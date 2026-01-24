@@ -1,34 +1,100 @@
 # Copilot Web Front-end
 
-This is a minimum viable web app that uses Copilot CLI SDK for a chat interface.
+A simple local web app using the Copilot CLI SDK for a chat interface.
 
 [Copilot CLI SDK](https://github.com/github/copilot-sdk)
 
-## open questions
+## MVP: Local Development Only
 
-Easiest to integrate and deploy web server?  My personal server uses Caddy, so something Caddy can route to.
-Don't expose via caddy for first tests?
-How do tool approvals work?
-Discover more unknowns.
-Unspecified requirements? Interview user.
+**What we're building:**
+- Simple chat interface running on localhost
+- Single user (you)
+- No authentication needed
+- All tools enabled (`--allow-all` mode)
+- No deployment complexity
 
-## hosting server
-Add required info about hosting server named Zalem using non-destructive commands:
+## SDK Overview
 
-> ssh Zalem `ls ~/docker`
+**Key Points:**
+- Multi-platform SDK (TypeScript, Python, Go, .NET)
+- Communicates with Copilot CLI via JSON-RPC
+- SDK manages CLI process lifecycle automatically
+- Currently in Technical Preview
+- Requires GitHub Copilot subscription (free tier available)
+- Default `--allow-all` mode (perfect for local use)
 
-## required arch packages
+## Requirements
 
-TBD
+- Node.js 18+
+- GitHub Copilot CLI installed and authenticated
+- npm
 
-## stack
+**Install Copilot CLI:**
+```bash
+# Follow GitHub's installation guide
+copilot --version  # Verify it works
+```
 
-provide two simple options and analyze them
+## Stack
 
-## design
+**Frontend:** htmx (HTML-first, minimal JavaScript)
+- No build step needed
+- Declare behavior in HTML attributes
+- Server renders everything
+- Perfect for simple chat interface
 
-TBD
+**Backend:** Node.js + Express
+- Serves HTML and handles htmx requests
+- Integrates with Copilot SDK
+- Runs on localhost:3000
 
-## security
+**SDK:** @github/copilot-sdk (TypeScript)
 
-Localhost serving only.  We can create an SSH tunnel to test.
+## Architecture
+
+```
+┌─────────────┐
+│   Browser   │
+│ (localhost) │
+└──────┬──────┘
+       │ HTTP (htmx)
+       ▼
+┌─────────────────────┐
+│  Express Server     │  (localhost:3000)
+│  ┌───────────────┐  │
+│  │ Copilot SDK   │  │
+│  └───────┬───────┘  │
+│          │ JSON-RPC │
+│  ┌───────▼───────┐  │
+│  │ Copilot CLI   │  │
+│  └───────────────┘  │
+└─────────────────────┘
+```
+
+### Components:
+1. **Frontend**: Single HTML file with htmx
+2. **Backend**: Express server with Copilot SDK
+3. **No authentication, no sessions** - single user local app
+
+### API Endpoints:
+- `GET /` - Serve chat interface
+- `POST /api/message` - Send message, return HTML fragment
+
+## Next Steps
+
+1. **Setup**:
+   - [ ] `npm init -y`
+   - [ ] Install dependencies: `npm install express @github/copilot-sdk`
+   - [ ] Create `server.js`
+   - [ ] Create `public/index.html` with htmx
+
+2. **MVP Features**:
+   - [ ] Basic chat interface
+   - [ ] Send message to Copilot
+   - [ ] Display response
+   - [ ] Message history in UI
+
+3. **Nice to Have**:
+   - [ ] Streaming responses
+   - [ ] Basic styling
+   - [ ] New chat button

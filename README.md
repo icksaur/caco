@@ -92,21 +92,7 @@ Server will be available at: `http://localhost:3000`
 **Stop the server:**
 - Press `Ctrl+C` in the terminal
 
-## Next Steps
-
-1. **Setup**:
-   - [ ] `npm init -y`
-   - [ ] Install dependencies: `npm install express @github/copilot-sdk`
-   - [ ] Create `server.js`
-   - [ ] Create `public/index.html` with htmx
-
-2. **MVP Features**:
-   - [ ] Basic chat interface
-   - [ ] Send message to Copilot
-   - [ ] Display response
-   - [ ] Message history in UI
-
-3. **Nice to Have**:
+**Nice to Have**:
    - [ ] Streaming responses
    - [ ] Basic styling
    - [ ] New chat button

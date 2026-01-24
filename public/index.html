@@ -135,6 +135,48 @@
     .htmx-request button {
       opacity: 0.6;
     }
+
+    .image-preview {
+      display: none;
+      position: relative;
+      margin-bottom: 0.5rem;
+      padding: 0.5rem;
+      background: #2d2d30;
+      border-radius: 4px;
+      border: 1px solid #3e3e42;
+    }
+
+    .image-preview.visible {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .image-preview img {
+      max-width: 80px;
+      max-height: 80px;
+      border-radius: 4px;
+    }
+
+    .image-preview .remove-btn {
+      background: #5e1f1f;
+      border: none;
+      color: white;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+
+    .image-preview .remove-btn:hover {
+      background: #7e2f2f;
+    }
+
+    .paste-hint {
+      font-size: 0.875rem;
+      color: #858585;
+      margin-top: 0.25rem;
+    }
   </style>
 </head>
 <body>
@@ -149,16 +191,22 @@
   </main>
 
   <footer>
+    <div id="imagePreview" class="image-preview">
+      <img id="previewImg" src="" alt="Pasted image">
+      <span>📎 Image attached</span>
+      <button type="button" class="remove-btn" onclick="removeImage()">✕ Remove</button>
+    </div>
     <form 
       hx-post="/api/message" 
       hx-target="#chat" 
       hx-swap="beforeend"
-      hx-on::after-request="this.reset()"
+      hx-on::after-request="this.reset(); removeImage()"
     >
+      <input type="hidden" id="imageData" name="imageData">
       <input 
         type="text" 
         name="message" 
-        placeholder="Ask Copilot anything..." 
+        placeholder="Ask Copilot anything... (Paste images with Ctrl+V)" 
         required
         autofocus
       >
@@ -166,14 +214,9 @@
         Send <span class="loading">...</span>
       </button>
     </form>
+    <div class="paste-hint">💡 Tip: Paste images directly with Ctrl+V or Cmd+V</div>
   </footer>
 
-  <script>
-    // Scroll to bottom when new messages arrive
-    document.body.addEventListener('htmx:afterSwap', () => {
-      const main = document.querySelector('main');
-      main.scrollTop = main.scrollHeight;
-    });
-  </script>
+  <script src="script.js"></script>
 </body>
 </html>

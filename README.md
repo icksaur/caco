@@ -52,23 +52,21 @@ copilot --version  # Verify it works
 
 ## Architecture
 
-```
-┌─────────────┐
-│   Browser   │
-│ (localhost) │
-└──────┬──────┘
-       │ HTTP (htmx)
-       ▼
-┌─────────────────────┐
-│  Express Server     │  (localhost:3000)
-│  ┌───────────────┐  │
-│  │ Copilot SDK   │  │
-│  └───────┬───────┘  │
-│          │ JSON-RPC │
-│  ┌───────▼───────┐  │
-│  │ Copilot CLI   │  │
-│  └───────────────┘  │
-└─────────────────────┘
+```mermaid
+graph TB
+    Browser["Browser<br/>(localhost)"]
+    Express["Express Server<br/>(localhost:3000)"]
+    SDK["Copilot SDK"]
+    CLI["Copilot CLI"]
+    
+    Browser -->|"HTTP (htmx)"| Express
+    Express --> SDK
+    SDK -->|JSON-RPC| CLI
+    
+    style Browser fill:#1e3a5f
+    style Express fill:#3d2817
+    style SDK fill:#4a1f5e
+    style CLI fill:#1f4d28
 ```
 
 ### Components:
@@ -79,6 +77,20 @@ copilot --version  # Verify it works
 ### API Endpoints:
 - `GET /` - Serve chat interface
 - `POST /api/message` - Send message, return HTML fragment
+
+## Running the Server
+
+**Start the server:**
+```bash
+node server.js
+# or with auto-reload:
+npx nodemon server.js
+```
+
+Server will be available at: `http://localhost:3000`
+
+**Stop the server:**
+- Press `Ctrl+C` in the terminal
 
 ## Next Steps
 

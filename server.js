@@ -141,12 +141,13 @@ app.get('/api/history', async (req, res) => {
   }
 });
 
-// List all sessions for this cwd
+// List all sessions grouped by cwd
 app.get('/api/sessions', (req, res) => {
-  const sessions = sessionManager.listByCwd(process.cwd());
+  const grouped = sessionManager.listAllGrouped();
   res.json({
     activeSessionId,
-    sessions
+    currentCwd: process.cwd(),
+    grouped
   });
 });
 

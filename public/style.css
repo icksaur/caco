@@ -318,6 +318,41 @@ button:disabled {
   font-style: italic;
 }
 
+/* Session list */
+.cwd-header {
+  font-size: 0.85rem;
+  color: #858585;
+  padding: 0.5rem 0;
+  margin-top: 0.5rem;
+  border-bottom: 1px solid #3e3e42;
+  word-break: break-all;
+}
+
+.cwd-header:first-child {
+  margin-top: 0;
+}
+
+.session-item {
+  background: #2d333b;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s;
+}
+
+.session-item:hover {
+  background: #3d434b;
+}
+
+.session-item.active {
+  background: #1f4d28;
+  border-left: 3px solid #4caf50;
+}
+
 #chat.hidden {
   display: none;
 }

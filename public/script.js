@@ -113,6 +113,102 @@ function toggleSessionPanel() {
     panel.classList.add('visible');
     chat.classList.add('hidden');
     btn.classList.add('active');
+    // Load sessions when opening
+    loadSessions();
+  }
+}
+
+// Format relative time
+function formatAge(dateStr) {
+  if (!dateStr) return '';
+  
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  
+  const minutes = Math.floor(diffMs / 60000);
+  const hours = Math.floor(diffMs / 3600000);
+  const days = Math.floor(diffMs / 86400000);
+  const weeks = Math.floor(days / 7);
+  const months = Math.floor(days / 30);
+  const years = Math.floor(days / 365);
+  
+  if (years >= 1) return `${years} year${years > 1 ? 's' : ''}`;
+  if (months >= 1) return `${months} month${months > 1 ? 's' : ''}`;
+  if (weeks >= 1) return `${weeks} week${weeks > 1 ? 's' : ''}`;
+  if (days >= 1) return `${days} day${days > 1 ? 's' : ''}`;
+  if (hours >= 1) return `${hours} hour${hours > 1 ? 's' : ''}`;
+  if (minutes >= 1) return `${minutes} min`;
+  return 'just now';
+}
+
+// Load and render sessions
+async function loadSessions() {
+  try {
+    const response = await fetch('/api/sessions');
+    if (!response.ok) return;
+    
+    const data = await response.json();
+    const { activeSessionId, currentCwd, grouped } = data;
+    
+    const container = document.getElementById('sessionList');
+    container.innerHTML = '';
+    
+    // Sort cwds: current first, then alphabetically
+    const cwds = Object.keys(grouped).sort((a, b) => {
+      if (a === currentCwd) return -1;
+      if (b === currentCwd) return 1;
+      return a.localeCompare(b);
+    });
+    
+    for (const cwd of cwds) {
+      const sessions = grouped[cwd];
+      
+      // CWD header
+      const cwdHeader = document.createElement('div');
+      cwdHeader.className = 'cwd-header';
+      cwdHeader.textContent = cwd === currentCwd ? `${cwd} (current)` : cwd;
+      container.appendChild(cwdHeader);
+      
+      // Session items
+      for (const session of sessions) {
+        const item = document.createElement('div');
+        item.className = 'session-item';
+        if (session.sessionId === activeSessionId) {
+          item.classList.add('active');
+        }
+        item.dataset.sessionId = session.sessionId;
+        item.onclick = () => switchSession(session.sessionId);
+        
+        // Summary text (truncated)
+        const summary = session.summary || 'No summary';
+        const age = session.updatedAt ? ` (${formatAge(session.updatedAt)})` : '';
+        item.textContent = summary + age;
+        
+        container.appendChild(item);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load sessions:', error);
+  }
+}
+
+// Switch to a different session
+async function switchSession(sessionId) {
+  try {
+    const response = await fetch(`/api/sessions/${sessionId}/resume`, {
+      method: 'POST'
+    });
+    
+    if (response.ok) {
+      // Reload the page to get new session's history
+      window.location.reload();
+    } else {
+      const err = await response.json();
+      alert('Failed to switch session: ' + err.error);
+    }
+  } catch (error) {
+    console.error('Failed to switch session:', error);
   }
 }
 

@@ -238,15 +238,47 @@ class SessionManager {
     }
     
     /**
-     * List all sessions (from cache)
-     * @returns Array of { sessionId, cwd, summary }
+     * List all sessions (from cache) with updatedAt
+     * @returns Array of { sessionId, cwd, summary, updatedAt }
      */
     list() {
         const result = [];
         for (const [sessionId, { cwd, summary }] of this.sessionCache) {
-            result.push({ sessionId, cwd, summary });
+            let updatedAt = null;
+            try {
+                const yamlPath = join(this.stateDir, sessionId, 'workspace.yaml');
+                const yaml = parseYaml(readFileSync(yamlPath, 'utf8'));
+                updatedAt = yaml.updated_at || null;
+            } catch (e) { /* missing */ }
+            result.push({ sessionId, cwd, summary, updatedAt });
         }
         return result;
+    }
+    
+    /**
+     * List all sessions grouped by cwd
+     * @returns Object { [cwd]: Array of sessions sorted by updatedAt desc }
+     */
+    listAllGrouped() {
+        const sessions = this.list();
+        const grouped = {};
+        
+        for (const s of sessions) {
+            const key = s.cwd || '(unknown)';
+            if (!grouped[key]) grouped[key] = [];
+            grouped[key].push(s);
+        }
+        
+        // Sort each group by updatedAt descending
+        for (const cwd of Object.keys(grouped)) {
+            grouped[cwd].sort((a, b) => {
+                const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+                const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+                return bTime - aTime;
+            });
+        }
+        
+        return grouped;
     }
     
     /**

@@ -276,9 +276,7 @@ button:disabled {
   justify-content: center;
   align-items: center;
   gap: 4px;
-  width: 40px;
-  height: 40px;
-  padding: 8px;
+  padding: 0.75rem;
   background: #3c3c3c;
   border: 1px solid #3e3e42;
   border-radius: 4px;
@@ -296,19 +294,6 @@ button:disabled {
   height: 2px;
   background: #d4d4d4;
   border-radius: 1px;
-  transition: transform 0.2s, opacity 0.2s;
-}
-
-.hamburger-btn.active span:nth-child(1) {
-  transform: rotate(45deg) translate(4px, 4px);
-}
-
-.hamburger-btn.active span:nth-child(2) {
-  opacity: 0;
-}
-
-.hamburger-btn.active span:nth-child(3) {
-  transform: rotate(-45deg) translate(4px, -4px);
 }
 
 /* Session panel */

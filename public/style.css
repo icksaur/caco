@@ -355,12 +355,12 @@ button:disabled {
   width: 24px;
   height: 24px;
   margin-left: 0.5rem;
+  padding: 0;
   background: transparent;
   border: none;
   border-radius: 4px;
   color: #f48771;
-  font-size: 1.25rem;
-  line-height: 1;
+  font-size: 1rem;
   cursor: pointer;
   opacity: 0.6;
   transition: opacity 0.15s, background 0.15s;
@@ -382,4 +382,72 @@ button:disabled {
 
 #chat.hidden {
   display: none;
+}
+
+/* Blue model hamburger button */
+.hamburger-btn.model-btn {
+  background: #264f78;
+  border-color: #3a6ea5;
+}
+
+.hamburger-btn.model-btn:hover {
+  background: #3a6ea5;
+}
+
+.hamburger-btn.model-btn span {
+  background: #ffffff;
+}
+
+/* Model panel */
+.model-panel {
+  display: none;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+}
+
+.model-panel.visible {
+  display: flex;
+}
+
+.model-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #2d333b;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.model-item:hover {
+  background: #3d434b;
+}
+
+.model-item.active {
+  background: #264f78;
+  border-left: 3px solid #4daafc;
+}
+
+.model-name {
+  flex: 1;
+}
+
+.model-cost {
+  font-size: 0.85rem;
+  color: #858585;
+  margin-left: 1rem;
+}
+
+.model-cost.free {
+  color: #4caf50;
+}
+
+.model-cost.cheap {
+  color: #8bc34a;
+}
+
+.model-cost.expensive {
+  color: #ff9800;
 }

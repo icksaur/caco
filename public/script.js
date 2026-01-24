@@ -93,13 +93,20 @@ async function loadSessionInfo() {
 document.addEventListener('DOMContentLoaded', () => {
   loadSessionInfo();
   loadHistory();
+  // Set initial placeholder based on selected model
+  const modelInfo = CURATED_MODELS.find(m => m.id === selectedModel);
+  if (modelInfo) {
+    document.querySelector('input[name="message"]').placeholder = `Ask ${modelInfo.name}...`;
+  }
 });
 
 // Toggle session panel
 function toggleSessionPanel() {
   const chat = document.getElementById('chat');
   const panel = document.getElementById('sessionPanel');
-  const btn = document.querySelector('.hamburger-btn');
+  const modelPanel = document.getElementById('modelPanel');
+  const btn = document.querySelector('.hamburger-btn:not(.model-btn)');
+  const modelBtn = document.querySelector('.hamburger-btn.model-btn');
   
   const isOpen = panel.classList.contains('visible');
   
@@ -109,6 +116,9 @@ function toggleSessionPanel() {
     chat.classList.remove('hidden');
     btn.classList.remove('active');
   } else {
+    // Close model panel if open
+    modelPanel.classList.remove('visible');
+    modelBtn.classList.remove('active');
     // Open panel, hide chat
     panel.classList.add('visible');
     chat.classList.add('hidden');
@@ -269,3 +279,102 @@ async function deleteSession(sessionId, summary) {
 // Test clipboard access on page load
 console.log('Clipboard API available:', 'clipboard' in navigator);
 console.log('Page loaded and ready for paste');
+
+// Current selected model
+let selectedModel = 'claude-sonnet-4';
+
+// Toggle model panel
+function toggleModelPanel() {
+  const chat = document.getElementById('chat');
+  const sessionPanel = document.getElementById('sessionPanel');
+  const modelPanel = document.getElementById('modelPanel');
+  const modelBtn = document.querySelector('.hamburger-btn.model-btn');
+  const sessionBtn = document.querySelector('.hamburger-btn:not(.model-btn)');
+  
+  const isOpen = modelPanel.classList.contains('visible');
+  
+  if (isOpen) {
+    // Close panel, show chat
+    modelPanel.classList.remove('visible');
+    chat.classList.remove('hidden');
+    modelBtn.classList.remove('active');
+  } else {
+    // Close session panel if open
+    sessionPanel.classList.remove('visible');
+    sessionBtn.classList.remove('active');
+    // Open model panel, hide chat
+    modelPanel.classList.add('visible');
+    chat.classList.add('hidden');
+    modelBtn.classList.add('active');
+    // Load models when opening
+    loadModels();
+  }
+}
+
+// Curated model list with display names and costs
+const CURATED_MODELS = [
+  { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', cost: 1 },
+  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', cost: 1 },
+  { id: 'claude-opus-4.5', name: 'Claude Opus 4.5', cost: 3 },
+  { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', cost: 0.33 },
+  { id: 'gpt-4.1', name: 'GPT-4.1', cost: 0 },
+  { id: 'gpt-4o', name: 'GPT-4o', cost: 0 },
+  { id: 'gpt-5-mini', name: 'GPT-5 mini', cost: 0 },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', cost: 1 },
+  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', cost: 0.33 }
+];
+
+// Load and render models
+async function loadModels() {
+  const container = document.getElementById('modelList');
+  container.innerHTML = '';
+  
+  for (const model of CURATED_MODELS) {
+    const item = document.createElement('div');
+    item.className = 'model-item';
+    if (model.id === selectedModel) {
+      item.classList.add('active');
+    }
+    item.dataset.modelId = model.id;
+    item.onclick = () => selectModel(model.id);
+    
+    // Model name
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'model-name';
+    nameSpan.textContent = model.name;
+    item.appendChild(nameSpan);
+    
+    // Cost indicator
+    const costSpan = document.createElement('span');
+    costSpan.className = 'model-cost';
+    if (model.cost === 0) {
+      costSpan.textContent = 'free';
+      costSpan.classList.add('free');
+    } else if (model.cost < 1) {
+      costSpan.textContent = `${model.cost}x`;
+      costSpan.classList.add('cheap');
+    } else if (model.cost > 1) {
+      costSpan.textContent = `${model.cost}x`;
+      costSpan.classList.add('expensive');
+    } else {
+      costSpan.textContent = '1x';
+    }
+    item.appendChild(costSpan);
+    
+    container.appendChild(item);
+  }
+}
+
+// Select a model
+function selectModel(modelId) {
+  selectedModel = modelId;
+  document.getElementById('selectedModel').value = modelId;
+  
+  // Update placeholder to show selected model
+  const modelInfo = CURATED_MODELS.find(m => m.id === modelId);
+  const input = document.querySelector('input[name="message"]');
+  input.placeholder = `Ask ${modelInfo?.name || modelId}...`;
+  
+  // Close panel
+  toggleModelPanel();
+}

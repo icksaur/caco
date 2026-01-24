@@ -1,69 +1,64 @@
-# Session Manager Implementation Plan
+# Session Manager - Implementation Status
 
-## Architecture
+## ✅ Completed
 
-```
-Express routes (thin)  →  SessionManager (singleton)  →  SDK
-       ↑                         ↑
-  Parse request            Owns SDK objects
-  Format response          One active session per cwd
-```
+### SessionManager (`src/session-manager.js`)
+- Singleton owning all SDK interactions
+- Discovers sessions from `~/.copilot/session-state/`
+- Cwd locks: one session per cwd, error if locked
+- Methods: `init()`, `create()`, `resume()`, `stop()`, `send()`, `getHistory()`, `delete()`, `list()`, `listAllGrouped()`, `getMostRecentForCwd()`
 
-**Simplifications (single identity, not single session):**
-- No userId/permissions (all requests are "me")
-- Multiple sessions can be active simultaneously
-- **One session per cwd** (cwd lock enforced)
-- Error thrown if create/resume on locked cwd
+### Server (`server.js`)
+- Uses SessionManager singleton
+- Auto-resumes most recent session for `process.cwd()` on startup
+- Endpoints: `GET /api/session`, `GET /api/history`, `GET /api/sessions`, `POST /api/sessions/:id/resume`, `POST /api/sessions/new`, `DELETE /api/sessions/:id`
 
-## Current State Analysis
-
-**Issues in `server.js`:**
-- Global `copilotClient` and `copilotSession` variables
-- Single session, single cwd (hardcoded to `process.cwd()`)
-- No session lifecycle management
+### Frontend (`public/`)
+- Hamburger menu → session panel
+- Sessions grouped by cwd, sorted by age
+- Delete with confirmation
+- History loads correctly (filters SDK events to user.message/assistant.message)
+- Markdown/Mermaid/syntax highlighting on history load
 
 ---
 
-## Tasks
+## 🔄 In Progress
 
-### 1. Create SessionManager Module
-- [x] `src/session-manager.js` - Singleton class
-- [x] Discover existing sessions from `~/.copilot/session-state/`
-- [x] Extract `sessionId`, `cwd`, `summary` from disk
-- [x] In-memory cwd locks: `Map<cwd, sessionId>`
-- [x] Active sessions: `Map<sessionId, { cwd, session, client }>`
+### Model Selection
+Add UI to select model before/between messages.
 
-### 2. SessionManager Methods
-- [x] All methods implemented:
-  - `init()`, `create()`, `resume()`, `stop()`, `send()`
-  - `getHistory()`, `delete()`, `list()`, `listByCwd()`
-  - `getMostRecentForCwd()`, `getActive()`, `isActive()`
+**SDK API:**
+- `client.listModels()` → `ModelInfo[]`
+- `ModelInfo`: `{ id, name, capabilities, policy?, billing? }`
+- `billing.multiplier` = cost multiplier (0.33, 1, 3, etc.)
+- `createSession({ model: "claude-sonnet-4.5" })` or `resumeSession(id, { model })`
+- `session.model_change` event fires on model change
 
-### 3. Refactor server.js
-- [x] Import SessionManager singleton
-- [x] Remove global `copilotClient`/`copilotSession`
-- [x] On startup: `init()` then auto-resume most recent for `process.cwd()`
-- [x] Route handlers use active session for cwd
-- [x] New endpoints: `/api/session`, `/api/history`, `/api/sessions`
+**UI Options (pick one):**
+1. **Dropdown in input area** - Select before each message
+2. **Model strip below hamburger** - Always visible, tap to cycle
+3. **Long-press send button** - Pop up model picker
 
-### 4. Minimal Frontend Update (v1)
-- [x] On page load, fetch conversation history for active session
-- [x] **FIXED:** History now displays correctly
-  - SDK `getMessages()` returns events, not chat messages
-  - Filter to `user.message` and `assistant.message` types
-  - Content is in `event.data.content`
-  - Skip empty content (tool-call messages have no text)
-- [x] Send new messages as before
-- [x] Fix: call `renderMarkdown()` after loading history (was `renderMarkdownMessages`)
-- [ ] Session switcher UI (hamburger menu stub added)
+**Implementation:**
+- [ ] Add `GET /api/models` endpoint → `listModels()`
+- [ ] Cache models on page load
+- [ ] Show model name in placeholder: "Ask Claude Sonnet 4.5..."
+- [ ] Add model selector UI
+- [ ] Pass `model` to send endpoint, forward to session
 
-### 5. Testing
-- [ ] Create → send → stop cycle
-- [x] Resume existing session, history loads
-- [x] Markdown rendering works on loaded history
-- [ ] Cwd lock: error on second create/resume for same cwd
-- [ ] Stop releases lock, allows new session
-- [ ] Error: send to non-active session
+---
 
-### 6. Cleanup
-- [ ] Remove debug endpoint `/api/debug/messages` before merge
+## 📋 TODO
+
+### New Session Experience
+- [ ] "New chat" button in session panel
+- [ ] Creates session for process.cwd() (stops current if needed)
+- [ ] Focus input after creation
+
+### Testing
+- [ ] Cwd lock: error on second resume for same cwd
+- [ ] Stop releases lock
+- [ ] Model selection persists across messages
+
+### Cleanup
+- [ ] Remove `/api/debug/messages` if present

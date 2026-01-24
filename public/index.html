@@ -19,6 +19,9 @@
     <div id="sessionPanel" class="session-panel">
       <div id="sessionList"></div>
     </div>
+    <div id="modelPanel" class="model-panel">
+      <div id="modelList"></div>
+    </div>
   </main>
 
   <footer>
@@ -39,6 +42,7 @@
         <span></span>
       </button>
       <input type="hidden" id="imageData" name="imageData">
+      <input type="hidden" id="selectedModel" name="model" value="claude-sonnet-4">
       <input 
         type="text" 
         name="message" 
@@ -46,6 +50,11 @@
         required
         autofocus
       >
+      <button type="button" class="hamburger-btn model-btn" onclick="toggleModelPanel()" aria-label="Select model">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
       <button type="submit">
         Send <span class="loading">...</span>
       </button>

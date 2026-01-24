@@ -215,6 +215,7 @@ app.post('/api/sessions/new', async (req, res) => {
 app.post('/api/message', async (req, res) => {
   const userMessage = req.body.message;
   const imageData = req.body.imageData;
+  const model = req.body.model || 'claude-sonnet-4';
   let tempFilePath = null;
 
   if (!userMessage) {
@@ -222,7 +223,7 @@ app.post('/api/message', async (req, res) => {
   }
 
   try {
-    const messageOptions = { prompt: userMessage };
+    const messageOptions = { prompt: userMessage, model };
 
     // Handle image attachment if present
     if (imageData && imageData.startsWith('data:image/')) {

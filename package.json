@@ -1,0 +1,17 @@
+{
+  "name": "copilot-web",
+  "version": "1.0.0",
+  "description": "A simple local web app using the Copilot CLI SDK for a chat interface.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@github/copilot-sdk": "^0.1.17",
+    "express": "^5.2.1"
+  }
+}

@@ -1,0 +1,34 @@
+# Node.js dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+
+# Build output
+dist/
+build/
+
+# Misc
+*.swp
+*.swo
+
+# VSCode
+.vscode/
+
+# Coverage
+coverage/
+
+# Public assets (if built)
+public/build/

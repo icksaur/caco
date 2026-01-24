@@ -161,6 +161,9 @@ async function loadSessions() {
     const data = await response.json();
     const { activeSessionId, currentCwd, grouped } = data;
     
+    // Store for new chat form
+    currentServerCwd = currentCwd;
+    
     const container = document.getElementById('sessionList');
     container.innerHTML = '';
     
@@ -273,6 +276,63 @@ async function deleteSession(sessionId, summary) {
   } catch (error) {
     console.error('Failed to delete session:', error);
     alert('Failed to delete session: ' + error.message);
+  }
+}
+
+// Store current cwd for new chat form
+let currentServerCwd = '';
+
+// Toggle new chat form expansion
+function toggleNewChatForm() {
+  const form = document.getElementById('newChatForm');
+  const pathInput = document.getElementById('newChatPath');
+  const errorDiv = document.getElementById('newChatError');
+  
+  if (form.classList.contains('expanded')) {
+    // Collapse
+    form.classList.remove('expanded');
+    errorDiv.classList.remove('visible');
+    errorDiv.textContent = '';
+  } else {
+    // Expand and pre-fill with current cwd
+    form.classList.add('expanded');
+    pathInput.value = currentServerCwd;
+    pathInput.focus();
+    pathInput.select();
+  }
+}
+
+// Create a new session with specified cwd
+async function createNewSession() {
+  const pathInput = document.getElementById('newChatPath');
+  const errorDiv = document.getElementById('newChatError');
+  const cwd = pathInput.value.trim();
+  
+  if (!cwd) {
+    errorDiv.textContent = 'Please enter a working directory path';
+    errorDiv.classList.add('visible');
+    return;
+  }
+  
+  try {
+    const response = await fetch('/api/sessions/new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd })
+    });
+    
+    if (response.ok) {
+      // Reload the page to start fresh session
+      window.location.reload();
+    } else {
+      const err = await response.json();
+      errorDiv.textContent = err.error || 'Failed to create session';
+      errorDiv.classList.add('visible');
+    }
+  } catch (error) {
+    console.error('Failed to create session:', error);
+    errorDiv.textContent = 'Failed to create session: ' + error.message;
+    errorDiv.classList.add('visible');
   }
 }
 

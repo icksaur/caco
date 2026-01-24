@@ -451,3 +451,97 @@ button:disabled {
 .model-cost.expensive {
   color: #ff9800;
 }
+
+/* New chat form */
+.new-chat-form {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #3e3e42;
+}
+
+.new-chat-toggle {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: #1f4d28;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.new-chat-toggle:hover {
+  background: #2a6b38;
+}
+
+.new-chat-expanded {
+  display: none;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.new-chat-form.expanded .new-chat-toggle {
+  display: none;
+}
+
+.new-chat-form.expanded .new-chat-expanded {
+  display: flex;
+}
+
+.new-chat-expanded input {
+  padding: 0.75rem;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #d4d4d4;
+  font-size: 0.9rem;
+}
+
+.new-chat-expanded input:focus {
+  outline: none;
+  border-color: #007acc;
+}
+
+.new-chat-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.new-chat-create {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  background: #1f4d28;
+  border: none;
+  border-radius: 4px;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.new-chat-create:hover {
+  background: #2a6b38;
+}
+
+.new-chat-cancel {
+  padding: 0.5rem 1rem;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #d4d4d4;
+  cursor: pointer;
+}
+
+.new-chat-cancel:hover {
+  background: #4c4c4c;
+}
+
+.new-chat-error {
+  color: #f48771;
+  font-size: 0.85rem;
+  display: none;
+}
+
+.new-chat-error.visible {
+  display: block;
+}

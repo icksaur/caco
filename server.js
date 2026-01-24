@@ -194,13 +194,25 @@ app.delete('/api/sessions/:sessionId', async (req, res) => {
 // Create a new session
 app.post('/api/sessions/new', async (req, res) => {
   try {
+    // Get cwd from request body, default to process.cwd()
+    const cwd = req.body.cwd || process.cwd();
+    
+    // Validate the path exists
+    const { existsSync, statSync } = await import('fs');
+    if (!existsSync(cwd)) {
+      return res.status(400).json({ error: `Path does not exist: ${cwd}` });
+    }
+    if (!statSync(cwd).isDirectory()) {
+      return res.status(400).json({ error: `Path is not a directory: ${cwd}` });
+    }
+    
     // Stop current session first
     if (activeSessionId) {
       await sessionManager.stop(activeSessionId);
     }
     
-    // Create new
-    activeSessionId = await sessionManager.create(process.cwd(), {
+    // Create new with specified cwd
+    activeSessionId = await sessionManager.create(cwd, {
       model: 'gpt-4.1',
       streaming: false,
       systemMessage: SYSTEM_MESSAGE

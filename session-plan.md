@@ -20,40 +20,37 @@
 - History loads correctly (filters SDK events to user.message/assistant.message)
 - Markdown/Mermaid/syntax highlighting on history load
 
+### Model Selection
+- Blue hamburger button (next to Send) opens model panel
+- Curated list of 9 models with cost indicators (free/0.33x/1x/3x)
+- Selected model shown in placeholder: "Ask Claude Sonnet 4..."
+- Model passed to send endpoint → session
+
 ---
 
 ## 🔄 In Progress
 
-### Model Selection
-Add UI to select model before/between messages.
+### New Session Experience
+Create new session with user-specified cwd (not just `process.cwd()`).
 
-**SDK API:**
-- `client.listModels()` → `ModelInfo[]`
-- `ModelInfo`: `{ id, name, capabilities, policy?, billing? }`
-- `billing.multiplier` = cost multiplier (0.33, 1, 3, etc.)
-- `createSession({ model: "claude-sonnet-4.5" })` or `resumeSession(id, { model })`
-- `session.model_change` event fires on model change
+**Chosen: Option 2 - Inline in Session Panel**
 
-**UI Options (pick one):**
-1. **Dropdown in input area** - Select before each message
-2. **Model strip below hamburger** - Always visible, tap to cycle
-3. **Long-press send button** - Pop up model picker
+"+ New Chat" button at top of session panel:
+- Clicking expands to show path input (pre-filled with `process.cwd()`)
+- "Create" button validates path and creates session
+- On success: closes panel, clears chat, focuses input
+- On error: shows inline error message
 
 **Implementation:**
-- [ ] Add `GET /api/models` endpoint → `listModels()`
-- [ ] Cache models on page load
-- [ ] Show model name in placeholder: "Ask Claude Sonnet 4.5..."
-- [ ] Add model selector UI
-- [ ] Pass `model` to send endpoint, forward to session
+- [x] Add expandable "+ New Chat" form at top of session list
+- [x] Pre-fill path with currentCwd from `/api/sessions`
+- [x] "Create" button → `POST /api/sessions/new` with `{ cwd }`
+- [x] Server validates path exists before creating session
+- [x] On success: reload page to start fresh session
 
 ---
 
 ## 📋 TODO
-
-### New Session Experience
-- [ ] "New chat" button in session panel
-- [ ] Creates session for process.cwd() (stops current if needed)
-- [ ] Focus input after creation
 
 ### Testing
 - [ ] Cwd lock: error on second resume for same cwd

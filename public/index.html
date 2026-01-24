@@ -17,6 +17,17 @@
       <!-- Messages will appear here -->
     </div>
     <div id="sessionPanel" class="session-panel">
+      <div id="newChatForm" class="new-chat-form">
+        <button type="button" class="new-chat-toggle" onclick="toggleNewChatForm()">+ New Chat</button>
+        <div class="new-chat-expanded">
+          <input type="text" id="newChatPath" placeholder="Working directory path...">
+          <div class="new-chat-actions">
+            <button type="button" class="new-chat-create" onclick="createNewSession()">Create</button>
+            <button type="button" class="new-chat-cancel" onclick="toggleNewChatForm()">Cancel</button>
+          </div>
+          <div id="newChatError" class="new-chat-error"></div>
+        </div>
+      </div>
       <div id="sessionList"></div>
     </div>
     <div id="modelPanel" class="model-panel">

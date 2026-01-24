@@ -46,17 +46,17 @@ main {
 }
 
 .message.user {
-  background: #1e3a5f;
+  background: #2c4258;
   margin-left: 2rem;
 }
 
 .message.assistant {
-  background: #1f4d28;
+  background: #2e4937;
   margin-right: 2rem;
 }
 
 .message.error {
-  background: #5e1f1f;
+  background: #4a2a2a;
   border-left: 4px solid #f48771;
 }
 
@@ -297,14 +297,17 @@ button:disabled {
 }
 
 /* Session panel */
-.session-panel {
+/* Shared panel styles */
+.session-panel,
+.model-panel {
   display: none;
   flex-direction: column;
   gap: 1rem;
   padding: 1rem;
 }
 
-.session-panel.visible {
+.session-panel.visible,
+.model-panel.visible {
   display: flex;
 }
 
@@ -318,7 +321,7 @@ button:disabled {
   font-style: italic;
 }
 
-/* Session list */
+/* Shared list item styles */
 .cwd-header {
   font-size: 0.85rem;
   color: #858585;
@@ -332,7 +335,13 @@ button:disabled {
   margin-top: 0;
 }
 
-.session-item {
+.cwd-header.omitted {
+  font-style: italic;
+  color: #6a6a6a;
+}
+
+.session-item,
+.model-item {
   display: flex;
   align-items: center;
   background: #2d333b;
@@ -343,7 +352,55 @@ button:disabled {
   transition: background 0.15s;
 }
 
-.session-summary {
+.session-item:hover,
+.model-item:hover {
+  background: #3d434b;
+}
+
+.session-item.active,
+.model-item.active {
+  background: #1f4d28;
+  border-left: 3px solid #4caf50;
+}
+
+.session-item.loading {
+  opacity: 0.7;
+  pointer-events: none;
+  position: relative;
+}
+
+.session-item.loading::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 40px;
+  background: inherit;
+  border-radius: 0 8px 8px 0;
+}
+
+.session-item.loading::before {
+  content: '';
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border: 2px solid #858585;
+  border-top-color: #4caf50;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  z-index: 1;
+}
+
+@keyframes spin {
+  to { transform: translateY(-50%) rotate(360deg); }
+}
+
+.session-summary,
+.model-name {
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
@@ -352,15 +409,15 @@ button:disabled {
 
 .session-delete {
   flex-shrink: 0;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   margin-left: 0.5rem;
   padding: 0;
   background: transparent;
   border: none;
   border-radius: 4px;
   color: #f48771;
-  font-size: 1rem;
+  font-size: 1.5rem;
   cursor: pointer;
   opacity: 0.6;
   transition: opacity 0.15s, background 0.15s;
@@ -369,15 +426,6 @@ button:disabled {
 .session-delete:hover {
   opacity: 1;
   background: rgba(244, 135, 113, 0.2);
-}
-
-.session-item:hover {
-  background: #3d434b;
-}
-
-.session-item.active {
-  background: #1f4d28;
-  border-left: 3px solid #4caf50;
 }
 
 #chat.hidden {
@@ -398,46 +446,15 @@ button:disabled {
   background: #ffffff;
 }
 
-/* Model panel */
-.model-panel {
-  display: none;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 1rem;
-}
-
-.model-panel.visible {
-  display: flex;
-}
-
-.model-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #2d333b;
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.model-item:hover {
-  background: #3d434b;
-}
-
-.model-item.active {
-  background: #264f78;
-  border-left: 3px solid #4daafc;
-}
-
-.model-name {
-  flex: 1;
-}
-
+/* Model cost indicator */
 .model-cost {
-  font-size: 0.85rem;
+  flex-shrink: 0;
+  font-size: 0.8rem;
   color: #858585;
   margin-left: 1rem;
+  padding: 0.15rem 0.4rem;
+  background: #252526;
+  border-radius: 4px;
 }
 
 .model-cost.free {

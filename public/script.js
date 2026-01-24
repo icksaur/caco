@@ -53,6 +53,12 @@ function removeImage() {
   document.getElementById('imagePreview').classList.remove('visible');
 }
 
+// Scroll chat to bottom
+function scrollToBottom() {
+  const main = document.querySelector('main');
+  main.scrollTop = main.scrollHeight;
+}
+
 // Load conversation history on page load
 async function loadHistory() {
   try {
@@ -65,10 +71,9 @@ async function loadHistory() {
         if (typeof renderMarkdown === 'function') {
           renderMarkdown();
         }
-        // Scroll to bottom
-        const main = document.querySelector('main');
-        main.scrollTop = main.scrollHeight;
       }
+      // Always scroll to bottom after loading history
+      scrollToBottom();
     }
   } catch (error) {
     console.error('Failed to load history:', error);
@@ -89,15 +94,55 @@ async function loadSessionInfo() {
   }
 }
 
+// Load and apply user preferences
+async function loadPreferences() {
+  try {
+    const response = await fetch('/api/preferences');
+    if (response.ok) {
+      const prefs = await response.json();
+      
+      // Apply saved model selection
+      if (prefs.lastModel && CURATED_MODELS.find(m => m.id === prefs.lastModel)) {
+        selectedModel = prefs.lastModel;
+        document.getElementById('selectedModel').value = selectedModel;
+        
+        // Update placeholder
+        const modelInfo = CURATED_MODELS.find(m => m.id === selectedModel);
+        if (modelInfo) {
+          document.querySelector('input[name="message"]').placeholder = `Ask ${modelInfo.name}...`;
+        }
+      }
+      
+      // Store last cwd for new chat form
+      if (prefs.lastCwd) {
+        currentServerCwd = prefs.lastCwd;
+      }
+      
+      console.log('Preferences loaded:', prefs);
+    }
+  } catch (error) {
+    console.error('Failed to load preferences:', error);
+  }
+}
+
+// Save a preference
+async function savePreference(key, value) {
+  try {
+    await fetch('/api/preferences', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [key]: value })
+    });
+  } catch (error) {
+    console.error('Failed to save preference:', error);
+  }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
   loadSessionInfo();
+  loadPreferences();
   loadHistory();
-  // Set initial placeholder based on selected model
-  const modelInfo = CURATED_MODELS.find(m => m.id === selectedModel);
-  if (modelInfo) {
-    document.querySelector('input[name="message"]').placeholder = `Ask ${modelInfo.name}...`;
-  }
 });
 
 // Toggle session panel
@@ -161,8 +206,9 @@ async function loadSessions() {
     const data = await response.json();
     const { activeSessionId, currentCwd, grouped } = data;
     
-    // Store for new chat form
+    // Store for use in switchSession and new chat form
     currentServerCwd = currentCwd;
+    currentActiveSessionId = activeSessionId;
     
     const container = document.getElementById('sessionList');
     container.innerHTML = '';
@@ -230,6 +276,19 @@ async function loadSessions() {
 
 // Switch to a different session
 async function switchSession(sessionId) {
+  // If already on this session, just close the panel and scroll to bottom
+  if (sessionId === currentActiveSessionId) {
+    toggleSessionPanel();
+    scrollToBottom();
+    return;
+  }
+  
+  // Show loading state on clicked item
+  const clickedItem = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
+  if (clickedItem) {
+    clickedItem.classList.add('loading');
+  }
+  
   try {
     const response = await fetch(`/api/sessions/${sessionId}/resume`, {
       method: 'POST'
@@ -240,10 +299,12 @@ async function switchSession(sessionId) {
       window.location.reload();
     } else {
       const err = await response.json();
+      if (clickedItem) clickedItem.classList.remove('loading');
       alert('Failed to switch session: ' + err.error);
     }
   } catch (error) {
     console.error('Failed to switch session:', error);
+    if (clickedItem) clickedItem.classList.remove('loading');
   }
 }
 
@@ -279,8 +340,9 @@ async function deleteSession(sessionId, summary) {
   }
 }
 
-// Store current cwd for new chat form
+// Store current cwd and session for new chat form and session switching
 let currentServerCwd = '';
+let currentActiveSessionId = null;
 
 // Toggle new chat form expansion
 function toggleNewChatForm() {
@@ -435,6 +497,9 @@ function selectModel(modelId) {
   const input = document.querySelector('input[name="message"]');
   input.placeholder = `Ask ${modelInfo?.name || modelId}...`;
   
+  // Save preference
+  savePreference('lastModel', modelId);
+  
   // Close panel
   toggleModelPanel();
 }
@@ -463,15 +528,15 @@ function addUserBubble(message, hasImage) {
   // Add user message
   const userDiv = document.createElement('div');
   userDiv.className = 'message user';
-  userDiv.innerHTML = `<strong>You${imageIndicator}:</strong> ${escapeHtml(message)}`;
+  userDiv.innerHTML = `${escapeHtml(message)}${hasImage ? ' <span class="image-indicator">[img]</span>' : ''}`;
   chat.appendChild(userDiv);
   
   // Add pending response with activity box
   const assistantDiv = document.createElement('div');
   assistantDiv.className = 'message assistant pending';
   assistantDiv.id = 'pending-response';
+  assistantDiv.setAttribute('data-markdown', '');
   assistantDiv.innerHTML = `
-    <strong>Copilot:</strong>
     <div class="activity-wrapper">
       <div class="activity-header" onclick="toggleActivityBox(this)">
         <span class="activity-icon">▶</span>
@@ -622,11 +687,17 @@ function streamResponse(prompt, model, imageData) {
   eventSource.addEventListener('assistant.message', (e) => {
     const data = JSON.parse(e.data);
     if (data.content) {
-      // Use final content and render as markdown
-      responseDiv.innerHTML = data.content;
+      // Set final content as text (renderMarkdown will parse it)
+      responseDiv.textContent = data.content;
       responseDiv.classList.remove('streaming-cursor');
       
-      // Render markdown
+      // Mark as not processed so renderMarkdown will handle it
+      const pending = document.getElementById('pending-response');
+      if (pending) {
+        pending.dataset.markdownProcessed = 'false';
+      }
+      
+      // Render markdown (with DOMPurify sanitization)
       if (typeof renderMarkdown === 'function') {
         renderMarkdown();
       }

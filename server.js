@@ -1,8 +1,9 @@
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { writeFile, unlink } from 'fs/promises';
-import { tmpdir } from 'os';
+import { writeFile, unlink, readFile } from 'fs/promises';
+import { existsSync } from 'fs';
+import { tmpdir, homedir } from 'os';
 import sessionManager from './src/session-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -10,6 +11,41 @@ const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = 3000;
+
+// Preferences file path
+const PREFS_FILE = join(homedir(), '.copilot', 'web-preferences.json');
+
+// Default preferences
+const DEFAULT_PREFS = {
+  lastCwd: process.cwd(),
+  lastModel: 'claude-sonnet-4',
+  lastSessionId: null
+};
+
+// Load preferences from disk
+async function loadPreferences() {
+  try {
+    if (existsSync(PREFS_FILE)) {
+      const data = await readFile(PREFS_FILE, 'utf8');
+      return { ...DEFAULT_PREFS, ...JSON.parse(data) };
+    }
+  } catch (e) {
+    console.warn('Could not load preferences:', e.message);
+  }
+  return { ...DEFAULT_PREFS };
+}
+
+// Save preferences to disk
+async function savePreferences(prefs) {
+  try {
+    await writeFile(PREFS_FILE, JSON.stringify(prefs, null, 2));
+  } catch (e) {
+    console.warn('Could not save preferences:', e.message);
+  }
+}
+
+// Current preferences (loaded on startup)
+let preferences = { ...DEFAULT_PREFS };
 
 // Current active session for this server instance
 let activeSessionId = null;
@@ -53,7 +89,21 @@ app.use(express.static('public'));
 async function initSession() {
   await sessionManager.init();
   
+  // Load saved preferences
+  preferences = await loadPreferences();
+  
   const cwd = process.cwd();
+  
+  // Try to resume last session from preferences first
+  if (preferences.lastSessionId) {
+    try {
+      activeSessionId = await sessionManager.resume(preferences.lastSessionId);
+      console.log(`✓ Resumed last session ${activeSessionId}`);
+      return;
+    } catch (e) {
+      console.warn(`Could not resume last session: ${e.message}`);
+    }
+  }
   
   // Try to resume most recent session for this cwd
   const recentSessionId = sessionManager.getMostRecentForCwd(cwd);
@@ -61,6 +111,8 @@ async function initSession() {
   if (recentSessionId) {
     try {
       activeSessionId = await sessionManager.resume(recentSessionId);
+      preferences.lastSessionId = activeSessionId;
+      await savePreferences(preferences);
       console.log(`✓ Resumed session ${activeSessionId}`);
       return;
     } catch (e) {
@@ -74,6 +126,9 @@ async function initSession() {
     streaming: true,
     systemMessage: SYSTEM_MESSAGE
   });
+  preferences.lastSessionId = activeSessionId;
+  preferences.lastCwd = cwd;
+  await savePreferences(preferences);
   console.log(`✓ Created new session ${activeSessionId}`);
 }
 
@@ -89,6 +144,24 @@ app.get('/api/session', (req, res) => {
     cwd: process.cwd(),
     isActive: sessionManager.isActive(activeSessionId)
   });
+});
+
+// Get preferences
+app.get('/api/preferences', (req, res) => {
+  res.json(preferences);
+});
+
+// Update preferences
+app.post('/api/preferences', async (req, res) => {
+  const updates = req.body;
+  
+  // Only allow updating specific fields
+  if (updates.lastModel) preferences.lastModel = updates.lastModel;
+  if (updates.lastCwd) preferences.lastCwd = updates.lastCwd;
+  if (updates.lastSessionId) preferences.lastSessionId = updates.lastSessionId;
+  
+  await savePreferences(preferences);
+  res.json(preferences);
 });
 
 // Debug: raw message structure
@@ -122,15 +195,14 @@ app.get('/api/history', async (req, res) => {
     // Convert to HTML fragments
     const html = messages.map(evt => {
       const isUser = evt.type === 'user.message';
-      const label = isUser ? 'You' : 'Copilot';
       const content = evt.data?.content || '';
       
       if (!content) return ''; // Skip empty messages
       
       if (isUser) {
-        return `<div class="message user"><strong>${label}:</strong> ${escapeHtml(content)}</div>`;
+        return `<div class="message user">${escapeHtml(content)}</div>`;
       } else {
-        return `<div class="message assistant" data-markdown><strong>${label}:</strong><div class="markdown-content">${escapeHtml(content)}</div></div>`;
+        return `<div class="message assistant" data-markdown><div class="markdown-content">${escapeHtml(content)}</div></div>`;
       }
     }).filter(Boolean).join('\n');
     
@@ -163,6 +235,11 @@ app.post('/api/sessions/:sessionId/resume', async (req, res) => {
     
     // Resume the requested one
     activeSessionId = await sessionManager.resume(sessionId);
+    
+    // Save to preferences
+    preferences.lastSessionId = activeSessionId;
+    await savePreferences(preferences);
+    
     res.json({ success: true, sessionId: activeSessionId });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -217,6 +294,12 @@ app.post('/api/sessions/new', async (req, res) => {
       streaming: true,
       systemMessage: SYSTEM_MESSAGE
     });
+    
+    // Save to preferences
+    preferences.lastSessionId = activeSessionId;
+    preferences.lastCwd = cwd;
+    await savePreferences(preferences);
+    
     res.json({ success: true, sessionId: activeSessionId });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -351,11 +434,8 @@ app.post('/api/message', async (req, res) => {
     const reply = response?.data?.content || 'No response';
     const imageIndicator = imageData ? ' [img]' : '';
     res.send(`
-      <div class="message user">
-        <strong>You${imageIndicator}:</strong> ${escapeHtml(userMessage)}
-      </div>
+      <div class="message user">${escapeHtml(userMessage)}${imageIndicator ? ' <span class="image-indicator">[img]</span>' : ''}</div>
       <div class="message assistant" data-markdown>
-        <strong>Copilot:</strong>
         <div class="markdown-content">${escapeHtml(reply)}</div>
       </div>
     `);

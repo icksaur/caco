@@ -32,3 +32,6 @@ coverage/
 
 # Public assets (if built)
 public/build/
+
+# Runtime files
+server.pid

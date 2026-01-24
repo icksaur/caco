@@ -60,10 +60,10 @@ session.on((event) => {
       console.log(event.data.content);
       break;
     case "tool.execution_start":
-      console.log(`🔧 Running: ${event.data.name}`);
+      console.log(`Running: ${event.data.name}`);
       break;
     case "session.error":
-      console.error(`❌ Error: ${event.data.message}`);
+      console.error(`Error: ${event.data.message}`);
       break;
     case "session.idle":
       // Ready for next message
@@ -257,12 +257,12 @@ function streamResponse(prompt, model) {
   
   eventSource.addEventListener('tool.execution_start', (e) => {
     const data = JSON.parse(e.data);
-    activityBox.innerHTML += `<div class="activity-item tool">🔧 ${data.name}...</div>`;
+    activityBox.innerHTML += `<div class="activity-item tool">[tool] ${data.name}...</div>`;
   });
   
   eventSource.addEventListener('session.error', (e) => {
     const data = JSON.parse(e.data);
-    activityBox.innerHTML += `<div class="activity-item error">❌ ${data.message}</div>`;
+    activityBox.innerHTML += `<div class="activity-item error">[error] ${data.message}</div>`;
   });
   
   eventSource.addEventListener('done', () => {
@@ -274,7 +274,7 @@ function streamResponse(prompt, model) {
   
   eventSource.onerror = () => {
     eventSource.close();
-    activityBox.innerHTML += `<div class="activity-item error">❌ Connection error</div>`;
+    activityBox.innerHTML += `<div class="activity-item error">[error] Connection error</div>`;
   };
 }
 ```

@@ -164,6 +164,15 @@ async function loadSessions() {
     for (const cwd of cwds) {
       const sessions = grouped[cwd];
       
+      // Handle unknown cwd sessions - just show a summary
+      if (cwd === '(unknown)' || !cwd) {
+        const summary = document.createElement('div');
+        summary.className = 'cwd-header omitted';
+        summary.textContent = `no cwd (${sessions.length} omitted)`;
+        container.appendChild(summary);
+        continue;
+      }
+      
       // CWD header
       const cwdHeader = document.createElement('div');
       cwdHeader.className = 'cwd-header';
@@ -178,12 +187,25 @@ async function loadSessions() {
           item.classList.add('active');
         }
         item.dataset.sessionId = session.sessionId;
-        item.onclick = () => switchSession(session.sessionId);
         
         // Summary text (truncated)
+        const summarySpan = document.createElement('span');
+        summarySpan.className = 'session-summary';
         const summary = session.summary || 'No summary';
         const age = session.updatedAt ? ` (${formatAge(session.updatedAt)})` : '';
-        item.textContent = summary + age;
+        summarySpan.textContent = summary + age;
+        summarySpan.onclick = () => switchSession(session.sessionId);
+        item.appendChild(summarySpan);
+        
+        // Delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'session-delete';
+        deleteBtn.textContent = '×';
+        deleteBtn.onclick = (e) => {
+          e.stopPropagation();
+          deleteSession(session.sessionId, session.summary);
+        };
+        item.appendChild(deleteBtn);
         
         container.appendChild(item);
       }
@@ -209,6 +231,38 @@ async function switchSession(sessionId) {
     }
   } catch (error) {
     console.error('Failed to switch session:', error);
+  }
+}
+
+// Delete a session
+async function deleteSession(sessionId, summary) {
+  const displayName = summary || sessionId.slice(0, 8);
+  if (!confirm(`Delete session "${displayName}"?\n\nThis cannot be undone.`)) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/sessions/${sessionId}`, {
+      method: 'DELETE'
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      
+      // If we deleted the active session, clear the chat
+      if (data.wasActive) {
+        document.getElementById('chat').innerHTML = '';
+      }
+      
+      // Refresh session list
+      loadSessions();
+    } else {
+      const err = await response.json();
+      alert('Failed to delete session: ' + err.error);
+    }
+  } catch (error) {
+    console.error('Failed to delete session:', error);
+    alert('Failed to delete session: ' + error.message);
   }
 }
 

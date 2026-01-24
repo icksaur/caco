@@ -333,15 +333,42 @@ button:disabled {
 }
 
 .session-item {
+  display: flex;
+  align-items: center;
   background: #2d333b;
   padding: 0.75rem 1rem;
   margin: 0.5rem 0;
   border-radius: 8px;
   cursor: pointer;
+  transition: background 0.15s;
+}
+
+.session-summary {
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background 0.15s;
+}
+
+.session-delete {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin-left: 0.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #f48771;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.session-delete:hover {
+  opacity: 1;
+  background: rgba(244, 135, 113, 0.2);
 }
 
 .session-item:hover {

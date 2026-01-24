@@ -169,6 +169,28 @@ app.post('/api/sessions/:sessionId/resume', async (req, res) => {
   }
 });
 
+// Delete a session
+app.delete('/api/sessions/:sessionId', async (req, res) => {
+  const { sessionId } = req.params;
+  
+  try {
+    // Check if this is the active session
+    const wasActive = sessionId === activeSessionId;
+    
+    // Delete the session (this will stop it if active)
+    await sessionManager.delete(sessionId);
+    
+    // If we deleted the active session, clear our reference
+    if (wasActive) {
+      activeSessionId = null;
+    }
+    
+    res.json({ success: true, wasActive });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 // Create a new session
 app.post('/api/sessions/new', async (req, res) => {
   try {

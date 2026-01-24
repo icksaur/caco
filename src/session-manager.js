@@ -86,10 +86,10 @@ class SessionManager {
         const client = new CopilotClient({ cwd });
         await client.start();
         
-        // Create session
+        // Create session with streaming enabled
         const session = await client.createSession({
             model: config.model || 'gpt-4.1',
-            streaming: config.streaming ?? false,
+            streaming: true,
             systemMessage: config.systemMessage,
             ...config
         });
@@ -189,12 +189,22 @@ class SessionManager {
         }
         
         const { session } = active;
-        const response = await session.sendAndWait({
-            prompt: message,
-            ...options
-        });
+        const TIMEOUT_MS = 120000; // 2 minutes
         
-        return response;
+        try {
+            const response = await session.sendAndWait({
+                prompt: message,
+                ...options
+            }, TIMEOUT_MS);
+            
+            return response;
+        } catch (error) {
+            // Convert SDK timeout message to user-friendly format
+            if (error.message?.includes('Timeout after')) {
+                throw new Error('Request timed out after 2 minutes');
+            }
+            throw error;
+        }
     }
     
     /**
@@ -331,6 +341,34 @@ class SessionManager {
      */
     isActive(sessionId) {
         return this.activeSessions.has(sessionId);
+    }
+    
+    /**
+     * Get the raw session object for event subscription
+     * @returns Session object or null if not active
+     */
+    getSession(sessionId) {
+        const active = this.activeSessions.get(sessionId);
+        if (!active) return null;
+        return active.session;
+    }
+    
+    /**
+     * Send a message without waiting (for streaming)
+     * Use with session.on() to receive events
+     * @throws Error if session is not active
+     */
+    async sendStream(sessionId, message, options = {}) {
+        const active = this.activeSessions.get(sessionId);
+        if (!active) {
+            throw new Error(`Session ${sessionId} is not active`);
+        }
+        
+        const { session } = active;
+        return session.send({
+            prompt: message,
+            ...options
+        });
     }
 }
 

@@ -438,3 +438,341 @@ function selectModel(modelId) {
   // Close panel
   toggleModelPanel();
 }
+
+// ========================================
+// Streaming Implementation
+// ========================================
+
+// HTML escape helper
+function escapeHtml(text) {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// Add user message bubble immediately
+function addUserBubble(message, hasImage) {
+  const chat = document.getElementById('chat');
+  const imageIndicator = hasImage ? ' [img]' : '';
+  
+  // Add user message
+  const userDiv = document.createElement('div');
+  userDiv.className = 'message user';
+  userDiv.innerHTML = `<strong>You${imageIndicator}:</strong> ${escapeHtml(message)}`;
+  chat.appendChild(userDiv);
+  
+  // Add pending response with activity box
+  const assistantDiv = document.createElement('div');
+  assistantDiv.className = 'message assistant pending';
+  assistantDiv.id = 'pending-response';
+  assistantDiv.innerHTML = `
+    <strong>Copilot:</strong>
+    <div class="activity-wrapper">
+      <div class="activity-header" onclick="toggleActivityBox(this)">
+        <span class="activity-icon">▶</span>
+        <span class="activity-label">Activity</span>
+        <span class="activity-count"></span>
+      </div>
+      <div class="activity-box"></div>
+    </div>
+    <div class="markdown-content streaming-cursor"></div>
+  `;
+  chat.appendChild(assistantDiv);
+  
+  // Scroll to bottom
+  const main = document.querySelector('main');
+  main.scrollTop = main.scrollHeight;
+  
+  return assistantDiv;
+}
+
+// Add activity item to activity box
+function addActivityItem(type, text, details = null) {
+  const activityBox = document.querySelector('#pending-response .activity-box');
+  if (!activityBox) return;
+  
+  const item = document.createElement('div');
+  item.className = `activity-item ${type}`;
+  
+  if (details) {
+    // Create expandable item with details
+    const summary = document.createElement('div');
+    summary.className = 'activity-summary';
+    summary.textContent = text;
+    summary.onclick = () => item.classList.toggle('expanded');
+    item.appendChild(summary);
+    
+    const detailsDiv = document.createElement('div');
+    detailsDiv.className = 'activity-details';
+    detailsDiv.textContent = details;
+    item.appendChild(detailsDiv);
+  } else {
+    item.textContent = text;
+  }
+  
+  activityBox.appendChild(item);
+  
+  // Update activity count in header
+  const wrapper = activityBox.closest('.activity-wrapper');
+  if (wrapper) {
+    const count = activityBox.querySelectorAll('.activity-item').length;
+    const countSpan = wrapper.querySelector('.activity-count');
+    if (countSpan) countSpan.textContent = `(${count})`;
+  }
+  
+  // Auto-scroll activity box
+  activityBox.scrollTop = activityBox.scrollHeight;
+}
+
+// Format tool arguments for display
+function formatToolArgs(args) {
+  if (!args) return '';
+  
+  // Handle common tool argument patterns
+  const parts = [];
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value === 'string') {
+      // Truncate long strings
+      const display = value.length > 80 ? value.substring(0, 80) + '...' : value;
+      parts.push(`${key}: ${display}`);
+    } else if (typeof value === 'object') {
+      parts.push(`${key}: ${JSON.stringify(value).substring(0, 60)}...`);
+    } else {
+      parts.push(`${key}: ${value}`);
+    }
+  }
+  return parts.join(', ');
+}
+
+// Format tool result for display
+function formatToolResult(result) {
+  if (!result) return '';
+  
+  if (result.content) {
+    // Truncate content to reasonable size
+    const content = typeof result.content === 'string' 
+      ? result.content 
+      : JSON.stringify(result.content);
+    return content.length > 500 ? content.substring(0, 500) + '...' : content;
+  }
+  
+  return JSON.stringify(result).substring(0, 200);
+}
+
+// Toggle activity box expand/collapse
+function toggleActivityBox(header) {
+  const wrapper = header.closest('.activity-wrapper');
+  if (!wrapper) return;
+  
+  const isCollapsed = wrapper.classList.contains('collapsed');
+  wrapper.classList.toggle('collapsed');
+  
+  // Update icon
+  const icon = header.querySelector('.activity-icon');
+  if (icon) {
+    icon.textContent = isCollapsed ? '▼' : '▶';
+  }
+}
+
+// Stream response via EventSource
+function streamResponse(prompt, model, imageData) {
+  // Build URL with parameters
+  const params = new URLSearchParams({ prompt, model });
+  if (imageData) {
+    params.set('imageData', imageData);
+  }
+  
+  const eventSource = new EventSource(`/api/stream?${params.toString()}`);
+  
+  const activityBox = document.querySelector('#pending-response .activity-box');
+  const responseDiv = document.querySelector('#pending-response .markdown-content');
+  let responseContent = '';
+  let firstDeltaReceived = false;
+  
+  // Handle response text deltas
+  eventSource.addEventListener('assistant.message_delta', (e) => {
+    const data = JSON.parse(e.data);
+    if (data.deltaContent) {
+      responseContent += data.deltaContent;
+      responseDiv.textContent = responseContent;
+      
+      // Collapse activity wrapper on first delta
+      if (!firstDeltaReceived) {
+        const wrapper = document.querySelector('#pending-response .activity-wrapper');
+        if (wrapper) {
+          wrapper.classList.add('collapsed');
+          const icon = wrapper.querySelector('.activity-icon');
+          if (icon) icon.textContent = '▶';
+        }
+        firstDeltaReceived = true;
+      }
+      
+      // Scroll to bottom
+      const main = document.querySelector('main');
+      main.scrollTop = main.scrollHeight;
+    }
+  });
+  
+  // Handle final message
+  eventSource.addEventListener('assistant.message', (e) => {
+    const data = JSON.parse(e.data);
+    if (data.content) {
+      // Use final content and render as markdown
+      responseDiv.innerHTML = data.content;
+      responseDiv.classList.remove('streaming-cursor');
+      
+      // Render markdown
+      if (typeof renderMarkdown === 'function') {
+        renderMarkdown();
+      }
+    }
+  });
+  
+  // Handle turn start
+  eventSource.addEventListener('assistant.turn_start', (e) => {
+    const data = JSON.parse(e.data);
+    addActivityItem('turn', `Turn ${parseInt(data.turnId || 0) + 1}...`);
+  });
+  
+  // Handle intent
+  eventSource.addEventListener('assistant.intent', (e) => {
+    const data = JSON.parse(e.data);
+    if (data.intent) {
+      addActivityItem('intent', `Intent: ${data.intent}`);
+    }
+  });
+  
+  // Handle reasoning
+  eventSource.addEventListener('assistant.reasoning_delta', (e) => {
+    // Could show reasoning, but might be verbose
+    // Just indicate reasoning is happening
+  });
+  
+  // Handle tool execution
+  eventSource.addEventListener('tool.execution_start', (e) => {
+    const data = JSON.parse(e.data);
+    const toolName = data.toolName || data.name || 'tool';
+    const args = formatToolArgs(data.arguments);
+    const summary = `▶ ${toolName}`;
+    const details = args ? `Arguments: ${args}` : null;
+    addActivityItem('tool', summary, details);
+  });
+  
+  eventSource.addEventListener('tool.execution_complete', (e) => {
+    const data = JSON.parse(e.data);
+    const toolName = data.toolName || data.name || 'tool';
+    const status = data.success ? '✓' : '✗';
+    const summary = `${status} ${toolName}`;
+    const details = data.result ? formatToolResult(data.result) : null;
+    addActivityItem('tool-result', summary, details);
+  });
+  
+  // Handle errors
+  eventSource.addEventListener('session.error', (e) => {
+    const data = JSON.parse(e.data);
+    addActivityItem('error', `Error: ${data.message || 'Unknown error'}`);
+  });
+  
+  eventSource.addEventListener('error', (e) => {
+    const data = JSON.parse(e.data || '{}');
+    addActivityItem('error', `Error: ${data.message || 'Connection error'}`);
+  });
+  
+  // Handle completion
+  eventSource.addEventListener('done', () => {
+    eventSource.close();
+    finishPendingResponse();
+  });
+  
+  eventSource.addEventListener('session.idle', () => {
+    // Will also receive 'done', but handle just in case
+  });
+  
+  // Handle connection errors
+  eventSource.onerror = (err) => {
+    console.error('EventSource error:', err);
+    eventSource.close();
+    
+    // If we haven't received any content, show error
+    if (!responseContent && !firstDeltaReceived) {
+      addActivityItem('error', 'Connection lost');
+    }
+    
+    finishPendingResponse();
+  };
+}
+
+// Clean up pending response
+function finishPendingResponse() {
+  const pending = document.getElementById('pending-response');
+  if (pending) {
+    pending.classList.remove('pending');
+    pending.removeAttribute('id');
+    
+    // Remove streaming cursor
+    const content = pending.querySelector('.markdown-content');
+    if (content) {
+      content.classList.remove('streaming-cursor');
+    }
+    
+    // Collapse activity wrapper when done (user can re-expand)
+    const wrapper = pending.querySelector('.activity-wrapper');
+    if (wrapper) {
+      wrapper.classList.add('collapsed');
+      const icon = wrapper.querySelector('.activity-icon');
+      if (icon) icon.textContent = '▶';
+    }
+  }
+  
+  // Re-enable form
+  setFormEnabled(true);
+}
+
+// Enable/disable form during streaming
+function setFormEnabled(enabled) {
+  const form = document.getElementById('chatForm');
+  const input = form.querySelector('input[name="message"]');
+  const submitBtn = form.querySelector('button[type="submit"]');
+  
+  input.disabled = !enabled;
+  submitBtn.disabled = !enabled;
+  
+  if (enabled) {
+    input.focus();
+  }
+}
+
+// Handle form submission with streaming
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('chatForm');
+  
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    
+    const input = form.querySelector('input[name="message"]');
+    const message = input.value.trim();
+    const model = document.getElementById('selectedModel').value;
+    const imageData = document.getElementById('imageData').value;
+    
+    if (!message) return;
+    
+    // Disable form during streaming
+    setFormEnabled(false);
+    
+    // Add user bubble immediately
+    const hasImage = !!imageData;
+    addUserBubble(message, hasImage);
+    
+    // Clear input and image
+    input.value = '';
+    removeImage();
+    
+    // Start streaming
+    streamResponse(message, model, imageData);
+  });
+});

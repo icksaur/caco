@@ -71,7 +71,7 @@ async function initSession() {
   // No existing session or resume failed - create new
   activeSessionId = await sessionManager.create(cwd, {
     model: 'gpt-4.1',
-    streaming: false,
+    streaming: true,
     systemMessage: SYSTEM_MESSAGE
   });
   console.log(`✓ Created new session ${activeSessionId}`);
@@ -214,7 +214,7 @@ app.post('/api/sessions/new', async (req, res) => {
     // Create new with specified cwd
     activeSessionId = await sessionManager.create(cwd, {
       model: 'gpt-4.1',
-      streaming: false,
+      streaming: true,
       systemMessage: SYSTEM_MESSAGE
     });
     res.json({ success: true, sessionId: activeSessionId });
@@ -223,7 +223,89 @@ app.post('/api/sessions/new', async (req, res) => {
   }
 });
 
-// Handle chat messages from htmx
+// Streaming SSE endpoint
+app.get('/api/stream', async (req, res) => {
+  const { prompt, model, imageData } = req.query;
+  
+  if (!prompt) {
+    return res.status(400).json({ error: 'prompt is required' });
+  }
+  
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+  res.flushHeaders();
+  
+  let tempFilePath = null;
+  
+  try {
+    // Get session
+    const session = sessionManager.getSession(activeSessionId);
+    if (!session) {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: 'No active session' })}\n\n`);
+      res.write('event: done\ndata: {}\n\n');
+      return res.end();
+    }
+    
+    const messageOptions = { prompt, model: model || 'claude-sonnet-4' };
+    
+    // Handle image attachment if present
+    if (imageData && imageData.startsWith('data:image/')) {
+      const matches = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (matches) {
+        const extension = matches[1];
+        const base64Data = matches[2];
+        tempFilePath = join(tmpdir(), `copilot-image-${Date.now()}.${extension}`);
+        await writeFile(tempFilePath, Buffer.from(base64Data, 'base64'));
+        messageOptions.attachments = [{ type: 'file', path: tempFilePath }];
+      }
+    }
+    
+    // Subscribe to events
+    const unsubscribe = session.on((event) => {
+      // Send event to client
+      res.write(`event: ${event.type}\n`);
+      res.write(`data: ${JSON.stringify(event.data || {})}\n\n`);
+      
+      // End stream on terminal events
+      if (event.type === 'session.idle' || event.type === 'session.error') {
+        res.write('event: done\ndata: {}\n\n');
+        res.end();
+        unsubscribe();
+        
+        // Clean up temp file
+        if (tempFilePath) {
+          unlink(tempFilePath).catch(() => {});
+        }
+      }
+    });
+    
+    // Handle client disconnect
+    req.on('close', () => {
+      unsubscribe();
+      if (tempFilePath) {
+        unlink(tempFilePath).catch(() => {});
+      }
+    });
+    
+    // Send message (non-blocking)
+    await sessionManager.sendStream(activeSessionId, prompt, messageOptions);
+    
+  } catch (error) {
+    console.error('Stream error:', error);
+    res.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
+    res.write('event: done\ndata: {}\n\n');
+    res.end();
+    
+    if (tempFilePath) {
+      await unlink(tempFilePath).catch(() => {});
+    }
+  }
+});
+
+// Handle chat messages from htmx (fallback for non-streaming)
 app.post('/api/message', async (req, res) => {
   const userMessage = req.body.message;
   const imageData = req.body.imageData;
@@ -308,7 +390,8 @@ function escapeHtml(text) {
 async function start() {
   await initSession();
   
-  app.listen(PORT, () => {
+  // Bind to localhost only for security - not exposed to network
+  app.listen(PORT, '127.0.0.1', () => {
     console.log(`✓ Server running at http://localhost:${PORT}`);
     console.log('  Press Ctrl+C to stop');
   });

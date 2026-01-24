@@ -43,7 +43,22 @@ async function renderMarkdown() {
     const markdownText = contentDiv.textContent;
     
     // Parse markdown
-    const html = marked.parse(markdownText);
+    const rawHtml = marked.parse(markdownText);
+    
+    // Sanitize HTML to prevent XSS attacks (especially HTMX injection)
+    const html = DOMPurify.sanitize(rawHtml, {
+      FORBID_ATTR: [
+        // HTMX attributes - prevent injected HTMX from executing
+        'hx-get', 'hx-post', 'hx-put', 'hx-delete', 'hx-patch',
+        'hx-trigger', 'hx-target', 'hx-swap', 'hx-vals', 'hx-sync',
+        'hx-confirm', 'hx-boost', 'hx-push-url', 'hx-on', 'hx-ext',
+        'hx-include', 'hx-indicator', 'hx-params', 'hx-request',
+        // JavaScript event handlers
+        'onclick', 'onerror', 'onload', 'onmouseover', 'onfocus',
+        'onblur', 'onchange', 'onsubmit', 'onkeydown', 'onkeyup'
+      ],
+      FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']
+    });
     
     // Update content
     contentDiv.innerHTML = html;

@@ -545,3 +545,143 @@ button:disabled {
 .new-chat-error.visible {
   display: block;
 }
+
+/* Streaming Activity Box */
+.activity-wrapper {
+  margin-bottom: 0.5rem;
+}
+
+.activity-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  background: #2d2d2d;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: #858585;
+  user-select: none;
+}
+
+.activity-header:hover {
+  background: #363636;
+  color: #a0a0a0;
+}
+
+.activity-icon {
+  font-size: 0.65rem;
+  transition: transform 0.15s ease;
+}
+
+.activity-wrapper:not(.collapsed) .activity-icon {
+  transform: rotate(90deg);
+}
+
+.activity-label {
+  font-weight: 500;
+}
+
+.activity-count {
+  color: #6a6a6a;
+  font-size: 0.75rem;
+}
+
+.activity-wrapper.collapsed .activity-box {
+  display: none;
+}
+
+.activity-box {
+  background: #252525;
+  border-radius: 0 0 4px 4px;
+  padding: 0.5rem;
+  font-size: 0.85rem;
+  color: #858585;
+  max-height: 150px;
+  overflow-y: auto;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  border-top: 1px solid #3e3e42;
+}
+
+.activity-box.collapsed {
+  display: none;
+}
+
+.activity-item {
+  margin: 0.25rem 0;
+  padding: 0.15rem 0;
+}
+
+.activity-item.tool {
+  color: #4daafc;
+}
+
+.activity-item.tool-result {
+  color: #6a9955;
+}
+
+.activity-item.tool-result .activity-summary::before {
+  content: '';
+}
+
+.activity-item.intent {
+  color: #dcdcaa;
+}
+
+.activity-item.reasoning {
+  color: #9cdcfe;
+}
+
+.activity-item.error {
+  color: #f48771;
+}
+
+.activity-item.turn {
+  color: #858585;
+  font-style: italic;
+}
+
+/* Expandable activity items */
+.activity-summary {
+  cursor: pointer;
+}
+
+.activity-summary:hover {
+  text-decoration: underline;
+}
+
+.activity-details {
+  display: none;
+  margin-top: 0.25rem;
+  padding: 0.5rem;
+  background: #1e1e1e;
+  border-radius: 3px;
+  font-size: 0.8rem;
+  color: #a0a0a0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.activity-item.expanded .activity-details {
+  display: block;
+}
+
+/* Pending message animation */
+.message.pending .activity-box::after {
+  content: '▋';
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* Streaming cursor */
+.streaming-cursor::after {
+  content: '▋';
+  animation: blink 0.7s infinite;
+  color: #4daafc;
+}

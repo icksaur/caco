@@ -23,7 +23,36 @@ app.use(express.static('public'));
 // Initialize Copilot on startup
 async function initCopilot() {
   try {
-    copilotClient = new CopilotClient();
+    copilotClient = new CopilotClient({
+      systemMessage: {
+        mode: 'replace',
+        content: `You are an AI assistant running in a local web application on the user's machine.
+
+Environment:
+- Platform: Web-based chat interface (browser UI, not the Copilot CLI terminal interface)
+- Host: Node.js Express server using Copilot SDK
+- Working Directory: ${process.cwd()}
+
+Capabilities:
+- Text conversations and problem-solving
+- Image understanding (users can paste images into the chat)
+- File system access (read, search, analyze files in the workspace)
+- Terminal command execution (when appropriate)
+- Code analysis and understanding
+- General knowledge and reasoning
+
+Interface Notes:
+- This is a web chat UI, not the CLI terminal interface
+- Slash commands like /help, @workspace are CLI UI features and don't apply here
+- Users interact through natural conversation in the browser
+
+Behavior:
+- Provide direct, helpful answers
+- Use tools when needed to access files or execute commands
+- Use markdown formatting when appropriate
+- Be concise unless detail is requested`
+      }
+    });
     copilotSession = await copilotClient.createSession({
       model: 'gpt-4.1',
       streaming: false
@@ -83,13 +112,14 @@ app.post('/api/message', async (req, res) => {
 
     // Return HTML fragment for htmx to insert
     const reply = response?.data?.content || 'No response';
-    const imageIndicator = imageData ? ' 📎' : '';
+    const imageIndicator = imageData ? ' [img]' : '';
     res.send(`
       <div class="message user">
         <strong>You${imageIndicator}:</strong> ${escapeHtml(userMessage)}
       </div>
-      <div class="message assistant">
-        <strong>Copilot:</strong> ${escapeHtml(reply)}
+      <div class="message assistant" data-markdown>
+        <strong>Copilot:</strong>
+        <div class="markdown-content">${escapeHtml(reply)}</div>
       </div>
     `);
   } catch (error) {

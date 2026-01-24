@@ -1,9 +1,9 @@
 import express from 'express';
-import { CopilotClient } from '@github/copilot-sdk';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
+import sessionManager from './src/session-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -11,22 +11,13 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-// Initialize Copilot client
-let copilotClient;
-let copilotSession;
+// Current active session for this server instance
+let activeSessionId = null;
 
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public'));
-
-// Initialize Copilot on startup
-async function initCopilot() {
-  try {
-    copilotClient = new CopilotClient({
-      systemMessage: {
-        mode: 'replace',
-        content: `You are an AI assistant running in a local web application on the user's machine.
+// System message for sessions
+const SYSTEM_MESSAGE = {
+  mode: 'replace',
+  content: `You are an AI assistant running in a local web application on the user's machine.
 
 Environment:
 - Platform: Web-based chat interface (browser UI, not the Copilot CLI terminal interface)
@@ -51,22 +42,150 @@ Behavior:
 - Use tools when needed to access files or execute commands
 - Use markdown formatting when appropriate
 - Be concise unless detail is requested`
-      }
-    });
-    copilotSession = await copilotClient.createSession({
-      model: 'gpt-4.1',
-      streaming: false
-    });
-    console.log('✓ Copilot SDK initialized');
-  } catch (error) {
-    console.error('✗ Failed to initialize Copilot:', error.message);
-    process.exit(1);
+};
+
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
+
+// Initialize: discover sessions and auto-resume or create
+async function initSession() {
+  await sessionManager.init();
+  
+  const cwd = process.cwd();
+  
+  // Try to resume most recent session for this cwd
+  const recentSessionId = sessionManager.getMostRecentForCwd(cwd);
+  
+  if (recentSessionId) {
+    try {
+      activeSessionId = await sessionManager.resume(recentSessionId);
+      console.log(`✓ Resumed session ${activeSessionId}`);
+      return;
+    } catch (e) {
+      console.warn(`Could not resume session ${recentSessionId}: ${e.message}`);
+    }
   }
+  
+  // No existing session or resume failed - create new
+  activeSessionId = await sessionManager.create(cwd, {
+    model: 'gpt-4.1',
+    streaming: false,
+    systemMessage: SYSTEM_MESSAGE
+  });
+  console.log(`✓ Created new session ${activeSessionId}`);
 }
 
 // Serve chat interface
 app.get('/', (req, res) => {
   res.sendFile(join(__dirname, 'public', 'index.html'));
+});
+
+// Get session info
+app.get('/api/session', (req, res) => {
+  res.json({
+    sessionId: activeSessionId,
+    cwd: process.cwd(),
+    isActive: sessionManager.isActive(activeSessionId)
+  });
+});
+
+// Debug: raw message structure
+app.get('/api/debug/messages', async (req, res) => {
+  try {
+    const events = await sessionManager.getHistory(activeSessionId);
+    // Get just user and assistant messages with content
+    const msgs = events
+      .filter(e => e.type === 'user.message' || e.type === 'assistant.message')
+      .map(e => ({
+        type: e.type,
+        content: e.data?.content,
+        hasToolRequests: !!e.data?.toolRequests?.length
+      }));
+    res.json({ count: msgs.length, messages: msgs });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get conversation history
+app.get('/api/history', async (req, res) => {
+  try {
+    const events = await sessionManager.getHistory(activeSessionId);
+    
+    // Filter to user.message and assistant.message events only
+    const messages = events.filter(e => 
+      e.type === 'user.message' || e.type === 'assistant.message'
+    );
+    
+    // Convert to HTML fragments
+    const html = messages.map(evt => {
+      const isUser = evt.type === 'user.message';
+      const label = isUser ? 'You' : 'Copilot';
+      const content = evt.data?.content || '';
+      
+      if (!content) return ''; // Skip empty messages
+      
+      if (isUser) {
+        return `<div class="message user"><strong>${label}:</strong> ${escapeHtml(content)}</div>`;
+      } else {
+        return `<div class="message assistant" data-markdown><strong>${label}:</strong><div class="markdown-content">${escapeHtml(content)}</div></div>`;
+      }
+    }).filter(Boolean).join('\n');
+    
+    res.send(html);
+  } catch (error) {
+    console.error('Error fetching history:', error);
+    res.send('');
+  }
+});
+
+// List all sessions for this cwd
+app.get('/api/sessions', (req, res) => {
+  const sessions = sessionManager.listByCwd(process.cwd());
+  res.json({
+    activeSessionId,
+    sessions
+  });
+});
+
+// Switch to a different session
+app.post('/api/sessions/:sessionId/resume', async (req, res) => {
+  const { sessionId } = req.params;
+  
+  try {
+    // Stop current session first
+    if (activeSessionId) {
+      await sessionManager.stop(activeSessionId);
+    }
+    
+    // Resume the requested one
+    activeSessionId = await sessionManager.resume(sessionId);
+    res.json({ success: true, sessionId: activeSessionId });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Create a new session
+app.post('/api/sessions/new', async (req, res) => {
+  try {
+    // Stop current session first
+    if (activeSessionId) {
+      await sessionManager.stop(activeSessionId);
+    }
+    
+    // Create new
+    activeSessionId = await sessionManager.create(process.cwd(), {
+      model: 'gpt-4.1',
+      streaming: false,
+      systemMessage: SYSTEM_MESSAGE
+    });
+    res.json({ success: true, sessionId: activeSessionId });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 // Handle chat messages from htmx
@@ -102,8 +221,8 @@ app.post('/api/message', async (req, res) => {
       }
     }
 
-    // Send message to Copilot
-    const response = await copilotSession.sendAndWait(messageOptions);
+    // Send message via SessionManager
+    const response = await sessionManager.send(activeSessionId, userMessage, messageOptions);
 
     // Clean up temp file
     if (tempFilePath) {
@@ -151,7 +270,7 @@ function escapeHtml(text) {
 
 // Start server
 async function start() {
-  await initCopilot();
+  await initSession();
   
   app.listen(PORT, () => {
     console.log(`✓ Server running at http://localhost:${PORT}`);
@@ -162,8 +281,8 @@ async function start() {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('\n✓ Shutting down gracefully...');
-  if (copilotClient) {
-    await copilotClient.stop();
+  if (activeSessionId) {
+    await sessionManager.stop(activeSessionId);
   }
   process.exit(0);
 });

@@ -53,6 +53,69 @@ function removeImage() {
   document.getElementById('imagePreview').classList.remove('visible');
 }
 
+// Load conversation history on page load
+async function loadHistory() {
+  try {
+    const response = await fetch('/api/history');
+    if (response.ok) {
+      const html = await response.text();
+      if (html.trim()) {
+        document.getElementById('chat').innerHTML = html;
+        // Render any markdown in loaded messages
+        if (typeof renderMarkdown === 'function') {
+          renderMarkdown();
+        }
+        // Scroll to bottom
+        const main = document.querySelector('main');
+        main.scrollTop = main.scrollHeight;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load history:', error);
+  }
+}
+
+// Load session info
+async function loadSessionInfo() {
+  try {
+    const response = await fetch('/api/session');
+    if (response.ok) {
+      const info = await response.json();
+      console.log('Session:', info.sessionId);
+      console.log('CWD:', info.cwd);
+    }
+  } catch (error) {
+    console.error('Failed to load session info:', error);
+  }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+  loadSessionInfo();
+  loadHistory();
+});
+
+// Toggle session panel
+function toggleSessionPanel() {
+  const chat = document.getElementById('chat');
+  const panel = document.getElementById('sessionPanel');
+  const btn = document.querySelector('.hamburger-btn');
+  
+  const isOpen = panel.classList.contains('visible');
+  
+  if (isOpen) {
+    // Close panel, show chat
+    panel.classList.remove('visible');
+    chat.classList.remove('hidden');
+    btn.classList.remove('active');
+  } else {
+    // Open panel, hide chat
+    panel.classList.add('visible');
+    chat.classList.add('hidden');
+    btn.classList.add('active');
+  }
+}
+
 // Test clipboard access on page load
 console.log('Clipboard API available:', 'clipboard' in navigator);
 console.log('Page loaded and ready for paste');

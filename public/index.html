@@ -20,6 +20,10 @@
     <div id="chat">
       <!-- Messages will appear here -->
     </div>
+    <div id="sessionPanel" class="session-panel">
+      <h2>Sessions</h2>
+      <p class="placeholder">Session switcher coming soon...</p>
+    </div>
   </main>
 
   <footer>
@@ -34,6 +38,11 @@
       hx-swap="beforeend"
       hx-on::after-request="this.reset(); removeImage()"
     >
+      <button type="button" class="hamburger-btn" onclick="toggleSessionPanel()" aria-label="Toggle sessions">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
       <input type="hidden" id="imageData" name="imageData">
       <input 
         type="text" 

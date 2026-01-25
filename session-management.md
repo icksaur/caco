@@ -44,10 +44,11 @@ await session3.sendAndWait({ prompt: "You are helping with a Go project" });
 
 **Safe approaches:**
 1. **Separate working directories**: Use different clients with different `cwd` paths
-2. **Restrict tools**: Create read-only sessions with `availableTools: ['view', 'grep', 'semantic_search']`
-3. **Sequential execution**: Run file-modifying sessions one at a time, not in parallel
-4. **Permission coordination**: Use `onPermissionRequest` handlers to prevent conflicts
-5. **Purpose separation**: Q&A sessions (no files), review sessions (read-only), modification sessions (exclusive)
+2. **Restrict tools with whitelist**: Create read-only sessions with `availableTools: ['view', 'grep', 'semantic_search']`
+3. **Restrict tools with blacklist**: Exclude specific tools with `excludedTools: ['edit', 'bash']`
+4. **Sequential execution**: Run file-modifying sessions one at a time, not in parallel
+5. **Permission coordination**: Use `onPermissionRequest` handlers to prevent conflicts
+6. **Purpose separation**: Q&A sessions (no files), review sessions (read-only), modification sessions (exclusive)
 
 **Best practice**: If sessions will modify files, run them **sequentially, never in parallel**.
 

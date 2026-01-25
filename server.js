@@ -205,7 +205,9 @@ async function initSession() {
     model: 'gpt-4.1',
     streaming: true,
     systemMessage: SYSTEM_MESSAGE,
-    tools: displayTools
+    tools: displayTools,
+    // Disable built-in tools that compete with our display tools
+    excludedTools: ['view']
   });
   preferences.lastSessionId = activeSessionId;
   preferences.lastCwd = cwd;
@@ -408,7 +410,9 @@ app.post('/api/sessions/new', async (req, res) => {
       model: 'gpt-4.1',
       streaming: true,
       systemMessage: SYSTEM_MESSAGE,
-      tools: displayTools
+      tools: displayTools,
+      // Disable built-in tools that compete with our display tools
+      excludedTools: ['view']
     });
     
     // Save to preferences

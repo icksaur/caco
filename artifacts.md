@@ -1,540 +1,158 @@
-# Artifacts: Efficient Data Passthrough
+# Artifacts: Display-Only Tools
 
-**Goal:** Avoid sending large data through LLM round-trips. Let the agent emit artifacts (stdout, files, images) directly to the UI without bloating conversation context.
+Artifacts let users **see** large outputs (files, terminal output, images) without consuming LLM context.
+
+## The Pattern
+
+```
+"Show me package.json"  →  User wants to SEE it (no analysis needed)
+"Fix my package.json"   →  Agent needs to READ it (uses normal tools)
+```
+
+When the user just wants to view something, our display tools:
+1. Read the content
+2. Store it in an **in-memory cache** (30-min TTL)
+3. Return only a **confirmation** to the LLM
+4. UI fetches and renders directly from cache
+
+**Result:** ~20 tokens instead of ~500+ tokens per file view.
 
 ---
 
-## The Problem
-
-Currently, when a tool produces large output:
+## Architecture
 
 ```
-User: "Run the test suite"
-  → Agent calls run_terminal_command
-  → Tool returns 500 lines of test output
-  → Full output goes to LLM context (tokens consumed)
-  → LLM summarizes: "Tests passed with 3 failures"
-  → User sees summary but can't access full output
+┌─────────────────┐                      ┌───────────────────┐
+│  Display Tool   │  storeArtifact(data) │  In-Memory Cache  │
+│  (SDK handler)  │  ───────────────────►│  Map + 30min TTL  │
+└─────────────────┘  returns artifactId  └───────────────────┘
+        │                                         │
+        │ toolTelemetry: { artifactId }           │ GET /api/artifacts/:id
+        ▼                                         ▼
+┌─────────────────┐                      ┌───────────────────┐
+│  LLM Context    │                      │  Browser UI       │
+│  (tiny summary) │                      │  (full content)   │
+└─────────────────┘                      └───────────────────┘
 ```
-
-**Issues:**
-1. **Token waste** - Large outputs consume context window
-2. **Latency** - LLM must process full output before responding
-3. **Data loss** - User can't access original output
-4. **Cost** - Paying for tokens on data the LLM just summarizes anyway
 
 ---
 
-## Solution 1: Display-Only Tools (Zero Context Cost)
+## Display Tools
 
-For requests where the user just wants to **see** data without agent analysis:
+| Tool | Use Case | LLM Sees |
+|------|----------|----------|
+| `render_file_contents` | "Show me config.js" | "Displayed config.js (50 lines)" |
+| `run_and_display` | "Run the tests" | "Command completed (exit 0, 200 lines)" |
+| `display_image` | "Show me logo.png" | "Displayed image logo.png" |
 
-### The Insight
-
-```
-"Show me the config file"     → User wants to SEE it (agent doesn't need content)
-"What's wrong with my config" → User wants ANALYSIS (agent needs content)
-```
-
-### render_file_contents Tool
+### Implementation: [src/display-tools.js](src/display-tools.js)
 
 ```javascript
-import { defineTool } from '@github/copilot-sdk';
-import { z } from 'zod';
-import { readFile } from 'fs/promises';
-
 const renderFileContents = defineTool("render_file_contents", {
-  description: `Display a file's contents directly to the user without reading it into context.
+  description: `Display a file directly to the user. Use for "show me", "cat", "view".
+                You receive confirmation only, not the file contents.`,
   
-USE THIS TOOL WHEN:
-- User asks to "show", "display", "print", "cat", or "view" a file
-- User wants to see file contents but hasn't asked for analysis
-- User says "let me see", "show me", "what's in"
-
-DO NOT USE WHEN:
-- User asks to analyze, fix, modify, or understand the file
-- User asks "what's wrong with" or "explain" the file
-- You need to reference the file contents in your response
-
-This tool renders the file directly to the UI. You will only receive
-confirmation that the file was displayed, not its contents.`,
-
   parameters: z.object({
-    path: z.string().describe("Path to the file to display"),
-    startLine: z.number().optional().describe("First line to show (1-indexed)"),
-    endLine: z.number().optional().describe("Last line to show"),
-    highlight: z.string().optional().describe("Language for syntax highlighting")
+    path: z.string(),
+    startLine: z.number().optional(),
+    endLine: z.number().optional()
   }),
 
-  handler: async ({ path, startLine, endLine, highlight }, invocation) => {
+  handler: async ({ path, startLine, endLine }) => {
     const content = await readFile(path, 'utf-8');
-    const lines = content.split('\n');
     
-    // Apply line range if specified
-    const start = (startLine || 1) - 1;
-    const end = endLine || lines.length;
-    const displayContent = lines.slice(start, end).join('\n');
+    // Store full content in cache
+    const artifactId = storeArtifact(content, { type: 'file', path });
     
-    // Store as artifact - this goes to UI, not to agent
-    const artifactId = storeArtifact(displayContent, {
-      type: 'file',
-      path,
-      mimeType: 'text/plain',
-      highlight: highlight || detectLanguage(path),
-      startLine: start + 1,
-      endLine: end,
-      totalLines: lines.length
-    });
-    
-    // Agent only sees this tiny confirmation
+    // LLM only sees this
     return {
-      textResultForLlm: `Displayed ${path} to user (${lines.length} lines, ${content.length} bytes)`,
-      toolTelemetry: {
-        artifactId,
-        lineCount: lines.length,
-        byteCount: content.length,
-        displayedLines: end - start
-      }
+      textResultForLlm: `Displayed ${path} to user (${lines.length} lines)`,
+      toolTelemetry: { artifactId }  // UI uses this to fetch content
     };
   }
 });
 ```
 
-### Flow Comparison
+---
 
-**Before (wastes context):**
-```
-User: "Show me package.json"
-  → Agent calls read_file
-  → 50 lines of JSON sent to agent context
-  → Agent: "Here's your package.json: ..." (regurgitates content)
-  → Token cost: ~500 tokens
-```
+## Server Components
 
-**After (zero context cost):**
-```
-User: "Show me package.json"
-  → Agent calls render_file_contents  
-  → Tool returns: "Displayed package.json to user (50 lines)"
-  → UI renders file directly from artifact
-  → Agent: "I've displayed package.json for you."
-  → Token cost: ~20 tokens
-```
-
-### Similar Display-Only Tools
+### Artifact Cache ([server.js](server.js#L59-L77))
 
 ```javascript
-// Run command, show output to user without agent reading it
-const runAndDisplay = defineTool("run_and_display", {
-  description: `Run a command and display its output directly to the user.
-  
-USE THIS WHEN user wants to see command output but not have it analyzed.
-Examples: "run the tests", "show me the git log", "cat the file"
-
-You will receive exit code and output size, not the actual output.`,
-
-  parameters: z.object({
-    command: z.string().describe("Command to execute"),
-    cwd: z.string().optional().describe("Working directory")
-  }),
-  
-  handler: async ({ command, cwd }) => {
-    const { stdout, stderr, exitCode } = await exec(command, { cwd });
-    const output = stdout + stderr;
-    
-    const artifactId = storeArtifact(output, {
-      type: 'terminal',
-      command,
-      exitCode
-    });
-    
-    return {
-      textResultForLlm: `Command completed (exit ${exitCode}). Output displayed to user (${output.length} chars, ${output.split('\n').length} lines)`,
-      toolTelemetry: { artifactId, exitCode, outputSize: output.length }
-    };
-  }
-});
-
-// Display image without sending to agent
-const displayImage = defineTool("display_image", {
-  description: `Display an image file directly to the user.
-  
-Use when user wants to see an image. You cannot see image contents.`,
-
-  parameters: z.object({
-    path: z.string().describe("Path to the image file")
-  }),
-  
-  handler: async ({ path }) => {
-    const data = await readFile(path);
-    const mimeType = getMimeType(path);
-    
-    const artifactId = storeArtifact(data, {
-      type: 'image',
-      path,
-      mimeType
-    });
-    
-    return {
-      textResultForLlm: `Displayed image ${path} to user`,
-      toolTelemetry: { artifactId, mimeType, size: data.length }
-    };
-  }
-});
-```
-
----
-
-## Solution 2: Artifact Cache (For Agent-Read Data)
-
-### What Works
-
-| Feature | Description | Use Case |
-|---------|-------------|----------|
-| `textResultForLlm` | Primary text sent to LLM | Short summaries |
-| `sessionLog` | UI-only logging (not sent to LLM) | Debug info |
-| `toolTelemetry` | Metadata about execution | Size hints, timing |
-| `tool.execution_partial_result` | Ephemeral streaming events | Progress output |
-
-### What Doesn't Work (Yet)
-
-| Feature | Status |
-|---------|--------|
-| `binaryResultsForLlm` | Skipped in tests - "not fully implemented" |
-| File attachment passthrough | No direct mechanism |
-| Artifact references | No built-in concept |
-
-### Relevant Session Events
-
-```typescript
-// Events emitted during tool execution
-"tool.execution_start"        // { toolName, arguments }
-"tool.execution_progress"     // { message }
-"tool.execution_partial_result" // Ephemeral streaming (not persisted)
-"tool.execution_complete"     // { result: ToolResult }
-```
-
-The key insight: **`sessionLog` and `toolTelemetry` don't go to the LLM**, so we can use them for artifact metadata.
-
----
-
-## Proposed Solution: Artifact Cache + References
-
-### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Tool Execution                           │
-├─────────────────────────────────────────────────────────────────┤
-│  Tool produces large output (500 lines, image, file)            │
-│                              │                                  │
-│                              ▼                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Tool Handler Decision:                                    │  │
-│  │   if (output.length > THRESHOLD) {                        │  │
-│  │     artifactId = cache.store(output);                     │  │
-│  │     return {                                              │  │
-│  │       textResultForLlm: "Output: 500 lines (see artifact)",│  │
-│  │       sessionLog: artifactId,     // For UI               │  │
-│  │       toolTelemetry: { size: 500, type: 'stdout' }        │  │
-│  │     };                                                    │  │
-│  │   }                                                       │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              │                                  │
-│              ┌───────────────┴───────────────┐                  │
-│              ▼                               ▼                  │
-│     LLM gets summary              UI gets artifactId            │
-│     (few tokens)                  (can fetch full data)         │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Implementation Phases
-
----
-
-## Phase 1: Server-Side Artifact Cache
-
-Add artifact caching to `server.js`:
-
-```javascript
-// Artifact cache with TTL
 const artifacts = new Map();
-const ARTIFACT_TTL = 30 * 60 * 1000; // 30 minutes
+const ARTIFACT_TTL = 30 * 60 * 1000;  // 30 minutes
 
 function storeArtifact(data, metadata = {}) {
   const id = `art_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  artifacts.set(id, {
-    data,
-    metadata,
-    createdAt: Date.now()
-  });
-  
-  // Auto-cleanup after TTL
+  artifacts.set(id, { data, metadata, createdAt: Date.now() });
   setTimeout(() => artifacts.delete(id), ARTIFACT_TTL);
-  
   return id;
 }
+```
 
-// Endpoint to fetch artifacts
+### Artifact API ([server.js](server.js#L237-L264))
+
+```javascript
 app.get('/api/artifacts/:id', (req, res) => {
-  const artifact = artifacts.get(req.params.id);
-  if (!artifact) {
-    return res.status(404).json({ error: 'Artifact expired or not found' });
-  }
+  const artifact = getArtifact(req.params.id);
+  if (!artifact) return res.status(404).json({ error: 'Expired' });
   
-  const { data, metadata } = artifact;
-  
-  if (metadata.mimeType) {
-    res.setHeader('Content-Type', metadata.mimeType);
-  }
-  
-  res.send(data);
+  if (metadata.mimeType) res.setHeader('Content-Type', metadata.mimeType);
+  res.send(artifact.data);
 });
 ```
 
+### SSE Event Processing ([server.js](server.js#L475-L495))
+
+The `tool.execution_complete` event contains `artifactId` in `toolTelemetry`. The server extracts it and forwards to the client.
+
 ---
 
-## Phase 2: Event Filtering in SSE Stream
-
-Intercept large tool results before sending to client:
+## Client Rendering ([public/script.js](public/script.js#L639-L720))
 
 ```javascript
-// In /api/stream handler
-const unsubscribe = session.on((event) => {
-  // Intercept large tool results
-  if (event.type === 'tool.execution_complete') {
-    const result = event.result?.textResultForLlm || '';
-    
-    if (result.length > 2000) {
-      // Store full content as artifact
-      const artifactId = storeArtifact(result, {
-        toolName: event.toolName,
-        type: 'text'
-      });
-      
-      // Truncate for SSE, add artifact reference
-      event = {
-        ...event,
-        result: {
-          ...event.result,
-          // Truncated preview
-          textResultForLlm: result.slice(0, 500) + `\n\n... [${result.length} chars, artifactId: ${artifactId}]`,
-          // Metadata for UI
-          _artifactId: artifactId,
-          _artifactSize: result.length
-        }
-      };
-    }
-  }
+async function displayArtifact(artifact) {
+  const res = await fetch(`/api/artifacts/${artifact.id}?format=json`);
+  const { data, metadata } = await res.json();
   
-  res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-});
-```
-
----
-
-## Phase 3: Custom Tools with Artifact Awareness
-
-Define tools that use the artifact pattern:
-
-```javascript
-import { defineTool } from '@github/copilot-sdk';
-import { z } from 'zod';
-
-const runCommand = defineTool("run_command", {
-  description: "Run a shell command and return the output",
-  parameters: z.object({
-    command: z.string().describe("The command to run")
-  }),
-  handler: async ({ command }, invocation) => {
-    const { stdout, stderr, exitCode } = await exec(command);
-    const fullOutput = stdout + stderr;
+  if (metadata.type === 'file') {
+    // Syntax-highlighted code block
+    const markdown = `\`\`\`${metadata.highlight}\n${data}\n\`\`\``;
+    container.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    hljs.highlightAll();
     
-    // If output is large, use artifact pattern
-    if (fullOutput.length > 1000) {
-      const artifactId = storeArtifact(fullOutput, {
-        type: 'stdout',
-        command,
-        exitCode
-      });
-      
-      return {
-        // Short summary for LLM
-        textResultForLlm: `Command completed (exit ${exitCode}). Output: ${fullOutput.length} chars. First 200 chars:\n${fullOutput.slice(0, 200)}...`,
-        
-        // Telemetry for confidence
-        toolTelemetry: {
-          artifactId,
-          outputSize: fullOutput.length,
-          exitCode,
-          truncated: true
-        },
-        
-        // Log for debugging
-        sessionLog: `Full output stored as artifact ${artifactId}`
-      };
-    }
-    
-    // Small output - send directly
-    return fullOutput;
+  } else if (metadata.type === 'image') {
+    // Direct image element
+    const img = document.createElement('img');
+    img.src = `/api/artifacts/${artifact.id}`;
+    container.appendChild(img);
   }
-});
-```
-
----
-
-## Phase 4: UI Integration
-
-Update the activity box to show artifact links:
-
-```javascript
-// In script.js - handle tool.execution_complete events
-function handleToolComplete(event) {
-  const { result } = event;
-  
-  // Check for artifact reference
-  if (result._artifactId) {
-    const artifactLink = document.createElement('a');
-    artifactLink.href = `/api/artifacts/${result._artifactId}`;
-    artifactLink.target = '_blank';
-    artifactLink.className = 'artifact-link';
-    artifactLink.textContent = `View full output (${formatSize(result._artifactSize)})`;
-    
-    activityBox.appendChild(artifactLink);
-  }
-}
-
-// CSS for artifact links
-.artifact-link {
-  display: inline-block;
-  padding: 4px 8px;
-  background: #1f6feb;
-  color: white;
-  border-radius: 4px;
-  text-decoration: none;
-  font-size: 0.85em;
-  margin-top: 8px;
 }
 ```
 
 ---
 
-## Phase 5: Image/Binary Artifacts
+## Configuration
 
-Extend for binary data:
+Built-in `view` tool is disabled so the agent prefers our display tools:
 
 ```javascript
-const captureScreenshot = defineTool("capture_screenshot", {
-  description: "Capture a screenshot of the current window",
-  handler: async () => {
-    const imageBuffer = await screenshot();
-    
-    const artifactId = storeArtifact(imageBuffer, {
-      type: 'image',
-      mimeType: 'image/png'
-    });
-    
-    return {
-      textResultForLlm: "Screenshot captured successfully",
-      toolTelemetry: {
-        artifactId,
-        mimeType: 'image/png',
-        size: imageBuffer.length
-      }
-    };
-  }
+// server.js - session creation
+activeSessionId = await sessionManager.create(cwd, {
+  tools: displayTools,
+  excludedTools: ['view']  // Use our display_image instead
 });
 ```
 
-UI shows inline image:
-
-```javascript
-if (metadata.mimeType?.startsWith('image/')) {
-  const img = document.createElement('img');
-  img.src = `/api/artifacts/${artifactId}`;
-  img.className = 'artifact-image';
-  activityBox.appendChild(img);
-}
-```
-
 ---
 
-## Size Estimation for Confidence
+## Why In-Memory?
 
-Give the agent size hints so it knows data was captured:
+| Approach | Pros | Cons |
+|----------|------|------|
+| **In-memory (current)** | Fast, auto-cleanup, no disk clutter | Lost on restart |
+| Disk persistence | Survives restarts, shareable | Cleanup needed |
+| Database | Scalable, queryable | Overkill for dev tool |
 
-```javascript
-return {
-  textResultForLlm: `File saved: ${filename}`,
-  toolTelemetry: {
-    // Agent can reference these in response
-    bytesWritten: buffer.length,
-    linesCount: content.split('\n').length,
-    artifactId,
-    
-    // Timing for perf analysis
-    durationMs: Date.now() - startTime
-  }
-};
-```
-
-The LLM doesn't see `toolTelemetry` but it's available in events, so we could potentially inject a summary if needed.
-
----
-
-## Alternative: Streaming Partial Results
-
-For real-time output (like running tests), use partial results:
-
-```javascript
-// Tool can emit progress during execution
-// These are ephemeral - not stored in conversation
-session.emitPartialResult({
-  type: 'stdout',
-  line: 'Running test 1...'
-});
-```
-
-**Note:** This requires SDK support for emitting from within tool handlers - need to verify if available.
-
----
-
-## Skills Consideration
-
-Skills (`skillDirectories` config) are markdown files that extend system prompts. They're **not helpful for artifact handling** but could document artifact patterns:
-
-```markdown
----
-name: artifact-aware
-description: Handle large outputs efficiently
----
-
-When tool output exceeds 1000 characters:
-- Store as artifact and return summary
-- Include size in response so user knows data was captured
-- Reference artifactId in confirmation message
-```
-
----
-
-## Summary: Implementation Priority
-
-| Phase | Effort | Impact | Recommendation |
-|-------|--------|--------|----------------|
-| 1. Artifact cache | Low | Medium | **Do first** - foundation |
-| 2. Event filtering | Medium | High | Core functionality |
-| 3. Custom tools | Low | High | Enable new use cases |
-| 4. UI integration | Low | High | User-facing value |
-| 5. Binary support | Medium | Medium | Nice to have |
-
-### Quick Win
-
-Even without custom tools, we can implement Phase 1+2 to automatically cache and truncate large tool outputs in the SSE stream. This works with existing built-in tools immediately.
-
----
-
-## References
-
-- [SDK Tool Types](https://github.com/github/copilot-sdk/blob/main/nodejs/src/types.ts)
-- [Session Events](https://github.com/github/copilot-sdk/blob/main/nodejs/src/generated/session-events.ts)
-- [Custom Tools Doc](./custom-tools.md)
+For a development-focused web UI, ephemeral in-memory storage is ideal.

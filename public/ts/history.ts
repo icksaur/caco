@@ -5,7 +5,7 @@
 import type { Preferences } from './types.js';
 import { scrollToBottom } from './ui-utils.js';
 import { applyModelPreference } from './model-selector.js';
-import { setCurrentServerCwd } from './session-panel.js';
+import { initFromPreferences } from './state.js';
 
 // Declare renderMarkdown as a global function from markdown-renderer.js
 declare global {
@@ -47,13 +47,11 @@ export async function loadPreferences(): Promise<void> {
     if (response.ok) {
       const prefs: Preferences = await response.json();
       
-      // Apply saved model selection
-      applyModelPreference(prefs);
+      // Initialize state from preferences
+      initFromPreferences(prefs);
       
-      // Store last cwd for new chat form
-      if (prefs.lastCwd) {
-        setCurrentServerCwd(prefs.lastCwd);
-      }
+      // Apply model to UI (placeholder text)
+      applyModelPreference(prefs);
     }
   } catch (error) {
     console.error('Failed to load preferences:', error);

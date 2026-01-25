@@ -2,6 +2,8 @@
  * Image paste handling
  */
 
+import { setHasImage } from './state.js';
+
 /**
  * Set up paste handler for image attachments
  */
@@ -28,6 +30,7 @@ export function setupImagePaste(): void {
           if (imageData) imageData.value = base64;
           if (previewImg) previewImg.src = base64;
           if (imagePreview) imagePreview.classList.add('visible');
+          setHasImage(true);
         };
         
         reader.onerror = (error) => console.error('FileReader error:', error);
@@ -49,4 +52,5 @@ export function removeImage(): void {
   if (imageData) imageData.value = '';
   if (previewImg) previewImg.src = '';
   if (imagePreview) imagePreview.classList.remove('visible');
+  setHasImage(false);
 }

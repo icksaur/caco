@@ -4,14 +4,7 @@
 
 import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge, scrollToBottom } from './ui-utils.js';
-
-/** Store current cwd and session for new chat form and session switching */
-export let currentServerCwd = '';
-export let currentActiveSessionId: string | null = null;
-
-export function setCurrentServerCwd(cwd: string): void {
-  currentServerCwd = cwd;
-}
+import { getActiveSessionId, getCurrentCwd, setActiveSession } from './state.js';
 
 /**
  * Toggle session panel visibility
@@ -56,9 +49,8 @@ export async function loadSessions(): Promise<void> {
     const data: SessionsResponse = await response.json();
     const { activeSessionId, currentCwd, grouped } = data;
     
-    // Store for use in switchSession and new chat form
-    currentServerCwd = currentCwd;
-    currentActiveSessionId = activeSessionId;
+    // Update state store
+    setActiveSession(activeSessionId, currentCwd);
     
     const container = document.getElementById('sessionList');
     if (!container) return;
@@ -139,7 +131,7 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
  */
 export async function switchSession(sessionId: string): Promise<void> {
   // If already on this session, just close the panel and scroll to bottom
-  if (sessionId === currentActiveSessionId) {
+  if (sessionId === getActiveSessionId()) {
     toggleSessionPanel();
     scrollToBottom();
     return;
@@ -225,7 +217,7 @@ export function toggleNewChatForm(): void {
   } else {
     // Expand and pre-fill with current cwd
     form.classList.add('expanded');
-    pathInput.value = currentServerCwd;
+    pathInput.value = getCurrentCwd();
     pathInput.focus();
     pathInput.select();
   }

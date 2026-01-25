@@ -3,6 +3,7 @@
  */
 
 import type { ModelInfo, Preferences } from './types.js';
+import { getSelectedModel, setSelectedModel as stateSetSelectedModel } from './state.js';
 
 /**
  * Curated model list with display names and costs
@@ -18,16 +19,6 @@ export const CURATED_MODELS: ModelInfo[] = [
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', cost: 1 },
   { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', cost: 0.33 }
 ];
-
-/** Current selected model */
-export let selectedModel = 'claude-sonnet-4';
-
-/**
- * Set the selected model
- */
-export function setSelectedModel(modelId: string): void {
-  selectedModel = modelId;
-}
 
 /**
  * Toggle model dropdown visibility
@@ -75,11 +66,12 @@ export function loadModels(): void {
   if (!container) return;
   
   container.innerHTML = '';
+  const currentModel = getSelectedModel();
   
   for (const model of CURATED_MODELS) {
     const item = document.createElement('div');
     item.className = 'model-item';
-    if (model.id === selectedModel) {
+    if (model.id === currentModel) {
       item.classList.add('active');
     }
     item.dataset.modelId = model.id;
@@ -116,12 +108,8 @@ export function loadModels(): void {
  * Select a model
  */
 export function selectModel(modelId: string): void {
-  selectedModel = modelId;
-  
-  const selectedModelInput = document.getElementById('selectedModel') as HTMLInputElement;
-  if (selectedModelInput) {
-    selectedModelInput.value = modelId;
-  }
+  // Update state (also syncs hidden input)
+  stateSetSelectedModel(modelId);
   
   // Update placeholder to show selected model
   const modelInfo = CURATED_MODELS.find(m => m.id === modelId);
@@ -146,15 +134,11 @@ export function selectModel(modelId: string): void {
  */
 export function applyModelPreference(prefs: Preferences): void {
   if (prefs.lastModel && CURATED_MODELS.find(m => m.id === prefs.lastModel)) {
-    selectedModel = prefs.lastModel;
-    
-    const selectedModelInput = document.getElementById('selectedModel') as HTMLInputElement;
-    if (selectedModelInput) {
-      selectedModelInput.value = selectedModel;
-    }
+    // Update state (also syncs hidden input)
+    stateSetSelectedModel(prefs.lastModel);
     
     // Update placeholder
-    const modelInfo = CURATED_MODELS.find(m => m.id === selectedModel);
+    const modelInfo = CURATED_MODELS.find(m => m.id === prefs.lastModel);
     const input = document.querySelector('input[name="message"]') as HTMLInputElement;
     if (input && modelInfo) {
       input.placeholder = `Ask ${modelInfo.name}...`;

@@ -7,6 +7,7 @@ import { escapeHtml, scrollToBottom } from './ui-utils.js';
 import { addActivityItem, formatToolArgs, formatToolResult, toggleActivityBox } from './activity.js';
 import { renderDisplayOutput } from './display-output.js';
 import { removeImage } from './image-paste.js';
+import { setStreaming, getActiveEventSource } from './state.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -15,8 +16,7 @@ declare global {
   }
 }
 
-/** Track active EventSource for stop functionality */
-let activeEventSource: EventSource | null = null;
+/** Timeout for stop button appearance */
 let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
 
 /**
@@ -68,7 +68,7 @@ export function streamResponse(prompt: string, model: string, imageData: string)
   }
   
   const eventSource = new EventSource(`/api/stream?${params.toString()}`);
-  activeEventSource = eventSource;
+  setStreaming(true, eventSource);
   
   const responseDiv = document.querySelector('#pending-response .markdown-content');
   let responseContent = '';
@@ -169,7 +169,7 @@ export function streamResponse(prompt: string, model: string, imageData: string)
   // Handle completion
   eventSource.addEventListener('done', () => {
     eventSource.close();
-    activeEventSource = null;
+    setStreaming(false, null);
     finishPendingResponse();
   });
   
@@ -181,7 +181,7 @@ export function streamResponse(prompt: string, model: string, imageData: string)
   eventSource.onerror = (err) => {
     console.error('EventSource error:', err);
     eventSource.close();
-    activeEventSource = null;
+    setStreaming(false, null);
     
     // If we haven't received any content, show error
     if (!responseContent && !firstDeltaReceived) {
@@ -196,9 +196,10 @@ export function streamResponse(prompt: string, model: string, imageData: string)
  * Stop streaming response
  */
 export function stopStreaming(): void {
+  const activeEventSource = getActiveEventSource();
   if (activeEventSource) {
     activeEventSource.close();
-    activeEventSource = null;
+    setStreaming(false, null);
     
     // Add visual feedback
     addActivityItem('info', 'Stopped by user');
@@ -274,7 +275,7 @@ export function setFormEnabled(enabled: boolean): void {
     
     stopButtonTimeout = setTimeout(() => {
       // Only show stop if still streaming
-      if (activeEventSource) {
+      if (getActiveEventSource()) {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Stop';
         submitBtn.classList.add('stop-btn');

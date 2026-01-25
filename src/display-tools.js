@@ -19,11 +19,11 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 /**
- * Create display tools that use a provided storeArtifact function
- * @param {Function} storeArtifact - (data, metadata) => artifactId
+ * Create display tools that use a provided storeOutput function
+ * @param {Function} storeOutput - (data, metadata) => outputId
  * @param {Function} detectLanguage - (filepath) => language string
  */
-export function createDisplayTools(storeArtifact, detectLanguage) {
+export function createDisplayTools(storeOutput, detectLanguage) {
   
   const renderFileContents = defineTool("render_file_contents", {
     description: `Display a file's contents directly to the user without reading it into context.
@@ -64,8 +64,8 @@ confirmation that the file was displayed, not its contents.`,
         const end = endLine ? Math.min(endLine, lines.length) : lines.length;
         const displayContent = lines.slice(start, end).join('\n');
         
-        // Store as artifact - this goes to UI, not to agent
-        const artifactId = storeArtifact(displayContent, {
+        // Store as output - this goes to UI, not to agent
+        const outputId = storeOutput(displayContent, {
           type: 'file',
           path,
           highlight: highlight || detectLanguage(path),
@@ -82,7 +82,7 @@ confirmation that the file was displayed, not its contents.`,
         return {
           textResultForLlm: `Displayed ${path} to user${rangeInfo} - ${lines.length} lines, ${content.length} bytes`,
           toolTelemetry: {
-            artifactId,
+            outputId,
             lineCount: lines.length,
             byteCount: content.length,
             displayedLines: end - start
@@ -127,7 +127,7 @@ You will receive exit code and output size, not the actual output.`,
         const output = stdout + (stderr ? `\n--- stderr ---\n${stderr}` : '');
         const lineCount = output.split('\n').length;
         
-        const artifactId = storeArtifact(output, {
+        const outputId = storeOutput(output, {
           type: 'terminal',
           command,
           cwd: options.cwd,
@@ -136,7 +136,7 @@ You will receive exit code and output size, not the actual output.`,
         
         return {
           textResultForLlm: `Command succeeded. Output displayed to user (${lineCount} lines, ${output.length} chars)`,
-          toolTelemetry: { artifactId, exitCode: 0, outputSize: output.length, lineCount }
+          toolTelemetry: { outputId, exitCode: 0, outputSize: output.length, lineCount }
         };
       } catch (err) {
         // Command failed - still show output
@@ -144,7 +144,7 @@ You will receive exit code and output size, not the actual output.`,
         const exitCode = err.code || 1;
         const lineCount = output.split('\n').length;
         
-        const artifactId = storeArtifact(output || err.message, {
+        const outputId = storeOutput(output || err.message, {
           type: 'terminal',
           command,
           cwd: cwd || process.cwd(),
@@ -153,7 +153,7 @@ You will receive exit code and output size, not the actual output.`,
         
         return {
           textResultForLlm: `Command failed (exit ${exitCode}). Output displayed to user (${lineCount} lines)`,
-          toolTelemetry: { artifactId, exitCode, outputSize: output.length, lineCount }
+          toolTelemetry: { outputId, exitCode, outputSize: output.length, lineCount }
         };
       }
     }
@@ -185,7 +185,7 @@ Supports: PNG, JPEG, GIF, WebP, SVG`,
         
         const mimeType = mimeTypes[ext] || 'application/octet-stream';
         
-        const artifactId = storeArtifact(data, {
+        const outputId = storeOutput(data, {
           type: 'image',
           path,
           mimeType
@@ -193,7 +193,7 @@ Supports: PNG, JPEG, GIF, WebP, SVG`,
         
         return {
           textResultForLlm: `Displayed image ${path} to user (${data.length} bytes)`,
-          toolTelemetry: { artifactId, mimeType, size: data.length }
+          toolTelemetry: { outputId, mimeType, size: data.length }
         };
       } catch (err) {
         return {

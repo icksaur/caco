@@ -1,6 +1,6 @@
-# Artifacts: Display-Only Tools
+# Outputs: Display-Only Tools
 
-Artifacts let users **see** large outputs (files, terminal output, images) without consuming LLM context.
+Display outputs let users **see** large content (files, terminal output, images) without consuming LLM context.
 
 ## The Pattern
 
@@ -23,11 +23,11 @@ When the user just wants to view something, our display tools:
 
 ```
 ┌─────────────────┐                      ┌───────────────────┐
-│  Display Tool   │  storeArtifact(data) │  In-Memory Cache  │
+│  Display Tool   │   storeOutput(data)  │  In-Memory Cache  │
 │  (SDK handler)  │  ───────────────────►│  Map + 30min TTL  │
-└─────────────────┘  returns artifactId  └───────────────────┘
+└─────────────────┘    returns outputId  └───────────────────┘
         │                                         │
-        │ toolTelemetry: { artifactId }           │ GET /api/artifacts/:id
+        │ toolTelemetry: { outputId }             │ GET /api/outputs/:id
         ▼                                         ▼
 ┌─────────────────┐                      ┌───────────────────┐
 │  LLM Context    │                      │  Browser UI       │
@@ -62,12 +62,12 @@ const renderFileContents = defineTool("render_file_contents", {
     const content = await readFile(path, 'utf-8');
     
     // Store full content in cache
-    const artifactId = storeArtifact(content, { type: 'file', path });
+    const outputId = storeOutput(content, { type: 'file', path });
     
     // LLM only sees this
     return {
       textResultForLlm: `Displayed ${path} to user (${lines.length} lines)`,
-      toolTelemetry: { artifactId }  // UI uses this to fetch content
+      toolTelemetry: { outputId }  // UI uses this to fetch content
     };
   }
 });
@@ -77,43 +77,43 @@ const renderFileContents = defineTool("render_file_contents", {
 
 ## Server Components
 
-### Artifact Cache ([server.js](server.js#L59-L77))
+### Output Cache ([server.js](server.js#L59-L77))
 
 ```javascript
-const artifacts = new Map();
-const ARTIFACT_TTL = 30 * 60 * 1000;  // 30 minutes
+const displayOutputs = new Map();
+const OUTPUT_TTL = 30 * 60 * 1000;  // 30 minutes
 
-function storeArtifact(data, metadata = {}) {
-  const id = `art_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  artifacts.set(id, { data, metadata, createdAt: Date.now() });
-  setTimeout(() => artifacts.delete(id), ARTIFACT_TTL);
+function storeOutput(data, metadata = {}) {
+  const id = `out_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  displayOutputs.set(id, { data, metadata, createdAt: Date.now() });
+  setTimeout(() => displayOutputs.delete(id), OUTPUT_TTL);
   return id;
 }
 ```
 
-### Artifact API ([server.js](server.js#L237-L264))
+### Output API ([server.js](server.js#L237-L264))
 
 ```javascript
-app.get('/api/artifacts/:id', (req, res) => {
-  const artifact = getArtifact(req.params.id);
-  if (!artifact) return res.status(404).json({ error: 'Expired' });
+app.get('/api/outputs/:id', (req, res) => {
+  const output = getOutput(req.params.id);
+  if (!output) return res.status(404).json({ error: 'Expired' });
   
   if (metadata.mimeType) res.setHeader('Content-Type', metadata.mimeType);
-  res.send(artifact.data);
+  res.send(output.data);
 });
 ```
 
 ### SSE Event Processing ([server.js](server.js#L475-L495))
 
-The `tool.execution_complete` event contains `artifactId` in `toolTelemetry`. The server extracts it and forwards to the client.
+The `tool.execution_complete` event contains `outputId` in `toolTelemetry`. The server extracts it and forwards to the client.
 
 ---
 
 ## Client Rendering ([public/script.js](public/script.js#L639-L720))
 
 ```javascript
-async function displayArtifact(artifact) {
-  const res = await fetch(`/api/artifacts/${artifact.id}?format=json`);
+async function renderDisplayOutput(output) {
+  const res = await fetch(`/api/outputs/${output.id}?format=json`);
   const { data, metadata } = await res.json();
   
   if (metadata.type === 'file') {
@@ -125,7 +125,7 @@ async function displayArtifact(artifact) {
   } else if (metadata.type === 'image') {
     // Direct image element
     const img = document.createElement('img');
-    img.src = `/api/artifacts/${artifact.id}`;
+    img.src = `/api/outputs/${output.id}`;
     container.appendChild(img);
   }
 }

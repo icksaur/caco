@@ -545,7 +545,7 @@ function addUserBubble(message, hasImage) {
       </div>
       <div class="activity-box"></div>
     </div>
-    <div class="artifacts-container"></div>
+    <div class="outputs-container"></div>
     <div class="markdown-content streaming-cursor"></div>
   `;
   chat.appendChild(assistantDiv);
@@ -631,19 +631,19 @@ function formatToolResult(result) {
 }
 
 // ============================================================
-// Artifact Display
+// Display Output Rendering
 // Display files, terminal output, images from display-only tools
 // Uses markdown rendering for syntax highlighting
 // ============================================================
 
-async function displayArtifact(artifact) {
-  console.log('displayArtifact called with:', artifact);
-  if (!artifact || !artifact.id) {
-    console.log('No artifact or no id');
+async function renderDisplayOutput(output) {
+  console.log('renderDisplayOutput called with:', output);
+  if (!output || !output.id) {
+    console.log('No output or no id');
     return;
   }
   
-  const container = document.querySelector('#pending-response .artifacts-container');
+  const container = document.querySelector('#pending-response .outputs-container');
   console.log('Container found:', container);
   if (!container) {
     console.log('No container found!');
@@ -651,23 +651,23 @@ async function displayArtifact(artifact) {
   }
   
   try {
-    // Fetch artifact with metadata
-    const url = `/api/artifacts/${artifact.id}?format=json`;
+    // Fetch output with metadata
+    const url = `/api/outputs/${output.id}?format=json`;
     console.log('Fetching:', url);
     const response = await fetch(url);
     console.log('Response status:', response.status);
     if (!response.ok) {
-      console.error('Failed to fetch artifact:', response.statusText);
+      console.error('Failed to fetch output:', response.statusText);
       return;
     }
     
     const json = await response.json();
-    console.log('Artifact data:', json);
+    console.log('Output data:', json);
     const { data, metadata } = json;
     
     let markdown = '';
     
-    if (artifact.type === 'file') {
+    if (output.type === 'file') {
       // File with syntax highlighting via markdown
       const lang = metadata.highlight || '';
       const pathInfo = metadata.path ? `**${metadata.path}**` : '';
@@ -677,19 +677,19 @@ async function displayArtifact(artifact) {
       
       markdown = `${pathInfo}${lineInfo}\n\n\`\`\`${lang}\n${data}\n\`\`\``;
       
-    } else if (artifact.type === 'terminal') {
+    } else if (output.type === 'terminal') {
       // Terminal output with command header
       const exitInfo = metadata.exitCode === 0 ? '' : ` (exit ${metadata.exitCode})`;
       markdown = `\`\`\`bash\n$ ${metadata.command}${exitInfo}\n${data}\n\`\`\``;
       
-    } else if (artifact.type === 'image') {
+    } else if (output.type === 'image') {
       // Image - create element directly since markdown images need URLs
       const img = document.createElement('img');
-      img.className = 'artifact-image';
+      img.className = 'output-image';
       if (metadata.mimeType && typeof data === 'string') {
         img.src = `data:${metadata.mimeType};base64,${data}`;
       } else {
-        img.src = `/api/artifacts/${artifact.id}`;
+        img.src = `/api/outputs/${output.id}`;
       }
       img.alt = metadata.path || 'Image';
       container.appendChild(img);
@@ -704,7 +704,7 @@ async function displayArtifact(artifact) {
       const rendered = DOMPurify.sanitize(rawHtml);
       console.log('Rendered HTML:', rendered.substring(0, 200) + '...');
       const div = document.createElement('div');
-      div.className = 'artifact-content';
+      div.className = 'output-content';
       div.innerHTML = rendered;
       container.appendChild(div);
       console.log('Appended to container');
@@ -720,7 +720,7 @@ async function displayArtifact(artifact) {
     }
     
   } catch (err) {
-    console.error('Error displaying artifact:', err);
+    console.error('Error displaying output:', err);
   }
 }
 
@@ -850,12 +850,12 @@ function streamResponse(prompt, model, imageData) {
     const details = data.result ? formatToolResult(data.result) : null;
     addActivityItem('tool-result', summary, details);
     
-    // Display artifact if present (from display-only tools)
-    if (data._artifact) {
-      console.log('Displaying artifact:', data._artifact);
-      displayArtifact(data._artifact);
+    // Display output if present (from display-only tools)
+    if (data._output) {
+      console.log('Displaying output:', data._output);
+      renderDisplayOutput(data._output);
     } else {
-      console.log('No _artifact in event data');
+      console.log('No _output in event data');
     }
   });
   

@@ -52,29 +52,29 @@ let preferences = { ...DEFAULT_PREFS };
 let activeSessionId = null;
 
 // ============================================================
-// Artifact Cache
+// Display Output Cache
 // Stores large outputs (files, terminal output) for display
 // without sending through LLM context
 // ============================================================
-const artifacts = new Map();
-const ARTIFACT_TTL = 30 * 60 * 1000; // 30 minutes
+const displayOutputs = new Map();
+const OUTPUT_TTL = 30 * 60 * 1000; // 30 minutes
 
-function storeArtifact(data, metadata = {}) {
-  const id = `art_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  artifacts.set(id, {
+function storeOutput(data, metadata = {}) {
+  const id = `out_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  displayOutputs.set(id, {
     data,
     metadata,
     createdAt: Date.now()
   });
   
   // Auto-cleanup after TTL
-  setTimeout(() => artifacts.delete(id), ARTIFACT_TTL);
+  setTimeout(() => displayOutputs.delete(id), OUTPUT_TTL);
   
   return id;
 }
 
-function getArtifact(id) {
-  return artifacts.get(id);
+function getOutput(id) {
+  return displayOutputs.get(id);
 }
 
 // Detect language from file extension for syntax highlighting
@@ -114,8 +114,8 @@ function detectLanguage(filepath) {
   return langMap[ext] || 'plaintext';
 }
 
-// Create display-only tools (use artifact cache for zero-context display)
-const displayTools = createDisplayTools(storeArtifact, detectLanguage);
+// Create display-only tools (use output cache for zero-context display)
+const displayTools = createDisplayTools(storeOutput, detectLanguage);
 
 // System message for sessions
 const SYSTEM_MESSAGE = {
@@ -239,17 +239,17 @@ app.get('/api/session', (req, res) => {
 });
 
 // ============================================================
-// Artifact API
+// Display Output API
 // ============================================================
 
-// Get artifact by ID
-app.get('/api/artifacts/:id', (req, res) => {
-  const artifact = getArtifact(req.params.id);
-  if (!artifact) {
-    return res.status(404).json({ error: 'Artifact expired or not found' });
+// Get display output by ID
+app.get('/api/outputs/:id', (req, res) => {
+  const output = getOutput(req.params.id);
+  if (!output) {
+    return res.status(404).json({ error: 'Output expired or not found' });
   }
   
-  const { data, metadata } = artifact;
+  const { data, metadata } = output;
   
   // Set appropriate content type
   if (metadata.mimeType) {
@@ -264,7 +264,7 @@ app.get('/api/artifacts/:id', (req, res) => {
       id: req.params.id,
       data: typeof data === 'string' ? data : data.toString('base64'),
       metadata,
-      createdAt: artifact.createdAt
+      createdAt: output.createdAt
     });
   }
   
@@ -480,21 +480,21 @@ app.get('/api/stream', async (req, res) => {
       // Prepare event data
       let eventData = event.data || {};
       
-      // For tool.execution_complete, check for artifact references in telemetry
+      // For tool.execution_complete, check for output references in telemetry
       // The SDK wraps our return value as JSON string inside result.content
       if (event.type === 'tool.execution_complete' && eventData.result?.content) {
         try {
           const parsed = JSON.parse(eventData.result.content);
-          if (parsed.toolTelemetry?.artifactId) {
+          if (parsed.toolTelemetry?.outputId) {
             const telemetry = parsed.toolTelemetry;
-            const artifactMeta = getArtifact(telemetry.artifactId)?.metadata || {};
-            // Add artifact info to event data for UI
+            const outputMeta = getOutput(telemetry.outputId)?.metadata || {};
+            // Add output info to event data for UI
             eventData = {
               ...eventData,
-              _artifact: {
-                id: telemetry.artifactId,
-                type: artifactMeta.type,
-                ...artifactMeta
+              _output: {
+                id: telemetry.outputId,
+                type: outputMeta.type,
+                ...outputMeta
               }
             };
           }

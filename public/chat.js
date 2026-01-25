@@ -64,6 +64,9 @@ async function loadHistory() {
   }
 }
 
+// Track if session has messages (model locked after first message)
+let sessionHasMessages = false;
+
 // Load and apply user preferences
 async function loadPreferences() {
   try {
@@ -93,18 +96,45 @@ async function loadPreferences() {
   }
 }
 
+// Check session state and update UI accordingly
+async function checkSessionState() {
+  try {
+    const response = await fetch('/api/session');
+    if (response.ok) {
+      const session = await response.json();
+      sessionHasMessages = session.hasMessages;
+      updateModelButtonVisibility();
+    }
+  } catch (error) {
+    console.error('Failed to check session state:', error);
+  }
+}
+
+// Show/hide model button based on whether messages have been sent
+function updateModelButtonVisibility() {
+  const modelBtn = document.querySelector('.hamburger-btn.model-btn');
+  if (modelBtn) {
+    if (sessionHasMessages) {
+      modelBtn.style.display = 'none';
+    } else {
+      modelBtn.style.display = '';
+    }
+  }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
   loadPreferences();
   loadHistory();
+  checkSessionState();
 });
 
 // Toggle session panel
 function toggleSessionPanel() {
   const chat = document.getElementById('chat');
   const panel = document.getElementById('sessionPanel');
-  const modelPanel = document.getElementById('modelPanel');
   const btn = document.querySelector('.hamburger-btn:not(.model-btn)');
+  const modelDropdown = document.getElementById('modelDropdown');
   const modelBtn = document.querySelector('.hamburger-btn.model-btn');
   
   const isOpen = panel.classList.contains('visible');
@@ -115,9 +145,9 @@ function toggleSessionPanel() {
     chat.classList.remove('hidden');
     btn.classList.remove('active');
   } else {
-    // Close model panel if open
-    modelPanel.classList.remove('visible');
-    modelBtn.classList.remove('active');
+    // Close model dropdown if open
+    if (modelDropdown) modelDropdown.classList.remove('visible');
+    if (modelBtn) modelBtn.classList.remove('active');
     // Open panel, hide chat
     panel.classList.add('visible');
     chat.classList.add('hidden');
@@ -355,33 +385,33 @@ async function createNewSession() {
 // Current selected model
 let selectedModel = 'claude-sonnet-4';
 
-// Toggle model panel
-function toggleModelPanel() {
-  const chat = document.getElementById('chat');
-  const sessionPanel = document.getElementById('sessionPanel');
-  const modelPanel = document.getElementById('modelPanel');
+// Toggle model dropdown
+function toggleModelDropdown() {
+  const dropdown = document.getElementById('modelDropdown');
   const modelBtn = document.querySelector('.hamburger-btn.model-btn');
-  const sessionBtn = document.querySelector('.hamburger-btn:not(.model-btn)');
   
-  const isOpen = modelPanel.classList.contains('visible');
+  const isOpen = dropdown.classList.contains('visible');
   
   if (isOpen) {
-    // Close panel, show chat
-    modelPanel.classList.remove('visible');
-    chat.classList.remove('hidden');
+    dropdown.classList.remove('visible');
     modelBtn.classList.remove('active');
   } else {
-    // Close session panel if open
-    sessionPanel.classList.remove('visible');
-    sessionBtn.classList.remove('active');
-    // Open model panel, hide chat
-    modelPanel.classList.add('visible');
-    chat.classList.add('hidden');
+    dropdown.classList.add('visible');
     modelBtn.classList.add('active');
     // Load models when opening
     loadModels();
   }
 }
+
+// Close model dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  const dropdown = document.getElementById('modelDropdown');
+  const modelBtn = document.querySelector('.hamburger-btn.model-btn');
+  if (dropdown && !dropdown.contains(e.target) && !modelBtn.contains(e.target)) {
+    dropdown.classList.remove('visible');
+    modelBtn.classList.remove('active');
+  }
+});
 
 // Curated model list with display names and costs
 const CURATED_MODELS = [
@@ -454,8 +484,8 @@ function selectModel(modelId) {
     body: JSON.stringify({ lastModel: modelId })
   }).catch(() => {}); // Ignore errors
   
-  // Close panel
-  toggleModelPanel();
+  // Close dropdown
+  toggleModelDropdown();
 }
 
 // ========================================
@@ -630,21 +660,7 @@ async function renderDisplayOutput(output) {
       embedContainer.className = 'output-embed';
       embedContainer.dataset.provider = metadata.providerKey || '';
       
-      // Add title header if available
-      if (metadata.title) {
-        const header = document.createElement('div');
-        header.className = 'embed-header';
-        header.innerHTML = `<span class="embed-provider">${escapeHtml(metadata.provider || '')}</span>`;
-        if (metadata.title) {
-          header.innerHTML += ` <span class="embed-title">${escapeHtml(metadata.title)}</span>`;
-        }
-        if (metadata.author) {
-          header.innerHTML += ` <span class="embed-author">by ${escapeHtml(metadata.author)}</span>`;
-        }
-        embedContainer.appendChild(header);
-      }
-      
-      // Embed the HTML (already sanitized by oEmbed providers)
+      // Embed the HTML directly (providers include their own branding)
       const embedFrame = document.createElement('div');
       embedFrame.className = 'embed-frame';
       embedFrame.innerHTML = data; // oEmbed HTML (iframe)
@@ -691,6 +707,10 @@ let stopButtonTimeout = null;
 
 // Stream response via EventSource
 function streamResponse(prompt, model, imageData) {
+  // Hide model button - first message locks the model
+  sessionHasMessages = true;
+  updateModelButtonVisibility();
+  
   // Build URL with parameters
   const params = new URLSearchParams({ prompt, model });
   if (imageData) {

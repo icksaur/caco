@@ -31,9 +31,6 @@
       </div>
       <div id="sessionList"></div>
     </div>
-    <div id="modelPanel" class="model-panel">
-      <div id="modelList"></div>
-    </div>
   </main>
 
   <footer>
@@ -57,11 +54,14 @@
         required
         autofocus
       >
-      <button type="button" class="hamburger-btn model-btn" onclick="toggleModelPanel()" aria-label="Select model">
+      <button type="button" class="hamburger-btn model-btn" onclick="toggleModelDropdown()" aria-label="Select model">
         <span></span>
         <span></span>
         <span></span>
       </button>
+      <div id="modelDropdown" class="model-dropdown">
+        <div id="modelList"></div>
+      </div>
       <button type="submit">
         Send <span class="loading">...</span>
       </button>

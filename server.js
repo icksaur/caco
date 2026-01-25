@@ -90,7 +90,7 @@ async function initSession() {
   
   const cwd = process.cwd();
   
-  // Config for both resume and create
+  // Config for session resume
   const sessionConfig = {
     tools: displayTools,
     excludedTools: ['view']
@@ -107,7 +107,14 @@ async function initSession() {
     }
   }
   
-  // Try to resume most recent session for this cwd
+  // If lastSessionId was explicitly null (new chat), don't auto-resume
+  // Just wait for first message to create session with selected model
+  if (preferences.lastSessionId === null) {
+    console.log('✓ No existing session - will create on first message');
+    return;
+  }
+  
+  // Try to resume most recent session for this cwd (only if no preference set)
   const recentSessionId = sessionManager.getMostRecentForCwd(cwd);
   
   if (recentSessionId) {
@@ -122,17 +129,31 @@ async function initSession() {
     }
   }
   
-  // No existing session or resume failed - create new
+  // No existing session - will create lazily on first message
+  console.log('✓ No existing session - will create on first message');
+}
+
+// Helper to create session lazily with specified model
+async function ensureSession(model) {
+  if (activeSessionId && sessionManager.isActive(activeSessionId)) {
+    return activeSessionId;
+  }
+  
+  const cwd = preferences.lastCwd || process.cwd();
+  
   activeSessionId = await sessionManager.create(cwd, {
-    model: 'gpt-4.1',
+    model: model || 'claude-sonnet-4',
     streaming: true,
     systemMessage: SYSTEM_MESSAGE,
-    ...sessionConfig
+    tools: displayTools,
+    excludedTools: ['view']
   });
+  
   preferences.lastSessionId = activeSessionId;
-  preferences.lastCwd = cwd;
   await savePreferences(preferences);
-  console.log(`✓ Created new session ${activeSessionId}`);
+  console.log(`✓ Created session ${activeSessionId} with model ${model || 'claude-sonnet-4'}`);
+  
+  return activeSessionId;
 }
 
 // Serve chat interface
@@ -141,11 +162,24 @@ app.get('/', (req, res) => {
 });
 
 // Get session info
-app.get('/api/session', (req, res) => {
+app.get('/api/session', async (req, res) => {
+  let hasMessages = false;
+  
+  // Check if session has messages
+  if (activeSessionId && sessionManager.isActive(activeSessionId)) {
+    try {
+      const history = await sessionManager.getHistory(activeSessionId);
+      hasMessages = history.some(e => e.type === 'user.message');
+    } catch (_e) {
+      // Session not active or error - no messages
+    }
+  }
+  
   res.json({
     sessionId: activeSessionId,
     cwd: process.cwd(),
-    isActive: sessionManager.isActive(activeSessionId)
+    isActive: activeSessionId ? sessionManager.isActive(activeSessionId) : false,
+    hasMessages
   });
 });
 
@@ -322,27 +356,19 @@ app.post('/api/sessions/new', async (req, res) => {
       return res.status(400).json({ error: `Path is not a directory: ${cwd}` });
     }
     
-    // Stop current session first
+    // Stop current session first (if any)
     if (activeSessionId) {
       await sessionManager.stop(activeSessionId);
+      activeSessionId = null;
     }
     
-    // Create new with specified cwd
-    activeSessionId = await sessionManager.create(cwd, {
-      model: 'gpt-4.1',
-      streaming: true,
-      systemMessage: SYSTEM_MESSAGE,
-      tools: displayTools,
-      // Disable built-in tools that compete with our display tools
-      excludedTools: ['view']
-    });
-    
-    // Save to preferences
-    preferences.lastSessionId = activeSessionId;
+    // Save cwd to preferences - session will be created lazily on first message
+    preferences.lastSessionId = null;
     preferences.lastCwd = cwd;
     await savePreferences(preferences);
     
-    res.json({ success: true, sessionId: activeSessionId });
+    console.log(`✓ New chat prepared for ${cwd} - session will create on first message`);
+    res.json({ success: true, cwd });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -366,6 +392,9 @@ app.get('/api/stream', async (req, res) => {
   let tempFilePath = null;
   
   try {
+    // Ensure session exists (create lazily with selected model if needed)
+    await ensureSession(model);
+    
     // Get session
     const session = sessionManager.getSession(activeSessionId);
     if (!session) {
@@ -374,7 +403,7 @@ app.get('/api/stream', async (req, res) => {
       return res.end();
     }
     
-    const messageOptions = { prompt, model: model || 'claude-sonnet-4' };
+    const messageOptions = { prompt };
     
     // Handle image attachment if present
     if (imageData && imageData.startsWith('data:image/')) {

@@ -5,6 +5,7 @@ import { writeFile, unlink, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { tmpdir, homedir } from 'os';
 import sessionManager from './src/session-manager.js';
+import { createDisplayTools } from './src/display-tools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -49,6 +50,72 @@ let preferences = { ...DEFAULT_PREFS };
 
 // Current active session for this server instance
 let activeSessionId = null;
+
+// ============================================================
+// Artifact Cache
+// Stores large outputs (files, terminal output) for display
+// without sending through LLM context
+// ============================================================
+const artifacts = new Map();
+const ARTIFACT_TTL = 30 * 60 * 1000; // 30 minutes
+
+function storeArtifact(data, metadata = {}) {
+  const id = `art_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  artifacts.set(id, {
+    data,
+    metadata,
+    createdAt: Date.now()
+  });
+  
+  // Auto-cleanup after TTL
+  setTimeout(() => artifacts.delete(id), ARTIFACT_TTL);
+  
+  return id;
+}
+
+function getArtifact(id) {
+  return artifacts.get(id);
+}
+
+// Detect language from file extension for syntax highlighting
+function detectLanguage(filepath) {
+  const ext = filepath.split('.').pop()?.toLowerCase();
+  const langMap = {
+    js: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    ts: 'typescript', tsx: 'typescript',
+    py: 'python',
+    rb: 'ruby',
+    go: 'go',
+    rs: 'rust',
+    java: 'java',
+    c: 'c', h: 'c',
+    cpp: 'cpp', hpp: 'cpp', cc: 'cpp',
+    cs: 'csharp',
+    php: 'php',
+    swift: 'swift',
+    kt: 'kotlin',
+    scala: 'scala',
+    sh: 'bash', bash: 'bash', zsh: 'bash',
+    sql: 'sql',
+    json: 'json',
+    yaml: 'yaml', yml: 'yaml',
+    xml: 'xml',
+    html: 'html', htm: 'html',
+    css: 'css',
+    scss: 'scss', sass: 'scss',
+    md: 'markdown',
+    dockerfile: 'dockerfile',
+    makefile: 'makefile',
+    toml: 'toml',
+    ini: 'ini',
+    conf: 'ini',
+    env: 'shell'
+  };
+  return langMap[ext] || 'plaintext';
+}
+
+// Create display-only tools (use artifact cache for zero-context display)
+const displayTools = createDisplayTools(storeArtifact, detectLanguage);
 
 // System message for sessions
 const SYSTEM_MESSAGE = {
@@ -137,7 +204,8 @@ async function initSession() {
   activeSessionId = await sessionManager.create(cwd, {
     model: 'gpt-4.1',
     streaming: true,
-    systemMessage: SYSTEM_MESSAGE
+    systemMessage: SYSTEM_MESSAGE,
+    tools: displayTools
   });
   preferences.lastSessionId = activeSessionId;
   preferences.lastCwd = cwd;
@@ -157,6 +225,40 @@ app.get('/api/session', (req, res) => {
     cwd: process.cwd(),
     isActive: sessionManager.isActive(activeSessionId)
   });
+});
+
+// ============================================================
+// Artifact API
+// ============================================================
+
+// Get artifact by ID
+app.get('/api/artifacts/:id', (req, res) => {
+  const artifact = getArtifact(req.params.id);
+  if (!artifact) {
+    return res.status(404).json({ error: 'Artifact expired or not found' });
+  }
+  
+  const { data, metadata } = artifact;
+  
+  // Set appropriate content type
+  if (metadata.mimeType) {
+    res.setHeader('Content-Type', metadata.mimeType);
+  } else if (metadata.type === 'file' || metadata.type === 'terminal') {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  }
+  
+  // For JSON response with metadata
+  if (req.query.format === 'json') {
+    return res.json({
+      id: req.params.id,
+      data: typeof data === 'string' ? data : data.toString('base64'),
+      metadata,
+      createdAt: artifact.createdAt
+    });
+  }
+  
+  // Raw data response
+  res.send(data);
 });
 
 // Get preferences
@@ -305,7 +407,8 @@ app.post('/api/sessions/new', async (req, res) => {
     activeSessionId = await sessionManager.create(cwd, {
       model: 'gpt-4.1',
       streaming: true,
-      systemMessage: SYSTEM_MESSAGE
+      systemMessage: SYSTEM_MESSAGE,
+      tools: displayTools
     });
     
     // Save to preferences
@@ -361,9 +464,27 @@ app.get('/api/stream', async (req, res) => {
     
     // Subscribe to events
     const unsubscribe = session.on((event) => {
+      // Prepare event data
+      let eventData = event.data || {};
+      
+      // For tool.execution_complete, check for artifact references in telemetry
+      if (event.type === 'tool.execution_complete' && eventData.result?.toolTelemetry?.artifactId) {
+        const telemetry = eventData.result.toolTelemetry;
+        // Add artifact info to event data for UI
+        eventData = {
+          ...eventData,
+          _artifact: {
+            id: telemetry.artifactId,
+            type: eventData.result.toolTelemetry.type || 
+                  (getArtifact(telemetry.artifactId)?.metadata?.type),
+            ...getArtifact(telemetry.artifactId)?.metadata
+          }
+        };
+      }
+      
       // Send event to client
       res.write(`event: ${event.type}\n`);
-      res.write(`data: ${JSON.stringify(event.data || {})}\n\n`);
+      res.write(`data: ${JSON.stringify(eventData)}\n\n`);
       
       // End stream on terminal events
       if (event.type === 'session.idle' || event.type === 'session.error') {

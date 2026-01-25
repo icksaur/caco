@@ -629,6 +629,80 @@ function formatToolResult(result) {
   return JSON.stringify(result).substring(0, 200);
 }
 
+// ============================================================
+// Artifact Display
+// Display files, terminal output, images from display-only tools
+// Uses markdown rendering for syntax highlighting
+// ============================================================
+
+async function displayArtifact(artifact) {
+  if (!artifact || !artifact.id) return;
+  
+  const container = document.querySelector('#pending-response .response-text');
+  if (!container) return;
+  
+  try {
+    // Fetch artifact with metadata
+    const response = await fetch(`/api/artifacts/${artifact.id}?format=json`);
+    if (!response.ok) {
+      console.error('Failed to fetch artifact:', response.statusText);
+      return;
+    }
+    
+    const { data, metadata } = await response.json();
+    
+    let markdown = '';
+    
+    if (artifact.type === 'file') {
+      // File with syntax highlighting via markdown
+      const lang = metadata.highlight || '';
+      const pathInfo = metadata.path ? `**${metadata.path}**` : '';
+      const lineInfo = metadata.startLine && metadata.endLine 
+        ? ` (lines ${metadata.startLine}-${metadata.endLine} of ${metadata.totalLines})`
+        : '';
+      
+      markdown = `${pathInfo}${lineInfo}\n\n\`\`\`${lang}\n${data}\n\`\`\``;
+      
+    } else if (artifact.type === 'terminal') {
+      // Terminal output with command header
+      const exitInfo = metadata.exitCode === 0 ? '' : ` (exit ${metadata.exitCode})`;
+      markdown = `\`\`\`bash\n$ ${metadata.command}${exitInfo}\n${data}\n\`\`\``;
+      
+    } else if (artifact.type === 'image') {
+      // Image - create element directly since markdown images need URLs
+      const img = document.createElement('img');
+      img.className = 'artifact-image';
+      if (metadata.mimeType && typeof data === 'string') {
+        img.src = `data:${metadata.mimeType};base64,${data}`;
+      } else {
+        img.src = `/api/artifacts/${artifact.id}`;
+      }
+      img.alt = metadata.path || 'Image';
+      container.appendChild(img);
+      return;
+    }
+    
+    // Render markdown content
+    if (markdown && window.renderMarkdown) {
+      const rendered = await window.renderMarkdown(markdown);
+      const div = document.createElement('div');
+      div.className = 'artifact-content';
+      div.innerHTML = rendered;
+      container.appendChild(div);
+    }
+    
+  } catch (err) {
+    console.error('Error displaying artifact:', err);
+  }
+}
+
+// Escape HTML for safe display
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 // Toggle activity box expand/collapse
 function toggleActivityBox(header) {
   const wrapper = header.closest('.activity-wrapper');
@@ -746,6 +820,11 @@ function streamResponse(prompt, model, imageData) {
     const summary = `${status} ${toolName}`;
     const details = data.result ? formatToolResult(data.result) : null;
     addActivityItem('tool-result', summary, details);
+    
+    // Display artifact if present (from display-only tools)
+    if (data._artifact) {
+      displayArtifact(data._artifact);
+    }
   });
   
   // Handle errors

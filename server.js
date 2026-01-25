@@ -468,18 +468,26 @@ app.get('/api/stream', async (req, res) => {
       let eventData = event.data || {};
       
       // For tool.execution_complete, check for artifact references in telemetry
-      if (event.type === 'tool.execution_complete' && eventData.result?.toolTelemetry?.artifactId) {
-        const telemetry = eventData.result.toolTelemetry;
-        // Add artifact info to event data for UI
-        eventData = {
-          ...eventData,
-          _artifact: {
-            id: telemetry.artifactId,
-            type: eventData.result.toolTelemetry.type || 
-                  (getArtifact(telemetry.artifactId)?.metadata?.type),
-            ...getArtifact(telemetry.artifactId)?.metadata
+      // The SDK wraps our return value as JSON string inside result.content
+      if (event.type === 'tool.execution_complete' && eventData.result?.content) {
+        try {
+          const parsed = JSON.parse(eventData.result.content);
+          if (parsed.toolTelemetry?.artifactId) {
+            const telemetry = parsed.toolTelemetry;
+            const artifactMeta = getArtifact(telemetry.artifactId)?.metadata || {};
+            // Add artifact info to event data for UI
+            eventData = {
+              ...eventData,
+              _artifact: {
+                id: telemetry.artifactId,
+                type: artifactMeta.type,
+                ...artifactMeta
+              }
+            };
           }
-        };
+        } catch (e) {
+          // result.content is not JSON, ignore
+        }
       }
       
       // Send event to client

@@ -545,6 +545,7 @@ function addUserBubble(message, hasImage) {
       </div>
       <div class="activity-box"></div>
     </div>
+    <div class="artifacts-container"></div>
     <div class="markdown-content streaming-cursor"></div>
   `;
   chat.appendChild(assistantDiv);
@@ -636,20 +637,33 @@ function formatToolResult(result) {
 // ============================================================
 
 async function displayArtifact(artifact) {
-  if (!artifact || !artifact.id) return;
+  console.log('displayArtifact called with:', artifact);
+  if (!artifact || !artifact.id) {
+    console.log('No artifact or no id');
+    return;
+  }
   
-  const container = document.querySelector('#pending-response .response-text');
-  if (!container) return;
+  const container = document.querySelector('#pending-response .artifacts-container');
+  console.log('Container found:', container);
+  if (!container) {
+    console.log('No container found!');
+    return;
+  }
   
   try {
     // Fetch artifact with metadata
-    const response = await fetch(`/api/artifacts/${artifact.id}?format=json`);
+    const url = `/api/artifacts/${artifact.id}?format=json`;
+    console.log('Fetching:', url);
+    const response = await fetch(url);
+    console.log('Response status:', response.status);
     if (!response.ok) {
       console.error('Failed to fetch artifact:', response.statusText);
       return;
     }
     
-    const { data, metadata } = await response.json();
+    const json = await response.json();
+    console.log('Artifact data:', json);
+    const { data, metadata } = json;
     
     let markdown = '';
     
@@ -682,13 +696,27 @@ async function displayArtifact(artifact) {
       return;
     }
     
-    // Render markdown content
-    if (markdown && window.renderMarkdown) {
-      const rendered = await window.renderMarkdown(markdown);
+    console.log('Markdown to render:', markdown.substring(0, 200) + '...');
+    
+    // Render markdown content using marked + DOMPurify directly
+    if (markdown && window.marked && window.DOMPurify) {
+      const rawHtml = marked.parse(markdown);
+      const rendered = DOMPurify.sanitize(rawHtml);
+      console.log('Rendered HTML:', rendered.substring(0, 200) + '...');
       const div = document.createElement('div');
       div.className = 'artifact-content';
       div.innerHTML = rendered;
       container.appendChild(div);
+      console.log('Appended to container');
+      
+      // Apply syntax highlighting
+      div.querySelectorAll('pre code').forEach((block) => {
+        if (window.hljs) {
+          hljs.highlightElement(block);
+        }
+      });
+    } else {
+      console.log('Missing marked or DOMPurify:', !!window.marked, !!window.DOMPurify);
     }
     
   } catch (err) {
@@ -815,6 +843,7 @@ function streamResponse(prompt, model, imageData) {
   
   eventSource.addEventListener('tool.execution_complete', (e) => {
     const data = JSON.parse(e.data);
+    console.log('tool.execution_complete:', data);
     const toolName = data.toolName || data.name || 'tool';
     const status = data.success ? '✓' : '✗';
     const summary = `${status} ${toolName}`;
@@ -823,7 +852,10 @@ function streamResponse(prompt, model, imageData) {
     
     // Display artifact if present (from display-only tools)
     if (data._artifact) {
+      console.log('Displaying artifact:', data._artifact);
       displayArtifact(data._artifact);
+    } else {
+      console.log('No _artifact in event data');
     }
   });
   

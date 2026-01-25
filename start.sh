@@ -6,8 +6,8 @@ cd "$(dirname "$0")"
 # Kill any existing server first
 ./stop.sh 2>/dev/null
 
-# Start in background with nohup
-nohup node server.js > server.log 2>&1 &
+# Start in background with nohup (use tsx for TypeScript)
+nohup npx tsx server.ts > server.log 2>&1 &
 echo $! > server.pid
 
 sleep 1

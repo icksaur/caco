@@ -1,0 +1,443 @@
+import { CopilotClient } from '@github/copilot-sdk';
+import { readFileSync, readdirSync, existsSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+import { parse as parseYaml } from 'yaml';
+import type { SessionConfig, SystemMessage } from './types.js';
+
+// SDK types (minimal definitions for what we use)
+interface CopilotClientInstance {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  createSession(config: CreateSessionConfig): Promise<CopilotSessionInstance>;
+  resumeSession(sessionId: string, config?: ResumeSessionConfig): Promise<CopilotSessionInstance>;
+  deleteSession(sessionId: string): Promise<void>;
+}
+
+interface CreateSessionConfig {
+  model?: string;
+  streaming?: boolean;
+  systemMessage?: SystemMessage;
+  tools?: unknown[];
+  excludedTools?: string[];
+}
+
+interface ResumeSessionConfig {
+  streaming?: boolean;
+  tools?: unknown[];
+  excludedTools?: string[];
+}
+
+interface CopilotSessionInstance {
+  sessionId: string;
+  send(options: SendOptions): AsyncIterable<SessionEvent>;
+  sendAndWait(options: SendOptions, timeout?: number): Promise<unknown>;
+  getMessages(): Promise<SessionEvent[]>;
+  destroy(): Promise<void>;
+}
+
+interface SendOptions {
+  prompt: string;
+  attachments?: Array<{ type: string; path: string }>;
+  mode?: string;
+}
+
+interface SessionEvent {
+  type: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+// Internal types
+interface ActiveSession {
+  cwd: string;
+  session: CopilotSessionInstance;
+  client: CopilotClientInstance;
+}
+
+interface CachedSession {
+  cwd: string | null;
+  summary: string | null;
+}
+
+interface SessionListItem {
+  sessionId: string;
+  cwd: string | null;
+  summary: string | null;
+  updatedAt: string | Date | null;
+}
+
+interface GroupedSessions {
+  [cwd: string]: SessionListItem[];
+}
+
+/**
+ * SessionManager - Singleton that owns all SDK interactions
+ * 
+ * Enforces one active session per cwd (working directory).
+ * Discovers existing sessions from ~/.copilot/session-state/
+ */
+class SessionManager {
+  // cwd → sessionId (lock)
+  private cwdLocks = new Map<string, string>();
+  
+  // sessionId → { cwd, session, client }
+  private activeSessions = new Map<string, ActiveSession>();
+  
+  // sessionId → { cwd, summary } (cached from disk)
+  private sessionCache = new Map<string, CachedSession>();
+  
+  // Path to session state directory
+  private stateDir = join(homedir(), '.copilot', 'session-state');
+  
+  private initialized = false;
+
+  /**
+   * Initialize: scan disk and build session cache
+   */
+  async init(): Promise<void> {
+    if (this.initialized) return;
+    
+    this._discoverSessions();
+    this.initialized = true;
+    console.log(`✓ SessionManager initialized (${this.sessionCache.size} sessions discovered)`);
+  }
+
+  /**
+   * Scan ~/.copilot/session-state/ and extract sessionId, cwd, summary
+   */
+  private _discoverSessions(): void {
+    this.sessionCache.clear();
+    
+    if (!existsSync(this.stateDir)) return;
+    
+    for (const sessionId of readdirSync(this.stateDir)) {
+      const sessionDir = join(this.stateDir, sessionId);
+      const record: CachedSession = { cwd: null, summary: null };
+      
+      // Get cwd from events.jsonl (first line)
+      try {
+        const eventsPath = join(sessionDir, 'events.jsonl');
+        const firstLine = readFileSync(eventsPath, 'utf8').split('\n')[0];
+        const event = JSON.parse(firstLine) as SessionEvent;
+        if (event.type === 'session.start') {
+          const data = event.data as { context?: { cwd?: string } } | undefined;
+          record.cwd = data?.context?.cwd ?? null;
+        }
+      } catch { /* missing or invalid */ }
+      
+      // Get summary from workspace.yaml
+      try {
+        const yamlPath = join(sessionDir, 'workspace.yaml');
+        const yaml = parseYaml(readFileSync(yamlPath, 'utf8')) as { summary?: string };
+        record.summary = yaml.summary ?? null;
+      } catch { /* missing or invalid */ }
+      
+      this.sessionCache.set(sessionId, record);
+    }
+  }
+
+  /**
+   * Create a new session for the given cwd
+   * @throws Error if cwd is already locked
+   */
+  async create(cwd: string, config: SessionConfig = {}): Promise<string> {
+    // Check lock
+    if (this.cwdLocks.has(cwd)) {
+      const existingSessionId = this.cwdLocks.get(cwd);
+      throw new Error(`Directory ${cwd} is locked by session ${existingSessionId}`);
+    }
+    
+    // Create client with cwd
+    const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
+    await client.start();
+    
+    // Create session with streaming enabled
+    const session = await client.createSession({
+      model: config.model || 'gpt-4.1',
+      streaming: true,
+      systemMessage: config.systemMessage,
+      ...config
+    });
+    
+    // Lock and track
+    this.cwdLocks.set(cwd, session.sessionId);
+    this.activeSessions.set(session.sessionId, { cwd, session, client });
+    this.sessionCache.set(session.sessionId, { cwd, summary: null });
+    
+    console.log(`✓ Created session ${session.sessionId} for ${cwd}`);
+    return session.sessionId;
+  }
+
+  /**
+   * Resume an existing session
+   * @throws Error if session's cwd is already locked by another session
+   * @throws Error if session doesn't exist
+   */
+  async resume(sessionId: string, config: SessionConfig = {}): Promise<string> {
+    // Get cwd from cache
+    const cached = this.sessionCache.get(sessionId);
+    if (!cached) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+    
+    const cwd = cached.cwd;
+    if (!cwd) {
+      throw new Error(`Session ${sessionId} has no cwd recorded`);
+    }
+    
+    // Check lock
+    const lockHolder = this.cwdLocks.get(cwd);
+    if (lockHolder && lockHolder !== sessionId) {
+      throw new Error(`Directory ${cwd} is locked by session ${lockHolder}`);
+    }
+    
+    // Already active?
+    if (this.activeSessions.has(sessionId)) {
+      console.log(`Session ${sessionId} already active`);
+      return sessionId;
+    }
+    
+    // Create client with correct cwd
+    const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
+    await client.start();
+    
+    // Resume session with optional tools and config
+    const session = await client.resumeSession(sessionId, {
+      streaming: true,
+      ...config
+    });
+    
+    // Lock and track
+    this.cwdLocks.set(cwd, sessionId);
+    this.activeSessions.set(sessionId, { cwd, session, client });
+    
+    console.log(`✓ Resumed session ${sessionId} for ${cwd}`);
+    return sessionId;
+  }
+
+  /**
+   * Stop an active session (releases lock)
+   */
+  async stop(sessionId: string): Promise<void> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      console.log(`Session ${sessionId} not active, nothing to stop`);
+      return;
+    }
+    
+    const { cwd, session, client } = active;
+    
+    try {
+      await session.destroy();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn(`Warning: session.destroy() failed: ${message}`);
+    }
+    
+    try {
+      await client.stop();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn(`Warning: client.stop() failed: ${message}`);
+    }
+    
+    // Unlock and untrack
+    this.cwdLocks.delete(cwd);
+    this.activeSessions.delete(sessionId);
+    
+    console.log(`✓ Stopped session ${sessionId}`);
+  }
+
+  /**
+   * Send a message to an active session
+   * @throws Error if session is not active
+   */
+  async send(sessionId: string, message: string, options: Partial<SendOptions> = {}): Promise<unknown> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error(`Session ${sessionId} is not active`);
+    }
+    
+    const { session } = active;
+    const TIMEOUT_MS = 120000; // 2 minutes
+    
+    try {
+      const response = await session.sendAndWait({
+        prompt: message,
+        ...options
+      }, TIMEOUT_MS);
+      
+      return response;
+    } catch (error) {
+      // Convert SDK timeout message to user-friendly format
+      if (error instanceof Error && error.message?.includes('Timeout after')) {
+        throw new Error('Request timed out after 2 minutes');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Get message history for a session
+   */
+  async getHistory(sessionId: string): Promise<SessionEvent[]> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error(`Session ${sessionId} is not active`);
+    }
+    
+    const { session } = active;
+    const messages = await session.getMessages();
+    return messages;
+  }
+
+  /**
+   * Delete a session from disk
+   */
+  async delete(sessionId: string): Promise<void> {
+    // Stop if active
+    if (this.activeSessions.has(sessionId)) {
+      await this.stop(sessionId);
+    }
+    
+    // Get any client to delete (cwd doesn't matter for delete)
+    const cached = this.sessionCache.get(sessionId);
+    const cwd = cached?.cwd || process.cwd();
+    
+    const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
+    await client.start();
+    
+    try {
+      await client.deleteSession(sessionId);
+      console.log(`✓ Deleted session ${sessionId}`);
+    } finally {
+      await client.stop();
+    }
+    
+    this.sessionCache.delete(sessionId);
+  }
+
+  /**
+   * List all sessions (from cache) with updatedAt
+   */
+  list(): SessionListItem[] {
+    const result: SessionListItem[] = [];
+    for (const [sessionId, { cwd, summary }] of this.sessionCache) {
+      let updatedAt: string | null = null;
+      try {
+        const yamlPath = join(this.stateDir, sessionId, 'workspace.yaml');
+        const yaml = parseYaml(readFileSync(yamlPath, 'utf8')) as { updated_at?: string };
+        updatedAt = yaml.updated_at || null;
+      } catch { /* missing */ }
+      result.push({ sessionId, cwd, summary, updatedAt });
+    }
+    return result;
+  }
+
+  /**
+   * List all sessions grouped by cwd
+   */
+  listAllGrouped(): GroupedSessions {
+    const sessions = this.list();
+    const grouped: GroupedSessions = {};
+    
+    for (const s of sessions) {
+      const key = s.cwd || '(unknown)';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(s);
+    }
+    
+    // Sort each group by updatedAt descending
+    for (const cwd of Object.keys(grouped)) {
+      grouped[cwd].sort((a, b) => {
+        const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return bTime - aTime;
+      });
+    }
+    
+    return grouped;
+  }
+
+  /**
+   * List sessions for a specific cwd
+   */
+  listByCwd(cwd: string): SessionListItem[] {
+    return this.list().filter(s => s.cwd === cwd);
+  }
+
+  /**
+   * Get the most recent session for a cwd
+   */
+  getMostRecentForCwd(cwd: string): string | null {
+    const sessions = this.listByCwd(cwd);
+    if (sessions.length === 0) return null;
+    
+    // Sort by modified time (newest first)
+    const sorted = sessions
+      .map(s => {
+        const yamlPath = join(this.stateDir, s.sessionId, 'workspace.yaml');
+        try {
+          const yaml = parseYaml(readFileSync(yamlPath, 'utf8')) as { updated_at?: string };
+          return { ...s, updatedAt: new Date(yaml.updated_at || 0) };
+        } catch {
+          return { ...s, updatedAt: new Date(0) };
+        }
+      })
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+    
+    return sorted[0]?.sessionId || null;
+  }
+
+  /**
+   * Get active sessionId for a cwd (or null)
+   */
+  getActive(cwd: string): string | null {
+    return this.cwdLocks.get(cwd) || null;
+  }
+
+  /**
+   * Get cwd for a session
+   */
+  getSessionCwd(sessionId: string): string | null {
+    return this.sessionCache.get(sessionId)?.cwd || null;
+  }
+
+  /**
+   * Check if a session is active
+   */
+  isActive(sessionId: string): boolean {
+    return this.activeSessions.has(sessionId);
+  }
+
+  /**
+   * Get the raw session object for event subscription
+   */
+  getSession(sessionId: string): CopilotSessionInstance | null {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) return null;
+    return active.session;
+  }
+
+  /**
+   * Send a message without waiting (for streaming)
+   * @throws Error if session is not active
+   */
+  sendStream(sessionId: string, message: string, options: Partial<SendOptions> = {}): AsyncIterable<SessionEvent> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error(`Session ${sessionId} is not active`);
+    }
+    
+    const { session } = active;
+    return session.send({
+      prompt: message,
+      ...options
+    });
+  }
+}
+
+// Singleton instance
+const sessionManager = new SessionManager();
+export default sessionManager;

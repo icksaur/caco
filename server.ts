@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { writeFile, unlink } from 'fs/promises';
@@ -8,6 +8,7 @@ import sessionManager from './src/session-manager.js';
 import { createDisplayTools } from './src/display-tools.js';
 import { storeOutput, getOutput, detectLanguage } from './src/output-cache.js';
 import { loadPreferences, savePreferences, getDefaultPreferences } from './src/preferences.js';
+import type { UserPreferences, SystemMessage } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -16,16 +17,16 @@ const app = express();
 const PORT = 3000;
 
 // Current preferences (loaded on startup)
-let preferences = getDefaultPreferences();
+let preferences: UserPreferences = getDefaultPreferences();
 
 // Current active session for this server instance
-let activeSessionId = null;
+let activeSessionId: string | null = null;
 
 // Create display-only tools (use output cache for zero-context display)
 const displayTools = createDisplayTools(storeOutput, detectLanguage);
 
 // System message for sessions
-const SYSTEM_MESSAGE = {
+const SYSTEM_MESSAGE: SystemMessage = {
   mode: 'replace',
   content: `You are an AI assistant in a browser-based chat interface powered by the Copilot SDK.
 
@@ -66,7 +67,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Security: Content Security Policy
-app.use((req, res, next) => {
+app.use((_req: Request, res: Response, next: () => void) => {
   res.setHeader('Content-Security-Policy', 
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline'; " +
@@ -82,7 +83,7 @@ app.use((req, res, next) => {
 app.use(express.static('public'));
 
 // Initialize: discover sessions and auto-resume or create
-async function initSession() {
+async function initSession(): Promise<void> {
   await sessionManager.init();
   
   // Load saved preferences
@@ -103,7 +104,8 @@ async function initSession() {
       console.log(`✓ Resumed last session ${activeSessionId}`);
       return;
     } catch (e) {
-      console.warn(`Could not resume last session: ${e.message}`);
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn(`Could not resume last session: ${message}`);
     }
   }
   
@@ -125,7 +127,8 @@ async function initSession() {
       console.log(`✓ Resumed session ${activeSessionId}`);
       return;
     } catch (e) {
-      console.warn(`Could not resume session ${recentSessionId}: ${e.message}`);
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn(`Could not resume session ${recentSessionId}: ${message}`);
     }
   }
   
@@ -134,7 +137,7 @@ async function initSession() {
 }
 
 // Helper to create session lazily with specified model
-async function ensureSession(model) {
+async function ensureSession(model?: string): Promise<string> {
   if (activeSessionId && sessionManager.isActive(activeSessionId)) {
     return activeSessionId;
   }
@@ -157,12 +160,12 @@ async function ensureSession(model) {
 }
 
 // Serve chat interface
-app.get('/', (req, res) => {
+app.get('/', (_req: Request, res: Response) => {
   res.sendFile(join(__dirname, 'public', 'index.html'));
 });
 
 // Get session info
-app.get('/api/session', async (req, res) => {
+app.get('/api/session', async (_req: Request, res: Response) => {
   let hasMessages = false;
   
   // Check if session has messages
@@ -170,7 +173,7 @@ app.get('/api/session', async (req, res) => {
     try {
       const history = await sessionManager.getHistory(activeSessionId);
       hasMessages = history.some(e => e.type === 'user.message');
-    } catch (_e) {
+    } catch {
       // Session not active or error - no messages
     }
   }
@@ -188,8 +191,9 @@ app.get('/api/session', async (req, res) => {
 // ============================================================
 
 // Get display output by ID
-app.get('/api/outputs/:id', (req, res) => {
-  const output = getOutput(req.params.id);
+app.get('/api/outputs/:id', (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const output = getOutput(id);
   if (!output) {
     return res.status(404).json({ error: 'Output expired or not found' });
   }
@@ -198,7 +202,7 @@ app.get('/api/outputs/:id', (req, res) => {
   
   // Set appropriate content type
   if (metadata.mimeType) {
-    res.setHeader('Content-Type', metadata.mimeType);
+    res.setHeader('Content-Type', metadata.mimeType as string);
   } else if (metadata.type === 'file' || metadata.type === 'terminal') {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   }
@@ -206,7 +210,7 @@ app.get('/api/outputs/:id', (req, res) => {
   // For JSON response with metadata
   if (req.query.format === 'json') {
     return res.json({
-      id: req.params.id,
+      id,
       data: typeof data === 'string' ? data : data.toString('base64'),
       metadata,
       createdAt: output.createdAt
@@ -218,13 +222,13 @@ app.get('/api/outputs/:id', (req, res) => {
 });
 
 // Get preferences
-app.get('/api/preferences', (req, res) => {
+app.get('/api/preferences', (_req: Request, res: Response) => {
   res.json(preferences);
 });
 
 // Update preferences
-app.post('/api/preferences', async (req, res) => {
-  const updates = req.body;
+app.post('/api/preferences', async (req: Request, res: Response) => {
+  const updates = req.body as Partial<UserPreferences>;
   
   // Only allow updating specific fields
   if (updates.lastModel) preferences.lastModel = updates.lastModel;
@@ -236,26 +240,33 @@ app.post('/api/preferences', async (req, res) => {
 });
 
 // Debug: raw message structure
-app.get('/api/debug/messages', async (req, res) => {
+app.get('/api/debug/messages', async (_req: Request, res: Response) => {
   try {
+    if (!activeSessionId) {
+      return res.json({ count: 0, messages: [] });
+    }
     const events = await sessionManager.getHistory(activeSessionId);
     // Get just user and assistant messages with content
     const msgs = events
       .filter(e => e.type === 'user.message' || e.type === 'assistant.message')
       .map(e => ({
         type: e.type,
-        content: e.data?.content,
-        hasToolRequests: !!e.data?.toolRequests?.length
+        content: (e.data as { content?: string })?.content,
+        hasToolRequests: !!(e.data as { toolRequests?: unknown[] })?.toolRequests?.length
       }));
     res.json({ count: msgs.length, messages: msgs });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
   }
 });
 
 // Get conversation history
-app.get('/api/history', async (req, res) => {
+app.get('/api/history', async (_req: Request, res: Response) => {
   try {
+    if (!activeSessionId) {
+      return res.send('');
+    }
     const events = await sessionManager.getHistory(activeSessionId);
     
     // Filter to user.message and assistant.message events only
@@ -266,7 +277,7 @@ app.get('/api/history', async (req, res) => {
     // Convert to HTML fragments
     const html = messages.map(evt => {
       const isUser = evt.type === 'user.message';
-      const content = evt.data?.content || '';
+      const content = (evt.data as { content?: string })?.content || '';
       
       if (!content) return ''; // Skip empty messages
       
@@ -285,7 +296,7 @@ app.get('/api/history', async (req, res) => {
 });
 
 // List all sessions grouped by cwd
-app.get('/api/sessions', (req, res) => {
+app.get('/api/sessions', (_req: Request, res: Response) => {
   const grouped = sessionManager.listAllGrouped();
   res.json({
     activeSessionId,
@@ -295,8 +306,8 @@ app.get('/api/sessions', (req, res) => {
 });
 
 // Switch to a different session
-app.post('/api/sessions/:sessionId/resume', async (req, res) => {
-  const { sessionId } = req.params;
+app.post('/api/sessions/:sessionId/resume', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
   
   try {
     // Stop current session first
@@ -316,13 +327,14 @@ app.post('/api/sessions/:sessionId/resume', async (req, res) => {
     
     res.json({ success: true, sessionId: activeSessionId });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(400).json({ error: message });
   }
 });
 
 // Delete a session
-app.delete('/api/sessions/:sessionId', async (req, res) => {
-  const { sessionId } = req.params;
+app.delete('/api/sessions/:sessionId', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
   
   try {
     // Check if this is the active session
@@ -338,15 +350,16 @@ app.delete('/api/sessions/:sessionId', async (req, res) => {
     
     res.json({ success: true, wasActive });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(400).json({ error: message });
   }
 });
 
 // Create a new session
-app.post('/api/sessions/new', async (req, res) => {
+app.post('/api/sessions/new', async (req: Request, res: Response) => {
   try {
     // Get cwd from request body, default to process.cwd()
-    const cwd = req.body.cwd || process.cwd();
+    const cwd = (req.body.cwd as string) || process.cwd();
     
     // Validate the path exists
     if (!existsSync(cwd)) {
@@ -370,13 +383,14 @@ app.post('/api/sessions/new', async (req, res) => {
     console.log(`✓ New chat prepared for ${cwd} - session will create on first message`);
     res.json({ success: true, cwd });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(400).json({ error: message });
   }
 });
 
 // Streaming SSE endpoint
-app.get('/api/stream', async (req, res) => {
-  const { prompt, model, imageData } = req.query;
+app.get('/api/stream', async (req: Request, res: Response) => {
+  const { prompt, model, imageData } = req.query as { prompt?: string; model?: string; imageData?: string };
   
   if (!prompt) {
     return res.status(400).json({ error: 'prompt is required' });
@@ -389,21 +403,21 @@ app.get('/api/stream', async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
   res.flushHeaders();
   
-  let tempFilePath = null;
+  let tempFilePath: string | null = null;
   
   try {
     // Ensure session exists (create lazily with selected model if needed)
     await ensureSession(model);
     
     // Get session
-    const session = sessionManager.getSession(activeSessionId);
+    const session = sessionManager.getSession(activeSessionId!);
     if (!session) {
       res.write(`event: error\ndata: ${JSON.stringify({ message: 'No active session' })}\n\n`);
       res.write('event: done\ndata: {}\n\n');
       return res.end();
     }
     
-    const messageOptions = { prompt };
+    const messageOptions: { prompt: string; attachments?: Array<{ type: string; path: string }> } = { prompt };
     
     // Handle image attachment if present
     if (imageData && imageData.startsWith('data:image/')) {
@@ -418,30 +432,31 @@ app.get('/api/stream', async (req, res) => {
     }
     
     // Subscribe to events
-    const unsubscribe = session.on((event) => {
+    const unsubscribe = (session as unknown as { on: (cb: (event: SessionEvent) => void) => () => void }).on((event: SessionEvent) => {
       // Prepare event data
-      let eventData = event.data || {};
+      let eventData: Record<string, unknown> = (event.data as Record<string, unknown>) || {};
       
       // For tool.execution_complete, check for output references in telemetry
-      // The SDK wraps our return value as JSON string inside result.content
-      if (event.type === 'tool.execution_complete' && eventData.result?.content) {
-        try {
-          const parsed = JSON.parse(eventData.result.content);
-          if (parsed.toolTelemetry?.outputId) {
-            const telemetry = parsed.toolTelemetry;
-            const outputMeta = getOutput(telemetry.outputId)?.metadata || {};
-            // Add output info to event data for UI
-            eventData = {
-              ...eventData,
-              _output: {
-                id: telemetry.outputId,
-                type: outputMeta.type,
-                ...outputMeta
-              }
-            };
+      if (event.type === 'tool.execution_complete') {
+        const result = (eventData.result as { content?: string }) || {};
+        if (result.content) {
+          try {
+            const parsed = JSON.parse(result.content) as { toolTelemetry?: { outputId?: string } };
+            if (parsed.toolTelemetry?.outputId) {
+              const telemetry = parsed.toolTelemetry;
+              const outputMeta = getOutput(telemetry.outputId!)?.metadata || {};
+              eventData = {
+                ...eventData,
+                _output: {
+                  id: telemetry.outputId,
+                  type: outputMeta.type,
+                  ...outputMeta
+                }
+              };
+            }
+          } catch {
+            // result.content is not JSON, ignore
           }
-        } catch (_e) {
-          // result.content is not JSON, ignore
         }
       }
       
@@ -471,11 +486,12 @@ app.get('/api/stream', async (req, res) => {
     });
     
     // Send message (non-blocking)
-    await sessionManager.sendStream(activeSessionId, prompt, messageOptions);
+    sessionManager.sendStream(activeSessionId!, prompt, messageOptions);
     
   } catch (error) {
     console.error('Stream error:', error);
-    res.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
+    const message = error instanceof Error ? error.message : String(error);
+    res.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`);
     res.write('event: done\ndata: {}\n\n');
     res.end();
     
@@ -485,33 +501,39 @@ app.get('/api/stream', async (req, res) => {
   }
 });
 
+// Session event type
+interface SessionEvent {
+  type: string;
+  data?: Record<string, unknown>;
+}
+
 // Handle chat messages from htmx (fallback for non-streaming)
-app.post('/api/message', async (req, res) => {
-  const userMessage = req.body.message;
-  const imageData = req.body.imageData;
-  const model = req.body.model || 'claude-sonnet-4';
-  let tempFilePath = null;
+app.post('/api/message', async (req: Request, res: Response) => {
+  const userMessage = req.body.message as string;
+  const imageData = req.body.imageData as string | undefined;
+  const model = (req.body.model as string) || 'claude-sonnet-4';
+  let tempFilePath: string | null = null;
 
   if (!userMessage) {
     return res.send('<div class="error">Message cannot be empty</div>');
   }
 
   try {
-    const messageOptions = { prompt: userMessage, model };
+    const messageOptions: { prompt: string; model: string; attachments?: Array<{ type: string; path: string }> } = { 
+      prompt: userMessage, 
+      model 
+    };
 
     // Handle image attachment if present
     if (imageData && imageData.startsWith('data:image/')) {
-      // Extract base64 data and image type
       const matches = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
       if (matches) {
         const extension = matches[1];
         const base64Data = matches[2];
         
-        // Create temp file
         tempFilePath = join(tmpdir(), `copilot-image-${Date.now()}.${extension}`);
         await writeFile(tempFilePath, Buffer.from(base64Data, 'base64'));
         
-        // Add attachment to message
         messageOptions.attachments = [{
           type: 'file',
           path: tempFilePath
@@ -520,11 +542,11 @@ app.post('/api/message', async (req, res) => {
     }
 
     // Send message via SessionManager
-    const response = await sessionManager.send(activeSessionId, userMessage, messageOptions);
+    const response = await sessionManager.send(activeSessionId!, userMessage, messageOptions) as { data?: { content?: string } };
 
     // Clean up temp file
     if (tempFilePath) {
-      await unlink(tempFilePath).catch(() => {}); // Ignore errors
+      await unlink(tempFilePath).catch(() => {});
     }
 
     // Return HTML fragment for htmx to insert
@@ -543,17 +565,18 @@ app.post('/api/message', async (req, res) => {
     }
     
     console.error('Error:', error);
+    const message = error instanceof Error ? error.message : String(error);
     res.send(`
       <div class="message error">
-        <strong>Error:</strong> ${escapeHtml(error.message)}
+        <strong>Error:</strong> ${escapeHtml(message)}
       </div>
     `);
   }
 });
 
 // HTML escape helper
-function escapeHtml(text) {
-  const map = {
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = {
     '&': '&amp;',
     '<': '&lt;',
     '>': '&gt;',
@@ -564,7 +587,7 @@ function escapeHtml(text) {
 }
 
 // Start server
-async function start() {
+async function start(): Promise<void> {
   await initSession();
   
   // Bind to localhost only for security - not exposed to network

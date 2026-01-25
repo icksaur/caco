@@ -6,16 +6,21 @@
  * with automatic TTL cleanup.
  */
 
-const displayOutputs = new Map();
+import type { OutputEntry } from './types.js';
+
+interface CacheEntry {
+  data: string | Buffer;
+  metadata: Record<string, unknown>;
+  createdAt: number;
+}
+
+const displayOutputs = new Map<string, CacheEntry>();
 const OUTPUT_TTL = 30 * 60 * 1000; // 30 minutes
 
 /**
  * Store content in cache with metadata
- * @param {string|Buffer} data - Content to store
- * @param {Object} metadata - Type info, path, etc.
- * @returns {string} Output ID for retrieval
  */
-export function storeOutput(data, metadata = {}) {
+export function storeOutput(data: string | Buffer, metadata: Record<string, unknown> = {}): string {
   const id = `out_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   displayOutputs.set(id, {
     data,
@@ -31,21 +36,17 @@ export function storeOutput(data, metadata = {}) {
 
 /**
  * Retrieve output from cache
- * @param {string} id - Output ID
- * @returns {Object|undefined} { data, metadata, createdAt }
  */
-export function getOutput(id) {
+export function getOutput(id: string): CacheEntry | undefined {
   return displayOutputs.get(id);
 }
 
 /**
  * Detect programming language from file extension
- * @param {string} filepath - Path to file
- * @returns {string} Language identifier for syntax highlighting
  */
-export function detectLanguage(filepath) {
-  const ext = filepath.split('.').pop()?.toLowerCase();
-  const langMap = {
+export function detectLanguage(filepath: string): string {
+  const ext = filepath.split('.').pop()?.toLowerCase() ?? '';
+  const langMap: Record<string, string> = {
     js: 'javascript', mjs: 'javascript', cjs: 'javascript',
     ts: 'typescript', tsx: 'typescript',
     py: 'python',

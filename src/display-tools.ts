@@ -19,12 +19,19 @@ import { fetchOEmbed, detectProvider, getSupportedProviders } from './oembed.js'
 
 const execAsync = promisify(exec);
 
+type StoreOutputFn = (data: string | Buffer, metadata: Record<string, unknown>) => string;
+type DetectLanguageFn = (filepath: string) => string;
+
+interface ExecError extends Error {
+  stdout?: string;
+  stderr?: string;
+  code?: number;
+}
+
 /**
  * Create display tools that use a provided storeOutput function
- * @param {Function} storeOutput - (data, metadata) => outputId
- * @param {Function} detectLanguage - (filepath) => language string
  */
-export function createDisplayTools(storeOutput, detectLanguage) {
+export function createDisplayTools(storeOutput: StoreOutputFn, detectLanguage: DetectLanguageFn) {
   
   const renderFileContents = defineTool('render_file_contents', {
     description: `Display a file's contents directly to the user without reading it into context.
@@ -54,7 +61,7 @@ confirmation that the file was displayed, not its contents.`,
         // Check if file exists and get size
         const stats = await stat(path);
         if (!stats.isFile()) {
-          return { textResultForLlm: `Error: ${path} is not a file`, resultType: 'error' };
+          return { textResultForLlm: `Error: ${path} is not a file`, resultType: 'error' as const };
         }
         
         const content = await readFile(path, 'utf-8');
@@ -90,9 +97,10 @@ confirmation that the file was displayed, not its contents.`,
           }
         };
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         return { 
-          textResultForLlm: `Error reading file: ${err.message}`,
-          resultType: 'error'
+          textResultForLlm: `Error reading file: ${message}`,
+          resultType: 'error' as const
         };
       }
     }
@@ -141,11 +149,12 @@ You will receive exit code and output size, not the actual output.`,
         };
       } catch (err) {
         // Command failed - still show output
-        const output = (err.stdout || '') + (err.stderr ? `\n--- stderr ---\n${err.stderr}` : '');
-        const exitCode = err.code || 1;
+        const execErr = err as ExecError;
+        const output = (execErr.stdout || '') + (execErr.stderr ? `\n--- stderr ---\n${execErr.stderr}` : '');
+        const exitCode = execErr.code || 1;
         const lineCount = output.split('\n').length;
         
-        const outputId = storeOutput(output || err.message, {
+        const outputId = storeOutput(output || execErr.message, {
           type: 'terminal',
           command,
           cwd: cwd || process.cwd(),
@@ -173,9 +182,9 @@ Supports: PNG, JPEG, GIF, WebP, SVG`,
     handler: async ({ path }) => {
       try {
         const data = await readFile(path);
-        const ext = path.split('.').pop()?.toLowerCase();
+        const ext = path.split('.').pop()?.toLowerCase() ?? '';
         
-        const mimeTypes = {
+        const mimeTypes: Record<string, string> = {
           png: 'image/png',
           jpg: 'image/jpeg',
           jpeg: 'image/jpeg',
@@ -197,9 +206,10 @@ Supports: PNG, JPEG, GIF, WebP, SVG`,
           toolTelemetry: { outputId, mimeType, size: data.length }
         };
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         return {
-          textResultForLlm: `Error loading image: ${err.message}`,
-          resultType: 'error'
+          textResultForLlm: `Error loading image: ${message}`,
+          resultType: 'error' as const
         };
       }
     }
@@ -234,7 +244,7 @@ You will receive confirmation with title/author info.`,
         if (!provider) {
           return {
             textResultForLlm: `Unsupported media URL. Supported: ${providerList}`,
-            resultType: 'error'
+            resultType: 'error' as const
           };
         }
 
@@ -266,9 +276,10 @@ You will receive confirmation with title/author info.`,
           }
         };
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         return {
-          textResultForLlm: `Error embedding media: ${err.message}`,
-          resultType: 'error'
+          textResultForLlm: `Error embedding media: ${message}`,
+          resultType: 'error' as const
         };
       }
     }

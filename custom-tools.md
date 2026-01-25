@@ -2,11 +2,24 @@
 
 **Critical capability for extending Copilot with application-specific functionality.**
 
-## What Are Custom Tools?
+## Overview
+
+There are **two ways** to add tools to Copilot sessions:
+
+| Approach | Location | Best For |
+|----------|----------|----------|
+| **In-process tools** | `defineTool()` in your Node.js app | App-specific logic, fast execution |
+| **MCP servers** | External process via stdio/TCP | Reusable tools, language-agnostic |
+
+This document covers both approaches.
+
+---
+
+## In-Process Custom Tools
 
 Custom tools are JavaScript/TypeScript functions you define that Copilot can intelligently call during conversations. They run **in-process** within your Node.js application, giving the AI access to your application's capabilities.
 
-## Why Custom Tools?
+### Why In-Process Tools?
 
 - **Extend AI capabilities** - Give Copilot access to your APIs, databases, business logic
 - **In-process execution** - No subprocess overhead, direct access to application state
@@ -355,3 +368,172 @@ const session = await client.createSession({
 5. Responds: "I found John Doe (john@example.com) and sent them a welcome notification."
 
 The AI orchestrates multiple tool calls automatically based on the user's request.
+
+---
+
+## MCP Server Configuration
+
+For external tools (separate processes), configure MCP servers in session options:
+
+### Local MCP Server (stdio)
+
+```typescript
+const session = await client.createSession({
+    model: "gpt-4.1",
+    mcpServers: {
+        "my-server": {
+            type: "local",
+            command: "node",
+            args: ["./mcp-server.js"],
+            env: { API_KEY: process.env.API_KEY }
+        }
+    }
+});
+```
+
+### Remote MCP Server (HTTP/SSE)
+
+```typescript
+const session = await client.createSession({
+    model: "gpt-4.1",
+    mcpServers: {
+        "github": {
+            type: "http",
+            url: "https://api.githubcopilot.com/mcp/",
+            headers: { "Authorization": `Bearer ${token}` }
+        }
+    }
+});
+```
+
+### MCP Server Config Types
+
+```typescript
+// Local server (spawns process)
+interface MCPLocalServerConfig {
+    type: "local";
+    command: string;           // Executable path
+    args?: string[];           // Command-line arguments
+    cwd?: string;              // Working directory
+    env?: Record<string, string>;  // Environment variables
+}
+
+// Remote server (HTTP connection)
+interface MCPRemoteServerConfig {
+    type: "http";
+    url: string;               // Server URL
+    headers?: Record<string, string>;  // HTTP headers
+}
+```
+
+---
+
+## Implementation in copilot-web
+
+To add custom tools to our web app, modify `session-manager.js`:
+
+```javascript
+// src/session-manager.js
+import { defineTool } from '@github/copilot-sdk';
+import { z } from 'zod';
+
+// Define custom tools
+const customTools = [
+    defineTool("get_time", {
+        description: "Get the current date and time",
+        handler: () => new Date().toISOString()
+    }),
+    
+    defineTool("search_files", {
+        description: "Search for files in the workspace",
+        parameters: z.object({
+            pattern: z.string().describe("Glob pattern to match"),
+            maxResults: z.number().optional().default(10)
+        }),
+        handler: async ({ pattern, maxResults }) => {
+            // Implementation
+            return `Found ${results.length} files`;
+        }
+    })
+];
+
+// Pass to createSession
+const session = await client.createSession({
+    cwd,
+    model,
+    streaming,
+    systemMessage,
+    tools: customTools  // Add this
+});
+```
+
+---
+
+## SDK Implementation Details
+
+The SDK handles tool registration and invocation:
+
+1. **Registration**: Tools are sent to the CLI server at session creation
+2. **Invocation**: When the AI calls a tool, SDK receives JSON-RPC request
+3. **Execution**: SDK looks up handler by name and executes with args
+4. **Response**: Result is sent back to CLI server → AI → user
+
+```
+AI decides to call tool → CLI server sends JSON-RPC → SDK executes handler → Result → AI response
+```
+
+### Internal Types (from SDK source)
+
+```typescript
+// ToolInvocation - received by handler
+interface ToolInvocation {
+    sessionId: string;
+    toolCallId: string;
+    toolName: string;
+    arguments: unknown;
+}
+
+// ToolResult - returned from handler
+type ToolResult = string | {
+    textResultForLlm: string;
+    binaryResultsForLlm?: ToolBinaryResult[];
+    resultType: "success" | "failure" | "rejected" | "denied";
+    error?: string;
+    sessionLog?: string;
+    toolTelemetry?: Record<string, unknown>;
+};
+
+// Tool definition
+interface Tool<TArgs = unknown> {
+    name: string;
+    description?: string;
+    parameters?: ZodSchema<TArgs> | Record<string, unknown>;
+    handler: (args: TArgs, invocation: ToolInvocation) => Promise<unknown> | unknown;
+}
+```
+
+### Error Handling (Security Note)
+
+The SDK **hides error details from the LLM** for security:
+
+```typescript
+// From SDK source - errors are sanitized
+catch (error) {
+    return {
+        result: {
+            // Generic message to LLM
+            textResultForLlm: "Invoking this tool produced an error. Detailed information is not available.",
+            resultType: "failure",
+            error: message,  // Actual error stored but not sent to LLM
+        },
+    };
+}
+```
+
+---
+
+## References
+
+- [Copilot SDK - Node.js](https://github.com/github/copilot-sdk/tree/main/nodejs)
+- [MCP Tools Specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
+- [GitHub MCP Server](https://github.com/github/github-mcp-server)

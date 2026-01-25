@@ -25,7 +25,167 @@ User: "Run the test suite"
 
 ---
 
-## SDK Capabilities (Current State)
+## Solution 1: Display-Only Tools (Zero Context Cost)
+
+For requests where the user just wants to **see** data without agent analysis:
+
+### The Insight
+
+```
+"Show me the config file"     → User wants to SEE it (agent doesn't need content)
+"What's wrong with my config" → User wants ANALYSIS (agent needs content)
+```
+
+### render_file_contents Tool
+
+```javascript
+import { defineTool } from '@github/copilot-sdk';
+import { z } from 'zod';
+import { readFile } from 'fs/promises';
+
+const renderFileContents = defineTool("render_file_contents", {
+  description: `Display a file's contents directly to the user without reading it into context.
+  
+USE THIS TOOL WHEN:
+- User asks to "show", "display", "print", "cat", or "view" a file
+- User wants to see file contents but hasn't asked for analysis
+- User says "let me see", "show me", "what's in"
+
+DO NOT USE WHEN:
+- User asks to analyze, fix, modify, or understand the file
+- User asks "what's wrong with" or "explain" the file
+- You need to reference the file contents in your response
+
+This tool renders the file directly to the UI. You will only receive
+confirmation that the file was displayed, not its contents.`,
+
+  parameters: z.object({
+    path: z.string().describe("Path to the file to display"),
+    startLine: z.number().optional().describe("First line to show (1-indexed)"),
+    endLine: z.number().optional().describe("Last line to show"),
+    highlight: z.string().optional().describe("Language for syntax highlighting")
+  }),
+
+  handler: async ({ path, startLine, endLine, highlight }, invocation) => {
+    const content = await readFile(path, 'utf-8');
+    const lines = content.split('\n');
+    
+    // Apply line range if specified
+    const start = (startLine || 1) - 1;
+    const end = endLine || lines.length;
+    const displayContent = lines.slice(start, end).join('\n');
+    
+    // Store as artifact - this goes to UI, not to agent
+    const artifactId = storeArtifact(displayContent, {
+      type: 'file',
+      path,
+      mimeType: 'text/plain',
+      highlight: highlight || detectLanguage(path),
+      startLine: start + 1,
+      endLine: end,
+      totalLines: lines.length
+    });
+    
+    // Agent only sees this tiny confirmation
+    return {
+      textResultForLlm: `Displayed ${path} to user (${lines.length} lines, ${content.length} bytes)`,
+      toolTelemetry: {
+        artifactId,
+        lineCount: lines.length,
+        byteCount: content.length,
+        displayedLines: end - start
+      }
+    };
+  }
+});
+```
+
+### Flow Comparison
+
+**Before (wastes context):**
+```
+User: "Show me package.json"
+  → Agent calls read_file
+  → 50 lines of JSON sent to agent context
+  → Agent: "Here's your package.json: ..." (regurgitates content)
+  → Token cost: ~500 tokens
+```
+
+**After (zero context cost):**
+```
+User: "Show me package.json"
+  → Agent calls render_file_contents  
+  → Tool returns: "Displayed package.json to user (50 lines)"
+  → UI renders file directly from artifact
+  → Agent: "I've displayed package.json for you."
+  → Token cost: ~20 tokens
+```
+
+### Similar Display-Only Tools
+
+```javascript
+// Run command, show output to user without agent reading it
+const runAndDisplay = defineTool("run_and_display", {
+  description: `Run a command and display its output directly to the user.
+  
+USE THIS WHEN user wants to see command output but not have it analyzed.
+Examples: "run the tests", "show me the git log", "cat the file"
+
+You will receive exit code and output size, not the actual output.`,
+
+  parameters: z.object({
+    command: z.string().describe("Command to execute"),
+    cwd: z.string().optional().describe("Working directory")
+  }),
+  
+  handler: async ({ command, cwd }) => {
+    const { stdout, stderr, exitCode } = await exec(command, { cwd });
+    const output = stdout + stderr;
+    
+    const artifactId = storeArtifact(output, {
+      type: 'terminal',
+      command,
+      exitCode
+    });
+    
+    return {
+      textResultForLlm: `Command completed (exit ${exitCode}). Output displayed to user (${output.length} chars, ${output.split('\n').length} lines)`,
+      toolTelemetry: { artifactId, exitCode, outputSize: output.length }
+    };
+  }
+});
+
+// Display image without sending to agent
+const displayImage = defineTool("display_image", {
+  description: `Display an image file directly to the user.
+  
+Use when user wants to see an image. You cannot see image contents.`,
+
+  parameters: z.object({
+    path: z.string().describe("Path to the image file")
+  }),
+  
+  handler: async ({ path }) => {
+    const data = await readFile(path);
+    const mimeType = getMimeType(path);
+    
+    const artifactId = storeArtifact(data, {
+      type: 'image',
+      path,
+      mimeType
+    });
+    
+    return {
+      textResultForLlm: `Displayed image ${path} to user`,
+      toolTelemetry: { artifactId, mimeType, size: data.length }
+    };
+  }
+});
+```
+
+---
+
+## Solution 2: Artifact Cache (For Agent-Read Data)
 
 ### What Works
 

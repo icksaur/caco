@@ -33,18 +33,21 @@
 - [x] Slim down server.ts to just Express setup (~115 lines vs 586)
 - [x] Verify all endpoints still work
 
-## Phase 3: Client-Side Modularization
-- [ ] Create public/js/ directory structure
-- [ ] Split chat.js into modules:
-  - [ ] public/js/image-paste.ts - Image handling (~30 lines)
-  - [ ] public/js/session-panel.ts - Session UI (~150 lines)
-  - [ ] public/js/model-selector.ts - Model dropdown (~100 lines)
-  - [ ] public/js/streaming.ts - SSE handling (~200 lines)
-  - [ ] public/js/history.ts - History loading (~100 lines)
-  - [ ] public/js/ui-utils.ts - Scrolling, formatting (~50 lines)
-  - [ ] public/js/main.ts - Init and event binding
-- [ ] Set up esbuild/rollup for bundling
-- [ ] Update index.html to use bundled JS
+## Phase 3: Client-Side Modularization ✅
+- [x] Create public/ts/ directory structure
+- [x] Split chat.js into modules:
+  - [x] public/ts/types.ts - Type definitions
+  - [x] public/ts/image-paste.ts - Image handling
+  - [x] public/ts/session-panel.ts - Session UI
+  - [x] public/ts/model-selector.ts - Model dropdown
+  - [x] public/ts/streaming.ts - SSE handling
+  - [x] public/ts/history.ts - History loading
+  - [x] public/ts/ui-utils.ts - Scrolling, formatting
+  - [x] public/ts/activity.ts - Activity box management
+  - [x] public/ts/display-output.ts - Display output rendering
+  - [x] public/ts/main.ts - Init and event binding
+- [x] Set up esbuild for bundling
+- [x] Update index.html to use bundled JS
 
 ## Phase 4: Session State Consolidation
 - [ ] Create explicit SessionState class
@@ -78,6 +81,7 @@
 | 2026-01-25 | Start | Planning | Created this document |
 | 2026-01-25 | Phase 1 | Complete | TypeScript migration done, server works |
 | 2026-01-25 | Phase 2 | Complete | Server split into routes, SessionState class |
+| 2026-01-25 | Phase 3 | Complete | Client-side TS modules, esbuild bundle |
 
 ---
 

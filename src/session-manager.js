@@ -58,14 +58,14 @@ class SessionManager {
                 if (event.type === 'session.start') {
                     record.cwd = event.data?.context?.cwd ?? null;
                 }
-            } catch (e) { /* missing or invalid */ }
+            } catch (_e) { /* missing or invalid */ }
             
             // Get summary from workspace.yaml
             try {
                 const yamlPath = join(sessionDir, 'workspace.yaml');
                 const yaml = parseYaml(readFileSync(yamlPath, 'utf8'));
                 record.summary = yaml.summary ?? null;
-            } catch (e) { /* missing or invalid */ }
+            } catch (_e) { /* missing or invalid */ }
             
             this.sessionCache.set(sessionId, record);
         }
@@ -105,10 +105,12 @@ class SessionManager {
     
     /**
      * Resume an existing session
+     * @param {string} sessionId - Session to resume
+     * @param {Object} config - Optional config (tools, systemMessage, etc.)
      * @throws Error if session's cwd is already locked by another session
      * @throws Error if session doesn't exist
      */
-    async resume(sessionId) {
+    async resume(sessionId, config = {}) {
         // Get cwd from cache
         const cached = this.sessionCache.get(sessionId);
         if (!cached) {
@@ -136,8 +138,11 @@ class SessionManager {
         const client = new CopilotClient({ cwd });
         await client.start();
         
-        // Resume session
-        const session = await client.resumeSession(sessionId);
+        // Resume session with optional tools and config
+        const session = await client.resumeSession(sessionId, {
+            streaming: true,
+            ...config
+        });
         
         // Lock and track
         this.cwdLocks.set(cwd, sessionId);
@@ -259,7 +264,7 @@ class SessionManager {
                 const yamlPath = join(this.stateDir, sessionId, 'workspace.yaml');
                 const yaml = parseYaml(readFileSync(yamlPath, 'utf8'));
                 updatedAt = yaml.updated_at || null;
-            } catch (e) { /* missing */ }
+            } catch (_e) { /* missing */ }
             result.push({ sessionId, cwd, summary, updatedAt });
         }
         return result;
@@ -313,7 +318,7 @@ class SessionManager {
                 try {
                     const yaml = parseYaml(readFileSync(yamlPath, 'utf8'));
                     return { ...s, updatedAt: new Date(yaml.updated_at || 0) };
-                } catch (e) {
+                } catch (_e) {
                     return { ...s, updatedAt: new Date(0) };
                 }
             })

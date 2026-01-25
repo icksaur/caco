@@ -177,7 +177,7 @@ When the LLM response contains HTMX attributes (e.g., `hx-post`, `hx-get`, `hx-t
    - Prevents network exposure
    - **CRITICAL CONTROL** - Do not change this
 
-2. **HTML Escaping** (server.js:458-466, script.js:512-520)
+2. **HTML Escaping** (server.js:458-466, chat.js:512-520)
    - Properly escapes user input before rendering
    - Prevents XSS in user messages
    - Consistent implementation across codebase

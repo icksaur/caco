@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { readFile, stat } from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { fetchOEmbed, detectProvider, getSupportedProviders } from './oembed.js';
 
 const execAsync = promisify(exec);
 
@@ -25,7 +26,7 @@ const execAsync = promisify(exec);
  */
 export function createDisplayTools(storeOutput, detectLanguage) {
   
-  const renderFileContents = defineTool("render_file_contents", {
+  const renderFileContents = defineTool('render_file_contents', {
     description: `Display a file's contents directly to the user without reading it into context.
   
 USE THIS TOOL WHEN:
@@ -42,10 +43,10 @@ This tool renders the file directly to the UI. You will only receive
 confirmation that the file was displayed, not its contents.`,
 
     parameters: z.object({
-      path: z.string().describe("Absolute path to the file to display"),
-      startLine: z.number().optional().describe("First line to show (1-indexed)"),
-      endLine: z.number().optional().describe("Last line to show (inclusive)"),
-      highlight: z.string().optional().describe("Language for syntax highlighting (auto-detected if omitted)")
+      path: z.string().describe('Absolute path to the file to display'),
+      startLine: z.number().optional().describe('First line to show (1-indexed)'),
+      endLine: z.number().optional().describe('Last line to show (inclusive)'),
+      highlight: z.string().optional().describe('Language for syntax highlighting (auto-detected if omitted)')
     }),
 
     handler: async ({ path, startLine, endLine, highlight }) => {
@@ -97,7 +98,7 @@ confirmation that the file was displayed, not its contents.`,
     }
   });
 
-  const runAndDisplay = defineTool("run_and_display", {
+  const runAndDisplay = defineTool('run_and_display', {
     description: `Run a command and display its output directly to the user.
   
 USE THIS WHEN:
@@ -111,8 +112,8 @@ DO NOT USE WHEN:
 You will receive exit code and output size, not the actual output.`,
 
     parameters: z.object({
-      command: z.string().describe("Shell command to execute"),
-      cwd: z.string().optional().describe("Working directory for the command")
+      command: z.string().describe('Shell command to execute'),
+      cwd: z.string().optional().describe('Working directory for the command')
     }),
   
     handler: async ({ command, cwd }) => {
@@ -159,14 +160,14 @@ You will receive exit code and output size, not the actual output.`,
     }
   });
 
-  const displayImage = defineTool("display_image", {
+  const displayImage = defineTool('display_image', {
     description: `Display an image file directly to the user.
   
 Use when user wants to see an image. You cannot see image contents.
 Supports: PNG, JPEG, GIF, WebP, SVG`,
 
     parameters: z.object({
-      path: z.string().describe("Absolute path to the image file")
+      path: z.string().describe('Absolute path to the image file')
     }),
   
     handler: async ({ path }) => {
@@ -204,5 +205,74 @@ Supports: PNG, JPEG, GIF, WebP, SVG`,
     }
   });
 
-  return [renderFileContents, runAndDisplay, displayImage];
+  // Build provider list for tool description
+  const providerList = getSupportedProviders()
+    .map(p => p.name)
+    .join(', ');
+
+  const embedMedia = defineTool('embed_media', {
+    description: `Embed media content (video, audio, etc.) directly in the chat.
+
+USE THIS WHEN:
+- User shares a YouTube, SoundCloud, Vimeo, or Spotify link
+- User asks to play, embed, or show media from a URL
+- User pastes a media URL and wants to see/hear it
+
+SUPPORTED PROVIDERS: ${providerList}
+
+The media player will be rendered inline in the conversation.
+You will receive confirmation with title/author info.`,
+
+    parameters: z.object({
+      url: z.string().describe('URL of the media to embed (YouTube, SoundCloud, Vimeo, Spotify, Twitter/X)')
+    }),
+
+    handler: async ({ url }) => {
+      try {
+        // Check if URL is supported
+        const provider = detectProvider(url);
+        if (!provider) {
+          return {
+            textResultForLlm: `Unsupported media URL. Supported: ${providerList}`,
+            resultType: 'error'
+          };
+        }
+
+        // Fetch oEmbed data
+        const embedData = await fetchOEmbed(url);
+
+        // Store embed HTML for display
+        const outputId = storeOutput(embedData.html, {
+          type: 'embed',
+          provider: embedData.provider,
+          providerKey: embedData.providerKey,
+          title: embedData.title,
+          author: embedData.author,
+          url,
+          thumbnailUrl: embedData.thumbnailUrl
+        });
+
+        const info = embedData.title 
+          ? `"${embedData.title}"${embedData.author ? ` by ${embedData.author}` : ''}`
+          : url;
+
+        return {
+          textResultForLlm: `Embedded ${embedData.provider} content: ${info}`,
+          toolTelemetry: { 
+            outputId, 
+            provider: embedData.provider,
+            title: embedData.title,
+            author: embedData.author
+          }
+        };
+      } catch (err) {
+        return {
+          textResultForLlm: `Error embedding media: ${err.message}`,
+          resultType: 'error'
+        };
+      }
+    }
+  });
+
+  return [renderFileContents, runAndDisplay, displayImage, embedMedia];
 }

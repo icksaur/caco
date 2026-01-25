@@ -109,7 +109,7 @@ The `tool.execution_complete` event contains `outputId` in `toolTelemetry`. The 
 
 ---
 
-## Client Rendering ([public/script.js](public/script.js#L639-L720))
+## Client Rendering ([public/chat.js](public/chat.js#L639-L720))
 
 ```javascript
 async function renderDisplayOutput(output) {

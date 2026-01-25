@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "public/chat.js",
+    "public/markdown-renderer.js"
+  ],
+  "project": [
+    "**/*.js",
+    "!public/*.min.js"
+  ],
+  "ignore": [
+    "public/*.min.js"
+  ]
+}

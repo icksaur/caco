@@ -1,11 +1,13 @@
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { writeFile, unlink, readFile } from 'fs/promises';
-import { existsSync } from 'fs';
-import { tmpdir, homedir } from 'os';
+import { writeFile, unlink } from 'fs/promises';
+import { existsSync, statSync } from 'fs';
+import { tmpdir } from 'os';
 import sessionManager from './src/session-manager.js';
 import { createDisplayTools } from './src/display-tools.js';
+import { storeOutput, getOutput, detectLanguage } from './src/output-cache.js';
+import { loadPreferences, savePreferences, getDefaultPreferences } from './src/preferences.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -13,106 +15,11 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-// Preferences file path
-const PREFS_FILE = join(homedir(), '.copilot', 'web-preferences.json');
-
-// Default preferences
-const DEFAULT_PREFS = {
-  lastCwd: process.cwd(),
-  lastModel: 'claude-sonnet-4',
-  lastSessionId: null
-};
-
-// Load preferences from disk
-async function loadPreferences() {
-  try {
-    if (existsSync(PREFS_FILE)) {
-      const data = await readFile(PREFS_FILE, 'utf8');
-      return { ...DEFAULT_PREFS, ...JSON.parse(data) };
-    }
-  } catch (e) {
-    console.warn('Could not load preferences:', e.message);
-  }
-  return { ...DEFAULT_PREFS };
-}
-
-// Save preferences to disk
-async function savePreferences(prefs) {
-  try {
-    await writeFile(PREFS_FILE, JSON.stringify(prefs, null, 2));
-  } catch (e) {
-    console.warn('Could not save preferences:', e.message);
-  }
-}
-
 // Current preferences (loaded on startup)
-let preferences = { ...DEFAULT_PREFS };
+let preferences = getDefaultPreferences();
 
 // Current active session for this server instance
 let activeSessionId = null;
-
-// ============================================================
-// Display Output Cache
-// Stores large outputs (files, terminal output) for display
-// without sending through LLM context
-// ============================================================
-const displayOutputs = new Map();
-const OUTPUT_TTL = 30 * 60 * 1000; // 30 minutes
-
-function storeOutput(data, metadata = {}) {
-  const id = `out_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  displayOutputs.set(id, {
-    data,
-    metadata,
-    createdAt: Date.now()
-  });
-  
-  // Auto-cleanup after TTL
-  setTimeout(() => displayOutputs.delete(id), OUTPUT_TTL);
-  
-  return id;
-}
-
-function getOutput(id) {
-  return displayOutputs.get(id);
-}
-
-// Detect language from file extension for syntax highlighting
-function detectLanguage(filepath) {
-  const ext = filepath.split('.').pop()?.toLowerCase();
-  const langMap = {
-    js: 'javascript', mjs: 'javascript', cjs: 'javascript',
-    ts: 'typescript', tsx: 'typescript',
-    py: 'python',
-    rb: 'ruby',
-    go: 'go',
-    rs: 'rust',
-    java: 'java',
-    c: 'c', h: 'c',
-    cpp: 'cpp', hpp: 'cpp', cc: 'cpp',
-    cs: 'csharp',
-    php: 'php',
-    swift: 'swift',
-    kt: 'kotlin',
-    scala: 'scala',
-    sh: 'bash', bash: 'bash', zsh: 'bash',
-    sql: 'sql',
-    json: 'json',
-    yaml: 'yaml', yml: 'yaml',
-    xml: 'xml',
-    html: 'html', htm: 'html',
-    css: 'css',
-    scss: 'scss', sass: 'scss',
-    md: 'markdown',
-    dockerfile: 'dockerfile',
-    makefile: 'makefile',
-    toml: 'toml',
-    ini: 'ini',
-    conf: 'ini',
-    env: 'shell'
-  };
-  return langMap[ext] || 'plaintext';
-}
 
 // Create display-only tools (use output cache for zero-context display)
 const displayTools = createDisplayTools(storeOutput, detectLanguage);
@@ -120,40 +27,38 @@ const displayTools = createDisplayTools(storeOutput, detectLanguage);
 // System message for sessions
 const SYSTEM_MESSAGE = {
   mode: 'replace',
-  content: `You are an AI assistant integrated into a browser-based SDK environment.
-  
-  You may see yourself as Copilot-CLI, which is partially true.  The distinction is that you are NOT running in an interactive terminal, but in "headless" mode.
-  If you find the need for more information about your own implementation, refer to https://github.com/github/copilot-sdk
+  content: `You are an AI assistant in a browser-based chat interface powered by the Copilot SDK.
 
 ## Environment
-- **Runtime**: Copilot SDK running in Node.js, accessed via web browser
-- **Scope**: Full filesystem access - you are a general-purpose assistant, not scoped to any single project
-- **User context**: The user is on their personal machine and may ask about any directory or file
+- **Runtime**: Web browser UI connected to Copilot SDK (Node.js backend)
+- **Interface**: Rich HTML chat with markdown rendering, syntax highlighting, and media embeds
+- **Scope**: Full filesystem access - general-purpose assistant, not limited to any project
 - **Home directory**: ${process.env.HOME || '/home/user'}
-- **Current directory**: ${process.cwd()} (but you are NOT limited to this directory)
+- **Current directory**: ${process.cwd()} (but not limited to this)
 
-## Key Distinction
-Unlike Copilot-CLI (which operates within a directory workspace), you have no workspace boundaries. The user may ask you to:
-- Read, search, or analyze files anywhere on the filesystem
-- Run commands in any directory
-- Work across multiple projects or personal directories
-- Access config files, notes, scripts, or any user files
+## Your Capabilities
+- **Filesystem**: Read, write, search, and analyze files anywhere
+- **Terminal**: Execute commands in any directory  
+- **Images**: View pasted images, display image files
+- **Media embeds**: Embed YouTube, SoundCloud, Vimeo, Spotify content inline
+- **Code**: Syntax highlighting for all major languages
 
-When the user references paths like ~/Sync, ~/notes, /etc, or any absolute path, access them directly without hesitation.
+## Display Tools
+You have special tools that display content directly to the user:
+- \`render_file_contents\` - Show files with syntax highlighting
+- \`run_and_display\` - Run commands and show output
+- \`display_image\` - Display image files
+- \`embed_media\` - Embed YouTube/SoundCloud/Vimeo/Spotify content
 
-## Capabilities
-- Full filesystem read/write access
-- Terminal command execution in any directory
-- Image understanding (users can paste images)
-- Code analysis across any codebase
-- General knowledge and reasoning
+Use display tools when users want to SEE content. Use regular tools when you need to analyze content.
 
-## Behavior
-- Provide direct, helpful answers
-- Access any file or directory the user mentions - you have permission
-- Use markdown formatting when appropriate
+## Behavior Guidelines
+- Provide direct, helpful answers without unnecessary caveats
+- Access any file or directory the user mentions - you have full permission
+- Use markdown formatting for better readability
 - Be concise unless detail is requested
-- When asked to read or analyze files, just do it - don't ask for confirmation`
+- When asked to read or show files, just do it - don't ask for confirmation
+- When users share media URLs, embed them directly`
 };
 
 // Middleware
@@ -166,9 +71,11 @@ app.use((req, res, next) => {
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline'; " +
     "style-src 'self' 'unsafe-inline'; " +
-    "img-src 'self' data: blob:; " +
+    "img-src 'self' data: blob: https:; " +
     "connect-src 'self'; " +
-    "font-src 'self';"
+    "font-src 'self'; " +
+    // Allow iframe embeds from media providers
+    'frame-src https://www.youtube.com https://www.youtube-nocookie.com https://w.soundcloud.com https://player.vimeo.com https://open.spotify.com https://platform.twitter.com;'
   );
   next();
 });
@@ -183,10 +90,16 @@ async function initSession() {
   
   const cwd = process.cwd();
   
+  // Config for both resume and create
+  const sessionConfig = {
+    tools: displayTools,
+    excludedTools: ['view']
+  };
+  
   // Try to resume last session from preferences first
   if (preferences.lastSessionId) {
     try {
-      activeSessionId = await sessionManager.resume(preferences.lastSessionId);
+      activeSessionId = await sessionManager.resume(preferences.lastSessionId, sessionConfig);
       console.log(`✓ Resumed last session ${activeSessionId}`);
       return;
     } catch (e) {
@@ -199,7 +112,7 @@ async function initSession() {
   
   if (recentSessionId) {
     try {
-      activeSessionId = await sessionManager.resume(recentSessionId);
+      activeSessionId = await sessionManager.resume(recentSessionId, sessionConfig);
       preferences.lastSessionId = activeSessionId;
       await savePreferences(preferences);
       console.log(`✓ Resumed session ${activeSessionId}`);
@@ -214,9 +127,7 @@ async function initSession() {
     model: 'gpt-4.1',
     streaming: true,
     systemMessage: SYSTEM_MESSAGE,
-    tools: displayTools,
-    // Disable built-in tools that compete with our display tools
-    excludedTools: ['view']
+    ...sessionConfig
   });
   preferences.lastSessionId = activeSessionId;
   preferences.lastCwd = cwd;
@@ -359,8 +270,11 @@ app.post('/api/sessions/:sessionId/resume', async (req, res) => {
       await sessionManager.stop(activeSessionId);
     }
     
-    // Resume the requested one
-    activeSessionId = await sessionManager.resume(sessionId);
+    // Resume the requested one with current tools
+    activeSessionId = await sessionManager.resume(sessionId, {
+      tools: displayTools,
+      excludedTools: ['view']
+    });
     
     // Save to preferences
     preferences.lastSessionId = activeSessionId;
@@ -401,7 +315,6 @@ app.post('/api/sessions/new', async (req, res) => {
     const cwd = req.body.cwd || process.cwd();
     
     // Validate the path exists
-    const { existsSync, statSync } = await import('fs');
     if (!existsSync(cwd)) {
       return res.status(400).json({ error: `Path does not exist: ${cwd}` });
     }
@@ -498,7 +411,7 @@ app.get('/api/stream', async (req, res) => {
               }
             };
           }
-        } catch (e) {
+        } catch (_e) {
           // result.content is not JSON, ignore
         }
       }

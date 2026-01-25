@@ -725,3 +725,70 @@ button.stop-btn:active {
   border-radius: 4px;
   margin: 1rem 0;
 }
+
+/* Media embed styles */
+.output-embed {
+  margin: 1rem 0;
+  background: #252526;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #3e3e42;
+}
+
+.embed-header {
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #3e3e42;
+  background: #2d2d2d;
+}
+
+.embed-provider {
+  color: #888;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+}
+
+.embed-title {
+  color: #d4d4d4;
+  font-weight: 500;
+}
+
+.embed-author {
+  color: #888;
+}
+
+.embed-frame {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+}
+
+.embed-frame iframe {
+  width: 100%;
+  border: none;
+  border-radius: 0 0 8px 8px;
+}
+
+/* Responsive embeds */
+.output-embed[data-provider="youtube"] .embed-frame,
+.output-embed[data-provider="vimeo"] .embed-frame {
+  aspect-ratio: 16 / 9;
+}
+
+.output-embed[data-provider="youtube"] .embed-frame iframe,
+.output-embed[data-provider="vimeo"] .embed-frame iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.output-embed[data-provider="soundcloud"] .embed-frame {
+  min-height: 166px;
+}
+
+.output-embed[data-provider="spotify"] .embed-frame {
+  min-height: 152px;
+}

@@ -4,42 +4,26 @@ document.body.addEventListener('htmx:afterSwap', () => {
   main.scrollTop = main.scrollHeight;
 });
 
-// Handle image paste - with debugging
+// Handle image paste
 document.addEventListener('paste', (e) => {
-  console.log('Paste event fired!', e);
-  
   const items = e.clipboardData?.items;
-  console.log('Clipboard items:', items);
-  
-  if (!items) {
-    console.log('No clipboard items found');
-    return;
-  }
+  if (!items) return;
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    console.log(`Item ${i}:`, item.type, item.kind);
-    
     if (item.type.indexOf('image') !== -1) {
-      console.log('Image found!');
       e.preventDefault();
       const blob = item.getAsFile();
-      console.log('Blob:', blob);
-      
       const reader = new FileReader();
       
       reader.onload = (event) => {
         const base64 = event.target.result;
-        console.log('Base64 length:', base64.length);
         document.getElementById('imageData').value = base64;
         document.getElementById('previewImg').src = base64;
         document.getElementById('imagePreview').classList.add('visible');
       };
       
-      reader.onerror = (error) => {
-        console.error('FileReader error:', error);
-      };
-      
+      reader.onerror = (error) => console.error('FileReader error:', error);
       reader.readAsDataURL(blob);
       break;
     }
@@ -80,20 +64,6 @@ async function loadHistory() {
   }
 }
 
-// Load session info
-async function loadSessionInfo() {
-  try {
-    const response = await fetch('/api/session');
-    if (response.ok) {
-      const info = await response.json();
-      console.log('Session:', info.sessionId);
-      console.log('CWD:', info.cwd);
-    }
-  } catch (error) {
-    console.error('Failed to load session info:', error);
-  }
-}
-
 // Load and apply user preferences
 async function loadPreferences() {
   try {
@@ -117,30 +87,14 @@ async function loadPreferences() {
       if (prefs.lastCwd) {
         currentServerCwd = prefs.lastCwd;
       }
-      
-      console.log('Preferences loaded:', prefs);
     }
   } catch (error) {
     console.error('Failed to load preferences:', error);
   }
 }
 
-// Save a preference
-async function savePreference(key, value) {
-  try {
-    await fetch('/api/preferences', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [key]: value })
-    });
-  } catch (error) {
-    console.error('Failed to save preference:', error);
-  }
-}
-
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
-  loadSessionInfo();
   loadPreferences();
   loadHistory();
 });
@@ -398,10 +352,6 @@ async function createNewSession() {
   }
 }
 
-// Test clipboard access on page load
-console.log('Clipboard API available:', 'clipboard' in navigator);
-console.log('Page loaded and ready for paste');
-
 // Current selected model
 let selectedModel = 'claude-sonnet-4';
 
@@ -497,8 +447,12 @@ function selectModel(modelId) {
   const input = document.querySelector('input[name="message"]');
   input.placeholder = `Ask ${modelInfo?.name || modelId}...`;
   
-  // Save preference
-  savePreference('lastModel', modelId);
+  // Save preference to server
+  fetch('/api/preferences', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lastModel: modelId })
+  }).catch(() => {}); // Ignore errors
   
   // Close panel
   toggleModelPanel();
@@ -523,7 +477,6 @@ function escapeHtml(text) {
 // Add user message bubble immediately
 function addUserBubble(message, hasImage) {
   const chat = document.getElementById('chat');
-  const imageIndicator = hasImage ? ' [img]' : '';
   
   // Add user message
   const userDiv = document.createElement('div');
@@ -637,98 +590,84 @@ function formatToolResult(result) {
 // ============================================================
 
 async function renderDisplayOutput(output) {
-  console.log('renderDisplayOutput called with:', output);
-  if (!output || !output.id) {
-    console.log('No output or no id');
-    return;
-  }
+  if (!output || !output.id) return;
   
   const container = document.querySelector('#pending-response .outputs-container');
-  console.log('Container found:', container);
-  if (!container) {
-    console.log('No container found!');
-    return;
-  }
+  if (!container) return;
   
   try {
-    // Fetch output with metadata
-    const url = `/api/outputs/${output.id}?format=json`;
-    console.log('Fetching:', url);
-    const response = await fetch(url);
-    console.log('Response status:', response.status);
-    if (!response.ok) {
-      console.error('Failed to fetch output:', response.statusText);
-      return;
-    }
+    const response = await fetch(`/api/outputs/${output.id}?format=json`);
+    if (!response.ok) return;
     
-    const json = await response.json();
-    console.log('Output data:', json);
-    const { data, metadata } = json;
-    
+    const { data, metadata } = await response.json();
     let markdown = '';
     
     if (output.type === 'file') {
-      // File with syntax highlighting via markdown
       const lang = metadata.highlight || '';
       const pathInfo = metadata.path ? `**${metadata.path}**` : '';
       const lineInfo = metadata.startLine && metadata.endLine 
         ? ` (lines ${metadata.startLine}-${metadata.endLine} of ${metadata.totalLines})`
         : '';
-      
       markdown = `${pathInfo}${lineInfo}\n\n\`\`\`${lang}\n${data}\n\`\`\``;
       
     } else if (output.type === 'terminal') {
-      // Terminal output with command header
       const exitInfo = metadata.exitCode === 0 ? '' : ` (exit ${metadata.exitCode})`;
       markdown = `\`\`\`bash\n$ ${metadata.command}${exitInfo}\n${data}\n\`\`\``;
       
     } else if (output.type === 'image') {
-      // Image - create element directly since markdown images need URLs
       const img = document.createElement('img');
       img.className = 'output-image';
-      if (metadata.mimeType && typeof data === 'string') {
-        img.src = `data:${metadata.mimeType};base64,${data}`;
-      } else {
-        img.src = `/api/outputs/${output.id}`;
-      }
+      img.src = metadata.mimeType && typeof data === 'string'
+        ? `data:${metadata.mimeType};base64,${data}`
+        : `/api/outputs/${output.id}`;
       img.alt = metadata.path || 'Image';
       container.appendChild(img);
       return;
+      
+    } else if (output.type === 'embed') {
+      // Media embed (YouTube, SoundCloud, etc.)
+      const embedContainer = document.createElement('div');
+      embedContainer.className = 'output-embed';
+      embedContainer.dataset.provider = metadata.providerKey || '';
+      
+      // Add title header if available
+      if (metadata.title) {
+        const header = document.createElement('div');
+        header.className = 'embed-header';
+        header.innerHTML = `<span class="embed-provider">${escapeHtml(metadata.provider || '')}</span>`;
+        if (metadata.title) {
+          header.innerHTML += ` <span class="embed-title">${escapeHtml(metadata.title)}</span>`;
+        }
+        if (metadata.author) {
+          header.innerHTML += ` <span class="embed-author">by ${escapeHtml(metadata.author)}</span>`;
+        }
+        embedContainer.appendChild(header);
+      }
+      
+      // Embed the HTML (already sanitized by oEmbed providers)
+      const embedFrame = document.createElement('div');
+      embedFrame.className = 'embed-frame';
+      embedFrame.innerHTML = data; // oEmbed HTML (iframe)
+      embedContainer.appendChild(embedFrame);
+      
+      container.appendChild(embedContainer);
+      return;
     }
     
-    console.log('Markdown to render:', markdown.substring(0, 200) + '...');
-    
-    // Render markdown content using marked + DOMPurify directly
     if (markdown && window.marked && window.DOMPurify) {
-      const rawHtml = marked.parse(markdown);
-      const rendered = DOMPurify.sanitize(rawHtml);
-      console.log('Rendered HTML:', rendered.substring(0, 200) + '...');
       const div = document.createElement('div');
       div.className = 'output-content';
-      div.innerHTML = rendered;
+      div.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
       container.appendChild(div);
-      console.log('Appended to container');
       
       // Apply syntax highlighting
       div.querySelectorAll('pre code').forEach((block) => {
-        if (window.hljs) {
-          hljs.highlightElement(block);
-        }
+        if (window.hljs) hljs.highlightElement(block);
       });
-    } else {
-      console.log('Missing marked or DOMPurify:', !!window.marked, !!window.DOMPurify);
     }
-    
   } catch (err) {
     console.error('Error displaying output:', err);
   }
-}
-
-// Escape HTML for safe display
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
 }
 
 // Toggle activity box expand/collapse
@@ -761,7 +700,6 @@ function streamResponse(prompt, model, imageData) {
   const eventSource = new EventSource(`/api/stream?${params.toString()}`);
   activeEventSource = eventSource;
   
-  const activityBox = document.querySelector('#pending-response .activity-box');
   const responseDiv = document.querySelector('#pending-response .markdown-content');
   let responseContent = '';
   let firstDeltaReceived = false;
@@ -826,7 +764,7 @@ function streamResponse(prompt, model, imageData) {
   });
   
   // Handle reasoning
-  eventSource.addEventListener('assistant.reasoning_delta', (e) => {
+  eventSource.addEventListener('assistant.reasoning_delta', (_e) => {
     // Could show reasoning, but might be verbose
     // Just indicate reasoning is happening
   });
@@ -843,7 +781,6 @@ function streamResponse(prompt, model, imageData) {
   
   eventSource.addEventListener('tool.execution_complete', (e) => {
     const data = JSON.parse(e.data);
-    console.log('tool.execution_complete:', data);
     const toolName = data.toolName || data.name || 'tool';
     const status = data.success ? '✓' : '✗';
     const summary = `${status} ${toolName}`;
@@ -852,10 +789,7 @@ function streamResponse(prompt, model, imageData) {
     
     // Display output if present (from display-only tools)
     if (data._output) {
-      console.log('Displaying output:', data._output);
       renderDisplayOutput(data._output);
-    } else {
-      console.log('No _output in event data');
     }
   });
   

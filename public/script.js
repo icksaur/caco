@@ -644,6 +644,10 @@ function toggleActivityBox(header) {
   }
 }
 
+// Track active EventSource for stop functionality
+let activeEventSource = null;
+let stopButtonTimeout = null;
+
 // Stream response via EventSource
 function streamResponse(prompt, model, imageData) {
   // Build URL with parameters
@@ -653,6 +657,7 @@ function streamResponse(prompt, model, imageData) {
   }
   
   const eventSource = new EventSource(`/api/stream?${params.toString()}`);
+  activeEventSource = eventSource;
   
   const activityBox = document.querySelector('#pending-response .activity-box');
   const responseDiv = document.querySelector('#pending-response .markdown-content');
@@ -757,6 +762,7 @@ function streamResponse(prompt, model, imageData) {
   // Handle completion
   eventSource.addEventListener('done', () => {
     eventSource.close();
+    activeEventSource = null;
     finishPendingResponse();
   });
   
@@ -768,6 +774,7 @@ function streamResponse(prompt, model, imageData) {
   eventSource.onerror = (err) => {
     console.error('EventSource error:', err);
     eventSource.close();
+    activeEventSource = null;
     
     // If we haven't received any content, show error
     if (!responseContent && !firstDeltaReceived) {
@@ -776,6 +783,25 @@ function streamResponse(prompt, model, imageData) {
     
     finishPendingResponse();
   };
+}
+
+// Stop streaming response
+function stopStreaming() {
+  if (activeEventSource) {
+    activeEventSource.close();
+    activeEventSource = null;
+    
+    // Add visual feedback
+    addActivityItem('info', 'Stopped by user');
+    
+    // Mark response as stopped
+    const responseDiv = document.querySelector('#pending-response .markdown-content');
+    if (responseDiv) {
+      responseDiv.classList.remove('streaming-cursor');
+    }
+    
+    finishPendingResponse();
+  }
 }
 
 // Clean up pending response
@@ -810,11 +836,39 @@ function setFormEnabled(enabled) {
   const input = form.querySelector('input[name="message"]');
   const submitBtn = form.querySelector('button[type="submit"]');
   
+  // Clear any pending stop button timeout
+  if (stopButtonTimeout) {
+    clearTimeout(stopButtonTimeout);
+    stopButtonTimeout = null;
+  }
+  
   input.disabled = !enabled;
-  submitBtn.disabled = !enabled;
   
   if (enabled) {
+    // Restore to Send button
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Send';
+    submitBtn.classList.remove('stop-btn');
+    submitBtn.onclick = null;
     input.focus();
+  } else {
+    // Briefly disable to prevent double-tap, then show Stop
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Send';
+    submitBtn.classList.remove('stop-btn');
+    
+    stopButtonTimeout = setTimeout(() => {
+      // Only show stop if still streaming
+      if (activeEventSource) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Stop';
+        submitBtn.classList.add('stop-btn');
+        submitBtn.onclick = (e) => {
+          e.preventDefault();
+          stopStreaming();
+        };
+      }
+    }, 400);
   }
 }
 

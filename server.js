@@ -83,6 +83,19 @@ Behavior:
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Security: Content Security Policy
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', 
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline'; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: blob:; " +
+    "connect-src 'self'; " +
+    "font-src 'self';"
+  );
+  next();
+});
 app.use(express.static('public'));
 
 // Initialize: discover sessions and auto-resume or create

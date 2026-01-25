@@ -215,6 +215,18 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.stop-btn {
+  background: #c42b1c;
+}
+
+button.stop-btn:hover {
+  background: #a32515;
+}
+
+button.stop-btn:active {
+  background: #8a1f11;
+}
+
 .loading {
   display: none;
 }

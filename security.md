@@ -69,22 +69,13 @@ When the LLM response contains HTMX attributes (e.g., `hx-post`, `hx-get`, `hx-t
 ## 🔒 Additional Critical Findings
 
 ### 2. NO AUTHENTICATION OR AUTHORIZATION
-**Severity:** HIGH (if exposed) / LOW (localhost only)  
-**Current Status:** By design for local use
+**Severity:** N/A  
+**Current Status:** ✅ OUT OF SCOPE
 
-- **Finding:** No authentication mechanism exists
-- **Impact:** Anyone who can reach http://localhost:3000 can:
-  - Access all sessions and conversation history
-  - Execute commands through the AI agent  
-  - Read/write files in working directories
-  - Delete sessions
-  - Switch between sessions
-- **Current Mitigation:** Server binds to `127.0.0.1` only (line 474 in server.js)
-- **Risk Level:** Acceptable for single-user localhost development
-- **Recommendation:** 
-  - ✅ **KEEP** localhost-only binding for current use case
-  - ❌ **NEVER** expose to network without proper authentication
-  - Consider adding password protection if other users share the machine
+- **Finding:** No authentication mechanism in this application
+- **Mitigation:** Server binds to `127.0.0.1` only (line 474 in server.js)
+- **External Protection:** If exposed to network, will be wrapped in **Caddy with 2FA OAuth**
+- **Risk Level:** Acceptable - authentication handled at infrastructure layer
 
 ### 3. NO CSRF PROTECTION
 **Severity:** MEDIUM  
@@ -159,7 +150,7 @@ When the LLM response contains HTMX attributes (e.g., `hx-post`, `hx-get`, `hx-t
 **Severity:** LOW  
 **Current Status:** Minor race condition risk
 
-- **Finding:** Image files saved with predictable timestamp-based names (line 343, 414 in server.js):
+- **Finding:** Image files saved with predictable timestamp-based names (lines 339, 413 in server.js):
   ```javascript
   `copilot-image-${Date.now()}.${extension}`
   ```
@@ -186,7 +177,7 @@ When the LLM response contains HTMX attributes (e.g., `hx-post`, `hx-get`, `hx-t
    - Prevents network exposure
    - **CRITICAL CONTROL** - Do not change this
 
-2. **HTML Escaping** (server.js:458-467, script.js:512-521)
+2. **HTML Escaping** (server.js:458-466, script.js:512-520)
    - Properly escapes user input before rendering
    - Prevents XSS in user messages
    - Consistent implementation across codebase
@@ -211,14 +202,14 @@ When the LLM response contains HTMX attributes (e.g., `hx-post`, `hx-get`, `hx-t
      - @github/copilot-sdk: 0.1.17
      - yaml: 2.8.2
 
-6. **SSE Security Headers** (server.js:318-322)
+6. **SSE Security Headers** (server.js:314-318)
    - Proper Cache-Control: no-cache
    - Connection: keep-alive
    - X-Accel-Buffering: no (prevents nginx buffering)
    - Prevents caching of sensitive streaming data
 
 7. **Resource Cleanup** (multiple locations)
-   - Temporary files deleted after use (server.js:362-364, 429-431)
+   - Temporary files deleted after use (server.js:358-360, 427-429)
    - Event listeners properly unsubscribed (server.js:369-373)
    - Graceful shutdown handling (server.js:481-487)
    - Prevents resource leaks and file system clutter
@@ -307,27 +298,18 @@ When the LLM response contains HTMX attributes (e.g., `hx-post`, `hx-get`, `hx-t
   ```
 
 ### 11. SESSION HIJACKING RISK
-**Severity:** MEDIUM (same machine)
+**Severity:** LOW  
+**Current Status:** ✅ OUT OF SCOPE for network exposure
 
-- **Finding:** No session tokens or authentication
+- **Finding:** No session tokens or authentication at app level
 - **Impact:** Any local process can use the API endpoints
 - **Attack Scenario:**
   - Malicious browser extension makes requests to localhost:3000
   - Local malware sends API calls
-  - Another browser tab (different domain) issues requests
-- **Recommendation:** Add simple token validation:
-  ```javascript
-  // Generate on server start
-  const serverToken = randomBytes(32).toString('hex');
-  
-  // Require in requests
-  app.use('/api/', (req, res, next) => {
-    if (req.headers['x-server-token'] !== serverToken) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    next();
-  });
-  ```
+- **Mitigation:** 
+  - Localhost-only binding prevents network access
+  - If exposed: Caddy + 2FA OAuth handles authentication externally
+  - Local process attacks are outside threat model (requires compromised machine)
 
 ### 12. NO CONTENT SECURITY POLICY
 **Severity:** LOW
@@ -372,13 +354,13 @@ When the LLM response contains HTMX attributes (e.g., `hx-post`, `hx-get`, `hx-t
 
 | Risk | Status | Severity | Notes |
 |------|--------|----------|-------|
-| **A01:2021 Broken Access Control** | ⚠️ VULNERABLE | HIGH | No authentication, CSRF, path traversal issues |
+| **A01:2021 Broken Access Control** | ⚠️ PARTIAL | MEDIUM | CSRF, path traversal (AuthN/AuthZ via Caddy) |
 | **A02:2021 Cryptographic Failures** | ⚠️ VULNERABLE | MEDIUM | Sessions stored unencrypted at rest |
 | **A03:2021 Injection** | ✅ PROTECTED | - | HTML escaping + DOMPurify sanitization |
 | **A04:2021 Insecure Design** | ⚠️ PARTIAL | LOW | Designed for localhost only (acceptable for use case) |
 | **A05:2021 Security Misconfiguration** | ✅ GOOD | - | Localhost binding, no unnecessary features |
 | **A06:2021 Vulnerable Components** | ✅ GOOD | - | 0 npm vulnerabilities, up-to-date packages |
-| **A07:2021 Auth Failures** | ⚠️ VULNERABLE | HIGH | No authentication mechanism |
+| **A07:2021 Auth Failures** | ✅ OUT OF SCOPE | - | AuthN handled by Caddy + 2FA OAuth if exposed |
 | **A08:2021 Data Integrity Failures** | ⚠️ VULNERABLE | MEDIUM | No CSRF protection, no request signing |
 | **A09:2021 Logging Failures** | ⚠️ VULNERABLE | MEDIUM | No audit logging, no monitoring |
 | **A10:2021 SSRF** | ✅ PROTECTED | - | No user-controlled external requests |
@@ -430,11 +412,9 @@ When the LLM response contains HTMX attributes (e.g., `hx-post`, `hx-get`, `hx-t
 10. 🔧 **Session encryption** - Encrypt sensitive data at rest
     - Requires SDK support or custom encryption layer
     
-11. 🔧 **Authentication system** - If multi-user scenarios arise
-    - Simple password protection for localhost
+11. ~~**Authentication system**~~ - ✅ OUT OF SCOPE (Caddy + 2FA OAuth)
     
-12. 🔧 **Request signing** - Prevent local session hijacking
-    - Token-based validation for API requests
+12. ~~**Request signing**~~ - ✅ OUT OF SCOPE (handled by Caddy)
     
 13. 🔧 **Auto-expire sessions** - Automatic cleanup of old conversations
     - Reduce sensitive data retention
@@ -713,139 +693,7 @@ tempFilePath = join(tmpdir(), filename);
   - Implemented DOMPurify mitigation
   - Added basic security notes
 
-### Option 1: DOMPurify (Recommended)
-
-Use DOMPurify to sanitize HTML before insertion:
-
-```javascript
-// Install: copy DOMPurify to public folder or use CDN
-// <script src="purify.min.js"></script>
-
-const clean = DOMPurify.sanitize(dirtyHTML, {
-  FORBID_ATTR: ['hx-get', 'hx-post', 'hx-put', 'hx-delete', 'hx-patch',
-                'hx-trigger', 'hx-target', 'hx-swap', 'hx-vals',
-                'hx-confirm', 'hx-boost', 'hx-push-url', 'hx-on',
-                'onclick', 'onerror', 'onload', 'onmouseover'],
-  FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form']
-});
-```
-
-### Option 2: HTMX hx-disable
-
-Wrap dynamic content in a container with `hx-disable`:
-
-```html
-<div hx-disable>
-  <!-- LLM response rendered here - HTMX won't process -->
-</div>
-```
-
-**Note:** This only works if HTMX respects the attribute during dynamic insertion. Need to verify.
-
-### Option 3: Text-only rendering
-
-Don't render markdown as HTML - display as escaped text:
-
-```javascript
-element.textContent = response; // Safe but loses formatting
-```
-
-### Option 4: Sandboxed iframe
-
-Render responses in a sandboxed iframe:
-
-```html
-<iframe sandbox="allow-same-origin" srcdoc="..."></iframe>
-```
-
-### Option 5: Content Security Policy
-
-Add CSP headers to restrict what can execute:
-
-```javascript
-app.use((req, res, next) => {
-  res.setHeader('Content-Security-Policy', 
-    "default-src 'self'; script-src 'self'; connect-src 'self'");
-  next();
-});
-```
-
----
-
-## Recommended Fix
-
-### Immediate: Use hx-disable
-
-Wrap all LLM response content in `hx-disable`:
-
-```javascript
-// In script.js addUserBubble()
-assistantDiv.innerHTML = `
-  <strong>Copilot:</strong>
-  <div class="activity-wrapper">...</div>
-  <div class="markdown-content streaming-cursor" hx-disable></div>
-`;
-```
-
-### Complete: Add DOMPurify
-
-1. Download DOMPurify: https://github.com/cure53/DOMPurify
-2. Add to public folder
-3. Sanitize all HTML before insertion:
-
-```javascript
-// In markdown-renderer.js
-function renderMarkdown() {
-  document.querySelectorAll('[data-markdown] .markdown-content').forEach(el => {
-    const raw = el.textContent;
-    const html = marked.parse(raw);
-    const clean = DOMPurify.sanitize(html, {
-      FORBID_ATTR: ['hx-get', 'hx-post', 'hx-put', 'hx-delete', 
-                    'hx-trigger', 'hx-target', 'hx-swap', 'hx-vals',
-                    'hx-on', 'onclick', 'onerror', 'onload'],
-      FORBID_TAGS: ['script', 'iframe', 'object', 'embed']
-    });
-    el.innerHTML = clean;
-  });
-}
-```
-
----
-
-## Other Security Considerations
-
-### 1. Local Server Exposure
-
-The server runs on `localhost:3000` - ensure it's not exposed to the network:
-
-```javascript
-app.listen(PORT, '127.0.0.1', () => { ... }); // Bind to localhost only
-```
-
-### 2. Path Traversal
-
-The `/api/sessions/new` endpoint accepts a `cwd` parameter. Ensure validation:
-- ✓ Already checks path exists
-- ✓ Already checks is directory
-- Consider: restrict to user home or workspace
-
-### 3. Temp File Cleanup
-
-Image attachments create temp files. Ensure cleanup on all error paths:
-- ✓ Cleanup in try/catch
-- Consider: periodic cleanup of orphaned files
-
-### 4. Session State
-
-Sessions are stored in `~/.copilot/session-state/`. Consider:
-- File permissions (should be 600)
-- Sensitive data in session history
-
----
-
-## References
-
-- [OWASP XSS Prevention](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)
-- [DOMPurify](https://github.com/cure53/DOMPurify)
-- [HTMX Security](https://htmx.org/docs/#security)
-- [Content Security Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP)
+- **2026-01-24 (v3)**: Scope adjustments
+  - Marked AuthN/AuthZ as out of scope (Caddy + 2FA OAuth)
+  - Fixed line number references
+  - Removed duplicate content

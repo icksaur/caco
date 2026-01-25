@@ -53,11 +53,24 @@ async function renderMarkdown() {
         'hx-trigger', 'hx-target', 'hx-swap', 'hx-vals', 'hx-sync',
         'hx-confirm', 'hx-boost', 'hx-push-url', 'hx-on', 'hx-ext',
         'hx-include', 'hx-indicator', 'hx-params', 'hx-request',
-        // JavaScript event handlers
-        'onclick', 'onerror', 'onload', 'onmouseover', 'onfocus',
-        'onblur', 'onchange', 'onsubmit', 'onkeydown', 'onkeyup'
+        'hx-select', 'hx-select-oob', 'hx-swap-oob', 'hx-preserve',
+        'hx-prompt', 'hx-replace-url', 'hx-disable', 'hx-disabled-elt',
+        'hx-disinherit', 'hx-encoding', 'hx-headers', 'hx-history',
+        'hx-history-elt', 'hx-inherit', 'hx-validate',
+        // JavaScript event handlers (comprehensive)
+        'onclick', 'ondblclick', 'onmousedown', 'onmouseup', 'onmouseover',
+        'onmousemove', 'onmouseout', 'onmouseenter', 'onmouseleave',
+        'onkeydown', 'onkeyup', 'onkeypress',
+        'onfocus', 'onblur', 'onchange', 'oninput', 'onsubmit', 'onreset',
+        'onload', 'onerror', 'onabort', 'onbeforeunload', 'onunload',
+        'onresize', 'onscroll', 'onwheel',
+        'oncopy', 'oncut', 'onpaste',
+        'ondrag', 'ondragstart', 'ondragend', 'ondragenter', 'ondragleave', 'ondragover', 'ondrop',
+        'oncontextmenu', 'onshow', 'ontoggle',
+        'onanimationstart', 'onanimationend', 'onanimationiteration',
+        'ontransitionend', 'onpointerdown', 'onpointerup', 'onpointermove'
       ],
-      FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']
+      FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'select', 'option']
     });
     
     // Update content

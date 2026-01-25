@@ -24,14 +24,14 @@
 - [x] Add types incrementally
 - [x] Verify server still runs
 
-## Phase 2: Server-Side Refactoring
-- [ ] Create src/types.ts for shared types
-- [ ] Create src/session-state.ts (consolidate activeSessionId, preferences)
-- [ ] Create src/routes/sessions.ts
-- [ ] Create src/routes/stream.ts
-- [ ] Create src/routes/api.ts (history, preferences, output)
-- [ ] Slim down server.ts to just Express setup
-- [ ] Verify all endpoints still work
+## Phase 2: Server-Side Refactoring ✅
+- [x] Create src/types.ts for shared types
+- [x] Create src/session-state.ts (consolidate activeSessionId, preferences)
+- [x] Create src/routes/sessions.ts
+- [x] Create src/routes/stream.ts
+- [x] Create src/routes/api.ts (history, preferences, output)
+- [x] Slim down server.ts to just Express setup (~115 lines vs 586)
+- [x] Verify all endpoints still work
 
 ## Phase 3: Client-Side Modularization
 - [ ] Create public/js/ directory structure
@@ -77,6 +77,7 @@
 |------|-------|--------|-------|
 | 2026-01-25 | Start | Planning | Created this document |
 | 2026-01-25 | Phase 1 | Complete | TypeScript migration done, server works |
+| 2026-01-25 | Phase 2 | Complete | Server split into routes, SessionState class |
 
 ---
 

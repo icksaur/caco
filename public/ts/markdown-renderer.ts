@@ -139,12 +139,22 @@ async function renderMarkdown(): Promise<void> {
   }
 }
 
+// Extend Window interface
+declare global {
+  interface Window {
+    renderMarkdown: typeof renderMarkdown;
+  }
+}
+
 /**
  * Set up markdown rendering
  */
 export function setupMarkdownRenderer(): void {
   initMermaid();
   configureMarked();
+  
+  // Export to window for other modules
+  window.renderMarkdown = renderMarkdown;
   
   // Render markdown when DOM is ready
   if (document.readyState === 'loading') {

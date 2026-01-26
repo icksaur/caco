@@ -5,28 +5,16 @@
 import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge, scrollToBottom } from './ui-utils.js';
 import { getActiveSessionId, getCurrentCwd, setActiveSession } from './state.js';
-import { setAvailableModels, showNewChat, hideNewChat } from './model-selector.js';
+import { setAvailableModels, loadModels, getNewChatCwd } from './model-selector.js';
 import { loadHistory } from './history.js';
+import { setViewState, getViewState, isViewState } from './view-controller.js';
 
 /**
  * Show session manager as the main view (landing page)
  * Different from toggleSessionPanel - this is for initial page load
  */
 export function showSessionManager(): void {
-  const chatView = document.getElementById('chatView');
-  const sessionView = document.getElementById('sessionView');
-  const footer = document.getElementById('chatFooter');
-  const menuBtn = document.getElementById('menuBtn');
-  
-  if (!chatView || !sessionView) return;
-  
-  // Switch to session view
-  chatView.classList.remove('active');
-  sessionView.classList.add('active');
-  footer?.classList.add('hidden');
-  menuBtn?.classList.add('active');
-  
-  // Load sessions
+  setViewState('sessions');
   loadSessions();
 }
 
@@ -34,34 +22,18 @@ export function showSessionManager(): void {
  * Toggle session panel visibility
  */
 export function toggleSessionPanel(): void {
-  const chatView = document.getElementById('chatView');
-  const sessionView = document.getElementById('sessionView');
-  const footer = document.getElementById('chatFooter');
-  const menuBtn = document.getElementById('menuBtn');
-  
-  if (!chatView || !sessionView) return;
-  
-  const isSessionView = sessionView.classList.contains('active');
-  
-  if (isSessionView) {
-    // Switch to chat view
-    sessionView.classList.remove('active');
-    chatView.classList.add('active');
-    footer?.classList.remove('hidden');
-    menuBtn?.classList.remove('active');
-    
-    // Check if we have chat messages - if not, show new chat form with models
+  if (isViewState('sessions')) {
+    // Switch to chat view - check if we have messages
     const chat = document.getElementById('chat');
     if (chat && chat.children.length === 0) {
-      showNewChat(getCurrentCwd());
+      setViewState('newChat');
+      loadModels();
+    } else {
+      setViewState('chatting');
     }
   } else {
     // Switch to session view
-    chatView.classList.remove('active');
-    sessionView.classList.add('active');
-    footer?.classList.add('hidden');
-    menuBtn?.classList.add('active');
-    // Load sessions when opening
+    setViewState('sessions');
     loadSessions();
   }
 }
@@ -186,19 +158,9 @@ export async function switchSession(sessionId: string): Promise<void> {
       // Update client state with new session
       setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
       
-      // Load history (this calls hideNewChat if there's content)
+      // Load history and switch to chat view
       await loadHistory();
-      
-      // Switch to chat view directly (not toggleSessionPanel which has extra logic)
-      const chatView = document.getElementById('chatView');
-      const sessionView = document.getElementById('sessionView');
-      const footer = document.getElementById('chatFooter');
-      const menuBtn = document.getElementById('menuBtn');
-      
-      sessionView?.classList.remove('active');
-      chatView?.classList.add('active');
-      footer?.classList.remove('hidden');
-      menuBtn?.classList.remove('active');
+      setViewState('chatting');
       
       // Scroll after view is visible and content is painted
       requestAnimationFrame(() => scrollToBottom());
@@ -254,25 +216,19 @@ export async function deleteSession(sessionId: string, summary?: string): Promis
  * Show new chat UI (switches from session manager to chat view with new chat form)
  */
 export function showNewChatUI(): void {
-  const chatView = document.getElementById('chatView');
-  const sessionView = document.getElementById('sessionView');
-  const footer = document.getElementById('chatFooter');
+  // Clear old chat messages
   const chat = document.getElementById('chat');
-  const menuBtn = document.getElementById('menuBtn');
+  if (chat) chat.innerHTML = '';
   
-  if (chatView && sessionView) {
-    // Switch to chat view
-    sessionView.classList.remove('active');
-    chatView.classList.add('active');
-    footer?.classList.remove('hidden');
-    menuBtn?.classList.remove('active');
-    
-    // Clear old chat and show new chat form with last cwd
-    if (chat) chat.innerHTML = '';
-    showNewChat(getCurrentCwd());
-    
-    // Focus the message input
-    const messageInput = document.querySelector('form input[name="message"]') as HTMLInputElement;
-    messageInput?.focus();
-  }
+  // Pre-fill cwd from last session
+  const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
+  if (cwdInput) cwdInput.value = getCurrentCwd() || '';
+  
+  // Switch to new chat view
+  setViewState('newChat');
+  loadModels();
+  
+  // Focus the message input
+  const messageInput = document.querySelector('form input[name="message"]') as HTMLInputElement;
+  messageInput?.focus();
 }

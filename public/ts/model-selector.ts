@@ -36,45 +36,6 @@ function getModels(): ModelInfo[] {
 }
 
 /**
- * Show the new chat form (for new sessions with no messages)
- */
-export function showNewChat(prefillCwd?: string): void {
-  const newChat = document.getElementById('newChat');
-  const chat = document.getElementById('chat');
-  const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
-  const errorDiv = document.getElementById('newChatError');
-  
-  if (newChat && chat) {
-    newChat.classList.remove('hidden');
-    chat.classList.add('hidden');
-    
-    // Clear any previous error
-    if (errorDiv) errorDiv.textContent = '';
-    
-    // Pre-fill cwd if provided
-    if (cwdInput && prefillCwd) {
-      cwdInput.value = prefillCwd;
-    }
-    
-    // Render models (already loaded on page init)
-    loadModels();
-  }
-}
-
-/**
- * Hide the new chat form and show chat (when messages exist)
- */
-export function hideNewChat(): void {
-  const newChat = document.getElementById('newChat');
-  const chat = document.getElementById('chat');
-  
-  if (newChat && chat) {
-    newChat.classList.add('hidden');
-    chat.classList.remove('hidden');
-  }
-}
-
-/**
  * Get the cwd from the new chat form
  */
 export function getNewChatCwd(): string {

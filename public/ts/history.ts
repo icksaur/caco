@@ -4,8 +4,9 @@
 
 import type { Preferences } from './types.js';
 import { scrollToBottom } from './ui-utils.js';
-import { applyModelPreference, showNewChat, hideNewChat } from './model-selector.js';
+import { applyModelPreference, loadModels } from './model-selector.js';
 import { initFromPreferences } from './state.js';
+import { setViewState } from './view-controller.js';
 
 // Declare renderMarkdown as a global function from markdown-renderer.js
 declare global {
@@ -24,9 +25,9 @@ export async function loadHistory(): Promise<void> {
       const html = await response.text();
       const chat = document.getElementById('chat');
       if (chat && html.trim()) {
-        // Has messages - show chat, hide new chat form
+        // Has messages - show chat view
         chat.innerHTML = html;
-        hideNewChat();
+        setViewState('chatting');
         // Render any markdown in loaded messages
         if (typeof window.renderMarkdown === 'function') {
           window.renderMarkdown();
@@ -34,15 +35,18 @@ export async function loadHistory(): Promise<void> {
         // Note: caller should scroll after view is visible
       } else {
         // No messages - show new chat form
-        showNewChat();
+        setViewState('newChat');
+        loadModels();
       }
     } else {
       // Error loading - show new chat form
-      showNewChat();
+      setViewState('newChat');
+      loadModels();
     }
   } catch (error) {
     console.error('Failed to load history:', error);
-    showNewChat();
+    setViewState('newChat');
+    loadModels();
   }
 }
 

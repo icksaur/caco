@@ -11,7 +11,8 @@ import { addActivityItem, formatToolArgs, formatToolResult, toggleActivityBox } 
 import { renderDisplayOutput } from './display-output.js';
 import { removeImage } from './image-paste.js';
 import { setStreaming, getActiveEventSource } from './state.js';
-import { hideNewChat, getNewChatCwd, showNewChatError } from './model-selector.js';
+import { getNewChatCwd, showNewChatError } from './model-selector.js';
+import { setViewState, isViewState } from './view-controller.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -30,8 +31,8 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
   const chat = document.getElementById('chat');
   if (!chat) throw new Error('Chat element not found');
   
-  // Hide new chat form, show chat (transition from new chat to conversation)
-  hideNewChat();
+  // Transition from new chat to conversation view
+  setViewState('chatting');
   
   // Add user message
   const userDiv = document.createElement('div');
@@ -375,8 +376,7 @@ export function setupFormHandler(): void {
     const cwd = getNewChatCwd();
     
     // If new chat form is visible and cwd is empty, show error
-    const newChat = document.getElementById('newChat');
-    if (newChat && !newChat.classList.contains('hidden') && !cwd) {
+    if (isViewState('newChat') && !cwd) {
       showNewChatError('Please enter a working directory');
       return;
     }

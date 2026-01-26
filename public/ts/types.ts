@@ -29,7 +29,8 @@ export interface Preferences {
 
 export interface DisplayOutput {
   id: string;
-  type: 'file' | 'terminal' | 'image';
+  // Type is optional - rendering is driven by metadata
+  type?: string;
 }
 
 export interface ToolEventData {
@@ -49,13 +50,30 @@ export interface MessageEventData {
 export interface OutputData {
   data: string;
   metadata: {
+    // Common
+    type?: string;
+    
+    // File/code metadata
     path?: string;
-    command?: string;
     startLine?: number;
     endLine?: number;
     totalLines?: number;
     highlight?: string;
+    
+    // Terminal metadata
+    command?: string;
     exitCode?: number;
+    
+    // Image metadata
     mimeType?: string;
+    
+    // Embed metadata (html takes precedence over data)
+    html?: string;
+    provider?: string;
+    providerKey?: string;
+    title?: string;
+    author?: string;
+    url?: string;
+    thumbnailUrl?: string;
   };
 }

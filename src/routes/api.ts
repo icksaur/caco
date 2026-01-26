@@ -2,6 +2,7 @@
  * API Routes
  * 
  * General API endpoints:
+ * - GET /api/models - Get available models from SDK
  * - GET /api/preferences - Get preferences
  * - POST /api/preferences - Update preferences
  * - GET /api/outputs/:id - Get display output
@@ -10,11 +11,57 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { CopilotClient } from '@github/copilot-sdk';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../output-cache.js';
 
 const router = Router();
+
+// Cache models to avoid repeated SDK calls
+let cachedModels: Array<{ id: string; name: string; multiplier: number }> | null = null;
+let modelsCacheTime = 0;
+const MODELS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Get available models from SDK
+router.get('/models', async (_req: Request, res: Response) => {
+  try {
+    // Return cached models if fresh
+    if (cachedModels && Date.now() - modelsCacheTime < MODELS_CACHE_TTL) {
+      return res.json({ models: cachedModels });
+    }
+    
+    // Create temporary client to list models
+    const client = new CopilotClient({ cwd: process.cwd() });
+    await client.start();
+    
+    try {
+      const sdkModels = await (client as unknown as { listModels(): Promise<Array<{
+        id: string;
+        name: string;
+        billing?: { multiplier: number };
+      }>> }).listModels();
+      
+      // Transform to our format
+      cachedModels = sdkModels.map(m => ({
+        id: m.id,
+        name: m.name,
+        multiplier: m.billing?.multiplier ?? 1
+      }));
+      modelsCacheTime = Date.now();
+      
+      console.log(`[MODELS] Fetched ${cachedModels.length} models from SDK:`, cachedModels.map(m => m.id));
+      
+      res.json({ models: cachedModels });
+    } finally {
+      await client.stop();
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[MODELS] Failed to fetch models:', message);
+    res.status(500).json({ error: message, models: [] });
+  }
+});
 
 // HTML escape helper
 function escapeHtml(text: string): string {

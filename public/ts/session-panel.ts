@@ -5,34 +5,61 @@
 import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge, scrollToBottom } from './ui-utils.js';
 import { getActiveSessionId, getCurrentCwd, setActiveSession } from './state.js';
+import { setAvailableModels, showNewChat } from './model-selector.js';
+
+/**
+ * Show session manager as the main view (landing page)
+ * Different from toggleSessionPanel - this is for initial page load
+ */
+export function showSessionManager(): void {
+  const chatView = document.getElementById('chatView');
+  const sessionView = document.getElementById('sessionView');
+  const footer = document.getElementById('chatFooter');
+  const menuBtn = document.getElementById('menuBtn');
+  
+  if (!chatView || !sessionView) return;
+  
+  // Switch to session view
+  chatView.classList.remove('active');
+  sessionView.classList.add('active');
+  footer?.classList.add('hidden');
+  menuBtn?.classList.add('active');
+  
+  // Load sessions
+  loadSessions();
+}
 
 /**
  * Toggle session panel visibility
  */
 export function toggleSessionPanel(): void {
-  const chat = document.getElementById('chat');
-  const panel = document.getElementById('sessionPanel');
-  const modelPanel = document.getElementById('modelPanel');
-  const btn = document.querySelector('.hamburger-btn:not(.model-btn)');
-  const modelBtn = document.querySelector('.hamburger-btn.model-btn');
+  const chatView = document.getElementById('chatView');
+  const sessionView = document.getElementById('sessionView');
+  const footer = document.getElementById('chatFooter');
+  const menuBtn = document.getElementById('menuBtn');
   
-  if (!panel || !chat) return;
+  if (!chatView || !sessionView) return;
   
-  const isOpen = panel.classList.contains('visible');
+  const isSessionView = sessionView.classList.contains('active');
   
-  if (isOpen) {
-    // Close panel, show chat
-    panel.classList.remove('visible');
-    chat.classList.remove('hidden');
-    btn?.classList.remove('active');
+  if (isSessionView) {
+    // Switch to chat view
+    sessionView.classList.remove('active');
+    chatView.classList.add('active');
+    footer?.classList.remove('hidden');
+    menuBtn?.classList.remove('active');
+    
+    // Check if we have chat messages - if not, show new chat form with models
+    const chat = document.getElementById('chat');
+    if (chat && chat.children.length === 0) {
+      showNewChat(getCurrentCwd());
+    }
   } else {
-    // Close model panel if open
-    modelPanel?.classList.remove('visible');
-    modelBtn?.classList.remove('active');
-    // Open panel, hide chat
-    panel.classList.add('visible');
-    chat.classList.add('hidden');
-    btn?.classList.add('active');
+    // Switch to session view
+    chatView.classList.remove('active');
+    sessionView.classList.add('active');
+    footer?.classList.add('hidden');
+    menuBtn?.classList.add('active');
     // Load sessions when opening
     loadSessions();
   }
@@ -47,10 +74,15 @@ export async function loadSessions(): Promise<void> {
     if (!response.ok) return;
     
     const data: SessionsResponse = await response.json();
-    const { activeSessionId, currentCwd, grouped } = data;
+    const { activeSessionId, currentCwd, grouped, models } = data;
     
     // Update state store
     setActiveSession(activeSessionId, currentCwd);
+    
+    // Store available models from SDK
+    if (models && models.length > 0) {
+      setAvailableModels(models);
+    }
     
     const container = document.getElementById('sessionList');
     if (!container) return;
@@ -179,13 +211,15 @@ export async function deleteSession(sessionId: string, summary?: string): Promis
     if (response.ok) {
       const data = await response.json();
       
-      // If we deleted the active session, clear the chat
+      // If we deleted the active session, show new chat form
       if (data.wasActive) {
         const chat = document.getElementById('chat');
         if (chat) chat.innerHTML = '';
+        showNewChat(getCurrentCwd());
       }
       
-      // Refresh session list
+      // If no sessions left, stay in session manager with just "new chat" button
+      // The loadSessions call will show empty list
       loadSessions();
     } else {
       const err = await response.json();
@@ -198,69 +232,28 @@ export async function deleteSession(sessionId: string, summary?: string): Promis
 }
 
 /**
- * Toggle new chat form expansion
+ * Show new chat UI (switches from session manager to chat view with new chat form)
  */
-export function toggleNewChatForm(): void {
-  const form = document.getElementById('newChatForm');
-  const pathInput = document.getElementById('newChatPath') as HTMLInputElement;
-  const errorDiv = document.getElementById('newChatError');
+export function showNewChatUI(): void {
+  const chatView = document.getElementById('chatView');
+  const sessionView = document.getElementById('sessionView');
+  const footer = document.getElementById('chatFooter');
+  const chat = document.getElementById('chat');
+  const menuBtn = document.getElementById('menuBtn');
   
-  if (!form || !pathInput) return;
-  
-  if (form.classList.contains('expanded')) {
-    // Collapse
-    form.classList.remove('expanded');
-    if (errorDiv) {
-      errorDiv.classList.remove('visible');
-      errorDiv.textContent = '';
-    }
-  } else {
-    // Expand and pre-fill with current cwd
-    form.classList.add('expanded');
-    pathInput.value = getCurrentCwd();
-    pathInput.focus();
-    pathInput.select();
-  }
-}
-
-/**
- * Create a new session with specified cwd
- */
-export async function createNewSession(): Promise<void> {
-  const pathInput = document.getElementById('newChatPath') as HTMLInputElement;
-  const errorDiv = document.getElementById('newChatError');
-  const cwd = pathInput?.value.trim();
-  
-  if (!cwd) {
-    if (errorDiv) {
-      errorDiv.textContent = 'Please enter a working directory path';
-      errorDiv.classList.add('visible');
-    }
-    return;
-  }
-  
-  try {
-    const response = await fetch('/api/sessions/new', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cwd })
-    });
+  if (chatView && sessionView) {
+    // Switch to chat view
+    sessionView.classList.remove('active');
+    chatView.classList.add('active');
+    footer?.classList.remove('hidden');
+    menuBtn?.classList.remove('active');
     
-    if (response.ok) {
-      // Reload the page to start fresh session
-      window.location.reload();
-    } else {
-      const err = await response.json();
-      if (errorDiv) {
-        errorDiv.textContent = err.error || 'Failed to create session';
-        errorDiv.classList.add('visible');
-      }
-    }
-  } catch (error) {
-    console.error('Failed to create session:', error);
-    if (errorDiv) {
-      errorDiv.textContent = 'Failed to create session: ' + (error as Error).message;
-      errorDiv.classList.add('visible');
-    }
+    // Clear old chat and show new chat form with last cwd
+    if (chat) chat.innerHTML = '';
+    showNewChat(getCurrentCwd());
+    
+    // Focus the message input
+    const messageInput = document.querySelector('form input[name="message"]') as HTMLInputElement;
+    messageInput?.focus();
   }
 }

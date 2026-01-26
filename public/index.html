@@ -13,38 +13,48 @@
   <script src="purify.min.js"></script>
 </head>
 <body>
+  <!-- Floating menu button (top-left, always visible) -->
+  <button type="button" id="menuBtn" class="menu-btn" onclick="toggleSessionPanel()" aria-label="Toggle sessions">
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
+
   <main>
-    <div id="chat">
-      <!-- Messages will appear here -->
-    </div>
-    <div id="sessionPanel" class="session-panel">
-      <div id="newChatForm" class="new-chat-form">
-        <button type="button" class="new-chat-toggle" onclick="toggleNewChatForm()">+ New Chat</button>
-        <div class="new-chat-expanded">
-          <input type="text" id="newChatPath" placeholder="Working directory path...">
-          <div class="new-chat-actions">
-            <button type="button" class="new-chat-create" onclick="createNewSession()">Create</button>
-            <button type="button" class="new-chat-cancel" onclick="toggleNewChatForm()">Cancel</button>
-          </div>
-          <div id="newChatError" class="new-chat-error"></div>
+    <!-- Chat view -->
+    <div id="chatView" class="view active">
+      <!-- New chat form (shown when no messages) -->
+      <div id="newChat" class="new-chat">
+        <h2>New Chat</h2>
+        <div class="new-chat-cwd">
+          <label for="newChatCwd">Working directory</label>
+          <input type="text" id="newChatCwd" placeholder="/path/to/project">
         </div>
+        <h3>Select a model</h3>
+        <div id="modelList"></div>
+        <div id="newChatError" class="new-chat-error"></div>
       </div>
+      <!-- Chat messages (shown when has messages) -->
+      <div id="chat" class="hidden">
+        <!-- Messages will appear here -->
+      </div>
+    </div>
+
+    <!-- Session manager view -->
+    <div id="sessionView" class="view">
+      <button type="button" class="new-chat-btn" onclick="showNewChat()">+ New Chat</button>
       <div id="sessionList"></div>
     </div>
   </main>
 
-  <footer>
+  <!-- Footer with chat input -->
+  <footer id="chatFooter">
     <div id="imagePreview" class="image-preview">
       <img id="previewImg" src="" alt="Pasted image">
       <span>Image attached</span>
       <button type="button" class="remove-btn" onclick="removeImage()">× Remove</button>
     </div>
     <form id="chatForm">
-      <button type="button" class="hamburger-btn" onclick="toggleSessionPanel()" aria-label="Toggle sessions">
-        <span></span>
-        <span></span>
-        <span></span>
-      </button>
       <input type="hidden" id="imageData" name="imageData">
       <input type="hidden" id="selectedModel" name="model" value="claude-sonnet-4">
       <input 
@@ -54,14 +64,6 @@
         required
         autofocus
       >
-      <button type="button" class="hamburger-btn model-btn" onclick="toggleModelDropdown()" aria-label="Select model">
-        <span></span>
-        <span></span>
-        <span></span>
-      </button>
-      <div id="modelDropdown" class="model-dropdown">
-        <div id="modelList"></div>
-      </div>
       <button type="submit">
         Send <span class="loading">...</span>
       </button>

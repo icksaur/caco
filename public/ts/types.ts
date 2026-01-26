@@ -18,6 +18,7 @@ export interface SessionsResponse {
   activeSessionId: string;
   currentCwd: string;
   grouped: Record<string, SessionData[]>;
+  models?: ModelInfo[];  // Models from SDK (if available)
 }
 
 export interface Preferences {

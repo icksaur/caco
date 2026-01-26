@@ -33,10 +33,17 @@ router.get('/session', async (_req: Request, res: Response) => {
 // List all sessions grouped by cwd
 router.get('/sessions', (_req: Request, res: Response) => {
   const grouped = sessionManager.listAllGrouped();
+  const models = sessionManager.getModels();
+  
   res.json({
     activeSessionId: sessionState.activeSessionId,
     currentCwd: process.cwd(),
-    grouped
+    grouped,
+    models: models.map(m => ({
+      id: m.id,
+      name: m.name,
+      cost: m.billing?.multiplier ?? 1
+    }))
   });
 });
 

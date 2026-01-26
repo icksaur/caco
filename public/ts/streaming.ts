@@ -8,6 +8,7 @@ import { addActivityItem, formatToolArgs, formatToolResult, toggleActivityBox } 
 import { renderDisplayOutput } from './display-output.js';
 import { removeImage } from './image-paste.js';
 import { setStreaming, getActiveEventSource } from './state.js';
+import { hideNewChat, getNewChatCwd, showNewChatError } from './model-selector.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -25,6 +26,9 @@ let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
 export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
   const chat = document.getElementById('chat');
   if (!chat) throw new Error('Chat element not found');
+  
+  // Hide new chat form, show chat (transition from new chat to conversation)
+  hideNewChat();
   
   // Add user message
   const userDiv = document.createElement('div');
@@ -60,11 +64,14 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
 /**
  * Stream response via EventSource
  */
-export function streamResponse(prompt: string, model: string, imageData: string): void {
+export function streamResponse(prompt: string, model: string, imageData: string, cwd?: string): void {
   // Build URL with parameters
   const params = new URLSearchParams({ prompt, model });
   if (imageData) {
     params.set('imageData', imageData);
+  }
+  if (cwd) {
+    params.set('cwd', cwd);
   }
   
   const eventSource = new EventSource(`/api/stream?${params.toString()}`);
@@ -300,8 +307,23 @@ export function setupFormHandler(): void {
     
     const input = form.querySelector('input[name="message"]') as HTMLInputElement;
     const message = input.value.trim();
-    const model = (document.getElementById('selectedModel') as HTMLInputElement).value;
+    const modelInput = document.getElementById('selectedModel') as HTMLInputElement;
+    const model = modelInput?.value;
     const imageData = (document.getElementById('imageData') as HTMLInputElement).value;
+    
+    // Get cwd from new chat form (will be empty if in existing chat)
+    const cwd = getNewChatCwd();
+    
+    // If new chat form is visible and cwd is empty, show error
+    const newChat = document.getElementById('newChat');
+    if (newChat && !newChat.classList.contains('hidden') && !cwd) {
+      showNewChatError('Please enter a working directory');
+      return;
+    }
+    
+    // Definitive model logging
+    console.log('[MODEL] Client sending request with model:', model || '(undefined)');
+    if (cwd) console.log('[CWD] New session cwd:', cwd);
     
     if (!message) return;
     
@@ -316,7 +338,7 @@ export function setupFormHandler(): void {
     input.value = '';
     removeImage();
     
-    // Start streaming
-    streamResponse(message, model, imageData);
+    // Start streaming (pass cwd for new sessions)
+    streamResponse(message, model, imageData, cwd);
   });
 }

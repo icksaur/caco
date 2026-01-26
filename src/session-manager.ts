@@ -12,6 +12,19 @@ interface CopilotClientInstance {
   createSession(config: CreateSessionConfig): Promise<CopilotSessionInstance>;
   resumeSession(sessionId: string, config?: ResumeSessionConfig): Promise<CopilotSessionInstance>;
   deleteSession(sessionId: string): Promise<void>;
+  listModels(): Promise<SDKModelInfo[]>;
+}
+
+// SDK model info from listModels()
+interface SDKModelInfo {
+  id: string;
+  name: string;
+  capabilities: {
+    supports: { vision: boolean };
+    limits: { max_context_window_tokens: number };
+  };
+  policy?: { state: string; terms: string };
+  billing?: { multiplier: number };
 }
 
 interface CreateSessionConfig {
@@ -90,17 +103,46 @@ class SessionManager {
   // Path to session state directory
   private stateDir = join(homedir(), '.copilot', 'session-state');
   
+  // Cached model list from SDK
+  private cachedModels: SDKModelInfo[] = [];
+  
   private initialized = false;
 
   /**
-   * Initialize: scan disk and build session cache
+   * Initialize: scan disk, build session cache, and fetch model list
    */
   async init(): Promise<void> {
     if (this.initialized) return;
     
     this._discoverSessions();
+    await this._fetchModels();
     this.initialized = true;
-    console.log(`✓ SessionManager initialized (${this.sessionCache.size} sessions discovered)`);
+    console.log(`✓ SessionManager initialized (${this.sessionCache.size} sessions, ${this.cachedModels.length} models)`);
+  }
+  
+  /**
+   * Fetch available models from SDK
+   */
+  private async _fetchModels(): Promise<void> {
+    try {
+      const client = new CopilotClient({ cwd: process.cwd() }) as unknown as CopilotClientInstance;
+      await client.start();
+      this.cachedModels = await client.listModels();
+      await client.stop();
+      console.log(`✓ Fetched ${this.cachedModels.length} models from SDK`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn(`Could not fetch models from SDK: ${message}`);
+      // Fall back to empty - client will use hardcoded list
+      this.cachedModels = [];
+    }
+  }
+  
+  /**
+   * Get cached model list
+   */
+  getModels(): SDKModelInfo[] {
+    return this.cachedModels;
   }
 
   /**
@@ -148,13 +190,20 @@ class SessionManager {
       throw new Error(`Directory ${cwd} is locked by session ${existingSessionId}`);
     }
     
+    // Model is REQUIRED - fail loudly if not provided
+    if (!config.model) {
+      throw new Error('Model is required when creating a session');
+    }
+    
+    console.log(`[MODEL] SessionManager.create() with model: ${config.model}`);
+    
     // Create client with cwd
     const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
     await client.start();
     
     // Create session with streaming enabled
     const session = await client.createSession({
-      model: config.model || 'gpt-4.1',
+      model: config.model,
       streaming: true,
       systemMessage: config.systemMessage,
       ...config
@@ -165,7 +214,7 @@ class SessionManager {
     this.activeSessions.set(session.sessionId, { cwd, session, client });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
     
-    console.log(`✓ Created session ${session.sessionId} for ${cwd}`);
+    console.log(`✓ Created session ${session.sessionId} for ${cwd} with model ${config.model}`);
     return session.sessionId;
   }
 
@@ -409,6 +458,22 @@ class SessionManager {
    */
   isActive(sessionId: string): boolean {
     return this.activeSessions.has(sessionId);
+  }
+
+  /**
+   * Check if a session has messages (i.e., can be resumed)
+   */
+  hasMessages(sessionId: string): boolean {
+    const sessionDir = join(this.stateDir, sessionId);
+    const eventsPath = join(sessionDir, 'events.jsonl');
+    try {
+      const content = readFileSync(eventsPath, 'utf8');
+      // Count actual message events (not just session.start)
+      const lines = content.split('\n').filter(l => l.trim());
+      return lines.length > 1; // More than just session.start
+    } catch {
+      return false;
+    }
   }
 
   /**

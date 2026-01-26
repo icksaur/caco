@@ -5,8 +5,8 @@
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom } from './ui-utils.js';
 import { loadHistory, loadPreferences } from './history.js';
-import { toggleSessionPanel, toggleNewChatForm, createNewSession, switchSession, deleteSession } from './session-panel.js';
-import { toggleModelDropdown, selectModel, loadModels, setupModelDropdownClose } from './model-selector.js';
+import { toggleSessionPanel, switchSession, deleteSession, showSessionManager, showNewChatUI } from './session-panel.js';
+import { selectModel, loadModels, showNewChat } from './model-selector.js';
 import { toggleActivityBox } from './activity.js';
 import { setupFormHandler, stopStreaming } from './streaming.js';
 
@@ -16,11 +16,9 @@ declare global {
     removeImage: typeof removeImage;
     scrollToBottom: typeof scrollToBottom;
     toggleSessionPanel: typeof toggleSessionPanel;
-    toggleNewChatForm: typeof toggleNewChatForm;
-    createNewSession: typeof createNewSession;
+    showNewChat: typeof showNewChatUI;
     switchSession: typeof switchSession;
     deleteSession: typeof deleteSession;
-    toggleModelDropdown: typeof toggleModelDropdown;
     selectModel: typeof selectModel;
     loadModels: typeof loadModels;
     toggleActivityBox: typeof toggleActivityBox;
@@ -32,11 +30,9 @@ declare global {
 window.removeImage = removeImage;
 window.scrollToBottom = scrollToBottom;
 window.toggleSessionPanel = toggleSessionPanel;
-window.toggleNewChatForm = toggleNewChatForm;
-window.createNewSession = createNewSession;
+window.showNewChat = showNewChatUI;
 window.switchSession = switchSession;
 window.deleteSession = deleteSession;
-window.toggleModelDropdown = toggleModelDropdown;
 window.selectModel = selectModel;
 window.loadModels = loadModels;
 window.toggleActivityBox = toggleActivityBox;
@@ -48,13 +44,33 @@ document.body.addEventListener('htmx:afterSwap', () => {
 });
 
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   // Set up event handlers
   setupImagePaste();
   setupFormHandler();
-  setupModelDropdownClose();
   
-  // Load initial state
-  loadPreferences();
-  loadHistory();
+  // Fetch models once on page load
+  try {
+    const response = await fetch('/api/sessions');
+    if (response.ok) {
+      const data = await response.json();
+      if (data.models && data.models.length > 0) {
+        const { setAvailableModels } = await import('./model-selector.js');
+        setAvailableModels(data.models);
+      }
+    }
+  } catch (e) {
+    console.error('Failed to fetch models on startup:', e);
+  }
+  
+  // Load preferences to check for active session
+  const hasActiveSession = await loadPreferences();
+  
+  if (hasActiveSession) {
+    // Active session exists - show chat with history
+    loadHistory();
+  } else {
+    // No active session - show session manager as landing page
+    showSessionManager();
+  }
 });

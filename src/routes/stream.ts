@@ -13,6 +13,7 @@ import { tmpdir } from 'os';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../output-cache.js';
+import { DEFAULT_MODEL } from '../preferences.js';
 
 const router = Router();
 
@@ -36,15 +37,20 @@ interface SessionEvent {
 
 // Streaming SSE endpoint
 router.get('/stream', async (req: Request, res: Response) => {
-  const { prompt, model, imageData } = req.query as { 
+  const { prompt, model, imageData, cwd } = req.query as { 
     prompt?: string; 
     model?: string; 
-    imageData?: string 
+    imageData?: string;
+    cwd?: string;
   };
   
   if (!prompt) {
     return res.status(400).json({ error: 'prompt is required' });
   }
+  
+  // Definitive model logging
+  console.log(`[MODEL] Route received model: ${model || '(undefined)'}`);
+  if (cwd) console.log(`[CWD] Route received cwd for new session: ${cwd}`);
   
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -56,8 +62,8 @@ router.get('/stream', async (req: Request, res: Response) => {
   let tempFilePath: string | null = null;
   
   try {
-    // Ensure session exists
-    const sessionId = await sessionState.ensureSession(model);
+    // Ensure session exists (pass cwd for new session creation)
+    const sessionId = await sessionState.ensureSession(model, cwd);
     
     // Get session
     const session = sessionManager.getSession(sessionId);
@@ -156,7 +162,7 @@ router.get('/stream', async (req: Request, res: Response) => {
 router.post('/message', async (req: Request, res: Response) => {
   const userMessage = req.body.message as string;
   const imageData = req.body.imageData as string | undefined;
-  const model = (req.body.model as string) || 'claude-sonnet-4';
+  const model = (req.body.model as string) || DEFAULT_MODEL;
   let tempFilePath: string | null = null;
 
   if (!userMessage) {

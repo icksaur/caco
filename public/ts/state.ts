@@ -28,13 +28,20 @@ export interface AppState {
 }
 
 // ============================================================
+// Constants
+// ============================================================
+
+// Single source of truth for default model (client-side)
+export const DEFAULT_MODEL = 'claude-sonnet-4';
+
+// ============================================================
 // State Store (singleton)
 // ============================================================
 
 const state: AppState = {
   activeSessionId: null,
   currentCwd: '',
-  selectedModel: 'claude-sonnet-4',
+  selectedModel: DEFAULT_MODEL,
   isStreaming: false,
   activeEventSource: null,
   hasImage: false

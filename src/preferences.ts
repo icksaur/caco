@@ -13,9 +13,12 @@ import type { UserPreferences } from './types.js';
 
 const PREFS_FILE = path.join(homedir(), '.copilot', 'web-preferences.json');
 
+// Single source of truth for default model
+export const DEFAULT_MODEL = 'claude-sonnet-4';
+
 const defaultPreferences: UserPreferences = {
   lastCwd: process.cwd(),
-  lastModel: 'claude-sonnet-4',
+  lastModel: DEFAULT_MODEL,
   lastSessionId: null
 };
 

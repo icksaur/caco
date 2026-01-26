@@ -1,14 +1,19 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
-    "public/chat.js",
-    "public/markdown-renderer.js"
+    "src/**/*.ts",
+    "public/ts/**/*.ts"
   ],
   "project": [
-    "**/*.js",
-    "!public/*.min.js"
+    "src/**/*.ts",
+    "public/ts/**/*.ts"
   ],
   "ignore": [
-    "public/*.min.js"
-  ]
+    "public/*.min.js",
+    "public/bundle.js",
+    "public/chat.js",
+    "public/markdown-renderer.js",
+    "public/script.js"
+  ],
+  "ignoreExportsUsedInFile": true
 }

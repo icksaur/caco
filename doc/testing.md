@@ -5,15 +5,15 @@
 | Module | Tests | Status |
 |--------|-------|--------|
 | `src/oembed.ts` | 21 | ✅ Covered |
-| `src/output-cache.ts` | 49 | ✅ Covered |
+| `src/output-cache.ts` | 6 | ✅ Covered |
 | `src/image-utils.ts` | 14 | ✅ Covered |
-| `src/session-parsing.ts` | 24 | ✅ Covered |
-| `public/ts/ui-utils.ts` | 29 | ✅ Covered |
-| `public/ts/state.ts` | 26 | ✅ Covered |
-| `public/ts/activity.ts` | 31 | ✅ Covered |
+| `src/session-parsing.ts` | 20 | ✅ Covered |
+| `public/ts/ui-utils.ts` | 6 | ✅ Covered |
+| `public/ts/state.ts` | 6 | ✅ Covered |
+| `public/ts/activity.ts` | 9 | ✅ Covered |
 | `public/ts/sse-parser.ts` | 22 | ✅ Covered |
-| `public/ts/markdown-builders.ts` | 22 | ✅ Covered |
-| **Total** | **238** | **~35% of codebase** |
+| `public/ts/markdown-builders.ts` | 6 | ✅ Covered |
+| **Total** | **110** | **Focused regression tests** |
 
 ## Refactoring Plan: Extract Pure Logic
 

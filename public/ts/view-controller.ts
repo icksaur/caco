@@ -6,6 +6,7 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
+import { clearActiveSession } from './state.js';
 
 /** Valid application view states */
 export type ViewState = 'sessions' | 'newChat' | 'chatting';
@@ -82,6 +83,8 @@ export function setViewState(state: ViewState): void {
       els.chatView?.classList.add('active');
       els.newChat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
+      // Clear session so messages don't go to old session
+      clearActiveSession();
       break;
       
     case 'chatting':

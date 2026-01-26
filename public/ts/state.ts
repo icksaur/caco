@@ -113,6 +113,13 @@ export function setActiveSession(sessionId: string | null, cwd: string): void {
 }
 
 /**
+ * Clear active session (for new chat - ensures messages don't go to old session)
+ */
+export function clearActiveSession(): void {
+  state.activeSessionId = null;
+}
+
+/**
  * Set selected model and sync to hidden input
  */
 export function setSelectedModel(modelId: string): void {

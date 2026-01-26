@@ -5,6 +5,8 @@
  * Extracted from SessionManager for testability.
  */
 
+import { parse as parseYaml } from 'yaml';
+
 /**
  * Parsed session start event data
  */
@@ -64,22 +66,8 @@ export function parseWorkspaceYaml(yamlContent: string | undefined): ParsedWorks
   }
   
   try {
-    // Try multiline format first: summary: |
-    const multilineMatch = yamlContent.match(/^summary:\s*\|\s*\n((?:[ \t]+.+\n?)+)/m);
-    if (multilineMatch) {
-      const lines = multilineMatch[1].split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
-      return { summary: lines.join(' ') };
-    }
-    
-    // Simple single-line: summary: value (but not summary: |)
-    const match = yamlContent.match(/^summary:\s*["']?([^|\n][^\n]*?)["']?\s*$/m);
-    if (match) {
-      return { summary: match[1].trim() };
-    }
-    
-    return { summary: null };
+    const parsed = parseYaml(yamlContent) as { summary?: string };
+    return { summary: parsed.summary ?? null };
   } catch {
     return { summary: null };
   }

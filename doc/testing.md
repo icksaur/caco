@@ -7,13 +7,13 @@
 | `src/oembed.ts` | 21 | ✅ Covered |
 | `src/output-cache.ts` | 49 | ✅ Covered |
 | `src/image-utils.ts` | 14 | ✅ Covered |
-| `src/session-parsing.ts` | 25 | ✅ Covered |
+| `src/session-parsing.ts` | 24 | ✅ Covered |
 | `public/ts/ui-utils.ts` | 29 | ✅ Covered |
 | `public/ts/state.ts` | 26 | ✅ Covered |
 | `public/ts/activity.ts` | 31 | ✅ Covered |
 | `public/ts/sse-parser.ts` | 22 | ✅ Covered |
 | `public/ts/markdown-builders.ts` | 22 | ✅ Covered |
-| **Total** | **239** | **~35% of codebase** |
+| **Total** | **238** | **~35% of codebase** |
 
 ## Refactoring Plan: Extract Pure Logic
 

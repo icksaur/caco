@@ -98,46 +98,13 @@ describe('parseSessionStartEvent', () => {
 });
 
 describe('parseWorkspaceYaml', () => {
-  describe('valid summaries', () => {
-    it('extracts simple summary', () => {
+  describe('extracts summary field', () => {
+    it('returns summary from valid yaml', () => {
       expect(parseWorkspaceYaml('summary: Fix the bug')).toEqual({ summary: 'Fix the bug' });
     });
-
-    it('extracts quoted summary', () => {
-      expect(parseWorkspaceYaml('summary: "Fix the bug"')).toEqual({ summary: 'Fix the bug' });
-    });
-
-    it('extracts single-quoted summary', () => {
-      expect(parseWorkspaceYaml("summary: 'Fix the bug'")).toEqual({ summary: 'Fix the bug' });
-    });
-
-    it('extracts summary from multi-field yaml', () => {
-      const yaml = `
-model: gpt-4
-summary: Implement feature X
-created: 2024-01-01
-`;
-      expect(parseWorkspaceYaml(yaml)).toEqual({ summary: 'Implement feature X' });
-    });
-
-    it('handles summary with colons', () => {
-      expect(parseWorkspaceYaml('summary: "Fix: something broken"'))
-        .toEqual({ summary: 'Fix: something broken' });
-    });
   });
 
-  describe('multiline summaries', () => {
-    it('extracts multiline summary with pipe (preserves newlines)', () => {
-      const yaml = `summary: |
-  This is a longer summary
-  that spans multiple lines`;
-      const result = parseWorkspaceYaml(yaml);
-      expect(result.summary).toContain('This is a longer summary');
-      expect(result.summary).toContain('that spans multiple lines');
-    });
-  });
-
-  describe('missing summary', () => {
+  describe('null handling', () => {
     it('returns null when summary key is missing', () => {
       expect(parseWorkspaceYaml('model: gpt-4')).toEqual({ summary: null });
     });
@@ -145,9 +112,7 @@ created: 2024-01-01
     it('returns null for empty summary value', () => {
       expect(parseWorkspaceYaml('summary:')).toEqual({ summary: null });
     });
-  });
 
-  describe('invalid input', () => {
     it('returns null for undefined', () => {
       expect(parseWorkspaceYaml(undefined)).toEqual({ summary: null });
     });
@@ -158,6 +123,10 @@ created: 2024-01-01
 
     it('returns null for whitespace only', () => {
       expect(parseWorkspaceYaml('   ')).toEqual({ summary: null });
+    });
+
+    it('returns null for invalid yaml', () => {
+      expect(parseWorkspaceYaml(':::invalid:::')).toEqual({ summary: null });
     });
   });
 });

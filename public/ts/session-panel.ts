@@ -135,9 +135,9 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
  * Switch to a different session
  */
 export async function switchSession(sessionId: string): Promise<void> {
-  // If already on this session, just close the panel and scroll to bottom
+  // If already on this session, just switch to chat view and scroll to bottom
   if (sessionId === getActiveSessionId()) {
-    toggleSessionPanel();
+    setViewState('chatting');
     scrollToBottom();
     return;
   }

@@ -111,6 +111,12 @@ class SessionState {
       throw new Error('SessionState not initialized');
     }
     
+    // If cwd is provided, this is a NEW chat request - clear active session
+    if (cwd) {
+      console.log(`[SESSION] New chat requested with cwd: ${cwd} - clearing active session`);
+      this._activeSessionId = null;
+    }
+    
     // If we have an active session, return it
     if (this._activeSessionId && sessionManager.isActive(this._activeSessionId)) {
       console.log(`[MODEL] Reusing existing session ${this._activeSessionId} - requested model '${model || '(undefined)'}' is IGNORED`);

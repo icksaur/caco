@@ -115,9 +115,10 @@ class SessionState {
       throw new Error('SessionState not initialized');
     }
     
-    // Explicit new chat request - clear active session
-    if (newChat) {
-      console.log(`[SESSION] New chat requested - clearing active session`);
+    // Explicit new chat request - stop and clear the old session
+    if (newChat && this._activeSessionId) {
+      console.log(`[SESSION] New chat requested - stopping old session ${this._activeSessionId}`);
+      await sessionManager.stop(this._activeSessionId);
       this._activeSessionId = null;
     }
     

@@ -5,6 +5,8 @@
  * All view transitions must go through setViewState() to prevent invalid states.
  */
 
+import { scrollToBottom } from './ui-utils.js';
+
 /** Valid application view states */
 export type ViewState = 'sessions' | 'newChat' | 'chatting';
 
@@ -86,6 +88,8 @@ export function setViewState(state: ViewState): void {
       els.chatView?.classList.add('active');
       els.chat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
+      // Scroll to bottom after view is painted
+      requestAnimationFrame(() => scrollToBottom());
       break;
   }
 }

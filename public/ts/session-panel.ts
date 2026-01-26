@@ -3,7 +3,7 @@
  */
 
 import type { SessionsResponse, SessionData } from './types.js';
-import { formatAge, scrollToBottom } from './ui-utils.js';
+import { formatAge } from './ui-utils.js';
 import { getActiveSessionId, getCurrentCwd, setActiveSession } from './state.js';
 import { setAvailableModels, loadModels, getNewChatCwd } from './model-selector.js';
 import { loadHistory } from './history.js';
@@ -135,10 +135,9 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
  * Switch to a different session
  */
 export async function switchSession(sessionId: string): Promise<void> {
-  // If already on this session, just switch to chat view and scroll to bottom
+  // If already on this session, just switch to chat view
   if (sessionId === getActiveSessionId()) {
     setViewState('chatting');
-    scrollToBottom();
     return;
   }
   
@@ -161,9 +160,6 @@ export async function switchSession(sessionId: string): Promise<void> {
       // Load history and switch to chat view
       await loadHistory();
       setViewState('chatting');
-      
-      // Scroll after view is visible and content is painted
-      requestAnimationFrame(() => scrollToBottom());
     } else {
       const err = await response.json();
       if (clickedItem) clickedItem.classList.remove('loading');

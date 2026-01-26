@@ -13,6 +13,7 @@
  */
 
 import type { OutputData } from './types.js';
+import { buildTerminalMarkdown, buildCodeMarkdown } from './markdown-builders.js';
 
 // Declare globals from external scripts
 declare global {
@@ -103,8 +104,11 @@ function renderImage(container: Element, outputId: string, data: string, metadat
  * Render terminal/command output
  */
 function renderTerminal(container: Element, data: string, metadata: OutputData['metadata']): void {
-  const exitInfo = metadata.exitCode === 0 ? '' : ` (exit ${metadata.exitCode})`;
-  const markdown = '```bash\n$ ' + metadata.command + exitInfo + '\n' + data + '\n```';
+  const markdown = buildTerminalMarkdown({
+    command: metadata.command || '',
+    exitCode: metadata.exitCode,
+    output: data
+  });
   renderMarkdown(container, markdown, 'output-terminal');
 }
 
@@ -112,12 +116,14 @@ function renderTerminal(container: Element, data: string, metadata: OutputData['
  * Render code/file content
  */
 function renderCode(container: Element, data: string, metadata: OutputData['metadata']): void {
-  const lang = metadata.highlight || '';
-  const pathInfo = metadata.path ? `**${metadata.path}**` : '';
-  const lineInfo = metadata.startLine && metadata.endLine 
-    ? ` (lines ${metadata.startLine}-${metadata.endLine} of ${metadata.totalLines})`
-    : '';
-  const markdown = pathInfo + lineInfo + '\n\n```' + lang + '\n' + data + '\n```';
+  const markdown = buildCodeMarkdown({
+    data,
+    path: metadata.path,
+    highlight: metadata.highlight,
+    startLine: metadata.startLine,
+    endLine: metadata.endLine,
+    totalLines: metadata.totalLines
+  });
   renderMarkdown(container, markdown, 'output-code');
 }
 

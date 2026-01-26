@@ -6,11 +6,14 @@
 |--------|-------|--------|
 | `src/oembed.ts` | 21 | ✅ Covered |
 | `src/output-cache.ts` | 49 | ✅ Covered |
+| `src/image-utils.ts` | 14 | ✅ Covered |
+| `src/session-parsing.ts` | 25 | ✅ Covered |
 | `public/ts/ui-utils.ts` | 29 | ✅ Covered |
 | `public/ts/state.ts` | 26 | ✅ Covered |
 | `public/ts/activity.ts` | 31 | ✅ Covered |
 | `public/ts/sse-parser.ts` | 22 | ✅ Covered |
-| **Total** | **178** | **25% of codebase** |
+| `public/ts/markdown-builders.ts` | 22 | ✅ Covered |
+| **Total** | **239** | **~35% of codebase** |
 
 ## Refactoring Plan: Extract Pure Logic
 
@@ -21,8 +24,8 @@ Extract pure functions, then test those.
 
 | Step | Status | Description |
 |------|--------|-------------|
-| 1.1 | ⬜ | Extract `parseSessionRecord(eventsJsonl, workspaceYaml)` from `session-manager.ts` |
-| 1.2 | ⬜ | Write tests for session parsing edge cases |
+| 1.1 | ✅ | Extract `parseSessionStartEvent()` and `parseWorkspaceYaml()` from `session-manager.ts` |
+| 1.2 | ✅ | Write tests for session parsing edge cases (25 tests) |
 | 1.3 | ⬜ | Extract `SessionStore` interface for file I/O |
 
 ### Phase 2: Activity Formatting (client)
@@ -43,8 +46,15 @@ Extract pure functions, then test those.
 
 | Step | Status | Description |
 |------|--------|-------------|
-| 4.1 | ⬜ | Extract `buildOutputHtml(data, metadata)` from `display-output.ts` |
-| 4.2 | ⬜ | Write tests for each output type (embed, image, terminal, code) |
+| 4.1 | ✅ | Extract `buildTerminalMarkdown()` and `buildCodeMarkdown()` from `display-output.ts` |
+| 4.2 | ✅ | Write tests for each output type (22 tests) |
+
+### Phase 5: Image Handling
+
+| Step | Status | Description |
+|------|--------|-------------|
+| 5.1 | ✅ | Extract `parseImageDataUrl()` for base64 image parsing |
+| 5.2 | ✅ | Write tests for image data URL parsing (14 tests) |
 
 ---
 
@@ -60,9 +70,13 @@ npm run test:coverage # With coverage report
 
 ```
 tests/unit/
-  oembed.test.ts        # URL detection, provider matching
-  output-cache.test.ts  # Store/get/TTL, language detection
-  ui-utils.test.ts      # escapeHtml, formatAge
-  state.test.ts         # Client state management
-  activity.test.ts      # (Phase 2) Tool formatting
+  activity.test.ts        # Tool formatting
+  image-utils.test.ts     # Image data URL parsing
+  markdown-builders.test.ts # Terminal/code markdown building
+  oembed.test.ts          # URL detection, provider matching
+  output-cache.test.ts    # Store/get/TTL, language detection
+  session-parsing.test.ts # Session start/workspace.yaml parsing
+  sse-parser.test.ts      # SSE buffer parsing
+  state.test.ts           # Client state management
+  ui-utils.test.ts        # escapeHtml, formatAge
 ```

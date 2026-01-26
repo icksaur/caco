@@ -4,6 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import type { SessionConfig, SystemMessage } from './types.js';
+import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
 
 // SDK types (minimal definitions for what we use)
 interface CopilotClientInstance {
@@ -161,18 +162,13 @@ class SessionManager {
       try {
         const eventsPath = join(sessionDir, 'events.jsonl');
         const firstLine = readFileSync(eventsPath, 'utf8').split('\n')[0];
-        const event = JSON.parse(firstLine) as SessionEvent;
-        if (event.type === 'session.start') {
-          const data = event.data as { context?: { cwd?: string } } | undefined;
-          record.cwd = data?.context?.cwd ?? null;
-        }
+        record.cwd = parseSessionStartEvent(firstLine).cwd;
       } catch { /* missing or invalid */ }
       
       // Get summary from workspace.yaml
       try {
         const yamlPath = join(sessionDir, 'workspace.yaml');
-        const yaml = parseYaml(readFileSync(yamlPath, 'utf8')) as { summary?: string };
-        record.summary = yaml.summary ?? null;
+        record.summary = parseWorkspaceYaml(readFileSync(yamlPath, 'utf8')).summary;
       } catch { /* missing or invalid */ }
       
       this.sessionCache.set(sessionId, record);

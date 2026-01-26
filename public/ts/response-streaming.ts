@@ -72,7 +72,7 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
  * - Sending (POST with large body for images)
  * - Receiving (GET SSE with just streamId)
  */
-export async function streamResponse(prompt: string, model: string, imageData: string, cwd?: string): Promise<void> {
+export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
   setStreaming(true, null);
   
   try {
@@ -80,7 +80,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     const response = await fetch('/api/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, model, imageData, cwd })
+      body: JSON.stringify({ prompt, model, imageData, newChat, cwd })
     });
     
     if (!response.ok) {
@@ -374,16 +374,17 @@ export function setupFormHandler(): void {
     
     // Get cwd from new chat form (will be empty if in existing chat)
     const cwd = getNewChatCwd();
+    const isNewChat = isViewState('newChat');
     
     // If new chat form is visible and cwd is empty, show error
-    if (isViewState('newChat') && !cwd) {
+    if (isNewChat && !cwd) {
       showNewChatError('Please enter a working directory');
       return;
     }
     
     // Definitive model logging
     console.log('[MODEL] Client sending request with model:', model || '(undefined)');
-    if (cwd) console.log('[CWD] New session cwd:', cwd);
+    if (isNewChat) console.log('[NEW CHAT] Creating new session with cwd:', cwd);
     
     if (!message) return;
     
@@ -398,7 +399,7 @@ export function setupFormHandler(): void {
     input.value = '';
     removeImage();
     
-    // Start streaming (pass cwd for new sessions)
-    streamResponse(message, model, imageData, cwd);
+    // Start streaming - explicitly pass whether this is a new chat
+    streamResponse(message, model, imageData, isNewChat, cwd);
   });
 }

@@ -29,6 +29,7 @@ interface PendingMessage {
   prompt: string;
   model: string;
   imageData?: string;
+  newChat?: boolean;
   cwd?: string;
   tempFilePath?: string;
   createdAt: number;
@@ -66,10 +67,11 @@ interface SessionEvent {
  * The actual message is sent when the client connects to GET /api/stream/:streamId
  */
 router.post('/message', async (req: Request, res: Response) => {
-  const { prompt, model, imageData, cwd } = req.body as {
+  const { prompt, model, imageData, newChat, cwd } = req.body as {
     prompt?: string;
     model?: string;
     imageData?: string;
+    newChat?: boolean;
     cwd?: string;
   };
   
@@ -93,6 +95,7 @@ router.post('/message', async (req: Request, res: Response) => {
     prompt,
     model: model || DEFAULT_MODEL,
     imageData,
+    newChat,
     cwd,
     tempFilePath,
     createdAt: Date.now()
@@ -123,10 +126,10 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
   // Remove from pending (one-time use)
   pendingMessages.delete(streamId);
   
-  const { prompt, model, cwd, tempFilePath } = pending;
+  const { prompt, model, newChat, cwd, tempFilePath } = pending;
   
   console.log(`[STREAM] Connecting to stream ${streamId}, model: ${model || '(undefined)'}`);
-  if (cwd) console.log(`[CWD] Route received cwd for new session: ${cwd}`);
+  if (newChat) console.log(`[NEW CHAT] Creating new session with cwd: ${cwd}`);
   
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -136,8 +139,8 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
   res.flushHeaders();
   
   try {
-    // Ensure session exists (pass cwd for new session creation)
-    const sessionId = await sessionState.ensureSession(model, cwd);
+    // Ensure session exists (explicit newChat flag, optional cwd)
+    const sessionId = await sessionState.ensureSession(model, newChat, cwd);
     
     // Get session
     const session = sessionManager.getSession(sessionId);

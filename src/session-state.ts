@@ -105,15 +105,19 @@ class SessionState {
    * 
    * If there's a pending resume (from init), resume that session.
    * Otherwise, create a new session with the specified model.
+   * 
+   * @param model - Model to use for the session
+   * @param newChat - Explicitly indicates this is a new chat (clears active session)
+   * @param cwd - Working directory for the session
    */
-  async ensureSession(model?: string, cwd?: string): Promise<string> {
+  async ensureSession(model?: string, newChat?: boolean, cwd?: string): Promise<string> {
     if (!this._config) {
       throw new Error('SessionState not initialized');
     }
     
-    // If cwd is provided, this is a NEW chat request - clear active session
-    if (cwd) {
-      console.log(`[SESSION] New chat requested with cwd: ${cwd} - clearing active session`);
+    // Explicit new chat request - clear active session
+    if (newChat) {
+      console.log(`[SESSION] New chat requested - clearing active session`);
       this._activeSessionId = null;
     }
     

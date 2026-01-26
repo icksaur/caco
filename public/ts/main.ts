@@ -9,6 +9,7 @@ import { toggleSessionPanel, switchSession, deleteSession, showSessionManager, s
 import { selectModel, loadModels, showNewChat } from './model-selector.js';
 import { toggleActivityBox } from './activity.js';
 import { setupFormHandler, stopStreaming } from './response-streaming.js';
+import { setupMarkdownRenderer } from './markdown-renderer.js';
 
 // Export functions to global scope for onclick handlers in HTML
 declare global {
@@ -48,6 +49,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Set up event handlers
   setupImagePaste();
   setupFormHandler();
+  setupMarkdownRenderer();
   
   // Fetch models once on page load
   try {

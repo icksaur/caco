@@ -9,6 +9,7 @@ import { renderDisplayOutput } from './display-output.js';
 import { removeImage } from './image-paste.js';
 import { setStreaming, getActiveEventSource } from './state.js';
 import { hideNewChat, getNewChatCwd, showNewChatError } from './model-selector.js';
+import { parseSSEBuffer } from './sse-parser.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -62,115 +63,227 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
 }
 
 /**
- * Stream response via EventSource
+ * Stream response via EventSource (GET) or fetch (POST for large payloads)
  */
 export function streamResponse(prompt: string, model: string, imageData: string, cwd?: string): void {
-  // Build URL with parameters
-  const params = new URLSearchParams({ prompt, model });
+  // Use POST for image data (too large for URL), GET otherwise
   if (imageData) {
-    params.set('imageData', imageData);
+    streamResponsePost(prompt, model, imageData, cwd);
+  } else {
+    streamResponseGet(prompt, model, cwd);
   }
+}
+
+/**
+ * Stream response via EventSource GET (for text-only requests)
+ */
+function streamResponseGet(prompt: string, model: string, cwd?: string): void {
+  const params = new URLSearchParams({ prompt, model });
   if (cwd) {
     params.set('cwd', cwd);
   }
   
   const eventSource = new EventSource(`/api/stream?${params.toString()}`);
   setStreaming(true, eventSource);
+  setupEventSourceHandlers(eventSource);
+}
+
+/**
+ * Stream response via fetch POST (for requests with images)
+ */
+async function streamResponsePost(prompt: string, model: string, imageData: string, cwd?: string): Promise<void> {
+  setStreaming(true, null);
   
+  try {
+    const response = await fetch('/api/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, model, imageData, cwd })
+    });
+    
+    if (!response.ok || !response.body) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    // Parse SSE stream manually
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    
+    const responseDiv = document.querySelector('#pending-response .markdown-content');
+    let responseContent = '';
+    let firstDeltaReceived = false;
+    
+    const state: StreamState = {
+      getContent: () => responseContent,
+      setContent: (c: string) => { responseContent = c; },
+      getFirstDelta: () => firstDeltaReceived,
+      setFirstDelta: (v: boolean) => { firstDeltaReceived = v; }
+    };
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      
+      // Process complete events using pure parser
+      const { events, remainingBuffer } = parseSSEBuffer(buffer);
+      buffer = remainingBuffer;
+      
+      for (const event of events) {
+        handleSSEEvent(event.type, event.data, responseDiv, state);
+        
+        if (event.type === 'done') {
+          setStreaming(false, null);
+          finishPendingResponse();
+          return;
+        }
+      }
+    }
+    
+    // Stream ended without 'done' event
+    setStreaming(false, null);
+    finishPendingResponse();
+    
+  } catch (err) {
+    console.error('Fetch stream error:', err);
+    setStreaming(false, null);
+    addActivityItem('error', 'Connection error');
+    finishPendingResponse();
+  }
+}
+
+interface StreamState {
+  getContent: () => string;
+  setContent: (c: string) => void;
+  getFirstDelta: () => boolean;
+  setFirstDelta: (v: boolean) => void;
+}
+
+/**
+ * Handle a single SSE event (shared between EventSource and fetch)
+ */
+function handleSSEEvent(eventType: string, dataStr: string, responseDiv: Element | null, state: StreamState): void {
+  try {
+    const data = dataStr ? JSON.parse(dataStr) : {};
+    
+    switch (eventType) {
+      case 'assistant.message_delta':
+        if (data.deltaContent) {
+          state.setContent(state.getContent() + data.deltaContent);
+          if (responseDiv) responseDiv.textContent = state.getContent();
+          
+          if (!state.getFirstDelta()) {
+            const wrapper = document.querySelector('#pending-response .activity-wrapper');
+            if (wrapper) {
+              wrapper.classList.add('collapsed');
+              const icon = wrapper.querySelector('.activity-icon');
+              if (icon) icon.textContent = '▶';
+            }
+            state.setFirstDelta(true);
+          }
+          scrollToBottom();
+        }
+        break;
+        
+      case 'assistant.message':
+        if (data.content && responseDiv) {
+          responseDiv.textContent = data.content;
+          responseDiv.classList.remove('streaming-cursor');
+          const pending = document.getElementById('pending-response');
+          if (pending) pending.dataset.markdownProcessed = 'false';
+          if (typeof window.renderMarkdown === 'function') window.renderMarkdown();
+        }
+        break;
+        
+      case 'assistant.turn_start':
+        addActivityItem('turn', `Turn ${parseInt(data.turnId || 0) + 1}...`);
+        break;
+        
+      case 'assistant.intent':
+        if (data.intent) addActivityItem('intent', `Intent: ${data.intent}`);
+        break;
+        
+      case 'tool.execution_start': {
+        const toolName = data.toolName || data.name || 'tool';
+        const args = formatToolArgs(data.arguments);
+        addActivityItem('tool', `▶ ${toolName}`, args ? `Arguments: ${args}` : null);
+        break;
+      }
+        
+      case 'tool.execution_complete': {
+        const toolName = data.toolName || data.name || 'tool';
+        const status = data.success ? '✓' : '✗';
+        addActivityItem('tool-result', `${status} ${toolName}`, data.result ? formatToolResult(data.result) : null);
+        if (data._output) renderDisplayOutput(data._output);
+        break;
+      }
+        
+      case 'session.error':
+        addActivityItem('error', `Error: ${data.message || 'Unknown error'}`);
+        break;
+        
+      case 'error':
+        addActivityItem('error', `Error: ${data.message || 'Connection error'}`);
+        break;
+    }
+  } catch (_e) {
+    // Ignore parse errors
+  }
+}
+
+/**
+ * Setup event handlers for EventSource (GET streaming)
+ */
+function setupEventSourceHandlers(eventSource: EventSource): void {
   const responseDiv = document.querySelector('#pending-response .markdown-content');
   let responseContent = '';
   let firstDeltaReceived = false;
   
+  const state: StreamState = {
+    getContent: () => responseContent,
+    setContent: (c: string) => { responseContent = c; },
+    getFirstDelta: () => firstDeltaReceived,
+    setFirstDelta: (v: boolean) => { firstDeltaReceived = v; }
+  };
+
   // Handle response text deltas
   eventSource.addEventListener('assistant.message_delta', (e: MessageEvent) => {
-    const data: MessageEventData = JSON.parse(e.data);
-    if (data.deltaContent) {
-      responseContent += data.deltaContent;
-      if (responseDiv) responseDiv.textContent = responseContent;
-      
-      // Collapse activity wrapper on first delta
-      if (!firstDeltaReceived) {
-        const wrapper = document.querySelector('#pending-response .activity-wrapper');
-        if (wrapper) {
-          wrapper.classList.add('collapsed');
-          const icon = wrapper.querySelector('.activity-icon');
-          if (icon) icon.textContent = '▶';
-        }
-        firstDeltaReceived = true;
-      }
-      
-      scrollToBottom();
-    }
+    handleSSEEvent('assistant.message_delta', e.data, responseDiv, state);
   });
   
   // Handle final message
   eventSource.addEventListener('assistant.message', (e: MessageEvent) => {
-    const data: MessageEventData = JSON.parse(e.data);
-    if (data.content && responseDiv) {
-      // Set final content as text (renderMarkdown will parse it)
-      responseDiv.textContent = data.content;
-      responseDiv.classList.remove('streaming-cursor');
-      
-      // Mark as not processed so renderMarkdown will handle it
-      const pending = document.getElementById('pending-response');
-      if (pending) {
-        pending.dataset.markdownProcessed = 'false';
-      }
-      
-      // Render markdown (with DOMPurify sanitization)
-      if (typeof window.renderMarkdown === 'function') {
-        window.renderMarkdown();
-      }
-    }
+    handleSSEEvent('assistant.message', e.data, responseDiv, state);
   });
   
   // Handle turn start
   eventSource.addEventListener('assistant.turn_start', (e: MessageEvent) => {
-    const data = JSON.parse(e.data);
-    addActivityItem('turn', `Turn ${parseInt(data.turnId || 0) + 1}...`);
+    handleSSEEvent('assistant.turn_start', e.data, responseDiv, state);
   });
   
   // Handle intent
   eventSource.addEventListener('assistant.intent', (e: MessageEvent) => {
-    const data = JSON.parse(e.data);
-    if (data.intent) {
-      addActivityItem('intent', `Intent: ${data.intent}`);
-    }
+    handleSSEEvent('assistant.intent', e.data, responseDiv, state);
   });
   
   // Handle tool execution
   eventSource.addEventListener('tool.execution_start', (e: MessageEvent) => {
-    const data: ToolEventData = JSON.parse(e.data);
-    const toolName = data.toolName || data.name || 'tool';
-    const args = formatToolArgs(data.arguments);
-    const summary = `▶ ${toolName}`;
-    const details = args ? `Arguments: ${args}` : null;
-    addActivityItem('tool', summary, details);
+    handleSSEEvent('tool.execution_start', e.data, responseDiv, state);
   });
   
   eventSource.addEventListener('tool.execution_complete', (e: MessageEvent) => {
-    const data: ToolEventData = JSON.parse(e.data);
-    const toolName = data.toolName || data.name || 'tool';
-    const status = data.success ? '✓' : '✗';
-    const summary = `${status} ${toolName}`;
-    const details = data.result ? formatToolResult(data.result) : null;
-    addActivityItem('tool-result', summary, details);
-    
-    // Display output if present (from display-only tools)
-    if (data._output) {
-      renderDisplayOutput(data._output);
-    }
+    handleSSEEvent('tool.execution_complete', e.data, responseDiv, state);
   });
   
   // Handle errors
   eventSource.addEventListener('session.error', (e: MessageEvent) => {
-    const data = JSON.parse(e.data);
-    addActivityItem('error', `Error: ${data.message || 'Unknown error'}`);
+    handleSSEEvent('session.error', e.data, responseDiv, state);
   });
   
   eventSource.addEventListener('error', (e: MessageEvent) => {
-    const data = JSON.parse(e.data || '{}');
-    addActivityItem('error', `Error: ${data.message || 'Connection error'}`);
+    handleSSEEvent('error', e.data || '{}', responseDiv, state);
   });
   
   // Handle completion
@@ -190,7 +303,6 @@ export function streamResponse(prompt: string, model: string, imageData: string,
     eventSource.close();
     setStreaming(false, null);
     
-    // If we haven't received any content, show error
     if (!responseContent && !firstDeltaReceived) {
       addActivityItem('error', 'Connection lost');
     }

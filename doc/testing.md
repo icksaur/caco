@@ -9,7 +9,8 @@
 | `public/ts/ui-utils.ts` | 29 | ✅ Covered |
 | `public/ts/state.ts` | 26 | ✅ Covered |
 | `public/ts/activity.ts` | 31 | ✅ Covered |
-| **Total** | **156** | **22% of codebase** |
+| `public/ts/sse-parser.ts` | 22 | ✅ Covered |
+| **Total** | **178** | **25% of codebase** |
 
 ## Refactoring Plan: Extract Pure Logic
 
@@ -35,8 +36,8 @@ Extract pure functions, then test those.
 
 | Step | Status | Description |
 |------|--------|-------------|
-| 3.1 | ⬜ | Extract `parseStreamEvent(eventType, data)` from `streaming.ts` |
-| 3.2 | ⬜ | Write tests for all SSE event types |
+| 3.1 | ✅ | Extract `parseSSEBuffer(buffer)` from `streaming.ts` |
+| 3.2 | ✅ | Write tests for SSE parsing edge cases |
 
 ### Phase 4: Display Output Building (client)
 

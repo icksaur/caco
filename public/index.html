@@ -20,6 +20,13 @@
     <span></span>
   </button>
 
+  <!-- Editor toggle button (top-right, visible in chatting/editor states) -->
+  <button type="button" id="editorBtn" class="editor-btn hidden" onclick="toggleEditor()" aria-label="Toggle editor">
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
+
   <main>
     <!-- Chat view -->
     <div id="chatView" class="view active">
@@ -44,6 +51,11 @@
     <div id="sessionView" class="view">
       <button type="button" class="new-chat-btn" onclick="showNewChat()">+ New Chat</button>
       <div id="sessionList"></div>
+    </div>
+
+    <!-- Editor view -->
+    <div id="editorView" class="view">
+      <h1>Editor</h1>
     </div>
   </main>
 

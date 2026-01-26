@@ -10,7 +10,18 @@ import { selectModel, loadModels } from './model-selector.js';
 import { toggleActivityBox } from './activity.js';
 import { setupFormHandler, stopStreaming } from './response-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
-import { initViewState } from './view-controller.js';
+import { initViewState, setViewState, isViewState } from './view-controller.js';
+
+/**
+ * Toggle between chatting and editor views
+ */
+function toggleEditor(): void {
+  if (isViewState('editor')) {
+    setViewState('chatting');
+  } else {
+    setViewState('editor');
+  }
+}
 
 // Export functions to global scope for onclick handlers in HTML
 declare global {
@@ -25,6 +36,7 @@ declare global {
     loadModels: typeof loadModels;
     toggleActivityBox: typeof toggleActivityBox;
     stopStreaming: typeof stopStreaming;
+    toggleEditor: typeof toggleEditor;
   }
 }
 
@@ -39,6 +51,7 @@ window.selectModel = selectModel;
 window.loadModels = loadModels;
 window.toggleActivityBox = toggleActivityBox;
 window.stopStreaming = stopStreaming;
+window.toggleEditor = toggleEditor;
 
 // Scroll to bottom when new messages arrive (HTMX)
 document.body.addEventListener('htmx:afterSwap', () => {

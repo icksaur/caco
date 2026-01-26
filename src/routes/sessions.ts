@@ -74,7 +74,8 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
   
   try {
     const newSessionId = await sessionState.switchSession(sessionId);
-    res.json({ success: true, sessionId: newSessionId });
+    const cwd = sessionState.preferences.lastCwd;
+    res.json({ success: true, sessionId: newSessionId, cwd });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(400).json({ error: message });

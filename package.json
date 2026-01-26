@@ -6,7 +6,7 @@
   "scripts": {
     "start": "tsx server.ts",
     "dev": "tsx watch server.ts",
-    "build": "npm run typecheck && npm run lint && npm run knip",
+    "build": "npm run build:client && npm run typecheck && npm run lint && npm run knip",
     "build:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --minify --sourcemap",
     "watch:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --sourcemap --watch",
     "typecheck": "tsc --noEmit",

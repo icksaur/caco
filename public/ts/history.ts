@@ -31,8 +31,7 @@ export async function loadHistory(): Promise<void> {
         if (typeof window.renderMarkdown === 'function') {
           window.renderMarkdown();
         }
-        // Scroll to bottom after loading history
-        scrollToBottom();
+        // Note: caller should scroll after view is visible
       } else {
         // No messages - show new chat form
         showNewChat();

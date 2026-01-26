@@ -6,9 +6,12 @@
  * Scroll chat to bottom
  */
 export function scrollToBottom(): void {
-  const main = document.querySelector('main');
-  if (main) {
-    main.scrollTop = main.scrollHeight;
+  // Try chatView first (the scrollable container for chat messages)
+  const chatView = document.getElementById('chatView');
+  if (chatView) {
+    console.log('[SCROLL] chatView before:', chatView.scrollTop, 'scrollHeight:', chatView.scrollHeight, 'clientHeight:', chatView.clientHeight);
+    chatView.scrollTop = chatView.scrollHeight;
+    console.log('[SCROLL] chatView after:', chatView.scrollTop);
   }
 }
 

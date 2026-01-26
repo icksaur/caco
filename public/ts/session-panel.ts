@@ -5,7 +5,8 @@
 import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge, scrollToBottom } from './ui-utils.js';
 import { getActiveSessionId, getCurrentCwd, setActiveSession } from './state.js';
-import { setAvailableModels, showNewChat } from './model-selector.js';
+import { setAvailableModels, showNewChat, hideNewChat } from './model-selector.js';
+import { loadHistory } from './history.js';
 
 /**
  * Show session manager as the main view (landing page)
@@ -181,8 +182,26 @@ export async function switchSession(sessionId: string): Promise<void> {
     });
     
     if (response.ok) {
-      // Reload the page to get new session's history
-      window.location.reload();
+      const data = await response.json();
+      // Update client state with new session
+      setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
+      
+      // Load history (this calls hideNewChat if there's content)
+      await loadHistory();
+      
+      // Switch to chat view directly (not toggleSessionPanel which has extra logic)
+      const chatView = document.getElementById('chatView');
+      const sessionView = document.getElementById('sessionView');
+      const footer = document.getElementById('chatFooter');
+      const menuBtn = document.getElementById('menuBtn');
+      
+      sessionView?.classList.remove('active');
+      chatView?.classList.add('active');
+      footer?.classList.remove('hidden');
+      menuBtn?.classList.remove('active');
+      
+      // Scroll after view is visible and content is painted
+      requestAnimationFrame(() => scrollToBottom());
     } else {
       const err = await response.json();
       if (clickedItem) clickedItem.classList.remove('loading');

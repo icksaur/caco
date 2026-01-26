@@ -8,7 +8,7 @@ import { loadHistory, loadPreferences } from './history.js';
 import { toggleSessionPanel, switchSession, deleteSession, showSessionManager, showNewChatUI } from './session-panel.js';
 import { selectModel, loadModels, showNewChat } from './model-selector.js';
 import { toggleActivityBox } from './activity.js';
-import { setupFormHandler, stopStreaming } from './streaming.js';
+import { setupFormHandler, stopStreaming } from './response-streaming.js';
 
 // Export functions to global scope for onclick handlers in HTML
 declare global {

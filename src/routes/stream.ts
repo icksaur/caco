@@ -1,33 +1,53 @@
 /**
  * Stream Routes
  * 
- * SSE streaming endpoints for chat:
- * - GET /api/stream - Stream chat response
- * - POST /api/message - Non-streaming fallback
+ * Separated concerns:
+ * - POST /api/message - Accept message+image, return streamId
+ * - GET /api/stream/:streamId - SSE connection for response streaming
+ * 
+ * This separation allows:
+ * - Large image uploads via POST body (not URL params)
+ * - Lightweight SSE connections via GET
+ * - htmx-friendly patterns
  */
 
 import { Router, Request, Response } from 'express';
 import { join } from 'path';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../output-cache.js';
 import { DEFAULT_MODEL } from '../preferences.js';
+import { parseImageDataUrl } from '../image-utils.js';
 
 const router = Router();
 
-// HTML escape helper
-function escapeHtml(text: string): string {
-  const map: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;'
-  };
-  return text.replace(/[&<>"']/g, m => map[m]);
+// Pending message storage (streamId -> message data)
+interface PendingMessage {
+  prompt: string;
+  model: string;
+  imageData?: string;
+  cwd?: string;
+  tempFilePath?: string;
+  createdAt: number;
 }
+
+const pendingMessages = new Map<string, PendingMessage>();
+
+// Clean up old pending messages (older than 5 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, msg] of pendingMessages.entries()) {
+    if (now - msg.createdAt > 5 * 60 * 1000) {
+      pendingMessages.delete(id);
+      if (msg.tempFilePath) {
+        unlink(msg.tempFilePath).catch(() => {});
+      }
+    }
+  }
+}, 60 * 1000);
 
 // Session event type
 interface SessionEvent {
@@ -35,21 +55,77 @@ interface SessionEvent {
   data?: Record<string, unknown>;
 }
 
-// Streaming SSE endpoint
-router.get('/stream', async (req: Request, res: Response) => {
-  const { prompt, model, imageData, cwd } = req.query as { 
-    prompt?: string; 
-    model?: string; 
+/**
+ * POST /api/message - Accept message with optional image, return streamId
+ * 
+ * This is the "send" endpoint. It:
+ * 1. Validates the request
+ * 2. Saves any image to a temp file
+ * 3. Returns a streamId for SSE connection
+ * 
+ * The actual message is sent when the client connects to GET /api/stream/:streamId
+ */
+router.post('/message', async (req: Request, res: Response) => {
+  const { prompt, model, imageData, cwd } = req.body as {
+    prompt?: string;
+    model?: string;
     imageData?: string;
     cwd?: string;
   };
   
   if (!prompt) {
-    return res.status(400).json({ error: 'prompt is required' });
+    res.status(400).json({ error: 'prompt is required' });
+    return;
   }
   
-  // Definitive model logging
-  console.log(`[MODEL] Route received model: ${model || '(undefined)'}`);
+  let tempFilePath: string | undefined;
+  
+  // Pre-process image if present (save to temp file now)
+  const parsed = parseImageDataUrl(imageData);
+  if (parsed) {
+    tempFilePath = join(tmpdir(), `copilot-image-${Date.now()}.${parsed.extension}`);
+    await writeFile(tempFilePath, Buffer.from(parsed.base64Data, 'base64'));
+  }
+  
+  // Generate streamId and store pending message
+  const streamId = randomUUID();
+  pendingMessages.set(streamId, {
+    prompt,
+    model: model || DEFAULT_MODEL,
+    imageData,
+    cwd,
+    tempFilePath,
+    createdAt: Date.now()
+  });
+  
+  console.log(`[STREAM] Created streamId ${streamId} for prompt: ${prompt.substring(0, 50)}...`);
+  
+  res.json({ streamId });
+});
+
+/**
+ * GET /api/stream/:streamId - SSE connection for response streaming
+ * 
+ * This is the "receive" endpoint. It:
+ * 1. Looks up the pending message by streamId
+ * 2. Sends the message to the SDK
+ * 3. Streams events back to the client
+ */
+router.get('/stream/:streamId', async (req: Request, res: Response) => {
+  const streamId = req.params.streamId as string;
+  
+  const pending = pendingMessages.get(streamId);
+  if (!pending) {
+    res.status(404).json({ error: 'Stream not found or expired' });
+    return;
+  }
+  
+  // Remove from pending (one-time use)
+  pendingMessages.delete(streamId);
+  
+  const { prompt, model, cwd, tempFilePath } = pending;
+  
+  console.log(`[STREAM] Connecting to stream ${streamId}, model: ${model || '(undefined)'}`);
   if (cwd) console.log(`[CWD] Route received cwd for new session: ${cwd}`);
   
   // Set SSE headers
@@ -58,8 +134,6 @@ router.get('/stream', async (req: Request, res: Response) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
-  
-  let tempFilePath: string | null = null;
   
   try {
     // Ensure session exists (pass cwd for new session creation)
@@ -70,7 +144,8 @@ router.get('/stream', async (req: Request, res: Response) => {
     if (!session) {
       res.write(`event: error\ndata: ${JSON.stringify({ message: 'No active session' })}\n\n`);
       res.write('event: done\ndata: {}\n\n');
-      return res.end();
+      res.end();
+      return;
     }
     
     const messageOptions: { 
@@ -78,16 +153,9 @@ router.get('/stream', async (req: Request, res: Response) => {
       attachments?: Array<{ type: string; path: string }> 
     } = { prompt };
     
-    // Handle image attachment
-    if (imageData && imageData.startsWith('data:image/')) {
-      const matches = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
-      if (matches) {
-        const extension = matches[1];
-        const base64Data = matches[2];
-        tempFilePath = join(tmpdir(), `copilot-image-${Date.now()}.${extension}`);
-        await writeFile(tempFilePath, Buffer.from(base64Data, 'base64'));
-        messageOptions.attachments = [{ type: 'file', path: tempFilePath }];
-      }
+    // Add image attachment if present
+    if (tempFilePath) {
+      messageOptions.attachments = [{ type: 'file', path: tempFilePath }];
     }
     
     // Subscribe to events
@@ -158,66 +226,5 @@ router.get('/stream', async (req: Request, res: Response) => {
   }
 });
 
-// Non-streaming fallback
-router.post('/message', async (req: Request, res: Response) => {
-  const userMessage = req.body.message as string;
-  const imageData = req.body.imageData as string | undefined;
-  const model = (req.body.model as string) || DEFAULT_MODEL;
-  let tempFilePath: string | null = null;
-
-  if (!userMessage) {
-    return res.send('<div class="error">Message cannot be empty</div>');
-  }
-
-  try {
-    const sessionId = await sessionState.ensureSession(model);
-    
-    const messageOptions: { 
-      prompt: string; 
-      model: string; 
-      attachments?: Array<{ type: string; path: string }> 
-    } = { prompt: userMessage, model };
-
-    // Handle image attachment
-    if (imageData && imageData.startsWith('data:image/')) {
-      const matches = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
-      if (matches) {
-        const extension = matches[1];
-        const base64Data = matches[2];
-        tempFilePath = join(tmpdir(), `copilot-image-${Date.now()}.${extension}`);
-        await writeFile(tempFilePath, Buffer.from(base64Data, 'base64'));
-        messageOptions.attachments = [{ type: 'file', path: tempFilePath }];
-      }
-    }
-
-    const response = await sessionManager.send(sessionId, userMessage, messageOptions) as { 
-      data?: { content?: string } 
-    };
-
-    if (tempFilePath) {
-      await unlink(tempFilePath).catch(() => {});
-    }
-
-    const reply = response?.data?.content || 'No response';
-    res.send(`
-      <div class="message user">${escapeHtml(userMessage)}${imageData ? ' <span class="image-indicator">[img]</span>' : ''}</div>
-      <div class="message assistant" data-markdown>
-        <div class="markdown-content">${escapeHtml(reply)}</div>
-      </div>
-    `);
-  } catch (error) {
-    if (tempFilePath) {
-      await unlink(tempFilePath).catch(() => {});
-    }
-    
-    console.error('Error:', error);
-    const message = error instanceof Error ? error.message : String(error);
-    res.send(`
-      <div class="message error">
-        <strong>Error:</strong> ${escapeHtml(message)}
-      </div>
-    `);
-  }
-});
-
 export default router;
+

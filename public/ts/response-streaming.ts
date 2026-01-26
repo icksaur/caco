@@ -1,5 +1,8 @@
 /**
- * SSE Streaming implementation
+ * Response Streaming
+ * 
+ * Handles receiving streamed responses from the server via SSE.
+ * Separated from message sending (which happens via POST).
  */
 
 import type { ToolEventData, MessageEventData } from './types.js';
@@ -9,7 +12,6 @@ import { renderDisplayOutput } from './display-output.js';
 import { removeImage } from './image-paste.js';
 import { setStreaming, getActiveEventSource } from './state.js';
 import { hideNewChat, getNewChatCwd, showNewChatError } from './model-selector.js';
-import { parseSSEBuffer } from './sse-parser.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -63,93 +65,39 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
 }
 
 /**
- * Stream response via EventSource (GET) or fetch (POST for large payloads)
+ * Stream response: POST message first, then connect to SSE for response
+ * 
+ * This separates concerns:
+ * - Sending (POST with large body for images)
+ * - Receiving (GET SSE with just streamId)
  */
-export function streamResponse(prompt: string, model: string, imageData: string, cwd?: string): void {
-  // Use POST for image data (too large for URL), GET otherwise
-  if (imageData) {
-    streamResponsePost(prompt, model, imageData, cwd);
-  } else {
-    streamResponseGet(prompt, model, cwd);
-  }
-}
-
-/**
- * Stream response via EventSource GET (for text-only requests)
- */
-function streamResponseGet(prompt: string, model: string, cwd?: string): void {
-  const params = new URLSearchParams({ prompt, model });
-  if (cwd) {
-    params.set('cwd', cwd);
-  }
-  
-  const eventSource = new EventSource(`/api/stream?${params.toString()}`);
-  setStreaming(true, eventSource);
-  setupEventSourceHandlers(eventSource);
-}
-
-/**
- * Stream response via fetch POST (for requests with images)
- */
-async function streamResponsePost(prompt: string, model: string, imageData: string, cwd?: string): Promise<void> {
+export async function streamResponse(prompt: string, model: string, imageData: string, cwd?: string): Promise<void> {
   setStreaming(true, null);
   
   try {
-    const response = await fetch('/api/stream', {
+    // Step 1: POST message to get streamId
+    const response = await fetch('/api/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, model, imageData, cwd })
     });
     
-    if (!response.ok || !response.body) {
-      throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP ${response.status}`);
     }
     
-    // Parse SSE stream manually
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+    const { streamId } = await response.json();
     
-    const responseDiv = document.querySelector('#pending-response .markdown-content');
-    let responseContent = '';
-    let firstDeltaReceived = false;
+    // Step 2: Connect to SSE for response streaming
+    const eventSource = new EventSource(`/api/stream/${streamId}`);
+    setStreaming(true, eventSource);
+    setupEventSourceHandlers(eventSource);
     
-    const state: StreamState = {
-      getContent: () => responseContent,
-      setContent: (c: string) => { responseContent = c; },
-      getFirstDelta: () => firstDeltaReceived,
-      setFirstDelta: (v: boolean) => { firstDeltaReceived = v; }
-    };
-    
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      
-      // Process complete events using pure parser
-      const { events, remainingBuffer } = parseSSEBuffer(buffer);
-      buffer = remainingBuffer;
-      
-      for (const event of events) {
-        handleSSEEvent(event.type, event.data, responseDiv, state);
-        
-        if (event.type === 'done') {
-          setStreaming(false, null);
-          finishPendingResponse();
-          return;
-        }
-      }
-    }
-    
-    // Stream ended without 'done' event
+  } catch (error) {
+    console.error('Send message error:', error);
     setStreaming(false, null);
-    finishPendingResponse();
-    
-  } catch (err) {
-    console.error('Fetch stream error:', err);
-    setStreaming(false, null);
-    addActivityItem('error', 'Connection error');
+    addActivityItem('error', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     finishPendingResponse();
   }
 }
@@ -162,7 +110,7 @@ interface StreamState {
 }
 
 /**
- * Handle a single SSE event (shared between EventSource and fetch)
+ * Handle a single SSE event
  */
 function handleSSEEvent(eventType: string, dataStr: string, responseDiv: Element | null, state: StreamState): void {
   try {

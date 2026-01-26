@@ -217,42 +217,20 @@ main {
 .view.active { display: flex; }
 
 /* ========================================
-   MENU BUTTON (Hamburger)
+   FLOATING NAV BUTTONS (Hamburger menus)
+   
+   Two floating buttons for navigation:
+   - menuBtn (left): sessions toggle, blue theme
+   - editorBtn (right): editor toggle, orange theme
+   
+   Both use the same layout, differ only in color.
    ======================================== */
-.menu-btn {
-  position: fixed;
-  top: var(--space-lg);
-  left: var(--space-lg);
-  z-index: 200;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 4px;
-  padding: var(--space-md);
-  background: var(--bg-input);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-}
 
-.menu-btn:hover { background: var(--bg-hover); }
-.menu-btn.active { background: #264f78; border-color: #3a6ea5; }
-.menu-btn span {
-  display: block;
-  width: 18px;
-  height: 2px;
-  background: var(--color-text);
-  border-radius: 1px;
-}
-
-/* ========================================
-   EDITOR BUTTON (Orange hamburger, top-right)
-   ======================================== */
+/* Shared hamburger button layout */
+.menu-btn,
 .editor-btn {
   position: fixed;
   top: var(--space-lg);
-  right: var(--space-lg);
   z-index: 200;
   display: flex;
   flex-direction: column;
@@ -260,21 +238,46 @@ main {
   align-items: center;
   gap: 4px;
   padding: var(--space-md);
-  background: #5c4a1f;
-  border: 1px solid #8b7355;
   border-radius: var(--radius-md);
   cursor: pointer;
 }
 
-.editor-btn:hover { background: #6d5a2a; }
-.editor-btn.hidden { display: none; }
+.menu-btn span,
 .editor-btn span {
   display: block;
   width: 18px;
   height: 2px;
-  background: #ffb347;
   border-radius: 1px;
 }
+
+/* Menu button (left) - Blue theme */
+.menu-btn {
+  left: var(--space-lg);
+  background: #1e3a5f;
+  border: 1px solid #2a4a6f;
+}
+.menu-btn span { background: #6a9fd4; }
+.menu-btn:hover { background: #264f78; }
+.menu-btn.active {
+  background: #2d6cb5;
+  border-color: #4a90d9;
+}
+.menu-btn.active span { background: #ffffff; }
+
+/* Editor button (right) - Orange theme */
+.editor-btn {
+  right: var(--space-lg);
+  background: #4a3520;
+  border: 1px solid #5f4530;
+}
+.editor-btn span { background: #d4956a; }
+.editor-btn:hover { background: #5c4328; }
+.editor-btn.hidden { display: none; }
+.editor-btn.active {
+  background: #b5702d;
+  border-color: #d98c4a;
+}
+.editor-btn.active span { background: #ffffff; }
 
 /* ========================================
    CHAT MESSAGES
@@ -283,7 +286,6 @@ main {
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
-  padding-left: 3rem;
 }
 
 #chat.hidden { display: none; }
@@ -529,7 +531,6 @@ main {
    ======================================== */
 #sessionView {
   padding: var(--space-lg);
-  padding-left: 4rem;
 }
 
 /* ========================================
@@ -537,7 +538,6 @@ main {
    ======================================== */
 #editorView {
   padding: var(--space-lg);
-  padding-left: 4rem;
 }
 
 #editorView h1 {
@@ -559,7 +559,6 @@ main {
    ======================================== */
 .new-chat {
   padding: var(--space-lg);
-  padding-left: 4rem;
 }
 
 .new-chat.hidden { display: none; }
@@ -888,3 +887,23 @@ main {
 button .loading { display: none; }
 .htmx-request button .loading { display: inline; }
 .htmx-request button { opacity: 0.6; }
+
+/* ========================================
+   RESPONSIVE: Desktop gets padding to avoid
+   floating nav buttons covering content.
+   Mobile uses full width (buttons overlay).
+   ======================================== */
+@media (min-width: 768px) {
+  #chat,
+  #sessionView,
+  #editorView,
+  .new-chat {
+    padding-left: 4rem;
+  }
+  
+  /* Right padding for editor button (visible in chat/editor views) */
+  #chat,
+  #editorView {
+    padding-right: 4rem;
+  }
+}

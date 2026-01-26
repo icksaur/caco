@@ -19,6 +19,8 @@ Thumbs.db
 # Build output
 dist/
 build/
+public/bundle.js
+public/bundle.js.map
 
 # Misc
 *.swp

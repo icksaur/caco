@@ -77,6 +77,7 @@ export function setViewState(state: ViewState): void {
   els.footer?.classList.add('hidden');
   els.menuBtn?.classList.remove('active');
   els.editorBtn?.classList.add('hidden');
+  els.editorBtn?.classList.remove('active');
 
   // Apply state-specific classes
   switch (state) {
@@ -105,6 +106,7 @@ export function setViewState(state: ViewState): void {
     case 'editor':
       els.editorView?.classList.add('active');
       els.editorBtn?.classList.remove('hidden');
+      els.editorBtn?.classList.add('active');
       break;
   }
 }

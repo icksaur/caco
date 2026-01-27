@@ -63,15 +63,24 @@ export function executeApplet(content: AppletContent): void {
   contentContainer.innerHTML = content.html;
   
   // Execute JavaScript after HTML is in DOM
+  // Uses <script> element injection so functions are defined in global scope
+  // This allows inline onclick handlers to work (they look up functions globally)
   if (content.js) {
     try {
-      // Create a function to execute JS with access to the applet container
-      // This runs in global scope but we pass the container for convenience
-      const executeScript = new Function('appletContainer', content.js);
-      executeScript(contentContainer);
+      // Remove any previous applet scripts
+      document.querySelectorAll('script[data-applet]').forEach(el => el.remove());
+      
+      const scriptElement = document.createElement('script');
+      scriptElement.setAttribute('data-applet', 'true');
+      // Provide appletContainer as a global for convenience
+      // Functions defined here will be global, so onclick="myFunc()" works
+      scriptElement.textContent = `
+var appletContainer = document.querySelector('#appletView .applet-content');
+${content.js}
+`;
+      document.body.appendChild(scriptElement);
     } catch (error) {
       console.error('[APPLET] JavaScript execution error:', error);
-      // Show error to user in applet view
       const errorDiv = document.createElement('div');
       errorDiv.className = 'applet-error';
       errorDiv.innerHTML = `<pre>JavaScript Error: ${error instanceof Error ? error.message : String(error)}</pre>`;
@@ -96,8 +105,9 @@ export function clearApplet(): void {
     currentStyleElement = null;
   }
   
-  // Also remove any orphaned applet styles
+  // Also remove any orphaned applet styles and scripts
   document.querySelectorAll('style[data-applet]').forEach(el => el.remove());
+  document.querySelectorAll('script[data-applet]').forEach(el => el.remove());
   
   // Clear content container
   const contentContainer = appletView.querySelector('.applet-content');

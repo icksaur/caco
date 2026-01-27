@@ -27,22 +27,23 @@ USE THIS TOOL TO CREATE INTERACTIVE UI:
 The applet view is a dedicated panel where your HTML/JS/CSS runs directly.
 The user interface auto-switches to show your applet when content is set.
 
-JAVASCRIPT CAPABILITIES:
-- Full DOM access within #appletView container
+JAVASCRIPT EXECUTION:
+- Runs in global scope - function declarations are available to onclick handlers
+- Full DOM access (document, getElementById, querySelector, etc.)
 - Fetch API for HTTP requests (including to localhost)
-- Event handlers for user interaction
-- Local state management
+- A global \`appletContainer\` variable points to the .applet-content element
 
 TIPS:
-- Keep HTML semantic and accessible
-- Use inline styles or the css parameter for styling
-- JavaScript runs after HTML is injected
+- Inline onclick="myFunc()" handlers work because JS runs in global scope
+- Use getElementById/querySelector to find elements in your HTML
+- Keep state in regular JS variables (they persist until applet is replaced)
+- CSS classes should be unique to avoid conflicts with the host page
 - The applet persists until replaced or cleared`,
 
     parameters: z.object({
-      html: z.string().describe('HTML content for the applet body. Will be injected into #appletView container.'),
-      js: z.string().optional().describe('JavaScript to execute after HTML is inserted. Runs in global scope with DOM access.'),
-      css: z.string().optional().describe('CSS styles to inject. Scoped styles recommended (use classes/IDs).'),
+      html: z.string().describe('HTML content for the applet body. Will be injected into .applet-content container.'),
+      js: z.string().optional().describe('JavaScript to execute after HTML is inserted. Runs in global scope - function declarations work with onclick handlers.'),
+      css: z.string().optional().describe('CSS styles to inject. Use unique class names to avoid conflicts with host page.'),
       title: z.string().optional().describe('Applet title for the UI header. Shows what this applet is for.')
     }),
 

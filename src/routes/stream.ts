@@ -169,45 +169,35 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
       
       // Handle tool output references
       if (event.type === 'tool.execution_complete') {
-        const toolName = eventData.toolName || eventData.name;
-        const result = (eventData.result as { content?: string }) || {};
+        // toolTelemetry is at the top level of eventData (SDK puts it there)
+        const toolTelemetry = eventData.toolTelemetry as { 
+          outputId?: string;
+          appletSet?: boolean;
+        } | undefined;
         
-        if (result.content) {
-          try {
-            const parsed = JSON.parse(result.content) as { 
-              toolTelemetry?: { 
-                outputId?: string;
-                appletSet?: boolean;
-              } 
+        // Display tool output reference
+        if (toolTelemetry?.outputId) {
+          const storedOutput = getOutput(toolTelemetry.outputId);
+          const outputMeta = storedOutput?.metadata;
+          if (outputMeta) {
+            eventData = {
+              ...eventData,
+              _output: {
+                id: toolTelemetry.outputId,
+                ...outputMeta
+              }
             };
-            
-            // Display tool output reference
-            if (parsed.toolTelemetry?.outputId) {
-              const storedOutput = getOutput(parsed.toolTelemetry.outputId);
-              const outputMeta = storedOutput?.metadata;
-              if (outputMeta) {
-                eventData = {
-                  ...eventData,
-                  _output: {
-                    id: parsed.toolTelemetry.outputId,
-                    ...outputMeta
-                  }
-                };
-              }
-            }
-            
-            // Applet content set - include full content for client-side execution
-            if (parsed.toolTelemetry?.appletSet || toolName === 'set_applet_content') {
-              const appletContent = getApplet();
-              if (appletContent) {
-                eventData = {
-                  ...eventData,
-                  _applet: appletContent
-                };
-              }
-            }
-          } catch {
-            // Not JSON, ignore
+          }
+        }
+        
+        // Applet content set - include full content for client-side execution
+        if (toolTelemetry?.appletSet) {
+          const appletContent = getApplet();
+          if (appletContent) {
+            eventData = {
+              ...eventData,
+              _applet: appletContent
+            };
           }
         }
       }

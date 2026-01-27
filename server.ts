@@ -88,10 +88,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Security: Content Security Policy
+// Note: 'unsafe-eval' is required for applet JS execution via new Function()
 app.use((_req, res, next) => {
   res.setHeader('Content-Security-Policy', 
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline'; " +
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
     "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: blob: https:; " +
     "connect-src 'self'; " +

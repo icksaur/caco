@@ -12,6 +12,14 @@
   <script src="purify.min.js"></script>
 </head>
 <body>
+  <!--
+    ==========================================================================
+    VIEW STATE: All view visibility changes MUST go through view-controller.ts
+    Do NOT manually toggle .active/.hidden classes on views.
+    Use: setViewState('sessions' | 'newChat' | 'chatting' | 'applet')
+    ==========================================================================
+  -->
+
   <!-- Floating menu button (top-left, always visible) -->
   <button type="button" id="menuBtn" class="menu-btn" onclick="toggleSessionPanel()" aria-label="Toggle sessions">
     <span></span>

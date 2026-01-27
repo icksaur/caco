@@ -86,16 +86,22 @@ async function loadAppletBySlug(slug: string): Promise<void> {
 /**
  * Load applet from URL query param (?applet=slug)
  * Called on page load
+ * @returns true if an applet was loaded from URL
  */
-export function loadAppletFromUrl(): void {
+export async function loadAppletFromUrl(): Promise<boolean> {
   const params = new URLSearchParams(window.location.search);
   const slug = params.get('applet');
   if (slug) {
     console.log(`[APPLET] Loading from URL param: ${slug}`);
-    loadAppletBySlug(slug).catch(err => {
+    try {
+      await loadAppletBySlug(slug);
+      return true;
+    } catch (err) {
       console.error(`[APPLET] Failed to load from URL:`, err);
-    });
+      return false;
+    }
   }
+  return false;
 }
 
 /**

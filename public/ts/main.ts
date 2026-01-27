@@ -88,12 +88,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   if (hasActiveSession) {
     // Active session exists - show chat with history
-    loadHistory();
+    await loadHistory();
   } else {
     // No active session - show session manager as landing page
     showSessionManager();
   }
   
   // Check for ?applet=slug param and load that applet
-  loadAppletFromUrl();
+  // This runs AFTER loadHistory so it can override the view state
+  await loadAppletFromUrl();
 });

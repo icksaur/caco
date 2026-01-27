@@ -197,7 +197,12 @@ export function getOutput(outputId: string): StoredOutput | null {
         const dataFile = files.find(f => f.startsWith(outputId) && !f.endsWith('.meta.json'));
         
         if (dataFile) {
-          const data = readFileSync(join(outputDir, dataFile));
+          const dataPath = join(outputDir, dataFile);
+          // Read as string for text types, buffer for binary (images)
+          const isTextFile = dataFile.endsWith('.txt') || dataFile.endsWith('.json');
+          const data = isTextFile 
+            ? readFileSync(dataPath, 'utf-8')
+            : readFileSync(dataPath);
           
           // Cache for future access
           outputCache.set(outputId, {

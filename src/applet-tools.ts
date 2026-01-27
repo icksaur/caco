@@ -425,27 +425,7 @@ The page will reload immediately after this tool is called.`,
   });
 
   const restartServer = defineTool('restart_server', {
-    description: `Schedule a server restart after a delay. THIS MUST BE YOUR FINAL ACTION.
-
-USE THIS WHEN:
-- You've modified server-side TypeScript files (src/*.ts)
-- Changes to routes, tools, or server logic need to take effect
-- You want to apply backend changes without manual intervention
-
-HOW IT WORKS:
-1. This tool schedules a restart after the specified delay (default: 3 seconds)
-2. The current response completes normally
-3. After the delay, the server process exits and restarts
-4. The browser will reconnect automatically
-
-⚠️ CRITICAL: This MUST be your last tool call. After calling this:
-- Do NOT call any more tools
-- Do NOT try to verify the restart worked
-- Simply inform the user the restart is scheduled and end your response
-- The agent session terminates when the server restarts
-
-In dev mode (tsx watch), the server auto-restarts on file changes,
-so this tool is mainly useful for production mode or forced restarts.`,
+    description: `Schedule a server restart to apply backend code changes. Use as final action after modifying src/*.ts files.`,
 
     parameters: z.object({
       delay: z.number()
@@ -470,7 +450,11 @@ so this tool is mainly useful for production mode or forced restarts.`,
       child.unref();
       
       return {
-        textResultForLlm: `Server restart scheduled in ${delay} seconds. The current response will complete, then the server will restart. In dev mode (tsx watch), it will auto-restart. In production, ensure your process manager (systemd, pm2, etc.) restarts the process.`,
+        textResultForLlm: `Server restart scheduled in ${delay} seconds.
+
+⚠️ CRITICAL: This MUST be your final action. Do NOT call any more tools.
+Simply inform the user the restart is scheduled and end your response.
+The server will terminate and the agent session will be lost.`,
         resultType: 'success' as const,
         toolTelemetry: {
           restartScheduled: true,

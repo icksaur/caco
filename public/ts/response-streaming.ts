@@ -66,7 +66,7 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
   return assistantDiv;
 }
 
-import { getAndClearPendingAppletState } from './applet-runtime.js';
+import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 
 /**
  * Stream response: POST message first, then connect to SSE for response
@@ -81,6 +81,8 @@ export async function streamResponse(prompt: string, model: string, imageData: s
   try {
     // Collect pending applet state (if any) to send with message
     const appletState = getAndClearPendingAppletState();
+    // Always collect navigation context for agent queries
+    const appletNavigation = getNavigationContext();
     
     // Step 1: POST message to get streamId
     const response = await fetch('/api/message', {
@@ -92,7 +94,8 @@ export async function streamResponse(prompt: string, model: string, imageData: s
         imageData, 
         newChat, 
         cwd,
-        ...(appletState && { appletState })  // Only include if has data
+        ...(appletState && { appletState }),  // Only include if has data
+        appletNavigation  // Always include navigation context
       })
     });
     

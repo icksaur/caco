@@ -7,7 +7,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { setApplet, getApplet, getAppletUserState, getActiveSlug, setActiveSlug, triggerReload } from './applet-state.js';
+import { setApplet, getApplet, getAppletUserState, getActiveSlug, setActiveSlug, getAppletNavigation, triggerReload } from './applet-state.js';
 import { saveApplet as storeApplet, loadApplet as loadStoredApplet, listApplets as listStoredApplets, getAppletPaths } from './applet-store.js';
 
 /**
@@ -125,12 +125,16 @@ RETURNS:
       const state = getAppletUserState();
       const applet = getApplet();
       const slug = getActiveSlug();
+      const navigation = getAppletNavigation();
       
       // Build response with metadata
       const meta = {
         activeSlug: slug || null,
         appletTitle: applet?.title || null,
-        hasApplet: !!applet
+        hasApplet: !!applet,
+        // Navigation context from client
+        stack: navigation.stack,
+        urlParams: navigation.urlParams
       };
       
       if (key) {

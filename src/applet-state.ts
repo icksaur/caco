@@ -5,6 +5,7 @@
  * Phase 1: Single applet, session-scoped, no persistence.
  * Phase 2: Applet-pushed state for agent queries.
  * Phase 3: Active slug tracking for persisted applets.
+ * Phase 4: Navigation context (stack + URL params) for agent queries.
  */
 
 export interface AppletContent {
@@ -15,6 +16,11 @@ export interface AppletContent {
   timestamp: number;
 }
 
+export interface NavigationContext {
+  stack: Array<{ slug: string; label: string }>;
+  urlParams: Record<string, string>;
+}
+
 let currentApplet: AppletContent | null = null;
 
 // Phase 2: User state pushed from applet JS
@@ -22,6 +28,9 @@ let appletUserState: Record<string, unknown> = {};
 
 // Phase 3: Active slug if this applet was loaded from/saved to disk
 let activeSlug: string | null = null;
+
+// Phase 4: Navigation context from client
+let appletNavigation: NavigationContext = { stack: [], urlParams: {} };
 
 /**
  * Set the current applet content
@@ -83,6 +92,21 @@ export function setAppletUserState(state: Record<string, unknown>): void {
  */
 export function getAppletUserState(): Record<string, unknown> {
   return appletUserState;
+}
+
+/**
+ * Set navigation context (called when receiving message with appletNavigation)
+ */
+export function setAppletNavigation(nav: NavigationContext): void {
+  appletNavigation = nav;
+  console.log(`[APPLET] Navigation context updated: ${nav.stack.length} items in stack`);
+}
+
+/**
+ * Get navigation context (called from get_applet_state tool)
+ */
+export function getAppletNavigation(): NavigationContext {
+  return appletNavigation;
 }
 
 // Reload signal for client

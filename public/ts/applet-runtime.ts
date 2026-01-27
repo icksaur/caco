@@ -19,6 +19,9 @@ export interface AppletContent {
 // Current applet style element (for cleanup)
 let currentStyleElement: HTMLStyleElement | null = null;
 
+// Pending applet state - accumulated until next message is sent
+let pendingAppletState: Record<string, unknown> | null = null;
+
 /**
  * Initialize applet runtime - exposes global functions for applet JS
  * Call this once at app startup
@@ -29,22 +32,25 @@ export function initAppletRuntime(): void {
 }
 
 /**
- * Push state from applet to server
+ * Store state from applet locally
+ * State is accumulated and sent with the next message POST
  * Applet JS calls this to make state queryable by agent's get_applet_state tool
  */
-async function setAppletState(state: Record<string, unknown>): Promise<void> {
-  try {
-    const response = await fetch('/api/applet/state', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state)
-    });
-    if (!response.ok) {
-      console.error('[APPLET] Failed to sync state:', response.status);
-    }
-  } catch (error) {
-    console.error('[APPLET] Error syncing state:', error);
-  }
+function setAppletState(state: Record<string, unknown>): void {
+  // Merge with existing pending state (newer values overwrite)
+  pendingAppletState = { ...pendingAppletState, ...state };
+  console.log('[APPLET] State updated locally:', pendingAppletState);
+}
+
+/**
+ * Get and clear pending applet state
+ * Called by message sender to include state with POST
+ * Returns null if no state pending
+ */
+export function getAndClearPendingAppletState(): Record<string, unknown> | null {
+  const state = pendingAppletState;
+  pendingAppletState = null;
+  return state;
 }
 
 /**

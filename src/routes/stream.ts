@@ -19,7 +19,7 @@ import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
-import { getApplet } from '../applet-state.js';
+import { getApplet, setAppletUserState } from '../applet-state.js';
 import { DEFAULT_MODEL } from '../preferences.js';
 import { parseImageDataUrl } from '../image-utils.js';
 
@@ -68,17 +68,24 @@ interface SessionEvent {
  * The actual message is sent when the client connects to GET /api/stream/:streamId
  */
 router.post('/message', async (req: Request, res: Response) => {
-  const { prompt, model, imageData, newChat, cwd } = req.body as {
+  const { prompt, model, imageData, newChat, cwd, appletState } = req.body as {
     prompt?: string;
     model?: string;
     imageData?: string;
     newChat?: boolean;
     cwd?: string;
+    appletState?: Record<string, unknown>;
   };
   
   if (!prompt) {
     res.status(400).json({ error: 'prompt is required' });
     return;
+  }
+  
+  // Store applet state if provided (batched from client)
+  if (appletState && typeof appletState === 'object') {
+    setAppletUserState(appletState);
+    console.log('[STREAM] Stored batched applet state');
   }
   
   let tempFilePath: string | undefined;

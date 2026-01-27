@@ -66,6 +66,8 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
   return assistantDiv;
 }
 
+import { getAndClearPendingAppletState } from './applet-runtime.js';
+
 /**
  * Stream response: POST message first, then connect to SSE for response
  * 
@@ -77,11 +79,21 @@ export async function streamResponse(prompt: string, model: string, imageData: s
   setStreaming(true, null);
   
   try {
+    // Collect pending applet state (if any) to send with message
+    const appletState = getAndClearPendingAppletState();
+    
     // Step 1: POST message to get streamId
     const response = await fetch('/api/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, model, imageData, newChat, cwd })
+      body: JSON.stringify({ 
+        prompt, 
+        model, 
+        imageData, 
+        newChat, 
+        cwd,
+        ...(appletState && { appletState })  // Only include if has data
+      })
     });
     
     if (!response.ok) {

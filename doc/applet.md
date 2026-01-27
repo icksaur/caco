@@ -339,6 +339,16 @@ Instead of polling/querying the DOM on demand, the applet JS pushes state update
 3. **Server-side**: `/api/applet/state` POST endpoint caches the state
 4. **Server-side**: `get_applet_state` tool reads cached state
 
+**Optimization (batching):**
+
+State updates are batched with message POSTs to minimize HTTP calls:
+
+1. **Client-side**: `setAppletState()` stores locally (no immediate HTTP)
+2. **Client-side**: When user sends next message, state included in POST body
+3. **Server-side**: `/api/message` extracts `appletState` and stores it
+
+This is efficient for SSH tunnels and high-frequency state updates.
+
 **Agent's responsibility**: Write applet JS that calls `setAppletState()` to expose relevant data.
 
 **Example pattern** (agent generates this):
@@ -353,12 +363,15 @@ function updateDisplay(value) {
 **Benefits**:
 - No async DOM querying from server
 - State always reflects latest user interaction
-- Simple request/response for tool
+- Minimal HTTP calls (batched with message)
+- Works well over SSH tunnels
 
 **Implementation Notes (Phase 2):**
-- `applet-runtime.ts` - `initAppletRuntime()` exposes global `setAppletState()` function
+- `applet-runtime.ts` - `setAppletState()` stores locally, `getAndClearPendingAppletState()` for batching
+- `response-streaming.ts` - Includes pending applet state when sending message
+- `stream.ts` - Extracts `appletState` from POST body and stores via `setAppletUserState()`
 - `applet-state.ts` - `appletUserState` object stores pushed state, cleared on applet change
-- `api.ts` - POST `/api/applet/state` receives state, GET returns it (for debugging)
+- `api.ts` - POST `/api/applet/state` fallback endpoint, GET for debugging
 - `applet-tools.ts` - `get_applet_state` tool returns cached state with optional key filter
 - Tool descriptions teach agent about `setAppletState()` pattern
 

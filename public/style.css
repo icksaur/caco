@@ -221,14 +221,14 @@ main {
    
    Two floating buttons for navigation:
    - menuBtn (left): sessions toggle, blue theme
-   - editorBtn (right): editor toggle, orange theme
+   - appletBtn (right): applet toggle, orange theme
    
    Both use the same layout, differ only in color.
    ======================================== */
 
 /* Shared hamburger button layout */
 .menu-btn,
-.editor-btn {
+.applet-btn {
   position: fixed;
   top: var(--space-lg);
   z-index: 200;
@@ -243,7 +243,7 @@ main {
 }
 
 .menu-btn span,
-.editor-btn span {
+.applet-btn span {
   display: block;
   width: 18px;
   height: 2px;
@@ -264,20 +264,20 @@ main {
 }
 .menu-btn.active span { background: #ffffff; }
 
-/* Editor button (right) - Orange theme */
-.editor-btn {
+/* Applet button (right) - Orange theme */
+.applet-btn {
   right: var(--space-lg);
   background: #4a3520;
   border: 1px solid #5f4530;
 }
-.editor-btn span { background: #d4956a; }
-.editor-btn:hover { background: #5c4328; }
-.editor-btn.hidden { display: none; }
-.editor-btn.active {
+.applet-btn span { background: #d4956a; }
+.applet-btn:hover { background: #5c4328; }
+.applet-btn.hidden { display: none; }
+.applet-btn.active {
   background: #b5702d;
   border-color: #d98c4a;
 }
-.editor-btn.active span { background: #ffffff; }
+.applet-btn.active span { background: #ffffff; }
 
 /* ========================================
    CHAT MESSAGES
@@ -534,13 +534,13 @@ main {
 }
 
 /* ========================================
-   EDITOR VIEW
+   APPLET VIEW
    ======================================== */
-#editorView {
+#appletView {
   padding: var(--space-lg);
 }
 
-#editorView h1 {
+#appletView h1 {
   color: #ffb347;
 }
 
@@ -882,13 +882,6 @@ main {
 .output-embed[data-provider="spotify"] .embed-frame { min-height: 152px; }
 
 /* ========================================
-   HTMX LOADING STATES
-   ======================================== */
-button .loading { display: none; }
-.htmx-request button .loading { display: inline; }
-.htmx-request button { opacity: 0.6; }
-
-/* ========================================
    RESPONSIVE: Desktop gets padding to avoid
    floating nav buttons covering content.
    Mobile uses full width (buttons overlay).
@@ -896,14 +889,14 @@ button .loading { display: none; }
 @media (min-width: 768px) {
   #chat,
   #sessionView,
-  #editorView,
+  #appletView,
   .new-chat {
     padding-left: 4rem;
   }
   
-  /* Right padding for editor button (visible in chat/editor views) */
+  /* Right padding for applet button (visible in chat/applet views) */
   #chat,
-  #editorView {
+  #appletView {
     padding-right: 4rem;
   }
 }

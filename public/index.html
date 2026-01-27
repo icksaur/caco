@@ -6,7 +6,6 @@
   <title>Copilot Chat</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="highlight-dark.min.css">
-  <script src="htmx.min.js"></script>
   <script src="marked.min.js"></script>
   <script src="mermaid.min.js"></script>
   <script src="highlight.min.js"></script>
@@ -20,8 +19,8 @@
     <span></span>
   </button>
 
-  <!-- Editor toggle button (top-right, visible in chatting/editor states) -->
-  <button type="button" id="editorBtn" class="editor-btn hidden" onclick="toggleEditor()" aria-label="Toggle editor">
+  <!-- Applet toggle button (top-right, visible in chatting/applet states) -->
+  <button type="button" id="appletBtn" class="applet-btn hidden" onclick="toggleApplet()" aria-label="Toggle applet">
     <span></span>
     <span></span>
     <span></span>
@@ -53,9 +52,9 @@
       <div id="sessionList"></div>
     </div>
 
-    <!-- Editor view -->
-    <div id="editorView" class="view">
-      <h1>Editor</h1>
+    <!-- Applet view -->
+    <div id="appletView" class="view">
+      <h1>Applet</h1>
     </div>
   </main>
 

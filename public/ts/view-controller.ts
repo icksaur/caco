@@ -9,7 +9,7 @@ import { scrollToBottom } from './ui-utils.js';
 import { clearActiveSession } from './state.js';
 
 /** Valid application view states */
-export type ViewState = 'sessions' | 'newChat' | 'chatting' | 'editor';
+export type ViewState = 'sessions' | 'newChat' | 'chatting' | 'applet';
 
 /** Current view state */
 let currentState: ViewState = 'sessions';
@@ -18,12 +18,12 @@ let currentState: ViewState = 'sessions';
 interface ViewElements {
   chatView: HTMLElement | null;
   sessionView: HTMLElement | null;
-  editorView: HTMLElement | null;
+  appletView: HTMLElement | null;
   chat: HTMLElement | null;
   newChat: HTMLElement | null;
   footer: HTMLElement | null;
   menuBtn: HTMLElement | null;
-  editorBtn: HTMLElement | null;
+  appletBtn: HTMLElement | null;
 }
 
 let cachedElements: ViewElements | null = null;
@@ -36,12 +36,12 @@ function getElements(): ViewElements {
     cachedElements = {
       chatView: document.getElementById('chatView'),
       sessionView: document.getElementById('sessionView'),
-      editorView: document.getElementById('editorView'),
+      appletView: document.getElementById('appletView'),
       chat: document.getElementById('chat'),
       newChat: document.getElementById('newChat'),
       footer: document.getElementById('chatFooter'),
       menuBtn: document.getElementById('menuBtn'),
-      editorBtn: document.getElementById('editorBtn'),
+      appletBtn: document.getElementById('appletBtn'),
     };
   }
   return cachedElements;
@@ -71,13 +71,13 @@ export function setViewState(state: ViewState): void {
   // Reset all elements to default (hidden/inactive)
   els.chatView?.classList.remove('active');
   els.sessionView?.classList.remove('active');
-  els.editorView?.classList.remove('active');
+  els.appletView?.classList.remove('active');
   els.chat?.classList.add('hidden');
   els.newChat?.classList.add('hidden');
   els.footer?.classList.add('hidden');
   els.menuBtn?.classList.remove('active');
-  els.editorBtn?.classList.add('hidden');
-  els.editorBtn?.classList.remove('active');
+  els.appletBtn?.classList.add('hidden');
+  els.appletBtn?.classList.remove('active');
 
   // Apply state-specific classes
   switch (state) {
@@ -98,15 +98,15 @@ export function setViewState(state: ViewState): void {
       els.chatView?.classList.add('active');
       els.chat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
-      els.editorBtn?.classList.remove('hidden');
+      els.appletBtn?.classList.remove('hidden');
       // Scroll to bottom after view is painted
       requestAnimationFrame(() => scrollToBottom());
       break;
       
-    case 'editor':
-      els.editorView?.classList.add('active');
-      els.editorBtn?.classList.remove('hidden');
-      els.editorBtn?.classList.add('active');
+    case 'applet':
+      els.appletView?.classList.add('active');
+      els.appletBtn?.classList.remove('hidden');
+      els.appletBtn?.classList.add('active');
       break;
   }
 }

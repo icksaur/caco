@@ -44,7 +44,6 @@ export default [
         DOMPurify: 'readonly',
         hljs: 'readonly',
         mermaid: 'readonly',
-        htmx: 'readonly',
         // Our own scripts loaded separately
         renderMarkdown: 'readonly'
       }

@@ -13,13 +13,13 @@ import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initViewState, setViewState, isViewState } from './view-controller.js';
 
 /**
- * Toggle between chatting and editor views
+ * Toggle between chatting and applet views
  */
-function toggleEditor(): void {
-  if (isViewState('editor')) {
+function toggleApplet(): void {
+  if (isViewState('applet')) {
     setViewState('chatting');
   } else {
-    setViewState('editor');
+    setViewState('applet');
   }
 }
 
@@ -36,7 +36,7 @@ declare global {
     loadModels: typeof loadModels;
     toggleActivityBox: typeof toggleActivityBox;
     stopStreaming: typeof stopStreaming;
-    toggleEditor: typeof toggleEditor;
+    toggleApplet: typeof toggleApplet;
   }
 }
 
@@ -51,12 +51,7 @@ window.selectModel = selectModel;
 window.loadModels = loadModels;
 window.toggleActivityBox = toggleActivityBox;
 window.stopStreaming = stopStreaming;
-window.toggleEditor = toggleEditor;
-
-// Scroll to bottom when new messages arrive (HTMX)
-document.body.addEventListener('htmx:afterSwap', () => {
-  scrollToBottom();
-});
+window.toggleApplet = toggleApplet;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {

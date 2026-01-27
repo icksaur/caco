@@ -1,98 +1,97 @@
-# Copilot Web Front-end
+# Copilot Web
 
-A simple local web app using the Copilot CLI SDK for a chat interface.
+A self-extensible chat front-end for the [GitHub Copilot CLI SDK](https://github.com/github/copilot-sdk).
 
-[Copilot CLI SDK](https://github.com/github/copilot-sdk)
+## What is this?
 
-## MVP: Local Development Only
+A local web interface for Copilot that the agent can extend at runtime. The agent can create custom interactive applets in the browser—file browsers, dashboards, forms—without modifying the codebase.
 
-**What we're building:**
-- Simple chat interface running on localhost
-- Single user (you)
-- No authentication needed
-- All tools enabled (`--allow-all` mode)
-- No deployment complexity
+**Key capabilities:**
+- Chat interface with streaming responses
+- Session management (multiple conversations)
+- Image attachments (paste to send)
+- Agent-generated custom interfaces via MCP tools
+- File operations for custom applets
 
-## SDK Overview
+## Architecture
 
-**Key Points:**
-- Multi-platform SDK (TypeScript, Python, Go, .NET)
-- Communicates with Copilot CLI via JSON-RPC
-- SDK manages CLI process lifecycle automatically
-- Currently in Technical Preview
-- Requires GitHub Copilot subscription (free tier available)
-- Default `--allow-all` mode (perfect for local use)
+```
+Browser (localhost:3000)
+    ↓ fetch / SSE
+Express Server
+    ↓ JSON-RPC
+Copilot SDK → Copilot CLI → AI Models
+```
+
+**Frontend:** TypeScript, bundled with esbuild  
+**Backend:** Node.js + Express + Copilot SDK  
+**Streaming:** Server-Sent Events (SSE)
 
 ## Requirements
 
 - Node.js 18+
 - GitHub Copilot CLI installed and authenticated
-- npm
+- GitHub Copilot subscription
 
-**Install Copilot CLI:**
 ```bash
-# Follow GitHub's installation guide
-copilot --version  # Verify it works
+copilot --version  # Verify CLI works
 ```
 
-## Stack
+## Quick Start
 
-**Frontend:** htmx (HTML-first, minimal JavaScript)
-- No build step needed
-- Declare behavior in HTML attributes
-- Server renders everything
-- Perfect for simple chat interface
-
-**Backend:** Node.js + Express
-- Serves HTML and handles htmx requests
-- Integrates with Copilot SDK
-- Runs on localhost:3000
-
-**SDK:** @github/copilot-sdk (TypeScript)
-
-## Architecture
-
-```mermaid
-graph TB
-    Browser["Browser<br/>(localhost)"]
-    Express["Express Server<br/>(localhost:3000)"]
-    SDK["Copilot SDK"]
-    CLI["Copilot CLI"]
-    
-    Browser -->|"HTTP (htmx)"| Express
-    Express --> SDK
-    SDK -->|JSON-RPC| CLI
-    
-    style Browser fill:#1e3a5f
-    style Express fill:#3d2817
-    style SDK fill:#4a1f5e
-    style CLI fill:#1f4d28
-```
-
-### Components:
-1. **Frontend**: Single HTML file with htmx
-2. **Backend**: Express server with Copilot SDK
-3. **No authentication, no sessions** - single user local app
-
-### API Endpoints:
-- `GET /` - Serve chat interface
-- `POST /api/message` - Send message, return HTML fragment
-
-## Running the Server
-
-**Start the server:**
 ```bash
-node server.js
-# or with auto-reload:
-npx nodemon server.js
+npm install
+npm run dev        # Start with auto-reload
 ```
 
-Server will be available at: `http://localhost:3000`
+Open `http://localhost:3000`
 
-**Stop the server:**
-- Press `Ctrl+C` in the terminal
+## Development
 
-**Nice to Have**:
-   - [ ] Streaming responses
-   - [ ] Basic styling
-   - [ ] New chat button
+```bash
+npm run build      # Build + typecheck + lint + test
+npm run dev        # Development server (nodemon)
+npm test           # Run tests
+```
+
+## Project Structure
+
+```
+public/
+├── ts/            # TypeScript source (bundled to bundle.js)
+├── index.html     # Single-page app
+└── style.css      # All styling
+
+src/
+├── server.ts      # Express server
+├── session-manager.js  # Copilot session lifecycle
+└── routes/        # API endpoints
+
+doc/
+├── applet.md      # Custom applet interface design
+├── custom-tools.md    # MCP tool documentation
+└── ...            # Feature documentation
+```
+
+## API
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/message` | POST | Send message, returns stream ID |
+| `/api/stream/:id` | GET | SSE stream for responses |
+| `/api/sessions` | GET | List chat sessions |
+| `/api/sessions/:id/resume` | POST | Resume a session |
+| `/api/history` | GET | Current session history |
+
+## Documentation
+
+See `doc/` for detailed documentation:
+- [SDK Features](doc/sdk-features.md)
+- [Custom Tools](doc/custom-tools.md)
+- [Applet Interface](doc/applet.md)
+- [Session Management](doc/session-management.md)
+- [Streaming](doc/streaming.md)
+
+## License
+
+MIT

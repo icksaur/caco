@@ -20,17 +20,8 @@ declare const hljs: {
   highlightAll(): void;
 } | undefined;
 
-// HTMX and event handler attributes to block
+// Event handler attributes to block (XSS protection)
 const FORBIDDEN_ATTRS = [
-  // HTMX attributes - prevent injected HTMX from executing
-  'hx-get', 'hx-post', 'hx-put', 'hx-delete', 'hx-patch',
-  'hx-trigger', 'hx-target', 'hx-swap', 'hx-vals', 'hx-sync',
-  'hx-confirm', 'hx-boost', 'hx-push-url', 'hx-on', 'hx-ext',
-  'hx-include', 'hx-indicator', 'hx-params', 'hx-request',
-  'hx-select', 'hx-select-oob', 'hx-swap-oob', 'hx-preserve',
-  'hx-prompt', 'hx-replace-url', 'hx-disable', 'hx-disabled-elt',
-  'hx-disinherit', 'hx-encoding', 'hx-headers', 'hx-history',
-  'hx-history-elt', 'hx-inherit', 'hx-validate',
   // JavaScript event handlers
   'onclick', 'ondblclick', 'onmousedown', 'onmouseup', 'onmouseover',
   'onmousemove', 'onmouseout', 'onmouseenter', 'onmouseleave',
@@ -162,7 +153,4 @@ export function setupMarkdownRenderer(): void {
   } else {
     renderMarkdown();
   }
-  
-  // Also render after htmx swaps new content
-  document.body.addEventListener('htmx:afterSwap', renderMarkdown);
 }

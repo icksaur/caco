@@ -69,6 +69,15 @@ AVAILABLE GLOBAL FUNCTIONS (call from your applet JS):
 
 HTTP ENDPOINTS (for fetch() in your applet JS):
 
+  GET /api/file?path=relative/path
+    Serve any file with correct Content-Type. Use for images, text, etc.
+    Returns raw file content (not JSON). 404 if not found.
+    Example: <img src="/api/file?path=photos/sunset.jpg">
+    Example: fetch('/api/file?path=config.yaml').then(r => r.text())
+
+  GET /api/files?path=dir
+    List directory contents: { files: [{name, type, size, mtime}] }
+
   GET /api/applets
     List all saved applets: { applets: [{slug, name, description, paths}] }
 
@@ -83,7 +92,8 @@ TIPS:
 - Use getElementById/querySelector to find elements in your HTML
 - Keep state in regular JS variables (they persist until applet is replaced)
 - CSS classes should be unique to avoid conflicts with the host page
-- The applet persists until replaced or cleared`,
+- The applet persists until replaced or cleared
+- For images, use /api/file?path=... directly in <img src>`,
 
     parameters: z.object({
       html: z.string().describe('HTML content for the applet body. Will be injected into .applet-content container.'),

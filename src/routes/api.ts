@@ -416,7 +416,98 @@ router.get('/files', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/files/read - Read file content
+ * GET /api/file - Serve file content with proper Content-Type
+ * Query params:
+ *   path: relative path from programCwd
+ * Returns: raw file content with appropriate Content-Type header
+ * Limited to 10MB files
+ */
+router.get('/file', async (req: Request, res: Response) => {
+  const requestedPath = req.query.path as string;
+  
+  if (!requestedPath) {
+    res.status(400).send('path parameter required');
+    return;
+  }
+  
+  try {
+    // Resolve and validate path
+    const fullPath = resolve(programCwd, requestedPath);
+    const relativePath = relative(programCwd, fullPath);
+    
+    if (relativePath.startsWith('..') || resolve(programCwd, relativePath) !== fullPath) {
+      res.status(403).send('Access denied: path outside workspace');
+      return;
+    }
+    
+    const stats = await stat(fullPath);
+    
+    if (stats.isDirectory()) {
+      res.status(400).send('Cannot serve directory');
+      return;
+    }
+    
+    if (stats.size > 10 * 1024 * 1024) {
+      res.status(413).send('File too large (max 10MB)');
+      return;
+    }
+    
+    // Determine content type from extension
+    const ext = fullPath.split('.').pop()?.toLowerCase() || '';
+    const mimeTypes: Record<string, string> = {
+      // Images
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      gif: 'image/gif',
+      webp: 'image/webp',
+      svg: 'image/svg+xml',
+      ico: 'image/x-icon',
+      // Text
+      txt: 'text/plain',
+      md: 'text/markdown',
+      html: 'text/html',
+      css: 'text/css',
+      js: 'text/javascript',
+      ts: 'text/typescript',
+      json: 'application/json',
+      xml: 'application/xml',
+      // Code
+      py: 'text/x-python',
+      rb: 'text/x-ruby',
+      go: 'text/x-go',
+      rs: 'text/x-rust',
+      java: 'text/x-java',
+      c: 'text/x-c',
+      cpp: 'text/x-c++',
+      h: 'text/x-c',
+      sh: 'text/x-shellscript',
+      yaml: 'text/yaml',
+      yml: 'text/yaml',
+      toml: 'text/toml',
+      // Documents
+      pdf: 'application/pdf',
+    };
+    
+    const contentType = mimeTypes[ext] || 'application/octet-stream';
+    const isText = contentType.startsWith('text/') || contentType === 'application/json';
+    
+    const fileData = await readFile(fullPath);
+    res.setHeader('Content-Type', contentType + (isText ? '; charset=utf-8' : ''));
+    res.setHeader('Content-Length', stats.size);
+    res.send(fileData);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      res.status(404).send('File not found');
+    } else {
+      console.error('[API] Failed to serve file:', error);
+      res.status(500).send('Failed to serve file');
+    }
+  }
+});
+
+/**
+ * GET /api/files/read - Read file content (LEGACY - use GET /api/file instead)
  * Query params:
  *   path: relative path from programCwd
  * Returns: { path, content, size }
@@ -457,6 +548,67 @@ router.get('/files/read', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[API] Failed to read file:', error);
     res.status(500).json({ error: 'Failed to read file' });
+  }
+});
+
+/**
+ * GET /api/files/image - Serve image file (LEGACY - use GET /api/file instead)
+ * Query params:
+ *   path: relative path from programCwd
+ * Returns: image binary with correct content-type
+ * Limited to 10MB images
+ */
+router.get('/files/image', async (req: Request, res: Response) => {
+  const requestedPath = req.query.path as string;
+  
+  if (!requestedPath) {
+    res.status(400).json({ error: 'path parameter required' });
+    return;
+  }
+  
+  try {
+    // Resolve and validate path
+    const fullPath = resolve(programCwd, requestedPath);
+    const relativePath = relative(programCwd, fullPath);
+    
+    if (relativePath.startsWith('..') || resolve(programCwd, relativePath) !== fullPath) {
+      res.status(403).json({ error: 'Access denied: path outside workspace' });
+      return;
+    }
+    
+    const stats = await stat(fullPath);
+    
+    if (stats.isDirectory()) {
+      res.status(400).json({ error: 'Cannot serve directory' });
+      return;
+    }
+    
+    if (stats.size > 10 * 1024 * 1024) {
+      res.status(400).json({ error: 'Image too large (max 10MB)' });
+      return;
+    }
+    
+    // Determine content type from extension
+    const ext = fullPath.split('.').pop()?.toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      gif: 'image/gif',
+      webp: 'image/webp',
+      svg: 'image/svg+xml',
+      ico: 'image/x-icon'
+    };
+    
+    const contentType = mimeTypes[ext || ''] || 'application/octet-stream';
+    
+    const imageData = await readFile(fullPath);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', stats.size);
+    res.send(imageData);
+  } catch (error) {
+    console.error('[API] Failed to serve image:', error);
+    res.status(500).json({ error: 'Failed to serve image' });
   }
 });
 

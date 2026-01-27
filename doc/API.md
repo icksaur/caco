@@ -128,6 +128,7 @@ Defined in `src/applet-tools.ts`
 | `load_applet` | Load saved applet by slug |
 | `list_applets` | List all saved applets with file paths |
 | `reload_page` | Trigger browser page refresh |
+| `restart_server` | Schedule server restart after delay |
 
 **set_applet_content** parameters:
 - `html` (string, required) - HTML content
@@ -149,6 +150,9 @@ Defined in `src/applet-tools.ts`
 **list_applets** - no parameters
 
 **reload_page** - no parameters
+
+**restart_server** parameters:
+- `delay` (number, optional) - Seconds to wait before restart (1-30, default: 3)
 
 ### Display Tools
 

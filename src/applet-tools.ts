@@ -7,6 +7,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
+import { spawn } from 'child_process';
 import { setApplet, getApplet, getAppletUserState, getActiveSlug, setActiveSlug, getAppletNavigation, triggerReload } from './applet-state.js';
 import { saveApplet as storeApplet, loadApplet as loadStoredApplet, listApplets as listStoredApplets, getAppletPaths } from './applet-store.js';
 
@@ -423,5 +424,59 @@ The page will reload immediately after this tool is called.`,
     }
   });
 
-  return [setAppletContent, getAppletState, saveApplet, loadApplet, listApplets, reloadPage];
+  const restartServer = defineTool('restart_server', {
+    description: `Schedule a server restart after a delay.
+
+USE THIS WHEN:
+- You've modified server-side TypeScript files (src/*.ts)
+- Changes to routes, tools, or server logic need to take effect
+- You want to apply backend changes without manual intervention
+
+HOW IT WORKS:
+1. This tool schedules a restart after the specified delay (default: 3 seconds)
+2. The current response completes normally
+3. After the delay, the server process exits and restarts
+4. The browser will reconnect automatically
+
+WARNING: Only use this after completing all server-side changes.
+The agent session will be lost and the user will need to send a new message.
+
+In dev mode (tsx watch), the server auto-restarts on file changes,
+so this tool is mainly useful for production mode or forced restarts.`,
+
+    parameters: z.object({
+      delay: z.number()
+        .min(1)
+        .max(30)
+        .default(3)
+        .describe('Seconds to wait before restarting (1-30, default: 3)')
+    }),
+
+    handler: async ({ delay = 3 }) => {
+      // Spawn a detached process that waits then sends SIGTERM
+      // This allows the current response to complete
+      const script = `
+        sleep ${delay}
+        kill -TERM ${process.pid}
+      `;
+      
+      const child = spawn('sh', ['-c', script], {
+        detached: true,
+        stdio: 'ignore'
+      });
+      child.unref();
+      
+      return {
+        textResultForLlm: `Server restart scheduled in ${delay} seconds. The current response will complete, then the server will restart. In dev mode (tsx watch), it will auto-restart. In production, ensure your process manager (systemd, pm2, etc.) restarts the process.`,
+        resultType: 'success' as const,
+        toolTelemetry: {
+          restartScheduled: true,
+          delaySeconds: delay,
+          pid: process.pid
+        }
+      };
+    }
+  });
+
+  return [setAppletContent, getAppletState, saveApplet, loadApplet, listApplets, reloadPage, restartServer];
 }

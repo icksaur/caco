@@ -84,3 +84,25 @@ export function setAppletUserState(state: Record<string, unknown>): void {
 export function getAppletUserState(): Record<string, unknown> {
   return appletUserState;
 }
+
+// Reload signal for client
+let pendingReload = false;
+
+/**
+ * Signal that the client should reload
+ */
+export function triggerReload(): void {
+  pendingReload = true;
+  console.log('[RELOAD] Page reload triggered');
+}
+
+/**
+ * Check and consume pending reload signal
+ */
+export function consumeReloadSignal(): boolean {
+  if (pendingReload) {
+    pendingReload = false;
+    return true;
+  }
+  return false;
+}

@@ -180,6 +180,10 @@ function handleSSEEvent(eventType: string, dataStr: string, responseDiv: Element
         addActivityItem('tool-result', `${status} ${toolName}`, data.result ? formatToolResult(data.result) : null);
         if (data._output) renderDisplayOutput(data._output);
         if (data._applet) executeApplet(data._applet as AppletContent);
+        if (data._reload) {
+          console.log('[RELOAD] Received reload signal, refreshing page...');
+          setTimeout(() => location.reload(), 500);
+        }
         break;
       }
         

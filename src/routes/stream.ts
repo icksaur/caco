@@ -19,7 +19,7 @@ import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
-import { getApplet, setAppletUserState } from '../applet-state.js';
+import { getApplet, setAppletUserState, consumeReloadSignal } from '../applet-state.js';
 import { DEFAULT_MODEL } from '../preferences.js';
 import { parseImageDataUrl } from '../image-utils.js';
 
@@ -180,6 +180,7 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
         const toolTelemetry = eventData.toolTelemetry as { 
           outputId?: string;
           appletSet?: boolean;
+          reloadTriggered?: boolean;
         } | undefined;
         
         // Display tool output reference
@@ -206,6 +207,14 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
               _applet: appletContent
             };
           }
+        }
+        
+        // Reload page signal
+        if (toolTelemetry?.reloadTriggered && consumeReloadSignal()) {
+          eventData = {
+            ...eventData,
+            _reload: true
+          };
         }
       }
       

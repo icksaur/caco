@@ -549,6 +549,7 @@ main {
 
 .applet-header {
   padding: var(--space-md) var(--space-lg);
+  padding-left: 60px; /* Clear the hamburger menu button */
   color: #ffb347;
   font-size: var(--text-lg);
   font-weight: 500;

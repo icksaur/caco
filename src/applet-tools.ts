@@ -7,7 +7,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { setApplet, getApplet, getAppletUserState, getActiveSlug, setActiveSlug } from './applet-state.js';
+import { setApplet, getApplet, getAppletUserState, getActiveSlug, setActiveSlug, triggerReload } from './applet-state.js';
 import { saveApplet as storeApplet, loadApplet as loadStoredApplet, listApplets as listStoredApplets, getAppletPaths } from './applet-store.js';
 
 /**
@@ -366,5 +366,30 @@ You can read/edit the files directly before loading.`,
     }
   });
 
-  return [setAppletContent, getAppletState, saveApplet, loadApplet, listApplets];
+  const reloadPage = defineTool('reload_page', {
+    description: `Reload the browser page.
+
+USE THIS WHEN:
+- You've made changes to client-side files (HTML, CSS, JS)
+- You need the user to see updated styles or scripts
+- The page needs a fresh start after server-side changes
+
+The page will reload immediately after this tool is called.`,
+
+    parameters: z.object({}),
+
+    handler: async () => {
+      triggerReload();
+      
+      return {
+        textResultForLlm: 'Page reload signal sent. The browser will refresh.',
+        resultType: 'success' as const,
+        toolTelemetry: {
+          reloadTriggered: true
+        }
+      };
+    }
+  });
+
+  return [setAppletContent, getAppletState, saveApplet, loadApplet, listApplets, reloadPage];
 }

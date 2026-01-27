@@ -40,20 +40,7 @@ interface ExecError extends Error {
 export function createDisplayTools(storeOutput: StoreOutputFn, detectLanguage: DetectLanguageFn) {
   
   const renderFileContents = defineTool('render_file_contents', {
-    description: `Display a file's contents directly to the user without reading it into context.
-  
-USE THIS TOOL WHEN:
-- User asks to "show", "display", "print", "cat", or "view" a file
-- User wants to see file contents but hasn't asked for analysis
-- User says "let me see", "show me", "what's in"
-
-DO NOT USE WHEN:
-- User asks to analyze, fix, modify, or understand the file
-- User asks "what's wrong with" or "explain" the file
-- You need to reference the file contents in your response
-
-This tool renders the file directly to the UI. You will only receive
-confirmation that the file was displayed, not its contents.`,
+    description: `Display file to user without loading into context. Use for "show me" requests. You receive confirmation only, not contents.`,
 
     parameters: z.object({
       path: z.string().describe('Absolute path to the file to display'),
@@ -113,17 +100,7 @@ confirmation that the file was displayed, not its contents.`,
   });
 
   const runAndDisplay = defineTool('run_and_display', {
-    description: `Run a command and display its output directly to the user.
-  
-USE THIS WHEN:
-- User wants to see command output but not have it analyzed
-- Examples: "run the tests", "show me the git log", "list the files"
-
-DO NOT USE WHEN:
-- User wants you to analyze, explain, or act on the output
-- You need to parse the output to answer a question
-
-You will receive exit code and output size, not the actual output.`,
+    description: `Run command and display output to user. You receive exit code only, not output. Use when user wants to see results without analysis.`,
 
     parameters: z.object({
       command: z.string().describe('Shell command to execute'),
@@ -176,10 +153,7 @@ You will receive exit code and output size, not the actual output.`,
   });
 
   const displayImage = defineTool('display_image', {
-    description: `Display an image file directly to the user.
-  
-Use when user wants to see an image. You cannot see image contents.
-Supports: PNG, JPEG, GIF, WebP, SVG`,
+    description: `Display image file to user. Supports PNG, JPEG, GIF, WebP, SVG.`,
 
     parameters: z.object({
       path: z.string().describe('Absolute path to the image file')
@@ -227,17 +201,7 @@ Supports: PNG, JPEG, GIF, WebP, SVG`,
     .join(', ');
 
   const embedMedia = defineTool('embed_media', {
-    description: `Embed media content (video, audio, etc.) directly in the chat.
-
-USE THIS WHEN:
-- User shares a YouTube, SoundCloud, Vimeo, or Spotify link
-- User asks to play, embed, or show media from a URL
-- User pastes a media URL and wants to see/hear it
-
-SUPPORTED PROVIDERS: ${providerList}
-
-The media player will be rendered inline in the conversation.
-You will receive confirmation with title/author info.`,
+    description: `Embed media (YouTube, Vimeo, SoundCloud, Spotify) inline in chat.`,
 
     parameters: z.object({
       url: z.string().describe('URL of the media to embed (YouTube, SoundCloud, Vimeo, Spotify, Twitter/X)')

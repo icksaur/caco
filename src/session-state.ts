@@ -7,13 +7,7 @@
 
 import sessionManager from './session-manager.js';
 import { loadPreferences, savePreferences, getDefaultPreferences, DEFAULT_MODEL } from './preferences.js';
-import type { UserPreferences, SystemMessage, SessionConfig } from './types.js';
-
-export interface SessionStateConfig {
-  systemMessage: SystemMessage;
-  tools: unknown[];
-  excludedTools: string[];
-}
+import type { UserPreferences, SystemMessage, SessionStateConfig } from './types.js';
 
 /**
  * Manages the active session state for the server.
@@ -56,11 +50,6 @@ class SessionState {
     this._config = config;
     await sessionManager.init();
     this._preferences = await loadPreferences();
-    
-    const sessionConfig = {
-      tools: config.tools,
-      excludedTools: config.excludedTools
-    };
     
     // Check for session to resume - but DON'T resume yet
     // We only create/resume SDK session on first message (in ensureSession)
@@ -131,7 +120,7 @@ class SessionState {
     // Use provided cwd, or last preference, or process.cwd()
     const sessionCwd = cwd || this._preferences.lastCwd || process.cwd();
     const sessionConfig = {
-      tools: this._config.tools,
+      toolFactory: this._config.toolFactory,
       excludedTools: this._config.excludedTools
     };
     
@@ -160,7 +149,7 @@ class SessionState {
       model: finalModel,
       streaming: true,
       systemMessage: this._config.systemMessage,
-      tools: this._config.tools,
+      toolFactory: this._config.toolFactory,
       excludedTools: this._config.excludedTools
     });
     
@@ -190,7 +179,7 @@ class SessionState {
     
     // Resume new session
     this._activeSessionId = await sessionManager.resume(sessionId, {
-      tools: this._config.tools,
+      toolFactory: this._config.toolFactory,
       excludedTools: this._config.excludedTools
     });
     

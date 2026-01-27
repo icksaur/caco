@@ -10,9 +10,9 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { sessionState } from './src/session-state.js';
 import { createDisplayTools } from './src/display-tools.js';
-import { storeOutput, detectLanguage } from './src/output-cache.js';
+import { storeOutput, detectLanguage } from './src/storage.js';
 import { sessionRoutes, apiRoutes, streamRoutes } from './src/routes/index.js';
-import type { SystemMessage } from './src/types.js';
+import type { SystemMessage, ToolFactory } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,8 +20,15 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-// Create display-only tools
-const displayTools = createDisplayTools(storeOutput, detectLanguage);
+// Tool factory - creates display tools with session cwd baked in for storage
+const toolFactory: ToolFactory = (sessionCwd: string) => {
+  // storeOutput receives sessionCwd first, then data and metadata
+  // The closure captures sessionCwd so each session's tools scope to the right storage
+  return createDisplayTools(
+    (data, meta) => storeOutput(sessionCwd, data, meta),
+    detectLanguage
+  );
+};
 
 // System message for sessions
 const SYSTEM_MESSAGE: SystemMessage = {
@@ -106,7 +113,7 @@ async function start(): Promise<void> {
   // Initialize session state
   await sessionState.init({
     systemMessage: SYSTEM_MESSAGE,
-    tools: displayTools,
+    toolFactory,
     excludedTools: ['view']
   });
   

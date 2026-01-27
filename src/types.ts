@@ -62,8 +62,18 @@ export interface SessionConfig {
   model?: string;
   streaming?: boolean;
   systemMessage?: SystemMessage;
-  tools?: unknown[];
+  toolFactory?: ToolFactory;
   excludedTools?: string[];
+}
+
+// Tool factory - creates tools with session cwd baked in for storage
+export type ToolFactory = (sessionCwd: string) => unknown[];
+
+// Session config with tool factory (for init)
+export interface SessionStateConfig {
+  systemMessage: SystemMessage;
+  toolFactory: ToolFactory;
+  excludedTools: string[];
 }
 
 // API response types

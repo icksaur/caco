@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import type { SessionConfig, SystemMessage } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
+import { registerSession, unregisterSession } from './storage.js';
 
 // SDK types (minimal definitions for what we use)
 interface CopilotClientInstance {
@@ -197,18 +198,25 @@ class SessionManager {
     const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
     await client.start();
     
+    // Create tools using factory (cwd is the storage key)
+    const tools = config.toolFactory ? config.toolFactory(cwd) : [];
+    
     // Create session with streaming enabled
     const session = await client.createSession({
       model: config.model,
       streaming: true,
       systemMessage: config.systemMessage,
-      ...config
+      tools,
+      excludedTools: config.excludedTools
     });
     
     // Lock and track
     this.cwdLocks.set(cwd, session.sessionId);
     this.activeSessions.set(session.sessionId, { cwd, session, client });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
+    
+    // Register with storage layer for output persistence
+    registerSession(cwd, session.sessionId);
     
     console.log(`✓ Created session ${session.sessionId} for ${cwd} with model ${config.model}`);
     return session.sessionId;
@@ -247,15 +255,22 @@ class SessionManager {
     const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
     await client.start();
     
-    // Resume session with optional tools and config
+    // Create tools using factory (cwd is the storage key)
+    const tools = config.toolFactory ? config.toolFactory(cwd) : [];
+    
+    // Resume session with tools
     const session = await client.resumeSession(sessionId, {
       streaming: true,
-      ...config
+      tools,
+      excludedTools: config.excludedTools
     });
     
     // Lock and track
     this.cwdLocks.set(cwd, sessionId);
     this.activeSessions.set(sessionId, { cwd, session, client });
+    
+    // Register with storage layer for output persistence
+    registerSession(cwd, sessionId);
     
     console.log(`✓ Resumed session ${sessionId} for ${cwd}`);
     return sessionId;
@@ -290,6 +305,9 @@ class SessionManager {
     // Unlock and untrack
     this.cwdLocks.delete(cwd);
     this.activeSessions.delete(sessionId);
+    
+    // Unregister from storage layer
+    unregisterSession(cwd);
     
     console.log(`✓ Stopped session ${sessionId}`);
   }

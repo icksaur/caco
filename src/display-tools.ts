@@ -19,7 +19,13 @@ import { fetchOEmbed, detectProvider, getSupportedProviders } from './oembed.js'
 
 const execAsync = promisify(exec);
 
-type StoreOutputFn = (data: string | Buffer, metadata: Record<string, unknown>) => string;
+// Metadata must include a type field for categorizing outputs
+interface OutputMeta {
+  type: 'file' | 'terminal' | 'image' | 'embed' | 'raw';
+  [key: string]: unknown;
+}
+
+type StoreOutputFn = (data: string | Buffer, metadata: OutputMeta) => string;
 type DetectLanguageFn = (filepath: string) => string;
 
 interface ExecError extends Error {
@@ -88,7 +94,7 @@ confirmation that the file was displayed, not its contents.`,
           : '';
           
         return {
-          textResultForLlm: `Displayed ${path} to user${rangeInfo} - ${lines.length} lines, ${content.length} bytes`,
+          textResultForLlm: `[output:${outputId}] Displayed ${path} to user${rangeInfo} - ${lines.length} lines, ${content.length} bytes`,
           toolTelemetry: {
             outputId,
             lineCount: lines.length,
@@ -144,7 +150,7 @@ You will receive exit code and output size, not the actual output.`,
         });
         
         return {
-          textResultForLlm: `Command succeeded. Output displayed to user (${lineCount} lines, ${output.length} chars)`,
+          textResultForLlm: `[output:${outputId}] Command succeeded. Output displayed to user (${lineCount} lines, ${output.length} chars)`,
           toolTelemetry: { outputId, exitCode: 0, outputSize: output.length, lineCount }
         };
       } catch (err) {
@@ -162,7 +168,7 @@ You will receive exit code and output size, not the actual output.`,
         });
         
         return {
-          textResultForLlm: `Command failed (exit ${exitCode}). Output displayed to user (${lineCount} lines)`,
+          textResultForLlm: `[output:${outputId}] Command failed (exit ${exitCode}). Output displayed to user (${lineCount} lines)`,
           toolTelemetry: { outputId, exitCode, outputSize: output.length, lineCount }
         };
       }
@@ -202,7 +208,7 @@ Supports: PNG, JPEG, GIF, WebP, SVG`,
         });
         
         return {
-          textResultForLlm: `Displayed image ${path} to user (${data.length} bytes)`,
+          textResultForLlm: `[output:${outputId}] Displayed image ${path} to user (${data.length} bytes)`,
           toolTelemetry: { outputId, mimeType, size: data.length }
         };
       } catch (err) {
@@ -267,7 +273,7 @@ You will receive confirmation with title/author info.`,
           : url;
 
         return {
-          textResultForLlm: `Embedded ${embedData.provider} content: ${info}`,
+          textResultForLlm: `[output:${outputId}] Embedded ${embedData.provider} content: ${info}`,
           toolTelemetry: { 
             outputId, 
             provider: embedData.provider,

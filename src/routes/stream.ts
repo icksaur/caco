@@ -18,7 +18,7 @@ import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
-import { getOutput } from '../output-cache.js';
+import { getOutput } from '../storage.js';
 import { DEFAULT_MODEL } from '../preferences.js';
 import { parseImageDataUrl } from '../image-utils.js';
 
@@ -173,15 +173,17 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
           try {
             const parsed = JSON.parse(result.content) as { toolTelemetry?: { outputId?: string } };
             if (parsed.toolTelemetry?.outputId) {
-              const outputMeta = getOutput(parsed.toolTelemetry.outputId)?.metadata || {};
-              eventData = {
-                ...eventData,
-                _output: {
-                  id: parsed.toolTelemetry.outputId,
-                  type: outputMeta.type,
-                  ...outputMeta
-                }
-              };
+              const storedOutput = getOutput(parsed.toolTelemetry.outputId);
+              const outputMeta = storedOutput?.metadata;
+              if (outputMeta) {
+                eventData = {
+                  ...eventData,
+                  _output: {
+                    id: parsed.toolTelemetry.outputId,
+                    ...outputMeta
+                  }
+                };
+              }
             }
           } catch {
             // Not JSON, ignore

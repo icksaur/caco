@@ -14,7 +14,7 @@ import { Router, Request, Response } from 'express';
 import { CopilotClient } from '@github/copilot-sdk';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
-import { getOutput } from '../output-cache.js';
+import { getOutput } from '../storage.js';
 
 const router = Router();
 
@@ -110,7 +110,7 @@ router.get('/outputs/:id', (req: Request, res: Response) => {
       id,
       data: typeof data === 'string' ? data : data.toString('base64'),
       metadata,
-      createdAt: output.createdAt
+      createdAt: metadata.createdAt
     });
   }
   

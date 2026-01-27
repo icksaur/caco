@@ -157,3 +157,92 @@ function renderMarkdown(container: Element, markdown: string, className: string)
     if (window.hljs) window.hljs.highlightElement(block);
   });
 }
+
+/**
+ * Restore outputs from history after page reload
+ * 
+ * Scans loaded messages for [output:xxx] markers and renders them.
+ * Called after history HTML is loaded into the chat container.
+ */
+export async function restoreOutputsFromHistory(): Promise<void> {
+  const chat = document.getElementById('chat');
+  if (!chat) return;
+  
+  // Find all [output:xxx] markers in message text
+  const markerRegex = /\[output:([^\]]+)\]/g;
+  const messages = chat.querySelectorAll('.message');
+  
+  for (const message of messages) {
+    const textContent = message.textContent || '';
+    const matches = [...textContent.matchAll(markerRegex)];
+    
+    if (matches.length === 0) continue;
+    
+    // Create outputs container for this message if needed
+    let outputsContainer = message.querySelector('.outputs-container');
+    if (!outputsContainer) {
+      outputsContainer = document.createElement('div');
+      outputsContainer.className = 'outputs-container';
+      message.appendChild(outputsContainer);
+    }
+    
+    // Render each output
+    for (const match of matches) {
+      const outputId = match[1];
+      await renderOutputById(outputId, outputsContainer);
+      
+      // Hide the marker text in the rendered message
+      hideMarkerText(message, match[0]);
+    }
+  }
+}
+
+/**
+ * Render an output by ID into a container
+ */
+async function renderOutputById(outputId: string, container: Element): Promise<void> {
+  try {
+    const response = await fetch(`/api/outputs/${outputId}?format=json`);
+    if (!response.ok) {
+      console.warn(`Output ${outputId} not found (may have expired)`);
+      return;
+    }
+    
+    const { data, metadata } = await response.json();
+    
+    // Dispatch based on metadata (same logic as renderDisplayOutput)
+    if (metadata.type === 'embed' || metadata.html) {
+      renderEmbed(container, data, metadata);
+    } else if (metadata.mimeType?.startsWith('image/')) {
+      renderImage(container, outputId, data, metadata);
+    } else if (metadata.command !== undefined) {
+      renderTerminal(container, data, metadata);
+    } else if (metadata.path) {
+      renderCode(container, data, metadata);
+    } else {
+      renderPreformatted(container, data);
+    }
+  } catch (err) {
+    console.error(`Error restoring output ${outputId}:`, err);
+  }
+}
+
+/**
+ * Hide [output:xxx] marker text in rendered message
+ */
+function hideMarkerText(message: Element, marker: string): void {
+  // Walk text nodes and hide the marker
+  const walker = document.createTreeWalker(
+    message,
+    NodeFilter.SHOW_TEXT,
+    null
+  );
+  
+  let node: Text | null;
+  while ((node = walker.nextNode() as Text)) {
+    if (node.textContent?.includes(marker)) {
+      // Replace the marker with empty string
+      node.textContent = node.textContent.replace(marker, '');
+    }
+  }
+}

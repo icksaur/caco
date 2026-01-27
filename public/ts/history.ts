@@ -7,6 +7,7 @@ import { scrollToBottom } from './ui-utils.js';
 import { applyModelPreference, loadModels } from './model-selector.js';
 import { initFromPreferences } from './state.js';
 import { setViewState } from './view-controller.js';
+import { restoreOutputsFromHistory } from './display-output.js';
 
 // Declare renderMarkdown as a global function from markdown-renderer.js
 declare global {
@@ -32,6 +33,8 @@ export async function loadHistory(): Promise<void> {
         if (typeof window.renderMarkdown === 'function') {
           window.renderMarkdown();
         }
+        // Restore display outputs from [output:xxx] markers
+        await restoreOutputsFromHistory();
         // Note: caller should scroll after view is visible
       } else {
         // No messages - show new chat form

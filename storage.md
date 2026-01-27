@@ -312,7 +312,7 @@ Tools must be created per-session with session CWD in closure for storage scopin
 - [x] Create `src/storage.ts` with OutputStore
 - [x] Update display tools to use disk storage (with session registration)
 - [x] Add outputId markers `[output:xxx]` to tool results
-- [ ] Update history reload to parse markers and load outputs
+- [x] Update history reload to parse markers and load outputs
 - [x] Migrate `/api/outputs/:id` to use disk store
 - [x] Delete old `src/output-cache.ts` (merged into storage.ts)
 

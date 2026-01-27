@@ -41,13 +41,31 @@ AVAILABLE GLOBAL FUNCTIONS (call from your applet JS):
     Push state to server. You can then query it with get_applet_state tool.
     Call on user input, button clicks, or whenever state changes.
 
-  loadApplet(slug)
+  loadApplet(slug, params?)
     Load and display a saved applet by slug. Use for applet browsers/launchers.
-    Returns a Promise. Example: loadApplet('calculator')
+    Optional params object sets URL query params for the target applet.
+    Returns a Promise.
+    Examples:
+      loadApplet('calculator')
+      loadApplet('image-viewer', { file: '/path/to/photo.jpg' })
 
   listApplets()
     Get list of saved applets. Returns Promise<Array<{slug, name, description}>>.
     Use for building applet browsers.
+
+  getAppletUrlParams()
+    Get URL query params (excluding 'applet'). Use to read initial state.
+    Example: const { file } = getAppletUrlParams();
+
+  updateAppletUrlParam(key, value)
+    Update a URL query param (uses replaceState, no history entry).
+    Use to make current state shareable/bookmarkable.
+
+  navigateBack()
+    Pop current applet and return to previous in navigation stack.
+
+  getBreadcrumbs()
+    Get current navigation stack: Array<{slug, label}>.
 
 HTTP ENDPOINTS (for fetch() in your applet JS):
 

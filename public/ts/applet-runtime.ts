@@ -3,6 +3,8 @@
  * 
  * Client-side applet execution.
  * Handles receiving applet content from SSE and injecting it into the DOM.
+ * 
+ * Phase 2: Exposes setAppletState() for applet JS to push state to server.
  */
 
 import { setViewState } from './view-controller.js';
@@ -16,6 +18,34 @@ export interface AppletContent {
 
 // Current applet style element (for cleanup)
 let currentStyleElement: HTMLStyleElement | null = null;
+
+/**
+ * Initialize applet runtime - exposes global functions for applet JS
+ * Call this once at app startup
+ */
+export function initAppletRuntime(): void {
+  // Expose setAppletState globally for applet JS to use
+  (window as unknown as { setAppletState: typeof setAppletState }).setAppletState = setAppletState;
+}
+
+/**
+ * Push state from applet to server
+ * Applet JS calls this to make state queryable by agent's get_applet_state tool
+ */
+async function setAppletState(state: Record<string, unknown>): Promise<void> {
+  try {
+    const response = await fetch('/api/applet/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state)
+    });
+    if (!response.ok) {
+      console.error('[APPLET] Failed to sync state:', response.status);
+    }
+  } catch (error) {
+    console.error('[APPLET] Error syncing state:', error);
+  }
+}
 
 /**
  * Execute applet content in the applet view

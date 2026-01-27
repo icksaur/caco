@@ -15,6 +15,7 @@ import { CopilotClient } from '@github/copilot-sdk';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
+import { setAppletUserState, getAppletUserState } from '../applet-state.js';
 
 const router = Router();
 
@@ -210,6 +211,31 @@ router.get('/debug/messages', async (_req: Request, res: Response) => {
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });
   }
+});
+
+// ============================================================
+// Applet State Endpoints (Phase 2)
+// ============================================================
+
+/**
+ * POST /api/applet/state - Receive state updates from applet JS
+ * Client-side applet calls setAppletState({...}) which hits this endpoint
+ */
+router.post('/applet/state', (req: Request, res: Response) => {
+  const state = req.body;
+  if (!state || typeof state !== 'object') {
+    res.status(400).json({ error: 'Invalid state object' });
+    return;
+  }
+  setAppletUserState(state);
+  res.json({ ok: true });
+});
+
+/**
+ * GET /api/applet/state - Get current applet state (for debugging)
+ */
+router.get('/applet/state', (_req: Request, res: Response) => {
+  res.json({ state: getAppletUserState() });
 });
 
 export default router;

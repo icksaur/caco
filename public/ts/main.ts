@@ -11,6 +11,7 @@ import { toggleActivityBox } from './activity.js';
 import { setupFormHandler, stopStreaming } from './response-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initViewState, setViewState, isViewState } from './view-controller.js';
+import { initAppletRuntime } from './applet-runtime.js';
 
 /**
  * Toggle between chatting and applet views
@@ -57,6 +58,9 @@ window.toggleApplet = toggleApplet;
 document.addEventListener('DOMContentLoaded', async () => {
   // Initialize view state from DOM
   initViewState();
+  
+  // Initialize applet runtime (exposes setAppletState globally)
+  initAppletRuntime();
   
   // Set up event handlers
   setupImagePaste();

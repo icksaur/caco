@@ -314,15 +314,53 @@ public/ts/
 **Implementation Notes (Phase 1):**
 - `applet-state.ts` - In-memory singleton for current applet content
 - `applet-tools.ts` - Defines `set_applet_content` with clear agent-facing description
-- `applet-runtime.ts` - Injects HTML, CSS (via `<style>`), executes JS via `new Function()`
+- `applet-runtime.ts` - Injects HTML, CSS (via `<style>`), executes JS via `<script>` element (global scope for onclick handlers)
 - SSE enrichment in `stream.ts` - Adds `_applet` to `tool.execution_complete` events
 - `response-streaming.ts` - Calls `executeApplet()` when `_applet` present
+- CSP includes `'unsafe-eval'` for dynamic script execution
 
-### Phase 2: State Query
+### Phase 2: State Query ✅
 
-- [ ] Add `get_applet_state` tool
-- [ ] Client exposes state query function
-- [ ] Server polls client or uses request/response pattern
+- [x] Add `get_applet_state` tool
+- [x] Client exposes `setAppletState(data)` function for applet JS to call
+- [x] Server endpoint `/api/applet/state` receives state updates
+- [x] Tool reads cached state from server
+
+**Design (Phase 2):**
+
+The challenge: Agent's tool handler runs server-side, but state lives client-side in the DOM.
+
+**Approach: Push-based state sync**
+
+Instead of polling/querying the DOM on demand, the applet JS pushes state updates to the server:
+
+1. **Client-side**: Global `setAppletState(data)` function available to applet JS
+2. **Client-side**: Applet calls `setAppletState({...})` on user interaction
+3. **Server-side**: `/api/applet/state` POST endpoint caches the state
+4. **Server-side**: `get_applet_state` tool reads cached state
+
+**Agent's responsibility**: Write applet JS that calls `setAppletState()` to expose relevant data.
+
+**Example pattern** (agent generates this):
+```javascript
+// Calculator applet - expose state on every operation
+function updateDisplay(value) {
+  document.getElementById('display').value = value;
+  setAppletState({ displayValue: value, lastOperation: currentOp });
+}
+```
+
+**Benefits**:
+- No async DOM querying from server
+- State always reflects latest user interaction
+- Simple request/response for tool
+
+**Implementation Notes (Phase 2):**
+- `applet-runtime.ts` - `initAppletRuntime()` exposes global `setAppletState()` function
+- `applet-state.ts` - `appletUserState` object stores pushed state, cleared on applet change
+- `api.ts` - POST `/api/applet/state` receives state, GET returns it (for debugging)
+- `applet-tools.ts` - `get_applet_state` tool returns cached state with optional key filter
+- Tool descriptions teach agent about `setAppletState()` pattern
 
 ### Phase 3: Persistence
 

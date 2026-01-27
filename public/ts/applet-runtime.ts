@@ -5,6 +5,7 @@
  * Handles receiving applet content from SSE and injecting it into the DOM.
  * 
  * Phase 2: Exposes setAppletState() for applet JS to push state to server.
+ * Phase 3: Exposes loadApplet(slug) for loading saved applets from applet JS.
  */
 
 import { setViewState } from './view-controller.js';
@@ -29,6 +30,10 @@ let pendingAppletState: Record<string, unknown> | null = null;
 export function initAppletRuntime(): void {
   // Expose setAppletState globally for applet JS to use
   (window as unknown as { setAppletState: typeof setAppletState }).setAppletState = setAppletState;
+  // Expose loadApplet globally for applet browser
+  (window as unknown as { loadApplet: typeof loadAppletBySlug }).loadApplet = loadAppletBySlug;
+  // Expose listApplets globally for applet browser
+  (window as unknown as { listApplets: typeof listSavedApplets }).listApplets = listSavedApplets;
 }
 
 /**
@@ -40,6 +45,60 @@ function setAppletState(state: Record<string, unknown>): void {
   // Merge with existing pending state (newer values overwrite)
   pendingAppletState = { ...pendingAppletState, ...state };
   console.log('[APPLET] State updated locally:', pendingAppletState);
+}
+
+/**
+ * Load a saved applet by slug
+ * Applet JS can call this to switch to a different applet
+ */
+async function loadAppletBySlug(slug: string): Promise<void> {
+  try {
+    console.log(`[APPLET] Loading applet: ${slug}`);
+    
+    // POST to load endpoint (updates server state + returns content)
+    const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // Execute the loaded applet
+    executeApplet({
+      html: data.html,
+      js: data.js,
+      css: data.css,
+      title: data.title
+    });
+    
+    console.log(`[APPLET] Loaded: ${data.title} (${slug})`);
+  } catch (error) {
+    console.error(`[APPLET] Failed to load "${slug}":`, error);
+    throw error;
+  }
+}
+
+/**
+ * List saved applets
+ * Returns array of { slug, name, description, updatedAt }
+ */
+async function listSavedApplets(): Promise<Array<{
+  slug: string;
+  name: string;
+  description: string | null;
+  updatedAt: string;
+}>> {
+  const response = await fetch('/api/applets');
+  if (!response.ok) {
+    throw new Error(`Failed to list applets: HTTP ${response.status}`);
+  }
+  const data = await response.json();
+  return data.applets;
 }
 
 /**

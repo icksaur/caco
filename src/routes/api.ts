@@ -15,7 +15,8 @@ import { CopilotClient } from '@github/copilot-sdk';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
-import { setAppletUserState, getAppletUserState } from '../applet-state.js';
+import { setAppletUserState, getAppletUserState, setApplet, setActiveSlug } from '../applet-state.js';
+import { listApplets, loadApplet } from '../applet-store.js';
 
 const router = Router();
 
@@ -236,6 +237,102 @@ router.post('/applet/state', (req: Request, res: Response) => {
  */
 router.get('/applet/state', (_req: Request, res: Response) => {
   res.json({ state: getAppletUserState() });
+});
+
+// ============================================================
+// Applet Browser Endpoints (Phase 3)
+// ============================================================
+
+const programCwd = process.cwd();
+
+/**
+ * GET /api/applets - List all saved applets
+ * Used by applet browser to show available applets
+ */
+router.get('/applets', async (_req: Request, res: Response) => {
+  try {
+    const applets = await listApplets(programCwd);
+    res.json({
+      applets: applets.map(a => ({
+        slug: a.slug,
+        name: a.name,
+        description: a.description || null,
+        updatedAt: a.updatedAt,
+        paths: a.paths
+      }))
+    });
+  } catch (error) {
+    console.error('[API] Failed to list applets:', error);
+    res.status(500).json({ error: 'Failed to list applets' });
+  }
+});
+
+/**
+ * GET /api/applets/:slug - Get applet content
+ * Returns HTML/JS/CSS for client-side execution
+ */
+router.get('/applets/:slug', async (req: Request, res: Response) => {
+  const slug = req.params.slug as string;
+  
+  try {
+    const stored = await loadApplet(programCwd, slug);
+    
+    if (!stored) {
+      res.status(404).json({ error: `Applet "${slug}" not found` });
+      return;
+    }
+    
+    res.json({
+      slug,
+      title: stored.meta.name,
+      html: stored.html,
+      js: stored.js || null,
+      css: stored.css || null,
+      meta: stored.meta
+    });
+  } catch (error) {
+    console.error(`[API] Failed to load applet "${slug}":`, error);
+    res.status(500).json({ error: 'Failed to load applet' });
+  }
+});
+
+/**
+ * POST /api/applets/:slug/load - Load applet and update server state
+ * Called by applet browser to switch to a different applet
+ * Updates server-side activeSlug so get_applet_state reflects correct applet
+ */
+router.post('/applets/:slug/load', async (req: Request, res: Response) => {
+  const slug = req.params.slug as string;
+  
+  try {
+    const stored = await loadApplet(programCwd, slug);
+    
+    if (!stored) {
+      res.status(404).json({ error: `Applet "${slug}" not found` });
+      return;
+    }
+    
+    // Update server-side state
+    setApplet({
+      html: stored.html,
+      js: stored.js,
+      css: stored.css,
+      title: stored.meta.name
+    }, slug);
+    
+    // Return content for client-side execution
+    res.json({
+      ok: true,
+      slug,
+      title: stored.meta.name,
+      html: stored.html,
+      js: stored.js || null,
+      css: stored.css || null
+    });
+  } catch (error) {
+    console.error(`[API] Failed to load applet "${slug}":`, error);
+    res.status(500).json({ error: 'Failed to load applet' });
+  }
 });
 
 export default router;

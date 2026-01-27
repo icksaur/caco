@@ -35,12 +35,30 @@ JAVASCRIPT EXECUTION:
 - Fetch API for HTTP requests (including to localhost)
 - A global \`appletContainer\` variable points to the .applet-content element
 
-STATE MANAGEMENT:
-To make applet state queryable by you (via get_applet_state tool):
-- Call setAppletState({ key: value, ... }) to push state to server
-- Call it on user input, button clicks, or whenever state changes
-- Example: setAppletState({ result: display.value, lastOp: currentOp })
-- You can then use get_applet_state to read what the user has done
+AVAILABLE GLOBAL FUNCTIONS (call from your applet JS):
+
+  setAppletState({ key: value, ... })
+    Push state to server. You can then query it with get_applet_state tool.
+    Call on user input, button clicks, or whenever state changes.
+
+  loadApplet(slug)
+    Load and display a saved applet by slug. Use for applet browsers/launchers.
+    Returns a Promise. Example: loadApplet('calculator')
+
+  listApplets()
+    Get list of saved applets. Returns Promise<Array<{slug, name, description}>>.
+    Use for building applet browsers.
+
+HTTP ENDPOINTS (for fetch() in your applet JS):
+
+  GET /api/applets
+    List all saved applets: { applets: [{slug, name, description, paths}] }
+
+  GET /api/applets/:slug
+    Get applet content: { slug, title, html, js, css, meta }
+
+  POST /api/applets/:slug/load
+    Load applet + update server state: { ok, slug, title, html, js, css }
 
 TIPS:
 - Inline onclick="myFunc()" handlers work because JS runs in global scope
@@ -311,19 +329,33 @@ To save an applet:
           };
         }
         
+        // Structured output for programmatic access
+        const structured = applets.map(a => ({
+          slug: a.slug,
+          name: a.name,
+          description: a.description || null,
+          files: {
+            html: a.paths.html,
+            js: a.paths.js,
+            css: a.paths.css,
+            meta: a.paths.meta
+          },
+          updatedAt: a.updatedAt
+        }));
+        
+        // Text summary for LLM
         const lines = applets.map(a => {
-          const desc = a.description ? `\n   ${a.description}` : '';
-          return `- ${a.slug}: "${a.name}"${desc}
-   Files: ${a.paths.html}
-   Updated: ${a.updatedAt}`;
+          const desc = a.description ? ` - ${a.description}` : '';
+          return `${a.slug}: "${a.name}"${desc}\n  → ${a.paths.html}`;
         });
         
         return {
           textResultForLlm: `Saved applets (${applets.length}):\n\n${lines.join('\n\n')}
 
 Use load_applet(slug) to display one.
-You can also read/edit the files directly.`,
-          resultType: 'success' as const
+You can read/edit the files directly before loading.`,
+          resultType: 'success' as const,
+          structuredResult: structured
         };
       } catch (error) {
         return {

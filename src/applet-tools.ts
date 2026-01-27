@@ -7,13 +7,15 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { setApplet, getApplet, getAppletUserState } from './applet-state.js';
+import { setApplet, getApplet, getAppletUserState, getActiveSlug, setActiveSlug } from './applet-state.js';
+import { saveApplet as storeApplet, loadApplet as loadStoredApplet, listApplets as listStoredApplets, getAppletPaths } from './applet-store.js';
 
 /**
  * Create applet tools
  * Returns an array of tool definitions to include in session creation.
+ * @param programCwd - The program's working directory for applet storage
  */
-export function createAppletTools() {
+export function createAppletTools(programCwd: string) {
   
   const setAppletContent = defineTool('set_applet_content', {
     description: `Set the content of the applet view with HTML, JavaScript, and CSS.
@@ -104,25 +106,233 @@ RETURNS:
     handler: async ({ key }) => {
       const state = getAppletUserState();
       const applet = getApplet();
+      const slug = getActiveSlug();
+      
+      // Build response with metadata
+      const meta = {
+        activeSlug: slug || null,
+        appletTitle: applet?.title || null,
+        hasApplet: !!applet
+      };
       
       if (key) {
         const value = state[key];
         return {
           textResultForLlm: value !== undefined 
-            ? `Applet state["${key}"]: ${JSON.stringify(value)}`
-            : `Key "${key}" not found in applet state. Available keys: ${Object.keys(state).join(', ') || '(none)'}`,
+            ? `Applet state["${key}"]: ${JSON.stringify(value)}\n\nMetadata: ${JSON.stringify(meta)}`
+            : `Key "${key}" not found in applet state. Available keys: ${Object.keys(state).join(', ') || '(none)'}\n\nMetadata: ${JSON.stringify(meta)}`,
           resultType: 'success' as const
         };
       }
       
       return {
         textResultForLlm: Object.keys(state).length > 0
-          ? `Applet state: ${JSON.stringify(state, null, 2)}`
-          : `Applet state is empty. ${applet ? 'The applet has not called setAppletState() yet.' : 'No applet is currently loaded.'}`,
+          ? `Applet state: ${JSON.stringify(state, null, 2)}\n\nMetadata: ${JSON.stringify(meta)}`
+          : `Applet state is empty. ${applet ? 'The applet has not called setAppletState() yet.' : 'No applet is currently loaded.'}\n\nMetadata: ${JSON.stringify(meta)}`,
         resultType: 'success' as const
       };
     }
   });
 
-  return [setAppletContent, getAppletState];
+  // =====================================================
+  // Phase 3: Persistence tools
+  // =====================================================
+
+  const saveApplet = defineTool('save_applet', {
+    description: `Save the current applet to disk for later reuse.
+
+WHEN TO USE:
+- After creating an applet the user wants to keep
+- To update an existing saved applet with changes
+
+WHAT IT DOES:
+- Saves HTML, JS, and CSS as separate files in .copilot-web/applets/<slug>/
+- Creates meta.json with name and description
+- Sets the active slug so get_applet_state shows it
+
+SLUG RULES:
+- Lowercase letters, numbers, and hyphens only
+- Must start and end with alphanumeric
+- Examples: "calculator", "data-viewer", "my-app-v2"
+
+After saving, the applet files can be inspected/edited with standard file tools.`,
+
+    parameters: z.object({
+      slug: z.string().describe('URL-safe identifier for the applet. Lowercase, numbers, hyphens.'),
+      name: z.string().describe('Human-readable name for display.'),
+      description: z.string().optional().describe('Brief description of what the applet does.')
+    }),
+
+    handler: async ({ slug, name, description }) => {
+      const applet = getApplet();
+      
+      if (!applet) {
+        return {
+          textResultForLlm: 'No applet is currently loaded. Use set_applet_content first.',
+          resultType: 'error' as const
+        };
+      }
+      
+      try {
+        const paths = await storeApplet(
+          programCwd,
+          slug,
+          name,
+          applet.html,
+          applet.js,
+          applet.css,
+          description
+        );
+        
+        // Update active slug
+        setActiveSlug(slug);
+        
+        return {
+          textResultForLlm: `Applet saved as "${name}" (slug: ${slug})
+
+Files created:
+- ${paths.html}
+- ${paths.js}
+- ${paths.css}
+- ${paths.meta}
+
+Use list_applets to see all saved applets.
+Use load_applet("${slug}") to reload this applet later.
+You can also edit the files directly with standard file tools.`,
+          resultType: 'success' as const
+        };
+      } catch (error) {
+        return {
+          textResultForLlm: `Failed to save applet: ${error instanceof Error ? error.message : String(error)}`,
+          resultType: 'error' as const
+        };
+      }
+    }
+  });
+
+  const loadApplet = defineTool('load_applet', {
+    description: `Load a saved applet from disk and display it.
+
+WHEN TO USE:
+- User asks to open/load a previously saved applet
+- After listing applets with list_applets
+
+WHAT IT DOES:
+- Reads the applet files from .copilot-web/applets/<slug>/
+- Sends content to the applet view (same as set_applet_content)
+- Sets the active slug
+
+TIP: Before loading, you can inspect/edit the applet files directly:
+- content.html - the HTML content
+- script.js - the JavaScript
+- style.css - the CSS
+- meta.json - name and description`,
+
+    parameters: z.object({
+      slug: z.string().describe('The slug of the applet to load.')
+    }),
+
+    handler: async ({ slug }) => {
+      try {
+        const stored = await loadStoredApplet(programCwd, slug);
+        
+        if (!stored) {
+          const available = await listStoredApplets(programCwd);
+          return {
+            textResultForLlm: `Applet "${slug}" not found.${available.length > 0 
+              ? ` Available applets: ${available.map(a => a.slug).join(', ')}`
+              : ' No applets are saved yet.'}`,
+            resultType: 'error' as const
+          };
+        }
+        
+        // Set the applet content (will push to client via SSE)
+        setApplet({
+          html: stored.html,
+          js: stored.js,
+          css: stored.css,
+          title: stored.meta.name
+        }, slug);
+        
+        return {
+          textResultForLlm: `Loaded applet "${stored.meta.name}" (slug: ${slug})
+
+The applet is now displayed in the applet view.
+Use get_applet_state to check user interactions.`,
+          resultType: 'success' as const,
+          toolTelemetry: {
+            appletSet: true,
+            title: stored.meta.name,
+            htmlLength: stored.html.length,
+            jsLength: stored.js?.length || 0,
+            cssLength: stored.css?.length || 0
+          }
+        };
+      } catch (error) {
+        return {
+          textResultForLlm: `Failed to load applet: ${error instanceof Error ? error.message : String(error)}`,
+          resultType: 'error' as const
+        };
+      }
+    }
+  });
+
+  const listApplets = defineTool('list_applets', {
+    description: `List all saved applets with their file paths.
+
+WHEN TO USE:
+- User asks what applets are available
+- Before loading an applet to see options
+- To find applet files for editing
+
+RETURNS:
+For each applet:
+- slug, name, description
+- File paths to content.html, script.js, style.css
+- Created and updated timestamps
+
+TIP: You can read/edit the applet files directly with standard file tools
+before calling load_applet to display the modified version.`,
+
+    parameters: z.object({}),
+
+    handler: async () => {
+      try {
+        const applets = await listStoredApplets(programCwd);
+        
+        if (applets.length === 0) {
+          return {
+            textResultForLlm: `No applets saved yet.
+
+To save an applet:
+1. Create one with set_applet_content
+2. Save it with save_applet`,
+            resultType: 'success' as const
+          };
+        }
+        
+        const lines = applets.map(a => {
+          const desc = a.description ? `\n   ${a.description}` : '';
+          return `- ${a.slug}: "${a.name}"${desc}
+   Files: ${a.paths.html}
+   Updated: ${a.updatedAt}`;
+        });
+        
+        return {
+          textResultForLlm: `Saved applets (${applets.length}):\n\n${lines.join('\n\n')}
+
+Use load_applet(slug) to display one.
+You can also read/edit the files directly.`,
+          resultType: 'success' as const
+        };
+      } catch (error) {
+        return {
+          textResultForLlm: `Failed to list applets: ${error instanceof Error ? error.message : String(error)}`,
+          resultType: 'error' as const
+        };
+      }
+    }
+  });
+
+  return [setAppletContent, getAppletState, saveApplet, loadApplet, listApplets];
 }

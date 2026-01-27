@@ -271,11 +271,11 @@ applets/
 
 | Module | Location | Purpose | Status |
 |--------|----------|---------|--------|
-| `applet-state.ts` | `src/` | In-memory applet state singleton | ✅ Phase 1 |
-| `applet-tools.ts` | `src/` | MCP tool definitions | ✅ Phase 1 |
-| `applet-runtime.ts` | `public/ts/` | Client-side applet execution | ✅ Phase 1 |
-| `applet-store.ts` | `src/` | Server-side applet persistence | Phase 3 |
-| `routes/applet.ts` | `src/routes/` | File operation endpoints | Phase 3 |
+| `applet-state.ts` | `src/` | In-memory applet state singleton | ✅ Phase 1+2+3 |
+| `applet-tools.ts` | `src/` | MCP tool definitions | ✅ Phase 1+2+3 |
+| `applet-runtime.ts` | `public/ts/` | Client-side applet execution | ✅ Phase 1+2 |
+| `applet-store.ts` | `src/` | Server-side applet persistence | ✅ Phase 3 |
+| `routes/applet.ts` | `src/routes/` | File operation endpoints | Phase 4 |
 
 ### Encapsulation Goals
 
@@ -375,11 +375,44 @@ function updateDisplay(value) {
 - `applet-tools.ts` - `get_applet_state` tool returns cached state with optional key filter
 - Tool descriptions teach agent about `setAppletState()` pattern
 
-### Phase 3: Persistence
+### Phase 3: Persistence ✅
 
-- [ ] Create `applet-store.ts` for file-based storage
-- [ ] Add `save_applet` / `load_applet` tools
-- [ ] UI for browsing saved applets
+- [x] Create `applet-store.ts` for file-based storage
+- [x] Add `save_applet` / `load_applet` / `list_applets` tools
+- [x] `get_applet_state` returns `activeSlug` for context
+- [ ] UI for browsing saved applets (deferred to Phase 4)
+
+**Design (Phase 3):**
+
+Applets are stored as separate files for easy agent inspection:
+
+```
+.copilot-web/applets/<slug>/
+├── meta.json       # { name, description, created, updated }
+├── content.html    # HTML content
+├── script.js       # JavaScript (optional)
+└── style.css       # CSS (optional)
+```
+
+**Agent workflow options:**
+
+1. **Direct load**: Agent calls `load_applet(slug)` to display immediately
+2. **Inspect first**: Agent uses `list_applets` to get file paths, reads/edits files with standard tools, then calls `load_applet`
+3. **Modify and save**: After loading, agent can modify via `set_applet_content`, then `save_applet` to update
+
+**Key design decisions:**
+
+- Separate files (not bundled) so agent can read/edit with standard file tools
+- `list_applets` returns full file paths for inspection
+- `load_applet` triggers rendering (no content returned to agent - avoids LLM round-trip)
+- `get_applet_state` returns `activeSlug` so agent knows what's loaded
+
+**Implementation Notes (Phase 3):**
+- `applet-store.ts` - File-based storage with `saveApplet`, `loadApplet`, `listApplets`, `getAppletPaths`
+- `applet-state.ts` - Added `activeSlug` tracking with `getActiveSlug()`, `setActiveSlug()`
+- `applet-tools.ts` - Three new tools: `save_applet`, `load_applet`, `list_applets`
+- `get_applet_state` - Now returns metadata including `activeSlug`, `appletTitle`, `hasApplet`
+- `load_applet` returns `toolTelemetry.appletSet` to trigger SSE push (same as `set_applet_content`)
 
 ### Phase 4: Polish
 

@@ -22,6 +22,9 @@ const app = express();
 const PORT = 3000;
 
 // Tool factory - creates display tools + applet tools with session cwd baked in
+// Program CWD for applet storage (fixed at startup)
+const programCwd = process.cwd();
+
 const toolFactory: ToolFactory = (sessionCwd: string) => {
   // Display tools need sessionCwd for storage scoping
   const displayTools = createDisplayTools(
@@ -29,8 +32,8 @@ const toolFactory: ToolFactory = (sessionCwd: string) => {
     detectLanguage
   );
   
-  // Applet tools are session-independent (in-memory for Phase 1)
-  const appletTools = createAppletTools();
+  // Applet tools need programCwd for persistent storage
+  const appletTools = createAppletTools(programCwd);
   
   return [...displayTools, ...appletTools];
 };

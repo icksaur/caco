@@ -308,7 +308,7 @@ Tools must be created per-session with session CWD in closure for storage scopin
 - [x] Verify build passes
 - [ ] Test: create session, use display tool, verify output works
 
-### Phase 1: Output Persistence
+### Phase 1: Output Persistence ✅
 - [x] Create `src/storage.ts` with OutputStore
 - [x] Update display tools to use disk storage (with session registration)
 - [x] Add outputId markers `[output:xxx]` to tool results
@@ -316,16 +316,19 @@ Tools must be created per-session with session CWD in closure for storage scopin
 - [x] Migrate `/api/outputs/:id` to use disk store
 - [x] Delete old `src/output-cache.ts` (merged into storage.ts)
 
-### Phase 2: Applet Storage
-- [ ] Add AppletStore to `src/storage.ts`
-- [ ] Create `save_applet`, `load_applet`, `list_applets` tools
-- [ ] Add `/api/storage/applet/*` endpoints
-- [ ] UI for browsing saved applets
+### Phase 2: Applet Storage ✅
+- [x] Create `src/applet-store.ts` for file-based applet storage
+- [x] Create `save_applet`, `load_applet`, `list_applets` tools in `applet-tools.ts`
+- [x] Tools include file paths so agent can inspect/edit with standard file tools
+- [x] `get_applet_state` returns `activeSlug` for context
+- [ ] HTTP endpoints for applet file access (deferred - agent uses file tools)
+- [ ] UI for browsing saved applets (deferred)
 
-### Phase 3: Applet Runtime State
-- [ ] Add state CRUD to AppletStore
-- [ ] Add `/api/storage/applet/:slug/state` endpoint
-- [ ] Client-side wrapper for state API
+### Phase 3: Applet Runtime State ✅
+- [x] In-memory state with `setAppletState()` push pattern
+- [x] State batching with message POST (optimized for SSH tunnels)
+- [ ] Persistent state per-applet (deferred - in-memory sufficient for now)
+- [ ] Client-side wrapper for state API (deferred)
 
 ---
 

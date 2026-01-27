@@ -343,16 +343,50 @@ class SessionManager {
 
   /**
    * Get message history for a session
+   * If active, uses the SDK session. Otherwise reads from disk.
    */
   async getHistory(sessionId: string): Promise<SessionEvent[]> {
     const active = this.activeSessions.get(sessionId);
-    if (!active) {
-      throw new Error(`Session ${sessionId} is not active`);
+    if (active) {
+      const { session } = active;
+      return await session.getMessages();
     }
     
-    const { session } = active;
-    const messages = await session.getMessages();
-    return messages;
+    // Not active - read from disk
+    return this.getHistoryFromDisk(sessionId);
+  }
+  
+  /**
+   * Read message history from disk without activating session
+   * Used for displaying history on page load before first message
+   */
+  private getHistoryFromDisk(sessionId: string): SessionEvent[] {
+    const sessionDir = join(this.stateDir, sessionId);
+    const eventsPath = join(sessionDir, 'events.jsonl');
+    
+    if (!existsSync(eventsPath)) {
+      return [];
+    }
+    
+    try {
+      const content = readFileSync(eventsPath, 'utf-8');
+      const lines = content.split('\n').filter(line => line.trim());
+      const events: SessionEvent[] = [];
+      
+      for (const line of lines) {
+        try {
+          const event = JSON.parse(line);
+          events.push(event);
+        } catch {
+          // Skip malformed lines
+        }
+      }
+      
+      return events;
+    } catch (e) {
+      console.error(`Error reading events from disk for ${sessionId}:`, e);
+      return [];
+    }
   }
 
   /**

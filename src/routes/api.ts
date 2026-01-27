@@ -121,33 +121,67 @@ router.get('/outputs/:id', (req: Request, res: Response) => {
 // Get conversation history
 router.get('/history', async (_req: Request, res: Response) => {
   try {
-    const activeId = sessionState.activeSessionId;
-    if (!activeId) {
+    // Use sessionIdForHistory - works for both active and pending-resume sessions
+    const sessionId = sessionState.sessionIdForHistory;
+    if (!sessionId) {
       return res.send('');
     }
     
-    const events = await sessionManager.getHistory(activeId);
+    const events = await sessionManager.getHistory(sessionId);
     
-    // Filter to user.message and assistant.message events only
-    const messages = events.filter(e => 
-      e.type === 'user.message' || e.type === 'assistant.message'
-    );
-    
-    // Convert to HTML fragments
-    const html = messages.map(evt => {
-      const isUser = evt.type === 'user.message';
-      const content = (evt.data as { content?: string })?.content || '';
-      
-      if (!content) return '';
-      
-      if (isUser) {
-        return `<div class="message user">${escapeHtml(content)}</div>`;
-      } else {
-        return `<div class="message assistant" data-markdown><div class="markdown-content">${escapeHtml(content)}</div></div>`;
+    // Extract output IDs from tool.execution_complete events
+    // Map: index of tool completion → output IDs
+    const outputsByIndex = new Map<number, string[]>();
+    events.forEach((evt, idx) => {
+      if (evt.type === 'tool.execution_complete') {
+        const result = (evt.data as { result?: { content?: string } })?.result;
+        if (result?.content) {
+          // Parse [output:xxx] markers from tool result
+          const matches = result.content.matchAll(/\[output:([^\]]+)\]/g);
+          const ids = [...matches].map(m => m[1]);
+          if (ids.length > 0) {
+            outputsByIndex.set(idx, ids);
+          }
+        }
       }
-    }).filter(Boolean).join('\n');
+    });
     
-    res.send(html);
+    // Build HTML with output markers injected
+    const htmlParts: string[] = [];
+    let pendingOutputs: string[] = [];
+    
+    for (let i = 0; i < events.length; i++) {
+      const evt = events[i];
+      
+      // Collect outputs from tool completions
+      if (outputsByIndex.has(i)) {
+        pendingOutputs.push(...outputsByIndex.get(i)!);
+      }
+      
+      // Render messages
+      if (evt.type === 'user.message' || evt.type === 'assistant.message') {
+        const isUser = evt.type === 'user.message';
+        const content = (evt.data as { content?: string })?.content || '';
+        
+        if (!content && pendingOutputs.length === 0) continue;
+        
+        if (isUser) {
+          htmlParts.push(`<div class="message user">${escapeHtml(content)}</div>`);
+        } else {
+          // Inject output markers as data attribute for client to restore
+          const outputAttr = pendingOutputs.length > 0 
+            ? ` data-outputs="${pendingOutputs.join(',')}"` 
+            : '';
+          htmlParts.push(
+            `<div class="message assistant" data-markdown${outputAttr}>` +
+            `<div class="markdown-content">${escapeHtml(content)}</div></div>`
+          );
+          pendingOutputs = []; // Clear after attaching to message
+        }
+      }
+    }
+    
+    res.send(htmlParts.join('\n'));
   } catch (error) {
     console.error('Error fetching history:', error);
     res.send('');
@@ -157,12 +191,12 @@ router.get('/history', async (_req: Request, res: Response) => {
 // Debug: raw message structure
 router.get('/debug/messages', async (_req: Request, res: Response) => {
   try {
-    const activeId = sessionState.activeSessionId;
-    if (!activeId) {
+    const sessionId = sessionState.sessionIdForHistory;
+    if (!sessionId) {
       return res.json({ count: 0, messages: [] });
     }
     
-    const events = await sessionManager.getHistory(activeId);
+    const events = await sessionManager.getHistory(sessionId);
     const msgs = events
       .filter(e => e.type === 'user.message' || e.type === 'assistant.message')
       .map(e => ({

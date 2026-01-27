@@ -161,38 +161,37 @@ function renderMarkdown(container: Element, markdown: string, className: string)
 /**
  * Restore outputs from history after page reload
  * 
- * Scans loaded messages for [output:xxx] markers and renders them.
+ * Looks for data-outputs attribute on messages and renders them.
  * Called after history HTML is loaded into the chat container.
  */
 export async function restoreOutputsFromHistory(): Promise<void> {
   const chat = document.getElementById('chat');
   if (!chat) return;
   
-  // Find all [output:xxx] markers in message text
-  const markerRegex = /\[output:([^\]]+)\]/g;
-  const messages = chat.querySelectorAll('.message');
+  // Find messages with data-outputs attribute
+  const messagesWithOutputs = chat.querySelectorAll('.message[data-outputs]');
   
-  for (const message of messages) {
-    const textContent = message.textContent || '';
-    const matches = [...textContent.matchAll(markerRegex)];
+  for (const message of messagesWithOutputs) {
+    const outputIds = message.getAttribute('data-outputs')?.split(',').filter(Boolean);
+    if (!outputIds || outputIds.length === 0) continue;
     
-    if (matches.length === 0) continue;
-    
-    // Create outputs container for this message if needed
+    // Create outputs container for this message
     let outputsContainer = message.querySelector('.outputs-container');
     if (!outputsContainer) {
       outputsContainer = document.createElement('div');
       outputsContainer.className = 'outputs-container';
-      message.appendChild(outputsContainer);
+      // Insert before markdown content
+      const markdownContent = message.querySelector('.markdown-content');
+      if (markdownContent) {
+        message.insertBefore(outputsContainer, markdownContent);
+      } else {
+        message.appendChild(outputsContainer);
+      }
     }
     
     // Render each output
-    for (const match of matches) {
-      const outputId = match[1];
+    for (const outputId of outputIds) {
       await renderOutputById(outputId, outputsContainer);
-      
-      // Hide the marker text in the rendered message
-      hideMarkerText(message, match[0]);
     }
   }
 }
@@ -224,25 +223,5 @@ async function renderOutputById(outputId: string, container: Element): Promise<v
     }
   } catch (err) {
     console.error(`Error restoring output ${outputId}:`, err);
-  }
-}
-
-/**
- * Hide [output:xxx] marker text in rendered message
- */
-function hideMarkerText(message: Element, marker: string): void {
-  // Walk text nodes and hide the marker
-  const walker = document.createTreeWalker(
-    message,
-    NodeFilter.SHOW_TEXT,
-    null
-  );
-  
-  let node: Text | null;
-  while ((node = walker.nextNode() as Text)) {
-    if (node.textContent?.includes(marker)) {
-      // Replace the marker with empty string
-      node.textContent = node.textContent.replace(marker, '');
-    }
   }
 }

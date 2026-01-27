@@ -28,6 +28,13 @@ class SessionState {
   }
 
   /**
+   * Get session ID for history - active or pending resume
+   */
+  get sessionIdForHistory(): string | null {
+    return this._activeSessionId || this._pendingResumeId;
+  }
+
+  /**
    * Get the current preferences
    */
   get preferences(): UserPreferences {

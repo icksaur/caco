@@ -121,14 +121,52 @@ interface StreamState {
   setContent: (c: string) => void;
   getFirstDelta: () => boolean;
   setFirstDelta: (v: boolean) => void;
+  getResponseDiv: () => Element | null;
+  setResponseDiv: (div: Element | null) => void;
+}
+
+/**
+ * Finalize current turn content and create a new content div for next turn
+ */
+function startNewTurn(state: StreamState): void {
+  const pending = document.getElementById('pending-response');
+  if (!pending) return;
+  
+  const currentDiv = state.getResponseDiv();
+  
+  // Finalize current div if it has content
+  if (currentDiv && state.getContent().trim()) {
+    currentDiv.classList.remove('streaming-cursor');
+    pending.dataset.markdownProcessed = 'false';
+    if (typeof window.renderMarkdown === 'function') window.renderMarkdown();
+  }
+  
+  // Create new content div for next turn - append at end to maintain order
+  const newDiv = document.createElement('div');
+  newDiv.className = 'markdown-content streaming-cursor';
+  pending.appendChild(newDiv);
+  
+  // Reset state for new turn
+  state.setResponseDiv(newDiv);
+  state.setContent('');
+  
+  // Re-expand activity box for new turn
+  const wrapper = pending.querySelector('.activity-wrapper');
+  if (wrapper) {
+    wrapper.classList.remove('collapsed');
+    const icon = wrapper.querySelector('.activity-icon');
+    if (icon) icon.textContent = '▼';
+  }
+  state.setFirstDelta(false);
 }
 
 /**
  * Handle a single SSE event
  */
-function handleSSEEvent(eventType: string, dataStr: string, responseDiv: Element | null, state: StreamState): void {
+function handleSSEEvent(eventType: string, dataStr: string, state: StreamState): void {
   try {
     const data = dataStr ? JSON.parse(dataStr) : {};
+    const responseDiv = state.getResponseDiv();
     
     switch (eventType) {
       case 'assistant.message_delta':
@@ -159,9 +197,15 @@ function handleSSEEvent(eventType: string, dataStr: string, responseDiv: Element
         }
         break;
         
-      case 'assistant.turn_start':
-        addActivityItem('turn', `Turn ${parseInt(data.turnId || 0) + 1}...`);
+      case 'assistant.turn_start': {
+        const turnNum = parseInt(data.turnId || 0) + 1;
+        addActivityItem('turn', `Turn ${turnNum}...`);
+        // Only start new content div if this isn't the first turn
+        if (turnNum > 1) {
+          startNewTurn(state);
+        }
         break;
+      }
         
       case 'assistant.intent':
         if (data.intent) addActivityItem('intent', `Intent: ${data.intent}`);
@@ -204,7 +248,7 @@ function handleSSEEvent(eventType: string, dataStr: string, responseDiv: Element
  * Setup event handlers for EventSource (GET streaming)
  */
 function setupEventSourceHandlers(eventSource: EventSource): void {
-  const responseDiv = document.querySelector('#pending-response .markdown-content');
+  let responseDiv: Element | null = document.querySelector('#pending-response .markdown-content');
   let responseContent = '';
   let firstDeltaReceived = false;
   
@@ -212,45 +256,47 @@ function setupEventSourceHandlers(eventSource: EventSource): void {
     getContent: () => responseContent,
     setContent: (c: string) => { responseContent = c; },
     getFirstDelta: () => firstDeltaReceived,
-    setFirstDelta: (v: boolean) => { firstDeltaReceived = v; }
+    setFirstDelta: (v: boolean) => { firstDeltaReceived = v; },
+    getResponseDiv: () => responseDiv,
+    setResponseDiv: (div: Element | null) => { responseDiv = div; }
   };
 
   // Handle response text deltas
   eventSource.addEventListener('assistant.message_delta', (e: MessageEvent) => {
-    handleSSEEvent('assistant.message_delta', e.data, responseDiv, state);
+    handleSSEEvent('assistant.message_delta', e.data, state);
   });
   
   // Handle final message
   eventSource.addEventListener('assistant.message', (e: MessageEvent) => {
-    handleSSEEvent('assistant.message', e.data, responseDiv, state);
+    handleSSEEvent('assistant.message', e.data, state);
   });
   
   // Handle turn start
   eventSource.addEventListener('assistant.turn_start', (e: MessageEvent) => {
-    handleSSEEvent('assistant.turn_start', e.data, responseDiv, state);
+    handleSSEEvent('assistant.turn_start', e.data, state);
   });
   
   // Handle intent
   eventSource.addEventListener('assistant.intent', (e: MessageEvent) => {
-    handleSSEEvent('assistant.intent', e.data, responseDiv, state);
+    handleSSEEvent('assistant.intent', e.data, state);
   });
   
   // Handle tool execution
   eventSource.addEventListener('tool.execution_start', (e: MessageEvent) => {
-    handleSSEEvent('tool.execution_start', e.data, responseDiv, state);
+    handleSSEEvent('tool.execution_start', e.data, state);
   });
   
   eventSource.addEventListener('tool.execution_complete', (e: MessageEvent) => {
-    handleSSEEvent('tool.execution_complete', e.data, responseDiv, state);
+    handleSSEEvent('tool.execution_complete', e.data, state);
   });
   
   // Handle errors
   eventSource.addEventListener('session.error', (e: MessageEvent) => {
-    handleSSEEvent('session.error', e.data, responseDiv, state);
+    handleSSEEvent('session.error', e.data, state);
   });
   
   eventSource.addEventListener('error', (e: MessageEvent) => {
-    handleSSEEvent('error', e.data || '{}', responseDiv, state);
+    handleSSEEvent('error', e.data || '{}', state);
   });
   
   // Handle completion
@@ -290,10 +336,12 @@ export function stopStreaming(): void {
     // Add visual feedback
     addActivityItem('info', 'Stopped by user');
     
-    // Mark response as stopped
-    const responseDiv = document.querySelector('#pending-response .markdown-content');
-    if (responseDiv) {
-      responseDiv.classList.remove('streaming-cursor');
+    // Mark all response divs as stopped (multi-turn creates multiple)
+    const pending = document.getElementById('pending-response');
+    if (pending) {
+      pending.querySelectorAll('.markdown-content').forEach(div => {
+        div.classList.remove('streaming-cursor');
+      });
     }
     
     finishPendingResponse();
@@ -309,11 +357,10 @@ function finishPendingResponse(): void {
     pending.classList.remove('pending');
     pending.removeAttribute('id');
     
-    // Remove streaming cursor
-    const content = pending.querySelector('.markdown-content');
-    if (content) {
+    // Remove streaming cursor from ALL content divs (multi-turn creates multiple)
+    pending.querySelectorAll('.markdown-content').forEach(content => {
       content.classList.remove('streaming-cursor');
-    }
+    });
     
     // Collapse activity wrapper when done (user can re-expand)
     const wrapper = pending.querySelector('.activity-wrapper');
@@ -333,7 +380,7 @@ function finishPendingResponse(): void {
  */
 export function setFormEnabled(enabled: boolean): void {
   const form = document.getElementById('chatForm') as HTMLFormElement;
-  const input = form?.querySelector('input[name="message"]') as HTMLInputElement;
+  const input = form?.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
   const submitBtn = form?.querySelector('button[type="submit"]') as HTMLButtonElement;
   
   if (!form || !input || !submitBtn) return;
@@ -374,6 +421,8 @@ export function setFormEnabled(enabled: boolean): void {
   }
 }
 
+import { resetTextareaHeight } from './multiline-input.js';
+
 /**
  * Set up form submission handler
  */
@@ -384,7 +433,7 @@ export function setupFormHandler(): void {
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     
-    const input = form.querySelector('input[name="message"]') as HTMLInputElement;
+    const input = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
     const message = input.value.trim();
     const modelInput = document.getElementById('selectedModel') as HTMLInputElement;
     const model = modelInput?.value;
@@ -413,8 +462,9 @@ export function setupFormHandler(): void {
     const hasImage = !!imageData;
     addUserBubble(message, hasImage);
     
-    // Clear input and image
+    // Clear input and image, reset textarea height
     input.value = '';
+    resetTextareaHeight();
     removeImage();
     
     // Start streaming - explicitly pass whether this is a new chat

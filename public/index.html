@@ -69,13 +69,13 @@
     <form id="chatForm">
       <input type="hidden" id="imageData" name="imageData">
       <input type="hidden" id="selectedModel" name="model" value="claude-sonnet-4">
-      <input 
-        type="text" 
+      <textarea 
         name="message" 
-        placeholder="Ask Copilot anything..." 
+        placeholder="Ask Copilot anything... (Shift+Enter for newline)" 
         required
         autofocus
-      >
+        rows="1"
+      ></textarea>
       <button type="submit">
         Send <span class="loading">...</span>
       </button>

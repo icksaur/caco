@@ -11,7 +11,8 @@ import { toggleActivityBox } from './activity.js';
 import { setupFormHandler, stopStreaming } from './response-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initViewState, setViewState, isViewState } from './view-controller.js';
-import { initAppletRuntime } from './applet-runtime.js';
+import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
+import { setupMultilineInput } from './multiline-input.js';
 
 /**
  * Toggle between chatting and applet views
@@ -66,6 +67,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupImagePaste();
   setupFormHandler();
   setupMarkdownRenderer();
+  setupMultilineInput();
   
   // Fetch models once on page load
   try {
@@ -91,4 +93,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // No active session - show session manager as landing page
     showSessionManager();
   }
+  
+  // Check for ?applet=slug param and load that applet
+  loadAppletFromUrl();
 });

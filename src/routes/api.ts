@@ -12,6 +12,8 @@
 
 import { Router, Request, Response } from 'express';
 import { CopilotClient } from '@github/copilot-sdk';
+import { readdir, readFile, stat } from 'fs/promises';
+import { join, relative, resolve } from 'path';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
@@ -149,8 +151,33 @@ router.get('/history', async (_req: Request, res: Response) => {
     });
     
     // Build HTML with output markers injected
+    // Group consecutive assistant messages into single bubbles (multi-turn responses)
     const htmlParts: string[] = [];
     let pendingOutputs: string[] = [];
+    let pendingAssistantContents: string[] = [];
+    let pendingAssistantOutputs: string[] = [];
+    
+    const flushAssistantBubble = () => {
+      if (pendingAssistantContents.length === 0 && pendingAssistantOutputs.length === 0) return;
+      
+      const outputAttr = pendingAssistantOutputs.length > 0 
+        ? ` data-outputs="${pendingAssistantOutputs.join(',')}"` 
+        : '';
+      
+      // Join all turn contents with markdown divs
+      const contentDivs = pendingAssistantContents
+        .map(c => `<div class="markdown-content">${escapeHtml(c)}</div>`)
+        .join('\n');
+      
+      htmlParts.push(
+        `<div class="message assistant" data-markdown${outputAttr}>` +
+        contentDivs +
+        `</div>`
+      );
+      
+      pendingAssistantContents = [];
+      pendingAssistantOutputs = [];
+    };
     
     for (let i = 0; i < events.length; i++) {
       const evt = events[i];
@@ -168,20 +195,20 @@ router.get('/history', async (_req: Request, res: Response) => {
         if (!content && pendingOutputs.length === 0) continue;
         
         if (isUser) {
+          // Flush any pending assistant bubble before user message
+          flushAssistantBubble();
           htmlParts.push(`<div class="message user">${escapeHtml(content)}</div>`);
         } else {
-          // Inject output markers as data attribute for client to restore
-          const outputAttr = pendingOutputs.length > 0 
-            ? ` data-outputs="${pendingOutputs.join(',')}"` 
-            : '';
-          htmlParts.push(
-            `<div class="message assistant" data-markdown${outputAttr}>` +
-            `<div class="markdown-content">${escapeHtml(content)}</div></div>`
-          );
-          pendingOutputs = []; // Clear after attaching to message
+          // Accumulate assistant content and outputs
+          if (content) pendingAssistantContents.push(content);
+          pendingAssistantOutputs.push(...pendingOutputs);
+          pendingOutputs = [];
         }
       }
     }
+    
+    // Flush final assistant bubble
+    flushAssistantBubble();
     
     res.send(htmlParts.join('\n'));
   } catch (error) {
@@ -332,6 +359,104 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
   } catch (error) {
     console.error(`[API] Failed to load applet "${slug}":`, error);
     res.status(500).json({ error: 'Failed to load applet' });
+  }
+});
+
+/**
+ * GET /api/files - List files in a directory
+ * Query params:
+ *   path: relative path from programCwd (default: "")
+ * Returns: { path, files: [{ name, type, size }] }
+ * Locked to programCwd - cannot escape
+ */
+router.get('/files', async (req: Request, res: Response) => {
+  const requestedPath = (req.query.path as string) || '';
+  
+  try {
+    // Resolve and validate path is within programCwd
+    const fullPath = resolve(programCwd, requestedPath);
+    const relativePath = relative(programCwd, fullPath);
+    
+    // Security: prevent escaping programCwd
+    if (relativePath.startsWith('..') || resolve(programCwd, relativePath) !== fullPath) {
+      res.status(403).json({ error: 'Access denied: path outside workspace' });
+      return;
+    }
+    
+    const entries = await readdir(fullPath, { withFileTypes: true });
+    const files = await Promise.all(
+      entries
+        .filter(e => !e.name.startsWith('.')) // Hide hidden files
+        .map(async (entry) => {
+          const entryPath = join(fullPath, entry.name);
+          const stats = await stat(entryPath).catch(() => null);
+          return {
+            name: entry.name,
+            type: entry.isDirectory() ? 'directory' : 'file',
+            size: stats?.size || 0
+          };
+        })
+    );
+    
+    // Sort: directories first, then alphabetically
+    files.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    
+    res.json({ 
+      path: relativePath || '.',
+      cwd: programCwd,
+      files 
+    });
+  } catch (error) {
+    console.error('[API] Failed to list files:', error);
+    res.status(500).json({ error: 'Failed to list directory' });
+  }
+});
+
+/**
+ * GET /api/files/read - Read file content
+ * Query params:
+ *   path: relative path from programCwd
+ * Returns: { path, content, size }
+ * Limited to 100KB files
+ */
+router.get('/files/read', async (req: Request, res: Response) => {
+  const requestedPath = req.query.path as string;
+  
+  if (!requestedPath) {
+    res.status(400).json({ error: 'path parameter required' });
+    return;
+  }
+  
+  try {
+    // Resolve and validate path
+    const fullPath = resolve(programCwd, requestedPath);
+    const relativePath = relative(programCwd, fullPath);
+    
+    if (relativePath.startsWith('..') || resolve(programCwd, relativePath) !== fullPath) {
+      res.status(403).json({ error: 'Access denied: path outside workspace' });
+      return;
+    }
+    
+    const stats = await stat(fullPath);
+    
+    if (stats.isDirectory()) {
+      res.status(400).json({ error: 'Cannot read directory' });
+      return;
+    }
+    
+    if (stats.size > 100 * 1024) {
+      res.status(400).json({ error: 'File too large (max 100KB)' });
+      return;
+    }
+    
+    const content = await readFile(fullPath, 'utf-8');
+    res.json({ path: relativePath, content, size: stats.size });
+  } catch (error) {
+    console.error('[API] Failed to read file:', error);
+    res.status(500).json({ error: 'Failed to read file' });
   }
 });
 

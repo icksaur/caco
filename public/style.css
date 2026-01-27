@@ -100,7 +100,8 @@ body {
 }
 
 /* Text input styling */
-input[type="text"] {
+input[type="text"],
+#chatForm textarea {
   flex: 1;
   padding: var(--space-md);
   background: var(--bg-input);
@@ -110,9 +111,20 @@ input[type="text"] {
   font-size: var(--text-base);
 }
 
-input[type="text"]:focus {
+input[type="text"]:focus,
+#chatForm textarea:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+
+/* Multiline chat textarea */
+#chatForm textarea {
+  min-height: 42px;
+  max-height: 180px;
+  resize: none;
+  line-height: 1.4;
+  font-family: var(--font-sans);
+  overflow-y: hidden;
 }
 
 /* ========================================
@@ -190,6 +202,18 @@ footer.hidden { display: none; }
 form {
   display: flex;
   gap: var(--space-sm);
+  align-items: flex-end;
+}
+
+/* Footer submit button - don't stretch with textarea */
+#chatForm button[type="submit"] {
+  flex-shrink: 0;
+  height: fit-content;
+}
+
+/* Hide loading indicator by default */
+#chatForm .loading {
+  display: none;
 }
 
 /* ========================================
@@ -299,6 +323,7 @@ main {
 .message.user {
   background: var(--color-user-bg);
   margin-left: var(--space-xl);
+  white-space: pre-wrap;
 }
 
 .message.assistant {

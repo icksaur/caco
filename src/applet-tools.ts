@@ -425,7 +425,7 @@ The page will reload immediately after this tool is called.`,
   });
 
   const restartServer = defineTool('restart_server', {
-    description: `Schedule a server restart after a delay.
+    description: `Schedule a server restart after a delay. THIS MUST BE YOUR FINAL ACTION.
 
 USE THIS WHEN:
 - You've modified server-side TypeScript files (src/*.ts)
@@ -438,8 +438,11 @@ HOW IT WORKS:
 3. After the delay, the server process exits and restarts
 4. The browser will reconnect automatically
 
-WARNING: Only use this after completing all server-side changes.
-The agent session will be lost and the user will need to send a new message.
+⚠️ CRITICAL: This MUST be your last tool call. After calling this:
+- Do NOT call any more tools
+- Do NOT try to verify the restart worked
+- Simply inform the user the restart is scheduled and end your response
+- The agent session terminates when the server restarts
 
 In dev mode (tsx watch), the server auto-restarts on file changes,
 so this tool is mainly useful for production mode or forced restarts.`,

@@ -10,7 +10,8 @@ A local web interface for Copilot that the agent can extend at runtime. The agen
 - Chat interface with streaming responses
 - Session management (multiple conversations)
 - Image attachments (paste to send)
-- Agent-generated custom interfaces via MCP tools
+- Agent-generated custom applets via MCP tools
+- Applet navigation stack with breadcrumbs
 - File operations for custom applets
 
 ## Architecture
@@ -68,29 +69,17 @@ src/
 └── routes/        # API endpoints
 
 doc/
-├── applet.md      # Custom applet interface design
-├── custom-tools.md    # MCP tool documentation
-└── ...            # Feature documentation
+└── API.md         # Complete API reference
 ```
-
-## API
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/message` | POST | Send message, returns stream ID |
-| `/api/stream/:id` | GET | SSE stream for responses |
-| `/api/sessions` | GET | List chat sessions |
-| `/api/sessions/:id/resume` | POST | Resume a session |
-| `/api/history` | GET | Current session history |
 
 ## Documentation
 
-See `doc/` for detailed documentation:
-- [SDK Features](doc/sdk-features.md)
-- [Custom Tools](doc/custom-tools.md)
-- [Applet Interface](doc/applet.md)
-- [Session Management](doc/session-management.md)
-- [Streaming](doc/streaming.md)
+See [doc/API.md](doc/API.md) for complete API reference including:
+- HTTP endpoints (sessions, streaming, applets, files)
+- MCP tools (set_applet_content, save_applet, display tools)
+- JavaScript APIs for applet code (setAppletState, loadApplet, navigation)
+- SSE events for response streaming
+- File storage structure
 
 ## License
 

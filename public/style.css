@@ -264,6 +264,9 @@ main {
   padding: var(--space-md);
   border-radius: var(--radius-md);
   cursor: pointer;
+  width: 40px;
+  height: 40px;
+  box-sizing: border-box;
 }
 
 .menu-btn span,
@@ -634,6 +637,7 @@ main {
   flex: 1;
   overflow: auto;
   padding: var(--space-lg);
+  contain: layout style;
 }
 
 .applet-error {
@@ -885,12 +889,6 @@ main {
 @keyframes blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
-}
-
-/* Pending message */
-.message.pending .activity-box::after {
-  content: '▋';
-  animation: blink 1s infinite;
 }
 
 /* Streaming cursor */

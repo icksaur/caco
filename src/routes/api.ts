@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { CopilotClient } from '@github/copilot-sdk';
-import { readdir, readFile, stat } from 'fs/promises';
+import { readdir, readFile, stat, writeFile } from 'fs/promises';
 import { join, relative, resolve } from 'path';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
@@ -552,17 +552,20 @@ router.get('/files/read', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/files/image - Serve image file (LEGACY - use GET /api/file instead)
- * Query params:
- *   path: relative path from programCwd
- * Returns: image binary with correct content-type
- * Limited to 10MB images
+ * POST /api/files/write - Write file content
+ * Body: { path: string, content: string }
+ * Locked to programCwd - cannot escape
  */
-router.get('/files/image', async (req: Request, res: Response) => {
-  const requestedPath = req.query.path as string;
+router.post('/files/write', async (req: Request, res: Response) => {
+  const { path: requestedPath, content } = req.body;
   
   if (!requestedPath) {
     res.status(400).json({ error: 'path parameter required' });
+    return;
+  }
+  
+  if (typeof content !== 'string') {
+    res.status(400).json({ error: 'content parameter required' });
     return;
   }
   
@@ -576,39 +579,11 @@ router.get('/files/image', async (req: Request, res: Response) => {
       return;
     }
     
-    const stats = await stat(fullPath);
-    
-    if (stats.isDirectory()) {
-      res.status(400).json({ error: 'Cannot serve directory' });
-      return;
-    }
-    
-    if (stats.size > 10 * 1024 * 1024) {
-      res.status(400).json({ error: 'Image too large (max 10MB)' });
-      return;
-    }
-    
-    // Determine content type from extension
-    const ext = fullPath.split('.').pop()?.toLowerCase();
-    const mimeTypes: Record<string, string> = {
-      jpg: 'image/jpeg',
-      jpeg: 'image/jpeg',
-      png: 'image/png',
-      gif: 'image/gif',
-      webp: 'image/webp',
-      svg: 'image/svg+xml',
-      ico: 'image/x-icon'
-    };
-    
-    const contentType = mimeTypes[ext || ''] || 'application/octet-stream';
-    
-    const imageData = await readFile(fullPath);
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Length', stats.size);
-    res.send(imageData);
+    await writeFile(fullPath, content, 'utf-8');
+    res.json({ ok: true, path: relativePath, size: content.length });
   } catch (error) {
-    console.error('[API] Failed to serve image:', error);
-    res.status(500).json({ error: 'Failed to serve image' });
+    console.error('[API] Failed to write file:', error);
+    res.status(500).json({ error: 'Failed to write file' });
   }
 });
 

@@ -129,12 +129,32 @@ function setAppletState(state: Record<string, unknown>): void {
 }
 
 /**
- * Load a saved applet by slug
- * Applet JS can call this to switch to a different applet
+ * Load a saved applet by slug, optionally with URL params
+ * Applet JS can call this to navigate to a different applet with context
+ * 
+ * @param slug - The applet slug to load
+ * @param params - Optional URL params to set (e.g., { file: '/path/to/image.jpg' })
  */
-async function loadAppletBySlug(slug: string): Promise<void> {
+async function loadAppletBySlug(slug: string, params?: Record<string, string>): Promise<void> {
   try {
-    console.log(`[APPLET] Loading applet: ${slug}`);
+    console.log(`[APPLET] Loading applet: ${slug}`, params ? `with params: ${JSON.stringify(params)}` : '');
+    
+    // Set URL params before loading (so applet can read them on init)
+    if (params) {
+      const url = new URL(window.location.href);
+      // Clear existing non-applet params first
+      const keysToRemove: string[] = [];
+      url.searchParams.forEach((_, key) => {
+        if (key !== 'applet') keysToRemove.push(key);
+      });
+      keysToRemove.forEach(key => url.searchParams.delete(key));
+      // Set new params
+      Object.entries(params).forEach(([key, value]) => {
+        url.searchParams.set(key, value);
+      });
+      url.searchParams.set('applet', slug);
+      history.replaceState(history.state, '', url.toString());
+    }
     
     // POST to load endpoint (updates server state + returns content)
     const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {

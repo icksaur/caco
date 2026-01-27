@@ -220,12 +220,26 @@ How does the server-side tool affect client-side DOM?
 
 ### Storage Mechanisms
 
-| Mechanism | Pros | Cons |
-|-----------|------|------|
-| **In-memory** | Simple, fast | Lost on restart |
-| **SQLite** | Structured, queryable | Dependency, overkill? |
-| **Files on disk** | Version controllable, simple | Need organization |
-| **Browser localStorage** | Client-side, simple | Size limits, not shareable |
+**Decision**: Files on disk in `.copilot-web/applets/`
+
+Uses the same storage layer as display tool outputs (see [storage.md](../storage.md)).
+
+```
+<program-cwd>/.copilot-web/
+├── sessions/<sessionId>/outputs/   # Display tool outputs (Phase 1 ✅)
+└── applets/<slug>/                 # Saved applets (Phase 2)
+    ├── meta.json
+    ├── content.html
+    ├── script.js
+    ├── style.css
+    └── state.json
+```
+
+**Benefits**:
+- Git-friendly (version control applets)
+- Human-readable
+- Unified with output storage
+- No database dependency
 
 ### File-Based Storage Design
 

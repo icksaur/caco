@@ -9,6 +9,7 @@ import type { ToolEventData, MessageEventData } from './types.js';
 import { escapeHtml, scrollToBottom } from './ui-utils.js';
 import { addActivityItem, formatToolArgs, formatToolResult, toggleActivityBox } from './activity.js';
 import { renderDisplayOutput } from './display-output.js';
+import { executeApplet, type AppletContent } from './applet-runtime.js';
 import { removeImage } from './image-paste.js';
 import { setStreaming, getActiveEventSource } from './state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
@@ -166,6 +167,7 @@ function handleSSEEvent(eventType: string, dataStr: string, responseDiv: Element
         const status = data.success ? '✓' : '✗';
         addActivityItem('tool-result', `${status} ${toolName}`, data.result ? formatToolResult(data.result) : null);
         if (data._output) renderDisplayOutput(data._output);
+        if (data._applet) executeApplet(data._applet as AppletContent);
         break;
       }
         

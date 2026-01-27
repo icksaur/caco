@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { sessionState } from './src/session-state.js';
 import { createDisplayTools } from './src/display-tools.js';
+import { createAppletTools } from './src/applet-tools.js';
 import { storeOutput, detectLanguage } from './src/storage.js';
 import { sessionRoutes, apiRoutes, streamRoutes } from './src/routes/index.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
@@ -20,14 +21,18 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-// Tool factory - creates display tools with session cwd baked in for storage
+// Tool factory - creates display tools + applet tools with session cwd baked in
 const toolFactory: ToolFactory = (sessionCwd: string) => {
-  // storeOutput receives sessionCwd first, then data and metadata
-  // The closure captures sessionCwd so each session's tools scope to the right storage
-  return createDisplayTools(
+  // Display tools need sessionCwd for storage scoping
+  const displayTools = createDisplayTools(
     (data, meta) => storeOutput(sessionCwd, data, meta),
     detectLanguage
   );
+  
+  // Applet tools are session-independent (in-memory for Phase 1)
+  const appletTools = createAppletTools();
+  
+  return [...displayTools, ...appletTools];
 };
 
 // System message for sessions
@@ -48,6 +53,7 @@ const SYSTEM_MESSAGE: SystemMessage = {
 - **Images**: View pasted images, display image files
 - **Media embeds**: Embed YouTube, SoundCloud, Vimeo, Spotify content inline
 - **Code**: Syntax highlighting for all major languages
+- **Applets**: Create custom interactive UI in the applet panel
 
 ## Display Tools
 You have special tools that display content directly to the user:
@@ -57,6 +63,13 @@ You have special tools that display content directly to the user:
 - \`embed_media\` - Embed YouTube/SoundCloud/Vimeo/Spotify content
 
 Use display tools when users want to SEE content. Use regular tools when you need to analyze content.
+
+## Applet Tool
+You can create custom interactive interfaces using:
+- \`set_applet_content\` - Set HTML/JS/CSS content in the applet panel
+
+Use this when users ask for interactive tools, editors, viewers, forms, or dashboards.
+The applet runs in a dedicated panel with full JavaScript capabilities.
 
 ## Behavior Guidelines
 - Provide direct, helpful answers without unnecessary caveats

@@ -269,12 +269,13 @@ applets/
 
 ### New Modules
 
-| Module | Location | Purpose |
-|--------|----------|---------|
-| `applet-store.ts` | `src/` | Server-side applet persistence |
-| `applet-tools.ts` | `src/` | MCP tool definitions |
-| `applet-runtime.ts` | `public/ts/` | Client-side applet execution |
-| `routes/applet.ts` | `src/routes/` | File operation endpoints |
+| Module | Location | Purpose | Status |
+|--------|----------|---------|--------|
+| `applet-state.ts` | `src/` | In-memory applet state singleton | ✅ Phase 1 |
+| `applet-tools.ts` | `src/` | MCP tool definitions | ✅ Phase 1 |
+| `applet-runtime.ts` | `public/ts/` | Client-side applet execution | ✅ Phase 1 |
+| `applet-store.ts` | `src/` | Server-side applet persistence | Phase 3 |
+| `routes/applet.ts` | `src/routes/` | File operation endpoints | Phase 3 |
 
 ### Encapsulation Goals
 
@@ -294,7 +295,7 @@ public/ts/
 ### Integration Points
 
 1. **Session Manager** - Register applet tools with session
-2. **SSE Stream** - New `applet.update` event type
+2. **SSE Stream** - `_applet` payload in `tool.execution_complete` events
 3. **View Controller** - Switch to applet view when content set
 4. **Main.ts** - Initialize applet runtime
 
@@ -302,13 +303,20 @@ public/ts/
 
 ## Implementation Plan
 
-### Phase 1: Basic Applet Tool
+### Phase 1: Basic Applet Tool ✅
 
-- [ ] Create `applet-tools.ts` with `set_applet_content`
-- [ ] Register tool in session creation
-- [ ] Create `applet-runtime.ts` for client-side execution
-- [ ] SSE event `applet.update` to push content
-- [ ] Auto-switch to applet view when content set
+- [x] Create `applet-tools.ts` with `set_applet_content`
+- [x] Register tool in session creation (via `toolFactory` in `server.ts`)
+- [x] Create `applet-runtime.ts` for client-side execution
+- [x] SSE event with `_applet` payload to push content
+- [x] Auto-switch to applet view when content set
+
+**Implementation Notes (Phase 1):**
+- `applet-state.ts` - In-memory singleton for current applet content
+- `applet-tools.ts` - Defines `set_applet_content` with clear agent-facing description
+- `applet-runtime.ts` - Injects HTML, CSS (via `<style>`), executes JS via `new Function()`
+- SSE enrichment in `stream.ts` - Adds `_applet` to `tool.execution_complete` events
+- `response-streaming.ts` - Calls `executeApplet()` when `_applet` present
 
 ### Phase 2: State Query
 

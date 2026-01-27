@@ -19,6 +19,7 @@ import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
+import { getApplet } from '../applet-state.js';
 import { DEFAULT_MODEL } from '../preferences.js';
 import { parseImageDataUrl } from '../image-utils.js';
 
@@ -168,10 +169,19 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
       
       // Handle tool output references
       if (event.type === 'tool.execution_complete') {
+        const toolName = eventData.toolName || eventData.name;
         const result = (eventData.result as { content?: string }) || {};
+        
         if (result.content) {
           try {
-            const parsed = JSON.parse(result.content) as { toolTelemetry?: { outputId?: string } };
+            const parsed = JSON.parse(result.content) as { 
+              toolTelemetry?: { 
+                outputId?: string;
+                appletSet?: boolean;
+              } 
+            };
+            
+            // Display tool output reference
             if (parsed.toolTelemetry?.outputId) {
               const storedOutput = getOutput(parsed.toolTelemetry.outputId);
               const outputMeta = storedOutput?.metadata;
@@ -182,6 +192,17 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
                     id: parsed.toolTelemetry.outputId,
                     ...outputMeta
                   }
+                };
+              }
+            }
+            
+            // Applet content set - include full content for client-side execution
+            if (parsed.toolTelemetry?.appletSet || toolName === 'set_applet_content') {
+              const appletContent = getApplet();
+              if (appletContent) {
+                eventData = {
+                  ...eventData,
+                  _applet: appletContent
                 };
               }
             }

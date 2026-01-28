@@ -12,7 +12,6 @@ All endpoints are prefixed with `/api/`.
 |----------|--------|-------------|
 | `/api/sessions` | POST | Create new session |
 | `/api/sessions/:id/messages` | POST | Send message to session |
-| `/api/stream/:streamId` | GET | SSE connection for response streaming |
 
 **POST /api/sessions** - Create new session
 ```json
@@ -29,10 +28,14 @@ Returns: `{ sessionId: "uuid", cwd: "string", model: "string" }`
   "prompt": "string",
   "imageData": "data:image/...;base64,... (optional)",
   "appletState": "object (optional, batched state from applet)",
-  "appletNavigation": "object (optional, navigation context)"
+  "appletNavigation": "object (optional, navigation context)",
+  "source": "'user' | 'applet' (optional, defaults to 'user')",
+  "appletSlug": "string (optional, applet context for agent)"
 }
 ```
-Returns: `{ streamId: "uuid", sessionId: "uuid" }`
+Returns: `{ ok: true, sessionId: "uuid" }`
+
+Response streams via WebSocket (not SSE).
 
 ### Session Management
 
@@ -45,14 +48,15 @@ Returns: `{ streamId: "uuid", sessionId: "uuid" }`
 
 **Headers:** All session endpoints accept `X-Client-ID` header for multi-client isolation.
 
-### Preferences & History
+### Preferences
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/preferences` | GET | Get user preferences |
 | `/api/preferences` | POST | Update preferences |
-| `/api/history` | GET | Get conversation history as HTML |
 | `/api/models` | GET | List available models from SDK |
+
+Note: History is streamed via WebSocket on connect, not HTTP.
 
 ### Display Outputs
 
@@ -103,15 +107,31 @@ Query params:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/files` | GET | List files in directory |
-| `/api/files/read` | GET | Read file content (max 100KB) |
+| `/api/file` | GET | Serve raw file content (max 10MB) |
+| `/api/files/read` | GET | Read file as JSON (max 100KB) |
+| `/api/files/write` | POST | Write file content |
 
 **GET /api/files** query params:
 - `path` - Relative path from workspace root
 
+**GET /api/file** query params:
+- `path` - Relative path to file
+Returns raw content with appropriate Content-Type header.
+
 **GET /api/files/read** query params:
 - `path` - Relative path to file
+Returns: `{ path, content, size }`
 
-Security: Both endpoints are locked to workspace root.
+**POST /api/files/write** body:
+```json
+{
+  "path": "relative/path/to/file",
+  "content": "file content string"
+}
+```
+Returns: `{ ok: true, path, size }`
+
+Security: All file endpoints are locked to workspace root.
 
 ### Debug
 
@@ -225,6 +245,34 @@ applets.forEach(app => {
 });
 ```
 
+### getSessionId()
+
+Get the active chat session ID (for agent invocation).
+
+```javascript
+const sessionId = getSessionId();
+// Returns: string | null (null if no active session)
+
+if (sessionId) {
+  console.log('Active session:', sessionId);
+}
+```
+
+### sendAgentMessage(prompt, appletSlug?)
+
+Send a message to the agent from applet JS. Creates an "applet" bubble (orange) in the chat.
+
+```javascript
+// Send a message with current applet as context
+await sendAgentMessage('Set the calculator value to 42');
+
+// Send with explicit applet slug
+await sendAgentMessage('Load file /path/to/image.jpg', 'image-viewer');
+```
+
+Returns a Promise that resolves when the message is sent (not when the agent responds).
+The agent's response will stream to the chat as usual.
+
 ### Global Variables
 
 | Variable | Description |
@@ -252,25 +300,41 @@ function handleClick() { /* ... */ }
 
 ---
 
-## SSE Events (Response Streaming)
+## WebSocket Events (Response Streaming)
 
-Events sent from `/api/stream/:streamId`.
+Messages sent via WebSocket connection at `/ws?sessionId=xxx`.
 
-| Event | Description |
-|-------|-------------|
-| `assistant.message_delta` | Incremental text content |
-| `assistant.message` | Final message content |
-| `assistant.turn_start` | New turn beginning |
-| `assistant.intent` | Agent's stated intent |
-| `tool.execution_start` | Tool call starting |
-| `tool.execution_complete` | Tool call finished |
-| `session.error` | Error occurred |
-| `session.idle` | Session ready for next message |
-| `done` | Stream complete |
+### Server → Client Messages
 
-**Special data in tool.execution_complete:**
-- `_output` - Display output reference
-- `_reload` - Signal to reload page
+| Type | Description |
+|------|-------------|
+| `message` | Chat message (user, assistant, or streaming update) |
+| `activity` | Tool calls, intents, errors |
+| `stateUpdate` | Applet state pushed from agent |
+| `historyComplete` | History streaming finished |
+| `pong` | Response to ping |
+
+**ChatMessage structure:**
+```json
+{
+  "id": "uuid",
+  "role": "user | assistant",
+  "content": "message text",
+  "status": "streaming | complete (optional)",
+  "deltaContent": "incremental text (optional)",
+  "source": "user | applet (optional)",
+  "appletSlug": "calculator (optional)",
+  "outputs": ["output-id-1"] 
+}
+```
+
+### Client → Server Messages
+
+| Type | Description |
+|------|-------------|
+| `setState` | Push applet state to server |
+| `getState` | Request current state |
+| `ping` | Keep-alive |
 
 ---
 

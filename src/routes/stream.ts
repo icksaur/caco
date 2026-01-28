@@ -17,7 +17,7 @@ import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
-import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, type ActivityItem } from './applet-ws.js';
+import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, type ActivityItem, type MessageSource } from './applet-ws.js';
 import { randomUUID } from 'crypto';
 
 const router = Router();
@@ -41,7 +41,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     imageData?: string;
     appletState?: Record<string, unknown>;
     appletNavigation?: NavigationContext;
-    source?: 'user' | 'applet';
+    source?: MessageSource;
     appletSlug?: string;
   };
   
@@ -84,8 +84,14 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // Return immediately - streaming happens via WebSocket
   res.json({ ok: true, sessionId });
   
+  // Prefix prompt with applet marker for history persistence
+  // Format: [applet:slug] actual prompt
+  const promptToSend = source === 'applet' && appletSlug 
+    ? `[applet:${appletSlug}] ${prompt}`
+    : prompt;
+  
   // Start streaming in background
-  streamToWebSocket(sessionId, prompt, tempFilePath, clientId).catch(err => {
+  streamToWebSocket(sessionId, promptToSend, tempFilePath, clientId).catch(err => {
     console.error(`[STREAM] Error streaming to WS:`, err);
   });
 });

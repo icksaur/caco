@@ -9,6 +9,12 @@
  * from old sockets are ignored.
  */
 
+/**
+ * Message source identifies who sent a message.
+ * Extensible: add new sources here (e.g., 'agent' for agent-to-agent).
+ */
+export type MessageSource = 'user' | 'applet';
+
 // Re-export ChatMessage type (matches server)
 export interface ChatMessage {
   id: string;
@@ -17,7 +23,7 @@ export interface ChatMessage {
   deltaContent?: string;      // Append to existing (streaming)
   status?: 'streaming' | 'complete';  // Defaults to 'complete'
   timestamp?: string;
-  source?: 'user' | 'applet';
+  source?: MessageSource;
   appletSlug?: string;
   hasImage?: boolean;
   outputs?: string[];
@@ -337,7 +343,7 @@ export function disconnectAppletWs(): void {
  * Send a chat message via WebSocket
  * Used instead of HTTP POST for unified rendering path
  */
-export function wsSendMessage(content: string, imageData?: string, source: 'user' | 'applet' = 'user', appletSlug?: string): void {
+export function wsSendMessage(content: string, imageData?: string, source: MessageSource = 'user', appletSlug?: string): void {
   send({ 
     type: 'sendMessage', 
     content, 

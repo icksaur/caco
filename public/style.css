@@ -33,6 +33,7 @@
   /* Colors - Chat messages */
   --color-user-bg: #2c4258;
   --color-assistant-bg: #2e4937;
+  --color-applet-bg: #9b7514;
   --color-selector-bg: #2d333b;
   --color-selector-hover: #3d434b;
 
@@ -336,14 +337,13 @@ main {
 
 /* Applet-invoked messages (agent called by applet, not user) */
 .message.applet {
-  background: linear-gradient(135deg, #e65c00 0%, #f09819 100%);
+  background: var(--color-applet-bg);
   margin-left: var(--space-xl);
   white-space: pre-wrap;
-  border-left: 3px solid #ff7b00;
 }
 
 .message.applet::before {
-  content: '🔧 ' attr(data-applet-source);
+  content: attr(data-applet-source);
   display: block;
   font-size: 0.75em;
   opacity: 0.8;

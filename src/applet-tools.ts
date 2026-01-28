@@ -75,18 +75,31 @@ function calculate() {
 }
 \`\`\`
 
-## JavaScript APIs Available
+## JavaScript APIs
 
-- \`setAppletState(obj)\` - Push state to server for agent to query via get_applet_state tool
+**Navigation:**
 - \`loadApplet(slug)\` - Navigate to another applet
 - \`listApplets()\` - Get array of saved applets (async)
 - \`appletContainer\` - Reference to container element
 
-## Querying Applet State
+**Agent Communication (two patterns):**
 
-After user interacts with applet, use \`get_applet_state\` tool to read values:
-- User fills form → applet calls setAppletState({ name: "...", email: "..." })
-- Agent calls get_applet_state → receives the form data
+### Pattern 1: Passive State (agent polls)
+\`setAppletState(obj)\` - Store state for agent to query later
+\`\`\`javascript
+setAppletState({ selectedFile: '/path/to/file.txt' });
+// Agent can read this anytime via get_applet_state tool
+\`\`\`
+
+### Pattern 2: Active Request (agent responds NOW)
+\`sendAgentMessage(prompt)\` - Send message, agent responds immediately
+\`\`\`javascript
+await sendAgentMessage('Get MSFT stock price and set_applet_state with result');
+// Agent receives message, takes action, responds in chat
+\`\`\`
+
+**Use passive** when storing data for agent to read on demand.
+**Use active** when you want the agent to do something RIGHT NOW.
 
 ## Tips
 

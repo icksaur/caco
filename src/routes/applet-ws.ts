@@ -14,6 +14,12 @@ import sessionManager from '../session-manager.js';
 // Track connections by sessionId
 const connections = new Map<string, Set<WebSocket>>();
 
+/**
+ * Message source identifies who sent a message.
+ * Extensible: add new sources here (e.g., 'agent' for agent-to-agent).
+ */
+export type MessageSource = 'user' | 'applet';
+
 // Message types from client
 interface ClientMessage {
   type: 'setState' | 'getState' | 'sendMessage' | 'ping';
@@ -22,7 +28,7 @@ interface ClientMessage {
   // For sendMessage
   content?: string;
   imageData?: string;
-  source?: 'user' | 'applet';
+  source?: MessageSource;
   appletSlug?: string;
 }
 
@@ -32,7 +38,7 @@ export interface UserMessage {
   role: 'user';
   content: string;
   timestamp: string;
-  source: 'user' | 'applet';
+  source: MessageSource;
   appletSlug?: string;
   hasImage: boolean;
 }
@@ -46,7 +52,7 @@ export interface ChatMessage {
   deltaContent?: string;      // Append to existing (streaming)
   status?: 'streaming' | 'complete';  // Defaults to 'complete'
   timestamp?: string;
-  source?: 'user' | 'applet';
+  source?: MessageSource;
   appletSlug?: string;
   hasImage?: boolean;
   // For assistant messages
@@ -237,7 +243,7 @@ export function hasAppletConnection(sessionId: string): boolean {
 }
 
 // Callback for when a message needs to be sent to the agent
-type MessageCallback = (sessionId: string, content: string, imageData?: string, source?: 'user' | 'applet', appletSlug?: string) => void;
+type MessageCallback = (sessionId: string, content: string, imageData?: string, source?: MessageSource, appletSlug?: string) => void;
 let messageCallback: MessageCallback | null = null;
 
 /**
@@ -314,7 +320,7 @@ export function broadcastUserMessageFromPost(
   sessionId: string,
   content: string,
   hasImage: boolean,
-  source: 'user' | 'applet' = 'user',
+  source: MessageSource = 'user',
   appletSlug?: string
 ): void {
   const message: ChatMessage = {
@@ -362,7 +368,20 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
       // Convert message events to ChatMessage
       if (evt.type === 'user.message' || evt.type === 'assistant.message') {
         const isUser = evt.type === 'user.message';
-        const content = (evt.data as { content?: string })?.content || '';
+        let content = (evt.data as { content?: string })?.content || '';
+        
+        // Parse applet marker from user messages: [applet:slug] actual content
+        let source: MessageSource = 'user';
+        let appletSlug: string | undefined;
+        
+        if (isUser) {
+          const appletMatch = content.match(/^\[applet:([^\]]+)\]\s*/);
+          if (appletMatch) {
+            source = 'applet';
+            appletSlug = appletMatch[1];
+            content = content.slice(appletMatch[0].length);
+          }
+        }
         
         if (!content && pendingOutputs.length === 0) continue;
         
@@ -371,7 +390,8 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
           role: isUser ? 'user' : 'assistant',
           content,
           timestamp: new Date().toISOString(),
-          source: isUser ? 'user' : undefined,
+          source: isUser ? source : undefined,
+          appletSlug: isUser ? appletSlug : undefined,
           outputs: isUser ? undefined : [...pendingOutputs]
         };
         

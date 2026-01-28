@@ -7,10 +7,11 @@
  * Phase 2: Exposes setAppletState() for applet JS to push state to server.
  * Phase 3: Exposes loadApplet(slug) for loading saved applets from applet JS.
  * Phase 4: WebSocket for real-time state sync.
+ * Phase 5: Agent invocation - applets can POST to active session.
  */
 
 import { setViewState } from './view-controller.js';
-import { connectAppletWs, wsSetState, onStateUpdate, isWsConnected } from './applet-ws.js';
+import { connectAppletWs, wsSetState, onStateUpdate, isWsConnected, getWsSessionId } from './applet-ws.js';
 import { getActiveSessionId } from './state.js';
 
 export interface AppletContent {
@@ -59,6 +60,10 @@ export function initAppletRuntime(): void {
   
   // WebSocket state subscription for applet JS
   (window as unknown as { onStateUpdate: typeof onStateUpdate }).onStateUpdate = onStateUpdate;
+  
+  // Agent invocation API for applet JS
+  (window as unknown as { getSessionId: typeof getActiveSessionId }).getSessionId = getActiveSessionId;
+  (window as unknown as { sendAgentMessage: typeof sendAgentMessage }).sendAgentMessage = sendAgentMessage;
   
   // Handle browser back/forward buttons
   window.addEventListener('popstate', handlePopState);
@@ -139,6 +144,43 @@ function setAppletState(state: Record<string, unknown>): void {
   } else {
     console.log('[APPLET] State queued (no WS):', Object.keys(state));
   }
+}
+
+/**
+ * Send a message to the agent from applet JS
+ * Creates an "applet" bubble (orange) in the chat and triggers agent response
+ * 
+ * @param prompt - The message to send to the agent
+ * @param appletSlug - Optional applet slug for context (defaults to current applet)
+ * @returns Promise that resolves when message is sent (not when agent responds)
+ */
+async function sendAgentMessage(prompt: string, appletSlug?: string): Promise<void> {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) {
+    throw new Error('No active session - cannot send agent message');
+  }
+  
+  // Default to current applet if not specified
+  const slug = appletSlug ?? appletStack[appletStack.length - 1]?.slug;
+  
+  console.log(`[APPLET] Sending agent message: "${prompt.slice(0, 50)}..." (session: ${sessionId}, applet: ${slug})`);
+  
+  const response = await fetch(`/api/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt,
+      source: 'applet',
+      appletSlug: slug
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || `HTTP ${response.status}`);
+  }
+  
+  console.log('[APPLET] Agent message sent successfully');
 }
 
 /**

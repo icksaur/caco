@@ -136,11 +136,26 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === 'Escape' || e.key === 'c') clearDisplay();
 });
 
+// Test button - fetch stock price and put in calculator
+var testBtn = document.getElementById('testBtn');
+testBtn.addEventListener('click', async function() {
+  var sessionId = window.getSessionId();
+  if (!sessionId) {
+    alert('Please start a chat session first');
+    return;
+  }
+  
+  // Use the sendAgentMessage API
+  await window.sendAgentMessage('Get MSFT stock price and set_applet_state({ currentValue: "<price>" })');
+});
+
 // Listen for state updates pushed from agent
 onStateUpdate(function(state) {
   console.log('[CALC] Received state from agent:', state);
+  
   if (state.currentValue !== undefined) {
     currentValue = String(state.currentValue);
+    updateDisplay();
   }
   if (state.pendingOp !== undefined) {
     pendingOp = state.pendingOp;
@@ -151,8 +166,6 @@ onStateUpdate(function(state) {
   if (state.displayValue !== undefined) {
     display.value = state.displayValue;
   }
-  // Apply changes and sync back to server (applet is source of truth)
-  updateDisplay();
 });
 
 syncState();

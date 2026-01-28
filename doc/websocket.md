@@ -71,14 +71,14 @@ Note: Chat messages are sent via HTTP POST, not WebSocket. This allows any clien
 
 | Type | Payload | Purpose |
 |------|---------|---------|
-| `history` | `{ messages: ChatMessage[] }` | Full history on connect |
-| `userMessage` | `ChatMessage` | User/applet message (echo back) |
-| `assistantStart` | `{ messageId }` | Assistant response starting |
-| `assistantDelta` | `{ messageId, delta }` | Streaming content |
-| `assistantComplete` | `ChatMessage` | Full assistant message |
+| `message` | `ChatMessage` | Any complete message (history or live) |
+| `historyComplete` | `{}` | History streaming finished |
+| `assistantDelta` | `{ messageId, delta }` | Streaming content chunk |
 | `stateUpdate` | `{ data }` | Applet state pushed |
 | `error` | `{ error }` | Error occurred |
 | `pong` | `{}` | Heartbeat response |
+
+**Unified `message` type**: Same event for history replay and live messages. Client uses one `renderMessage()` function for all.
 
 ### ChatMessage Structure
 
@@ -247,10 +247,19 @@ sequenceDiagram
     participant S as Server
     participant A as Agent/SDK
 
+    Note over C,S: Page load / reconnect
+    C->>W: connect
+    S->>W: message (user)
+    S->>W: message (assistant)
+    S->>W: message (user)
+    S->>W: ...N messages
+    S->>W: historyComplete
+    W->>C: renderMessage() for each
+
     Note over C,S: User sends message
     C->>H: POST /sessions/:id/messages
     H->>S: receive message
-    S->>W: broadcast userMessage
+    S->>W: message (user)
     W->>C: renderMessage()
     S->>A: session.sendMessage()
 
@@ -258,14 +267,12 @@ sequenceDiagram
     A-->>S: streaming events
     S->>W: assistantDelta
     W->>C: update streaming div
-    S->>W: assistantComplete
+    S->>W: message (assistant)
     W->>C: finalize message
 
     Note over C,S: Applet invokes
     C->>H: POST with source='applet'
-    S->>W: userMessage (source: applet)
+    S->>W: message (user, applet)
     W->>C: renderMessage() [orange]
     S->>A: session.sendMessage()
-    A-->>S: streaming
-    S->>W: assistantComplete
 ```

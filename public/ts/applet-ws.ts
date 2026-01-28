@@ -13,7 +13,7 @@
  * Message source identifies who sent a message.
  * Extensible: add new sources here (e.g., 'agent' for agent-to-agent).
  */
-export type MessageSource = 'user' | 'applet';
+export type MessageSource = 'user' | 'applet' | 'agent';
 
 // Re-export ChatMessage type (matches server)
 export interface ChatMessage {

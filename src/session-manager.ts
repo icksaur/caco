@@ -198,8 +198,10 @@ class SessionManager {
     const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
     await client.start();
     
-    // Create tools using factory (cwd is the storage key)
-    const tools = config.toolFactory ? config.toolFactory(cwd) : [];
+    // For new sessions, create a mutable ref with placeholder
+    // The ref will be updated after session creation so tools can access real ID
+    const sessionRef = { id: 'PENDING' };
+    const tools = config.toolFactory ? config.toolFactory(cwd, sessionRef) : [];
     
     // Create session with streaming enabled
     const session = await client.createSession({
@@ -209,6 +211,9 @@ class SessionManager {
       tools,
       excludedTools: config.excludedTools
     });
+    
+    // Update the ref so tool handlers can access the real session ID
+    sessionRef.id = session.sessionId;
     
     // Lock and track
     this.cwdLocks.set(cwd, session.sessionId);
@@ -255,8 +260,10 @@ class SessionManager {
     const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
     await client.start();
     
-    // Create tools using factory (cwd is the storage key)
-    const tools = config.toolFactory ? config.toolFactory(cwd) : [];
+    // Create tools using factory (cwd and sessionRef for agent tools)
+    // For resume, we know the sessionId upfront
+    const sessionRef = { id: sessionId };
+    const tools = config.toolFactory ? config.toolFactory(cwd, sessionRef) : [];
     
     // Resume session with tools
     const session = await client.resumeSession(sessionId, {

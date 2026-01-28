@@ -36,13 +36,14 @@ interface SessionEvent {
  */
 router.post('/sessions/:sessionId/messages', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { prompt, imageData, appletState, appletNavigation, source, appletSlug } = req.body as {
+  const { prompt, imageData, appletState, appletNavigation, source, appletSlug, fromSession } = req.body as {
     prompt?: string;
     imageData?: string;
     appletState?: Record<string, unknown>;
     appletNavigation?: NavigationContext;
     source?: MessageSource;
     appletSlug?: string;
+    fromSession?: string;  // For agent-to-agent: originating session ID
   };
   
   const clientId = req.headers['x-client-id'] as string | undefined;
@@ -55,6 +56,12 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // Verify session exists (getSessionCwd returns null if not found)
   if (!sessionManager.getSessionCwd(sessionId)) {
     res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+  
+  // Self-POST prevention: block agent posting to its own session
+  if (source === 'agent' && fromSession === sessionId) {
+    res.status(400).json({ error: 'Cannot post to own session' });
     return;
   }
   
@@ -144,9 +151,10 @@ export async function dispatchMessage(
   let hasStarted = false;
   
   try {
-    // Ensure session is active
+    // Ensure session is active (loads SDK client into memory)
+    // Uses resume() directly - doesn't stop other sessions
     if (!sessionManager.isActive(sessionId)) {
-      await sessionState.switchSession(sessionId, clientId);
+      await sessionManager.resume(sessionId);
     }
     
     // Get session

@@ -22,6 +22,38 @@ POST /api/sessions/:id/messages
 
 The POST must work without any WS connection. WS is just for real-time UI updates.
 
+### Backend Has No "Active Session" Concept
+
+The backend doesn't track which session the user is looking at. That's a client concern.
+
+**Backend responsibilities:**
+- Respond to HTTP requests for any session
+- Establish WS connections when clients connect
+- Broadcast events to WS for connected sessions
+- Load SDK clients into memory as needed (multiple can be active)
+
+**What "active" means in backend:**
+- `sessionManager.activeSessions` = sessions with SDK client loaded in memory
+- Multiple sessions can be "active" simultaneously
+- POST to any session will load its SDK client if needed (via `resume()`)
+- Does NOT stop other sessions when activating a new one
+
+**What "active" means in client:**
+- Which session the user is viewing
+- Client filters WS messages by active session ID
+- Client tracks this locally
+
+### Session Activation on POST
+
+When POST arrives for a session:
+1. Check if session exists (404 if not)
+2. Check if SDK client is loaded (`isActive`)
+3. If not loaded, call `sessionManager.resume()` to load it
+4. Dispatch message to SDK
+5. Broadcast events to WS (if any clients connected)
+
+Key: `resume()` loads a session **without stopping others**.
+
 ### Client Session Filtering
 
 Client ignores WS packets for sessions other than current active session.
@@ -133,46 +165,61 @@ Track "spawn depth" to prevent infinite delegation chains.
 
 ## MCP Tool Wrapper
 
+Three tools are provided for agent-to-agent communication. All tools are session-aware - they know their own session ID and include it in requests so receiving sessions can call back.
+
+### send_agent_message
+
+Send a message to another agent session. The target session receives the message with `source: 'agent'` and the originating session ID.
+
 ```typescript
-// send_agent_message tool
-{
-  name: "send_agent_message",
-  description: "Send a message to another agent session",
-  parameters: {
-    sessionId: { type: "string", description: "Target session ID" },
-    message: { type: "string", description: "Message to send" }
-  }
-}
+send_agent_message(sessionId: string, message: string)
+```
 
-// create_agent_session tool
-{
-  name: "create_agent_session", 
-  description: "Create a new agent session",
-  parameters: {
-    cwd: { type: "string", description: "Working directory for new session" },
-    model: { type: "string", description: "Model to use" },
-    initialMessage: { type: "string", description: "First message to send" }
-  }
-}
+**Callback pattern**: Include instructions in your message so the target can report back:
 
-// get_session_state tool
-{
-  name: "get_session_state",
-  description: "Check if a session is idle or streaming",
-  parameters: {
-    sessionId: { type: "string", description: "Session to check" }
-  }
-}
+```
+"Analyze the API in /src/api. When finished, call send_agent_message('${mySessionId}', 'Analysis results: ...')"
+```
+
+The tool description includes your session ID so the model knows what to tell the target.
+
+### get_session_state
+
+Check if a session is idle, streaming, or doesn't exist.
+
+```typescript
+get_session_state(sessionId: string)
+// Returns: { sessionId, status: 'idle' | 'streaming', cwd, isActive }
+```
+
+Use this to poll spawned sessions for completion.
+
+### create_agent_session
+
+Create a new session with a specific working directory.
+
+```typescript
+create_agent_session(cwd: string, initialMessage?: string)
+// Returns: new session ID
+```
+
+If `initialMessage` is provided, it's sent immediately with `source: 'agent'`.
+
+**Example workflow**:
+```
+1. create_agent_session('/path/to/project', 'Analyze this codebase and send_agent_message("abc123", "Results: ...")') 
+2. Poll with get_session_state until idle
+3. Or just wait for the callback message
 ```
 
 ## Implementation Plan
 
-1. Add `source: 'agent'` support to message schema
-2. Implement POST /api/sessions/:sessionId/messages
-3. Implement GET /api/sessions/:sessionId/state
-4. Add self-POST prevention
-5. Create MCP tool wrappers
-6. Add agent bubble styling in UI
+1. ✅ Add `source: 'agent'` support to message schema
+2. ✅ Implement POST /api/sessions/:sessionId/messages
+3. ✅ Implement GET /api/sessions/:sessionId/state
+4. ✅ Add self-POST prevention
+5. ✅ Create MCP tool wrappers (`src/agent-tools.ts`)
+6. ✅ Add agent bubble styling in UI (purple)
 
 ## Open Questions
 

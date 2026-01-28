@@ -122,4 +122,28 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/sessions/:sessionId/state
+ * Get session state (for agent-to-agent polling)
+ * Returns: status (idle/inactive), cwd
+ */
+router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  
+  const cwd = sessionManager.getSessionCwd(sessionId);
+  if (!cwd) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+  
+  const isActive = sessionManager.isActive(sessionId);
+  
+  res.json({
+    sessionId,
+    status: isActive ? 'idle' : 'inactive',
+    cwd,
+    isActive
+  });
+});
+
 export default router;

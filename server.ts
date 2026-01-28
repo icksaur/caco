@@ -12,6 +12,7 @@ import { dirname, join } from 'path';
 import { sessionState } from './src/session-state.js';
 import { createDisplayTools } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
+import { createAgentTools, type SessionIdRef } from './src/agent-tools.js';
 import { storeOutput, detectLanguage } from './src/storage.js';
 import { sessionRoutes, apiRoutes, streamRoutes } from './src/routes/index.js';
 import { setupAppletWebSocket } from './src/routes/applet-ws.js';
@@ -27,7 +28,7 @@ const PORT = 3000;
 // Program CWD for applet storage (fixed at startup)
 const programCwd = process.cwd();
 
-const toolFactory: ToolFactory = (sessionCwd: string) => {
+const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
   // Display tools need sessionCwd for storage scoping
   const displayTools = createDisplayTools(
     (data, meta) => storeOutput(sessionCwd, data, meta),
@@ -37,7 +38,11 @@ const toolFactory: ToolFactory = (sessionCwd: string) => {
   // Applet tools need programCwd for persistent storage
   const appletTools = createAppletTools(programCwd);
   
-  return [...displayTools, ...appletTools];
+  // Agent tools need sessionRef for self-identification in callbacks
+  // Uses mutable ref so tools work even when sessionId isn't known at creation time
+  const agentTools = createAgentTools(sessionRef);
+  
+  return [...displayTools, ...appletTools, ...agentTools];
 };
 
 // System message for sessions
@@ -75,6 +80,15 @@ You can create custom interactive interfaces using:
 
 Use this when users ask for interactive tools, editors, viewers, forms, or dashboards.
 The applet runs in a dedicated panel with full JavaScript capabilities.
+
+## Agent-to-Agent Tools
+You can communicate with other agent sessions:
+- \`send_agent_message\` - Send a message to another session
+- \`get_session_state\` - Check if a session is idle or streaming  
+- \`create_agent_session\` - Create a new session with specific cwd
+
+Use these to delegate subtasks, coordinate work, or fan out parallel tasks.
+Include callback instructions so other agents can report back when finished.
 
 ## Behavior Guidelines
 - Provide direct, helpful answers without unnecessary caveats

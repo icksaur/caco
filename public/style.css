@@ -34,6 +34,7 @@
   --color-user-bg: #2c4258;
   --color-assistant-bg: #2e4937;
   --color-applet-bg: #9b7514;
+  --color-agent-bg: #5c3d6e;
   --color-selector-bg: #2d333b;
   --color-selector-hover: #3d434b;
 
@@ -344,6 +345,21 @@ main {
 
 .message.applet::before {
   content: attr(data-applet-source);
+  display: block;
+  font-size: 0.75em;
+  opacity: 0.8;
+  margin-bottom: var(--space-xs);
+}
+
+/* Agent-invoked messages (from another agent session) */
+.message.agent {
+  background: var(--color-agent-bg);
+  margin-left: var(--space-xl);
+  white-space: pre-wrap;
+}
+
+.message.agent::before {
+  content: 'Agent';
   display: block;
   font-size: 0.75em;
   opacity: 0.8;

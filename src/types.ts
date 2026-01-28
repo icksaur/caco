@@ -66,8 +66,14 @@ export interface SessionConfig {
   excludedTools?: string[];
 }
 
-// Tool factory - creates tools with session cwd baked in for storage
-export type ToolFactory = (sessionCwd: string) => unknown[];
+// Session ID reference - mutable for agent tools
+export interface SessionIdRef {
+  id: string;
+}
+
+// Tool factory - creates tools with session cwd and sessionId ref
+// The ref allows updating sessionId after session creation for new sessions
+export type ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => unknown[];
 
 // Session config with tool factory (for init)
 export interface SessionStateConfig {

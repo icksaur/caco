@@ -36,7 +36,7 @@ let loadingHistory = false;
  * Message variant determines styling (CSS class suffix)
  * All bubbles use same structure, only class differs
  */
-export type MessageVariant = 'user' | 'assistant' | 'applet' | 'error' | 'system';
+export type MessageVariant = 'user' | 'assistant' | 'applet' | 'agent' | 'error' | 'system';
 
 /**
  * Options for creating a message bubble
@@ -196,7 +196,9 @@ function handleMessage(msg: ChatMessage): void {
 function createMessage(msg: ChatMessage): void {
   if (msg.role === 'user') {
     // Determine variant based on source
-    const variant: MessageVariant = msg.source === 'applet' ? 'applet' : 'user';
+    let variant: MessageVariant = 'user';
+    if (msg.source === 'applet') variant = 'applet';
+    else if (msg.source === 'agent') variant = 'agent';
     
     renderBubble({
       id: msg.id,

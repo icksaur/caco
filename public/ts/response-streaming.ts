@@ -7,7 +7,7 @@
 
 import { escapeHtml, scrollToBottom, isAutoScrollEnabled, enableAutoScroll } from './ui-utils.js';
 import { addActivityItem } from './activity.js';
-import { setStreaming, getActiveSessionId, setActiveSession } from './state.js';
+import { setStreaming, isStreaming, getActiveSessionId, setActiveSession } from './state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { setViewState, isViewState } from './view-controller.js';
 import { onMessage, onHistoryComplete, onActivity, isWsConnected, type ChatMessage, type ActivityItem } from './applet-ws.js';
@@ -466,7 +466,7 @@ export function setFormEnabled(enabled: boolean): void {
     
     stopButtonTimeout = setTimeout(() => {
       // Only show stop if still streaming
-      if (getActiveEventSource()) {
+      if (isStreaming()) {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Stop';
         submitBtn.classList.add('stop-btn');

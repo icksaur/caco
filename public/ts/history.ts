@@ -6,7 +6,6 @@ import type { Preferences } from './types.js';
 import { scrollToBottom } from './ui-utils.js';
 import { applyModelPreference, loadModels } from './model-selector.js';
 import { initFromPreferences } from './state.js';
-import { setViewState } from './view-controller.js';
 import { restoreOutputsFromHistory } from './display-output.js';
 import { setLoadingHistory } from './response-streaming.js';
 import { onHistoryComplete } from './applet-ws.js';
@@ -54,11 +53,13 @@ export function waitForHistoryComplete(): Promise<void> {
 
 /**
  * Finish history loading (after WS streaming completes)
+ * Does NOT change view state - that's handled by main.ts on page load
+ * and by user actions (session clicks, applet links)
  */
 function finishHistoryLoad(): void {
   const chat = document.getElementById('chat');
+  
   if (chat && chat.children.length > 0) {
-    setViewState('chatting');
     if (typeof window.renderMarkdown === 'function') {
       window.renderMarkdown();
     }
@@ -67,7 +68,6 @@ function finishHistoryLoad(): void {
     );
     scrollToBottom(true);
   } else {
-    setViewState('newChat');
     loadModels();
   }
 }

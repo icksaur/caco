@@ -109,7 +109,6 @@ function doConnect(myConnectionId: number): void {
   
   // Guard for Node.js test environment
   if (typeof window === 'undefined') {
-    console.log('[WS] Skipping connect in non-browser environment');
     return;
   }
   
@@ -128,7 +127,6 @@ function doConnect(myConnectionId: number): void {
       return;
     }
     
-    console.log('[WS] Connected');
     reconnectAttempts = 0;
     
     // Fire connect callbacks
@@ -158,7 +156,6 @@ function doConnect(myConnectionId: number): void {
     
     // Bail if stale - another connection is active
     if (myConnectionId !== connectionId) {
-      console.log('[WS] onclose bailing, stale connection ID');
       return;
     }
     
@@ -214,7 +211,6 @@ function handleMessage(msg: { type: string; id?: string; data?: unknown; error?:
     case 'message': {
       // Chat message (user or assistant) - from history or live
       const msgWithData = msg as unknown as { message?: ChatMessage };
-      console.log('[WS] message event, callbacks:', messageCallbacks.size, 'msg:', msgWithData.message?.role);
       if (msgWithData.message) {
         for (const cb of messageCallbacks) {
           try {
@@ -258,7 +254,7 @@ function handleMessage(msg: { type: string; id?: string; data?: unknown; error?:
       break;
       
     default:
-      console.log('[WS] Unknown message type:', msg.type);
+      // Unknown message type - ignore
   }
 }
 

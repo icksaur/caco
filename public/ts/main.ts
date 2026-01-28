@@ -88,17 +88,35 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load preferences to check for active session
   const prefs = await loadPreferences();
   
+  // Check for ?applet=slug param early
+  const hasAppletParam = new URLSearchParams(window.location.search).has('applet');
+  
   if (prefs?.lastSessionId) {
     // Active session exists - connect WS and wait for history
     connectAppletWs(prefs.lastSessionId);
     await waitForConnect();
     await waitForHistoryComplete();
+    
+    // Set view based on URL param (applet takes priority)
+    if (hasAppletParam) {
+      await loadAppletFromUrl();
+    } else {
+      // No applet - show chat or new chat based on history
+      const chat = document.getElementById('chat');
+      if (chat && chat.children.length > 0) {
+        setViewState('chatting');
+      } else {
+        setViewState('newChat');
+      }
+    }
   } else {
-    // No active session - show session manager as landing page
-    showSessionManager();
+    // No active session
+    if (hasAppletParam) {
+      // Applet requested but no session - load applet anyway
+      await loadAppletFromUrl();
+    } else {
+      // Show session manager as landing page
+      showSessionManager();
+    }
   }
-  
-  // Check for ?applet=slug param and load that applet
-  // This runs AFTER loadHistory so it can override the view state
-  await loadAppletFromUrl();
 });

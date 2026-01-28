@@ -9,7 +9,7 @@ import { escapeHtml, scrollToBottom, isAutoScrollEnabled, enableAutoScroll } fro
 import { addActivityItem } from './activity.js';
 import { setStreaming, isStreaming, getActiveSessionId, setActiveSession } from './state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
-import { setViewState, isViewState } from './view-controller.js';
+import { isViewState } from './view-controller.js';
 import { onMessage, onHistoryComplete, onActivity, isWsConnected, waitForConnect, type ChatMessage, type ActivityItem } from './applet-ws.js';
 
 // Declare renderMarkdown global
@@ -148,15 +148,11 @@ function registerWsHandlers(): void {
   
   // Unified message handler for history and live streaming
   onMessage((msg: ChatMessage) => {
-    console.log('[WS] Received message:', msg.id, msg.role, msg.status || 'complete', 
-      msg.deltaContent ? `delta(${msg.deltaContent.length})` : '',
-      loadingHistory ? '(history)' : '(live)');
     handleMessage(msg);
   });
   
   // History complete handler
   onHistoryComplete(() => {
-    console.log('[WS] History streaming complete');
     loadingHistory = false;
     // Render markdown for all history messages
     if (window.renderMarkdown) window.renderMarkdown();
@@ -166,7 +162,6 @@ function registerWsHandlers(): void {
   
   // Activity handler for tool calls, intents, errors
   onActivity((item: ActivityItem) => {
-    console.log('[WS] Activity:', item.type, item.text);
     addActivityItem(item.type, item.text, item.details);
   });
 }
@@ -178,13 +173,8 @@ function registerWsHandlers(): void {
  * - Finalizes bubbles (complete)
  */
 function handleMessage(msg: ChatMessage): void {
-  console.log('[MSG] handleMessage:', msg.id?.slice(0,8), msg.role, msg.status || '-', 
-    msg.deltaContent ? `delta(${msg.deltaContent.length})` : '',
-    msg.content ? `content(${msg.content.length})` : '');
-  
   // Find existing message element by ID
   const existing = document.querySelector(`[data-message-id="${msg.id}"]`);
-  console.log('[MSG] existing element:', existing ? 'found' : 'not found');
   
   if (existing) {
     // Update existing message
@@ -204,9 +194,6 @@ function handleMessage(msg: ChatMessage): void {
  * Create a new message element using unified renderBubble
  */
 function createMessage(msg: ChatMessage): void {
-  // Transition to chatting view on first message
-  setViewState('chatting');
-  
   if (msg.role === 'user') {
     // Determine variant based on source
     const variant: MessageVariant = msg.source === 'applet' ? 'applet' : 'user';
@@ -327,9 +314,6 @@ export function setLoadingHistory(loading: boolean): void {
 export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
   const userId = `local_user_${Date.now()}`;
   const assistantId = `local_assistant_${Date.now()}`;
-  
-  // Transition to chatting view
-  setViewState('chatting');
   
   // Render user bubble
   renderBubble({

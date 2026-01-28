@@ -107,6 +107,16 @@ await sendAgentMessage('Get MSFT stock price and set_applet_state with result');
 - Test with reload_page tool after file changes
 - Applet runs in sandboxed scope but has full DOM access
 - Use relative paths for any fetch() calls to local APIs
+
+## After Creating/Updating
+
+Always provide a clickable link so the user can open the applet:
+
+\`\`\`markdown
+Open the applet: [Calculator](/?applet=calculator)
+\`\`\`
+
+The link uses relative URL format \`/?applet=slug\` which navigates without page refresh.
 `.trim();
 
 /**

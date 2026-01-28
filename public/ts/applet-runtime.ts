@@ -8,11 +8,29 @@
  * Phase 3: Exposes loadApplet(slug) for loading saved applets from applet JS.
  * Phase 4: WebSocket for real-time state sync.
  * Phase 5: Agent invocation - applets can POST to active session.
+ * Phase 6: Navigation API for SPA routing.
  */
 
 import { setViewState } from './view-controller.js';
 import { connectAppletWs, wsSetState, onStateUpdate, isWsConnected, getWsSessionId } from './applet-ws.js';
 import { getActiveSessionId } from './state.js';
+
+// Navigation API types (not yet in TypeScript lib)
+interface NavigateEvent extends Event {
+  canIntercept: boolean;
+  downloadRequest: string | null;
+  hashChange: boolean;
+  navigationType: 'push' | 'replace' | 'reload' | 'traverse';
+  destination: { url: string };
+  intercept(options: { handler: () => Promise<void> }): void;
+}
+
+interface Navigation extends EventTarget {
+  addEventListener(type: 'navigate', listener: (event: NavigateEvent) => void): void;
+  navigate(url: string, options?: { state?: unknown }): { committed: Promise<void>; finished: Promise<void> };
+  currentEntry: { getState(): unknown };
+  updateCurrentEntry(options: { state: unknown }): void;
+}
 
 export interface AppletContent {
   html: string;
@@ -39,6 +57,9 @@ let currentStyleElement: HTMLStyleElement | null = null;
 // Pending applet state - accumulated until next message is sent
 let pendingAppletState: Record<string, unknown> | null = null;
 
+// Flag to prevent recursive navigation when inside a navigate handler
+let insideNavigateHandler = false;
+
 /**
  * Initialize applet runtime - exposes global functions for applet JS
  * Call this once at app startup
@@ -46,15 +67,10 @@ let pendingAppletState: Record<string, unknown> | null = null;
 export function initAppletRuntime(): void {
   // Expose setAppletState globally for applet JS to use
   (window as unknown as { setAppletState: typeof setAppletState }).setAppletState = setAppletState;
-  // Expose loadApplet globally for applet browser
-  (window as unknown as { loadApplet: typeof loadAppletBySlug }).loadApplet = loadAppletBySlug;
   // Expose listApplets globally for applet browser
   (window as unknown as { listApplets: typeof listSavedApplets }).listApplets = listSavedApplets;
   
-  // Navigation API for applet JS
-  (window as unknown as { navigateToApplet: typeof loadAppletBySlug }).navigateToApplet = loadAppletBySlug;
-  (window as unknown as { navigateBack: typeof popApplet }).navigateBack = popApplet;
-  (window as unknown as { getBreadcrumbs: typeof getAppletStack }).getBreadcrumbs = getAppletStack;
+  // URL params API for applet JS
   (window as unknown as { getAppletUrlParams: typeof getAppletUrlParams }).getAppletUrlParams = getAppletUrlParams;
   (window as unknown as { updateAppletUrlParam: typeof updateAppletUrlParam }).updateAppletUrlParam = updateAppletUrlParam;
   
@@ -65,42 +81,99 @@ export function initAppletRuntime(): void {
   (window as unknown as { getSessionId: typeof getActiveSessionId }).getSessionId = getActiveSessionId;
   (window as unknown as { sendAgentMessage: typeof sendAgentMessage }).sendAgentMessage = sendAgentMessage;
   
-  // Handle browser back/forward buttons
-  window.addEventListener('popstate', handlePopState);
+  // Navigation API: single handler for all navigation types
+  // (links, back/forward, programmatic, address bar)
+  // Applets use <a href="?applet=slug"> links - no JS API needed
+  setupNavigationHandler();
 }
 
 /**
- * Handle browser back/forward navigation
+ * Set up Navigation API handler for applet routing
+ * Intercepts all navigations with ?applet= param
  */
-function handlePopState(event: PopStateEvent): void {
-  const slug = new URLSearchParams(window.location.search).get('applet');
-  
-  if (!slug) {
-    // No applet param - clear stack and hide applet view
-    console.log('[APPLET] popstate: no applet param, clearing stack');
-    clearApplet();
+function setupNavigationHandler(): void {
+  // TypeScript doesn't have Navigation API types yet
+  const nav = (window as unknown as { navigation?: Navigation }).navigation;
+  if (!nav) {
+    console.warn('[APPLET] Navigation API not available');
     return;
   }
   
-  // Check if the target is in our current stack
-  const index = appletStack.findIndex(a => a.slug === slug);
-  if (index >= 0) {
-    // Navigate to existing in stack (pop down to it)
-    console.log(`[APPLET] popstate: navigating to stack index ${index}`);
-    // Don't call syncToUrl() here - we're reacting to URL change, not causing it
-    while (appletStack.length > index + 1) {
-      const popped = appletStack.pop()!;
-      destroyInstance(popped);
+  nav.addEventListener('navigate', (event: NavigateEvent) => {
+    // Skip if we can't intercept (e.g., cross-origin)
+    if (!event.canIntercept) return;
+    
+    // Skip downloads, hash-only changes, and page reloads
+    // Page reloads are handled by loadAppletFromUrl() in main.ts
+    if (event.downloadRequest !== null || event.hashChange) return;
+    if (event.navigationType === 'reload') return;
+    
+    const url = new URL(event.destination.url);
+    const appletSlug = url.searchParams.get('applet');
+    
+    // Only intercept same-origin applet navigations
+    if (url.origin !== window.location.origin) return;
+    
+    // Check if navigating away from applet (no ?applet= param)
+    if (!appletSlug) {
+      // If we're currently showing an applet, intercept to clear it
+      if (appletStack.length > 0) {
+        event.intercept({
+          handler: async () => {
+            insideNavigateHandler = true;
+            try {
+              console.log('[APPLET] navigate: leaving applet view');
+              clearApplet();
+            } finally {
+              insideNavigateHandler = false;
+            }
+          }
+        });
+      }
+      return;
     }
-    showInstance(appletStack[index]);
-    updateBreadcrumbUI();
-  } else {
-    // Load fresh - slug not in stack (came from external link or refresh)
-    console.log(`[APPLET] popstate: loading fresh: ${slug}`);
-    loadAppletBySlug(slug).catch(err => {
-      console.error('[APPLET] Failed to load from popstate:', err);
+    
+    // Extract URL params for applet state
+    const params: Record<string, string> = {};
+    url.searchParams.forEach((value, key) => {
+      if (key !== 'applet') params[key] = value;
     });
-  }
+    
+    // Intercept and handle applet navigation
+    event.intercept({
+      handler: async () => {
+        insideNavigateHandler = true;
+        try {
+          // Check if slug is already in stack (breadcrumb click or back navigation)
+          const index = appletStack.findIndex(a => a.slug === appletSlug);
+          if (index >= 0 && index < appletStack.length - 1) {
+            // Pop down to existing entry (it's earlier in the stack)
+            console.log(`[APPLET] navigate: popping to stack index ${index}`);
+            while (appletStack.length > index + 1) {
+              const popped = appletStack.pop()!;
+              destroyInstance(popped);
+            }
+            showInstance(appletStack[index]);
+            updateBreadcrumbUI();
+            setViewState('applet');
+          } else if (index === appletStack.length - 1) {
+            // Already showing this applet, just ensure it's visible
+            console.log(`[APPLET] navigate: already showing ${appletSlug}`);
+            showInstance(appletStack[index]);
+            setViewState('applet');
+          } else {
+            // Load applet (push new) - pushApplet will call setViewState
+            console.log(`[APPLET] navigate: loading ${appletSlug}`, Object.keys(params).length ? params : '');
+            await loadAppletBySlug(appletSlug, Object.keys(params).length ? params : undefined);
+          }
+        } finally {
+          insideNavigateHandler = false;
+        }
+      }
+    });
+  });
+  
+  console.log('[APPLET] Navigation API handler installed');
 }
 
 /**
@@ -193,23 +266,6 @@ async function sendAgentMessage(prompt: string, appletSlug?: string): Promise<vo
 async function loadAppletBySlug(slug: string, params?: Record<string, string>): Promise<void> {
   try {
     console.log(`[APPLET] Loading applet: ${slug}`, params ? `with params: ${JSON.stringify(params)}` : '');
-    
-    // Set URL params before loading (so applet can read them on init)
-    if (params) {
-      const url = new URL(window.location.href);
-      // Clear existing non-applet params first
-      const keysToRemove: string[] = [];
-      url.searchParams.forEach((_, key) => {
-        if (key !== 'applet') keysToRemove.push(key);
-      });
-      keysToRemove.forEach(key => url.searchParams.delete(key));
-      // Set new params
-      Object.entries(params).forEach(([key, value]) => {
-        url.searchParams.set(key, value);
-      });
-      url.searchParams.set('applet', slug);
-      history.replaceState(history.state, '', url.toString());
-    }
     
     // POST to load endpoint (updates server state + returns content)
     const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
@@ -384,30 +440,42 @@ function renderAppletToInstance(
 }
 
 /**
- * Sync current applet to URL using History API
+ * Sync current applet to URL using Navigation API
  * Enables browser back/forward navigation
  */
 function syncToUrl(): void {
+  // Skip if we're inside a navigate handler - the URL is already being handled
+  if (insideNavigateHandler) return;
+  
+  const nav = (window as unknown as { navigation?: Navigation }).navigation;
+  
   const current = appletStack[appletStack.length - 1];
+  const url = new URL(window.location.href);
+  const currentSlugInUrl = url.searchParams.get('applet');
+  
   if (!current) {
     // No applets - clear the URL param
-    const url = new URL(window.location.href);
     if (url.searchParams.has('applet')) {
       url.searchParams.delete('applet');
-      history.pushState({ appletStack: [] }, '', url.toString());
+      if (nav) {
+        nav.navigate(url.toString(), { state: { appletStack: [] } });
+      } else {
+        history.pushState({ appletStack: [] }, '', url.toString());
+      }
     }
     return;
   }
   
-  const url = new URL(window.location.href);
-  const currentSlugInUrl = url.searchParams.get('applet');
-  
-  // Only push if different from current URL
+  // Only navigate if different from current URL
   if (currentSlugInUrl !== current.slug) {
     url.searchParams.set('applet', current.slug);
-    // Store stack metadata in history state for restoration
     const stackData = appletStack.map(a => ({ slug: a.slug, label: a.label }));
-    history.pushState({ appletStack: stackData }, '', url.toString());
+    
+    if (nav) {
+      nav.navigate(url.toString(), { state: { appletStack: stackData } });
+    } else {
+      history.pushState({ appletStack: stackData }, '', url.toString());
+    }
     console.log(`[APPLET] URL synced: ${url.searchParams.get('applet')}`);
   }
 }
@@ -415,6 +483,7 @@ function syncToUrl(): void {
 /**
  * Update the breadcrumb UI based on current stack
  * Shows clickable trail with overflow collapse for 5+ items
+ * Uses simple hrefs - Navigation API handles the actual navigation
  */
 function updateBreadcrumbUI(): void {
   const container = document.querySelector('.applet-breadcrumbs');
@@ -469,16 +538,19 @@ function updateBreadcrumbUI(): void {
       container.appendChild(sep);
     }
     
-    // Create breadcrumb item
-    const crumb = document.createElement('span');
-    crumb.className = 'breadcrumb-item' + (isLast ? ' active' : '');
-    crumb.textContent = item.instance.label;
-    
-    if (!isLast) {
-      crumb.onclick = () => navigateToBreadcrumb(item.originalIndex);
+    // Create breadcrumb item - use <a> for clickable, <span> for current
+    if (isLast) {
+      const crumb = document.createElement('span');
+      crumb.className = 'breadcrumb-item active';
+      crumb.textContent = item.instance.label;
+      container.appendChild(crumb);
+    } else {
+      const link = document.createElement('a');
+      link.className = 'breadcrumb-item';
+      link.href = `?applet=${item.instance.slug}`;
+      link.textContent = item.instance.label;
+      container.appendChild(link);
     }
-    
-    container.appendChild(crumb);
   });
 }
 
@@ -563,6 +635,7 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
  * Clears entire stack when leaving applet view completely
  */
 export function clearApplet(): void {
+  
   // Destroy all instances in stack
   while (appletStack.length > 0) {
     const instance = appletStack.pop()!;
@@ -578,6 +651,9 @@ export function clearApplet(): void {
     currentStyleElement.remove();
     currentStyleElement = null;
   }
+  
+  // Switch back to chat view
+  setViewState('chatting');
 }
 
 /**
@@ -598,37 +674,6 @@ export function popApplet(): void {
   // Show previous
   const previous = appletStack[appletStack.length - 1];
   showInstance(previous);
-  
-  updateBreadcrumbUI();
-  syncToUrl();
-}
-
-/**
- * Navigate to a specific breadcrumb index
- * Destroys all applets after that index
- */
-export function navigateToBreadcrumb(index: number): void {
-  if (index < 0 || index >= appletStack.length) {
-    console.warn(`[APPLET] Invalid breadcrumb index: ${index}`);
-    return;
-  }
-  
-  // Already at this index?
-  if (index === appletStack.length - 1) {
-    return;
-  }
-  
-  console.log(`[APPLET] Navigating to breadcrumb ${index}: ${appletStack[index].slug}`);
-  
-  // Destroy all instances after target
-  while (appletStack.length > index + 1) {
-    const popped = appletStack.pop()!;
-    destroyInstance(popped);
-  }
-  
-  // Show target
-  const target = appletStack[index];
-  showInstance(target);
   
   updateBreadcrumbUI();
   syncToUrl();

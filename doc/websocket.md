@@ -231,7 +231,7 @@ Messages sent by applets (not typed by user) are visually distinct:
 - [x] `pushStateToApplet(sessionId, data)` server function
 - [x] `onStateUpdate(callback)` client API
 
-### Phase 3: Unified Chat Rendering
+### Phase 3: Unified Chat Rendering ✅
 - [x] **3A: User message via POST, render via WS** ✅
   - [x] HTTP POST `/api/sessions/:id/messages` sends to agent
   - [x] Server broadcasts `message` via WS after POST
@@ -241,16 +241,16 @@ Messages sent by applets (not typed by user) are visually distinct:
   - [x] Server streams `message` events on WS connect
   - [x] Server sends `historyComplete` when done
   - [x] Client waits for historyComplete before finishing render
-  - [x] Clean separation: loadPreferences() → connectWs() → waitForHistoryComplete()
-  - [ ] Remove `GET /api/history` endpoint (keep as fallback for now)
-- [ ] **3C: Applet invocation** ← NEXT
+- [ ] **3C: Applet invocation (orange bubbles)** ← NEXT
+  - [x] Message structure supports `source: 'applet'`
   - [ ] Applet POSTs with `source: 'applet'` metadata
   - [ ] Server broadcasts with applet info
-  - [ ] Orange bubble rendering
-- [ ] **3D: Streaming via WebSocket**
-  - [ ] Replace SSE with WS streaming
-  - [ ] `assistantDelta` messages
-  - [ ] Unified output rendering
+  - [ ] Orange bubble rendering tested
+- [x] **3D: Streaming via WebSocket** ✅
+  - [x] SSE removed, all streaming via WS
+  - [x] `message` with `deltaContent` for streaming
+  - [x] `activity` events for tool calls, intents
+  - [x] Client creates pending response on first activity/delta
 
 ### Phase 4: File Operations (Future)
 - [ ] `readFile(path)` with streaming

@@ -40,13 +40,17 @@ DELETE /sessions/:id       → delete
 
 | Current | Used | Required | Stateful | Stateless Equiv | Status |
 |---------|------|----------|----------|-----------------|--------|
-| `POST /message` | ✓ | ✓ | ~~singleton~~ | X-Client-ID header | ✅ Done |
+| `POST /sessions` | ✓ | ✓ | none | ✓ RESTful create | ✅ Done |
+| `POST /sessions/:id/messages` | ✓ | ✓ | none | ✓ RESTful | ✅ Done |
+| `POST /message` | ✓ | compat | ~~singleton~~ | ↑ use above | ⚠️ Deprecated |
 | `GET /stream/:streamId` | ✓ | ✓ | ~~singleton~~ | clientId in pending msg | ✅ Done |
 
 **Notes:**
-- `POST /message` now accepts `X-Client-ID` header, stored in pending message
-- `GET /stream/:streamId` passes clientId to `ensureSession()` for isolation
-- Each client can now have independent sessions
+- **NEW:** `POST /sessions` creates session explicitly, returns `{ sessionId, cwd }`
+- **NEW:** `POST /sessions/:id/messages` sends message to session, returns `{ streamId, sessionId }`
+- `POST /message` kept for backward compatibility, but deprecated
+- `GET /stream/:streamId` passes clientId/sessionId for isolation
+- Client now uses RESTful flow: create session → send messages to session
 
 ---
 
@@ -100,23 +104,39 @@ DELETE /sessions/:id       → delete
 
 **Already stateless (5):** `/sessions`, `/applets`, `/outputs/:id`, `/file`, `/files`, `/models`
 
-**Dead code (1):** `POST /sessions/new` — delete
+**Completed (session + streaming):**
+- `POST /sessions` — create session (RESTful) ✅
+- `POST /sessions/:id/messages` — send message to session (RESTful) ✅
+- `GET /session?sessionId=` — stateless query ✅
+- `POST /sessions/:id/resume` — with X-Client-ID ✅
+- `DELETE /sessions/:id` — with X-Client-ID ✅
+- `GET /stream/:streamId` — uses sessionId from pending message ✅
 
-**Needs sessionId param (4):**
-- `GET /session` → `GET /sessions/:id`
+**Deprecated:** `POST /message` — kept for backward compat, client migrated to RESTful
+
+**Needs work:**
 - `GET /history` → `GET /sessions/:id/history`
-- `GET /preferences` → `GET /sessions/:id/preferences`  
+- `GET /preferences` → `GET /sessions/:id/preferences`
 - `PUT /preferences` → `PUT /sessions/:id/preferences`
-
-**Needs clientId scope for multi-client (3):**
-- `POST /sessions/:id/resume`
-- `POST /message` + `GET /stream/:streamId`
-- `GET/POST /applet/state`
+- `GET/POST /applet/state` → keyed by sessionId
 
 ---
 
-## Next Steps
+## Completed Changes
 
-1. Delete `POST /sessions/new`
-2. Add `?sessionId=` param to `/history`, `/preferences`
-3. Plan clientId for multi-client support
+### Session State Refactor (commit f0697a2)
+- `_activeSessionId` → `_clientSessions: Map<string, string | null>`
+- `_pendingResumeId` → `_clientPendingResume: Map<string, string | null>`
+- All lifecycle methods accept optional `clientId` param
+- `DEFAULT_CLIENT = 'default'` fallback for backward compat
+
+### Session Routes (commit cebe843)
+- Deleted `POST /sessions/new` (dead code)
+- `GET /session` accepts `?sessionId=` param
+- Resume/delete accept `X-Client-ID` header
+
+### RESTful API (commit b19ae75)
+- `POST /sessions` — create new session
+- `POST /sessions/:id/messages` — send message to specific session
+- Client updated to use RESTful flow
+- 15 integration tests passing

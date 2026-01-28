@@ -334,6 +334,31 @@ main {
   margin-right: var(--space-xl);
 }
 
+/* Applet-invoked messages (agent called by applet, not user) */
+.message.applet {
+  background: linear-gradient(135deg, #e65c00 0%, #f09819 100%);
+  margin-left: var(--space-xl);
+  white-space: pre-wrap;
+  border-left: 3px solid #ff7b00;
+}
+
+.message.applet::before {
+  content: '🔧 ' attr(data-applet-source);
+  display: block;
+  font-size: 0.75em;
+  opacity: 0.8;
+  margin-bottom: var(--space-xs);
+}
+
+/* System messages */
+.message.system {
+  background: var(--bg-raised);
+  margin: 0 var(--space-xl);
+  text-align: center;
+  font-style: italic;
+  color: var(--color-text-dim);
+}
+
 .message.error {
   background: var(--color-error-bg);
   border-left: 4px solid var(--color-error);

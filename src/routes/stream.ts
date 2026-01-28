@@ -36,11 +36,13 @@ interface SessionEvent {
  */
 router.post('/sessions/:sessionId/messages', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { prompt, imageData, appletState, appletNavigation } = req.body as {
+  const { prompt, imageData, appletState, appletNavigation, source, appletSlug } = req.body as {
     prompt?: string;
     imageData?: string;
     appletState?: Record<string, unknown>;
     appletNavigation?: NavigationContext;
+    source?: 'user' | 'applet';
+    appletSlug?: string;
   };
   
   const clientId = req.headers['x-client-id'] as string | undefined;
@@ -76,7 +78,8 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   }
   
   // Broadcast user message to WS clients for unified rendering
-  broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, 'user');
+  // Use source from request (defaults to 'user' for normal messages)
+  broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, source ?? 'user', appletSlug);
   
   // Return immediately - streaming happens via WebSocket
   res.json({ ok: true, sessionId });

@@ -241,11 +241,12 @@ Messages sent by applets (not typed by user) are visually distinct:
   - [x] Server streams `message` events on WS connect
   - [x] Server sends `historyComplete` when done
   - [x] Client waits for historyComplete before finishing render
-- [ ] **3C: Applet invocation (orange bubbles)** ← NEXT
+- [x] **3C: Applet invocation (orange bubbles)** ✅
   - [x] Message structure supports `source: 'applet'`
-  - [ ] Applet POSTs with `source: 'applet'` metadata
-  - [ ] Server broadcasts with applet info
-  - [ ] Orange bubble rendering tested
+  - [x] POST `/sessions/:id/messages` accepts `source` and `appletSlug`
+  - [x] Server broadcasts with applet info via `broadcastUserMessageFromPost`
+  - [x] Unified `renderBubble()` with `variant: 'applet'` renders orange
+  - [x] CSS `.message.applet` with orange gradient and `🔧` prefix
 - [x] **3D: Streaming via WebSocket** ✅
   - [x] SSE removed, all streaming via WS
   - [x] `message` with `deltaContent` for streaming

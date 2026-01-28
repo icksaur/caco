@@ -28,6 +28,116 @@ let wsHandlersRegistered = false;
 /** Track if currently loading history */
 let loadingHistory = false;
 
+// ============================================================================
+// Bubble Rendering - Unified System
+// ============================================================================
+
+/**
+ * Message variant determines styling (CSS class suffix)
+ * All bubbles use same structure, only class differs
+ */
+export type MessageVariant = 'user' | 'assistant' | 'applet' | 'error' | 'system';
+
+/**
+ * Options for creating a message bubble
+ */
+interface BubbleOptions {
+  id: string;
+  role: 'user' | 'assistant';
+  variant?: MessageVariant;          // Defaults to role
+  content?: string;
+  appletSlug?: string;               // For applet variant
+  hasImage?: boolean;                // For user variant
+  streaming?: boolean;               // For assistant variant
+  outputs?: string[];                // For assistant variant
+}
+
+/**
+ * Get CSS classes for a bubble based on options
+ */
+function getBubbleClasses(options: BubbleOptions): string {
+  const classes = ['message', options.role];
+  
+  // Add variant class if different from role
+  const variant = options.variant ?? options.role;
+  if (variant !== options.role) {
+    classes.push(variant);
+  }
+  
+  // State classes
+  if (options.streaming) {
+    classes.push('pending');
+  }
+  
+  return classes.join(' ');
+}
+
+/**
+ * Create the inner HTML for a user-type bubble
+ */
+function createUserBubbleInner(content: string, hasImage?: boolean): string {
+  const imageIndicator = hasImage ? ' <span class="image-indicator">[img]</span>' : '';
+  return `${escapeHtml(content)}${imageIndicator}`;
+}
+
+/**
+ * Create the inner HTML for an assistant-type bubble
+ */
+function createAssistantBubbleInner(content: string, streaming?: boolean): string {
+  const cursorClass = streaming ? ' streaming-cursor' : '';
+  return `
+    <div class="activity-wrapper${streaming ? '' : '" style="display: none'}">
+      <div class="activity-header" onclick="toggleActivityBox(this)">
+        <span class="activity-icon">▶</span>
+        <span class="activity-label">Activity</span>
+        <span class="activity-count"></span>
+      </div>
+      <div class="activity-box"></div>
+    </div>
+    <div class="outputs-container"></div>
+    <div class="markdown-content${cursorClass}">${escapeHtml(content)}</div>
+  `;
+}
+
+/**
+ * Unified bubble renderer
+ * All message types go through this function
+ */
+function renderBubble(options: BubbleOptions): HTMLElement {
+  const chat = document.getElementById('chat');
+  if (!chat) throw new Error('Chat element not found');
+  
+  const div = document.createElement('div');
+  div.className = getBubbleClasses(options);
+  div.setAttribute('data-message-id', options.id);
+  
+  // Role determines structure
+  if (options.role === 'user') {
+    div.innerHTML = createUserBubbleInner(options.content || '', options.hasImage);
+    // Store applet source for CSS styling
+    if (options.variant === 'applet' && options.appletSlug) {
+      div.dataset.appletSource = options.appletSlug;
+    }
+  } else {
+    div.setAttribute('data-markdown', '');
+    div.innerHTML = createAssistantBubbleInner(options.content || '', options.streaming);
+    if (options.streaming) {
+      div.id = 'pending-response';
+    }
+    // Store output IDs for later restoration
+    if (options.outputs && options.outputs.length > 0) {
+      div.setAttribute('data-outputs', options.outputs.join(','));
+    }
+  }
+  
+  chat.appendChild(div);
+  return div;
+}
+
+// ============================================================================
+// WebSocket Message Handlers
+// ============================================================================
+
 /**
  * Register all WebSocket handlers for messages and activity
  * Called once during app initialization
@@ -91,17 +201,27 @@ function handleMessage(msg: ChatMessage): void {
 }
 
 /**
- * Create a new message element
+ * Create a new message element using unified renderBubble
  */
 function createMessage(msg: ChatMessage): void {
+  // Transition to chatting view on first message
+  setViewState('chatting');
+  
   if (msg.role === 'user') {
-    renderUserBubble(
-      msg.content || '', 
-      msg.hasImage ?? false, 
-      msg.source ?? 'user', 
-      msg.appletSlug,
-      msg.id
-    );
+    // Determine variant based on source
+    const variant: MessageVariant = msg.source === 'applet' ? 'applet' : 'user';
+    
+    renderBubble({
+      id: msg.id,
+      role: 'user',
+      variant,
+      content: msg.content || '',
+      hasImage: msg.hasImage,
+      appletSlug: msg.appletSlug,
+    });
+    
+    enableAutoScroll();
+    scrollToBottom(true);
   } else {
     // Assistant message - could be complete (history) or streaming (live)
     if (msg.status === 'streaming' || !msg.content) {
@@ -113,12 +233,26 @@ function createMessage(msg: ChatMessage): void {
         setStreaming(true);
       } else {
         // Start streaming response
-        addPendingResponse(msg.id);
+        renderBubble({
+          id: msg.id,
+          role: 'assistant',
+          streaming: true,
+        });
         setStreaming(true);
       }
     } else {
       // Complete message (history)
-      renderAssistantBubble(msg.id, msg.content, msg.outputs);
+      renderBubble({
+        id: msg.id,
+        role: 'assistant',
+        content: msg.content,
+        outputs: msg.outputs,
+      });
+      
+      // Only render markdown immediately if not loading history (batched later)
+      if (!loadingHistory && window.renderMarkdown) {
+        window.renderMarkdown();
+      }
     }
   }
 }
@@ -187,129 +321,36 @@ export function setLoadingHistory(loading: boolean): void {
 }
 
 /**
- * Render completed assistant message (from history or finalized)
- */
-function renderAssistantBubble(id: string, content: string, outputs?: string[]): void {
-  const chat = document.getElementById('chat');
-  if (!chat) return;
-  
-  const assistantDiv = document.createElement('div');
-  assistantDiv.className = 'message assistant';
-  assistantDiv.setAttribute('data-markdown', '');
-  assistantDiv.setAttribute('data-message-id', id);
-  
-  // Create inner structure
-  const activityWrapper = document.createElement('div');
-  activityWrapper.className = 'activity-wrapper';
-  activityWrapper.style.display = 'none';
-  activityWrapper.innerHTML = `
-    <div class="activity-header" onclick="toggleActivityBox(this)">
-      <span class="activity-icon">▶</span>
-      <span class="activity-label">Activity</span>
-      <span class="activity-count"></span>
-    </div>
-    <div class="activity-box"></div>
-  `;
-  
-  const outputsContainer = document.createElement('div');
-  outputsContainer.className = 'outputs-container';
-  
-  const markdownContent = document.createElement('div');
-  markdownContent.className = 'markdown-content';
-  markdownContent.textContent = content; // Raw text for markdown processor
-  
-  assistantDiv.appendChild(activityWrapper);
-  assistantDiv.appendChild(outputsContainer);
-  assistantDiv.appendChild(markdownContent);
-  chat.appendChild(assistantDiv);
-  
-  // Store output IDs for later restoration
-  if (outputs && outputs.length > 0) {
-    assistantDiv.setAttribute('data-outputs', outputs.join(','));
-  }
-  
-  // Only render markdown immediately if not loading history (batched later)
-  if (!loadingHistory && window.renderMarkdown) {
-    window.renderMarkdown();
-  }
-}
-
-/**
- * Render user message bubble (unified renderer)
- * Called either directly (fallback) or from WS message handler
- */
-function renderUserBubble(
-  content: string, 
-  hasImage: boolean, 
-  source: 'user' | 'applet' = 'user',
-  appletSlug?: string,
-  messageId?: string
-): HTMLElement {
-  const chat = document.getElementById('chat');
-  if (!chat) throw new Error('Chat element not found');
-  
-  // Transition from new chat to conversation view
-  setViewState('chatting');
-  
-  // Add user message with applet styling if applicable
-  const userDiv = document.createElement('div');
-  userDiv.className = `message user${source === 'applet' ? ' applet-invoked' : ''}`;
-  if (messageId) {
-    userDiv.setAttribute('data-message-id', messageId);
-  }
-  if (source === 'applet' && appletSlug) {
-    userDiv.dataset.appletSource = appletSlug;
-  }
-  userDiv.innerHTML = `${escapeHtml(content)}${hasImage ? ' <span class="image-indicator">[img]</span>' : ''}`;
-  chat.appendChild(userDiv);
-  
-  // Enable auto-scroll and scroll to bottom when user sends a message
-  enableAutoScroll();
-  scrollToBottom(true);
-  
-  return userDiv;
-}
-
-/**
- * Add pending assistant response placeholder
- * Called when streaming starts
- */
-function addPendingResponse(messageId: string): HTMLElement {
-  const chat = document.getElementById('chat');
-  if (!chat) throw new Error('Chat element not found');
-  
-  const assistantDiv = document.createElement('div');
-  assistantDiv.className = 'message assistant pending';
-  assistantDiv.id = 'pending-response';
-  assistantDiv.setAttribute('data-markdown', '');
-  assistantDiv.setAttribute('data-message-id', messageId);
-  assistantDiv.innerHTML = `
-    <div class="activity-wrapper">
-      <div class="activity-header" onclick="toggleActivityBox(this)">
-        <span class="activity-icon">▶</span>
-        <span class="activity-label">Activity</span>
-        <span class="activity-count"></span>
-      </div>
-      <div class="activity-box"></div>
-    </div>
-    <div class="outputs-container"></div>
-    <div class="markdown-content streaming-cursor"></div>
-  `;
-  chat.appendChild(assistantDiv);
-  
-  scrollToBottom(true);
-  return assistantDiv;
-}
-
-/**
  * Add user message bubble immediately (legacy interface for fallback)
  * Used when WS is not connected. Generates local IDs.
  */
 export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
   const userId = `local_user_${Date.now()}`;
   const assistantId = `local_assistant_${Date.now()}`;
-  renderUserBubble(message, hasImage, 'user', undefined, userId);
-  return addPendingResponse(assistantId);
+  
+  // Transition to chatting view
+  setViewState('chatting');
+  
+  // Render user bubble
+  renderBubble({
+    id: userId,
+    role: 'user',
+    content: message,
+    hasImage,
+  });
+  
+  enableAutoScroll();
+  scrollToBottom(true);
+  
+  // Render pending assistant bubble and return it
+  const pending = renderBubble({
+    id: assistantId,
+    role: 'assistant',
+    streaming: true,
+  });
+  
+  scrollToBottom(true);
+  return pending;
 }
 
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';

@@ -21,16 +21,17 @@ Two paths = two places for bugs, styling drift, feature divergence.
 
 ### Solution: Single WebSocket Source of Truth
 
-All chat content flows through WebSocket:
+All chat rendering flows through WebSocket, but sending uses HTTP POST:
 
 ```
-User types  → WS send    → server → WS broadcast → renderMessage() → DOM
+User types  → HTTP POST  → server → WS broadcast → renderMessage() → DOM
 History     → page load  → server → WS sends all → renderMessage() → DOM  
-Applet      → WS invoke  → server → WS broadcast → renderMessage() → DOM
-Agent       → WS/SSE     → server → WS streams   → renderMessage() → DOM
+Applet      → HTTP POST  → server → WS broadcast → renderMessage() → DOM
+Agent       → streaming  → server → WS streams   → renderMessage() → DOM
 ```
 
 **One function renders everything.** Server controls message format and metadata.
+**One API for sending.** HTTP POST allows any client (curl, orchestrator, applet) to send messages.
 
 ### Benefits
 
@@ -61,11 +62,10 @@ Note: Renamed from `/ws/applet` to `/ws/session` - it now handles all session co
 
 | Type | Payload | Purpose |
 |------|---------|---------|
-| `sendMessage` | `{ content, imageData? }` | User sends chat message |
-| `invoke` | `{ prompt, source, appletSlug? }` | Applet invokes agent |
-| `loadHistory` | `{}` | Request session history |
 | `setState` | `{ data }` | Push applet state |
 | `ping` | `{}` | Heartbeat |
+
+Note: Chat messages are sent via HTTP POST, not WebSocket. This allows any client to send messages.
 
 ### Server → Client
 
@@ -185,18 +185,18 @@ Messages sent by applets (not typed by user) are visually distinct:
 - [x] `onStateUpdate(callback)` client API
 
 ### Phase 3: Unified Chat Rendering
-- [ ] **3A: User message round-trip** ← NEXT
-  - [ ] Client sends `sendMessage` via WS instead of POST
-  - [ ] Server echoes back as `userMessage`
-  - [ ] Single `renderMessage()` function
-  - [ ] Remove `addUserBubble()` direct DOM
-- [ ] **3B: History via WebSocket**
+- [x] **3A: User message via POST, render via WS** ✅
+  - [x] HTTP POST `/api/sessions/:id/messages` sends to agent
+  - [x] Server broadcasts `userMessage` via WS after POST
+  - [x] Client renders bubble from WS (if connected)
+  - [x] Fallback to direct render if WS not connected
+- [ ] **3B: History via WebSocket** ← NEXT
   - [ ] Server sends `history` on WS connect
   - [ ] Remove `GET /api/history` endpoint
   - [ ] Client renders via `renderMessage()`
 - [ ] **3C: Applet invocation**
-  - [ ] `invokeAgent()` client API
-  - [ ] Server routes to session
+  - [ ] Applet POSTs with `source: 'applet'` metadata
+  - [ ] Server broadcasts with applet info
   - [ ] Orange bubble rendering
 - [ ] **3D: Streaming via WebSocket**
   - [ ] Replace SSE with WS streaming
@@ -212,12 +212,11 @@ Messages sent by applets (not typed by user) are visually distinct:
 
 ## Migration Path
 
-### Step 1: User Message Round-Trip
-1. Add `sendMessage` handler to WS server
-2. Server calls existing message sending logic
-3. Server broadcasts `userMessage` back
-4. Client waits for `userMessage` before rendering bubble
-5. Remove direct `addUserBubble()` call
+### Step 1: User Message Round-Trip ✅
+1. HTTP POST `/api/sessions/:id/messages` receives message
+2. Server broadcasts `userMessage` via WS to all session connections
+3. Client renders bubble from WS broadcast (if connected)
+4. Fallback: direct render if WS not connected (new chat, offline)
 
 ### Step 2: History via WebSocket
 1. On WS connect, server sends `history` with all messages
@@ -226,10 +225,9 @@ Messages sent by applets (not typed by user) are visually distinct:
 4. Handle reconnection (re-fetch history)
 
 ### Step 3: Applet Invocation
-1. Add `invoke` handler to WS server
-2. Server sends message with `source: 'applet'` metadata
-3. Broadcast `userMessage` with applet info
-4. Client renders orange bubble
+1. Applet POSTs to `/api/sessions/:id/messages` with `source: 'applet'`
+2. Server broadcasts `userMessage` with applet metadata
+3. Client renders orange bubble
 
 ### Step 4: Streaming Migration
 1. Replace SSE with WS streaming
@@ -244,16 +242,17 @@ Messages sent by applets (not typed by user) are visually distinct:
 ```mermaid
 sequenceDiagram
     participant C as Chat UI
+    participant H as HTTP POST
     participant W as WebSocket
     participant S as Server
     participant A as Agent/SDK
 
     Note over C,S: User sends message
-    C->>W: sendMessage({ content })
-    W->>S: route to session
-    S->>A: session.sendMessage()
+    C->>H: POST /sessions/:id/messages
+    H->>S: receive message
     S->>W: broadcast userMessage
     W->>C: renderMessage()
+    S->>A: session.sendMessage()
 
     Note over C,S: Agent responds
     A-->>S: streaming events
@@ -263,7 +262,7 @@ sequenceDiagram
     W->>C: finalize message
 
     Note over C,S: Applet invokes
-    C->>W: invoke({ prompt, appletSlug })
+    C->>H: POST with source='applet'
     S->>W: userMessage (source: applet)
     W->>C: renderMessage() [orange]
     S->>A: session.sendMessage()

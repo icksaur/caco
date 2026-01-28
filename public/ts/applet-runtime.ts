@@ -498,23 +498,6 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
 }
 
 /**
- * Execute applet content in the applet view
- * 
- * This injects HTML, CSS, and executes JavaScript in the applet container.
- * Called when receiving applet.update SSE event.
- * 
- * Legacy function - now wraps pushApplet for backward compatibility
- */
-export function executeApplet(content: AppletContent): void {
-  // Use title as both slug and label for now
-  // In the future, SSE should send slug explicitly
-  const slug = content.title?.toLowerCase().replace(/\s+/g, '-') || 'untitled';
-  const label = content.title || 'Untitled';
-  
-  pushApplet(slug, label, content);
-}
-
-/**
  * Clear the current applet content
  * Clears entire stack when leaving applet view completely
  */

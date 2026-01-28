@@ -19,7 +19,7 @@ import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
-import { getApplet, setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
+import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { DEFAULT_MODEL } from '../preferences.js';
 import { parseImageDataUrl } from '../image-utils.js';
 
@@ -200,7 +200,6 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
         // toolTelemetry is at the top level of eventData (SDK puts it there)
         const toolTelemetry = eventData.toolTelemetry as { 
           outputId?: string;
-          appletSet?: boolean;
           reloadTriggered?: boolean;
         } | undefined;
         
@@ -215,17 +214,6 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
                 id: toolTelemetry.outputId,
                 ...outputMeta
               }
-            };
-          }
-        }
-        
-        // Applet content set - include full content for client-side execution
-        if (toolTelemetry?.appletSet) {
-          const appletContent = getApplet();
-          if (appletContent) {
-            eventData = {
-              ...eventData,
-              _applet: appletContent
             };
           }
         }

@@ -17,7 +17,7 @@ import { join, relative, resolve } from 'path';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
-import { setAppletUserState, getAppletUserState, setApplet, setActiveSlug } from '../applet-state.js';
+import { setAppletUserState, getAppletUserState, clearAppletUserState } from '../applet-state.js';
 import { listApplets, loadApplet } from '../applet-store.js';
 
 const router = Router();
@@ -324,9 +324,9 @@ router.get('/applets/:slug', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/applets/:slug/load - Load applet and update server state
+ * POST /api/applets/:slug/load - Load applet content
  * Called by applet browser to switch to a different applet
- * Updates server-side activeSlug so get_applet_state reflects correct applet
+ * Clears user state since applet is changing
  */
 router.post('/applets/:slug/load', async (req: Request, res: Response) => {
   const slug = req.params.slug as string;
@@ -339,13 +339,8 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
       return;
     }
     
-    // Update server-side state
-    setApplet({
-      html: stored.html,
-      js: stored.js,
-      css: stored.css,
-      title: stored.meta.name
-    }, slug);
+    // Clear user state since applet is changing
+    clearAppletUserState();
     
     // Return content for client-side execution
     res.json({

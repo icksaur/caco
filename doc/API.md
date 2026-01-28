@@ -131,32 +131,18 @@ Defined in `src/applet-tools.ts`
 
 | Tool | Description |
 |------|-------------|
-| `set_applet_content` | Create interactive UI with HTML/JS/CSS |
 | `get_applet_state` | Query state pushed by applet JS |
-| `save_applet` | Save current applet to disk |
-| `load_applet` | Load saved applet by slug |
-| `list_applets` | List all saved applets with file paths |
 | `reload_page` | Trigger browser page refresh |
 | `restart_server` | Schedule server restart after delay |
 
-**set_applet_content** parameters:
-- `html` (string, required) - HTML content
-- `js` (string, optional) - JavaScript to execute
-- `css` (string, optional) - CSS styles
-- `title` (string, optional) - Applet title
+**Removed tools** (agent can use file tools directly):
+- `set_applet_content` → Agent writes files to `.copilot-web/applets/`, user navigates via URL
+- `save_applet` → Agent uses `write_file` directly
+- `load_applet` → User navigates via `?applet=slug` URL param
+- `list_applets` → Agent uses `list_dir` on `.copilot-web/applets/`
 
 **get_applet_state** parameters:
 - `key` (string, optional) - Get specific key instead of full state
-
-**save_applet** parameters:
-- `slug` (string, required) - URL-safe identifier
-- `name` (string, required) - Display name
-- `description` (string, optional) - Brief description
-
-**load_applet** parameters:
-- `slug` (string, required) - Applet to load
-
-**list_applets** - no parameters
 
 **reload_page** - no parameters
 
@@ -282,7 +268,6 @@ Events sent from `/api/stream/:streamId`.
 
 **Special data in tool.execution_complete:**
 - `_output` - Display output reference
-- `_applet` - Applet content to execute
 - `_reload` - Signal to reload page
 
 ---

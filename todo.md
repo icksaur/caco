@@ -1,16 +1,5 @@
 # things to do
 
-
-~~Use and update [applet-os.md](doc/applet-os.md) Look at current query parameter scheme for ?applet=applet-name~~
-~~Document new QOL requirements:~~
-~~migrate to navigation API~~
-~~links in current to display URL's applet without page refresh~~
-~~navigate to applet by using browser url will show applet and not flash chat~~
-~~back button works to go down "applet stack" (forward if it's simple impl)~~
-~~Implement requirements systematially.  Identify architecture simplifications.~~
-✅ Done: Navigation API migration complete. Applets use `<a href="?applet=slug">` links.
-   Back/forward buttons work. View state changes only from user actions (not data loading).
-
 agent-to-agent HTTP API:
 Agents can POST to other sessions or create a new session with a prompt via MCP tool.  Basic prevention of post-to-self via HTTP route handler blocking same cwd.
 make agent-to-agent.md, plan it out, iterate with user

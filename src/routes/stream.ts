@@ -17,7 +17,7 @@ import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
-import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, type ActivityItem, type MessageSource } from './applet-ws.js';
+import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, type ActivityItem, type MessageSource, type ChatMessage } from './applet-ws.js';
 import { randomUUID } from 'crypto';
 
 const router = Router();
@@ -81,36 +81,62 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // Use source from request (defaults to 'user' for normal messages)
   broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, source ?? 'user', appletSlug);
   
-  // Return immediately - streaming happens via WebSocket
+  // Return immediately - dispatch happens in background
   res.json({ ok: true, sessionId });
   
-  // Prefix prompt with applet marker for history persistence
-  // Format: [applet:slug] actual prompt
+  // Prefix prompt with applet/agent marker for history persistence
+  // Format: [applet:slug] or [agent:sessionId] actual prompt
   const promptToSend = source === 'applet' && appletSlug 
     ? `[applet:${appletSlug}] ${prompt}`
     : prompt;
   
-  // Start streaming in background
-  streamToWebSocket(sessionId, promptToSend, tempFilePath, clientId).catch(err => {
-    console.error(`[STREAM] Error streaming to WS:`, err);
+  // Dispatch to SDK with WS broadcast callbacks
+  dispatchMessage(
+    sessionId, 
+    promptToSend, 
+    { tempFilePath, clientId },
+    {
+      onMessage: (msg) => broadcastMessage(sessionId, msg),
+      onActivity: (item) => broadcastActivity(sessionId, item)
+    }
+  ).catch(err => {
+    console.error(`[DISPATCH] Error:`, err);
   });
 });
 
 /**
- * Stream agent response via WebSocket
- * Uses unified message protocol:
- * - message with status:'streaming' to start
- * - message with deltaContent to append
- * - message with status:'complete' to finalize
- * - activity for tool calls, intents, errors
+ * Callback types for dispatch observers
  */
-async function streamToWebSocket(
+export type MessageCallback = (message: ChatMessage) => void;
+export type ActivityCallback = (item: ActivityItem) => void;
+
+export interface DispatchCallbacks {
+  onMessage?: MessageCallback;
+  onActivity?: ActivityCallback;
+}
+
+/**
+ * Dispatch a message to a session and handle SDK events
+ * 
+ * Core dispatch function - works without WebSocket.
+ * Optional callbacks allow observers (like WS broadcast) to receive events.
+ * 
+ * @param sessionId - Target session
+ * @param prompt - Message to send
+ * @param options - Optional: tempFilePath for image, clientId for session switching
+ * @param callbacks - Optional: onMessage and onActivity callbacks for observers
+ */
+export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  tempFilePath?: string,
-  clientId?: string
+  options?: { tempFilePath?: string; clientId?: string },
+  callbacks?: DispatchCallbacks
 ): Promise<void> {
-  console.log(`[STREAM] Starting WS stream for session ${sessionId}`);
+  console.log(`[DISPATCH] Starting for session ${sessionId}`);
+  
+  const { tempFilePath, clientId } = options || {};
+  const onMessage = callbacks?.onMessage || (() => {});
+  const onActivity = callbacks?.onActivity || (() => {});
   
   // Generate message ID for the assistant response
   const messageId = `msg_${randomUUID()}`;
@@ -126,7 +152,7 @@ async function streamToWebSocket(
     // Get session
     const session = sessionManager.getSession(sessionId);
     if (!session) {
-      broadcastActivity(sessionId, { type: 'error', text: 'No active session' });
+      onActivity({ type: 'error', text: 'No active session' });
       return;
     }
     
@@ -140,7 +166,7 @@ async function streamToWebSocket(
       messageOptions.attachments = [{ type: 'file', path: tempFilePath }];
     }
     
-    // Subscribe to events and broadcast via WS
+    // Subscribe to events and call callbacks
     type EventCallback = (event: SessionEvent) => void;
     const unsubscribe = (session as unknown as { on: (cb: EventCallback) => () => void }).on((event: SessionEvent) => {
       const eventData: Record<string, unknown> = event.data || {};
@@ -149,7 +175,7 @@ async function streamToWebSocket(
         case 'assistant.message_delta': {
           // Start streaming message if first delta
           if (!hasStarted) {
-            broadcastMessage(sessionId, {
+            onMessage({
               id: messageId,
               role: 'assistant',
               content: '',
@@ -160,7 +186,7 @@ async function streamToWebSocket(
           // Append delta content
           const delta = (eventData.deltaContent as string) || '';
           messageContent += delta;
-          broadcastMessage(sessionId, {
+          onMessage({
             id: messageId,
             role: 'assistant',
             deltaContent: delta
@@ -172,11 +198,11 @@ async function streamToWebSocket(
           // Text content from assistant - but DON'T finalize here
           // The agent may do more turns. Finalization happens on session.idle.
           const content = (eventData.content as string) || '';
-          console.log(`[STREAM] assistant.message event: hasStarted=${hasStarted}, content="${content?.slice(0,50)}", messageContent="${messageContent?.slice(0,50)}"`);
+          console.log(`[DISPATCH] assistant.message event: hasStarted=${hasStarted}, content="${content?.slice(0,50)}", messageContent="${messageContent?.slice(0,50)}"`);
           
           // If we haven't started streaming yet, start now
           if (!hasStarted && content) {
-            broadcastMessage(sessionId, {
+            onMessage({
               id: messageId,
               role: 'assistant',
               content: '',
@@ -194,14 +220,14 @@ async function streamToWebSocket(
         
         case 'assistant.turn_start': {
           const turnNum = parseInt(String(eventData.turnId || 0)) + 1;
-          broadcastActivity(sessionId, { type: 'turn', text: `Turn ${turnNum}...` });
+          onActivity({ type: 'turn', text: `Turn ${turnNum}...` });
           break;
         }
         
         case 'assistant.intent': {
           const intent = eventData.intent as string;
           if (intent) {
-            broadcastActivity(sessionId, { type: 'intent', text: `Intent: ${intent}` });
+            onActivity({ type: 'intent', text: `Intent: ${intent}` });
           }
           break;
         }
@@ -209,7 +235,7 @@ async function streamToWebSocket(
         case 'tool.execution_start': {
           const toolName = (eventData.toolName || eventData.name || 'tool') as string;
           const args = eventData.arguments ? JSON.stringify(eventData.arguments) : undefined;
-          broadcastActivity(sessionId, { 
+          onActivity({ 
             type: 'tool', 
             text: `▶ ${toolName}`,
             details: args ? `Arguments: ${args}` : undefined
@@ -239,28 +265,28 @@ async function streamToWebSocket(
             }
           }
           
-          broadcastActivity(sessionId, { 
+          onActivity({ 
             type: 'tool-result', 
             text: `${status} ${toolName}`,
             details
           });
           
           if (toolTelemetry?.reloadTriggered && consumeReloadSignal()) {
-            broadcastActivity(sessionId, { type: 'info', text: 'Reload triggered' });
+            onActivity({ type: 'info', text: 'Reload triggered' });
           }
           break;
         }
         
         case 'session.error': {
           const msg = (eventData.message as string) || 'Unknown error';
-          broadcastActivity(sessionId, { type: 'error', text: `Error: ${msg}` });
+          onActivity({ type: 'error', text: `Error: ${msg}` });
           // Fall through to cleanup
         }
         // eslint-disable-next-line no-fallthrough
         case 'session.idle': {
           // Ensure message is finalized if we haven't sent complete
           if (hasStarted && messageContent) {
-            broadcastMessage(sessionId, {
+            onMessage({
               id: messageId,
               role: 'assistant',
               content: messageContent,
@@ -280,9 +306,9 @@ async function streamToWebSocket(
     sessionManager.sendStream(sessionId, prompt, messageOptions);
     
   } catch (error) {
-    console.error('Stream error:', error);
+    console.error('Dispatch error:', error);
     const message = error instanceof Error ? error.message : String(error);
-    broadcastActivity(sessionId, { type: 'error', text: `Error: ${message}` });
+    onActivity({ type: 'error', text: `Error: ${message}` });
     
     if (tempFilePath) {
       await unlink(tempFilePath).catch(() => {});

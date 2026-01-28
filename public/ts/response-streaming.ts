@@ -155,10 +155,23 @@ function finalizeMessage(element: Element, msg: ChatMessage): void {
   }
   
   setStreaming(false);
-  finishPendingResponse();
+  
+  // Collapse activity wrapper
+  const wrapper = element.querySelector('.activity-wrapper');
+  if (wrapper) {
+    wrapper.classList.add('collapsed');
+    const icon = wrapper.querySelector('.activity-icon');
+    if (icon) icon.textContent = '▶';
+  }
+  
+  // Enable form
+  setFormEnabled(true);
   
   // Render markdown for the completed message
+  (element as HTMLElement).dataset.markdownProcessed = 'false';
   if (window.renderMarkdown) window.renderMarkdown();
+  
+  scrollToBottom(true);
 }
 
 /**

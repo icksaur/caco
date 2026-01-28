@@ -89,38 +89,45 @@ async function renderMarkdown(): Promise<void> {
     // Skip if already processed
     if (el.dataset.markdownProcessed === 'true') continue;
     
-    const contentDiv = el.querySelector('.markdown-content');
-    if (!contentDiv) continue;
+    // Process ALL .markdown-content divs (multi-turn creates multiple)
+    const contentDivs = el.querySelectorAll('.markdown-content');
+    if (contentDivs.length === 0) continue;
     
-    // Get the escaped text content
-    const markdownText = contentDiv.textContent ?? '';
-    
-    // Parse markdown
-    const rawHtml = marked.parse(markdownText);
-    
-    // Sanitize HTML to prevent XSS attacks
-    const html = DOMPurify.sanitize(rawHtml, {
-      FORBID_ATTR: FORBIDDEN_ATTRS,
-      FORBID_TAGS: FORBIDDEN_TAGS
-    });
-    
-    // Update content
-    contentDiv.innerHTML = html;
-    
-    // Render any Mermaid diagrams
-    const mermaidDivs = contentDiv.querySelectorAll('.mermaid-diagram');
-    for (const div of mermaidDivs) {
-      try {
-        const { svg } = await mermaid.render(div.id + '-svg', div.textContent ?? '');
-        div.innerHTML = svg;
-      } catch (error) {
-        console.error('Mermaid rendering error:', error);
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        div.innerHTML = `<pre class="mermaid-error">Error rendering diagram: ${message}</pre>`;
+    for (const contentDiv of contentDivs) {
+      // Skip if this specific div is already rendered (has HTML children)
+      if (contentDiv.querySelector('p, h1, h2, h3, ul, ol, pre, blockquote')) continue;
+      
+      // Get the escaped text content
+      const markdownText = contentDiv.textContent ?? '';
+      if (!markdownText.trim()) continue;
+      
+      // Parse markdown
+      const rawHtml = marked.parse(markdownText);
+      
+      // Sanitize HTML to prevent XSS attacks
+      const html = DOMPurify.sanitize(rawHtml, {
+        FORBID_ATTR: FORBIDDEN_ATTRS,
+        FORBID_TAGS: FORBIDDEN_TAGS
+      });
+      
+      // Update content
+      contentDiv.innerHTML = html;
+      
+      // Render any Mermaid diagrams
+      const mermaidDivs = contentDiv.querySelectorAll('.mermaid-diagram');
+      for (const div of mermaidDivs) {
+        try {
+          const { svg } = await mermaid.render(div.id + '-svg', div.textContent ?? '');
+          div.innerHTML = svg;
+        } catch (error) {
+          console.error('Mermaid rendering error:', error);
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          div.innerHTML = `<pre class="mermaid-error">Error rendering diagram: ${message}</pre>`;
+        }
       }
     }
     
-    // Mark as processed
+    // Mark parent as processed
     el.dataset.markdownProcessed = 'true';
   }
   

@@ -30,6 +30,7 @@ export interface ActivityItem {
 let socket: WebSocket | null = null;
 let sessionId: string | null = null;
 let reconnectAttempts = 0;
+let intentionalClose = false; // Prevent reconnect when switching sessions
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 1000;
 
@@ -57,6 +58,8 @@ let requestId = 0;
  * Called when an applet is loaded
  */
 export function connectAppletWs(session: string): void {
+  console.log(`[WS] connectAppletWs called for ${session}, current: ${sessionId}, socket state: ${socket?.readyState}`);
+  
   // Already connected or connecting to this session
   if (socket && sessionId === session) {
     const state = socket.readyState;
@@ -68,11 +71,14 @@ export function connectAppletWs(session: string): void {
   
   // Close existing connection if different session
   if (socket) {
+    console.log(`[WS] Closing existing socket (state: ${socket.readyState})`);
+    intentionalClose = true;
     socket.close();
   }
   
   sessionId = session;
   reconnectAttempts = 0;
+  intentionalClose = false;
   
   doConnect();
 }
@@ -121,6 +127,12 @@ function doConnect(): void {
   socket.onclose = () => {
     console.log('[WS] Disconnected');
     socket = null;
+    
+    // Don't reconnect if we intentionally closed for session switch
+    if (intentionalClose) {
+      console.log('[WS] Intentional close, not reconnecting');
+      return;
+    }
     
     // Auto-reconnect with backoff
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {

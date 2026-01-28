@@ -42,8 +42,8 @@ DELETE /sessions/:id       → delete
 |---------|------|----------|----------|-----------------|--------|
 | `POST /sessions` | ✓ | ✓ | none | ✓ RESTful create | ✅ Done |
 | `POST /sessions/:id/messages` | ✓ | ✓ | none | ✓ RESTful | ✅ Done |
-| `POST /message` | ✓ | compat | ~~singleton~~ | ↑ use above | ⚠️ Deprecated |
-| `GET /stream/:streamId` | ✓ | ✓ | ~~singleton~~ | clientId in pending msg | ✅ Done |
+| `GET /stream/:streamId` | ✓ | ✓ | none | sessionId in pending msg | ✅ Done |
+| `POST /message` | ✗ | ✗ | — | — | ✅ Deleted |
 
 **Notes:**
 - **NEW:** `POST /sessions` creates session explicitly, returns `{ sessionId, cwd }`

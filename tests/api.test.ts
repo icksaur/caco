@@ -161,37 +161,12 @@ describe('API Routes', () => {
   });
 
   // ─────────────────────────────────────────────────────────────
-  // Streaming Routes (decoupled)
+  // Streaming Routes
   // ─────────────────────────────────────────────────────────────
   describe('streaming routes', () => {
-    test('POST /message - accepts X-Client-ID header', async () => {
-      const res = await fetch(`${BASE}/message`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'X-Client-ID': 'test-client-456'
-        },
-        body: JSON.stringify({ prompt: 'test message' })
-      });
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
-      assert.ok('streamId' in data, 'should return streamId');
-    });
-
     test('GET /stream/:id - returns 404 for invalid streamId', async () => {
       const res = await fetch(`${BASE}/stream/invalid-stream-id`);
       assert.strictEqual(res.status, 404);
-    });
-
-    test('POST /message without prompt - returns 400', async () => {
-      const res = await fetch(`${BASE}/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      assert.strictEqual(res.status, 400);
-      const data = await res.json();
-      assert.ok(data.error.includes('prompt'), 'should mention prompt');
     });
   });
 

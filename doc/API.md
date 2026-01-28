@@ -13,7 +13,6 @@ All endpoints are prefixed with `/api/`.
 | `/api/sessions` | POST | Create new session |
 | `/api/sessions/:id/messages` | POST | Send message to session |
 | `/api/stream/:streamId` | GET | SSE connection for response streaming |
-| `/api/message` | POST | ⚠️ **Deprecated** - use above |
 
 **POST /api/sessions** - Create new session
 ```json
@@ -34,21 +33,6 @@ Returns: `{ sessionId: "uuid", cwd: "string", model: "string" }`
 }
 ```
 Returns: `{ streamId: "uuid", sessionId: "uuid" }`
-
-**POST /api/message** ⚠️ Deprecated
-```json
-{
-  "prompt": "string",
-  "model": "string (optional)",
-  "imageData": "data:image/...;base64,... (optional)",
-  "newChat": "boolean (optional)",
-  "cwd": "string (optional, for new chats)",
-  "appletState": "object (optional, batched state from applet)"
-}
-```
-Returns: `{ streamId: "uuid" }`
-
-> **Migration:** Use `POST /sessions` to create a session, then `POST /sessions/:id/messages` for each message. The client tracks `sessionId` in state.
 
 ### Session Management
 

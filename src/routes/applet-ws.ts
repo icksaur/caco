@@ -9,6 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
 import { randomUUID } from 'crypto';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
+import sessionManager from '../session-manager.js';
 
 // Track connections by sessionId
 const connections = new Map<string, Set<WebSocket>>();
@@ -37,11 +38,26 @@ export interface UserMessage {
 }
 
 // Message types to client
+// ChatMessage for history and live messages
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  source?: 'user' | 'applet';
+  appletSlug?: string;
+  hasImage?: boolean;
+  // For assistant messages
+  outputs?: string[];  // Output IDs
+}
+
 interface ServerMessage {
-  type: 'stateUpdate' | 'state' | 'userMessage' | 'pong' | 'error';
+  type: 'stateUpdate' | 'state' | 'message' | 'historyComplete' | 'assistantDelta' | 'pong' | 'error';
   id?: string;
   data?: unknown;
-  message?: UserMessage;
+  message?: ChatMessage;
+  delta?: string;
+  messageId?: string;
   error?: string;
 }
 
@@ -58,13 +74,16 @@ export function setupAppletWebSocket(server: Server): WebSocketServer {
     const url = new URL(req.url || '', 'http://localhost');
     const sessionId = url.searchParams.get('session') || 'default';
     
-    console.log(`[WS] Applet connected: session=${sessionId}`);
+    console.log(`[WS] Session connected: session=${sessionId}`);
     
     // Track connection
     if (!connections.has(sessionId)) {
       connections.set(sessionId, new Set());
     }
     connections.get(sessionId)!.add(ws);
+    
+    // Stream history on connect
+    streamHistory(ws, sessionId);
     
     ws.on('message', (data) => {
       try {
@@ -76,7 +95,7 @@ export function setupAppletWebSocket(server: Server): WebSocketServer {
     });
     
     ws.on('close', () => {
-      console.log(`[WS] Applet disconnected: session=${sessionId}`);
+      console.log(`[WS] Session disconnected: session=${sessionId}`);
       connections.get(sessionId)?.delete(ws);
       if (connections.get(sessionId)?.size === 0) {
         connections.delete(sessionId);
@@ -269,7 +288,7 @@ function broadcastUserMessage(sessionId: string, message: UserMessage): void {
   const sockets = connections.get(sessionId);
   if (!sockets) return;
   
-  const msg: ServerMessage = { type: 'userMessage', message };
+  const msg: ServerMessage = { type: 'message', message };
   const data = JSON.stringify(msg);
   
   for (const ws of sockets) {
@@ -290,7 +309,7 @@ export function broadcastUserMessageFromPost(
   source: 'user' | 'applet' = 'user',
   appletSlug?: string
 ): void {
-  const message: UserMessage = {
+  const message: ChatMessage = {
     id: randomUUID(),
     role: 'user',
     content,
@@ -300,6 +319,86 @@ export function broadcastUserMessageFromPost(
     hasImage
   };
   
-  broadcastUserMessage(sessionId, message);
-  console.log(`[WS] Broadcast userMessage for session ${sessionId} (from POST)`);
+  broadcastMessage(sessionId, message);
+  console.log(`[WS] Broadcast message for session ${sessionId} (from POST)`);
+}
+
+/**
+ * Broadcast a message to all connections in a session
+ */
+function broadcastMessage(sessionId: string, message: ChatMessage): void {
+  const sockets = connections.get(sessionId);
+  if (!sockets) return;
+  
+  const msg: ServerMessage = { type: 'message', message };
+  const data = JSON.stringify(msg);
+  
+  for (const ws of sockets) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
+  }
+}
+
+/**
+ * Stream session history to a newly connected client
+ * Converts SDK events to ChatMessage format and sends individually
+ */
+async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
+  if (sessionId === 'default') {
+    // No session, just send historyComplete
+    send(ws, { type: 'historyComplete' });
+    return;
+  }
+  
+  try {
+    const events = await sessionManager.getHistory(sessionId);
+    let messageCount = 0;
+    
+    // Track outputs from tool completions for assistant messages
+    const pendingOutputs: string[] = [];
+    
+    for (const evt of events) {
+      // Collect output IDs from tool completions
+      if (evt.type === 'tool.execution_complete') {
+        const result = (evt.data as { result?: { content?: string } })?.result;
+        if (result?.content) {
+          const matches = result.content.matchAll(/\[output:([^\]]+)\]/g);
+          pendingOutputs.push(...[...matches].map(m => m[1]));
+        }
+      }
+      
+      // Convert message events to ChatMessage
+      if (evt.type === 'user.message' || evt.type === 'assistant.message') {
+        const isUser = evt.type === 'user.message';
+        const content = (evt.data as { content?: string })?.content || '';
+        
+        if (!content && pendingOutputs.length === 0) continue;
+        
+        const message: ChatMessage = {
+          id: randomUUID(),
+          role: isUser ? 'user' : 'assistant',
+          content,
+          timestamp: new Date().toISOString(),
+          source: isUser ? 'user' : undefined,
+          outputs: isUser ? undefined : [...pendingOutputs]
+        };
+        
+        // Clear pending outputs after assistant message
+        if (!isUser) {
+          pendingOutputs.length = 0;
+        }
+        
+        send(ws, { type: 'message', message });
+        messageCount++;
+      }
+    }
+    
+    send(ws, { type: 'historyComplete' });
+    console.log(`[WS] Streamed ${messageCount} history messages for session ${sessionId}`);
+    
+  } catch (error) {
+    console.error(`[WS] Error streaming history for ${sessionId}:`, error);
+    send(ws, { type: 'historyComplete' });
+  }
 }

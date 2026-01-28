@@ -13,7 +13,7 @@ import { removeImage } from './image-paste.js';
 import { setStreaming, getActiveEventSource, getActiveSessionId, setActiveSession } from './state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { setViewState, isViewState } from './view-controller.js';
-import { onUserMessage, isWsConnected, type UserMessage } from './applet-ws.js';
+import { onMessage, onHistoryComplete, isWsConnected, type ChatMessage } from './applet-ws.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -28,6 +28,9 @@ let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
 /** Track if WS message handler is registered */
 let wsHandlerRegistered = false;
 
+/** Track if currently loading history */
+let loadingHistory = false;
+
 /**
  * Register WebSocket message handler for unified rendering
  * Called once during app initialization
@@ -36,10 +39,74 @@ function registerWsMessageHandler(): void {
   if (wsHandlerRegistered) return;
   wsHandlerRegistered = true;
   
-  onUserMessage((msg: UserMessage) => {
-    console.log('[WS] Received userMessage:', msg.id, msg.source);
-    renderUserBubble(msg.content, msg.hasImage, msg.source, msg.appletSlug);
+  onMessage((msg: ChatMessage) => {
+    console.log('[WS] Received message:', msg.id, msg.role, loadingHistory ? '(history)' : '(live)');
+    renderMessage(msg, loadingHistory);
   });
+  
+  onHistoryComplete(() => {
+    console.log('[WS] History streaming complete');
+    loadingHistory = false;
+    // Scroll to bottom after history loads
+    scrollToBottom(true);
+  });
+}
+
+/**
+ * Mark that we're loading history (suppress pending response for history messages)
+ */
+export function setLoadingHistory(loading: boolean): void {
+  loadingHistory = loading;
+}
+
+/**
+ * Unified message renderer - handles both user and assistant messages
+ * Used for history replay and live messages
+ */
+function renderMessage(msg: ChatMessage, isHistory: boolean = false): void {
+  if (msg.role === 'user') {
+    renderUserBubble(
+      msg.content, 
+      msg.hasImage ?? false, 
+      msg.source ?? 'user', 
+      msg.appletSlug
+    );
+  } else {
+    // Assistant message (from history)
+    renderAssistantBubble(msg.content, msg.outputs);
+  }
+}
+
+/**
+ * Render completed assistant message (from history)
+ */
+function renderAssistantBubble(content: string, outputs?: string[]): void {
+  const chat = document.getElementById('chat');
+  if (!chat) return;
+  
+  const assistantDiv = document.createElement('div');
+  assistantDiv.className = 'message assistant';
+  assistantDiv.setAttribute('data-markdown', content);
+  assistantDiv.innerHTML = `
+    <div class="activity-wrapper" style="display: none;">
+      <div class="activity-header" onclick="toggleActivityBox(this)">
+        <span class="activity-icon">▶</span>
+        <span class="activity-label">Activity</span>
+        <span class="activity-count"></span>
+      </div>
+      <div class="activity-box"></div>
+    </div>
+    <div class="outputs-container"></div>
+    <div class="markdown-content"></div>
+  `;
+  chat.appendChild(assistantDiv);
+  
+  // TODO: Render outputs if present
+  
+  // Trigger markdown rendering
+  if (window.renderMarkdown) {
+    window.renderMarkdown();
+  }
 }
 
 /**

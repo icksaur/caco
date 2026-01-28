@@ -6,7 +6,8 @@ import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge } from './ui-utils.js';
 import { getActiveSessionId, getCurrentCwd, setActiveSession } from './state.js';
 import { setAvailableModels, loadModels, getNewChatCwd } from './model-selector.js';
-import { loadHistory } from './history.js';
+import { waitForHistoryComplete } from './history.js';
+import { connectAppletWs, waitForConnect } from './applet-ws.js';
 import { setViewState, getViewState, isViewState } from './view-controller.js';
 
 /**
@@ -157,8 +158,10 @@ export async function switchSession(sessionId: string): Promise<void> {
       // Update client state with new session
       setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
       
-      // Load history and switch to chat view
-      await loadHistory();
+      // Connect WS and wait for history to stream
+      connectAppletWs(data.sessionId);
+      await waitForConnect();
+      await waitForHistoryComplete();
       setViewState('chatting');
     } else {
       const err = await response.json();

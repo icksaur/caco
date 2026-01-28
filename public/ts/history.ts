@@ -8,6 +8,8 @@ import { applyModelPreference, loadModels } from './model-selector.js';
 import { initFromPreferences } from './state.js';
 import { setViewState } from './view-controller.js';
 import { restoreOutputsFromHistory } from './display-output.js';
+import { setLoadingHistory } from './response-streaming.js';
+import { onHistoryComplete } from './applet-ws.js';
 
 // Declare renderMarkdown as a global function from markdown-renderer.js
 declare global {
@@ -17,32 +19,51 @@ declare global {
 }
 
 /**
- * Load conversation history on page load
+ * Wait for history to stream via WebSocket
+ * Assumes WS is already connected and streaming has started
  */
-export async function loadHistory(): Promise<void> {
+export function waitForHistoryComplete(): Promise<void> {
+  setLoadingHistory(true);
+  
+  return new Promise<void>((resolve) => {
+    const unsubscribe = onHistoryComplete(() => {
+      unsubscribe();
+      setLoadingHistory(false);
+      finishHistoryLoad();
+      resolve();
+    });
+    
+    // Timeout fallback (5 seconds)
+    setTimeout(() => {
+      unsubscribe();
+      setLoadingHistory(false);
+      finishHistoryLoad();
+      resolve();
+    }, 5000);
+  });
+}
+
+/**
+ * Load conversation history via HTTP (fallback for non-WS)
+ */
+export async function loadHistoryHttp(): Promise<void> {
   try {
     const response = await fetch('/api/history');
     if (response.ok) {
       const html = await response.text();
       const chat = document.getElementById('chat');
       if (chat && html.trim()) {
-        // Has messages - show chat view
         chat.innerHTML = html;
         setViewState('chatting');
-        // Render any markdown in loaded messages
         if (typeof window.renderMarkdown === 'function') {
           window.renderMarkdown();
         }
-        // Restore display outputs from [output:xxx] markers
         await restoreOutputsFromHistory();
-        // Note: caller should scroll after view is visible
       } else {
-        // No messages - show new chat form
         setViewState('newChat');
         loadModels();
       }
     } else {
-      // Error loading - show new chat form
       setViewState('newChat');
       loadModels();
     }
@@ -54,10 +75,30 @@ export async function loadHistory(): Promise<void> {
 }
 
 /**
- * Load and apply user preferences
- * @returns true if there's an active session
+ * Finish history loading (after WS streaming completes)
  */
-export async function loadPreferences(): Promise<boolean> {
+function finishHistoryLoad(): void {
+  const chat = document.getElementById('chat');
+  if (chat && chat.children.length > 0) {
+    setViewState('chatting');
+    if (typeof window.renderMarkdown === 'function') {
+      window.renderMarkdown();
+    }
+    restoreOutputsFromHistory().catch(err => 
+      console.error('Failed to restore outputs:', err)
+    );
+    scrollToBottom(true);
+  } else {
+    setViewState('newChat');
+    loadModels();
+  }
+}
+
+/**
+ * Load and apply user preferences
+ * Returns the preferences (no side effects beyond initializing state)
+ */
+export async function loadPreferences(): Promise<Preferences | null> {
   try {
     const response = await fetch('/api/preferences');
     if (response.ok) {
@@ -69,11 +110,10 @@ export async function loadPreferences(): Promise<boolean> {
       // Apply model to UI (placeholder text)
       applyModelPreference(prefs);
       
-      // Return whether we have an active session
-      return prefs.lastSessionId != null;
+      return prefs;
     }
   } catch (error) {
     console.error('Failed to load preferences:', error);
   }
-  return false;
+  return null;
 }

@@ -5,15 +5,16 @@
  * Provides real-time state sync and future agent invocation support.
  */
 
-// Re-export UserMessage type (matches server)
-export interface UserMessage {
+// Re-export ChatMessage type (matches server)
+export interface ChatMessage {
   id: string;
-  role: 'user';
+  role: 'user' | 'assistant';
   content: string;
   timestamp: string;
-  source: 'user' | 'applet';
+  source?: 'user' | 'applet';
   appletSlug?: string;
-  hasImage: boolean;
+  hasImage?: boolean;
+  outputs?: string[];
 }
 
 // Connection state
@@ -25,9 +26,13 @@ const RECONNECT_DELAY_MS = 1000;
 
 // Callbacks
 type StateCallback = (state: Record<string, unknown>) => void;
-type UserMessageCallback = (msg: UserMessage) => void;
+type MessageCallback = (msg: ChatMessage) => void;
+type HistoryCompleteCallback = () => void;
+type ConnectCallback = () => void;
 const stateCallbacks: Set<StateCallback> = new Set();
-const userMessageCallbacks: Set<UserMessageCallback> = new Set();
+const messageCallbacks: Set<MessageCallback> = new Set();
+const historyCompleteCallbacks: Set<HistoryCompleteCallback> = new Set();
+const connectCallbacks: Set<ConnectCallback> = new Set();
 
 // Pending requests (for request/response pattern)
 const pendingRequests = new Map<string, {
@@ -77,6 +82,15 @@ function doConnect(): void {
   socket.onopen = () => {
     console.log('[WS] Connected');
     reconnectAttempts = 0;
+    
+    // Fire connect callbacks
+    for (const cb of connectCallbacks) {
+      try {
+        cb();
+      } catch (err) {
+        console.error('[WS] Connect callback error:', err);
+      }
+    }
   };
   
   socket.onmessage = (event) => {
@@ -137,16 +151,28 @@ function handleMessage(msg: { type: string; id?: string; data?: unknown; error?:
       }
       break;
     
-    case 'userMessage':
-      // User message echoed back for rendering
-      if ((msg as { message?: UserMessage }).message) {
-        const userMsg = (msg as { message: UserMessage }).message;
-        for (const cb of userMessageCallbacks) {
+    case 'message': {
+      // Chat message (user or assistant) - from history or live
+      const msgWithData = msg as unknown as { message?: ChatMessage };
+      if (msgWithData.message) {
+        for (const cb of messageCallbacks) {
           try {
-            cb(userMsg);
+            cb(msgWithData.message);
           } catch (err) {
-            console.error('[WS] UserMessage callback error:', err);
+            console.error('[WS] Message callback error:', err);
           }
+        }
+      }
+      break;
+    }
+    
+    case 'historyComplete':
+      // History streaming complete
+      for (const cb of historyCompleteCallbacks) {
+        try {
+          cb();
+        } catch (err) {
+          console.error('[WS] HistoryComplete callback error:', err);
         }
       }
       break;
@@ -252,12 +278,51 @@ export function wsSendMessage(content: string, imageData?: string, source: 'user
 }
 
 /**
- * Subscribe to user messages (echoed back for rendering)
+ * Subscribe to chat messages (user or assistant)
  * Returns unsubscribe function
  */
-export function onUserMessage(callback: UserMessageCallback): () => void {
-  userMessageCallbacks.add(callback);
-  return () => userMessageCallbacks.delete(callback);
+export function onMessage(callback: MessageCallback): () => void {
+  messageCallbacks.add(callback);
+  return () => messageCallbacks.delete(callback);
+}
+
+/**
+ * Subscribe to history complete event
+ * Returns unsubscribe function
+ */
+export function onHistoryComplete(callback: HistoryCompleteCallback): () => void {
+  historyCompleteCallbacks.add(callback);
+  return () => historyCompleteCallbacks.delete(callback);
+}
+
+/**
+ * Subscribe to connect event
+ * If already connected, fires immediately
+ * Returns unsubscribe function
+ */
+export function onConnect(callback: ConnectCallback): () => void {
+  connectCallbacks.add(callback);
+  // If already connected, fire immediately
+  if (socket?.readyState === WebSocket.OPEN) {
+    try { callback(); } catch (e) { console.error('[WS] Connect callback error:', e); }
+  }
+  return () => connectCallbacks.delete(callback);
+}
+
+/**
+ * Wait for WebSocket connection
+ * Returns immediately if already connected
+ */
+export function waitForConnect(): Promise<void> {
+  if (socket?.readyState === WebSocket.OPEN) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const unsub = onConnect(() => {
+      unsub();
+      resolve();
+    });
+  });
 }
 
 /**

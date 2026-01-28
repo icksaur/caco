@@ -4,7 +4,7 @@
 
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom, setupScrollDetection } from './ui-utils.js';
-import { loadHistory, loadPreferences } from './history.js';
+import { loadPreferences, waitForHistoryComplete, loadHistoryHttp } from './history.js';
 import { toggleSessionPanel, switchSession, deleteSession, showSessionManager, showNewChatUI } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { toggleActivityBox } from './activity.js';
@@ -13,6 +13,7 @@ import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initViewState, setViewState, isViewState } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { setupMultilineInput } from './multiline-input.js';
+import { connectAppletWs, waitForConnect } from './applet-ws.js';
 
 /**
  * Toggle between chatting and applet views
@@ -85,11 +86,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   
   // Load preferences to check for active session
-  const hasActiveSession = await loadPreferences();
+  const prefs = await loadPreferences();
   
-  if (hasActiveSession) {
-    // Active session exists - show chat with history
-    await loadHistory();
+  if (prefs?.lastSessionId) {
+    // Active session exists - connect WS and wait for history
+    connectAppletWs(prefs.lastSessionId);
+    await waitForConnect();
+    await waitForHistoryComplete();
   } else {
     // No active session - show session manager as landing page
     showSessionManager();

@@ -160,6 +160,7 @@ export function setHasImage(hasImage: boolean): void {
 
 /**
  * Initialize state from server preferences
+ * Does NOT connect WebSocket - caller should do that explicitly
  */
 export function initFromPreferences(prefs: { 
   lastModel?: string; 

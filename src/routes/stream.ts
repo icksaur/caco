@@ -160,14 +160,26 @@ async function streamToWebSocket(
         }
         
         case 'assistant.message': {
-          // Final message content
-          const content = (eventData.content as string) || messageContent;
-          broadcastMessage(sessionId, {
-            id: messageId,
-            role: 'assistant',
-            content,
-            status: 'complete'
-          });
+          // Text content from assistant - but DON'T finalize here
+          // The agent may do more turns. Finalization happens on session.idle.
+          const content = (eventData.content as string) || '';
+          console.log(`[STREAM] assistant.message event: hasStarted=${hasStarted}, content="${content?.slice(0,50)}", messageContent="${messageContent?.slice(0,50)}"`);
+          
+          // If we haven't started streaming yet, start now
+          if (!hasStarted && content) {
+            broadcastMessage(sessionId, {
+              id: messageId,
+              role: 'assistant',
+              content: '',
+              status: 'streaming'
+            });
+            hasStarted = true;
+          }
+          
+          // Update accumulated content (for final message)
+          if (content && content.length > messageContent.length) {
+            messageContent = content;
+          }
           break;
         }
         

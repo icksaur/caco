@@ -10,7 +10,7 @@ import { addActivityItem } from './activity.js';
 import { setStreaming, isStreaming, getActiveSessionId, setActiveSession } from './state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { setViewState, isViewState } from './view-controller.js';
-import { onMessage, onHistoryComplete, onActivity, isWsConnected, type ChatMessage, type ActivityItem } from './applet-ws.js';
+import { onMessage, onHistoryComplete, onActivity, isWsConnected, waitForConnect, type ChatMessage, type ActivityItem } from './applet-ws.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -68,8 +68,13 @@ function registerWsHandlers(): void {
  * - Finalizes bubbles (complete)
  */
 function handleMessage(msg: ChatMessage): void {
+  console.log('[MSG] handleMessage:', msg.id?.slice(0,8), msg.role, msg.status || '-', 
+    msg.deltaContent ? `delta(${msg.deltaContent.length})` : '',
+    msg.content ? `content(${msg.content.length})` : '');
+  
   // Find existing message element by ID
   const existing = document.querySelector(`[data-message-id="${msg.id}"]`);
+  console.log('[MSG] existing element:', existing ? 'found' : 'not found');
   
   if (existing) {
     // Update existing message
@@ -348,6 +353,12 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       const sessionData = await sessionRes.json();
       sessionId = sessionData.sessionId;
       setActiveSession(sessionId, sessionData.cwd);
+      
+      // Wait for WS to connect before sending message
+      // This ensures we receive the user message broadcast
+      console.log('[STREAM] Waiting for WS connect after new session...');
+      await waitForConnect();
+      console.log('[STREAM] WS connected, proceeding with message');
     }
     
     // Step 2: POST message to session, get streamId
@@ -534,16 +545,9 @@ export function setupFormHandler(): void {
     
     const hasImage = !!imageData;
     
-    // Unified rendering path:
-    // - WS connected: server broadcasts user message, then streams assistant response
-    // - WS not connected: fallback direct render (new chat before WS ready)
-    if (!isWsConnected()) {
-      // Fallback: direct bubble add (WS not ready or new chat)
-      // Generate a temporary ID for local rendering
-      addUserBubble(message, hasImage);
-    }
-    // If WS connected, user bubble comes from server broadcast
-    // Assistant pending response is created when server sends status:'streaming' message
+    // For new chats, don't render locally - WS will connect and server will broadcast
+    // For existing sessions with broken WS, render locally as fallback
+    // (streamResponse will wait for WS connect on new chats before POSTing)
     
     // Clear input and image, reset textarea height
     input.value = '';

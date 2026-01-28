@@ -8,6 +8,7 @@ import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { spawn } from 'child_process';
 import { getAppletUserState, getAppletNavigation, triggerReload } from './applet-state.js';
+import { pushStateToApplet } from './routes/applet-ws.js';
 
 /**
  * Documentation returned by applet_howto tool.
@@ -199,5 +200,31 @@ export function createAppletTools(_programCwd: string) {
     }
   });
 
-  return [appletHowto, getAppletState, reloadPage, restartServer];
+  const setAppletState = defineTool('set_applet_state', {
+    description: 'Push state to the running applet in real-time via WebSocket. The applet receives updates via onStateUpdate() callback. Use for progress updates, computed results, or any data the applet should display.',
+
+    parameters: z.object({
+      data: z.record(z.string(), z.unknown()).describe('State object to push to the applet. Keys/values are merged with existing state.'),
+      sessionId: z.string().optional().describe('Optional session ID. Uses default session if not provided.')
+    }),
+
+    handler: async ({ data, sessionId }) => {
+      const sid = sessionId || 'default';
+      const sent = pushStateToApplet(sid, data as Record<string, unknown>);
+      
+      if (sent) {
+        return {
+          textResultForLlm: `State pushed to applet: ${JSON.stringify(data)}`,
+          resultType: 'success' as const
+        };
+      } else {
+        return {
+          textResultForLlm: `No applet WebSocket connection for session "${sid}". The applet may not be open.`,
+          resultType: 'success' as const
+        };
+      }
+    }
+  });
+
+  return [appletHowto, getAppletState, setAppletState, reloadPage, restartServer];
 }

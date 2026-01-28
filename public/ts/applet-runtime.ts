@@ -6,9 +6,12 @@
  * 
  * Phase 2: Exposes setAppletState() for applet JS to push state to server.
  * Phase 3: Exposes loadApplet(slug) for loading saved applets from applet JS.
+ * Phase 4: WebSocket for real-time state sync.
  */
 
 import { setViewState } from './view-controller.js';
+import { connectAppletWs, wsSetState, onStateUpdate, isWsConnected } from './applet-ws.js';
+import { getActiveSessionId } from './state.js';
 
 export interface AppletContent {
   html: string;
@@ -53,6 +56,9 @@ export function initAppletRuntime(): void {
   (window as unknown as { getBreadcrumbs: typeof getAppletStack }).getBreadcrumbs = getAppletStack;
   (window as unknown as { getAppletUrlParams: typeof getAppletUrlParams }).getAppletUrlParams = getAppletUrlParams;
   (window as unknown as { updateAppletUrlParam: typeof updateAppletUrlParam }).updateAppletUrlParam = updateAppletUrlParam;
+  
+  // WebSocket state subscription for applet JS
+  (window as unknown as { onStateUpdate: typeof onStateUpdate }).onStateUpdate = onStateUpdate;
   
   // Handle browser back/forward buttons
   window.addEventListener('popstate', handlePopState);
@@ -118,14 +124,21 @@ export function updateAppletUrlParam(key: string, value: string): void {
 }
 
 /**
- * Store state from applet locally
- * State is accumulated and sent with the next message POST
+ * Store state from applet
+ * Uses WebSocket when connected for real-time sync, otherwise stores locally.
  * Applet JS calls this to make state queryable by agent's get_applet_state tool
  */
 function setAppletState(state: Record<string, unknown>): void {
   // Merge with existing pending state (newer values overwrite)
   pendingAppletState = { ...pendingAppletState, ...state };
-  console.log('[APPLET] State updated locally:', pendingAppletState);
+  
+  // If WebSocket connected, push immediately
+  if (isWsConnected()) {
+    wsSetState(state);
+    console.log('[APPLET] State pushed via WebSocket:', Object.keys(state));
+  } else {
+    console.log('[APPLET] State queued (no WS):', Object.keys(state));
+  }
 }
 
 /**
@@ -495,6 +508,12 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   updateBreadcrumbUI();
   syncToUrl();
   setViewState('applet');
+  
+  // Connect WebSocket for real-time state sync
+  const sessionId = getActiveSessionId();
+  if (sessionId) {
+    connectAppletWs(sessionId);
+  }
 }
 
 /**

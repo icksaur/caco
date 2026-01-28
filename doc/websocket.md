@@ -84,36 +84,37 @@ set_applet_state({
 
 ## Implementation Plan
 
-### Phase 1: WebSocket Infrastructure
-- [ ] Add `ws` package dependency
-- [ ] Create `/ws/applet` endpoint in `src/routes/applet-ws.ts`
-- [ ] Track connections by sessionId
-- [ ] Client-side connection manager in `public/ts/applet-ws.ts`
+### Phase 1: WebSocket Infrastructure ✅
+- [x] Add `ws` package dependency
+- [x] Create `/ws/applet` endpoint in `src/routes/applet-ws.ts`
+- [x] Track connections by sessionId
+- [x] Client-side connection manager in `public/ts/applet-ws.ts`
+- [x] Auto-connect when applet loads
 
-### Phase 2: State Push (Agent → Applet)
-- [ ] `set_applet_state` MCP tool
-- [ ] `pushStateToApplet(sessionId, data)` server function
-- [ ] `onAgentState(callback)` client API
+### Phase 2: State Push (Agent → Applet) ✅
+- [x] `set_applet_state` MCP tool
+- [x] `pushStateToApplet(sessionId, data)` server function
+- [x] `onStateUpdate(callback)` client API
 
 ### Phase 3: Agent Invocation (Applet → Agent)
 - [ ] `invokeAgent(prompt, options)` client API
 - [ ] Server routes `invoke` message to session
 - [ ] Stream response back via WebSocket
 
-### Phase 4: Replace HTTP State Sync
-- [ ] Migrate `setAppletState()` from HTTP batch to WebSocket
-- [ ] Remove `/api/applet/state` POST endpoint
-- [ ] Keep SSE for chat streaming (separate concern)
+### Phase 4: File Operations
+- [ ] `readFile(path)` with streaming response
+- [ ] `writeFile(path, content)`
+- [ ] `subscribe(path)` for file watching
 
 ## Files to Create/Modify
 
-| File | Action |
-|------|--------|
-| `src/routes/applet-ws.ts` | New - WebSocket server |
-| `src/applet-tools.ts` | Add `set_applet_state` tool |
-| `public/ts/applet-ws.ts` | New - Client WebSocket manager |
-| `public/ts/applet-runtime.ts` | Integrate WS, expose new APIs |
-| `server.ts` | Mount WebSocket on HTTP server |
+| File | Action | Status |
+|------|--------|--------|
+| `src/routes/applet-ws.ts` | New - WebSocket server | ✅ |
+| `src/applet-tools.ts` | Add `set_applet_state` tool | ✅ |
+| `public/ts/applet-ws.ts` | New - Client WebSocket manager | ✅ |
+| `public/ts/applet-runtime.ts` | Integrate WS, expose new APIs | ✅ |
+| `server.ts` | Mount WebSocket on HTTP server | ✅ |
 
 ## Flow Diagram
 

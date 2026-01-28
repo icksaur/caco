@@ -6,6 +6,7 @@
  */
 
 import express from 'express';
+import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { sessionState } from './src/session-state.js';
@@ -13,6 +14,7 @@ import { createDisplayTools } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
 import { storeOutput, detectLanguage } from './src/storage.js';
 import { sessionRoutes, apiRoutes, streamRoutes } from './src/routes/index.js';
+import { setupAppletWebSocket } from './src/routes/applet-ws.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -134,8 +136,14 @@ async function start(): Promise<void> {
     excludedTools: ['view']
   });
   
+  // Create HTTP server from Express app
+  const server = createServer(app);
+  
+  // Attach WebSocket server for applet channel
+  setupAppletWebSocket(server);
+  
   // Start server (localhost only for security)
-  app.listen(PORT, '127.0.0.1', () => {
+  server.listen(PORT, '127.0.0.1', () => {
     console.log(`✓ Server running at http://localhost:${PORT}`);
     console.log('  Press Ctrl+C to stop');
   });

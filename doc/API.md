@@ -6,14 +6,36 @@ Complete catalog of all APIs in copilot-web.
 
 All endpoints are prefixed with `/api/`.
 
-### Streaming & Messages
+### Sessions & Messages (RESTful API)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/message` | POST | Send a message, get a streamId for SSE |
+| `/api/sessions` | POST | Create new session |
+| `/api/sessions/:id/messages` | POST | Send message to session |
 | `/api/stream/:streamId` | GET | SSE connection for response streaming |
+| `/api/message` | POST | ⚠️ **Deprecated** - use above |
 
-**POST /api/message**
+**POST /api/sessions** - Create new session
+```json
+{
+  "cwd": "string (optional, defaults to server cwd)",
+  "model": "string (optional)"
+}
+```
+Returns: `{ sessionId: "uuid", cwd: "string", model: "string" }`
+
+**POST /api/sessions/:id/messages** - Send message to session
+```json
+{
+  "prompt": "string",
+  "imageData": "data:image/...;base64,... (optional)",
+  "appletState": "object (optional, batched state from applet)",
+  "appletNavigation": "object (optional, navigation context)"
+}
+```
+Returns: `{ streamId: "uuid", sessionId: "uuid" }`
+
+**POST /api/message** ⚠️ Deprecated
 ```json
 {
   "prompt": "string",
@@ -26,15 +48,18 @@ All endpoints are prefixed with `/api/`.
 ```
 Returns: `{ streamId: "uuid" }`
 
-### Sessions
+> **Migration:** Use `POST /sessions` to create a session, then `POST /sessions/:id/messages` for each message. The client tracks `sessionId` in state.
+
+### Session Management
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/session` | GET | Get current active session info |
+| `/api/session` | GET | Get session info (accepts `?sessionId=`) |
 | `/api/sessions` | GET | List all sessions with available models |
-| `/api/sessions/new` | POST | Create a new session |
-| `/api/sessions/:sessionId/resume` | POST | Resume an existing session |
-| `/api/sessions/:sessionId` | DELETE | Delete a session |
+| `/api/sessions/:id/resume` | POST | Resume an existing session |
+| `/api/sessions/:id` | DELETE | Delete a session |
+
+**Headers:** All session endpoints accept `X-Client-ID` header for multi-client isolation.
 
 ### Preferences & History
 

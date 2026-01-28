@@ -11,7 +11,7 @@ import { addActivityItem, formatToolArgs, formatToolResult, toggleActivityBox } 
 import { renderDisplayOutput } from './display-output.js';
 import { executeApplet, type AppletContent } from './applet-runtime.js';
 import { removeImage } from './image-paste.js';
-import { setStreaming, getActiveEventSource } from './state.js';
+import { setStreaming, getActiveEventSource, getActiveSessionId, setActiveSession } from './state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { setViewState, isViewState } from './view-controller.js';
 
@@ -69,11 +69,16 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 
 /**
- * Stream response: POST message first, then connect to SSE for response
+ * Stream response using RESTful API:
+ * 
+ * 1. If newChat: POST /sessions to create session → get sessionId
+ * 2. POST /sessions/:id/messages → get streamId
+ * 3. GET /stream/:streamId for SSE response
  * 
  * This separates concerns:
- * - Sending (POST with large body for images)
- * - Receiving (GET SSE with just streamId)
+ * - Session creation (explicit resource creation)
+ * - Message sending (targets specific session)
+ * - Response streaming (lightweight SSE connection)
  */
 export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
   setStreaming(true, null);
@@ -84,16 +89,33 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     // Always collect navigation context for agent queries
     const appletNavigation = getNavigationContext();
     
-    // Step 1: POST message to get streamId
-    const response = await fetch('/api/message', {
+    let sessionId = getActiveSessionId();
+    
+    // Step 1: Create new session if this is a new chat
+    if (newChat || !sessionId) {
+      const sessionRes = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cwd, model })
+      });
+      
+      if (!sessionRes.ok) {
+        const error = await sessionRes.json().catch(() => ({ error: 'Session creation failed' }));
+        throw new Error(error.error || `HTTP ${sessionRes.status}`);
+      }
+      
+      const sessionData = await sessionRes.json();
+      sessionId = sessionData.sessionId;
+      setActiveSession(sessionId, sessionData.cwd);
+    }
+    
+    // Step 2: POST message to session, get streamId
+    const response = await fetch(`/api/sessions/${sessionId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         prompt, 
-        model, 
-        imageData, 
-        newChat, 
-        cwd,
+        imageData,
         ...(appletState && { appletState }),  // Only include if has data
         appletNavigation  // Always include navigation context
       })
@@ -106,7 +128,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     
     const { streamId } = await response.json();
     
-    // Step 2: Connect to SSE for response streaming
+    // Step 3: Connect to SSE for response streaming
     const eventSource = new EventSource(`/api/stream/${streamId}`);
     setStreaming(true, eventSource);
     setupEventSourceHandlers(eventSource);

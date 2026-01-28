@@ -38,14 +38,15 @@ DELETE /sessions/:id       → delete
 
 ## Streaming Routes
 
-| Current | Used | Required | Stateful | Stateless Equiv |
-|---------|------|----------|----------|-----------------|
-| `POST /message` | ✓ | ✓ send msg | writes pending map + applet state | `POST /sessions/:id/messages` |
-| `GET /stream/:streamId` | ✓ | ✓ SSE stream | writes session singleton | keep streamId, add sessionId |
+| Current | Used | Required | Stateful | Stateless Equiv | Status |
+|---------|------|----------|----------|-----------------|--------|
+| `POST /message` | ✓ | ✓ | ~~singleton~~ | X-Client-ID header | ✅ Done |
+| `GET /stream/:streamId` | ✓ | ✓ | ~~singleton~~ | clientId in pending msg | ✅ Done |
 
 **Notes:**
-- `/message` creates session lazily via `ensureSession(model, newChat, cwd)`.
-- Stateless equiv: client provides `sessionId` explicitly, server doesn't track "active" session.
+- `POST /message` now accepts `X-Client-ID` header, stored in pending message
+- `GET /stream/:streamId` passes clientId to `ensureSession()` for isolation
+- Each client can now have independent sessions
 
 ---
 

@@ -33,6 +33,8 @@ interface PendingMessage {
   newChat?: boolean;
   cwd?: string;
   tempFilePath?: string;
+  clientId?: string;
+  sessionId?: string;  // Explicit session target (RESTful API)
   createdAt: number;
 }
 
@@ -78,6 +80,9 @@ router.post('/message', async (req: Request, res: Response) => {
     appletNavigation?: NavigationContext;
   };
   
+  // Get clientId from header for multi-client isolation
+  const clientId = req.headers['x-client-id'] as string | undefined;
+  
   if (!prompt) {
     res.status(400).json({ error: 'prompt is required' });
     return;
@@ -113,12 +118,78 @@ router.post('/message', async (req: Request, res: Response) => {
     newChat,
     cwd,
     tempFilePath,
+    clientId,
     createdAt: Date.now()
   });
   
   console.log(`[STREAM] Created streamId ${streamId} for prompt: ${prompt.substring(0, 50)}...`);
   
   res.json({ streamId });
+});
+
+/**
+ * POST /api/sessions/:sessionId/messages - Send message to specific session (RESTful)
+ * 
+ * This is the preferred endpoint. It:
+ * 1. Validates the request
+ * 2. Targets a specific session (no implicit session creation)
+ * 3. Returns a streamId for SSE connection
+ */
+router.post('/sessions/:sessionId/messages', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const { prompt, imageData, appletState, appletNavigation } = req.body as {
+    prompt?: string;
+    imageData?: string;
+    appletState?: Record<string, unknown>;
+    appletNavigation?: NavigationContext;
+  };
+  
+  const clientId = req.headers['x-client-id'] as string | undefined;
+  
+  if (!prompt) {
+    res.status(400).json({ error: 'prompt is required' });
+    return;
+  }
+  
+  // Verify session exists (getSessionCwd returns null if not found)
+  if (!sessionManager.getSessionCwd(sessionId)) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+  
+  // Store applet state if provided
+  if (appletState && typeof appletState === 'object') {
+    setAppletUserState(appletState);
+  }
+  
+  // Store navigation context if provided
+  if (appletNavigation && typeof appletNavigation === 'object') {
+    setAppletNavigation(appletNavigation);
+  }
+  
+  let tempFilePath: string | undefined;
+  
+  // Pre-process image if present
+  const parsed = parseImageDataUrl(imageData);
+  if (parsed) {
+    tempFilePath = join(tmpdir(), `copilot-image-${Date.now()}.${parsed.extension}`);
+    await writeFile(tempFilePath, Buffer.from(parsed.base64Data, 'base64'));
+  }
+  
+  // Generate streamId and store pending message with explicit sessionId
+  const streamId = randomUUID();
+  pendingMessages.set(streamId, {
+    prompt,
+    model: '', // Model is already set on the session
+    sessionId,  // Explicit target
+    tempFilePath,
+    clientId,
+    createdAt: Date.now()
+  });
+  
+  console.log(`[STREAM] Created streamId ${streamId} for session ${sessionId}`);
+  
+  res.json({ streamId, sessionId });
 });
 
 /**
@@ -141,9 +212,9 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
   // Remove from pending (one-time use)
   pendingMessages.delete(streamId);
   
-  const { prompt, model, newChat, cwd, tempFilePath } = pending;
+  const { prompt, model, newChat, cwd, tempFilePath, clientId, sessionId: explicitSessionId } = pending;
   
-  console.log(`[STREAM] Connecting to stream ${streamId}, model: ${model || '(undefined)'}`);
+  console.log(`[STREAM] Connecting to stream ${streamId}${explicitSessionId ? `, session: ${explicitSessionId}` : `, model: ${model || '(undefined)'}`}${clientId ? `, client: ${clientId}` : ''}`);
   if (newChat) console.log(`[NEW CHAT] Creating new session with cwd: ${cwd}`);
   
   // Set SSE headers
@@ -154,8 +225,19 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
   res.flushHeaders();
   
   try {
-    // Ensure session exists (explicit newChat flag, optional cwd)
-    const sessionId = await sessionState.ensureSession(model, newChat, cwd);
+    // Use explicit sessionId if provided, otherwise ensure session via legacy flow
+    let sessionId: string;
+    if (explicitSessionId) {
+      // RESTful path: session already exists
+      sessionId = explicitSessionId;
+      // Ensure it's resumed if not active
+      if (!sessionManager.isActive(sessionId)) {
+        sessionId = await sessionState.switchSession(sessionId, clientId);
+      }
+    } else {
+      // Legacy path: ensure session exists (may create new)
+      sessionId = await sessionState.ensureSession(model, newChat, cwd, clientId);
+    }
     
     // Get session
     const session = sessionManager.getSession(sessionId);

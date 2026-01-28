@@ -4,11 +4,13 @@
  * API endpoints for session management:
  * - GET /api/session - Current session info (accepts ?sessionId for stateless)
  * - GET /api/sessions - List all sessions
- * - POST /api/sessions/:id/resume - Switch session
+ * - POST /api/sessions - Create new session (RESTful)
+ * - POST /api/sessions/:id/resume - Switch to existing session
  * - DELETE /api/sessions/:id - Delete session
  */
 
 import { Router, Request, Response } from 'express';
+import { existsSync, statSync } from 'fs';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 
@@ -55,6 +57,38 @@ router.get('/sessions', (_req: Request, res: Response) => {
       cost: m.billing?.multiplier ?? 1
     }))
   });
+});
+
+// Create a new session (RESTful replacement for POST /message with newChat: true)
+// Returns sessionId that client uses for subsequent POST /sessions/:id/messages
+router.post('/sessions', async (req: Request, res: Response) => {
+  const { cwd, model } = req.body as { cwd?: string; model?: string };
+  const clientId = req.headers['x-client-id'] as string | undefined;
+  
+  const sessionCwd = cwd || process.cwd();
+  
+  // Validate path
+  if (!existsSync(sessionCwd)) {
+    return res.status(400).json({ error: `Path does not exist: ${sessionCwd}` });
+  }
+  if (!statSync(sessionCwd).isDirectory()) {
+    return res.status(400).json({ error: `Path is not a directory: ${sessionCwd}` });
+  }
+  
+  try {
+    // Create new session (forces new, ignoring any existing active session)
+    const sessionId = await sessionState.ensureSession(model, true, sessionCwd, clientId);
+    const actualCwd = sessionManager.getSessionCwd(sessionId);
+    
+    res.json({ 
+      sessionId, 
+      cwd: actualCwd || sessionCwd,
+      model: model || 'default'
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
 });
 
 // Switch to a different session

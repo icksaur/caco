@@ -5,8 +5,8 @@ export default defineConfig({
     // Run tests in Node environment (not browser)
     environment: 'node',
     
-    // Include both src and public/ts tests
-    include: ['tests/**/*.test.ts'],
+    // Include unit tests only (integration tests use node:test runner)
+    include: ['tests/unit/**/*.test.ts'],
     
     // Coverage configuration
     coverage: {

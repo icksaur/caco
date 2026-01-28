@@ -85,6 +85,117 @@ describe('API Routes', () => {
   });
 
   // ─────────────────────────────────────────────────────────────
+  // RESTful API (new design)
+  // ─────────────────────────────────────────────────────────────
+  describe('RESTful API', () => {
+    let createdSessionId: string | null = null;
+
+    test('POST /sessions - creates new session', async () => {
+      const res = await fetch(`${BASE}/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cwd: process.cwd(), model: 'claude-sonnet' })
+      });
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.ok(data.sessionId, 'should return sessionId');
+      assert.ok(data.cwd, 'should return cwd');
+      createdSessionId = data.sessionId;
+    });
+
+    test('POST /sessions/:id/messages - sends message to session', async () => {
+      if (!createdSessionId) {
+        // Create session first if previous test didn't run
+        const createRes = await fetch(`${BASE}/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cwd: process.cwd() })
+        });
+        const createData = await createRes.json();
+        createdSessionId = createData.sessionId;
+      }
+
+      const res = await fetch(`${BASE}/sessions/${createdSessionId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Hello from RESTful API test' })
+      });
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.ok(data.streamId, 'should return streamId');
+      assert.strictEqual(data.sessionId, createdSessionId, 'should echo sessionId');
+    });
+
+    test('POST /sessions/:id/messages - returns 404 for unknown session', async () => {
+      const res = await fetch(`${BASE}/sessions/nonexistent-session-id/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'test' })
+      });
+      assert.strictEqual(res.status, 404);
+      const data = await res.json();
+      assert.ok(data.error.includes('not found'), 'should mention session not found');
+    });
+
+    test('POST /sessions/:id/messages - returns 400 without prompt', async () => {
+      if (!createdSessionId) return; // skip if no session created
+      
+      const res = await fetch(`${BASE}/sessions/${createdSessionId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      assert.strictEqual(res.status, 400);
+    });
+    
+    test('POST /sessions - returns 400 for invalid path', async () => {
+      const res = await fetch(`${BASE}/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cwd: '/nonexistent/path/12345' })
+      });
+      assert.strictEqual(res.status, 400);
+      const data = await res.json();
+      assert.ok(data.error.includes('not exist'), 'should mention path does not exist');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Streaming Routes (decoupled)
+  // ─────────────────────────────────────────────────────────────
+  describe('streaming routes', () => {
+    test('POST /message - accepts X-Client-ID header', async () => {
+      const res = await fetch(`${BASE}/message`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Client-ID': 'test-client-456'
+        },
+        body: JSON.stringify({ prompt: 'test message' })
+      });
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.ok('streamId' in data, 'should return streamId');
+    });
+
+    test('GET /stream/:id - returns 404 for invalid streamId', async () => {
+      const res = await fetch(`${BASE}/stream/invalid-stream-id`);
+      assert.strictEqual(res.status, 404);
+    });
+
+    test('POST /message without prompt - returns 400', async () => {
+      const res = await fetch(`${BASE}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      assert.strictEqual(res.status, 400);
+      const data = await res.json();
+      assert.ok(data.error.includes('prompt'), 'should mention prompt');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
   // Stateless routes (should work without any session)
   // ─────────────────────────────────────────────────────────────
   describe('stateless routes', () => {
@@ -112,6 +223,5 @@ describe('API Routes', () => {
   describe('stateful (needs refactoring)', () => {
     test.todo('GET /history - chat history');
     test.todo('GET /applet/state - applet state');
-    test.todo('POST /message - send message');
   });
 });

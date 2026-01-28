@@ -2,30 +2,40 @@
  * Session Routes
  * 
  * API endpoints for session management:
- * - GET /api/session - Current session info
+ * - GET /api/session - Current session info (accepts ?sessionId for stateless)
  * - GET /api/sessions - List all sessions
- * - POST /api/sessions/new - Prepare new chat
  * - POST /api/sessions/:id/resume - Switch session
  * - DELETE /api/sessions/:id - Delete session
  */
 
 import { Router, Request, Response } from 'express';
-import { existsSync, statSync } from 'fs';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 
 const router = Router();
 
 // Get current session info
-router.get('/session', async (_req: Request, res: Response) => {
-  const hasMessages = await sessionState.hasMessages();
+// Stateless: accepts ?sessionId to query specific session
+router.get('/session', async (req: Request, res: Response) => {
+  const sessionId = (req.query.sessionId as string) || sessionState.activeSessionId;
+  
+  if (!sessionId) {
+    return res.json({
+      sessionId: null,
+      cwd: process.cwd(),
+      isActive: false,
+      hasMessages: false
+    });
+  }
+  
+  const isActive = sessionManager.isActive(sessionId);
+  const hasMessages = sessionManager.hasMessages(sessionId);
+  const cwd = sessionManager.getSessionCwd(sessionId);
   
   res.json({
-    sessionId: sessionState.activeSessionId,
-    cwd: process.cwd(),
-    isActive: sessionState.activeSessionId 
-      ? sessionManager.isActive(sessionState.activeSessionId) 
-      : false,
+    sessionId,
+    cwd: cwd || process.cwd(),
+    isActive,
     hasMessages
   });
 });
@@ -47,33 +57,14 @@ router.get('/sessions', (_req: Request, res: Response) => {
   });
 });
 
-// Create/prepare a new chat
-router.post('/sessions/new', async (req: Request, res: Response) => {
-  try {
-    const cwd = (req.body.cwd as string) || process.cwd();
-    
-    // Validate path
-    if (!existsSync(cwd)) {
-      return res.status(400).json({ error: `Path does not exist: ${cwd}` });
-    }
-    if (!statSync(cwd).isDirectory()) {
-      return res.status(400).json({ error: `Path is not a directory: ${cwd}` });
-    }
-    
-    await sessionState.prepareNewChat(cwd);
-    res.json({ success: true, cwd });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    res.status(400).json({ error: message });
-  }
-});
-
 // Switch to a different session
+// Accepts X-Client-ID header for multi-client isolation
 router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
+  const clientId = req.headers['x-client-id'] as string | undefined;
   
   try {
-    const newSessionId = await sessionState.switchSession(sessionId);
+    const newSessionId = await sessionState.switchSession(sessionId, clientId);
     const cwd = sessionState.preferences.lastCwd;
     res.json({ success: true, sessionId: newSessionId, cwd });
   } catch (error) {
@@ -83,11 +74,13 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
 });
 
 // Delete a session
+// Accepts X-Client-ID header for multi-client isolation
 router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
+  const clientId = req.headers['x-client-id'] as string | undefined;
   
   try {
-    const wasActive = await sessionState.deleteSession(sessionId);
+    const wasActive = await sessionState.deleteSession(sessionId, clientId);
     res.json({ success: true, wasActive });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

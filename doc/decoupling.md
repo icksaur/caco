@@ -21,17 +21,18 @@ DELETE /sessions/:id       → delete
 
 ## Session Routes
 
-| Current | Used | Required | Stateful | Stateless Equiv |
-|---------|------|----------|----------|-----------------|
-| `GET /session` | ✓ | ✓ current session info | reads `sessionState` | `GET /sessions/:id` |
-| `GET /sessions` | ✓ | ✓ list all | reads only | ✓ already stateless |
-| `POST /sessions/new` | ✗ | ✗ dead code | writes | `POST /sessions` |
-| `POST /sessions/:id/resume` | ✓ | ✓ switch session | writes singleton | keep, add clientId scope |
-| `DELETE /sessions/:id` | ✓ | ✓ delete | disk only | ✓ already stateless |
+| Current | Used | Required | Stateful | Stateless Equiv | Status |
+|---------|------|----------|----------|-----------------|--------|
+| `GET /session` | ✓ | ✓ | ~~singleton~~ | `?sessionId=` param | ✅ Done |
+| `GET /sessions` | ✓ | ✓ | reads only | ✓ already stateless | ✅ Done |
+| `POST /sessions/new` | ✗ | ✗ | — | — | ✅ Deleted |
+| `POST /sessions/:id/resume` | ✓ | ✓ | ~~singleton~~ | X-Client-ID header | ✅ Done |
+| `DELETE /sessions/:id` | ✓ | ✓ | ~~singleton~~ | X-Client-ID header | ✅ Done |
 
 **Notes:**
-- `POST /sessions/new` has zero client callers (verified via grep). New chats use `newChat: true` on `/message`.
-- `GET /session` returns "active" session from singleton—should accept `:id` param instead.
+- `POST /sessions/new` deleted (zero client callers, verified via grep)
+- `GET /session` now accepts `?sessionId=` for stateless queries
+- Resume/delete now accept `X-Client-ID` header for multi-client isolation
 
 ---
 

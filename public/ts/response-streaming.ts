@@ -392,6 +392,10 @@ function finishPendingResponse(): void {
       const icon = wrapper.querySelector('.activity-icon');
       if (icon) icon.textContent = '▶';
     }
+    
+    // Render markdown (may not have been triggered if no assistant.message event)
+    pending.dataset.markdownProcessed = 'false';
+    if (typeof window.renderMarkdown === 'function') window.renderMarkdown();
   }
   
   // Re-enable form

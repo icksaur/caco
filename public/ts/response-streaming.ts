@@ -156,6 +156,9 @@ function finalizeMessage(element: Element, msg: ChatMessage): void {
   
   setStreaming(false);
   finishPendingResponse();
+  
+  // Render markdown for the completed message
+  if (window.renderMarkdown) window.renderMarkdown();
 }
 
 /**

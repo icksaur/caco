@@ -22,6 +22,7 @@ import { getOutput } from '../storage.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { DEFAULT_MODEL } from '../preferences.js';
 import { parseImageDataUrl } from '../image-utils.js';
+import { broadcastUserMessageFromPost } from './applet-ws.js';
 
 const router = Router();
 
@@ -118,6 +119,9 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     clientId,
     createdAt: Date.now()
   });
+  
+  // Broadcast user message to WS clients for unified rendering
+  broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, 'user');
   
   console.log(`[STREAM] Created streamId ${streamId} for session ${sessionId}`);
   

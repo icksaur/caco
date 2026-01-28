@@ -13,7 +13,7 @@ import { removeImage } from './image-paste.js';
 import { setStreaming, getActiveEventSource, getActiveSessionId, setActiveSession } from './state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { setViewState, isViewState } from './view-controller.js';
-import { onUserMessage, isWsConnected, wsSendMessage, type UserMessage } from './applet-ws.js';
+import { onUserMessage, isWsConnected, type UserMessage } from './applet-ws.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -554,16 +554,14 @@ export function setupFormHandler(): void {
     
     const hasImage = !!imageData;
     
-    // For existing sessions with WS connected, send via WS for unified rendering
-    // The WS handler will render the bubble when the echo comes back
-    // For new chats or when WS not connected, use legacy direct rendering
-    if (!isNewChat && isWsConnected()) {
-      console.log('[WS] Sending message via WebSocket');
-      wsSendMessage(message, imageData || undefined, 'user');
-      // Add pending response immediately (bubble comes from WS echo)
+    // Unified rendering path:
+    // - If WS connected: server will broadcast userMessage after receiving POST
+    // - If WS not connected (new chat, offline): render directly as fallback
+    if (isWsConnected()) {
+      // Add pending response; user bubble comes from WS broadcast after POST
       addPendingResponse();
     } else {
-      // Legacy path: direct bubble add (WS not ready or new chat)
+      // Fallback: direct bubble add (WS not ready or new chat)
       addUserBubble(message, hasImage);
     }
     
@@ -572,7 +570,7 @@ export function setupFormHandler(): void {
     resetTextareaHeight();
     removeImage();
     
-    // Start streaming - explicitly pass whether this is a new chat
+    // HTTP POST is the single path for sending messages to agent
     streamResponse(message, model, imageData, isNewChat, cwd);
   });
 }

@@ -278,3 +278,28 @@ function broadcastUserMessage(sessionId: string, message: UserMessage): void {
     }
   }
 }
+
+/**
+ * Broadcast user message from HTTP POST handler
+ * Called when server receives a message via REST API
+ */
+export function broadcastUserMessageFromPost(
+  sessionId: string,
+  content: string,
+  hasImage: boolean,
+  source: 'user' | 'applet' = 'user',
+  appletSlug?: string
+): void {
+  const message: UserMessage = {
+    id: randomUUID(),
+    role: 'user',
+    content,
+    timestamp: new Date().toISOString(),
+    source,
+    appletSlug,
+    hasImage
+  };
+  
+  broadcastUserMessage(sessionId, message);
+  console.log(`[WS] Broadcast userMessage for session ${sessionId} (from POST)`);
+}

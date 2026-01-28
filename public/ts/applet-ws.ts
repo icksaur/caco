@@ -3,6 +3,10 @@
  * 
  * Client-side WebSocket connection for applet ↔ server communication.
  * Provides real-time state sync and future agent invocation support.
+ * 
+ * ARCHITECTURE: Single socket per session, tracked by connection ID.
+ * When switching sessions, we increment the ID so any pending callbacks
+ * from old sockets are ignored.
  */
 
 // Re-export ChatMessage type (matches server)
@@ -26,11 +30,11 @@ export interface ActivityItem {
   details?: string;
 }
 
-// Connection state
+// Connection state - use ID to ignore stale callbacks
 let socket: WebSocket | null = null;
 let sessionId: string | null = null;
+let connectionId = 0;  // Incremented on each new connection
 let reconnectAttempts = 0;
-let intentionalClose = false; // Prevent reconnect when switching sessions
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 1000;
 
@@ -55,39 +59,47 @@ let requestId = 0;
 
 /**
  * Connect to applet WebSocket
- * Called when an applet is loaded
+ * Called when an applet is loaded.
+ * 
+ * PATTERN: Each connect increments connectionId. Callbacks from old
+ * connections are ignored because they captured a stale ID.
  */
 export function connectAppletWs(session: string): void {
-  console.log(`[WS] connectAppletWs called for ${session}, current: ${sessionId}, socket state: ${socket?.readyState}`);
+  console.log(`[WS] connectAppletWs called for ${session}, current: ${sessionId}`);
   
-  // Already connected or connecting to this session
-  if (socket && sessionId === session) {
-    const state = socket.readyState;
-    if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) {
-      console.log(`[WS] Already connected/connecting to session ${session}, skipping`);
-      return;
-    }
-  }
-  
-  // Close existing connection if different session
+  // Always close any existing socket first (sync, before any async)
   if (socket) {
     console.log(`[WS] Closing existing socket (state: ${socket.readyState})`);
-    intentionalClose = true;
-    socket.close();
+    const oldSocket = socket;
+    socket = null;  // Clear immediately
+    oldSocket.onclose = null;  // Remove handler to prevent reconnect
+    oldSocket.onerror = null;
+    oldSocket.onmessage = null;
+    oldSocket.onopen = null;
+    oldSocket.close();
   }
   
+  // New connection
   sessionId = session;
+  connectionId++;  // Increment ID so stale callbacks are ignored
   reconnectAttempts = 0;
-  intentionalClose = false;
   
-  doConnect();
+  doConnect(connectionId);
 }
 
 /**
- * Internal connect logic
+ * Internal connect logic.
+ * @param myConnectionId - The connection ID when this was called.
+ *   All callbacks capture this and bail if it's stale.
  */
-function doConnect(): void {
+function doConnect(myConnectionId: number): void {
   if (!sessionId) return;
+  
+  // Bail if a newer connection has been started
+  if (myConnectionId !== connectionId) {
+    console.log(`[WS] doConnect bailing, stale connection ID ${myConnectionId} vs current ${connectionId}`);
+    return;
+  }
   
   // Guard for Node.js test environment
   if (typeof window === 'undefined') {
@@ -98,10 +110,18 @@ function doConnect(): void {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${protocol}//${window.location.host}/ws/applet?session=${encodeURIComponent(sessionId)}`;
   
-  console.log(`[WS] Connecting: ${url}`);
-  socket = new WebSocket(url);
+  console.log(`[WS] Connecting: ${url} (connectionId: ${myConnectionId})`);
+  const ws = new WebSocket(url);
+  socket = ws;
   
-  socket.onopen = () => {
+  ws.onopen = () => {
+    // Bail if stale
+    if (myConnectionId !== connectionId) {
+      console.log(`[WS] onopen bailing, stale connection ID`);
+      ws.close();
+      return;
+    }
+    
     console.log('[WS] Connected');
     reconnectAttempts = 0;
     
@@ -115,7 +135,10 @@ function doConnect(): void {
     }
   };
   
-  socket.onmessage = (event) => {
+  ws.onmessage = (event) => {
+    // Bail if stale
+    if (myConnectionId !== connectionId) return;
+    
     try {
       const msg = JSON.parse(event.data);
       handleMessage(msg);
@@ -124,26 +147,29 @@ function doConnect(): void {
     }
   };
   
-  socket.onclose = () => {
-    console.log('[WS] Disconnected');
-    socket = null;
+  ws.onclose = () => {
+    console.log(`[WS] Disconnected (connectionId: ${myConnectionId}, current: ${connectionId})`);
     
-    // Don't reconnect if we intentionally closed for session switch
-    if (intentionalClose) {
-      console.log('[WS] Intentional close, not reconnecting');
+    // Bail if stale - another connection is active
+    if (myConnectionId !== connectionId) {
+      console.log('[WS] onclose bailing, stale connection ID');
       return;
     }
+    
+    socket = null;
     
     // Auto-reconnect with backoff
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       reconnectAttempts++;
       const delay = RECONNECT_DELAY_MS * reconnectAttempts;
       console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
-      setTimeout(doConnect, delay);
+      setTimeout(() => doConnect(myConnectionId), delay);
     }
   };
   
-  socket.onerror = (err) => {
+  ws.onerror = (err) => {
+    // Bail if stale
+    if (myConnectionId !== connectionId) return;
     console.error('[WS] Error:', err);
   };
 }

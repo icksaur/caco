@@ -1,19 +1,16 @@
 /**
  * Response Streaming
  * 
- * Handles receiving streamed responses from the server via SSE.
- * Separated from message sending (which happens via POST or WebSocket).
+ * Handles receiving streamed responses from the server via WebSocket.
+ * Unified message protocol: all messages (history and live) use same handler.
  */
 
-import type { ToolEventData, MessageEventData } from './types.js';
 import { escapeHtml, scrollToBottom, isAutoScrollEnabled, enableAutoScroll } from './ui-utils.js';
-import { addActivityItem, formatToolArgs, formatToolResult, toggleActivityBox } from './activity.js';
-import { renderDisplayOutput } from './display-output.js';
-import { removeImage } from './image-paste.js';
-import { setStreaming, getActiveEventSource, getActiveSessionId, setActiveSession } from './state.js';
+import { addActivityItem } from './activity.js';
+import { setStreaming, getActiveSessionId, setActiveSession } from './state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { setViewState, isViewState } from './view-controller.js';
-import { onMessage, onHistoryComplete, isWsConnected, type ChatMessage } from './applet-ws.js';
+import { onMessage, onHistoryComplete, onActivity, isWsConnected, type ChatMessage, type ActivityItem } from './applet-ws.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -25,31 +22,132 @@ declare global {
 /** Timeout for stop button appearance */
 let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
 
-/** Track if WS message handler is registered */
-let wsHandlerRegistered = false;
+/** Track if WS handlers are registered */
+let wsHandlersRegistered = false;
 
 /** Track if currently loading history */
 let loadingHistory = false;
 
 /**
- * Register WebSocket message handler for unified rendering
+ * Register all WebSocket handlers for messages and activity
  * Called once during app initialization
  */
-function registerWsMessageHandler(): void {
-  if (wsHandlerRegistered) return;
-  wsHandlerRegistered = true;
+function registerWsHandlers(): void {
+  if (wsHandlersRegistered) return;
+  wsHandlersRegistered = true;
   
+  // Unified message handler for history and live streaming
   onMessage((msg: ChatMessage) => {
-    console.log('[WS] Received message:', msg.id, msg.role, loadingHistory ? '(history)' : '(live)');
-    renderMessage(msg, loadingHistory);
+    console.log('[WS] Received message:', msg.id, msg.role, msg.status || 'complete', 
+      msg.deltaContent ? `delta(${msg.deltaContent.length})` : '',
+      loadingHistory ? '(history)' : '(live)');
+    handleMessage(msg);
   });
   
+  // History complete handler
   onHistoryComplete(() => {
     console.log('[WS] History streaming complete');
     loadingHistory = false;
+    // Render markdown for all history messages
+    if (window.renderMarkdown) window.renderMarkdown();
     // Scroll to bottom after history loads
     scrollToBottom(true);
   });
+  
+  // Activity handler for tool calls, intents, errors
+  onActivity((item: ActivityItem) => {
+    console.log('[WS] Activity:', item.type, item.text);
+    addActivityItem(item.type, item.text, item.details);
+  });
+}
+
+/**
+ * Handle a message from WebSocket (unified protocol)
+ * - Creates new bubbles
+ * - Updates existing bubbles (streaming)
+ * - Finalizes bubbles (complete)
+ */
+function handleMessage(msg: ChatMessage): void {
+  // Find existing message element by ID
+  const existing = document.querySelector(`[data-message-id="${msg.id}"]`);
+  
+  if (existing) {
+    // Update existing message
+    if (msg.deltaContent) {
+      appendContent(existing, msg.deltaContent);
+    }
+    if (msg.status === 'complete') {
+      finalizeMessage(existing, msg);
+    }
+  } else {
+    // Create new message
+    createMessage(msg);
+  }
+}
+
+/**
+ * Create a new message element
+ */
+function createMessage(msg: ChatMessage): void {
+  if (msg.role === 'user') {
+    renderUserBubble(
+      msg.content || '', 
+      msg.hasImage ?? false, 
+      msg.source ?? 'user', 
+      msg.appletSlug,
+      msg.id
+    );
+  } else {
+    // Assistant message - could be complete (history) or streaming (live)
+    if (msg.status === 'streaming' || !msg.content) {
+      // Start streaming response
+      addPendingResponse(msg.id);
+      setStreaming(true);
+    } else {
+      // Complete message (history)
+      renderAssistantBubble(msg.id, msg.content, msg.outputs);
+    }
+  }
+}
+
+/**
+ * Append delta content to existing streaming message
+ */
+function appendContent(element: Element, delta: string): void {
+  const markdownDiv = element.querySelector('.markdown-content');
+  if (markdownDiv) {
+    markdownDiv.textContent = (markdownDiv.textContent || '') + delta;
+    
+    // Collapse activity box after first content
+    const wrapper = element.querySelector('.activity-wrapper');
+    if (wrapper && !wrapper.classList.contains('collapsed')) {
+      wrapper.classList.add('collapsed');
+      const icon = wrapper.querySelector('.activity-icon');
+      if (icon) icon.textContent = '▶';
+    }
+    
+    scrollToBottom();
+  }
+}
+
+/**
+ * Finalize a streaming message (mark complete)
+ */
+function finalizeMessage(element: Element, msg: ChatMessage): void {
+  element.classList.remove('pending');
+  element.removeAttribute('id'); // Remove pending-response id
+  
+  const markdownDiv = element.querySelector('.markdown-content');
+  if (markdownDiv) {
+    markdownDiv.classList.remove('streaming-cursor');
+    // If final content provided, use it
+    if (msg.content) {
+      markdownDiv.textContent = msg.content;
+    }
+  }
+  
+  setStreaming(false);
+  finishPendingResponse();
 }
 
 /**
@@ -60,51 +158,49 @@ export function setLoadingHistory(loading: boolean): void {
 }
 
 /**
- * Unified message renderer - handles both user and assistant messages
- * Used for history replay and live messages
+ * Render completed assistant message (from history or finalized)
  */
-function renderMessage(msg: ChatMessage, isHistory: boolean = false): void {
-  if (msg.role === 'user') {
-    renderUserBubble(
-      msg.content, 
-      msg.hasImage ?? false, 
-      msg.source ?? 'user', 
-      msg.appletSlug
-    );
-  } else {
-    // Assistant message (from history)
-    renderAssistantBubble(msg.content, msg.outputs);
-  }
-}
-
-/**
- * Render completed assistant message (from history)
- */
-function renderAssistantBubble(content: string, outputs?: string[]): void {
+function renderAssistantBubble(id: string, content: string, outputs?: string[]): void {
   const chat = document.getElementById('chat');
   if (!chat) return;
   
   const assistantDiv = document.createElement('div');
   assistantDiv.className = 'message assistant';
-  assistantDiv.setAttribute('data-markdown', content);
-  assistantDiv.innerHTML = `
-    <div class="activity-wrapper" style="display: none;">
-      <div class="activity-header" onclick="toggleActivityBox(this)">
-        <span class="activity-icon">▶</span>
-        <span class="activity-label">Activity</span>
-        <span class="activity-count"></span>
-      </div>
-      <div class="activity-box"></div>
+  assistantDiv.setAttribute('data-markdown', '');
+  assistantDiv.setAttribute('data-message-id', id);
+  
+  // Create inner structure
+  const activityWrapper = document.createElement('div');
+  activityWrapper.className = 'activity-wrapper';
+  activityWrapper.style.display = 'none';
+  activityWrapper.innerHTML = `
+    <div class="activity-header" onclick="toggleActivityBox(this)">
+      <span class="activity-icon">▶</span>
+      <span class="activity-label">Activity</span>
+      <span class="activity-count"></span>
     </div>
-    <div class="outputs-container"></div>
-    <div class="markdown-content"></div>
+    <div class="activity-box"></div>
   `;
+  
+  const outputsContainer = document.createElement('div');
+  outputsContainer.className = 'outputs-container';
+  
+  const markdownContent = document.createElement('div');
+  markdownContent.className = 'markdown-content';
+  markdownContent.textContent = content; // Raw text for markdown processor
+  
+  assistantDiv.appendChild(activityWrapper);
+  assistantDiv.appendChild(outputsContainer);
+  assistantDiv.appendChild(markdownContent);
   chat.appendChild(assistantDiv);
   
-  // TODO: Render outputs if present
+  // Store output IDs for later restoration
+  if (outputs && outputs.length > 0) {
+    assistantDiv.setAttribute('data-outputs', outputs.join(','));
+  }
   
-  // Trigger markdown rendering
-  if (window.renderMarkdown) {
+  // Only render markdown immediately if not loading history (batched later)
+  if (!loadingHistory && window.renderMarkdown) {
     window.renderMarkdown();
   }
 }
@@ -117,7 +213,8 @@ function renderUserBubble(
   content: string, 
   hasImage: boolean, 
   source: 'user' | 'applet' = 'user',
-  appletSlug?: string
+  appletSlug?: string,
+  messageId?: string
 ): HTMLElement {
   const chat = document.getElementById('chat');
   if (!chat) throw new Error('Chat element not found');
@@ -128,6 +225,9 @@ function renderUserBubble(
   // Add user message with applet styling if applicable
   const userDiv = document.createElement('div');
   userDiv.className = `message user${source === 'applet' ? ' applet-invoked' : ''}`;
+  if (messageId) {
+    userDiv.setAttribute('data-message-id', messageId);
+  }
   if (source === 'applet' && appletSlug) {
     userDiv.dataset.appletSource = appletSlug;
   }
@@ -143,9 +243,9 @@ function renderUserBubble(
 
 /**
  * Add pending assistant response placeholder
- * Called after user bubble is rendered
+ * Called when streaming starts
  */
-function addPendingResponse(): HTMLElement {
+function addPendingResponse(messageId: string): HTMLElement {
   const chat = document.getElementById('chat');
   if (!chat) throw new Error('Chat element not found');
   
@@ -153,6 +253,7 @@ function addPendingResponse(): HTMLElement {
   assistantDiv.className = 'message assistant pending';
   assistantDiv.id = 'pending-response';
   assistantDiv.setAttribute('data-markdown', '');
+  assistantDiv.setAttribute('data-message-id', messageId);
   assistantDiv.innerHTML = `
     <div class="activity-wrapper">
       <div class="activity-header" onclick="toggleActivityBox(this)">
@@ -172,12 +273,14 @@ function addPendingResponse(): HTMLElement {
 }
 
 /**
- * Add user message bubble immediately (legacy interface)
- * Now wraps renderUserBubble + addPendingResponse
+ * Add user message bubble immediately (legacy interface for fallback)
+ * Used when WS is not connected. Generates local IDs.
  */
 export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
-  renderUserBubble(message, hasImage, 'user');
-  return addPendingResponse();
+  const userId = `local_user_${Date.now()}`;
+  const assistantId = `local_assistant_${Date.now()}`;
+  renderUserBubble(message, hasImage, 'user', undefined, userId);
+  return addPendingResponse(assistantId);
 }
 
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
@@ -195,7 +298,7 @@ import { getAndClearPendingAppletState, getNavigationContext } from './applet-ru
  * - Response streaming (lightweight SSE connection)
  */
 export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
-  setStreaming(true, null);
+  setStreaming(true);
   
   try {
     // Collect pending applet state (if any) to send with message
@@ -240,254 +343,40 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       throw new Error(error.error || `HTTP ${response.status}`);
     }
     
-    const { streamId } = await response.json();
+    // Server returns ok, streaming happens via WebSocket
+    await response.json();
     
-    // Step 3: Connect to SSE for response streaming
-    const eventSource = new EventSource(`/api/stream/${streamId}`);
-    setStreaming(true, eventSource);
-    setupEventSourceHandlers(eventSource);
+    // Step 3: Response streaming now happens via WebSocket (see setupWsStreamHandlers)
+    // The WS handlers are already registered, nothing more to do here
     
   } catch (error) {
     console.error('Send message error:', error);
-    setStreaming(false, null);
+    setStreaming(false);
     addActivityItem('error', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     finishPendingResponse();
   }
-}
-
-interface StreamState {
-  getContent: () => string;
-  setContent: (c: string) => void;
-  getFirstDelta: () => boolean;
-  setFirstDelta: (v: boolean) => void;
-  getResponseDiv: () => Element | null;
-  setResponseDiv: (div: Element | null) => void;
-}
-
-/**
- * Finalize current turn content and create a new content div for next turn
- */
-function startNewTurn(state: StreamState): void {
-  const pending = document.getElementById('pending-response');
-  if (!pending) return;
-  
-  const currentDiv = state.getResponseDiv();
-  
-  // Always remove cursor from current div
-  if (currentDiv) {
-    currentDiv.classList.remove('streaming-cursor');
-  }
-  
-  // Render markdown for current div if it has content
-  if (currentDiv && state.getContent().trim()) {
-    pending.dataset.markdownProcessed = 'false';
-    if (typeof window.renderMarkdown === 'function') window.renderMarkdown();
-  }
-  
-  // Create new content div for next turn - append at end to maintain order
-  const newDiv = document.createElement('div');
-  newDiv.className = 'markdown-content streaming-cursor';
-  pending.appendChild(newDiv);
-  
-  // Reset state for new turn
-  state.setResponseDiv(newDiv);
-  state.setContent('');
-  
-  // Re-expand activity box for new turn
-  const wrapper = pending.querySelector('.activity-wrapper');
-  if (wrapper) {
-    wrapper.classList.remove('collapsed');
-    const icon = wrapper.querySelector('.activity-icon');
-    if (icon) icon.textContent = '▼';
-  }
-  state.setFirstDelta(false);
-}
-
-/**
- * Handle a single SSE event
- */
-function handleSSEEvent(eventType: string, dataStr: string, state: StreamState): void {
-  try {
-    const data = dataStr ? JSON.parse(dataStr) : {};
-    const responseDiv = state.getResponseDiv();
-    
-    switch (eventType) {
-      case 'assistant.message_delta':
-        if (data.deltaContent) {
-          state.setContent(state.getContent() + data.deltaContent);
-          if (responseDiv) responseDiv.textContent = state.getContent();
-          
-          if (!state.getFirstDelta()) {
-            const wrapper = document.querySelector('#pending-response .activity-wrapper');
-            if (wrapper) {
-              wrapper.classList.add('collapsed');
-              const icon = wrapper.querySelector('.activity-icon');
-              if (icon) icon.textContent = '▶';
-            }
-            state.setFirstDelta(true);
-          }
-          scrollToBottom();
-        }
-        break;
-        
-      case 'assistant.message':
-        if (data.content && responseDiv) {
-          responseDiv.textContent = data.content;
-          responseDiv.classList.remove('streaming-cursor');
-          const pending = document.getElementById('pending-response');
-          if (pending) pending.dataset.markdownProcessed = 'false';
-          if (typeof window.renderMarkdown === 'function') window.renderMarkdown();
-        }
-        break;
-        
-      case 'assistant.turn_start': {
-        const turnNum = parseInt(data.turnId || 0) + 1;
-        addActivityItem('turn', `Turn ${turnNum}...`);
-        // Only start new content div if this isn't the first turn
-        if (turnNum > 1) {
-          startNewTurn(state);
-        }
-        break;
-      }
-        
-      case 'assistant.intent':
-        if (data.intent) addActivityItem('intent', `Intent: ${data.intent}`);
-        break;
-        
-      case 'tool.execution_start': {
-        const toolName = data.toolName || data.name || 'tool';
-        const args = formatToolArgs(data.arguments);
-        addActivityItem('tool', `▶ ${toolName}`, args ? `Arguments: ${args}` : null);
-        break;
-      }
-        
-      case 'tool.execution_complete': {
-        const toolName = data.toolName || data.name || 'tool';
-        const status = data.success ? '✓' : '✗';
-        addActivityItem('tool-result', `${status} ${toolName}`, data.result ? formatToolResult(data.result) : null);
-        if (data._output) renderDisplayOutput(data._output);
-        if (data._reload) {
-          console.log('[RELOAD] Received reload signal, refreshing page...');
-          setTimeout(() => location.reload(), 500);
-        }
-        break;
-      }
-        
-      case 'session.error':
-        addActivityItem('error', `Error: ${data.message || 'Unknown error'}`);
-        break;
-        
-      case 'error':
-        addActivityItem('error', `Error: ${data.message || 'Connection error'}`);
-        break;
-    }
-  } catch (_e) {
-    // Ignore parse errors
-  }
-}
-
-/**
- * Setup event handlers for EventSource (GET streaming)
- */
-function setupEventSourceHandlers(eventSource: EventSource): void {
-  let responseDiv: Element | null = document.querySelector('#pending-response .markdown-content');
-  let responseContent = '';
-  let firstDeltaReceived = false;
-  
-  const state: StreamState = {
-    getContent: () => responseContent,
-    setContent: (c: string) => { responseContent = c; },
-    getFirstDelta: () => firstDeltaReceived,
-    setFirstDelta: (v: boolean) => { firstDeltaReceived = v; },
-    getResponseDiv: () => responseDiv,
-    setResponseDiv: (div: Element | null) => { responseDiv = div; }
-  };
-
-  // Handle response text deltas
-  eventSource.addEventListener('assistant.message_delta', (e: MessageEvent) => {
-    handleSSEEvent('assistant.message_delta', e.data, state);
-  });
-  
-  // Handle final message
-  eventSource.addEventListener('assistant.message', (e: MessageEvent) => {
-    handleSSEEvent('assistant.message', e.data, state);
-  });
-  
-  // Handle turn start
-  eventSource.addEventListener('assistant.turn_start', (e: MessageEvent) => {
-    handleSSEEvent('assistant.turn_start', e.data, state);
-  });
-  
-  // Handle intent
-  eventSource.addEventListener('assistant.intent', (e: MessageEvent) => {
-    handleSSEEvent('assistant.intent', e.data, state);
-  });
-  
-  // Handle tool execution
-  eventSource.addEventListener('tool.execution_start', (e: MessageEvent) => {
-    handleSSEEvent('tool.execution_start', e.data, state);
-  });
-  
-  eventSource.addEventListener('tool.execution_complete', (e: MessageEvent) => {
-    handleSSEEvent('tool.execution_complete', e.data, state);
-  });
-  
-  // Handle errors
-  eventSource.addEventListener('session.error', (e: MessageEvent) => {
-    handleSSEEvent('session.error', e.data, state);
-  });
-  
-  eventSource.addEventListener('error', (e: MessageEvent) => {
-    handleSSEEvent('error', e.data || '{}', state);
-  });
-  
-  // Handle completion
-  eventSource.addEventListener('done', () => {
-    eventSource.close();
-    setStreaming(false, null);
-    finishPendingResponse();
-  });
-  
-  eventSource.addEventListener('session.idle', () => {
-    // Will also receive 'done', but handle just in case
-  });
-  
-  // Handle connection errors
-  eventSource.onerror = (err) => {
-    console.error('EventSource error:', err);
-    eventSource.close();
-    setStreaming(false, null);
-    
-    if (!responseContent && !firstDeltaReceived) {
-      addActivityItem('error', 'Connection lost');
-    }
-    
-    finishPendingResponse();
-  };
 }
 
 /**
  * Stop streaming response
  */
 export function stopStreaming(): void {
-  const activeEventSource = getActiveEventSource();
-  if (activeEventSource) {
-    activeEventSource.close();
-    setStreaming(false, null);
-    
-    // Add visual feedback
-    addActivityItem('info', 'Stopped by user');
-    
-    // Mark all response divs as stopped (multi-turn creates multiple)
-    const pending = document.getElementById('pending-response');
-    if (pending) {
-      pending.querySelectorAll('.markdown-content').forEach(div => {
-        div.classList.remove('streaming-cursor');
-      });
-    }
-    
-    finishPendingResponse();
+  // With WebSocket, we just mark the UI as stopped
+  // TODO: Send cancel signal to server if needed
+  setStreaming(false);
+  
+  // Add visual feedback
+  addActivityItem('info', 'Stopped by user');
+  
+  // Mark all response divs as stopped (multi-turn creates multiple)
+  const pending = document.getElementById('pending-response');
+  if (pending) {
+    pending.querySelectorAll('.markdown-content').forEach(div => {
+      div.classList.remove('streaming-cursor');
+    });
   }
+  
+  finishPendingResponse();
 }
 
 /**
@@ -585,8 +474,8 @@ import { resetTextareaHeight } from './multiline-input.js';
  * Set up form submission handler
  */
 export function setupFormHandler(): void {
-  // Register WS message handler for unified rendering
-  registerWsMessageHandler();
+  // Register WS handlers for messages and activity
+  registerWsHandlers();
   
   const form = document.getElementById('chatForm') as HTMLFormElement;
   if (!form) return;
@@ -622,15 +511,15 @@ export function setupFormHandler(): void {
     const hasImage = !!imageData;
     
     // Unified rendering path:
-    // - If WS connected: server will broadcast userMessage after receiving POST
-    // - If WS not connected (new chat, offline): render directly as fallback
-    if (isWsConnected()) {
-      // Add pending response; user bubble comes from WS broadcast after POST
-      addPendingResponse();
-    } else {
+    // - WS connected: server broadcasts user message, then streams assistant response
+    // - WS not connected: fallback direct render (new chat before WS ready)
+    if (!isWsConnected()) {
       // Fallback: direct bubble add (WS not ready or new chat)
+      // Generate a temporary ID for local rendering
       addUserBubble(message, hasImage);
     }
+    // If WS connected, user bubble comes from server broadcast
+    // Assistant pending response is created when server sends status:'streaming' message
     
     // Clear input and image, reset textarea height
     input.value = '';

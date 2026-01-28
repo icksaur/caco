@@ -9,12 +9,21 @@
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
+  content?: string;           // Full content (create or replace)
+  deltaContent?: string;      // Append to existing (streaming)
+  status?: 'streaming' | 'complete';  // Defaults to 'complete'
+  timestamp?: string;
   source?: 'user' | 'applet';
   appletSlug?: string;
   hasImage?: boolean;
   outputs?: string[];
+}
+
+// Activity item for tool calls, intents, errors
+export interface ActivityItem {
+  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info';
+  text: string;
+  details?: string;
 }
 
 // Connection state
@@ -27,10 +36,12 @@ const RECONNECT_DELAY_MS = 1000;
 // Callbacks
 type StateCallback = (state: Record<string, unknown>) => void;
 type MessageCallback = (msg: ChatMessage) => void;
+type ActivityCallback = (item: ActivityItem) => void;
 type HistoryCompleteCallback = () => void;
 type ConnectCallback = () => void;
 const stateCallbacks: Set<StateCallback> = new Set();
 const messageCallbacks: Set<MessageCallback> = new Set();
+const activityCallbacks: Set<ActivityCallback> = new Set();
 const historyCompleteCallbacks: Set<HistoryCompleteCallback> = new Set();
 const connectCallbacks: Set<ConnectCallback> = new Set();
 
@@ -154,6 +165,7 @@ function handleMessage(msg: { type: string; id?: string; data?: unknown; error?:
     case 'message': {
       // Chat message (user or assistant) - from history or live
       const msgWithData = msg as unknown as { message?: ChatMessage };
+      console.log('[WS] message event, callbacks:', messageCallbacks.size, 'msg:', msgWithData.message?.role);
       if (msgWithData.message) {
         for (const cb of messageCallbacks) {
           try {
@@ -176,6 +188,21 @@ function handleMessage(msg: { type: string; id?: string; data?: unknown; error?:
         }
       }
       break;
+    
+    case 'activity': {
+      // Activity item (tool calls, intents, errors)
+      const activityMsg = msg as unknown as { item?: ActivityItem };
+      if (activityMsg.item) {
+        for (const cb of activityCallbacks) {
+          try {
+            cb(activityMsg.item);
+          } catch (err) {
+            console.error('[WS] Activity callback error:', err);
+          }
+        }
+      }
+      break;
+    }
       
     case 'pong':
       // Heartbeat response - no action needed
@@ -293,6 +320,15 @@ export function onMessage(callback: MessageCallback): () => void {
 export function onHistoryComplete(callback: HistoryCompleteCallback): () => void {
   historyCompleteCallbacks.add(callback);
   return () => historyCompleteCallbacks.delete(callback);
+}
+
+/**
+ * Subscribe to activity events (tool calls, intents, errors)
+ * Returns unsubscribe function
+ */
+export function onActivity(callback: ActivityCallback): () => void {
+  activityCallbacks.add(callback);
+  return () => activityCallbacks.delete(callback);
 }
 
 /**

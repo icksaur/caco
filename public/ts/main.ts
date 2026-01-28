@@ -4,7 +4,7 @@
 
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom, setupScrollDetection } from './ui-utils.js';
-import { loadPreferences, waitForHistoryComplete, loadHistoryHttp } from './history.js';
+import { loadPreferences, waitForHistoryComplete } from './history.js';
 import { toggleSessionPanel, switchSession, deleteSession, showSessionManager, showNewChatUI } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { toggleActivityBox } from './activity.js';

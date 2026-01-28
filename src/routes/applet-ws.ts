@@ -42,8 +42,10 @@ export interface UserMessage {
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
+  content?: string;           // Full content (create or replace)
+  deltaContent?: string;      // Append to existing (streaming)
+  status?: 'streaming' | 'complete';  // Defaults to 'complete'
+  timestamp?: string;
   source?: 'user' | 'applet';
   appletSlug?: string;
   hasImage?: boolean;
@@ -51,13 +53,19 @@ export interface ChatMessage {
   outputs?: string[];  // Output IDs
 }
 
+// Activity item for tool calls, intents, errors
+export interface ActivityItem {
+  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info';
+  text: string;
+  details?: string;
+}
+
 interface ServerMessage {
-  type: 'stateUpdate' | 'state' | 'message' | 'historyComplete' | 'assistantDelta' | 'pong' | 'error';
+  type: 'stateUpdate' | 'state' | 'message' | 'activity' | 'historyComplete' | 'pong' | 'error';
   id?: string;
   data?: unknown;
   message?: ChatMessage;
-  delta?: string;
-  messageId?: string;
+  item?: ActivityItem;
   error?: string;
 }
 
@@ -324,23 +332,6 @@ export function broadcastUserMessageFromPost(
 }
 
 /**
- * Broadcast a message to all connections in a session
- */
-function broadcastMessage(sessionId: string, message: ChatMessage): void {
-  const sockets = connections.get(sessionId);
-  if (!sockets) return;
-  
-  const msg: ServerMessage = { type: 'message', message };
-  const data = JSON.stringify(msg);
-  
-  for (const ws of sockets) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
-    }
-  }
-}
-
-/**
  * Stream session history to a newly connected client
  * Converts SDK events to ChatMessage format and sends individually
  */
@@ -400,5 +391,47 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
   } catch (error) {
     console.error(`[WS] Error streaming history for ${sessionId}:`, error);
     send(ws, { type: 'historyComplete' });
+  }
+}
+
+/**
+ * Broadcast a message update to all connections in a session
+ * Used for streaming assistant responses - can create, append, or finalize
+ */
+export function broadcastMessage(
+  sessionId: string,
+  message: ChatMessage
+): void {
+  const sockets = connections.get(sessionId);
+  if (!sockets) return;
+  
+  const msg: ServerMessage = { type: 'message', message };
+  const data = JSON.stringify(msg);
+  
+  for (const ws of sockets) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
+  }
+}
+
+/**
+ * Broadcast an activity item to all connections in a session
+ * Used for tool calls, intents, errors during agent response
+ */
+export function broadcastActivity(
+  sessionId: string,
+  item: ActivityItem
+): void {
+  const sockets = connections.get(sessionId);
+  if (!sockets) return;
+  
+  const msg: ServerMessage = { type: 'activity', item };
+  const data = JSON.stringify(msg);
+  
+  for (const ws of sockets) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
   }
 }

@@ -71,14 +71,45 @@ Note: Chat messages are sent via HTTP POST, not WebSocket. This allows any clien
 
 | Type | Payload | Purpose |
 |------|---------|---------|
-| `message` | `ChatMessage` | Any complete message (history or live) |
+| `message` | `ChatMessage` | Message (history, live, or streaming update) |
+| `activity` | `ActivityItem` | Tool calls, intents, errors |
 | `historyComplete` | `{}` | History streaming finished |
-| `assistantDelta` | `{ messageId, delta }` | Streaming content chunk |
 | `stateUpdate` | `{ data }` | Applet state pushed |
 | `error` | `{ error }` | Error occurred |
 | `pong` | `{}` | Heartbeat response |
 
-**Unified `message` type**: Same event for history replay and live messages. Client uses one `renderMessage()` function for all.
+### Unified Message Protocol
+
+All messages (history and live streaming) use the same `message` type with `id` for updates:
+
+**Creating a new message:**
+```typescript
+{ type: 'message', id: 'msg_1', role: 'assistant', content: '', status: 'streaming' }
+```
+
+**Appending content (streaming):**
+```typescript
+{ type: 'message', id: 'msg_1', deltaContent: 'Hello ' }
+{ type: 'message', id: 'msg_1', deltaContent: 'world!' }
+```
+
+**Finalizing message:**
+```typescript
+{ type: 'message', id: 'msg_1', content: 'Hello world!', status: 'complete' }
+```
+
+**Client logic:**
+```typescript
+onMessage((msg) => {
+  const existing = document.querySelector(`[data-message-id="${msg.id}"]`);
+  if (existing) {
+    if (msg.deltaContent) appendContent(existing, msg.deltaContent);
+    if (msg.status === 'complete') finalizeMessage(existing, msg);
+  } else {
+    createMessage(msg);
+  }
+});
+```
 
 ### ChatMessage Structure
 
@@ -86,8 +117,13 @@ Note: Chat messages are sent via HTTP POST, not WebSocket. This allows any clien
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
+  status?: 'streaming' | 'complete';  // Optional, defaults to 'complete'
+  
+  // Content - one of:
+  content?: string;        // Full content (create or replace)
+  deltaContent?: string;   // Append to existing
+  
+  timestamp?: string;
   
   // User message metadata
   source?: 'user' | 'applet';
@@ -96,7 +132,6 @@ interface ChatMessage {
   
   // Assistant message metadata  
   outputs?: OutputMeta[];     // Display tool outputs
-  activity?: ActivityItem[];  // Tool calls, intents
 }
 
 interface OutputMeta {
@@ -104,9 +139,21 @@ interface OutputMeta {
   type: 'file' | 'terminal' | 'image' | 'embed';
   // ... type-specific fields
 }
+```
 
+### Activity Events
+
+Activity items (tool calls, intents, errors) are sent separately from message content:
+
+```typescript
+{ type: 'activity', item: { type: 'turn', text: 'Turn 1...' } }
+{ type: 'activity', item: { type: 'tool', text: '▶ read_file', details: 'Arguments: ...' } }
+{ type: 'activity', item: { type: 'tool-result', text: '✓ read_file', details: '...' } }
+```
+
+```typescript
 interface ActivityItem {
-  type: 'turn' | 'intent' | 'tool' | 'tool-result';
+  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info';
   text: string;
   details?: string;
 }

@@ -22,7 +22,6 @@ export interface AppState {
   
   // Streaming state (transient)
   isStreaming: boolean;
-  activeEventSource: EventSource | null;
   
   // Image attachment state
   hasImage: boolean;
@@ -44,7 +43,6 @@ const state: AppState = {
   currentCwd: '',
   selectedModel: DEFAULT_MODEL,
   isStreaming: false,
-  activeEventSource: null,
   hasImage: false
 };
 
@@ -85,13 +83,6 @@ export function getSelectedModel(): string {
  */
 export function isStreaming(): boolean {
   return state.isStreaming;
-}
-
-/**
- * Get active event source (for stopping)
- */
-export function getActiveEventSource(): EventSource | null {
-  return state.activeEventSource;
 }
 
 /**
@@ -142,9 +133,8 @@ export function setSelectedModel(modelId: string): void {
 /**
  * Set streaming state
  */
-export function setStreaming(streaming: boolean, eventSource: EventSource | null = null): void {
+export function setStreaming(streaming: boolean): void {
   state.isStreaming = streaming;
-  state.activeEventSource = eventSource;
 }
 
 /**

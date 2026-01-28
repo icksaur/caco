@@ -1,58 +1,26 @@
 /**
  * Stream Routes
  * 
- * Separated concerns:
- * - POST /api/message - Accept message+image, return streamId
- * - GET /api/stream/:streamId - SSE connection for response streaming
+ * POST /api/sessions/:id/messages - Send message, stream response via WebSocket
  * 
- * This separation allows:
- * - Large image uploads via POST body (not URL params)
- * - Lightweight SSE connections via GET
- * - htmx-friendly patterns
+ * The response streams via WebSocket (not SSE):
+ * - Client sends message via POST
+ * - Server broadcasts events via WS to all session connections
  */
 
 import { Router, Request, Response } from 'express';
 import { join } from 'path';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
-import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
-import { DEFAULT_MODEL } from '../preferences.js';
 import { parseImageDataUrl } from '../image-utils.js';
-import { broadcastUserMessageFromPost } from './applet-ws.js';
+import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, type ActivityItem } from './applet-ws.js';
+import { randomUUID } from 'crypto';
 
 const router = Router();
-
-// Pending message storage (streamId -> message data)
-interface PendingMessage {
-  prompt: string;
-  model: string;
-  imageData?: string;
-  newChat?: boolean;
-  cwd?: string;
-  tempFilePath?: string;
-  clientId?: string;
-  sessionId?: string;  // Explicit session target (RESTful API)
-  createdAt: number;
-}
-
-const pendingMessages = new Map<string, PendingMessage>();
-
-// Clean up old pending messages (older than 5 minutes)
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, msg] of pendingMessages.entries()) {
-    if (now - msg.createdAt > 5 * 60 * 1000) {
-      pendingMessages.delete(id);
-      if (msg.tempFilePath) {
-        unlink(msg.tempFilePath).catch(() => {});
-      }
-    }
-  }
-}, 60 * 1000);
 
 // Session event type
 interface SessionEvent {
@@ -61,12 +29,10 @@ interface SessionEvent {
 }
 
 /**
- * POST /api/sessions/:sessionId/messages - Send message to specific session (RESTful)
+ * POST /api/sessions/:sessionId/messages - Send message to specific session
  * 
- * This is the preferred endpoint. It:
- * 1. Validates the request
- * 2. Targets a specific session (no implicit session creation)
- * 3. Returns a streamId for SSE connection
+ * Response streams via WebSocket (not returned here).
+ * Returns immediately with { ok: true, sessionId }.
  */
 router.post('/sessions/:sessionId/messages', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
@@ -109,78 +75,49 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     await writeFile(tempFilePath, Buffer.from(parsed.base64Data, 'base64'));
   }
   
-  // Generate streamId and store pending message with explicit sessionId
-  const streamId = randomUUID();
-  pendingMessages.set(streamId, {
-    prompt,
-    model: '', // Model is already set on the session
-    sessionId,  // Explicit target
-    tempFilePath,
-    clientId,
-    createdAt: Date.now()
-  });
-  
   // Broadcast user message to WS clients for unified rendering
   broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, 'user');
   
-  console.log(`[STREAM] Created streamId ${streamId} for session ${sessionId}`);
+  // Return immediately - streaming happens via WebSocket
+  res.json({ ok: true, sessionId });
   
-  res.json({ streamId, sessionId });
+  // Start streaming in background
+  streamToWebSocket(sessionId, prompt, tempFilePath, clientId).catch(err => {
+    console.error(`[STREAM] Error streaming to WS:`, err);
+  });
 });
 
 /**
- * GET /api/stream/:streamId - SSE connection for response streaming
- * 
- * This is the "receive" endpoint. It:
- * 1. Looks up the pending message by streamId
- * 2. Sends the message to the SDK
- * 3. Streams events back to the client
+ * Stream agent response via WebSocket
+ * Uses unified message protocol:
+ * - message with status:'streaming' to start
+ * - message with deltaContent to append
+ * - message with status:'complete' to finalize
+ * - activity for tool calls, intents, errors
  */
-router.get('/stream/:streamId', async (req: Request, res: Response) => {
-  const streamId = req.params.streamId as string;
+async function streamToWebSocket(
+  sessionId: string,
+  prompt: string,
+  tempFilePath?: string,
+  clientId?: string
+): Promise<void> {
+  console.log(`[STREAM] Starting WS stream for session ${sessionId}`);
   
-  const pending = pendingMessages.get(streamId);
-  if (!pending) {
-    res.status(404).json({ error: 'Stream not found or expired' });
-    return;
-  }
-  
-  // Remove from pending (one-time use)
-  pendingMessages.delete(streamId);
-  
-  const { prompt, model, newChat, cwd, tempFilePath, clientId, sessionId: explicitSessionId } = pending;
-  
-  console.log(`[STREAM] Connecting to stream ${streamId}${explicitSessionId ? `, session: ${explicitSessionId}` : `, model: ${model || '(undefined)'}`}${clientId ? `, client: ${clientId}` : ''}`);
-  if (newChat) console.log(`[NEW CHAT] Creating new session with cwd: ${cwd}`);
-  
-  // Set SSE headers
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+  // Generate message ID for the assistant response
+  const messageId = `msg_${randomUUID()}`;
+  let messageContent = '';
+  let hasStarted = false;
   
   try {
-    // Use explicit sessionId if provided, otherwise ensure session via legacy flow
-    let sessionId: string;
-    if (explicitSessionId) {
-      // RESTful path: session already exists
-      sessionId = explicitSessionId;
-      // Ensure it's resumed if not active
-      if (!sessionManager.isActive(sessionId)) {
-        sessionId = await sessionState.switchSession(sessionId, clientId);
-      }
-    } else {
-      // Legacy path: ensure session exists (may create new)
-      sessionId = await sessionState.ensureSession(model, newChat, cwd, clientId);
+    // Ensure session is active
+    if (!sessionManager.isActive(sessionId)) {
+      await sessionState.switchSession(sessionId, clientId);
     }
     
     // Get session
     const session = sessionManager.getSession(sessionId);
     if (!session) {
-      res.write(`event: error\ndata: ${JSON.stringify({ message: 'No active session' })}\n\n`);
-      res.write('event: done\ndata: {}\n\n');
-      res.end();
+      broadcastActivity(sessionId, { type: 'error', text: 'No active session' });
       return;
     }
     
@@ -194,64 +131,127 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
       messageOptions.attachments = [{ type: 'file', path: tempFilePath }];
     }
     
-    // Subscribe to events
+    // Subscribe to events and broadcast via WS
     type EventCallback = (event: SessionEvent) => void;
     const unsubscribe = (session as unknown as { on: (cb: EventCallback) => () => void }).on((event: SessionEvent) => {
-      let eventData: Record<string, unknown> = event.data || {};
+      const eventData: Record<string, unknown> = event.data || {};
       
-      // Handle tool output references
-      if (event.type === 'tool.execution_complete') {
-        // toolTelemetry is at the top level of eventData (SDK puts it there)
-        const toolTelemetry = eventData.toolTelemetry as { 
-          outputId?: string;
-          reloadTriggered?: boolean;
-        } | undefined;
-        
-        // Display tool output reference
-        if (toolTelemetry?.outputId) {
-          const storedOutput = getOutput(toolTelemetry.outputId);
-          const outputMeta = storedOutput?.metadata;
-          if (outputMeta) {
-            eventData = {
-              ...eventData,
-              _output: {
-                id: toolTelemetry.outputId,
-                ...outputMeta
-              }
-            };
+      switch (event.type) {
+        case 'assistant.message_delta': {
+          // Start message if first delta
+          if (!hasStarted) {
+            broadcastMessage(sessionId, {
+              id: messageId,
+              role: 'assistant',
+              content: '',
+              status: 'streaming'
+            });
+            hasStarted = true;
           }
+          // Append delta
+          const delta = (eventData.deltaContent as string) || '';
+          messageContent += delta;
+          broadcastMessage(sessionId, {
+            id: messageId,
+            role: 'assistant',
+            deltaContent: delta
+          });
+          break;
         }
         
-        // Reload page signal
-        if (toolTelemetry?.reloadTriggered && consumeReloadSignal()) {
-          eventData = {
-            ...eventData,
-            _reload: true
-          };
+        case 'assistant.message': {
+          // Final message content
+          const content = (eventData.content as string) || messageContent;
+          broadcastMessage(sessionId, {
+            id: messageId,
+            role: 'assistant',
+            content,
+            status: 'complete'
+          });
+          break;
         }
-      }
-      
-      // Send event to client
-      res.write(`event: ${event.type}\n`);
-      res.write(`data: ${JSON.stringify(eventData)}\n\n`);
-      
-      // End stream on terminal events
-      if (event.type === 'session.idle' || event.type === 'session.error') {
-        res.write('event: done\ndata: {}\n\n');
-        res.end();
-        unsubscribe();
         
-        if (tempFilePath) {
-          unlink(tempFilePath).catch(() => {});
+        case 'assistant.turn_start': {
+          const turnNum = parseInt(String(eventData.turnId || 0)) + 1;
+          broadcastActivity(sessionId, { type: 'turn', text: `Turn ${turnNum}...` });
+          break;
         }
-      }
-    });
-    
-    // Handle client disconnect
-    req.on('close', () => {
-      unsubscribe();
-      if (tempFilePath) {
-        unlink(tempFilePath).catch(() => {});
+        
+        case 'assistant.intent': {
+          const intent = eventData.intent as string;
+          if (intent) {
+            broadcastActivity(sessionId, { type: 'intent', text: `Intent: ${intent}` });
+          }
+          break;
+        }
+        
+        case 'tool.execution_start': {
+          const toolName = (eventData.toolName || eventData.name || 'tool') as string;
+          const args = eventData.arguments ? JSON.stringify(eventData.arguments) : undefined;
+          broadcastActivity(sessionId, { 
+            type: 'tool', 
+            text: `▶ ${toolName}`,
+            details: args ? `Arguments: ${args}` : undefined
+          });
+          break;
+        }
+        
+        case 'tool.execution_complete': {
+          const toolName = (eventData.toolName || eventData.name || 'tool') as string;
+          const success = eventData.success as boolean;
+          const status = success ? '✓' : '✗';
+          const result = eventData.result ? JSON.stringify(eventData.result) : undefined;
+          
+          // Handle output references
+          const toolTelemetry = eventData.toolTelemetry as { 
+            outputId?: string;
+            reloadTriggered?: boolean;
+          } | undefined;
+          
+          let details = result;
+          if (toolTelemetry?.outputId) {
+            const storedOutput = getOutput(toolTelemetry.outputId);
+            const outputMeta = storedOutput?.metadata;
+            if (outputMeta) {
+              // TODO: Handle display output rendering via activity or message
+              details = `[Output: ${toolTelemetry.outputId}]`;
+            }
+          }
+          
+          broadcastActivity(sessionId, { 
+            type: 'tool-result', 
+            text: `${status} ${toolName}`,
+            details
+          });
+          
+          if (toolTelemetry?.reloadTriggered && consumeReloadSignal()) {
+            broadcastActivity(sessionId, { type: 'info', text: 'Reload triggered' });
+          }
+          break;
+        }
+        
+        case 'session.error': {
+          const msg = (eventData.message as string) || 'Unknown error';
+          broadcastActivity(sessionId, { type: 'error', text: `Error: ${msg}` });
+          // Fall through to cleanup
+        }
+        // eslint-disable-next-line no-fallthrough
+        case 'session.idle': {
+          // Ensure message is finalized if we haven't sent complete
+          if (hasStarted && messageContent) {
+            broadcastMessage(sessionId, {
+              id: messageId,
+              role: 'assistant',
+              content: messageContent,
+              status: 'complete'
+            });
+          }
+          unsubscribe();
+          if (tempFilePath) {
+            unlink(tempFilePath).catch(() => {});
+          }
+          break;
+        }
       }
     });
     
@@ -261,15 +261,13 @@ router.get('/stream/:streamId', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Stream error:', error);
     const message = error instanceof Error ? error.message : String(error);
-    res.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`);
-    res.write('event: done\ndata: {}\n\n');
-    res.end();
+    broadcastActivity(sessionId, { type: 'error', text: `Error: ${message}` });
     
     if (tempFilePath) {
       await unlink(tempFilePath).catch(() => {});
     }
   }
-});
+}
 
 export default router;
 

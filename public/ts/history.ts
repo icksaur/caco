@@ -21,14 +21,22 @@ declare global {
 /**
  * Wait for history to stream via WebSocket
  * Assumes WS is already connected and streaming has started
+ * The actual handling is done by registerWsHandlers() in response-streaming.ts
  */
 export function waitForHistoryComplete(): Promise<void> {
   setLoadingHistory(true);
   
+  // Clear existing chat before loading new history
+  const chat = document.getElementById('chat');
+  if (chat) {
+    chat.innerHTML = '';
+  }
+  
   return new Promise<void>((resolve) => {
     const unsubscribe = onHistoryComplete(() => {
       unsubscribe();
-      setLoadingHistory(false);
+      // Don't call setLoadingHistory(false) here - response-streaming handler does it
+      // Just finish local tasks
       finishHistoryLoad();
       resolve();
     });
@@ -36,42 +44,12 @@ export function waitForHistoryComplete(): Promise<void> {
     // Timeout fallback (5 seconds)
     setTimeout(() => {
       unsubscribe();
+      // Ensure we're not stuck in loading state on timeout
       setLoadingHistory(false);
       finishHistoryLoad();
       resolve();
     }, 5000);
   });
-}
-
-/**
- * Load conversation history via HTTP (fallback for non-WS)
- */
-export async function loadHistoryHttp(): Promise<void> {
-  try {
-    const response = await fetch('/api/history');
-    if (response.ok) {
-      const html = await response.text();
-      const chat = document.getElementById('chat');
-      if (chat && html.trim()) {
-        chat.innerHTML = html;
-        setViewState('chatting');
-        if (typeof window.renderMarkdown === 'function') {
-          window.renderMarkdown();
-        }
-        await restoreOutputsFromHistory();
-      } else {
-        setViewState('newChat');
-        loadModels();
-      }
-    } else {
-      setViewState('newChat');
-      loadModels();
-    }
-  } catch (error) {
-    console.error('Failed to load history:', error);
-    setViewState('newChat');
-    loadModels();
-  }
 }
 
 /**

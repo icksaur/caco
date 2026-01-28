@@ -132,28 +132,45 @@ function broadcastToSession(sessionId: string, msg: ServerMessage, exclude?: Web
 }
 
 /**
- * Push state to all applet connections for a session
+ * Push state to applet connections
+ * If sessionId is provided, targets that session. Otherwise broadcasts to all.
  * Called from set_applet_state MCP tool
  */
-export function pushStateToApplet(sessionId: string, state: Record<string, unknown>): boolean {
-  const sockets = connections.get(sessionId);
-  if (!sockets || sockets.size === 0) {
-    console.log(`[WS] No applet connections for session=${sessionId}`);
-    return false;
-  }
-  
+export function pushStateToApplet(sessionId: string | null, state: Record<string, unknown>): boolean {
   const msg: ServerMessage = { type: 'stateUpdate', data: state };
   const data = JSON.stringify(msg);
   
   let sent = 0;
-  for (const ws of sockets) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
-      sent++;
+  
+  if (sessionId) {
+    // Target specific session
+    const sockets = connections.get(sessionId);
+    if (sockets) {
+      for (const ws of sockets) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(data);
+          sent++;
+        }
+      }
+    }
+  } else {
+    // Broadcast to all sessions (localhost single-user mode)
+    for (const [sid, sockets] of connections) {
+      for (const ws of sockets) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(data);
+          sent++;
+        }
+      }
     }
   }
   
-  console.log(`[WS] Pushed state to ${sent} connections: session=${sessionId}`);
+  if (sent > 0) {
+    console.log(`[WS] Pushed state to ${sent} connections`);
+  } else {
+    console.log(`[WS] No applet connections available`);
+  }
+  
   return sent > 0;
 }
 

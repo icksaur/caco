@@ -205,12 +205,15 @@ export function createAppletTools(_programCwd: string) {
 
     parameters: z.object({
       data: z.record(z.string(), z.unknown()).describe('State object to push to the applet. Keys/values are merged with existing state.'),
-      sessionId: z.string().optional().describe('Optional session ID. Uses default session if not provided.')
+      sessionId: z.string().optional().describe('Optional session ID. Broadcasts to all open applets if not provided.')
     }),
 
     handler: async ({ data, sessionId }) => {
-      const sid = sessionId || 'default';
-      const sent = pushStateToApplet(sid, data as Record<string, unknown>);
+      const stateData = data as Record<string, unknown>;
+      
+      // Push to client via WebSocket only
+      // Applet is source of truth - it will call setAppletState() after processing
+      const sent = pushStateToApplet(sessionId || null, stateData);
       
       if (sent) {
         return {
@@ -219,7 +222,7 @@ export function createAppletTools(_programCwd: string) {
         };
       } else {
         return {
-          textResultForLlm: `No applet WebSocket connection for session "${sid}". The applet may not be open.`,
+          textResultForLlm: 'No applet WebSocket connections available. The applet may not be open.',
           resultType: 'success' as const
         };
       }

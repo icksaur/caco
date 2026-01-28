@@ -119,6 +119,13 @@ document.querySelectorAll('[data-action]').forEach(function(btn) {
 });
 
 document.addEventListener('keydown', function(e) {
+  // Ignore if user is typing in an input or textarea
+  var tag = e.target.tagName.toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  
+  // Ignore if calculator is not visible (check offsetParent)
+  if (!display.offsetParent) return;
+  
   if (e.key >= '0' && e.key <= '9') appendNum(e.key);
   else if (e.key === '.') appendDecimal();
   else if (e.key === '+') appendOp('+');
@@ -127,6 +134,25 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === '/') appendOp('/');
   else if (e.key === 'Enter' || e.key === '=') calculate();
   else if (e.key === 'Escape' || e.key === 'c') clearDisplay();
+});
+
+// Listen for state updates pushed from agent
+onStateUpdate(function(state) {
+  console.log('[CALC] Received state from agent:', state);
+  if (state.currentValue !== undefined) {
+    currentValue = String(state.currentValue);
+  }
+  if (state.pendingOp !== undefined) {
+    pendingOp = state.pendingOp;
+  }
+  if (state.previousValue !== undefined) {
+    previousValue = state.previousValue;
+  }
+  if (state.displayValue !== undefined) {
+    display.value = state.displayValue;
+  }
+  // Apply changes and sync back to server (applet is source of truth)
+  updateDisplay();
 });
 
 syncState();

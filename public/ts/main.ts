@@ -3,7 +3,7 @@
  */
 
 import { setupImagePaste, removeImage } from './image-paste.js';
-import { scrollToBottom } from './ui-utils.js';
+import { scrollToBottom, setupScrollDetection } from './ui-utils.js';
 import { loadHistory, loadPreferences } from './history.js';
 import { toggleSessionPanel, switchSession, deleteSession, showSessionManager, showNewChatUI } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
@@ -68,6 +68,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupFormHandler();
   setupMarkdownRenderer();
   setupMultilineInput();
+  setupScrollDetection();
   
   // Fetch models once on page load
   try {

@@ -3,6 +3,7 @@
  */
 
 import type { ToolEventData } from './types.js';
+import { scrollToBottom } from './ui-utils.js';
 
 /**
  * Add activity item to activity box
@@ -40,8 +41,11 @@ export function addActivityItem(type: string, text: string, details: string | nu
     if (countSpan) countSpan.textContent = `(${count})`;
   }
   
-  // Auto-scroll activity box
+  // Auto-scroll activity box itself
   activityBox.scrollTop = activityBox.scrollHeight;
+  
+  // Scroll chat to keep up with activity growth
+  scrollToBottom();
 }
 
 /**

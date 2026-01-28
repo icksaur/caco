@@ -6,7 +6,7 @@
  */
 
 import type { ToolEventData, MessageEventData } from './types.js';
-import { escapeHtml, scrollToBottom } from './ui-utils.js';
+import { escapeHtml, scrollToBottom, isAutoScrollEnabled, enableAutoScroll } from './ui-utils.js';
 import { addActivityItem, formatToolArgs, formatToolResult, toggleActivityBox } from './activity.js';
 import { renderDisplayOutput } from './display-output.js';
 import { removeImage } from './image-paste.js';
@@ -59,7 +59,8 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
   `;
   chat.appendChild(assistantDiv);
   
-  // Force scroll to bottom when user sends a message
+  // Enable auto-scroll and scroll to bottom when user sends a message
+  enableAutoScroll();
   scrollToBottom(true);
   
   return assistantDiv;
@@ -158,9 +159,13 @@ function startNewTurn(state: StreamState): void {
   
   const currentDiv = state.getResponseDiv();
   
-  // Finalize current div if it has content
-  if (currentDiv && state.getContent().trim()) {
+  // Always remove cursor from current div
+  if (currentDiv) {
     currentDiv.classList.remove('streaming-cursor');
+  }
+  
+  // Render markdown for current div if it has content
+  if (currentDiv && state.getContent().trim()) {
     pending.dataset.markdownProcessed = 'false';
     if (typeof window.renderMarkdown === 'function') window.renderMarkdown();
   }
@@ -393,14 +398,21 @@ async function finishPendingResponse(): Promise<void> {
       if (icon) icon.textContent = '▶';
     }
     
+    // Check if auto-scroll is still enabled (user didn't scroll up)
+    const shouldScroll = isAutoScrollEnabled();
+    
     // Render markdown (may not have been triggered if no assistant.message event)
     pending.dataset.markdownProcessed = 'false';
     if (typeof window.renderMarkdown === 'function') {
       await window.renderMarkdown();
     }
     
-    // Scroll to show rendered content (if user is at bottom)
-    scrollToBottom();
+    // Scroll after markdown render if auto-scroll still enabled
+    if (shouldScroll) {
+      requestAnimationFrame(() => {
+        scrollToBottom(true);
+      });
+    }
   }
   
   // Re-enable form

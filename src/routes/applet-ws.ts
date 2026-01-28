@@ -403,7 +403,12 @@ export function broadcastMessage(
   message: ChatMessage
 ): void {
   const sockets = connections.get(sessionId);
-  if (!sockets) return;
+  if (!sockets) {
+    console.log(`[WS] No sockets for session ${sessionId}`);
+    return;
+  }
+  
+  console.log(`[WS] Broadcasting to ${sockets.size} sockets for session ${sessionId}: ${message.role} ${message.status || '-'} ${message.deltaContent ? `delta(${message.deltaContent.length})` : ''}`);
   
   const msg: ServerMessage = { type: 'message', message };
   const data = JSON.stringify(msg);

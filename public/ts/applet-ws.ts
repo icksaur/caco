@@ -57,8 +57,13 @@ let requestId = 0;
  * Called when an applet is loaded
  */
 export function connectAppletWs(session: string): void {
-  if (socket?.readyState === WebSocket.OPEN && sessionId === session) {
-    return; // Already connected to this session
+  // Already connected or connecting to this session
+  if (socket && sessionId === session) {
+    const state = socket.readyState;
+    if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) {
+      console.log(`[WS] Already connected/connecting to session ${session}, skipping`);
+      return;
+    }
   }
   
   // Close existing connection if different session

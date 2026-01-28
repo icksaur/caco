@@ -32,16 +32,12 @@ describe('client state', () => {
     expect(stateModule.getCurrentCwd()).toBe('/home/user');
   });
 
-  it('setStreaming tracks streaming state and event source', () => {
-    const mockEventSource = { close: vi.fn() } as unknown as EventSource;
-    
-    stateModule.setStreaming(true, mockEventSource);
+  it('setStreaming tracks streaming state', () => {
+    stateModule.setStreaming(true);
     expect(stateModule.isStreaming()).toBe(true);
-    expect(stateModule.getActiveEventSource()).toBe(mockEventSource);
     
-    stateModule.setStreaming(false, null);
+    stateModule.setStreaming(false);
     expect(stateModule.isStreaming()).toBe(false);
-    expect(stateModule.getActiveEventSource()).toBeNull();
   });
 
   it('initFromSession handles both API response formats', () => {

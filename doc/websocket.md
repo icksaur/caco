@@ -187,14 +187,16 @@ Messages sent by applets (not typed by user) are visually distinct:
 ### Phase 3: Unified Chat Rendering
 - [x] **3A: User message via POST, render via WS** ✅
   - [x] HTTP POST `/api/sessions/:id/messages` sends to agent
-  - [x] Server broadcasts `userMessage` via WS after POST
+  - [x] Server broadcasts `message` via WS after POST
   - [x] Client renders bubble from WS (if connected)
   - [x] Fallback to direct render if WS not connected
-- [ ] **3B: History via WebSocket** ← NEXT
-  - [ ] Server sends `history` on WS connect
-  - [ ] Remove `GET /api/history` endpoint
-  - [ ] Client renders via `renderMessage()`
-- [ ] **3C: Applet invocation**
+- [x] **3B: History via WebSocket** ✅
+  - [x] Server streams `message` events on WS connect
+  - [x] Server sends `historyComplete` when done
+  - [x] Client waits for historyComplete before finishing render
+  - [x] Clean separation: loadPreferences() → connectWs() → waitForHistoryComplete()
+  - [ ] Remove `GET /api/history` endpoint (keep as fallback for now)
+- [ ] **3C: Applet invocation** ← NEXT
   - [ ] Applet POSTs with `source: 'applet'` metadata
   - [ ] Server broadcasts with applet info
   - [ ] Orange bubble rendering

@@ -374,7 +374,7 @@ export function stopStreaming(): void {
 /**
  * Clean up pending response
  */
-function finishPendingResponse(): void {
+async function finishPendingResponse(): Promise<void> {
   const pending = document.getElementById('pending-response');
   if (pending) {
     pending.classList.remove('pending');
@@ -395,7 +395,12 @@ function finishPendingResponse(): void {
     
     // Render markdown (may not have been triggered if no assistant.message event)
     pending.dataset.markdownProcessed = 'false';
-    if (typeof window.renderMarkdown === 'function') window.renderMarkdown();
+    if (typeof window.renderMarkdown === 'function') {
+      await window.renderMarkdown();
+    }
+    
+    // Scroll to show rendered content (if user is at bottom)
+    scrollToBottom();
   }
   
   // Re-enable form

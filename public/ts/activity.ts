@@ -6,10 +6,44 @@ import type { ToolEventData } from './types.js';
 import { scrollToBottom } from './ui-utils.js';
 
 /**
+ * Ensure pending response exists for activity items
+ * Creates one if it doesn't exist (activity can arrive before first delta)
+ */
+function ensurePendingResponse(): Element | null {
+  let activityBox = document.querySelector('#pending-response .activity-box');
+  if (activityBox) return activityBox;
+  
+  // Create pending response bubble for activity
+  const chat = document.getElementById('chat');
+  if (!chat) return null;
+  
+  const assistantDiv = document.createElement('div');
+  assistantDiv.className = 'message assistant pending';
+  assistantDiv.id = 'pending-response';
+  assistantDiv.setAttribute('data-markdown', '');
+  assistantDiv.setAttribute('data-message-id', `pending_${Date.now()}`);
+  assistantDiv.innerHTML = `
+    <div class="activity-wrapper">
+      <div class="activity-header" onclick="toggleActivityBox(this)">
+        <span class="activity-icon">▼</span>
+        <span class="activity-label">Activity</span>
+        <span class="activity-count"></span>
+      </div>
+      <div class="activity-box"></div>
+    </div>
+    <div class="outputs-container"></div>
+    <div class="markdown-content streaming-cursor"></div>
+  `;
+  chat.appendChild(assistantDiv);
+  
+  return assistantDiv.querySelector('.activity-box');
+}
+
+/**
  * Add activity item to activity box
  */
 export function addActivityItem(type: string, text: string, details: string | null = null): void {
-  const activityBox = document.querySelector('#pending-response .activity-box');
+  const activityBox = ensurePendingResponse();
   if (!activityBox) return;
   
   const item = document.createElement('div');

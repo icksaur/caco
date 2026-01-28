@@ -138,7 +138,7 @@ async function streamToWebSocket(
       
       switch (event.type) {
         case 'assistant.message_delta': {
-          // Start message if first delta
+          // Start streaming message if first delta
           if (!hasStarted) {
             broadcastMessage(sessionId, {
               id: messageId,
@@ -148,7 +148,7 @@ async function streamToWebSocket(
             });
             hasStarted = true;
           }
-          // Append delta
+          // Append delta content
           const delta = (eventData.deltaContent as string) || '';
           messageContent += delta;
           broadcastMessage(sessionId, {

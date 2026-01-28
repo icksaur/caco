@@ -100,9 +100,17 @@ function createMessage(msg: ChatMessage): void {
   } else {
     // Assistant message - could be complete (history) or streaming (live)
     if (msg.status === 'streaming' || !msg.content) {
-      // Start streaming response
-      addPendingResponse(msg.id);
-      setStreaming(true);
+      // Check if pending response already exists (created by activity)
+      const existingPending = document.getElementById('pending-response');
+      if (existingPending) {
+        // Update the ID to match the server's message ID
+        existingPending.setAttribute('data-message-id', msg.id);
+        setStreaming(true);
+      } else {
+        // Start streaming response
+        addPendingResponse(msg.id);
+        setStreaming(true);
+      }
     } else {
       // Complete message (history)
       renderAssistantBubble(msg.id, msg.content, msg.outputs);

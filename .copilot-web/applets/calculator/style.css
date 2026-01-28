@@ -30,7 +30,7 @@
 .btn {
   height: 56px;
   border: none;
-  border-radius: 50%;
+  border-radius: 12px;
   font-size: 24px;
   cursor: pointer;
   background: #333;

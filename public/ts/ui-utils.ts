@@ -2,17 +2,32 @@
  * UI utility functions
  */
 
+/** Threshold in pixels for considering "at bottom" */
+const SCROLL_THRESHOLD = 100;
+
 /**
- * Scroll chat to bottom
+ * Check if chat is scrolled to bottom (or near it)
  */
-export function scrollToBottom(): void {
-  // Try chatView first (the scrollable container for chat messages)
+export function isAtBottom(): boolean {
   const chatView = document.getElementById('chatView');
-  if (chatView) {
-    console.log('[SCROLL] chatView before:', chatView.scrollTop, 'scrollHeight:', chatView.scrollHeight, 'clientHeight:', chatView.clientHeight);
-    chatView.scrollTop = chatView.scrollHeight;
-    console.log('[SCROLL] chatView after:', chatView.scrollTop);
-  }
+  if (!chatView) return true;
+  
+  const distanceFromBottom = chatView.scrollHeight - chatView.scrollTop - chatView.clientHeight;
+  return distanceFromBottom <= SCROLL_THRESHOLD;
+}
+
+/**
+ * Scroll chat to bottom, but only if already at bottom (or forced)
+ * @param force - If true, always scroll regardless of current position
+ */
+export function scrollToBottom(force = false): void {
+  const chatView = document.getElementById('chatView');
+  if (!chatView) return;
+  
+  // Only scroll if user is already at bottom or force is true
+  if (!force && !isAtBottom()) return;
+  
+  chatView.scrollTop = chatView.scrollHeight;
 }
 
 /**

@@ -59,8 +59,8 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
   `;
   chat.appendChild(assistantDiv);
   
-  // Scroll to bottom
-  scrollToBottom();
+  // Force scroll to bottom when user sends a message
+  scrollToBottom(true);
   
   return assistantDiv;
 }

@@ -6,6 +6,7 @@
  */
 
 import type { ModelInfo } from './types.js';
+import { connectAppletWs, isWsConnected, getWsSessionId } from './applet-ws.js';
 
 // ============================================================
 // State Interface
@@ -106,10 +107,16 @@ export function hasImage(): boolean {
 
 /**
  * Set active session (from server response)
+ * Also connects WebSocket for unified messaging
  */
 export function setActiveSession(sessionId: string | null, cwd: string): void {
   state.activeSessionId = sessionId;
   state.currentCwd = cwd;
+  
+  // Connect WebSocket when session becomes active
+  if (sessionId && (!isWsConnected() || getWsSessionId() !== sessionId)) {
+    connectAppletWs(sessionId);
+  }
 }
 
 /**

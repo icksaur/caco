@@ -5,6 +5,17 @@
  * Provides real-time state sync and future agent invocation support.
  */
 
+// Re-export UserMessage type (matches server)
+export interface UserMessage {
+  id: string;
+  role: 'user';
+  content: string;
+  timestamp: string;
+  source: 'user' | 'applet';
+  appletSlug?: string;
+  hasImage: boolean;
+}
+
 // Connection state
 let socket: WebSocket | null = null;
 let sessionId: string | null = null;
@@ -14,7 +25,9 @@ const RECONNECT_DELAY_MS = 1000;
 
 // Callbacks
 type StateCallback = (state: Record<string, unknown>) => void;
+type UserMessageCallback = (msg: UserMessage) => void;
 const stateCallbacks: Set<StateCallback> = new Set();
+const userMessageCallbacks: Set<UserMessageCallback> = new Set();
 
 // Pending requests (for request/response pattern)
 const pendingRequests = new Map<string, {
@@ -48,6 +61,12 @@ export function connectAppletWs(session: string): void {
  */
 function doConnect(): void {
   if (!sessionId) return;
+  
+  // Guard for Node.js test environment
+  if (typeof window === 'undefined') {
+    console.log('[WS] Skipping connect in non-browser environment');
+    return;
+  }
   
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${protocol}//${window.location.host}/ws/applet?session=${encodeURIComponent(sessionId)}`;
@@ -113,6 +132,20 @@ function handleMessage(msg: { type: string; id?: string; data?: unknown; error?:
             cb(msg.data as Record<string, unknown>);
           } catch (err) {
             console.error('[WS] State callback error:', err);
+          }
+        }
+      }
+      break;
+    
+    case 'userMessage':
+      // User message echoed back for rendering
+      if ((msg as { message?: UserMessage }).message) {
+        const userMsg = (msg as { message: UserMessage }).message;
+        for (const cb of userMessageCallbacks) {
+          try {
+            cb(userMsg);
+          } catch (err) {
+            console.error('[WS] UserMessage callback error:', err);
           }
         }
       }
@@ -202,4 +235,34 @@ export function disconnectAppletWs(): void {
   }
   sessionId = null;
   reconnectAttempts = MAX_RECONNECT_ATTEMPTS; // Prevent auto-reconnect
+}
+
+/**
+ * Send a chat message via WebSocket
+ * Used instead of HTTP POST for unified rendering path
+ */
+export function wsSendMessage(content: string, imageData?: string, source: 'user' | 'applet' = 'user', appletSlug?: string): void {
+  send({ 
+    type: 'sendMessage', 
+    content, 
+    imageData,
+    source,
+    appletSlug 
+  });
+}
+
+/**
+ * Subscribe to user messages (echoed back for rendering)
+ * Returns unsubscribe function
+ */
+export function onUserMessage(callback: UserMessageCallback): () => void {
+  userMessageCallbacks.add(callback);
+  return () => userMessageCallbacks.delete(callback);
+}
+
+/**
+ * Get current session ID
+ */
+export function getWsSessionId(): string | null {
+  return sessionId;
 }

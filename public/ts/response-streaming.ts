@@ -2,7 +2,7 @@
  * Response Streaming
  * 
  * Handles receiving streamed responses from the server via SSE.
- * Separated from message sending (which happens via POST).
+ * Separated from message sending (which happens via POST or WebSocket).
  */
 
 import type { ToolEventData, MessageEventData } from './types.js';
@@ -13,6 +13,7 @@ import { removeImage } from './image-paste.js';
 import { setStreaming, getActiveEventSource, getActiveSessionId, setActiveSession } from './state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { setViewState, isViewState } from './view-controller.js';
+import { onUserMessage, isWsConnected, wsSendMessage, type UserMessage } from './applet-ws.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -24,23 +25,63 @@ declare global {
 /** Timeout for stop button appearance */
 let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
 
+/** Track if WS message handler is registered */
+let wsHandlerRegistered = false;
+
 /**
- * Add user message bubble immediately
+ * Register WebSocket message handler for unified rendering
+ * Called once during app initialization
  */
-export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
+function registerWsMessageHandler(): void {
+  if (wsHandlerRegistered) return;
+  wsHandlerRegistered = true;
+  
+  onUserMessage((msg: UserMessage) => {
+    console.log('[WS] Received userMessage:', msg.id, msg.source);
+    renderUserBubble(msg.content, msg.hasImage, msg.source, msg.appletSlug);
+  });
+}
+
+/**
+ * Render user message bubble (unified renderer)
+ * Called either directly (fallback) or from WS message handler
+ */
+function renderUserBubble(
+  content: string, 
+  hasImage: boolean, 
+  source: 'user' | 'applet' = 'user',
+  appletSlug?: string
+): HTMLElement {
   const chat = document.getElementById('chat');
   if (!chat) throw new Error('Chat element not found');
   
   // Transition from new chat to conversation view
   setViewState('chatting');
   
-  // Add user message
+  // Add user message with applet styling if applicable
   const userDiv = document.createElement('div');
-  userDiv.className = 'message user';
-  userDiv.innerHTML = `${escapeHtml(message)}${hasImage ? ' <span class="image-indicator">[img]</span>' : ''}`;
+  userDiv.className = `message user${source === 'applet' ? ' applet-invoked' : ''}`;
+  if (source === 'applet' && appletSlug) {
+    userDiv.dataset.appletSource = appletSlug;
+  }
+  userDiv.innerHTML = `${escapeHtml(content)}${hasImage ? ' <span class="image-indicator">[img]</span>' : ''}`;
   chat.appendChild(userDiv);
   
-  // Add pending response with activity box
+  // Enable auto-scroll and scroll to bottom when user sends a message
+  enableAutoScroll();
+  scrollToBottom(true);
+  
+  return userDiv;
+}
+
+/**
+ * Add pending assistant response placeholder
+ * Called after user bubble is rendered
+ */
+function addPendingResponse(): HTMLElement {
+  const chat = document.getElementById('chat');
+  if (!chat) throw new Error('Chat element not found');
+  
   const assistantDiv = document.createElement('div');
   assistantDiv.className = 'message assistant pending';
   assistantDiv.id = 'pending-response';
@@ -59,11 +100,17 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
   `;
   chat.appendChild(assistantDiv);
   
-  // Enable auto-scroll and scroll to bottom when user sends a message
-  enableAutoScroll();
   scrollToBottom(true);
-  
   return assistantDiv;
+}
+
+/**
+ * Add user message bubble immediately (legacy interface)
+ * Now wraps renderUserBubble + addPendingResponse
+ */
+export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
+  renderUserBubble(message, hasImage, 'user');
+  return addPendingResponse();
 }
 
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
@@ -471,6 +518,9 @@ import { resetTextareaHeight } from './multiline-input.js';
  * Set up form submission handler
  */
 export function setupFormHandler(): void {
+  // Register WS message handler for unified rendering
+  registerWsMessageHandler();
+  
   const form = document.getElementById('chatForm') as HTMLFormElement;
   if (!form) return;
   
@@ -502,9 +552,20 @@ export function setupFormHandler(): void {
     // Disable form during streaming
     setFormEnabled(false);
     
-    // Add user bubble immediately
     const hasImage = !!imageData;
-    addUserBubble(message, hasImage);
+    
+    // For existing sessions with WS connected, send via WS for unified rendering
+    // The WS handler will render the bubble when the echo comes back
+    // For new chats or when WS not connected, use legacy direct rendering
+    if (!isNewChat && isWsConnected()) {
+      console.log('[WS] Sending message via WebSocket');
+      wsSendMessage(message, imageData || undefined, 'user');
+      // Add pending response immediately (bubble comes from WS echo)
+      addPendingResponse();
+    } else {
+      // Legacy path: direct bubble add (WS not ready or new chat)
+      addUserBubble(message, hasImage);
+    }
     
     // Clear input and image, reset textarea height
     input.value = '';

@@ -14,7 +14,7 @@ import { createDisplayTools } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
 import { storeOutput, detectLanguage } from './src/storage.js';
 import { sessionRoutes, apiRoutes, streamRoutes } from './src/routes/index.js';
-import { setupAppletWebSocket } from './src/routes/applet-ws.js';
+import { setupAppletWebSocket, onChatMessage } from './src/routes/applet-ws.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -141,6 +141,13 @@ async function start(): Promise<void> {
   
   // Attach WebSocket server for applet channel
   setupAppletWebSocket(server);
+  
+  // Register WS chat message handler - routes messages to session
+  onChatMessage(async (sessionId, content, imageData, source, appletSlug) => {
+    console.log(`[WS→Session] Message received for session ${sessionId}, source=${source || 'user'}`);
+    // For now, we just log it - the actual message sending still goes through HTTP/SSE
+    // TODO: Full WS streaming integration
+  });
   
   // Start server (localhost only for security)
   server.listen(PORT, '127.0.0.1', () => {

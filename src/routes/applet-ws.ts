@@ -7,6 +7,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
+import { randomUUID } from 'crypto';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
 
 // Track connections by sessionId
@@ -14,16 +15,33 @@ const connections = new Map<string, Set<WebSocket>>();
 
 // Message types from client
 interface ClientMessage {
-  type: 'setState' | 'getState' | 'ping';
+  type: 'setState' | 'getState' | 'sendMessage' | 'ping';
   id?: string;  // For request/response correlation
   data?: Record<string, unknown>;
+  // For sendMessage
+  content?: string;
+  imageData?: string;
+  source?: 'user' | 'applet';
+  appletSlug?: string;
+}
+
+// User message structure (echoed back to client for rendering)
+export interface UserMessage {
+  id: string;
+  role: 'user';
+  content: string;
+  timestamp: string;
+  source: 'user' | 'applet';
+  appletSlug?: string;
+  hasImage: boolean;
 }
 
 // Message types to client
 interface ServerMessage {
-  type: 'stateUpdate' | 'state' | 'pong' | 'error';
+  type: 'stateUpdate' | 'state' | 'userMessage' | 'pong' | 'error';
   id?: string;
   data?: unknown;
+  message?: UserMessage;
   error?: string;
 }
 
@@ -85,6 +103,10 @@ function handleMessage(ws: WebSocket, sessionId: string, msg: ClientMessage): vo
         // Broadcast to other connections on same session (for multi-tab sync)
         broadcastToSession(sessionId, { type: 'stateUpdate', data: msg.data }, ws);
       }
+      break;
+    
+    case 'sendMessage':
+      handleSendMessage(ws, sessionId, msg);
       break;
       
     case 'getState':
@@ -185,4 +207,74 @@ export function hasAppletConnection(sessionId: string): boolean {
     if (ws.readyState === WebSocket.OPEN) return true;
   }
   return false;
+}
+
+// Callback for when a message needs to be sent to the agent
+type MessageCallback = (sessionId: string, content: string, imageData?: string, source?: 'user' | 'applet', appletSlug?: string) => void;
+let messageCallback: MessageCallback | null = null;
+
+/**
+ * Register callback for handling chat messages
+ * Called from server.ts to wire up the session manager
+ */
+export function onChatMessage(callback: MessageCallback): void {
+  messageCallback = callback;
+}
+
+/**
+ * Handle sendMessage from client
+ * 1. Generate message ID
+ * 2. Broadcast userMessage to all session connections (for rendering)
+ * 3. Invoke callback to send to agent
+ */
+function handleSendMessage(ws: WebSocket, sessionId: string, msg: ClientMessage): void {
+  if (!msg.content) {
+    sendError(ws, msg.id, 'content is required');
+    return;
+  }
+  
+  // Create UserMessage for broadcasting
+  const userMessage: UserMessage = {
+    id: randomUUID(),
+    role: 'user',
+    content: msg.content,
+    timestamp: new Date().toISOString(),
+    source: msg.source || 'user',
+    appletSlug: msg.appletSlug,
+    hasImage: !!msg.imageData
+  };
+  
+  console.log(`[WS] Received sendMessage: session=${sessionId}, source=${userMessage.source}, hasImage=${userMessage.hasImage}`);
+  
+  // Broadcast to ALL connections in session (including sender) for rendering
+  broadcastUserMessage(sessionId, userMessage);
+  
+  // Invoke callback to send to agent (if registered)
+  if (messageCallback) {
+    messageCallback(sessionId, msg.content, msg.imageData, msg.source, msg.appletSlug);
+  } else {
+    console.warn('[WS] No message callback registered, message will not be sent to agent');
+  }
+  
+  // Acknowledge the request
+  if (msg.id) {
+    send(ws, { type: 'state', id: msg.id, data: { messageId: userMessage.id } });
+  }
+}
+
+/**
+ * Broadcast user message to all connections in session (including sender)
+ */
+function broadcastUserMessage(sessionId: string, message: UserMessage): void {
+  const sockets = connections.get(sessionId);
+  if (!sockets) return;
+  
+  const msg: ServerMessage = { type: 'userMessage', message };
+  const data = JSON.stringify(msg);
+  
+  for (const ws of sockets) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
+  }
 }

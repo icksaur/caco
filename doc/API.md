@@ -131,15 +131,17 @@ Defined in `src/applet-tools.ts`
 
 | Tool | Description |
 |------|-------------|
+| `applet_howto` | Get documentation for creating applets |
 | `get_applet_state` | Query state pushed by applet JS |
 | `reload_page` | Trigger browser page refresh |
 | `restart_server` | Schedule server restart after delay |
 
-**Removed tools** (agent can use file tools directly):
-- `set_applet_content` → Agent writes files to `.copilot-web/applets/`, user navigates via URL
-- `save_applet` → Agent uses `write_file` directly
-- `load_applet` → User navigates via `?applet=slug` URL param
-- `list_applets` → Agent uses `list_dir` on `.copilot-web/applets/`
+**applet_howto** - no parameters
+Returns comprehensive documentation on:
+- File structure (`.copilot-web/applets/<slug>/`)
+- Required files (meta.json, content.html) and optional (script.js, style.css)
+- JavaScript APIs available (setAppletState, loadApplet, listApplets)
+- How to share applets via URL (`?applet=slug`)
 
 **get_applet_state** parameters:
 - `key` (string, optional) - Get specific key instead of full state

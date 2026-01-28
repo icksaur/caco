@@ -1,19 +1,99 @@
 /**
  * Applet Tools
  * 
- * MCP tools for applet interaction.
- * 
- * Removed tools (agent can use file tools directly):
- * - set_applet_content → Agent writes files, user navigates via URL
- * - save_applet → Agent uses write_file directly
- * - load_applet → User navigates via ?applet=slug URL
- * - list_applets → Agent uses list_dir on .copilot-web/applets/
+ * MCP tools for applet interaction and documentation.
  */
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { spawn } from 'child_process';
 import { getAppletUserState, getAppletNavigation, triggerReload } from './applet-state.js';
+
+/**
+ * Documentation returned by applet_howto tool.
+ * This teaches agents how to create applets using file tools.
+ */
+const APPLET_HOWTO = `
+# Creating Applets in copilot-web
+
+Applets are interactive HTML/JS/CSS components stored on disk and loaded via URL.
+
+## File Structure
+
+\`\`\`
+.copilot-web/applets/<slug>/
+├── meta.json      # Required: { name, description, slug, createdAt, updatedAt }
+├── content.html   # Required: HTML content (no <html>/<body> wrapper)
+├── script.js      # Optional: JavaScript code
+└── style.css      # Optional: CSS styles
+\`\`\`
+
+## Creating an Applet
+
+1. Choose a slug (lowercase, hyphens: "my-calculator", "todo-list")
+2. Create directory: \`.copilot-web/applets/<slug>/\`
+3. Write the 4 files using write_file tool
+4. Share URL with user: http://localhost:3000/?applet=<slug>
+
+## meta.json Format
+
+\`\`\`json
+{
+  "name": "My Calculator",
+  "description": "A simple calculator applet",
+  "slug": "my-calculator",
+  "createdAt": "2026-01-27T12:00:00.000Z",
+  "updatedAt": "2026-01-27T12:00:00.000Z"
+}
+\`\`\`
+
+## content.html
+
+HTML fragment (no doctype, html, head, body tags):
+\`\`\`html
+<div class="calculator">
+  <input type="text" id="display" readonly>
+  <div class="buttons">
+    <button onclick="appendDigit('7')">7</button>
+    <!-- ... -->
+  </div>
+</div>
+\`\`\`
+
+## script.js
+
+Plain JavaScript with global functions for onclick handlers:
+\`\`\`javascript
+function appendDigit(d) {
+  document.getElementById('display').value += d;
+}
+
+function calculate() {
+  const result = eval(document.getElementById('display').value);
+  setAppletState({ lastResult: result });
+}
+\`\`\`
+
+## JavaScript APIs Available
+
+- \`setAppletState(obj)\` - Push state to server for agent to query via get_applet_state tool
+- \`loadApplet(slug)\` - Navigate to another applet
+- \`listApplets()\` - Get array of saved applets (async)
+- \`appletContainer\` - Reference to container element
+
+## Querying Applet State
+
+After user interacts with applet, use \`get_applet_state\` tool to read values:
+- User fills form → applet calls setAppletState({ name: "...", email: "..." })
+- Agent calls get_applet_state → receives the form data
+
+## Tips
+
+- Use onclick="functionName()" for button handlers (not addEventListener)
+- Test with reload_page tool after file changes
+- Applet runs in sandboxed scope but has full DOM access
+- Use relative paths for any fetch() calls to local APIs
+`.trim();
 
 /**
  * Create applet tools
@@ -106,5 +186,18 @@ export function createAppletTools(_programCwd: string) {
     }
   });
 
-  return [getAppletState, reloadPage, restartServer];
+  const appletHowto = defineTool('applet_howto', {
+    description: 'Get documentation for creating interactive applets. Call this when user asks to create an applet, widget, or interactive UI component.',
+
+    parameters: z.object({}),
+
+    handler: async () => {
+      return {
+        textResultForLlm: APPLET_HOWTO,
+        resultType: 'success' as const
+      };
+    }
+  });
+
+  return [appletHowto, getAppletState, reloadPage, restartServer];
 }

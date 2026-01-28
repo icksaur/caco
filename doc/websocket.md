@@ -1,4 +1,4 @@
-# WebSocket Applet Channel
+# WebSocket Session Channel
 
 ## WebSocket Primer
 
@@ -7,201 +7,160 @@ WebSocket is a bidirectional protocol over a single TCP connection. Unlike HTTP 
 **When to use:** Real-time bidirectional communication (chat, live updates, gaming).
 **When not to use:** Simple request/response, infrequent updates (HTTP is simpler).
 
-## Current State
+---
 
-| Direction | Current Mechanism | Problem |
-|-----------|-------------------|---------|
-| Applet → Server | `setAppletState()` batched with next message POST | Requires user to send message |
-| Server → Applet | SSE `_applet` event (reload only) | No general state push |
-| Agent → Applet | ❌ None | Agent can't update running applet |
-| Applet → Agent | ❌ None | Applet can't invoke agent directly |
+## Architecture: Unified WebSocket Rendering
 
-## Proposed Solution
+### The Problem with Dual Rendering Paths
 
-Single WebSocket per applet session. Server handles all messages - some locally, some routed to agent.
+Current chat has two rendering paths:
+1. **User input** → `addUserBubble()` → direct DOM manipulation
+2. **History reload** → `GET /api/history` → server returns HTML → innerHTML
 
-### Endpoint
+Two paths = two places for bugs, styling drift, feature divergence.
+
+### Solution: Single WebSocket Source of Truth
+
+All chat content flows through WebSocket:
+
 ```
-ws://localhost:3000/ws/applet?session=<sessionId>
-```
-
-### Message Types
-
-**Client → Server (server-local):**
-| Type | Payload | Purpose |
-|------|---------|---------|
-| `setState` | `{ data: {...} }` | Push UI state |
-| `readFile` | `{ path }` | Stream file content back |
-| `writeFile` | `{ path, content }` | Write file |
-| `subscribe` | `{ path }` | Watch file for changes |
-
-**Client → Server (agent-routed):**
-| Type | Payload | Purpose |
-|------|---------|---------|
-| `invoke` | `{ prompt, background? }` | Trigger agent action |
-
-**Server → Client:**
-| Type | Payload | Purpose |
-|------|---------|---------|
-| `stateUpdate` | `{ data }` | State pushed (from agent tool or server) |
-| `fileContent` | `{ path, chunk, done }` | Streamed file data |
-| `fileChanged` | `{ path, event }` | Watched file changed |
-| `stream` | `{ delta }` | Agent response chunk |
-| `invokeComplete` | `{ id, result, error? }` | Agent finished |
-
-### Client API (applet JS)
-
-```javascript
-// State sync (server-local)
-setAppletState({ key: value });
-
-// File operations (server-local, streamed)
-const content = await readFile('/path/to/file');
-await writeFile('/path/to/file', content);
-subscribeFile('/path/to/file', (event) => reload());
-
-// Agent invocation
-const result = await invokeAgent("Analyze this", { background: true });
-
-// Receive pushed state (from agent or server)
-onStateUpdate((state) => {
-  document.getElementById('progress').value = state.progress;
-});
+User types  → WS send    → server → WS broadcast → renderMessage() → DOM
+History     → page load  → server → WS sends all → renderMessage() → DOM  
+Applet      → WS invoke  → server → WS broadcast → renderMessage() → DOM
+Agent       → WS/SSE     → server → WS streams   → renderMessage() → DOM
 ```
 
-### MCP Tools
+**One function renders everything.** Server controls message format and metadata.
 
-**Existing:**
-- `get_applet_state` - Query state pushed by applet
+### Benefits
 
-**New:**
-```typescript
-set_applet_state({
-  data: { progress: 50, status: "Processing..." }
-})
-// Pushes state to applet via WebSocket
-```
-
-## Implementation Plan
-
-### Phase 1: WebSocket Infrastructure ✅
-- [x] Add `ws` package dependency
-- [x] Create `/ws/applet` endpoint in `src/routes/applet-ws.ts`
-- [x] Track connections by sessionId
-- [x] Client-side connection manager in `public/ts/applet-ws.ts`
-- [x] Auto-connect when applet loads
-
-### Phase 2: State Push (Agent → Applet) ✅
-- [x] `set_applet_state` MCP tool
-- [x] `pushStateToApplet(sessionId, data)` server function
-- [x] `onStateUpdate(callback)` client API
-
-### Phase 3: Agent Invocation (Applet → Agent)
-- [ ] `invokeAgent(prompt, options)` client API
-- [ ] Server routes `invoke` message to session
-- [ ] Stream response back via WebSocket
-- [ ] Chat UI receives applet-invoked messages (orange bubbles)
-
-### Phase 4: File Operations
-- [ ] `readFile(path)` with streaming response
-- [ ] `writeFile(path, content)`
-- [ ] `subscribe(path)` for file watching
+| Concern | Dual path (before) | Unified WS (after) |
+|---------|---------------------|---------------------|
+| Styling consistency | Two places to maintain | One renderer |
+| Applet messages | Third path to add | Already handled |
+| Message metadata | Parse in two places | Server controls |
+| History format | HTML string | Structured JSON |
+| Live/reload parity | Easy to diverge | Guaranteed same |
+| Future features | Add to both paths | Add once |
 
 ---
 
-## Phase 3: Applet → Agent Communication (Detailed Spec)
-
-### Three Invocation Scenarios
-
-| Scenario | Description | Session | UI Effect |
-|----------|-------------|---------|-----------|
-| **1. Active Chat** | Applet triggers agent in currently viewed session | Active session | Orange bubble appears in chat |
-| **2. Background** | Applet triggers agent in known non-active session | Existing sessionId | No UI, result via WS |
-| **3. New Session** | Applet creates fresh session for isolated task | New sessionId | No UI, result via WS |
-
-### HTTP APIs (Already Support All Scenarios)
+## Endpoint
 
 ```
-POST /api/sessions                    # Create new session → sessionId
-POST /api/sessions/:id/messages       # Send message → streamId
-GET  /api/stream/:streamId            # SSE for response (or use WS)
+ws://localhost:3000/ws/session?id=<sessionId>
 ```
 
-**Applet can use these directly.** The missing piece is UI coordination.
+Note: Renamed from `/ws/applet` to `/ws/session` - it now handles all session communication.
 
-### The Active Chat Problem
+---
 
-When user types in chat:
-```
-User types → addUserBubble() → POST /sessions/:id/messages → SSE stream → render response
-```
+## Message Protocol
 
-When applet invokes agent:
-```
-Applet → POST /sessions/:id/messages → SSE stream → ???
-```
-
-**Problem:** Chat UI doesn't know a message was sent. No user bubble appears. Response not rendered.
-
-### Solution: WebSocket Session Events
-
-Upgrade the applet WebSocket to a **session channel** that broadcasts:
-- `messageStarted` - A message was sent (from any source)
-- `streamConnected` - SSE stream is ready
-- `messageDone` - Agent finished responding
-
-**New message types (Server → Client):**
+### Client → Server
 
 | Type | Payload | Purpose |
 |------|---------|---------|
-| `messageStarted` | `{ prompt, source, streamId }` | Message sent to session |
-| `streamReady` | `{ streamId }` | SSE stream ready to connect |
+| `sendMessage` | `{ content, imageData? }` | User sends chat message |
+| `invoke` | `{ prompt, source, appletSlug? }` | Applet invokes agent |
+| `loadHistory` | `{}` | Request session history |
+| `setState` | `{ data }` | Push applet state |
+| `ping` | `{}` | Heartbeat |
 
-### Client API Extension
+### Server → Client
 
-```javascript
-// Invoke agent from applet
-const result = await invokeAgent("Analyze this data", {
-  session: 'active',        // 'active' | 'background' | 'new' | <sessionId>
-  showInChat: true,         // Show orange bubble in chat UI
-  waitForResult: false      // Return immediately or wait for response
-});
+| Type | Payload | Purpose |
+|------|---------|---------|
+| `history` | `{ messages: ChatMessage[] }` | Full history on connect |
+| `userMessage` | `ChatMessage` | User/applet message (echo back) |
+| `assistantStart` | `{ messageId }` | Assistant response starting |
+| `assistantDelta` | `{ messageId, delta }` | Streaming content |
+| `assistantComplete` | `ChatMessage` | Full assistant message |
+| `stateUpdate` | `{ data }` | Applet state pushed |
+| `error` | `{ error }` | Error occurred |
+| `pong` | `{}` | Heartbeat response |
 
-// Options:
-// session: 'active' - use current browser session
-// session: 'background' - use current session but don't show in chat
-// session: 'new' - create new ephemeral session
-// session: '<uuid>' - target specific session
+### ChatMessage Structure
+
+```typescript
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  
+  // User message metadata
+  source?: 'user' | 'applet';
+  appletSlug?: string;        // If source === 'applet'
+  hasImage?: boolean;
+  
+  // Assistant message metadata  
+  outputs?: OutputMeta[];     // Display tool outputs
+  activity?: ActivityItem[];  // Tool calls, intents
+}
+
+interface OutputMeta {
+  id: string;
+  type: 'file' | 'terminal' | 'image' | 'embed';
+  // ... type-specific fields
+}
+
+interface ActivityItem {
+  type: 'turn' | 'intent' | 'tool' | 'tool-result';
+  text: string;
+  details?: string;
+}
+```
+
+---
+
+## Client Rendering
+
+Single renderer for all message types:
+
+```typescript
+function renderMessage(msg: ChatMessage): HTMLElement {
+  const div = document.createElement('div');
+  div.className = `message ${msg.role}`;
+  div.id = `msg-${msg.id}`;
+  
+  if (msg.role === 'user') {
+    // User or applet message
+    if (msg.source === 'applet') {
+      div.classList.add('applet-invoked');
+      div.dataset.appletSource = msg.appletSlug || 'unknown';
+    }
+    div.innerHTML = escapeHtml(msg.content);
+    if (msg.hasImage) {
+      div.innerHTML += ' <span class="image-indicator">[img]</span>';
+    }
+  } else {
+    // Assistant message
+    div.innerHTML = renderAssistantContent(msg);
+  }
+  
+  return div;
+}
 ```
 
 ---
 
 ## UI Specification: Orange Bubbles
 
-### Requirement
-
-Messages sent by applets (not typed by user) must be visually distinct:
-- **Orange background** instead of user's blue
-- **Applet indicator** showing which applet sent it
-- **Consistent rendering** in live chat AND history reload
-
-### CSS Classes
+Messages sent by applets (not typed by user) are visually distinct:
 
 ```css
-.message.user { ... }                  /* Normal user - blue */
-.message.user.applet-invoked { ... }   /* Applet-invoked - orange */
-```
+.message.user { 
+  background: linear-gradient(135deg, #0066cc 0%, #0099ff 100%);
+}
 
-### Proposed Styling
-
-```css
 .message.user.applet-invoked {
   background: linear-gradient(135deg, #e65c00 0%, #f09819 100%);
   border-left: 3px solid #ff7b00;
 }
 
 .message.user.applet-invoked::before {
-  content: attr(data-applet-source);
+  content: '🔧 ' attr(data-applet-source);
   display: block;
   font-size: 0.75em;
   opacity: 0.7;
@@ -209,169 +168,105 @@ Messages sent by applets (not typed by user) must be visually distinct:
 }
 ```
 
-### Message Source Identification
+---
 
-**Problem:** SDK stores messages in `events.jsonl` with fixed format:
-```json
-{"type":"user.message","data":{"content":"Hello"}}
-```
+## Implementation Status
 
-We cannot add custom fields to SDK storage.
+### Phase 1: WebSocket Infrastructure ✅
+- [x] Add `ws` package dependency
+- [x] Create WebSocket endpoint
+- [x] Track connections by sessionId
+- [x] Client-side connection manager
+- [x] Auto-connect when applet loads
 
-**Solution:** Message prefix marker
+### Phase 2: State Push (Agent → Applet) ✅
+- [x] `set_applet_state` MCP tool
+- [x] `pushStateToApplet(sessionId, data)` server function
+- [x] `onStateUpdate(callback)` client API
 
-Applet-invoked messages are prefixed with a marker:
-```
-[applet:calculator] What is 2+2?
-```
+### Phase 3: Unified Chat Rendering
+- [ ] **3A: User message round-trip** ← NEXT
+  - [ ] Client sends `sendMessage` via WS instead of POST
+  - [ ] Server echoes back as `userMessage`
+  - [ ] Single `renderMessage()` function
+  - [ ] Remove `addUserBubble()` direct DOM
+- [ ] **3B: History via WebSocket**
+  - [ ] Server sends `history` on WS connect
+  - [ ] Remove `GET /api/history` endpoint
+  - [ ] Client renders via `renderMessage()`
+- [ ] **3C: Applet invocation**
+  - [ ] `invokeAgent()` client API
+  - [ ] Server routes to session
+  - [ ] Orange bubble rendering
+- [ ] **3D: Streaming via WebSocket**
+  - [ ] Replace SSE with WS streaming
+  - [ ] `assistantDelta` messages
+  - [ ] Unified output rendering
 
-Format: `[applet:<slug>] <actual prompt>`
-
-**Rendering logic:**
-1. Check if message starts with `[applet:`
-2. Extract slug and actual content
-3. Render with `.applet-invoked` class and `data-applet-source` attribute
-
-### Metadata Storage (Supplement)
-
-In addition to the prefix, store richer metadata in our storage:
-
-```
-.copilot-web/sessions/<sessionId>/
-├── outputs.json           # Existing - display tool outputs
-└── message-meta.json      # NEW - message source metadata
-```
-
-**message-meta.json format:**
-```json
-{
-  "messages": [
-    {
-      "timestamp": "2026-01-27T20:00:00.000Z",
-      "source": "applet",
-      "appletSlug": "calculator",
-      "prompt": "What is 2+2?"
-    }
-  ]
-}
-```
-
-**Purpose:** Richer metadata for future features (analytics, filtering).
-**Fallback:** Prefix marker in content is the source of truth for rendering.
-
-### Live Chat Rendering
-
-When applet calls `invokeAgent()`:
-
-1. Applet sends WS message: `{ type: 'invoke', prompt, options }`
-2. Server broadcasts to session: `{ type: 'messageStarted', prompt, source: 'applet', appletSlug }`
-3. Chat UI receives `messageStarted` event
-4. Chat UI calls `addAppletBubble(prompt, appletSlug)` instead of `addUserBubble()`
-5. Chat UI connects to SSE stream for response
-
-**New function in response-streaming.ts:**
-```typescript
-export function addAppletBubble(message: string, appletSlug: string): HTMLElement {
-  const chat = document.getElementById('chat');
-  
-  const userDiv = document.createElement('div');
-  userDiv.className = 'message user applet-invoked';
-  userDiv.setAttribute('data-applet-source', appletSlug);
-  userDiv.innerHTML = escapeHtml(message);
-  chat.appendChild(userDiv);
-  
-  // ... add pending response div ...
-}
-```
-
-### History Rendering
-
-When loading session history (`GET /api/history`):
-
-```typescript
-// In api.ts history rendering
-if (isUser) {
-  const { isApplet, slug, content } = parseAppletMessage(rawContent);
-  
-  if (isApplet) {
-    htmlParts.push(`<div class="message user applet-invoked" data-applet-source="${slug}">${escapeHtml(content)}</div>`);
-  } else {
-    htmlParts.push(`<div class="message user">${escapeHtml(content)}</div>`);
-  }
-}
-
-function parseAppletMessage(content: string): { isApplet: boolean; slug: string; content: string } {
-  const match = content.match(/^\[applet:([^\]]+)\]\s*(.*)/s);
-  if (match) {
-    return { isApplet: true, slug: match[1], content: match[2] };
-  }
-  return { isApplet: false, slug: '', content };
-}
-```
+### Phase 4: File Operations (Future)
+- [ ] `readFile(path)` with streaming
+- [ ] `writeFile(path, content)`  
+- [ ] `subscribe(path)` for file watching
 
 ---
 
-## Implementation Checklist
+## Migration Path
 
-### Phase 3A: Core Infrastructure
-- [ ] Add `invoke` message type to WS server
-- [ ] Add `messageStarted` broadcast from server
-- [ ] Implement `invokeAgent()` client API
-- [ ] Wire up POST /sessions/:id/messages from WS handler
+### Step 1: User Message Round-Trip
+1. Add `sendMessage` handler to WS server
+2. Server calls existing message sending logic
+3. Server broadcasts `userMessage` back
+4. Client waits for `userMessage` before rendering bubble
+5. Remove direct `addUserBubble()` call
 
-### Phase 3B: Chat UI Coordination
-- [ ] Chat connects to session WS (not just applet WS)
-- [ ] Handle `messageStarted` event in chat
-- [ ] Add `addAppletBubble()` function
-- [ ] Connect to SSE stream from WS event
+### Step 2: History via WebSocket
+1. On WS connect, server sends `history` with all messages
+2. Client renders each via `renderMessage()`
+3. Remove `/api/history` endpoint
+4. Handle reconnection (re-fetch history)
 
-### Phase 3C: Visual Styling
-- [ ] Add `.applet-invoked` CSS styles
-- [ ] Add applet source indicator styling
-- [ ] Test with calculator applet
+### Step 3: Applet Invocation
+1. Add `invoke` handler to WS server
+2. Server sends message with `source: 'applet'` metadata
+3. Broadcast `userMessage` with applet info
+4. Client renders orange bubble
 
-### Phase 3D: History Persistence
-- [ ] Implement prefix marker for applet messages
-- [ ] Parse prefix in history rendering
-- [ ] Create `message-meta.json` storage (optional enrichment)
-- [ ] Test reload renders orange bubbles correctly
+### Step 4: Streaming Migration
+1. Replace SSE with WS streaming
+2. `assistantStart` → `assistantDelta` → `assistantComplete`
+3. Single streaming renderer
+4. Remove SSE infrastructure
 
-## Files to Create/Modify
-
-| File | Action | Status |
-|------|--------|--------|
-| `src/routes/applet-ws.ts` | New - WebSocket server | ✅ |
-| `src/applet-tools.ts` | Add `set_applet_state` tool | ✅ |
-| `public/ts/applet-ws.ts` | New - Client WebSocket manager | ✅ |
-| `public/ts/applet-runtime.ts` | Integrate WS, expose new APIs | ✅ |
-| `server.ts` | Mount WebSocket on HTTP server | ✅ |
+---
 
 ## Flow Diagram
 
 ```mermaid
 sequenceDiagram
-    participant A as Applet JS
+    participant C as Chat UI
+    participant W as WebSocket
     participant S as Server
-    participant M as Agent/MCP
+    participant A as Agent/SDK
 
-    Note over A,S: Server-local operations
-    A->>S: setState({ formData })
-    S->>S: store in memory
+    Note over C,S: User sends message
+    C->>W: sendMessage({ content })
+    W->>S: route to session
+    S->>A: session.sendMessage()
+    S->>W: broadcast userMessage
+    W->>C: renderMessage()
 
-    A->>S: readFile("/config.yaml")
-    S-->>A: fileContent (chunked)
+    Note over C,S: Agent responds
+    A-->>S: streaming events
+    S->>W: assistantDelta
+    W->>C: update streaming div
+    S->>W: assistantComplete
+    W->>C: finalize message
 
-    A->>S: subscribe("/data.json")
-    Note right of S: fs.watch()
-    S-->>A: fileChanged (on edit)
-
-    Note over A,M: Agent-routed operations
-    A->>S: invoke("Process this")
-    S->>M: send to session
-    M-->>S: streaming response
-    S-->>A: stream chunks
-    S-->>A: invokeComplete
-
-    M->>S: set_applet_state tool
-    S-->>A: stateUpdate
+    Note over C,S: Applet invokes
+    C->>W: invoke({ prompt, appletSlug })
+    S->>W: userMessage (source: applet)
+    W->>C: renderMessage() [orange]
+    S->>A: session.sendMessage()
+    A-->>S: streaming
+    S->>W: assistantComplete
 ```

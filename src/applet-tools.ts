@@ -82,31 +82,50 @@ function calculate() {
 - \`listApplets()\` - Get array of saved applets (async)
 - \`appletContainer\` - Reference to container element
 
-**Agent Communication (two patterns):**
+**Agent Communication:**
 
-### Pattern 1: Passive State (agent polls)
-\`setAppletState(obj)\` - Store state for agent to query later
+\`setAppletState(obj)\` - Store state for agent to query via get_applet_state tool
 \`\`\`javascript
 setAppletState({ selectedFile: '/path/to/file.txt' });
-// Agent can read this anytime via get_applet_state tool
 \`\`\`
 
-### Pattern 2: Active Request (agent responds NOW)
-\`sendAgentMessage(prompt)\` - Send message, agent responds immediately
+\`sendAgentMessage(prompt, options?)\` - Send message, agent responds immediately
 \`\`\`javascript
 await sendAgentMessage('Get MSFT stock price and set_applet_state with result');
-// Agent receives message, takes action, responds in chat
+
+// With image data (from canvas, etc.)
+await sendAgentMessage('Analyze this image', { imageData: canvas.toDataURL() });
 \`\`\`
 
-**Use passive** when storing data for agent to read on demand.
-**Use active** when you want the agent to do something RIGHT NOW.
+\`getSessionId()\` - Get current session ID (null if no active session)
+
+\`saveTempFile(dataUrl, options?)\` - Save image to ~/.caco/tmp/ for agent viewing
+\`\`\`javascript
+const { path } = await saveTempFile(canvas.toDataURL('image/png'));
+await sendAgentMessage(\`Analyze image at \${path}\`);  // Agent uses view tool
+\`\`\`
+
+**Keyboard Input:**
+
+\`registerKeyHandler(slug, handler)\` - Register keyboard handler for this applet
+\`\`\`javascript
+registerKeyHandler('my-applet', function(e) {
+  // Only called when this applet is active (visible)
+  // No visibility checks needed - router handles it
+  if (e.key === 'Enter') submitForm();
+});
+\`\`\`
+
+- Router automatically filters for INPUT/TEXTAREA focus
+- Handler only fires when applet view is active
+- No global document.addEventListener needed
 
 ## Tips
 
-- Use onclick="functionName()" for button handlers (not addEventListener)
+- Use onclick="functionName()" for button handlers
+- Use registerKeyHandler() for keyboard shortcuts (not addEventListener)
 - Test with reload_page tool after file changes
-- Applet runs in sandboxed scope but has full DOM access
-- Use relative paths for any fetch() calls to local APIs
+- Applet runs in main window scope with full DOM access
 
 ## After Creating/Updating
 

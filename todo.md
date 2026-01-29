@@ -1,9 +1,5 @@
 # things to do
 
-app-to-session vision flow:
-apps can send image data to agent when making requests
-agents can get image data from apps (maybe already works?)
-
 agent-to-agent recursion or loop defense
 server-side, like failure for  agent-to-agent MCP tools or POST endpoint protection
 

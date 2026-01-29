@@ -4,6 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import type { SessionConfig, SystemMessage } from './types.js';
+import { CwdLockedError } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
 import { registerSession, unregisterSession } from './storage.js';
 
@@ -178,13 +179,13 @@ class SessionManager {
 
   /**
    * Create a new session for the given cwd
-   * @throws Error if cwd is already locked
+   * @throws CwdLockedError if cwd is already locked
    */
   async create(cwd: string, config: SessionConfig = {}): Promise<string> {
     // Check lock
     if (this.cwdLocks.has(cwd)) {
-      const existingSessionId = this.cwdLocks.get(cwd);
-      throw new Error(`Directory ${cwd} is locked by session ${existingSessionId}`);
+      const existingSessionId = this.cwdLocks.get(cwd)!;
+      throw new CwdLockedError(cwd, existingSessionId);
     }
     
     // Model is REQUIRED - fail loudly if not provided
@@ -247,7 +248,7 @@ class SessionManager {
     // Check lock
     const lockHolder = this.cwdLocks.get(cwd);
     if (lockHolder && lockHolder !== sessionId) {
-      throw new Error(`Directory ${cwd} is locked by session ${lockHolder}`);
+      throw new CwdLockedError(cwd, lockHolder);
     }
     
     // Already active?

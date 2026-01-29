@@ -29,12 +29,12 @@ export function createAgentTools(sessionRef: SessionIdRef) {
   const sendAgentMessage = defineTool('send_agent_message', {
     description: `Send a message to another agent session. Use this to delegate work to specialist sessions or coordinate with other agents.
 
-The target session will receive your message with source: 'agent' and your session ID.
+The target session receives your message with source: 'agent'. Your session ID is automatically included so the target can call back.
 
-**Callback pattern**: Include instructions like "When finished, call send_agent_message('<your-session-id>', 'Results: ...')" so the target can report back. Call get_session_state on yourself to get your session ID if needed.
+**Callback pattern**: Tell the target to "send_agent_message(requestingSession, 'Results: ...')" when finished.
 
 **Example uses**:
-- Delegate: "Analyze the API in /src/api and send_agent_message('<your-session-id>', 'Analysis: ...') when done"
+- Delegate: "Analyze the API in /src/api and send_agent_message(requestingSession, 'Analysis: ...') when done"
 - Fan-out: Send same analysis task to multiple specialist sessions
 - Coordinate: Notify other sessions of state changes`,
 
@@ -65,7 +65,7 @@ The target session will receive your message with source: 'agent' and your sessi
 
         await response.json();
         return { 
-          textResultForLlm: `Message sent to session ${sessionId}. The target session will process asynchronously. Your session ID is ${sessionRef.id} - include callback instructions like: "When finished, call send_agent_message('${sessionRef.id}', 'your results here')"`,
+          textResultForLlm: `Message sent to session ${sessionId}. Target will process asynchronously. Include callback instructions like: "send_agent_message(requestingSession, 'results')" so target can reply.`,
           resultType: 'text' as const
         };
       } catch (err) {
@@ -81,17 +81,15 @@ The target session will receive your message with source: 'agent' and your sessi
     description: `Check the current state of an agent session. Use this to:
 - Poll if a session you sent work to is still processing or idle
 - Verify a session exists before sending messages
-- Get the working directory of a session
-- Get your own session ID (pass 'self' as sessionId)`,
+- Get the working directory of a session`,
 
     parameters: z.object({
-      sessionId: z.string().describe("Target session ID to check, or 'self' to get your own session info")
+      sessionId: z.string().describe('Target session ID to check')
     }),
 
     handler: async ({ sessionId }) => {
       try {
-        // Handle 'self' to get own session info
-        const targetId = sessionId === 'self' ? sessionRef.id : sessionId;
+        const targetId = sessionId;
         
         const response = await fetch(`${SERVER_URL}/api/sessions/${targetId}/state`);
         
@@ -173,7 +171,7 @@ Returns the new session ID. Use send_agent_message to send work to it.
           }
           
           return { 
-            textResultForLlm: `Created session ${newSessionId} in ${cwd} and sent initial message. Your session ID is ${sessionRef.id} - to receive results, your initial message should include: "When finished, call send_agent_message('${sessionRef.id}', 'your results')"`,
+            textResultForLlm: `Created session ${newSessionId} in ${cwd} and sent initial message. Include callback instructions like "send_agent_message(requestingSession, 'results')" so the new session can reply.`,
             resultType: 'text' as const
           };
         }

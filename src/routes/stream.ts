@@ -86,16 +86,19 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   
   // Broadcast user message to WS clients for unified rendering
   // Use source from request (defaults to 'user' for normal messages)
-  broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, source ?? 'user', appletSlug);
+  broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, source ?? 'user', appletSlug, fromSession);
   
   // Return immediately - dispatch happens in background
   res.json({ ok: true, sessionId });
   
   // Prefix prompt with applet/agent marker for history persistence
-  // Format: [applet:slug] or [agent:sessionId] actual prompt
-  const promptToSend = source === 'applet' && appletSlug 
-    ? `[applet:${appletSlug}] ${prompt}`
-    : prompt;
+  // Format: [applet:slug] or [agent:fromSession] actual prompt
+  let promptToSend = prompt;
+  if (source === 'applet' && appletSlug) {
+    promptToSend = `[applet:${appletSlug}] ${prompt}`;
+  } else if (source === 'agent' && fromSession) {
+    promptToSend = `[agent:${fromSession}] ${prompt}`;
+  }
   
   // Dispatch to SDK with WS broadcast callbacks
   dispatchMessage(

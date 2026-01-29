@@ -24,7 +24,8 @@ export interface ChatMessage {
   status?: 'streaming' | 'complete';  // Defaults to 'complete'
   timestamp?: string;
   source?: MessageSource;
-  appletSlug?: string;
+  appletSlug?: string;        // For applet source messages
+  fromSession?: string;       // For agent source messages
   hasImage?: boolean;
   outputs?: string[];
 }

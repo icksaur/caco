@@ -53,7 +53,8 @@ export interface ChatMessage {
   status?: 'streaming' | 'complete';  // Defaults to 'complete'
   timestamp?: string;
   source?: MessageSource;
-  appletSlug?: string;
+  appletSlug?: string;        // For applet source messages
+  fromSession?: string;       // For agent source messages
   hasImage?: boolean;
   // For assistant messages
   outputs?: string[];  // Output IDs
@@ -321,7 +322,8 @@ export function broadcastUserMessageFromPost(
   content: string,
   hasImage: boolean,
   source: MessageSource = 'user',
-  appletSlug?: string
+  appletSlug?: string,
+  fromSession?: string
 ): void {
   const message: ChatMessage = {
     id: randomUUID(),
@@ -330,6 +332,7 @@ export function broadcastUserMessageFromPost(
     timestamp: new Date().toISOString(),
     source,
     appletSlug,
+    fromSession,
     hasImage
   };
   
@@ -370,16 +373,22 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
         const isUser = evt.type === 'user.message';
         let content = (evt.data as { content?: string })?.content || '';
         
-        // Parse applet marker from user messages: [applet:slug] actual content
+        // Parse applet/agent marker from user messages: [applet:slug] or [agent:sessionId]
         let source: MessageSource = 'user';
         let appletSlug: string | undefined;
+        let fromSession: string | undefined;
         
         if (isUser) {
           const appletMatch = content.match(/^\[applet:([^\]]+)\]\s*/);
+          const agentMatch = content.match(/^\[agent:([^\]]+)\]\s*/);
           if (appletMatch) {
             source = 'applet';
             appletSlug = appletMatch[1];
             content = content.slice(appletMatch[0].length);
+          } else if (agentMatch) {
+            source = 'agent';
+            fromSession = agentMatch[1];
+            content = content.slice(agentMatch[0].length);
           }
         }
         
@@ -392,6 +401,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
           timestamp: new Date().toISOString(),
           source: isUser ? source : undefined,
           appletSlug: isUser ? appletSlug : undefined,
+          fromSession: isUser ? fromSession : undefined,
           outputs: isUser ? undefined : [...pendingOutputs]
         };
         

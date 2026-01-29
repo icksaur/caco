@@ -227,3 +227,26 @@ If `initialMessage` is provided, it's sent immediately with `source: 'agent'`.
 - [ ] How to handle errors from spawned sessions (notify originator?)
 - [ ] Should there be a "wait for completion" variant that blocks?
 - [ ] Session cleanup - who cleans up spawned sessions?
+
+## Known Bugs (Fixed)
+
+### Bug 1: send_agent_message mentioned session IDs to agent context (FIXED)
+
+The tool responses mentioned "your session ID" but agents don't need this info. The `fromSession` is auto-filled internally and the receiving session can access it from context.
+
+**Fix**: Removed all session ID mentions from tool descriptions and responses. Callback pattern now uses `requestingSession` placeholder.
+
+### Bug 2: Agent messages didn't render correctly in history reload (FIXED)
+
+Agent messages appeared purple during streaming but not when reloading from history. This was because:
+
+1. `stream.ts` didn't prefix agent messages with `[agent:fromSession]` like it did `[applet:slug]`
+2. `applet-ws.ts` history parsing only handled `[applet:...]`, not `[agent:...]`
+3. `ChatMessage` interface didn't include `fromSession` field
+4. `broadcastUserMessageFromPost` didn't pass `fromSession`
+
+**Fix**: 
+- Added `[agent:fromSession]` prefix in stream.ts for agent source messages
+- Parse `[agent:...]` in history alongside `[applet:...]`
+- Added `fromSession` field to ChatMessage interface (both server and client)
+- Pass `fromSession` through broadcastUserMessageFromPost

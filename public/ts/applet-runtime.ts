@@ -84,6 +84,9 @@ export function initAppletRuntime(): void {
   (window as unknown as { getSessionId: typeof getActiveSessionId }).getSessionId = getActiveSessionId;
   (window as unknown as { sendAgentMessage: typeof sendAgentMessage }).sendAgentMessage = sendAgentMessage;
   
+  // Temp file API for applet JS - save images for agent to view
+  (window as unknown as { saveTempFile: typeof saveTempFile }).saveTempFile = saveTempFile;
+  
   // Input routing API for applet JS - register keyboard handler
   (window as unknown as { registerKeyHandler: typeof registerKeyHandler }).registerKeyHandler = registerKeyHandler;
   
@@ -284,6 +287,64 @@ async function sendAgentMessage(prompt: string, options?: SendAgentMessageOption
   }
   
   console.log('[APPLET] Agent message sent successfully');
+}
+
+/**
+ * Result from saveTempFile
+ */
+interface TempFileResult {
+  /** Absolute path to the saved file (for agent's view tool) */
+  path: string;
+  /** Filename used */
+  filename: string;
+  /** File size in bytes */
+  size: number;
+  /** Detected MIME type */
+  mimeType: string;
+}
+
+/**
+ * Save a temporary file to ~/.caco/tmp/
+ * 
+ * Use this to save images/data that the agent can then view.
+ * Returns the absolute path which you can include in a message to the agent.
+ * 
+ * @param data - Base64 data URL (data:image/png;base64,...) or raw base64
+ * @param options - Optional filename or mimeType
+ * @returns Promise with path information
+ * 
+ * @example
+ * // From canvas
+ * const dataUrl = canvas.toDataURL('image/png');
+ * const { path } = await saveTempFile(dataUrl);
+ * await sendAgentMessage(`Please analyze the image at ${path}`);
+ * 
+ * @example  
+ * // With custom filename
+ * const { path } = await saveTempFile(dataUrl, { filename: 'screenshot.png' });
+ */
+async function saveTempFile(
+  data: string, 
+  options?: { filename?: string; mimeType?: string }
+): Promise<TempFileResult> {
+  const response = await fetch('/api/tmpfile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      data,
+      filename: options?.filename,
+      mimeType: options?.mimeType
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || `HTTP ${response.status}`);
+  }
+  
+  const result = await response.json();
+  console.log(`[APPLET] Saved temp file: ${result.path}`);
+  return result;
 }
 
 /**

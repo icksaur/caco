@@ -15,6 +15,8 @@ import express from 'express';
 import { CopilotClient } from '@github/copilot-sdk';
 import { readdir, readFile, stat, writeFile, mkdir } from 'fs/promises';
 import { join, relative, resolve, dirname } from 'path';
+import { homedir } from 'os';
+import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
@@ -22,6 +24,9 @@ import { setAppletUserState, getAppletUserState, clearAppletUserState } from '..
 import { listApplets, loadApplet } from '../applet-store.js';
 
 const router = Router();
+
+// Temp file directory (~/.caco/tmp)
+const TEMP_DIR = join(homedir(), '.caco', 'tmp');
 
 // Cache models to avoid repeated SDK calls
 let cachedModels: Array<{ id: string; name: string; multiplier: number }> | null = null;
@@ -532,6 +537,84 @@ router.post('/files/write', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[API] Failed to write file:', error);
     res.status(500).json({ error: 'Failed to write file' });
+  }
+});
+
+/**
+ * POST /api/tmpfile - Write temporary file to ~/.caco/tmp/
+ * Body: { data: string, mimeType?: string, filename?: string }
+ * 
+ * For applets to save images/files that the agent can then view.
+ * Returns absolute path for use with agent's view tool.
+ * 
+ * data: base64 data URL (data:image/png;base64,...) or raw base64
+ * mimeType: optional, inferred from data URL if not provided
+ * filename: optional, auto-generated if not provided
+ */
+router.post('/tmpfile', express.json({ limit: '10mb' }), async (req: Request, res: Response) => {
+  const { data, mimeType, filename } = req.body as { data?: string; mimeType?: string; filename?: string };
+  
+  if (!data) {
+    res.status(400).json({ error: 'data is required' });
+    return;
+  }
+  
+  try {
+    // Parse data URL or use raw base64
+    let base64Data: string;
+    let detectedMime: string;
+    
+    if (data.startsWith('data:')) {
+      // Parse data URL: data:image/png;base64,iVBOR...
+      const matches = data.match(/^data:([^;]+);base64,(.+)$/);
+      if (!matches) {
+        res.status(400).json({ error: 'Invalid data URL format' });
+        return;
+      }
+      detectedMime = matches[1];
+      base64Data = matches[2];
+    } else {
+      // Raw base64, require mimeType
+      base64Data = data;
+      detectedMime = mimeType || 'application/octet-stream';
+    }
+    
+    // Determine file extension from mime type
+    const extMap: Record<string, string> = {
+      'image/png': 'png',
+      'image/jpeg': 'jpg',
+      'image/gif': 'gif',
+      'image/webp': 'webp',
+      'image/svg+xml': 'svg',
+      'application/pdf': 'pdf',
+      'text/plain': 'txt',
+      'application/json': 'json',
+    };
+    const ext = extMap[detectedMime] || 'bin';
+    
+    // Generate filename if not provided
+    const finalFilename = filename || `${randomUUID()}.${ext}`;
+    
+    // Ensure tmp directory exists
+    await mkdir(TEMP_DIR, { recursive: true });
+    
+    // Write file
+    const fullPath = join(TEMP_DIR, finalFilename);
+    const buffer = Buffer.from(base64Data, 'base64');
+    await writeFile(fullPath, buffer);
+    
+    console.log(`[API] Wrote temp file: ${fullPath} (${buffer.length} bytes)`);
+    
+    res.json({ 
+      ok: true, 
+      path: fullPath,          // Absolute path for agent's view tool
+      filename: finalFilename,
+      size: buffer.length,
+      mimeType: detectedMime
+    });
+  } catch (error) {
+    console.error('[API] Failed to write temp file:', error);
+    res.status(500).json({ error: 'Failed to write temp file' });
   }
 });
 

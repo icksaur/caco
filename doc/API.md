@@ -299,6 +299,28 @@ await sendAgentMessage('Analyze this', { appletSlug: 'image-viewer', imageData }
 Returns a Promise that resolves when the message is sent (not when the agent responds).
 The agent's response will stream to the chat as usual.
 
+### saveTempFile(data, options?)
+
+Save a temporary file to `~/.caco/tmp/` for the agent to view.
+
+This is useful when SDK binary results aren't fully supported yet - save the image to a file, then tell the agent the path so it can use the `view` tool.
+
+```javascript
+// From canvas
+const dataUrl = canvas.toDataURL('image/png');
+const { path } = await saveTempFile(dataUrl);
+await sendAgentMessage(`Please analyze the image at ${path}`);
+
+// With custom filename
+const { path } = await saveTempFile(dataUrl, { filename: 'screenshot.png' });
+```
+
+**Returns:** `{ path, filename, size, mimeType }`
+- `path` - Absolute path (e.g., `/home/user/.caco/tmp/abc123.png`)
+- `filename` - Filename used
+- `size` - File size in bytes
+- `mimeType` - Detected MIME type
+
 ### Global Variables
 
 | Variable | Description |

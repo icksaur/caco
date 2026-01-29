@@ -16,6 +16,7 @@ import { createAgentTools, type SessionIdRef } from './src/agent-tools.js';
 import { storeOutput, detectLanguage } from './src/storage.js';
 import { sessionRoutes, apiRoutes, streamRoutes } from './src/routes/index.js';
 import { setupWebSocket } from './src/routes/websocket.js';
+import { loadUsageCache } from './src/usage-state.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -143,6 +144,9 @@ app.use('/api', streamRoutes);
 // ============================================================
 
 async function start(): Promise<void> {
+  // Load cached usage from disk
+  loadUsageCache();
+  
   // Initialize session state
   await sessionState.init({
     systemMessage: SYSTEM_MESSAGE,

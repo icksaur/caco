@@ -13,7 +13,7 @@ import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initViewState, setViewState, isViewState } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { setupMultilineInput } from './multiline-input.js';
-import { connectAppletWs, waitForConnect } from './applet-ws.js';
+import { connectAppletWs, setActiveSession, requestHistory, waitForConnect, reconnectIfNeeded } from './applet-ws.js';
 
 /**
  * Toggle between chatting and applet views
@@ -64,6 +64,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initialize applet runtime (exposes setAppletState globally)
   initAppletRuntime();
   
+  // Connect WebSocket once on page load
+  connectAppletWs();
+  await waitForConnect();
+  
+  // Reconnect WS when page becomes visible (e.g., returning from another tab)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      reconnectIfNeeded();
+    }
+  });
+  
   // Set up event handlers
   setupImagePaste();
   setupFormHandler();
@@ -92,9 +103,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const hasAppletParam = new URLSearchParams(window.location.search).has('applet');
   
   if (prefs?.lastSessionId) {
-    // Active session exists - connect WS and wait for history
-    connectAppletWs(prefs.lastSessionId);
-    await waitForConnect();
+    // Active session exists - set active and request history
+    setActiveSession(prefs.lastSessionId);
+    requestHistory(prefs.lastSessionId);
     await waitForHistoryComplete();
     
     // Set view based on URL param (applet takes priority)

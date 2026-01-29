@@ -12,7 +12,7 @@
  */
 
 import { setViewState } from './view-controller.js';
-import { connectAppletWs, wsSetState, onStateUpdate, isWsConnected, getWsSessionId } from './applet-ws.js';
+import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './applet-ws.js';
 import { getActiveSessionId } from './state.js';
 
 // Navigation API types (not yet in TypeScript lib)
@@ -623,11 +623,7 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   syncToUrl();
   setViewState('applet');
   
-  // Connect WebSocket for real-time state sync
-  const sessionId = getActiveSessionId();
-  if (sessionId) {
-    connectAppletWs(sessionId);
-  }
+  // WebSocket is already connected on page load - no need to connect here
 }
 
 /**

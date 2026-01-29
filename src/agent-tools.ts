@@ -44,6 +44,7 @@ The target session receives your message with source: 'agent'. Your session ID i
     }),
 
     handler: async ({ sessionId, message }) => {
+      console.log(`[AGENT-TOOL] send_agent_message called: target=${sessionId}`);
       try {
         const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/messages`, {
           method: 'POST',
@@ -54,9 +55,11 @@ The target session receives your message with source: 'agent'. Your session ID i
             fromSession: sessionRef.id
           })
         });
+        console.log(`[AGENT-TOOL] POST response received: status=${response.status}`);
         
         if (!response.ok) {
           const error = await response.json().catch(() => ({ error: response.statusText }));
+          console.log(`[AGENT-TOOL] POST failed:`, error);
           return { 
             textResultForLlm: `Failed to send message: ${error.error || response.statusText}`,
             resultType: 'error' as const
@@ -64,6 +67,7 @@ The target session receives your message with source: 'agent'. Your session ID i
         }
 
         await response.json();
+        console.log(`[AGENT-TOOL] Tool returning success`);
         return { 
           textResultForLlm: `Message sent to session ${sessionId}. Target will process asynchronously. Include callback instructions like: "send_agent_message(requestingSession, 'results')" so target can reply.`,
           resultType: 'text' as const

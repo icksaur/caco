@@ -9,8 +9,8 @@ import { escapeHtml, scrollToBottom, isAutoScrollEnabled, enableAutoScroll } fro
 import { addActivityItem } from './activity.js';
 import { setStreaming, isStreaming, getActiveSessionId, setActiveSession } from './state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
-import { isViewState } from './view-controller.js';
-import { onMessage, onHistoryComplete, onActivity, isWsConnected, waitForConnect, type ChatMessage, type ActivityItem } from './applet-ws.js';
+import { isViewState, setViewState } from './view-controller.js';
+import { onMessage, onHistoryComplete, onActivity, isWsConnected, type ChatMessage, type ActivityItem } from './applet-ws.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -381,11 +381,11 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       sessionId = sessionData.sessionId;
       setActiveSession(sessionId, sessionData.cwd);
       
-      // Wait for WS to connect before sending message
-      // This ensures we receive the user message broadcast
-      console.log('[STREAM] Waiting for WS connect after new session...');
-      await waitForConnect();
-      console.log('[STREAM] WS connected, proceeding with message');
+      // Switch to chatting view now that we have a session
+      setViewState('chatting');
+      
+      // WebSocket is already connected on page load and setActiveSession
+      // configures message filtering for the new session
     }
     
     // Step 2: POST message to session, get streamId

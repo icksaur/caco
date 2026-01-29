@@ -171,10 +171,10 @@ class SessionState {
     
     const activeId = this.getActiveSessionId(clientId);
     
-    // Explicit new chat request - stop and clear the old session
+    // Explicit new chat request - just clear the active session reference
+    // Don't stop the old session - it may still be running
     if (newChat && activeId) {
-      console.log(`[SESSION] New chat requested - stopping old session ${activeId}`);
-      await sessionManager.stop(activeId);
+      console.log(`[SESSION] New chat requested - clearing active session reference (${activeId} continues running)`);
       this.setActiveSessionId(null, clientId);
     }
     
@@ -242,16 +242,13 @@ class SessionState {
       throw new Error('SessionState not initialized');
     }
     
-    // Stop current session
-    const activeId = this.getActiveSessionId(clientId);
-    if (activeId) {
-      await sessionManager.stop(activeId);
-    }
+    // Don't stop current session - it may still be running
+    // Just switch which session the client is viewing
     
     // Clear any pending resume - we're switching explicitly
     this.setPendingResumeId(null, clientId);
     
-    // Resume new session
+    // Resume new session (loads SDK client if needed, doesn't stop others)
     const resumedId = await sessionManager.resume(sessionId, {
       toolFactory: this._config.toolFactory,
       excludedTools: this._config.excludedTools
@@ -265,14 +262,15 @@ class SessionState {
   }
 
   /**
-   * Prepare for a new chat (stop current, set cwd, clear session)
+   * Prepare for a new chat (clear session reference, set cwd)
+   * Does NOT stop the current session - it may still be running
    * @param cwd - Working directory for the new chat
    * @param clientId - Client identifier for multi-client support
    */
   async prepareNewChat(cwd: string, clientId?: string): Promise<void> {
     const activeId = this.getActiveSessionId(clientId);
     if (activeId) {
-      await sessionManager.stop(activeId);
+      console.log(`[SESSION] Preparing new chat - clearing reference to ${activeId} (session continues running)`);
       this.setActiveSessionId(null, clientId);
     }
     

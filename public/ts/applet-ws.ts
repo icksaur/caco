@@ -1,12 +1,11 @@
 /**
  * Applet WebSocket Client
  * 
- * Client-side WebSocket connection for applet ↔ server communication.
- * Provides real-time state sync and future agent invocation support.
+ * ARCHITECTURE: Single persistent WebSocket connection (no session in URL).
+ * Server broadcasts ALL messages with sessionId. Client filters by active session.
  * 
- * ARCHITECTURE: Single socket per session, tracked by connection ID.
- * When switching sessions, we increment the ID so any pending callbacks
- * from old sockets are ignored.
+ * Connect once on page load. When switching sessions, call requestHistory().
+ * Messages for non-active sessions are ignored.
  */
 
 /**
@@ -37,13 +36,15 @@ export interface ActivityItem {
   details?: string;
 }
 
-// Connection state - use ID to ignore stale callbacks
+// Connection state
 let socket: WebSocket | null = null;
-let sessionId: string | null = null;
 let connectionId = 0;  // Incremented on each new connection
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 1000;
+
+// Active session - messages for other sessions are filtered out
+let activeSessionId: string | null = null;
 
 // Callbacks
 type StateCallback = (state: Record<string, unknown>) => void;
@@ -65,33 +66,44 @@ const pendingRequests = new Map<string, {
 let requestId = 0;
 
 /**
- * Connect to applet WebSocket
- * Called when an applet is loaded.
- * 
- * PATTERN: Each connect increments connectionId. Callbacks from old
- * connections are ignored because they captured a stale ID.
+ * Connect to the WebSocket server (call once on page load).
+ * No session parameter - server broadcasts all, client filters.
  */
-export function connectAppletWs(session: string): void {
-  console.log(`[WS] connectAppletWs called for ${session}, current: ${sessionId}`);
+export function connectAppletWs(): void {
+  console.log(`[WS] connectAppletWs called, socket state: ${socket?.readyState ?? 'null'}`);
   
-  // Always close any existing socket first (sync, before any async)
-  if (socket) {
-    console.log(`[WS] Closing existing socket (state: ${socket.readyState})`);
-    const oldSocket = socket;
-    socket = null;  // Clear immediately
-    oldSocket.onclose = null;  // Remove handler to prevent reconnect
-    oldSocket.onerror = null;
-    oldSocket.onmessage = null;
-    oldSocket.onopen = null;
-    oldSocket.close();
+  // Already connected or connecting
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    console.log(`[WS] Already connected/connecting`);
+    return;
   }
   
-  // New connection
-  sessionId = session;
-  connectionId++;  // Increment ID so stale callbacks are ignored
+  connectionId++;
   reconnectAttempts = 0;
-  
   doConnect(connectionId);
+}
+
+/**
+ * Set the active session ID. Messages for other sessions are filtered out.
+ */
+export function setActiveSession(sessionId: string | null): void {
+  console.log(`[WS] setActiveSession: ${sessionId}`);
+  activeSessionId = sessionId;
+}
+
+/**
+ * Get the active session ID.
+ */
+export function getActiveSessionId(): string | null {
+  return activeSessionId;
+}
+
+/**
+ * Request history for a session. Server streams messages with that sessionId.
+ */
+export function requestHistory(sessionId: string): void {
+  console.log(`[WS] requestHistory for session: ${sessionId}`);
+  send({ type: 'requestHistory', sessionId });
 }
 
 /**
@@ -100,8 +112,6 @@ export function connectAppletWs(session: string): void {
  *   All callbacks capture this and bail if it's stale.
  */
 function doConnect(myConnectionId: number): void {
-  if (!sessionId) return;
-  
   // Bail if a newer connection has been started
   if (myConnectionId !== connectionId) {
     console.log(`[WS] doConnect bailing, stale connection ID ${myConnectionId} vs current ${connectionId}`);
@@ -114,7 +124,7 @@ function doConnect(myConnectionId: number): void {
   }
   
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${protocol}//${window.location.host}/ws/applet?session=${encodeURIComponent(sessionId)}`;
+  const url = `${protocol}//${window.location.host}/ws/applet`;
   
   console.log(`[WS] Connecting: ${url} (connectionId: ${myConnectionId})`);
   const ws = new WebSocket(url);
@@ -180,9 +190,10 @@ function doConnect(myConnectionId: number): void {
 
 /**
  * Handle incoming message from server
+ * Filters messages by activeSessionId - only messages for current session are processed
  */
-function handleMessage(msg: { type: string; id?: string; data?: unknown; error?: string }): void {
-  // Handle request/response messages
+function handleMessage(msg: { type: string; id?: string; sessionId?: string; data?: unknown; error?: string }): void {
+  // Handle request/response messages (no session filtering)
   if (msg.id && pendingRequests.has(msg.id)) {
     const { resolve, reject } = pendingRequests.get(msg.id)!;
     pendingRequests.delete(msg.id);
@@ -192,6 +203,13 @@ function handleMessage(msg: { type: string; id?: string; data?: unknown; error?:
     } else {
       resolve(msg.data);
     }
+    return;
+  }
+  
+  // Filter by active session for broadcast messages
+  const msgSessionId = msg.sessionId;
+  if (msgSessionId && activeSessionId && msgSessionId !== activeSessionId) {
+    // Message for a different session - ignore
     return;
   }
   
@@ -332,7 +350,7 @@ export function disconnectAppletWs(): void {
     socket.close();
     socket = null;
   }
-  sessionId = null;
+  activeSessionId = null;
   reconnectAttempts = MAX_RECONNECT_ATTEMPTS; // Prevent auto-reconnect
 }
 
@@ -408,8 +426,13 @@ export function waitForConnect(): Promise<void> {
 }
 
 /**
- * Get current session ID
+ * Reconnect to WebSocket (e.g., on visibility change)
  */
-export function getWsSessionId(): string | null {
-  return sessionId;
+export function reconnectIfNeeded(): void {
+  if (!socket || socket.readyState === WebSocket.CLOSED) {
+    console.log(`[WS] reconnectIfNeeded - reconnecting`);
+    reconnectAttempts = 0;
+    connectionId++;
+    doConnect(connectionId);
+  }
 }

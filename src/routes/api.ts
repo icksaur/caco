@@ -123,7 +123,7 @@ router.get('/outputs/:id', (req: Request, res: Response) => {
 });
 
 // History is now streamed via WebSocket on connect
-// See: src/routes/applet-ws.ts streamHistory()
+// See: src/routes/websocket.ts streamHistory()
 
 // Debug: raw message structure
 router.get('/debug/messages', async (_req: Request, res: Response) => {

@@ -17,7 +17,7 @@ import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
-import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, type ActivityItem, type MessageSource, type ChatMessage } from './applet-ws.js';
+import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, type ActivityItem, type MessageSource, type ChatMessage } from './websocket.js';
 import { randomUUID } from 'crypto';
 
 const router = Router();

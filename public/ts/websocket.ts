@@ -1,11 +1,15 @@
 /**
- * Applet WebSocket Client
+ * WebSocket Client
  * 
- * ARCHITECTURE: Single persistent WebSocket connection (no session in URL).
- * Server broadcasts ALL messages with sessionId. Client filters by active session.
+ * Single persistent WebSocket connection for all client-server communication:
+ * - Chat message streaming (user & assistant)
+ * - Activity items (tool calls, intents, errors)
+ * - History loading
+ * - State sync
+ * - Agent-to-agent messages
  * 
- * Connect once on page load. When switching sessions, call requestHistory().
- * Messages for non-active sessions are ignored.
+ * Connect once on page load. Server broadcasts ALL messages with sessionId.
+ * Client filters by active session.
  */
 
 /**
@@ -69,8 +73,8 @@ let requestId = 0;
  * Connect to the WebSocket server (call once on page load).
  * No session parameter - server broadcasts all, client filters.
  */
-export function connectAppletWs(): void {
-  console.log(`[WS] connectAppletWs called, socket state: ${socket?.readyState ?? 'null'}`);
+export function connectWs(): void {
+  console.log(`[WS] connectWs called, socket state: ${socket?.readyState ?? 'null'}`);
   
   // Already connected or connecting
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
@@ -124,7 +128,7 @@ function doConnect(myConnectionId: number): void {
   }
   
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${protocol}//${window.location.host}/ws/applet`;
+  const url = `${protocol}//${window.location.host}/ws`;
   
   console.log(`[WS] Connecting: ${url} (connectionId: ${myConnectionId})`);
   const ws = new WebSocket(url);
@@ -313,7 +317,7 @@ function request<T = unknown>(type: string, data?: object): Promise<T> {
 
 /**
  * Push state to server (replaces HTTP batch)
- * Applet JS calls this to make state queryable by agent
+ * Called by applet JS to make state queryable by agent
  */
 export function wsSetState(state: Record<string, unknown>): void {
   send({ type: 'setState', data: state });
@@ -345,7 +349,7 @@ export function isWsConnected(): boolean {
 /**
  * Disconnect WebSocket
  */
-export function disconnectAppletWs(): void {
+export function disconnectWs(): void {
   if (socket) {
     socket.close();
     socket = null;

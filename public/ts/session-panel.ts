@@ -7,7 +7,7 @@ import { formatAge } from './ui-utils.js';
 import { getActiveSessionId, getCurrentCwd, setActiveSession } from './state.js';
 import { setAvailableModels, loadModels, getNewChatCwd } from './model-selector.js';
 import { waitForHistoryComplete } from './history.js';
-import { setActiveSession as setWsActiveSession, requestHistory } from './applet-ws.js';
+import { setActiveSession as setWsActiveSession, requestHistory } from './websocket.js';
 import { setViewState, getViewState, isViewState } from './view-controller.js';
 
 /**

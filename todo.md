@@ -1,20 +1,10 @@
 # things to do
 
-agent-to-agent HTTP API:
-Agents can POST to other sessions or create a new session with a prompt via MCP tool.  Basic prevention of post-to-self via HTTP route handler blocking same cwd.
-make agent-to-agent.md, plan it out, iterate with user
-
-agent-to-agent MCP custom tool:
-wrap above in MCP custom tool for agents to call.
-
-session state HTTP API:
-ensure we have a GET request that gets a session state, so we can see if an agent session is idle and what the last message is, or if it's busy
-
 fix POST /api/files/write to make the URL path the file path instead of JSON+Content payload.
 ex: POST /api/files/path/to/file.json
 update all
 
-rebrand this project to "Caco" (lowercase caco for slugs and folders).  Change all display text to "Caco"  Change ".vscode-web" to ".caco".  Update all applet code and docs.
+rebrand this project to "Caco" (lowercase caco for slugs, filenames variables).  Change all display text to "Caco"  Change ".vscode-web" to ".caco".  Update all applet code and docs.  Move ./.caco/ to be found in ~/.caco/
 
 applet input segregation - only visible app gets mouse, keyboard, gamepad, camera, whatever input.  May require frames or iframe?  Needs:
 applet-os.md reqs list

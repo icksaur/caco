@@ -13,7 +13,7 @@ import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initViewState, setViewState, isViewState } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { setupMultilineInput } from './multiline-input.js';
-import { connectAppletWs, setActiveSession, requestHistory, waitForConnect, reconnectIfNeeded } from './applet-ws.js';
+import { connectWs, setActiveSession, requestHistory, waitForConnect, reconnectIfNeeded } from './websocket.js';
 
 /**
  * Toggle between chatting and applet views
@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initAppletRuntime();
   
   // Connect WebSocket once on page load
-  connectAppletWs();
+  connectWs();
   await waitForConnect();
   
   // Reconnect WS when page becomes visible (e.g., returning from another tab)

@@ -1,7 +1,13 @@
 /**
- * Applet WebSocket Channel
+ * WebSocket Server
  * 
- * Unified bidirectional channel for all client-server communication.
+ * Unified bidirectional channel for all client-server communication:
+ * - Chat message streaming (user & assistant)
+ * - Activity items (tool calls, intents, errors)
+ * - History loading
+ * - State sync
+ * - Agent-to-agent messages
+ * 
  * Single persistent connection - server broadcasts ALL messages, client filters.
  */
 
@@ -82,10 +88,10 @@ interface ServerMessage {
  * Setup WebSocket server on existing HTTP server
  * Single persistent connection - no session in URL
  */
-export function setupAppletWebSocket(server: Server): WebSocketServer {
+export function setupWebSocket(server: Server): WebSocketServer {
   const wss = new WebSocketServer({ 
     server, 
-    path: '/ws/applet' 
+    path: '/ws' 
   });
 
   wss.on('connection', (ws, req) => {
@@ -113,7 +119,7 @@ export function setupAppletWebSocket(server: Server): WebSocketServer {
     });
   });
 
-  console.log('[WS] WebSocket server ready on /ws/applet');
+  console.log('[WS] WebSocket server ready on /ws');
   return wss;
 }
 

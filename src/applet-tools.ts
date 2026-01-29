@@ -8,7 +8,7 @@ import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { spawn } from 'child_process';
 import { getAppletUserState, getAppletNavigation, triggerReload } from './applet-state.js';
-import { pushStateToApplet } from './routes/applet-ws.js';
+import { pushStateToApplet } from './routes/websocket.js';
 
 /**
  * Documentation returned by applet_howto tool.

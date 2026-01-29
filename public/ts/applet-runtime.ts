@@ -12,7 +12,7 @@
  */
 
 import { setViewState } from './view-controller.js';
-import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './applet-ws.js';
+import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './websocket.js';
 import { getActiveSessionId } from './state.js';
 
 // Navigation API types (not yet in TypeScript lib)

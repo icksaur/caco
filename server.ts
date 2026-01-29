@@ -15,7 +15,7 @@ import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools, type SessionIdRef } from './src/agent-tools.js';
 import { storeOutput, detectLanguage } from './src/storage.js';
 import { sessionRoutes, apiRoutes, streamRoutes } from './src/routes/index.js';
-import { setupAppletWebSocket } from './src/routes/applet-ws.js';
+import { setupWebSocket } from './src/routes/websocket.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -155,7 +155,7 @@ async function start(): Promise<void> {
   
   // Attach WebSocket server for unified session channel
   // WS is for server→client push (rendering); POST is for client→server send
-  setupAppletWebSocket(server);
+  setupWebSocket(server);
   
   // Start server (localhost only for security)
   server.listen(PORT, '127.0.0.1', () => {

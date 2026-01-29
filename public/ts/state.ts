@@ -6,7 +6,7 @@
  */
 
 import type { ModelInfo } from './types.js';
-import { setActiveSession as setWsActiveSession, isWsConnected, getActiveSessionId as getWsActiveSession } from './applet-ws.js';
+import { setActiveSession as setWsActiveSession, isWsConnected, getActiveSessionId as getWsActiveSession } from './websocket.js';
 
 // ============================================================
 // State Interface

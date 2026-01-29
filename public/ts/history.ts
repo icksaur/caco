@@ -8,7 +8,7 @@ import { applyModelPreference, loadModels } from './model-selector.js';
 import { initFromPreferences } from './state.js';
 import { restoreOutputsFromHistory } from './display-output.js';
 import { setLoadingHistory } from './response-streaming.js';
-import { onHistoryComplete } from './applet-ws.js';
+import { onHistoryComplete } from './websocket.js';
 
 // Declare renderMarkdown as a global function from markdown-renderer.js
 declare global {

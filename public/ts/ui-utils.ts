@@ -2,11 +2,10 @@
  * UI utility functions
  */
 
+import { isAutoScrollEnabled, enableAutoScroll as enableAutoScrollState, disableAutoScroll } from './app-state.js';
+
 /** Threshold in pixels for considering "at bottom" */
 const SCROLL_THRESHOLD = 150;
-
-/** Auto-scroll mode - disabled when user actively scrolls up */
-let autoScrollEnabled = true;
 
 /**
  * Check if chat is scrolled to bottom (or near it)
@@ -23,15 +22,11 @@ export function isAtBottom(): boolean {
  * Enable auto-scroll mode (call when sending a message)
  */
 export function enableAutoScroll(): void {
-  autoScrollEnabled = true;
+  enableAutoScrollState();
 }
 
-/**
- * Check if auto-scroll is enabled
- */
-export function isAutoScrollEnabled(): boolean {
-  return autoScrollEnabled;
-}
+// Re-export for compatibility
+export { isAutoScrollEnabled };
 
 /**
  * Scroll chat to bottom
@@ -42,7 +37,7 @@ export function scrollToBottom(force = false): void {
   if (!chatView) return;
   
   // If not forcing, only scroll if auto-scroll is enabled
-  if (!force && !autoScrollEnabled) return;
+  if (!force && !isAutoScrollEnabled()) return;
   
   chatView.scrollTop = chatView.scrollHeight;
 }
@@ -59,11 +54,11 @@ export function setupScrollDetection(): void {
   chatView.addEventListener('wheel', (e: WheelEvent) => {
     // Scrolling up (negative deltaY)
     if (e.deltaY < 0) {
-      autoScrollEnabled = false;
+      disableAutoScroll();
     }
     // Scrolling down and at bottom - re-enable
     if (e.deltaY > 0 && isAtBottom()) {
-      autoScrollEnabled = true;
+      enableAutoScrollState();
     }
   }, { passive: true });
   
@@ -78,10 +73,10 @@ export function setupScrollDetection(): void {
     const deltaY = touchStartY - touchY; // positive = scroll up
     
     if (deltaY < -10) { // swiping down = scrolling up
-      autoScrollEnabled = false;
+      disableAutoScroll();
     }
     if (deltaY > 10 && isAtBottom()) { // swiping up = scrolling down
-      autoScrollEnabled = true;
+      enableAutoScrollState();
     }
     touchStartY = touchY;
   }, { passive: true });

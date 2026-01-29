@@ -13,7 +13,7 @@
 
 import { setViewState } from './view-controller.js';
 import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './websocket.js';
-import { getActiveSessionId } from './state.js';
+import { getActiveSessionId } from './app-state.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {

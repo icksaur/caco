@@ -3,7 +3,7 @@
  */
 
 import type { ModelInfo, Preferences } from './types.js';
-import { getSelectedModel, setSelectedModel as stateSetSelectedModel } from './state.js';
+import { getSelectedModel, setSelectedModel as stateSetSelectedModel, getAvailableModels, setAvailableModels as stateSetAvailableModels } from './app-state.js';
 
 /**
  * Fallback model list (used if SDK doesn't return models)
@@ -17,14 +17,11 @@ const FALLBACK_MODELS: ModelInfo[] = [
   { id: 'gpt-4o', name: 'GPT-4o', cost: 0 }
 ];
 
-// Models from server (set by setAvailableModels)
-let availableModels: ModelInfo[] = [];
-
 /**
  * Set available models from server response
  */
 export function setAvailableModels(models: ModelInfo[]): void {
-  availableModels = models;
+  stateSetAvailableModels(models);
   console.log(`[MODEL] Available models from SDK:`, models.map(m => m.id));
 }
 
@@ -32,7 +29,8 @@ export function setAvailableModels(models: ModelInfo[]): void {
  * Get models to display (server models or fallback)
  */
 function getModels(): ModelInfo[] {
-  return availableModels.length > 0 ? availableModels : FALLBACK_MODELS;
+  const available = getAvailableModels();
+  return available.length > 0 ? [...available] : FALLBACK_MODELS;
 }
 
 /**

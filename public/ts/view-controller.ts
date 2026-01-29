@@ -6,7 +6,7 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { clearActiveSession } from './state.js';
+import { clearActiveSession } from './app-state.js';
 
 /** Valid application view states */
 export type ViewState = 'sessions' | 'newChat' | 'chatting' | 'applet';

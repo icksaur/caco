@@ -5,7 +5,7 @@
 import type { Preferences } from './types.js';
 import { scrollToBottom } from './ui-utils.js';
 import { applyModelPreference, loadModels } from './model-selector.js';
-import { initFromPreferences } from './state.js';
+import { initFromPreferences } from './app-state.js';
 import { restoreOutputsFromHistory } from './display-output.js';
 import { setLoadingHistory } from './response-streaming.js';
 import { onHistoryComplete } from './websocket.js';

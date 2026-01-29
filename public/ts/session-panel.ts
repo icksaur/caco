@@ -4,7 +4,7 @@
 
 import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge } from './ui-utils.js';
-import { getActiveSessionId, getCurrentCwd, setActiveSession } from './state.js';
+import { getActiveSessionId, getCurrentCwd, setActiveSession } from './app-state.js';
 import { setAvailableModels, loadModels, getNewChatCwd } from './model-selector.js';
 import { waitForHistoryComplete } from './history.js';
 import { setActiveSession as setWsActiveSession, requestHistory } from './websocket.js';

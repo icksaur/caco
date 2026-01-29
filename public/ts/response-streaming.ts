@@ -7,7 +7,7 @@
 
 import { escapeHtml, scrollToBottom, isAutoScrollEnabled, enableAutoScroll } from './ui-utils.js';
 import { addActivityItem } from './activity.js';
-import { setStreaming, isStreaming, getActiveSessionId, setActiveSession } from './state.js';
+import { setStreaming, isStreaming, getActiveSessionId, setActiveSession, isLoadingHistory, setLoadingHistory } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { isViewState, setViewState } from './view-controller.js';
 import { onMessage, onHistoryComplete, onActivity, isWsConnected, type ChatMessage, type ActivityItem } from './websocket.js';
@@ -25,9 +25,6 @@ let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
 
 /** Track if WS handlers are registered */
 let wsHandlersRegistered = false;
-
-/** Track if currently loading history */
-let loadingHistory = false;
 
 // ============================================================================
 // Bubble Rendering - Unified System
@@ -156,7 +153,7 @@ function registerWsHandlers(): void {
   
   // History complete handler
   onHistoryComplete(() => {
-    loadingHistory = false;
+    setLoadingHistory(false);
     // Render markdown for all history messages
     if (window.renderMarkdown) window.renderMarkdown();
     // Scroll to bottom after history loads
@@ -242,7 +239,7 @@ function createMessage(msg: ChatMessage): void {
       });
       
       // Only render markdown immediately if not loading history (batched later)
-      if (!loadingHistory && window.renderMarkdown) {
+      if (!isLoadingHistory() && window.renderMarkdown) {
         window.renderMarkdown();
       }
     }
@@ -305,12 +302,8 @@ function finalizeMessage(element: Element, msg: ChatMessage): void {
   scrollToBottom(true);
 }
 
-/**
- * Mark that we're loading history (suppress pending response for history messages)
- */
-export function setLoadingHistory(loading: boolean): void {
-  loadingHistory = loading;
-}
+// Re-export setLoadingHistory for external callers (from app-state)
+export { setLoadingHistory };
 
 /**
  * Add user message bubble immediately (legacy interface for fallback)

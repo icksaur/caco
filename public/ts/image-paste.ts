@@ -2,7 +2,7 @@
  * Image paste handling
  */
 
-import { setHasImage } from './state.js';
+import { setHasImage } from './app-state.js';
 
 /**
  * Set up paste handler for image attachments

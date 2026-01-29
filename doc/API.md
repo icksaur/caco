@@ -108,8 +108,9 @@ Query params:
 |----------|--------|-------------|
 | `/api/files` | GET | List files in directory |
 | `/api/file` | GET | Serve raw file content (max 10MB) |
-| `/api/files/read` | GET | Read file as JSON (max 100KB) |
-| `/api/files/write` | POST | Write file content |
+| `/api/files/*` | PUT | Write file content (path in URL) |
+| `/api/files/read` | GET | Read file as JSON (max 100KB, legacy) |
+| `/api/files/write` | POST | Write file content (legacy) |
 
 **GET /api/files** query params:
 - `path` - Relative path from workspace root
@@ -118,11 +119,24 @@ Query params:
 - `path` - Relative path to file
 Returns raw content with appropriate Content-Type header.
 
-**GET /api/files/read** query params:
+**PUT /api/files/\*** - Write file content
+- URL path contains file path: `PUT /api/files/src/app.ts`
+- Body: raw file content (text/plain)
+- Creates parent directories automatically
+- Returns: `{ ok: true, path, size }`
+
+Example:
+```bash
+curl -X PUT http://localhost:3000/api/files/src/hello.txt \
+  -H "Content-Type: text/plain" \
+  -d "Hello, world!"
+```
+
+**GET /api/files/read** (legacy) query params:
 - `path` - Relative path to file
 Returns: `{ path, content, size }`
 
-**POST /api/files/write** body:
+**POST /api/files/write** (legacy) body:
 ```json
 {
   "path": "relative/path/to/file",

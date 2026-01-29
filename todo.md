@@ -1,10 +1,6 @@
 # things to do
 
-fix POST /api/files/write to make the URL path the file path instead of JSON+Content payload.
-ex: POST /api/files/path/to/file.json
-update all
-
-rebrand this project to "Caco" (lowercase caco for slugs, filenames variables).  Change all display text to "Caco"  Change ".vscode-web" to ".caco".  Update all applet code and docs.  Move ./.caco/ to be found in ~/.caco/
+rebrand this project to "Caco" (lowercase caco for slugs, filenames variables).  Change all display text to "Caco"  Change ".vscode-web" to ".caco".  Update all applet code and docs.  Move ./.caco/ to be found in ~/.caco/.  This workspace directory name is fine for now.
 
 applet input segregation - only visible app gets mouse, keyboard, gamepad, camera, whatever input.  May require frames or iframe?  Needs:
 applet-os.md reqs list

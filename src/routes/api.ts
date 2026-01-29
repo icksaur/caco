@@ -11,9 +11,10 @@
  */
 
 import { Router, Request, Response } from 'express';
+import express from 'express';
 import { CopilotClient } from '@github/copilot-sdk';
-import { readdir, readFile, stat, writeFile } from 'fs/promises';
-import { join, relative, resolve } from 'path';
+import { readdir, readFile, stat, writeFile, mkdir } from 'fs/promises';
+import { join, relative, resolve, dirname } from 'path';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
@@ -455,7 +456,51 @@ router.get('/files/read', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/files/write - Write file content
+ * PUT /api/files/*path - Write file content
+ * Path: file path relative to workspace (e.g., PUT /api/files/src/app.ts)
+ * Body: raw file content (text/plain)
+ * Locked to programCwd - cannot escape
+ */
+router.put('/files/*path', express.text({ type: '*/*', limit: '10mb' }), async (req: Request, res: Response) => {
+  // Extract path from URL (everything after /files/)
+  const pathSegments = req.params.path as unknown as string[];
+  const requestedPath = pathSegments.join('/');
+  
+  if (!requestedPath) {
+    res.status(400).json({ error: 'file path required in URL' });
+    return;
+  }
+  
+  const content = req.body;
+  if (typeof content !== 'string') {
+    res.status(400).json({ error: 'request body required' });
+    return;
+  }
+  
+  try {
+    // Resolve and validate path
+    const fullPath = resolve(programCwd, requestedPath);
+    const relativePath = relative(programCwd, fullPath);
+    
+    if (relativePath.startsWith('..') || resolve(programCwd, relativePath) !== fullPath) {
+      res.status(403).json({ error: 'Access denied: path outside workspace' });
+      return;
+    }
+    
+    // Ensure parent directory exists
+    const parentDir = dirname(fullPath);
+    await mkdir(parentDir, { recursive: true });
+    
+    await writeFile(fullPath, content, 'utf-8');
+    res.json({ ok: true, path: relativePath, size: content.length });
+  } catch (error) {
+    console.error('[API] Failed to write file:', error);
+    res.status(500).json({ error: 'Failed to write file' });
+  }
+});
+
+/**
+ * POST /api/files/write - Write file content (LEGACY - use PUT /api/files/* instead)
  * Body: { path: string, content: string }
  * Locked to programCwd - cannot escape
  */

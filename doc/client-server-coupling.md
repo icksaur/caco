@@ -67,8 +67,9 @@ For each API/component:
 |----------|-----------|----------|-----------------|-------------------|--------|
 | `GET /files` | ✅ | ✅ | ✅ | ✅ | Reads filesystem, stateless |
 | `GET /file` | ✅ | ✅ | ✅ | ✅ | Reads filesystem, stateless |
-| `GET /files/read` | ✅ | ✅ | ✅ | ✅ | Reads filesystem, stateless |
-| `POST /files/write` | ✅ | ✅ | ✅ | ⚠️ | Writes to disk, race conditions possible |
+| `PUT /files/*` | ✅ | ✅ | ✅ | ⚠️ | Writes to disk, race conditions possible |
+| `GET /files/read` | ✅ | ✅ | ✅ | ✅ | Legacy, reads filesystem |
+| `POST /files/write` | ✅ | ✅ | ✅ | ⚠️ | Legacy, writes to disk |
 
 **These are clean.** File APIs are stateless and work for any caller.
 

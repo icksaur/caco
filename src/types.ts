@@ -1,5 +1,5 @@
 /**
- * Shared types for copilot-web
+ * Shared types for Caco
  */
 
 // Custom error for when a cwd is locked by another session

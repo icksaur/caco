@@ -1,6 +1,6 @@
 # API Reference
 
-Complete catalog of all APIs in copilot-web.
+Complete catalog of all APIs in Caco.
 
 ## HTTP Endpoints
 
@@ -92,10 +92,10 @@ Query params:
       "description": "iOS-style calculator",
       "updatedAt": "2026-01-27T...",
       "paths": {
-        "html": ".copilot-web/applets/calculator/content.html",
-        "js": ".copilot-web/applets/calculator/script.js",
-        "css": ".copilot-web/applets/calculator/style.css",
-        "meta": ".copilot-web/applets/calculator/meta.json"
+        "html": ".Caco/applets/calculator/content.html",
+        "js": ".Caco/applets/calculator/script.js",
+        "css": ".Caco/applets/calculator/style.css",
+        "meta": ".Caco/applets/calculator/meta.json"
       }
     }
   ]
@@ -172,7 +172,7 @@ Defined in `src/applet-tools.ts`
 
 **applet_howto** - no parameters
 Returns comprehensive documentation on:
-- File structure (`.copilot-web/applets/<slug>/`)
+- File structure (`.Caco/applets/<slug>/`)
 - Required files (meta.json, content.html) and optional (script.js, style.css)
 - JavaScript APIs available (setAppletState, loadApplet, listApplets)
 - How to share applets via URL (`?applet=slug`)
@@ -366,10 +366,10 @@ Example: `http://localhost:3000/?applet=calculator`
 
 ### Applet Storage Structure
 
-Location: `.copilot-web/applets/<slug>/`
+Location: `.Caco/applets/<slug>/`
 
 ```
-.copilot-web/
+.Caco/
 └── applets/
     └── calculator/
         ├── meta.json      # { slug, name, description, createdAt, updatedAt }
@@ -378,4 +378,4 @@ Location: `.copilot-web/applets/<slug>/`
         └── style.css      # CSS styles
 ```
 
-The `.copilot-web/` directory has its own git repository, separate from the main project.
+The `.Caco/` directory has its own git repository, separate from the main project.

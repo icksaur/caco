@@ -1,6 +1,6 @@
 # Client-Server Coupling Analysis
 
-Analysis of coupling between browser client and Node.js server in copilot-web.
+Analysis of coupling between browser client and Node.js server in Caco.
 
 ## Primary Questions
 

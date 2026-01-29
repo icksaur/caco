@@ -60,8 +60,7 @@ export default [
     ignores: [
       'node_modules/**',
       'public/*.min.js',  // Ignore minified vendor libraries
-      'public/bundle.js', // Ignore bundled output
-      '.copilot-web/**'   // Ignore generated applet files
+      'public/bundle.js'  // Ignore bundled output
     ]
   }
 ];

@@ -1,4 +1,4 @@
-# Refactoring Plan: copilot-web
+# Refactoring Plan: Caco
 
 ## Goals
 1. **TypeScript migration** - Type safety, catch bugs at compile time

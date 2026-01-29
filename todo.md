@@ -1,14 +1,16 @@
 # things to do
 
-rebrand this project to "Caco" (lowercase caco for slugs, filenames variables).  Change all display text to "Caco"  Change ".vscode-web" to ".caco".  Update all applet code and docs.  Move ./.caco/ to be found in ~/.caco/.  This workspace directory name is fine for now.
-
-applet input segregation - only visible app gets mouse, keyboard, gamepad, camera, whatever input.  May require frames or iframe?  Needs:
-applet-os.md reqs list
+applet input segregation - only visible app gets mouse, keyboard, gamepad, camera, whatever input.  Naieve implementations of applets send keyboard to chat and applet for example
+May require frames or iframe?
+Needs:
+applet-os.md reqs list:
 input segregation
 current state analysis
+
+what breaks? applet websockets? applets with href like applet-browser?
 study for how to implement cleanly, concerning NavigationAPI etc.
-make decision
-simplify all applet input code
+decide if it's not worth it - applets global JS state may be powerful but a bit fiddly
+make suggestion to user
 
 app-to-session vision flow:
 apps can send image data to agent when making requests

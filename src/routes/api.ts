@@ -187,7 +187,7 @@ const programCwd = process.cwd();
  */
 router.get('/applets', async (_req: Request, res: Response) => {
   try {
-    const applets = await listApplets(programCwd);
+    const applets = await listApplets();
     res.json({
       applets: applets.map(a => ({
         slug: a.slug,
@@ -211,7 +211,7 @@ router.get('/applets/:slug', async (req: Request, res: Response) => {
   const slug = req.params.slug as string;
   
   try {
-    const stored = await loadApplet(programCwd, slug);
+    const stored = await loadApplet(slug);
     
     if (!stored) {
       res.status(404).json({ error: `Applet "${slug}" not found` });
@@ -241,7 +241,7 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
   const slug = req.params.slug as string;
   
   try {
-    const stored = await loadApplet(programCwd, slug);
+    const stored = await loadApplet(slug);
     
     if (!stored) {
       res.status(404).json({ error: `Applet "${slug}" not found` });

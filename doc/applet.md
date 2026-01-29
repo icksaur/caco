@@ -220,12 +220,12 @@ How does the server-side tool affect client-side DOM?
 
 ### Storage Mechanisms
 
-**Decision**: Files on disk in `.copilot-web/applets/`
+**Decision**: Files on disk in `.Caco/applets/`
 
 Uses the same storage layer as display tool outputs (see [storage.md](../storage.md)).
 
 ```
-<program-cwd>/.copilot-web/
+<program-cwd>/.Caco/
 ├── sessions/<sessionId>/outputs/   # Display tool outputs (Phase 1 ✅)
 └── applets/<slug>/                 # Saved applets (Phase 2)
     ├── meta.json
@@ -387,7 +387,7 @@ function updateDisplay(value) {
 Applets are stored as separate files for easy agent inspection:
 
 ```
-.copilot-web/applets/<slug>/
+.Caco/applets/<slug>/
 ├── meta.json       # { name, description, created, updated }
 ├── content.html    # HTML content
 ├── script.js       # JavaScript (optional)

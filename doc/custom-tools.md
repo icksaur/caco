@@ -428,7 +428,7 @@ interface MCPRemoteServerConfig {
 
 ---
 
-## Implementation in copilot-web
+## Implementation in Caco
 
 To add custom tools to our web app, modify `session-manager.js`:
 

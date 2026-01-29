@@ -4,7 +4,7 @@
  * File-based storage for persisted applets.
  * 
  * Storage structure:
- *   .copilot-web/applets/<slug>/
+ *   ~/.caco/applets/<slug>/
  *     ├── meta.json       # { name, description, created, updated }
  *     ├── content.html    # HTML content
  *     ├── script.js       # JavaScript (optional)
@@ -18,8 +18,9 @@
 
 import { mkdir, readFile, writeFile, readdir, rm, stat } from 'fs/promises';
 import { join } from 'path';
+import { homedir } from 'os';
 
-const APPLET_DIR = '.copilot-web/applets';
+const APPLET_DIR = join(homedir(), '.caco', 'applets');
 
 export interface AppletMeta {
   slug: string;
@@ -45,17 +46,17 @@ export interface AppletFilePaths {
 }
 
 /**
- * Get the applets directory for a given program cwd
+ * Get the applets directory (global ~/.caco/applets)
  */
-function getAppletsDir(programCwd: string): string {
-  return join(programCwd, APPLET_DIR);
+function getAppletsDir(): string {
+  return APPLET_DIR;
 }
 
 /**
  * Get file paths for an applet
  */
-export function getAppletPaths(programCwd: string, slug: string): AppletFilePaths {
-  const root = join(getAppletsDir(programCwd), slug);
+export function getAppletPaths(slug: string): AppletFilePaths {
+  const root = join(getAppletsDir(), slug);
   return {
     root,
     meta: join(root, 'meta.json'),
@@ -81,7 +82,6 @@ function validateSlug(slug: string): void {
  * Save an applet to disk
  */
 export async function saveApplet(
-  programCwd: string,
   slug: string,
   name: string,
   html: string,
@@ -91,7 +91,7 @@ export async function saveApplet(
 ): Promise<AppletFilePaths> {
   validateSlug(slug);
   
-  const paths = getAppletPaths(programCwd, slug);
+  const paths = getAppletPaths(slug);
   
   // Check if exists (for created vs updated timestamp)
   let existingMeta: AppletMeta | null = null;
@@ -136,12 +136,11 @@ export async function saveApplet(
  * Load an applet from disk
  */
 export async function loadApplet(
-  programCwd: string,
   slug: string
 ): Promise<StoredApplet | null> {
   validateSlug(slug);
   
-  const paths = getAppletPaths(programCwd, slug);
+  const paths = getAppletPaths(slug);
   
   try {
     // Read meta (required)
@@ -179,10 +178,8 @@ export async function loadApplet(
 /**
  * List all saved applets
  */
-export async function listApplets(
-  programCwd: string
-): Promise<Array<AppletMeta & { paths: AppletFilePaths }>> {
-  const appletsDir = getAppletsDir(programCwd);
+export async function listApplets(): Promise<Array<AppletMeta & { paths: AppletFilePaths }>> {
+  const appletsDir = getAppletsDir();
   
   try {
     const entries = await readdir(appletsDir, { withFileTypes: true });
@@ -192,7 +189,7 @@ export async function listApplets(
       if (!entry.isDirectory()) continue;
       if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
       
-      const paths = getAppletPaths(programCwd, entry.name);
+      const paths = getAppletPaths(entry.name);
       
       try {
         const metaContent = await readFile(paths.meta, 'utf-8');
@@ -217,12 +214,11 @@ export async function listApplets(
  * Delete an applet
  */
 export async function deleteApplet(
-  programCwd: string,
   slug: string
 ): Promise<boolean> {
   validateSlug(slug);
   
-  const paths = getAppletPaths(programCwd, slug);
+  const paths = getAppletPaths(slug);
   
   try {
     await rm(paths.root, { recursive: true });
@@ -237,12 +233,11 @@ export async function deleteApplet(
  * Check if an applet exists
  */
 export async function appletExists(
-  programCwd: string,
   slug: string
 ): Promise<boolean> {
   try {
     validateSlug(slug);
-    const paths = getAppletPaths(programCwd, slug);
+    const paths = getAppletPaths(slug);
     await stat(paths.meta);
     return true;
   } catch {

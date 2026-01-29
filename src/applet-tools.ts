@@ -15,14 +15,14 @@ import { pushStateToApplet } from './routes/websocket.js';
  * This teaches agents how to create applets using file tools.
  */
 const APPLET_HOWTO = `
-# Creating Applets in copilot-web
+# Creating Applets in Caco
 
 Applets are interactive HTML/JS/CSS components stored on disk and loaded via URL.
 
 ## File Structure
 
 \`\`\`
-.copilot-web/applets/<slug>/
+~/.caco/applets/<slug>/
 ├── meta.json      # Required: { name, description, slug, createdAt, updatedAt }
 ├── content.html   # Required: HTML content (no <html>/<body> wrapper)
 ├── script.js      # Optional: JavaScript code
@@ -32,7 +32,7 @@ Applets are interactive HTML/JS/CSS components stored on disk and loaded via URL
 ## Creating an Applet
 
 1. Choose a slug (lowercase, hyphens: "my-calculator", "todo-list")
-2. Create directory: \`.copilot-web/applets/<slug>/\`
+2. Create directory: \`~/.caco/applets/<slug>/\`
 3. Write the 4 files using write_file tool
 4. Share URL with user: http://localhost:3000/?applet=<slug>
 

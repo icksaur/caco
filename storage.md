@@ -42,10 +42,10 @@ These prepend content to responses. On session reload, SDK returns message histo
 
 | Concept | Value | Purpose |
 |---------|-------|---------|
-| **Program CWD** | Where Node process runs (e.g., `/home/user/copilot-web`) | Fixed at startup, where app lives |
+| **Program CWD** | Where Node process runs (e.g., `/home/user/Caco`) | Fixed at startup, where app lives |
 | **Session CWD** | Per-session working directory (e.g., `/home/user/my-project`) | Where Copilot runs commands, has lock |
 
-**Decision**: Storage root = **Program CWD** (`process.cwd()/.copilot-web/`)
+**Decision**: Storage root = **Program CWD** (`process.cwd()/.Caco/`)
 
 Rationale:
 - Centralized, predictable location
@@ -54,7 +54,7 @@ Rationale:
 - Outputs keyed by sessionId (unique across all sessions)
 
 ```
-<program-cwd>/.copilot-web/
+<program-cwd>/.Caco/
 ├── sessions/
 │   └── <sessionId>/
 │       ├── outputs.json       # Map of outputId → metadata
@@ -288,7 +288,7 @@ GET  /api/storage/applets               → [{ slug, name, description }]
 |------|------------|
 | Path traversal | Validate paths, restrict to cwd subtree |
 | Sensitive files | Block patterns: `.env`, `.git/config`, `*_key`, `*.pem` |
-| Arbitrary write | Restrict to `.copilot-web/` directory |
+| Arbitrary write | Restrict to `.Caco/` directory |
 | Symlink escape | Resolve real path, validate still in allowed tree |
 
 ---
@@ -343,7 +343,7 @@ Tools must be created per-session with session CWD in closure for storage scopin
 
 3. **Cross-session applets**: Can applet from project A be used in project B?
    - Could support explicit export/import
-   - Or global applet library in `~/.copilot-web/applets/`
+   - Or global applet library in `~/.Caco/applets/`
 
 4. **Output pruning**: How long to keep session outputs?
    - 30 days default?

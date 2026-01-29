@@ -1,7 +1,7 @@
 {
-  "name": "copilot-web",
+  "name": "caco",
   "version": "1.0.0",
-  "description": "A simple local web app using the Copilot CLI SDK for a chat interface.",
+  "description": "Caco - A web-based chat interface using the Copilot SDK.",
   "main": "server.ts",
   "scripts": {
     "start": "tsx server.ts",

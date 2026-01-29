@@ -2,19 +2,20 @@
  * Persistent Storage Layer
  * 
  * Stores display tool outputs and applet data on disk.
- * Storage root: <program-cwd>/.copilot-web/
+ * Storage root: ~/.caco/
  * 
  * Structure:
- *   .copilot-web/
+ *   ~/.caco/
  *   ├── sessions/<sessionId>/outputs/   # Display tool outputs
- *   └── applets/<slug>/                 # Saved applets (Phase 2)
+ *   └── applets/<slug>/                 # Saved applets
  */
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 
-// Storage root (program CWD, set once at module load)
-const STORAGE_ROOT = join(process.cwd(), '.copilot-web');
+// Storage root (~/.caco, set once at module load)
+const STORAGE_ROOT = join(homedir(), '.caco');
 
 // In-memory cache for frequently accessed outputs (avoids disk reads)
 const outputCache = new Map<string, CacheEntry>();

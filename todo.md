@@ -1,9 +1,5 @@
 # things to do
 
-Fix set_applet_state in calculator.
-agent get -> set -> get flow works in agent (state is found on server)
-applet is not getting the SET, or not updating the state in its UI
-
 app-to-session vision flow:
 apps can send image data to agent when making requests
 agents can get image data from apps (maybe already works?)

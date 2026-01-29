@@ -567,16 +567,6 @@ export function setupFormHandler(): void {
     // Get cwd from new chat form (will be empty if in existing chat)
     const cwd = getNewChatCwd();
     const isNewChat = isViewState('newChat');
-    const sessionId = getActiveSessionId();
-    
-    // DEBUG: Show state when sending
-    console.log('[SEND DEBUG]', {
-      viewState: isNewChat ? 'newChat' : 'chatting',
-      isNewChat,
-      sessionId,
-      cwd,
-      willCreateSession: isNewChat || !sessionId
-    });
     
     // If new chat form is visible and cwd is empty, show error
     if (isNewChat && !cwd) {

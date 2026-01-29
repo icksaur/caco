@@ -12,6 +12,7 @@ import { setupFormHandler, stopStreaming } from './response-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initViewState, setViewState, isViewState } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
+import { initInputRouter } from './input-router.js';
 import { setupMultilineInput } from './multiline-input.js';
 import { connectWs, setActiveSession, requestHistory, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
@@ -63,6 +64,9 @@ window.hideToast = hideToast;
 document.addEventListener('DOMContentLoaded', async () => {
   // Initialize view state from DOM
   initViewState();
+  
+  // Initialize input router (global keyboard event routing)
+  initInputRouter();
   
   // Initialize applet runtime (exposes setAppletState globally)
   initAppletRuntime();

@@ -1,6 +1,61 @@
 # Applet Input Isolation Analysis
 
-## Problem Statement
+## Status: IMPLEMENTED ✅
+
+We implemented **Option 4: Centralized Input Router** - a global keyboard dispatcher that routes events only to the active applet based on view state.
+
+### Files Changed
+
+- `public/ts/input-router.ts` - New file: global keyboard routing
+- `public/ts/view-controller.ts` - Added `activeAppletSlug` tracking
+- `public/ts/applet-runtime.ts` - Exposes `registerKeyHandler()` to applets
+- `public/ts/main.ts` - Initializes input router on startup
+- `~/.caco/applets/calculator/script.js` - Uses new API (no visibility checks!)
+
+### How It Works
+
+```
+view-controller.ts          input-router.ts
+┌───────────────────┐      ┌──────────────────────────┐
+│ currentState      │      │ document.keydown         │
+│ activeAppletSlug  │ ◄─── │                          │
+└───────────────────┘      │ if (viewState === 'applet')
+                           │   get handler for slug    │
+                           │   call handler(event)     │
+                           └──────────────────────────┘
+```
+
+1. `view-controller` tracks which view is active + which applet slug
+2. `input-router` has one global `document.keydown` listener
+3. When event fires, router checks active view/applet
+4. Routes to registered handler (or ignores if not in applet view)
+
+### Applet API
+
+Before (manual filtering):
+```javascript
+document.addEventListener('keydown', function(e) {
+  var tag = e.target.tagName.toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  if (!display.offsetParent) return;  // visibility check
+  
+  // Handle keys...
+});
+```
+
+After (routed automatically):
+```javascript
+registerKeyHandler('calculator', function(e) {
+  // Only called when calculator is the active applet
+  // No visibility check needed!
+  if (e.key >= '0' && e.key <= '9') appendNum(e.key);
+  // ...
+});
+```
+
+---
+
+## Original Problem Statement
 
 Applets currently run in the main document context, sharing the DOM with the chat UI. This causes input conflicts:
 
@@ -143,20 +198,28 @@ function onAppletKeydown(handler) {
 
 **Migration Effort**: LOW
 
-### Option 4: Web Components
+### Option 4: Centralized Input Router ✅ IMPLEMENTED
 
-**How it works**: Define applets as custom elements.
+**How it works**: Single global keyboard listener in `input-router.ts`, routes to registered handlers based on view state.
 
 **Pros**:
-- Modern standard
-- Can combine with Shadow DOM
+- Zero applet boilerplate - just register handler with slug
+- View-controller already tracks active view
+- Easy debugging - log which handler receives events
+- Handlers auto-unregister when applet destroyed
+- Native text inputs still work (router skips INPUT/TEXTAREA)
 
 **Cons**:
-- Still doesn't solve JavaScript isolation
-- Significant rewrite of authoring model
-- Overkill for the problem
+- Applets must call `registerKeyHandler(slug, fn)` 
+- Not full isolation (applets could still add global listeners)
 
-**Verdict**: Adds complexity without solving core issue.
+**Migration Effort**: LOW
+- Add input-router.ts (~60 lines)
+- Extend view-controller to track applet slug
+- Expose `registerKeyHandler` to applets
+- Update one applet as example
+
+**Verdict**: Best balance of isolation and simplicity. Implemented.
 
 ---
 
@@ -201,21 +264,18 @@ window.addEventListener('message', (e) => {
 
 ## Recommendation
 
-**Short term (Option 3)**: Add helper functions to reduce boilerplate in applets.
+**Implemented (Option 4)**: Centralized input router with `registerKeyHandler()`.
 
-```javascript
-// New helpers exposed to applets
-function onAppletKeydown(handler) { ... }
-function onAppletVisible(handler) { ... }
-function isAppletActive() { ... }
-```
-
-Update applet_howto documentation with clear guidance.
+This gives us:
+- Clean applet API - no visibility checks in applet code
+- Single source of truth via view-controller
+- Works with existing applet loading/navigation
+- Easy migration path - update applets one at a time
 
 **Long term (Option 1)**: Migrate to iframe-based isolation if:
 - We want to load untrusted/third-party applets
-- Input bugs keep recurring despite conventions
-- We add more complex applets (games, editors)
+- Need full JavaScript sandboxing
+- Add complex applets that might pollute global state
 
 ### Why Not iframe Now?
 
@@ -257,24 +317,32 @@ function setAppletState(state) {
 
 ## Decision Matrix
 
-| Criterion | Option 1 (iframe) | Option 3 (Helpers) |
-|-----------|-------------------|-------------------|
-| Input isolation | ✅ Complete | ⚠️ Convention-based |
-| Migration effort | ❌ High | ✅ Low |
-| Applet simplicity | ⚠️ More ceremony | ✅ Direct DOM |
-| Security | ✅ Sandboxed | ❌ Full access |
-| Current applets | ❌ Need updates | ✅ Work as-is |
+| Criterion | Option 1 (iframe) | Option 3 (Helpers) | Option 4 (Router) ✅ |
+|-----------|-------------------|-------------------|---------------------|
+| Input isolation | ✅ Complete | ⚠️ Convention-based | ✅ Automatic routing |
+| Migration effort | ❌ High | ✅ Low | ✅ Low |
+| Applet simplicity | ⚠️ More ceremony | ⚠️ Manual checks | ✅ Just register |
+| Security | ✅ Sandboxed | ❌ Full access | ❌ Full access |
+| Current applets | ❌ Need updates | ✅ Work as-is | ✅ Work (can migrate) |
 
 ---
 
 ## Action Items
 
-### Immediate (Option 3)
+### Done ✅
 
-1. Add `isAppletActive()` helper that checks visibility
-2. Add `onAppletKeydown(handler)` helper with automatic filtering
-3. Update applet_howto documentation
-4. Refactor calculator to use new helper (as example)
+1. Created `input-router.ts` with centralized keyboard routing
+2. Extended `view-controller.ts` to track active applet slug  
+3. Exposed `registerKeyHandler(slug, handler)` to applets
+4. Exposed `getAppletSlug()` so applets know their slug
+5. Updated calculator applet to use new API
+6. Handlers auto-unregister when applet destroyed
+
+### Remaining
+
+1. Update other applets (drum-machine, etc.) if they use keyboard
+2. Update applet_howto documentation with new pattern
+3. Consider adding `registerMouseHandler()` if needed later
 
 ### Future (Option 1, if needed)
 

@@ -9,11 +9,13 @@
  * Phase 4: WebSocket for real-time state sync.
  * Phase 5: Agent invocation - applets can POST to active session.
  * Phase 6: Navigation API for SPA routing.
+ * Phase 7: Input routing - keyboard events routed to active applet only.
  */
 
 import { setViewState } from './view-controller.js';
 import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './websocket.js';
 import { getActiveSessionId } from './app-state.js';
+import { registerKeyHandler, unregisterKeyHandler, type KeyHandler } from './input-router.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -72,6 +74,7 @@ export function initAppletRuntime(): void {
   
   // URL params API for applet JS
   (window as unknown as { getAppletUrlParams: typeof getAppletUrlParams }).getAppletUrlParams = getAppletUrlParams;
+  (window as unknown as { getAppletSlug: typeof getAppletSlug }).getAppletSlug = getAppletSlug;
   (window as unknown as { updateAppletUrlParam: typeof updateAppletUrlParam }).updateAppletUrlParam = updateAppletUrlParam;
   
   // WebSocket state subscription for applet JS
@@ -80,6 +83,9 @@ export function initAppletRuntime(): void {
   // Agent invocation API for applet JS
   (window as unknown as { getSessionId: typeof getActiveSessionId }).getSessionId = getActiveSessionId;
   (window as unknown as { sendAgentMessage: typeof sendAgentMessage }).sendAgentMessage = sendAgentMessage;
+  
+  // Input routing API for applet JS - register keyboard handler
+  (window as unknown as { registerKeyHandler: typeof registerKeyHandler }).registerKeyHandler = registerKeyHandler;
   
   // Navigation API: single handler for all navigation types
   // (links, back/forward, programmatic, address bar)
@@ -155,12 +161,12 @@ function setupNavigationHandler(): void {
             }
             showInstance(appletStack[index]);
             updateBreadcrumbUI();
-            setViewState('applet');
+            setViewState('applet', appletSlug);
           } else if (index === appletStack.length - 1) {
             // Already showing this applet, just ensure it's visible
             console.log(`[APPLET] navigate: already showing ${appletSlug}`);
             showInstance(appletStack[index]);
-            setViewState('applet');
+            setViewState('applet', appletSlug);
           } else {
             // Load applet (push new) - pushApplet will call setViewState
             console.log(`[APPLET] navigate: loading ${appletSlug}`, Object.keys(params).length ? params : '');
@@ -189,6 +195,14 @@ export function getAppletUrlParams(): Record<string, string> {
     }
   });
   return result;
+}
+
+/**
+ * Get the current applet's slug from URL
+ * Returns null if not in an applet view
+ */
+export function getAppletSlug(): string | null {
+  return new URLSearchParams(window.location.search).get('applet');
 }
 
 /**
@@ -366,7 +380,7 @@ export function getNavigationContext(): NavigationContext {
 }
 
 /**
- * Destroy an applet instance (remove from DOM, cleanup styles/scripts)
+ * Destroy an applet instance (remove from DOM, cleanup styles/scripts/handlers)
  */
 function destroyInstance(instance: AppletInstance): void {
   instance.element.remove();
@@ -374,6 +388,8 @@ function destroyInstance(instance: AppletInstance): void {
   // Remove scripts tagged with this instance's slug
   document.querySelectorAll(`script[data-applet-slug="${instance.slug}"]`)
     .forEach(el => el.remove());
+  // Unregister keyboard handler
+  unregisterKeyHandler(instance.slug);
 }
 
 /**
@@ -584,7 +600,7 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
     showInstance(appletStack[existingIndex]);
     updateBreadcrumbUI();
     syncToUrl();
-    setViewState('applet');
+    setViewState('applet', slug);
     return;
   }
   
@@ -621,7 +637,7 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   // Update UI
   updateBreadcrumbUI();
   syncToUrl();
-  setViewState('applet');
+  setViewState('applet', slug);
   
   // WebSocket is already connected on page load - no need to connect here
 }

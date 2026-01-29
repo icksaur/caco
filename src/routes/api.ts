@@ -22,6 +22,7 @@ import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
 import { setAppletUserState, getAppletUserState, clearAppletUserState } from '../applet-state.js';
 import { listApplets, loadApplet } from '../applet-store.js';
+import { getUsage } from '../usage-state.js';
 
 const router = Router();
 
@@ -71,6 +72,12 @@ router.get('/models', async (_req: Request, res: Response) => {
     console.error('[MODELS] Failed to fetch models:', message);
     res.status(500).json({ error: message, models: [] });
   }
+});
+
+// Get current usage/quota info
+router.get('/usage', (_req: Request, res: Response) => {
+  const usage = getUsage();
+  res.json({ usage });
 });
 
 // HTML escape helper

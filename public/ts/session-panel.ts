@@ -17,6 +17,7 @@ import { setViewState, getViewState, isViewState } from './view-controller.js';
 export function showSessionManager(): void {
   setViewState('sessions');
   loadSessions();
+  loadUsage();
 }
 
 /**
@@ -36,6 +37,7 @@ export function toggleSessionPanel(): void {
     // Switch to session view
     setViewState('sessions');
     loadSessions();
+    loadUsage();
   }
 }
 
@@ -231,4 +233,44 @@ export function showNewChatUI(): void {
   // Focus the message input
   const messageInput = document.querySelector('form input[name="message"]') as HTMLInputElement;
   messageInput?.focus();
+}
+
+/**
+ * Fetch and display usage/budget info
+ */
+async function loadUsage(): Promise<void> {
+  try {
+    const response = await fetch('/api/usage');
+    if (!response.ok) return;
+    
+    const data = await response.json();
+    const usage = data.usage;
+    
+    const container = document.getElementById('usageInfo');
+    if (!container) return;
+    
+    if (!usage) {
+      container.textContent = '';
+      return;
+    }
+    
+    if (usage.isUnlimited) {
+      container.textContent = 'Unlimited usage';
+      container.className = 'usage-info';
+      return;
+    }
+    
+    const remaining = Math.round(usage.remainingPercentage);
+    container.textContent = `${remaining}% of budget remaining`;
+    
+    // Add warning classes for low usage
+    container.className = 'usage-info';
+    if (remaining <= 10) {
+      container.classList.add('usage-critical');
+    } else if (remaining <= 25) {
+      container.classList.add('usage-low');
+    }
+  } catch (error) {
+    console.error('Failed to load usage:', error);
+  }
 }

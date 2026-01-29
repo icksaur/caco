@@ -656,6 +656,27 @@ main {
   padding: var(--space-lg);
 }
 
+/* Usage info display */
+.usage-info {
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.usage-info:empty {
+  display: none;
+}
+
+.usage-info.usage-low {
+  color: #f59e0b;
+}
+
+.usage-info.usage-critical {
+  color: #ef4444;
+}
+
 /* ========================================
    APPLET VIEW
    ======================================== */

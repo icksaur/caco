@@ -16,6 +16,7 @@ import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
+import { updateUsage } from '../usage-state.js';
 import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, broadcastOutput, type ActivityItem, type MessageSource, type ChatMessage } from './websocket.js';
 import { extractToolTelemetry, extractToolName, type ToolExecutionCompleteEvent } from '../sdk-event-parser.js';
 import { randomUUID } from 'crypto';
@@ -282,6 +283,19 @@ export async function dispatchMessage(
           if (toolTelemetry?.reloadTriggered && consumeReloadSignal()) {
             onActivity({ type: 'info', text: 'Reload triggered' });
           }
+          break;
+        }
+        
+        case 'assistant.usage': {
+          // Capture quota/budget info
+          const quotaSnapshots = eventData.quotaSnapshots as Record<string, {
+            isUnlimitedEntitlement: boolean;
+            entitlementRequests: number;
+            usedRequests: number;
+            remainingPercentage: number;
+            resetDate?: string;
+          }> | undefined;
+          updateUsage(quotaSnapshots);
           break;
         }
         

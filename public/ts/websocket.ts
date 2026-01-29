@@ -197,6 +197,7 @@ function doConnect(myConnectionId: number): void {
 /**
  * Handle incoming message from server
  * Filters messages by activeSessionId - only messages for current session are processed
+ * Exception: stateUpdate bypasses session filtering (applets receive state from any session)
  */
 function handleMessage(msg: { type: string; id?: string; sessionId?: string; data?: unknown; error?: string }): void {
   // Handle request/response messages (no session filtering)
@@ -212,7 +213,21 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
     return;
   }
   
-  // Filter by active session for broadcast messages
+  // stateUpdate bypasses session filtering - applets receive state regardless of which session agent runs in
+  if (msg.type === 'stateUpdate') {
+    if (msg.data && typeof msg.data === 'object') {
+      for (const cb of stateCallbacks) {
+        try {
+          cb(msg.data as Record<string, unknown>);
+        } catch (err) {
+          console.error('[WS] State callback error:', err);
+        }
+      }
+    }
+    return;
+  }
+  
+  // Filter by active session for other broadcast messages
   const msgSessionId = msg.sessionId;
   if (msgSessionId && activeSessionId && msgSessionId !== activeSessionId) {
     // Message for a different session - ignore
@@ -221,18 +236,6 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
   
   // Handle broadcast messages
   switch (msg.type) {
-    case 'stateUpdate':
-      if (msg.data && typeof msg.data === 'object') {
-        for (const cb of stateCallbacks) {
-          try {
-            cb(msg.data as Record<string, unknown>);
-          } catch (err) {
-            console.error('[WS] State callback error:', err);
-          }
-        }
-      }
-      break;
-    
     case 'message': {
       // Chat message (user or assistant) - from history or live
       const msgWithData = msg as unknown as { message?: ChatMessage };

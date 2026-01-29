@@ -1,22 +1,15 @@
 # things to do
 
-create doc/applet-os.md
-applet input segregation - only visible app gets mouse, keyboard, gamepad, camera, whatever input.  Naieve implementations of applets send keyboard to chat and applet.
-May require iframe.  Other options?  Search online or github.
-Needs:
-applet-os.md reqs list:
-input segregation
-current state analysis
-what breaks? applet websockets? applets with href like applet-browser?
-study for how to implement cleanly, concerning NavigationAPI etc.
-decide if it's not worth it - applets global JS state may be powerful but a bit fiddly
-make suggestion to user
+Fix set_applet_state in calculator.
+agent get -> set -> get flow works in agent (state is found on server)
+applet is not getting the SET, or not updating the state in its UI
 
 app-to-session vision flow:
 apps can send image data to agent when making requests
+agents can get image data from apps (maybe already works?)
 
 agent-to-agent recursion or loop defense
 server-side, like failure for  agent-to-agent MCP tools or POST endpoint protection
 
-generic MPC wrapper
-J
+MPC wrapper for apps
+Once an agent figures out how to solve a problem, it can write an applet that solves the same problem using the same MCP tools.

@@ -10,8 +10,9 @@ import { addActivityItem } from './activity.js';
 import { setStreaming, isStreaming, getActiveSessionId, setActiveSession, isLoadingHistory, setLoadingHistory } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { isViewState, setViewState } from './view-controller.js';
-import { onMessage, onHistoryComplete, onActivity, isWsConnected, type ChatMessage, type ActivityItem } from './websocket.js';
+import { onMessage, onHistoryComplete, onActivity, onOutput, isWsConnected, type ChatMessage, type ActivityItem } from './websocket.js';
 import { showToast, hideToast } from './toast.js';
+import { renderOutputById, restoreOutputsFromHistory } from './display-output.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -151,11 +152,15 @@ function registerWsHandlers(): void {
     handleMessage(msg);
   });
   
-  // History complete handler
+  // History complete handler - single place for all post-history tasks
   onHistoryComplete(() => {
     setLoadingHistory(false);
     // Render markdown for all history messages
     if (window.renderMarkdown) window.renderMarkdown();
+    // Restore outputs from history messages
+    restoreOutputsFromHistory().catch(err => 
+      console.error('Failed to restore outputs:', err)
+    );
     // Scroll to bottom after history loads
     scrollToBottom(true);
   });
@@ -163,6 +168,19 @@ function registerWsHandlers(): void {
   // Activity handler for tool calls, intents, errors
   onActivity((item: ActivityItem) => {
     addActivityItem(item.type, item.text, item.details);
+  });
+  
+  // Output handler for display-only tool results
+  onOutput((outputId: string) => {
+    console.log('[response-streaming] onOutput callback:', outputId);
+    // Find the pending response's outputs container
+    const container = document.querySelector('#pending-response .outputs-container');
+    console.log('[response-streaming] Container found:', !!container);
+    if (container) {
+      renderOutputById(outputId, container).catch(err => 
+        console.error('Failed to render output:', err)
+      );
+    }
   });
 }
 

@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
-import type { SessionConfig, SystemMessage } from './types.js';
+import type { SessionConfig, CreateConfig, ResumeConfig, SystemMessage } from './types.js';
 import { CwdLockedError } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
 import { registerSession, unregisterSession } from './storage.js';
@@ -179,9 +179,10 @@ class SessionManager {
 
   /**
    * Create a new session for the given cwd
+   * @param config - Required config with toolFactory (prevents sessions without tools)
    * @throws CwdLockedError if cwd is already locked
    */
-  async create(cwd: string, config: SessionConfig = {}): Promise<string> {
+  async create(cwd: string, config: CreateConfig): Promise<string> {
     // Check lock
     if (this.cwdLocks.has(cwd)) {
       const existingSessionId = this.cwdLocks.get(cwd)!;
@@ -202,7 +203,7 @@ class SessionManager {
     // For new sessions, create a mutable ref with placeholder
     // The ref will be updated after session creation so tools can access real ID
     const sessionRef = { id: 'PENDING' };
-    const tools = config.toolFactory ? config.toolFactory(cwd, sessionRef) : [];
+    const tools = config.toolFactory(cwd, sessionRef);
     
     // Create session with streaming enabled
     const session = await client.createSession({
@@ -230,10 +231,11 @@ class SessionManager {
 
   /**
    * Resume an existing session
+   * @param config - Required config with toolFactory (prevents resuming without tools)
    * @throws Error if session's cwd is already locked by another session
    * @throws Error if session doesn't exist
    */
-  async resume(sessionId: string, config: SessionConfig = {}): Promise<string> {
+  async resume(sessionId: string, config: ResumeConfig): Promise<string> {
     // Get cwd from cache
     const cached = this.sessionCache.get(sessionId);
     if (!cached) {
@@ -264,7 +266,7 @@ class SessionManager {
     // Create tools using factory (cwd and sessionRef for agent tools)
     // For resume, we know the sessionId upfront
     const sessionRef = { id: sessionId };
-    const tools = config.toolFactory ? config.toolFactory(cwd, sessionRef) : [];
+    const tools = config.toolFactory(cwd, sessionRef);
     
     // Resume session with tools
     const session = await client.resumeSession(sessionId, {

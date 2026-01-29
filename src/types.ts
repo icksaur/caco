@@ -79,6 +79,20 @@ export interface SessionConfig {
   excludedTools?: string[];
 }
 
+// Create config - toolFactory is REQUIRED to prevent sessions without tools
+export interface CreateConfig {
+  model?: string;
+  systemMessage?: SystemMessage;
+  toolFactory: ToolFactory;
+  excludedTools?: string[];
+}
+
+// Resume config - toolFactory is REQUIRED to prevent sessions resuming without tools
+export interface ResumeConfig {
+  toolFactory: ToolFactory;
+  excludedTools?: string[];
+}
+
 // Session ID reference - mutable for agent tools
 export interface SessionIdRef {
   id: string;

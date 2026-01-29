@@ -198,8 +198,9 @@ export async function restoreOutputsFromHistory(): Promise<void> {
 
 /**
  * Render an output by ID into a container
+ * Exported for live streaming - called when output message arrives via WS
  */
-async function renderOutputById(outputId: string, container: Element): Promise<void> {
+export async function renderOutputById(outputId: string, container: Element): Promise<void> {
   try {
     const response = await fetch(`/api/outputs/${outputId}?format=json`);
     if (!response.ok) {

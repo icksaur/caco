@@ -14,10 +14,10 @@ import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
-import { getOutput } from '../storage.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
-import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, type ActivityItem, type MessageSource, type ChatMessage } from './websocket.js';
+import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, broadcastOutput, type ActivityItem, type MessageSource, type ChatMessage } from './websocket.js';
+import { extractToolTelemetry, extractToolName, type ToolExecutionCompleteEvent } from '../sdk-event-parser.js';
 import { randomUUID } from 'crypto';
 
 const router = Router();
@@ -156,8 +156,9 @@ export async function dispatchMessage(
   try {
     // Ensure session is active (loads SDK client into memory)
     // Uses resume() directly - doesn't stop other sessions
+    // MUST pass config so tools are attached!
     if (!sessionManager.isActive(sessionId)) {
-      await sessionManager.resume(sessionId);
+      await sessionManager.resume(sessionId, sessionState.getSessionConfig());
     }
     
     // Get session
@@ -255,25 +256,21 @@ export async function dispatchMessage(
         }
         
         case 'tool.execution_complete': {
-          const toolName = (eventData.toolName || eventData.name || 'tool') as string;
+          const toolName = extractToolName(eventData as ToolExecutionCompleteEvent);
           const success = eventData.success as boolean;
           const status = success ? '✓' : '✗';
-          const result = eventData.result ? JSON.stringify(eventData.result) : undefined;
+          const resultObj = eventData.result as { content?: string } | undefined;
+          const result = resultObj ? JSON.stringify(resultObj) : undefined;
           
-          // Handle output references
-          const toolTelemetry = eventData.toolTelemetry as { 
-            outputId?: string;
-            reloadTriggered?: boolean;
-          } | undefined;
+          // Extract toolTelemetry from SDK's nested JSON format
+          const toolTelemetry = extractToolTelemetry(eventData as ToolExecutionCompleteEvent);
           
           let details = result;
           if (toolTelemetry?.outputId) {
-            const storedOutput = getOutput(toolTelemetry.outputId);
-            const outputMeta = storedOutput?.metadata;
-            if (outputMeta) {
-              // TODO: Handle display output rendering via activity or message
-              details = `[Output: ${toolTelemetry.outputId}]`;
-            }
+            // Broadcast output directly so client renders it immediately
+            console.log('[stream] Broadcasting output:', toolTelemetry.outputId);
+            broadcastOutput(sessionId, toolTelemetry.outputId);
+            details = `[Output: ${toolTelemetry.outputId}]`;
           }
           
           onActivity({ 

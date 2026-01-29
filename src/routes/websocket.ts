@@ -75,12 +75,13 @@ export interface ActivityItem {
 }
 
 interface ServerMessage {
-  type: 'stateUpdate' | 'state' | 'message' | 'activity' | 'historyComplete' | 'pong' | 'error';
+  type: 'stateUpdate' | 'state' | 'message' | 'activity' | 'output' | 'historyComplete' | 'pong' | 'error';
   id?: string;
   sessionId?: string;  // All broadcasts include sessionId for client filtering
   data?: unknown;
   message?: ChatMessage;
   item?: ActivityItem;
+  outputId?: string;   // For output type: ID to fetch and render
   error?: string;
 }
 
@@ -381,6 +382,27 @@ export function broadcastActivity(
   
   // Include sessionId so clients can filter
   const msg: ServerMessage = { type: 'activity', sessionId, item };
+  const data = JSON.stringify(msg);
+  
+  for (const ws of allConnections) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
+  }
+}
+
+/**
+ * Broadcast an output to render immediately
+ * Used for display-only tools (embed_media, render_file_contents, etc.)
+ * Client fetches output data and renders into pending response
+ */
+export function broadcastOutput(
+  sessionId: string,
+  outputId: string
+): void {
+  if (allConnections.size === 0) return;
+  
+  const msg: ServerMessage = { type: 'output', sessionId, outputId };
   const data = JSON.stringify(msg);
   
   for (const ws of allConnections) {

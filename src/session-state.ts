@@ -106,6 +106,20 @@ class SessionState {
   }
 
   /**
+   * Get session config for resuming sessions (toolFactory, excludedTools)
+   * Used by stream route to ensure resumed sessions have tools
+   */
+  getSessionConfig() {
+    if (!this._config) {
+      throw new Error('SessionState not initialized');
+    }
+    return {
+      toolFactory: this._config.toolFactory,
+      excludedTools: this._config.excludedTools
+    };
+  }
+
+  /**
    * Initialize session state - must be called before other operations
    */
   async init(config: SessionStateConfig): Promise<void> {
@@ -222,7 +236,6 @@ class SessionState {
     
     const newSessionId = await sessionManager.create(sessionCwd, {
       model: finalModel,
-      streaming: true,
       systemMessage: this._config.systemMessage,
       toolFactory: this._config.toolFactory,
       excludedTools: this._config.excludedTools

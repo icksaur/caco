@@ -54,11 +54,13 @@ let activeSessionId: string | null = null;
 type StateCallback = (state: Record<string, unknown>) => void;
 type MessageCallback = (msg: ChatMessage) => void;
 type ActivityCallback = (item: ActivityItem) => void;
+type OutputCallback = (outputId: string) => void;
 type HistoryCompleteCallback = () => void;
 type ConnectCallback = () => void;
 const stateCallbacks: Set<StateCallback> = new Set();
 const messageCallbacks: Set<MessageCallback> = new Set();
 const activityCallbacks: Set<ActivityCallback> = new Set();
+const outputCallbacks: Set<OutputCallback> = new Set();
 const historyCompleteCallbacks: Set<HistoryCompleteCallback> = new Set();
 const connectCallbacks: Set<ConnectCallback> = new Set();
 
@@ -271,6 +273,22 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       }
       break;
     }
+    
+    case 'output': {
+      // Output to render immediately
+      console.log('[WS] Received output message:', msg);
+      const outputMsg = msg as unknown as { outputId?: string };
+      if (outputMsg.outputId) {
+        for (const cb of outputCallbacks) {
+          try {
+            cb(outputMsg.outputId);
+          } catch (err) {
+            console.error('[WS] Output callback error:', err);
+          }
+        }
+      }
+      break;
+    }
       
     case 'pong':
       // Heartbeat response - no action needed
@@ -397,6 +415,15 @@ export function onHistoryComplete(callback: HistoryCompleteCallback): () => void
 export function onActivity(callback: ActivityCallback): () => void {
   activityCallbacks.add(callback);
   return () => activityCallbacks.delete(callback);
+}
+
+/**
+ * Subscribe to output events (display-only tool results)
+ * Returns unsubscribe function
+ */
+export function onOutput(callback: OutputCallback): () => void {
+  outputCallbacks.add(callback);
+  return () => outputCallbacks.delete(callback);
 }
 
 /**

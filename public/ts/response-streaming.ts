@@ -27,6 +27,33 @@ let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
 /** Track if WS handlers are registered */
 let wsHandlersRegistered = false;
 
+/** Current correlation ID for agent call tracking */
+let currentCorrelationId: string | null = null;
+
+/**
+ * Generate a new correlation ID for user-initiated actions
+ */
+function generateCorrelationId(): string {
+  return crypto.randomUUID();
+}
+
+/**
+ * Get or create current correlation ID
+ */
+function getCorrelationId(): string {
+  if (!currentCorrelationId) {
+    currentCorrelationId = generateCorrelationId();
+  }
+  return currentCorrelationId;
+}
+
+/**
+ * Reset correlation ID (for new user-initiated flows)
+ */
+function resetCorrelationId(): void {
+  currentCorrelationId = null;
+}
+
 // ============================================================================
 // Bubble Rendering - Unified System
 // ============================================================================
@@ -407,6 +434,10 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       // configures message filtering for the new session
     }
     
+    // Generate new correlation ID for this user-initiated flow
+    const correlationId = generateCorrelationId();
+    currentCorrelationId = correlationId;
+    
     // Step 2: POST message to session, get streamId
     const response = await fetch(`/api/sessions/${sessionId}/messages`, {
       method: 'POST',
@@ -414,6 +445,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       body: JSON.stringify({ 
         prompt, 
         imageData,
+        correlationId,
         ...(appletState && { appletState }),  // Only include if has data
         appletNavigation  // Always include navigation context
       })

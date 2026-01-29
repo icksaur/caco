@@ -7,6 +7,7 @@ import type { SessionConfig, CreateConfig, ResumeConfig, SystemMessage } from '.
 import { CwdLockedError } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
 import { registerSession, unregisterSession } from './storage.js';
+import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 
 // SDK types (minimal definitions for what we use)
 interface CopilotClientInstance {
@@ -108,6 +109,10 @@ class SessionManager {
   
   // Cached model list from SDK
   private cachedModels: SDKModelInfo[] = [];
+  
+  // Correlation tracking for runaway guard
+  private correlations = new Map<string, CorrelationMetrics>();
+  private correlationRules: CorrelationRules = DEFAULT_RULES;
   
   private initialized = false;
 
@@ -558,6 +563,53 @@ class SessionManager {
       prompt: message,
       ...options
     });
+  }
+
+  /**
+   * Check if an agent call is allowed (runaway guard)
+   * 
+   * @param correlationId - Correlation ID for the flow
+   * @param toSessionId - Session being called
+   * @returns { allowed: true } or { allowed: false, reason: string }
+   */
+  checkAgentCall(correlationId: string, toSessionId: string): { allowed: true } | { allowed: false; reason: string } {
+    // Get or create metrics for this correlation
+    let metrics = this.correlations.get(correlationId);
+    if (!metrics) {
+      metrics = new CorrelationMetrics(correlationId, this.correlationRules);
+      this.correlations.set(correlationId, metrics);
+    }
+    
+    // Check if expired - clean up if so
+    if (metrics.isExpired()) {
+      this.correlations.delete(correlationId);
+      metrics = new CorrelationMetrics(correlationId, this.correlationRules);
+      this.correlations.set(correlationId, metrics);
+    }
+    
+    return metrics.isAllowed(toSessionId);
+  }
+
+  /**
+   * Record a successful agent call
+   * 
+   * @param correlationId - Correlation ID for the flow
+   * @param toSessionId - Session that was called
+   */
+  recordAgentCall(correlationId: string, toSessionId: string): void {
+    let metrics = this.correlations.get(correlationId);
+    if (!metrics) {
+      metrics = new CorrelationMetrics(correlationId, this.correlationRules);
+      this.correlations.set(correlationId, metrics);
+    }
+    metrics.recordCall(toSessionId);
+  }
+
+  /**
+   * Get correlation metrics (for debugging)
+   */
+  getCorrelationMetrics(correlationId: string) {
+    return this.correlations.get(correlationId)?.getMetrics();
   }
 }
 

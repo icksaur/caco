@@ -37,7 +37,7 @@ interface SessionEvent {
  */
 router.post('/sessions/:sessionId/messages', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { prompt, imageData, appletState, appletNavigation, source, appletSlug, fromSession } = req.body as {
+  const { prompt, imageData, appletState, appletNavigation, source, appletSlug, fromSession, correlationId } = req.body as {
     prompt?: string;
     imageData?: string;
     appletState?: Record<string, unknown>;
@@ -45,12 +45,19 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     source?: MessageSource;
     appletSlug?: string;
     fromSession?: string;  // For agent-to-agent: originating session ID
+    correlationId?: string; // For tracking related calls
   };
   
   const clientId = req.headers['x-client-id'] as string | undefined;
   
   if (!prompt) {
     res.status(400).json({ error: 'prompt is required' });
+    return;
+  }
+  
+  // Agent calls must include correlationId
+  if (fromSession && !correlationId) {
+    res.status(400).json({ error: 'correlationId required for agent-initiated calls' });
     return;
   }
   
@@ -64,6 +71,16 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   if (source === 'agent' && fromSession === sessionId) {
     res.status(400).json({ error: 'Cannot post to own session' });
     return;
+  }
+  
+  // Runaway guard: check correlation metrics for agent calls
+  if (correlationId) {
+    const guardResult = sessionManager.checkAgentCall(correlationId, sessionId);
+    if (!guardResult.allowed) {
+      console.log(`[RUNAWAY GUARD] Rejected call to ${sessionId}: ${guardResult.reason}`);
+      res.status(400).json({ error: `Agent call rejected: ${guardResult.reason}` });
+      return;
+    }
   }
   
   // Store applet state if provided
@@ -88,6 +105,11 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // Broadcast user message to WS clients for unified rendering
   // Use source from request (defaults to 'user' for normal messages)
   broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, source ?? 'user', appletSlug, fromSession);
+  
+  // Record agent call for runaway guard
+  if (correlationId) {
+    sessionManager.recordAgentCall(correlationId, sessionId);
+  }
   
   // Return immediately - dispatch happens in background
   res.json({ ok: true, sessionId });

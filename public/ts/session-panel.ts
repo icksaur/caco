@@ -48,10 +48,11 @@ export async function loadSessions(): Promise<void> {
     if (!response.ok) return;
     
     const data: SessionsResponse = await response.json();
-    const { activeSessionId, currentCwd, grouped, models } = data;
+    const { grouped, models } = data;
     
-    // Update state store
-    setActiveSession(activeSessionId, currentCwd);
+    // Use client state as source of truth (not server response)
+    const activeSessionId = getActiveSessionId();
+    const currentCwd = getCurrentCwd();
     
     // Store available models from SDK
     if (models && models.length > 0) {

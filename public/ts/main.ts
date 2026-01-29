@@ -14,6 +14,7 @@ import { initViewState, setViewState, isViewState } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { setupMultilineInput } from './multiline-input.js';
 import { connectWs, setActiveSession, requestHistory, waitForConnect, reconnectIfNeeded } from './websocket.js';
+import { hideToast } from './toast.js';
 
 /**
  * Toggle between chatting and applet views
@@ -40,6 +41,7 @@ declare global {
     toggleActivityBox: typeof toggleActivityBox;
     stopStreaming: typeof stopStreaming;
     toggleApplet: typeof toggleApplet;
+    hideToast: typeof hideToast;
   }
 }
 
@@ -55,6 +57,7 @@ window.loadModels = loadModels;
 window.toggleActivityBox = toggleActivityBox;
 window.stopStreaming = stopStreaming;
 window.toggleApplet = toggleApplet;
+window.hideToast = hideToast;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {

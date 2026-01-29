@@ -1,0 +1,260 @@
+/**
+ * Consolidated Application State
+ * 
+ * SINGLE SOURCE OF TRUTH for all client-side state.
+ * All state changes go through this module's setters.
+ * 
+ * Design principles:
+ * - State is private, accessed via getters
+ * - Mutations are explicit functions with clear names
+ * - Side effects (DOM updates, WS sync) are handled in setters
+ * - State can be inspected for debugging
+ */
+
+import type { ModelInfo } from './types.js';
+import { setActiveSession as setWsActiveSession } from './websocket.js';
+
+// ============================================================
+// View State Types
+// ============================================================
+
+/** Valid application view states */
+export type ViewState = 'sessions' | 'newChat' | 'chatting' | 'applet';
+
+// ============================================================
+// State Interface
+// ============================================================
+
+export interface AppState {
+  // === View State ===
+  viewState: ViewState;
+  
+  // === Session State ===
+  activeSessionId: string | null;
+  currentCwd: string;
+  
+  // === Model State ===
+  selectedModel: string;
+  availableModels: ModelInfo[];
+  
+  // === UI Flags ===
+  isStreaming: boolean;
+  loadingHistory: boolean;
+  autoScrollEnabled: boolean;
+  hasImage: boolean;
+}
+
+// ============================================================
+// Constants
+// ============================================================
+
+export const DEFAULT_MODEL = 'claude-sonnet-4';
+
+// ============================================================
+// State Store (private singleton)
+// ============================================================
+
+const state: AppState = {
+  viewState: 'sessions',
+  activeSessionId: null,
+  currentCwd: '',
+  selectedModel: DEFAULT_MODEL,
+  availableModels: [],
+  isStreaming: false,
+  loadingHistory: false,
+  autoScrollEnabled: true,
+  hasImage: false
+};
+
+// ============================================================
+// State Accessors (read-only)
+// ============================================================
+
+/** Get a shallow copy of entire state (for debugging) */
+export function getState(): Readonly<AppState> {
+  return { ...state };
+}
+
+/** Get current view state */
+export function getViewState(): ViewState {
+  return state.viewState;
+}
+
+/** Check if in a specific view state */
+export function isViewState(viewState: ViewState): boolean {
+  return state.viewState === viewState;
+}
+
+/** Get active session ID */
+export function getActiveSessionId(): string | null {
+  return state.activeSessionId;
+}
+
+/** Get current working directory */
+export function getCurrentCwd(): string {
+  return state.currentCwd;
+}
+
+/** Get selected model */
+export function getSelectedModel(): string {
+  return state.selectedModel;
+}
+
+/** Get available models */
+export function getAvailableModels(): readonly ModelInfo[] {
+  return state.availableModels;
+}
+
+/** Check if streaming */
+export function isStreaming(): boolean {
+  return state.isStreaming;
+}
+
+/** Check if loading history */
+export function isLoadingHistory(): boolean {
+  return state.loadingHistory;
+}
+
+/** Check if auto-scroll is enabled */
+export function isAutoScrollEnabled(): boolean {
+  return state.autoScrollEnabled;
+}
+
+/** Check if has image attachment */
+export function hasImage(): boolean {
+  return state.hasImage;
+}
+
+// ============================================================
+// State Mutations
+// ============================================================
+
+/** 
+ * Set view state
+ * Note: Does NOT update DOM - caller must handle that
+ */
+export function setViewState(viewState: ViewState): boolean {
+  if (state.viewState === viewState) return false; // No change
+  state.viewState = viewState;
+  return true;
+}
+
+/**
+ * Set active session and sync to WebSocket
+ */
+export function setActiveSession(sessionId: string | null, cwd: string): void {
+  state.activeSessionId = sessionId;
+  state.currentCwd = cwd;
+  setWsActiveSession(sessionId);
+}
+
+/**
+ * Clear active session (for new chat)
+ */
+export function clearActiveSession(): void {
+  state.activeSessionId = null;
+  // Note: Don't clear cwd - it's useful as default for next session
+}
+
+/**
+ * Set selected model
+ */
+export function setSelectedModel(modelId: string): void {
+  state.selectedModel = modelId;
+  
+  // Sync to hidden form input (DOM side effect)
+  if (typeof document !== 'undefined') {
+    const input = document.getElementById('selectedModel') as HTMLInputElement | null;
+    if (input) {
+      input.value = modelId;
+    }
+  }
+}
+
+/**
+ * Set available models
+ */
+export function setAvailableModels(models: ModelInfo[]): void {
+  state.availableModels = [...models]; // Defensive copy
+}
+
+/**
+ * Set streaming state
+ */
+export function setStreaming(streaming: boolean): void {
+  state.isStreaming = streaming;
+}
+
+/**
+ * Set loading history state
+ */
+export function setLoadingHistory(loading: boolean): void {
+  state.loadingHistory = loading;
+}
+
+/**
+ * Enable auto-scroll (called when sending a message)
+ */
+export function enableAutoScroll(): void {
+  state.autoScrollEnabled = true;
+}
+
+/**
+ * Disable auto-scroll (called when user scrolls up)
+ */
+export function disableAutoScroll(): void {
+  state.autoScrollEnabled = false;
+}
+
+/**
+ * Set image attachment state
+ */
+export function setHasImage(hasImage: boolean): void {
+  state.hasImage = hasImage;
+}
+
+// ============================================================
+// Initialization
+// ============================================================
+
+/**
+ * Initialize from server preferences
+ */
+export function initFromPreferences(prefs: { 
+  lastModel?: string; 
+  lastCwd?: string;
+  lastSessionId?: string | null;
+}): void {
+  if (prefs.lastModel) {
+    setSelectedModel(prefs.lastModel);
+  }
+  if (prefs.lastCwd) {
+    state.currentCwd = prefs.lastCwd;
+  }
+  if (prefs.lastSessionId !== undefined) {
+    state.activeSessionId = prefs.lastSessionId;
+  }
+}
+
+/**
+ * Initialize from session API response
+ */
+export function initFromSession(data: {
+  sessionId?: string | null;
+  cwd?: string;
+  activeSessionId?: string | null;
+  currentCwd?: string;
+}): void {
+  const sessionId = data.sessionId ?? data.activeSessionId ?? null;
+  const cwd = data.cwd ?? data.currentCwd ?? '';
+  setActiveSession(sessionId, cwd);
+}
+
+// ============================================================
+// Debug
+// ============================================================
+
+/** Log current state to console */
+export function debugState(): void {
+  console.log('[APP STATE]', getState());
+}

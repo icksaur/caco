@@ -170,6 +170,7 @@ class SessionState {
     }
     
     const activeId = this.getActiveSessionId(clientId);
+    console.log(`[ENSURE DEBUG] newChat=${newChat}, activeId=${activeId}, clientId=${clientId || 'default'}`);
     
     // Explicit new chat request - just clear the active session reference
     // Don't stop the old session - it may still be running
@@ -178,8 +179,14 @@ class SessionState {
       this.setActiveSessionId(null, clientId);
     }
     
+    // Also clear pending resume when new chat is requested
+    if (newChat) {
+      this.setPendingResumeId(null, clientId);
+    }
+    
     // If we have an active session, return it
     const currentActiveId = this.getActiveSessionId(clientId);
+    console.log(`[ENSURE DEBUG] After clear: currentActiveId=${currentActiveId}`);
     if (currentActiveId && sessionManager.isActive(currentActiveId)) {
       console.log(`[MODEL] Reusing existing session ${currentActiveId} - requested model '${model || '(undefined)'}' is IGNORED`);
       return currentActiveId;

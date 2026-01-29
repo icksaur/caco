@@ -11,6 +11,7 @@ import { setStreaming, isStreaming, getActiveSessionId, setActiveSession } from 
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { isViewState, setViewState } from './view-controller.js';
 import { onMessage, onHistoryComplete, onActivity, isWsConnected, type ChatMessage, type ActivityItem } from './websocket.js';
+import { showToast, hideToast } from './toast.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -148,6 +149,8 @@ function registerWsHandlers(): void {
   
   // Unified message handler for history and live streaming
   onMessage((msg: ChatMessage) => {
+    // Hide any error toast when we get stream messages
+    hideToast();
     handleMessage(msg);
   });
   
@@ -376,7 +379,8 @@ export async function streamResponse(prompt: string, model: string, imageData: s
         const error = await sessionRes.json().catch(() => ({ error: 'Session creation failed' }));
         // Handle 409 Conflict (directory locked by another session)
         if (sessionRes.status === 409 && error.code === 'CWD_LOCKED') {
-          throw new Error(`This directory is in use by another session. Stop the other session first, or switch to it.`);
+          // Use server's error message which includes cwd path
+          throw new Error(error.error || 'Directory is locked by another session');
         }
         throw new Error(error.error || `HTTP ${sessionRes.status}`);
       }
@@ -418,8 +422,20 @@ export async function streamResponse(prompt: string, model: string, imageData: s
   } catch (error) {
     console.error('Send message error:', error);
     setStreaming(false);
-    addActivityItem('error', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    finishPendingResponse();
+    setFormEnabled(true);  // Re-enable form so user can retry
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    // Restore user's message to input so they can retry
+    const input = document.querySelector('#chatForm textarea') as HTMLTextAreaElement;
+    if (input) {
+      input.value = prompt;
+      // Trigger input event to resize textarea
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    
+    // Show toast (floats above input, doesn't disturb chat)
+    showToast(errorMessage);
   }
 }
 
@@ -558,6 +574,16 @@ export function setupFormHandler(): void {
     // Get cwd from new chat form (will be empty if in existing chat)
     const cwd = getNewChatCwd();
     const isNewChat = isViewState('newChat');
+    const sessionId = getActiveSessionId();
+    
+    // DEBUG: Show state when sending
+    console.log('[SEND DEBUG]', {
+      viewState: isNewChat ? 'newChat' : 'chatting',
+      isNewChat,
+      sessionId,
+      cwd,
+      willCreateSession: isNewChat || !sessionId
+    });
     
     // If new chat form is visible and cwd is empty, show error
     if (isNewChat && !cwd) {

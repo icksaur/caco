@@ -9,6 +9,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { homedir } from 'os';
 import { sessionState } from './src/session-state.js';
 import { createDisplayTools } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
@@ -55,7 +56,7 @@ const SYSTEM_MESSAGE: SystemMessage = {
 - **Runtime**: Web browser UI connected to Copilot SDK (Node.js backend)
 - **Interface**: Rich HTML chat with markdown rendering, syntax highlighting, and media embeds
 - **Scope**: Full filesystem access - general-purpose assistant, not limited to any project
-- **Home directory**: ${process.env.HOME || '/home/user'}
+- **Home directory**: ${process.env.HOME || process.env.USERPROFILE || homedir()}
 - **Current directory**: ${process.cwd()} (but not limited to this)
 
 ## Your Capabilities

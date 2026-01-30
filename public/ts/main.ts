@@ -16,6 +16,7 @@ import { initInputRouter } from './input-router.js';
 import { setupMultilineInput } from './multiline-input.js';
 import { connectWs, setActiveSession, requestHistory, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
+import { initHostnameHash } from './hostname-hash.js';
 
 /**
  * Toggle between chatting and applet views
@@ -97,6 +98,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupMarkdownRenderer();
   setupMultilineInput();
   setupScrollDetection();
+  
+  // Initialize hostname-based favicon and button colors
+  initHostnameHash();
   
   // Fetch models once on page load
   try {

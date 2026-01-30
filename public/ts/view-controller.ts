@@ -7,10 +7,8 @@
 
 import { scrollToBottom } from './ui-utils.js';
 import { clearActiveSession, getCurrentCwd } from './app-state.js';
-import { getActiveAppletSlug } from './applet-runtime.js';
-
-/** Base title (hostname) */
-const BASE_TITLE = window.location.hostname;
+import { getActiveAppletSlug, getActiveAppletLabel } from './applet-runtime.js';
+import { getServerHostname } from './hostname-hash.js';
 
 /** Valid application view states */
 export type ViewState = 'sessions' | 'newChat' | 'chatting' | 'applet';
@@ -120,31 +118,32 @@ export function setViewState(state: ViewState): void {
 
 /**
  * Update browser tab title based on current view
- * Format: hostname | context
+ * Format: hostname context
  */
 export function updateTitle(): void {
-  let title = BASE_TITLE;
+  const baseTitle = getServerHostname();
+  let title = baseTitle;
   
   switch (currentState) {
     case 'sessions':
-      title = `${BASE_TITLE} | Sessions`;
+      title = `${baseTitle} Sessions`;
       break;
     case 'newChat':
-      title = `${BASE_TITLE} | New Chat`;
+      title = `${baseTitle} New Chat`;
       break;
     case 'chatting': {
       const cwd = getCurrentCwd();
       if (cwd) {
         // Show just the last directory name
         const dirName = cwd.split('/').pop() || cwd;
-        title = `${BASE_TITLE} | ${dirName}`;
+        title = `${baseTitle} ${dirName}`;
       }
       break;
     }
     case 'applet': {
-      const slug = getActiveAppletSlug();
-      if (slug) {
-        title = `${BASE_TITLE} | ${slug}`;
+      const label = getActiveAppletLabel();
+      if (label) {
+        title = `${baseTitle} ${label}`;
       }
       break;
     }

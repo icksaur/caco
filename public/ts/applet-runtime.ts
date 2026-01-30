@@ -11,7 +11,7 @@
  * Phase 6: Navigation API for SPA routing.
  */
 
-import { setViewState } from './view-controller.js';
+import { setViewState, updateTitle } from './view-controller.js';
 import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './websocket.js';
 import { getActiveSessionId } from './app-state.js';
 
@@ -124,6 +124,7 @@ function setupNavigationHandler(): void {
             try {
               console.log('[APPLET] navigate: leaving applet view');
               clearApplet();
+              updateTitle();
             } finally {
               insideNavigateHandler = false;
             }
@@ -166,6 +167,7 @@ function setupNavigationHandler(): void {
             console.log(`[APPLET] navigate: loading ${appletSlug}`, Object.keys(params).length ? params : '');
             await loadAppletBySlug(appletSlug, Object.keys(params).length ? params : undefined);
           }
+          updateTitle();
         } finally {
           insideNavigateHandler = false;
         }
@@ -691,6 +693,14 @@ export function getAppletStack(): ReadonlyArray<{ slug: string; label: string }>
 export function getActiveAppletSlug(): string | null {
   if (appletStack.length === 0) return null;
   return appletStack[appletStack.length - 1].slug;
+}
+
+/**
+ * Get the current (top) applet label (friendly name), or null if none active
+ */
+export function getActiveAppletLabel(): string | null {
+  if (appletStack.length === 0) return null;
+  return appletStack[appletStack.length - 1].label;
 }
 
 /**

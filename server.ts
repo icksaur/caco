@@ -9,7 +9,8 @@ import express from 'express';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { homedir } from 'os';
+import { homedir, hostname } from 'os';
+import { readFileSync } from 'fs';
 import { sessionState } from './src/session-state.js';
 import { createDisplayTools } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
@@ -124,17 +125,25 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Static files
-app.use(express.static('public'));
-
 // ============================================================
 // Routes
 // ============================================================
 
-// Serve chat interface
+// Serve chat interface with injected server hostname (BEFORE static files)
+const indexHtmlPath = join(__dirname, 'public', 'index.html');
+const serverHostname = hostname();
+
 app.get('/', (_req, res) => {
-  res.sendFile(join(__dirname, 'public', 'index.html'));
+  const html = readFileSync(indexHtmlPath, 'utf-8');
+  const injectedHtml = html.replace(
+    '</head>',
+    `<script>window.SERVER_HOSTNAME = ${JSON.stringify(serverHostname)};</script></head>`
+  );
+  res.type('html').send(injectedHtml);
 });
+
+// Static files (after index.html route so injection works)
+app.use(express.static('public'));
 
 // API routes
 app.use('/api', sessionRoutes);

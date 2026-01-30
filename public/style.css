@@ -316,6 +316,24 @@ form {
 #chatForm button[type="submit"] {
   flex-shrink: 0;
   height: fit-content;
+  /* Hostname-based 4-corner gradient (colors set via JS) */
+  background: 
+    radial-gradient(ellipse at 0% 0%, var(--host-color-tl, var(--color-accent)), transparent 70%),
+    radial-gradient(ellipse at 100% 0%, var(--host-color-tr, var(--color-accent)), transparent 70%),
+    radial-gradient(ellipse at 0% 100%, var(--host-color-bl, var(--color-accent)), transparent 70%),
+    radial-gradient(ellipse at 100% 100%, var(--host-color-br, var(--color-accent)), transparent 70%),
+    #333;
+  border: none;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+#chatForm button[type="submit"]:hover {
+  opacity: 0.9;
+  transform: scale(1.02);
+}
+
+#chatForm button[type="submit"]:active {
+  transform: scale(0.98);
 }
 
 /* Hide loading indicator by default */
@@ -1206,9 +1224,9 @@ html, body {
   }
 }
 
-/* Mobile: reduce padding, full width */
+/* Mobile: reduce padding, full width - no bottom padding (footer handles spacing) */
 main {
-  padding: var(--space-md);
+  padding: var(--space-md) var(--space-md) 0;
 }
 
 /* Ensure fixed buttons stay in viewport on mobile */
@@ -1219,7 +1237,7 @@ main {
 
 @media (min-width: 768px) {
   main {
-    padding: var(--space-lg);
+    padding: var(--space-lg) var(--space-lg) 0;
   }
   
   #chat,

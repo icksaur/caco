@@ -6,7 +6,11 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { clearActiveSession } from './app-state.js';
+import { clearActiveSession, getCurrentCwd } from './app-state.js';
+import { getActiveAppletSlug } from './applet-runtime.js';
+
+/** Base title (hostname) */
+const BASE_TITLE = window.location.hostname;
 
 /** Valid application view states */
 export type ViewState = 'sessions' | 'newChat' | 'chatting' | 'applet';
@@ -109,6 +113,44 @@ export function setViewState(state: ViewState): void {
       els.appletBtn?.classList.add('active');
       break;
   }
+  
+  // Update browser tab title
+  updateTitle();
+}
+
+/**
+ * Update browser tab title based on current view
+ * Format: hostname | context
+ */
+export function updateTitle(): void {
+  let title = BASE_TITLE;
+  
+  switch (currentState) {
+    case 'sessions':
+      title = `${BASE_TITLE} | Sessions`;
+      break;
+    case 'newChat':
+      title = `${BASE_TITLE} | New Chat`;
+      break;
+    case 'chatting': {
+      const cwd = getCurrentCwd();
+      if (cwd) {
+        // Show just the last directory name
+        const dirName = cwd.split('/').pop() || cwd;
+        title = `${BASE_TITLE} | ${dirName}`;
+      }
+      break;
+    }
+    case 'applet': {
+      const slug = getActiveAppletSlug();
+      if (slug) {
+        title = `${BASE_TITLE} | ${slug}`;
+      }
+      break;
+    }
+  }
+  
+  document.title = title;
 }
 
 /**

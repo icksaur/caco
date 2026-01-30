@@ -17,7 +17,6 @@ import { setViewState, getViewState, isViewState } from './view-controller.js';
 export function showSessionManager(): void {
   setViewState('sessions');
   loadSessions();
-  loadUsage();
 }
 
 /**
@@ -37,7 +36,6 @@ export function toggleSessionPanel(): void {
     // Switch to session view
     setViewState('sessions');
     loadSessions();
-    loadUsage();
   }
 }
 
@@ -233,70 +231,4 @@ export function showNewChatUI(): void {
   // Focus the message input
   const messageInput = document.querySelector('form input[name="message"]') as HTMLInputElement;
   messageInput?.focus();
-}
-
-/**
- * Fetch and display usage/budget info
- */
-async function loadUsage(): Promise<void> {
-  try {
-    const response = await fetch('/api/usage');
-    if (!response.ok) return;
-    
-    const data = await response.json();
-    const usage = data.usage;
-    
-    const container = document.getElementById('usageInfo');
-    if (!container) return;
-    
-    if (!usage) {
-      container.textContent = '';
-      return;
-    }
-    
-    if (usage.isUnlimited) {
-      let text = 'Unlimited usage';
-      if (usage.fromCache) {
-        text += ` (last fetched ${formatCacheDate(usage.updatedAt)})`;
-      }
-      container.textContent = text;
-      container.className = 'usage-info';
-      return;
-    }
-    
-    const remaining = Math.round(usage.remainingPercentage);
-    let text = `${remaining}% of budget remaining`;
-    if (usage.fromCache) {
-      text += ` (last fetched ${formatCacheDate(usage.updatedAt)})`;
-    }
-    container.textContent = text;
-    
-    // Add warning classes for low usage
-    container.className = 'usage-info';
-    if (remaining <= 10) {
-      container.classList.add('usage-critical');
-    } else if (remaining <= 25) {
-      container.classList.add('usage-low');
-    }
-  } catch (error) {
-    console.error('Failed to load usage:', error);
-  }
-}
-
-/**
- * Format cache date for display
- */
-function formatCacheDate(isoDate: string): string {
-  const date = new Date(isoDate);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-  
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
 }

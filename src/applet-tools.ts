@@ -6,6 +6,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
+import { spawn } from 'child_process';
 import { getAppletUserState, getAppletNavigation, triggerReload } from './applet-state.js';
 import { pushStateToApplet } from './routes/websocket.js';
 
@@ -62,8 +63,7 @@ HTML fragment (no doctype, html, head, body tags):
 
 ## script.js
 
-Plain JavaScript - functions for onclick handlers must be exposed to window:
-
+Plain JavaScript with global functions for onclick handlers:
 \`\`\`javascript
 function appendDigit(d) {
   document.getElementById('display').value += d;
@@ -73,126 +73,40 @@ function calculate() {
   const result = eval(document.getElementById('display').value);
   setAppletState({ lastResult: result });
 }
-
-// IMPORTANT: Expose functions for onclick handlers
-// Scripts are wrapped in IIFE, so functions aren't automatically global
-expose({ appendDigit, calculate });
-
-// Or expose individually:
-// window.appendDigit = appendDigit;
-// window.calculate = calculate;
 \`\`\`
-
-⚠️ **onclick Handler Gotcha:**
-
-Scripts are wrapped in an IIFE for isolation. Functions **aren't automatically global**.
-
-**For onclick handlers, you MUST expose functions:**
-\`\`\`javascript
-function myHandler() { console.log('clicked'); }
-expose('myHandler', myHandler);  // Now onclick="myHandler()" works
-\`\`\`
-
-**Alternative: Use addEventListener (recommended, no exposure needed)**
-\`\`\`javascript
-document.getElementById('my-btn').addEventListener('click', () => {
-  console.log('clicked');  // No window exposure required!
-});
-\`\`\`
-
-The runtime will warn in console if onclick handlers reference undefined functions.
 
 ## JavaScript APIs
-
-**Function Exposure (for onclick handlers):**
-
-\`expose(name, fn)\` or \`expose({ fn1, fn2 })\` - Expose functions to global scope
-\`\`\`javascript
-function handleClick() { /* ... */ }
-expose('handleClick', handleClick);  // Now onclick="handleClick()" works
-
-// Or expose multiple:
-expose({ handleClick, handleSubmit, handleCancel });
-\`\`\`
 
 **Navigation:**
 - \`loadApplet(slug)\` - Navigate to another applet
 - \`listApplets()\` - Get array of saved applets (async)
 - \`appletContainer\` - Reference to container element
 
-**Agent Communication:**
+**Agent Communication (two patterns):**
 
-\`setAppletState(obj)\` - Store state for agent to query via get_applet_state tool
+### Pattern 1: Passive State (agent polls)
+\`setAppletState(obj)\` - Store state for agent to query later
 \`\`\`javascript
 setAppletState({ selectedFile: '/path/to/file.txt' });
+// Agent can read this anytime via get_applet_state tool
 \`\`\`
 
-\`sendAgentMessage(prompt, options?)\` - Send message, agent responds immediately
+### Pattern 2: Active Request (agent responds NOW)
+\`sendAgentMessage(prompt)\` - Send message, agent responds immediately
 \`\`\`javascript
 await sendAgentMessage('Get MSFT stock price and set_applet_state with result');
-
-// With image data (from canvas, etc.)
-await sendAgentMessage('Analyze this image', { imageData: canvas.toDataURL() });
+// Agent receives message, takes action, responds in chat
 \`\`\`
 
-\`getSessionId()\` - Get current session ID (null if no active session)
-
-\`saveTempFile(dataUrl, options?)\` - Save image to ~/.caco/tmp/ for agent viewing
-\`\`\`javascript
-const { path } = await saveTempFile(canvas.toDataURL('image/png'));
-await sendAgentMessage(\`Analyze image at \${path}\`);  // Agent uses view tool
-\`\`\`
-
-**MCP Tools:**
-
-\`callMCPTool(toolName, params)\` - Call MCP tools for file operations
-\`\`\`javascript
-// Read a file
-const result = await callMCPTool('read_file', { path: '/path/to/file.txt' });
-
-// Write a file
-await callMCPTool('write_file', { 
-  path: '/path/to/output.txt', 
-  content: 'Hello world' 
-});
-
-// List directory contents
-const files = await callMCPTool('list_directory', { path: '/home/user' });
-
-// Get available tools
-const tools = await callMCPTool('tools', {});
-\`\`\`
-
-Available tools:
-- \`read_file\` - Read file contents (params: \`{ path }\`)
-- \`write_file\` - Write file contents (params: \`{ path, content }\`)
-- \`list_directory\` - List directory entries (params: \`{ path }\`)
-
-Allowed directories: workspace, ~/.caco, /tmp
-
-**Keyboard Input:**
-
-\`registerKeyHandler(slug, handler)\` - Register keyboard handler for this applet
-\`\`\`javascript
-registerKeyHandler('my-applet', function(e) {
-  // Only called when this applet is active (visible)
-  // No visibility checks needed - router handles it
-  if (e.key === 'Enter') submitForm();
-});
-\`\`\`
-
-- Router automatically filters for INPUT/TEXTAREA focus
-- Handler only fires when applet view is active
-- No global document.addEventListener needed
+**Use passive** when storing data for agent to read on demand.
+**Use active** when you want the agent to do something RIGHT NOW.
 
 ## Tips
 
-- **For onclick handlers:** Use \`expose('functionName', functionName)\` to make functions globally accessible
-- **Preferred:** Use \`addEventListener\` instead of onclick attributes (no exposure needed)
-- Use registerKeyHandler() for keyboard shortcuts (not addEventListener)
+- Use onclick="functionName()" for button handlers (not addEventListener)
 - Test with reload_page tool after file changes
-- Applet runs in main window scope with full DOM access
-- Check browser console for warnings about undefined onclick handlers
+- Applet runs in sandboxed scope but has full DOM access
+- Use relative paths for any fetch() calls to local APIs
 
 ## After Creating/Updating
 
@@ -265,25 +179,31 @@ export function createAppletTools(_programCwd: string) {
   });
 
   const restartServer = defineTool('restart_server', {
-    description: 'Schedule a graceful server restart to apply backend code changes. Server waits for all active sessions to finish responding before restarting. Use as final action after modifying src/*.ts files.',
+    description: 'Schedule a server restart to apply backend code changes. Use as final action after modifying src/*.ts files.',
 
-    parameters: z.object({}),
+    parameters: z.object({
+      delay: z.number()
+        .min(1)
+        .max(30)
+        .default(3)
+        .describe('Seconds to wait before restarting (1-30, default: 3)')
+    }),
 
-    handler: async () => {
-      // Import dynamically to avoid circular dependency
-      const { requestRestart, getActiveDispatches } = await import('./restart-manager.js');
+    handler: async ({ delay = 3 }) => {
+      const script = `sleep ${delay} && kill -TERM ${process.pid}`;
       
-      requestRestart();
-      const active = getActiveDispatches();
+      const child = spawn('sh', ['-c', script], {
+        detached: true,
+        stdio: 'ignore'
+      });
+      child.unref();
       
       return {
-        textResultForLlm: active > 0 
-          ? `Server restart scheduled. Waiting for ${active} active session(s) to complete. Server will restart when your session and all others are idle.`
-          : `Server restart initiated. This MUST be your final action.`,
+        textResultForLlm: `Server restart scheduled in ${delay} seconds. This MUST be your final action.`,
         resultType: 'success' as const,
         toolTelemetry: {
           restartScheduled: true,
-          activeDispatches: active,
+          delaySeconds: delay,
           pid: process.pid
         }
       };

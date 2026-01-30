@@ -272,54 +272,20 @@ if (sessionId) {
 }
 ```
 
-### sendAgentMessage(prompt, options?)
+### sendAgentMessage(prompt, appletSlug?)
 
 Send a message to the agent from applet JS. Creates an "applet" bubble (orange) in the chat.
 
 ```javascript
-// Send a text message with current applet as context
+// Send a message with current applet as context
 await sendAgentMessage('Set the calculator value to 42');
 
-// Send with explicit applet slug (legacy signature still works)
+// Send with explicit applet slug
 await sendAgentMessage('Load file /path/to/image.jpg', 'image-viewer');
-
-// Send with image data (from canvas, file input, etc.)
-const canvas = document.getElementById('myCanvas');
-const imageData = canvas.toDataURL('image/png');
-await sendAgentMessage('What do you see in this image?', { imageData });
-
-// Send with both applet slug and image
-await sendAgentMessage('Analyze this', { appletSlug: 'image-viewer', imageData });
 ```
-
-**Options object:**
-- `appletSlug?: string` - Applet context (defaults to current applet)
-- `imageData?: string` - Base64 data URL (e.g., `data:image/png;base64,...`)
 
 Returns a Promise that resolves when the message is sent (not when the agent responds).
 The agent's response will stream to the chat as usual.
-
-### saveTempFile(data, options?)
-
-Save a temporary file to `~/.caco/tmp/` for the agent to view.
-
-This is useful when SDK binary results aren't fully supported yet - save the image to a file, then tell the agent the path so it can use the `view` tool.
-
-```javascript
-// From canvas
-const dataUrl = canvas.toDataURL('image/png');
-const { path } = await saveTempFile(dataUrl);
-await sendAgentMessage(`Please analyze the image at ${path}`);
-
-// With custom filename
-const { path } = await saveTempFile(dataUrl, { filename: 'screenshot.png' });
-```
-
-**Returns:** `{ path, filename, size, mimeType }`
-- `path` - Absolute path (e.g., `/home/user/.caco/tmp/abc123.png`)
-- `filename` - Filename used
-- `size` - File size in bytes
-- `mimeType` - Detected MIME type
 
 ### Global Variables
 

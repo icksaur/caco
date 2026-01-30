@@ -18,7 +18,6 @@ import { renderOutputById, restoreOutputsFromHistory } from './display-output.js
 declare global {
   interface Window {
     renderMarkdown?: () => void;
-    renderMarkdownElement?: (element: Element) => void;
   }
 }
 
@@ -27,50 +26,6 @@ let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
 
 /** Track if WS handlers are registered */
 let wsHandlersRegistered = false;
-
-/** Current correlation ID for agent call tracking */
-let currentCorrelationId: string | null = null;
-
-/** Debounced render timeout for streaming */
-let streamingRenderTimeout: ReturnType<typeof setTimeout> | null = null;
-let lastRenderLength = 0;  // Track content length at last render
-let streamingRawContent = '';  // Raw markdown content (textContent gets replaced by innerHTML)
-const STREAMING_RENDER_INTERVAL = 200; // ms between renders
-const MIN_CHARS_BEFORE_RENDER = 50;    // Render after this many new chars
-
-/**
- * Generate a new correlation ID for user-initiated actions
- */
-function generateCorrelationId(): string {
-  // Polyfill for crypto.randomUUID (not supported on older iOS Safari)
-  if (typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  
-  // Fallback: Generate UUID v4 manually
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
-/**
- * Get or create current correlation ID
- */
-function getCorrelationId(): string {
-  if (!currentCorrelationId) {
-    currentCorrelationId = generateCorrelationId();
-  }
-  return currentCorrelationId;
-}
-
-/**
- * Reset correlation ID (for new user-initiated flows)
- */
-function resetCorrelationId(): void {
-  currentCorrelationId = null;
-}
 
 // ============================================================================
 // Bubble Rendering - Unified System
@@ -217,8 +172,10 @@ function registerWsHandlers(): void {
   
   // Output handler for display-only tool results
   onOutput((outputId: string) => {
+    console.log('[response-streaming] onOutput callback:', outputId);
     // Find the pending response's outputs container
     const container = document.querySelector('#pending-response .outputs-container');
+    console.log('[response-streaming] Container found:', !!container);
     if (container) {
       renderOutputById(outputId, container).catch(err => 
         console.error('Failed to render output:', err)
@@ -309,14 +266,11 @@ function createMessage(msg: ChatMessage): void {
 
 /**
  * Append delta content to existing streaming message
- * Uses debounced markdown rendering for smooth incremental display
  */
 function appendContent(element: Element, delta: string): void {
   const markdownDiv = element.querySelector('.markdown-content');
   if (markdownDiv) {
-    // Accumulate raw content (don't read textContent - it gets replaced by innerHTML)
-    streamingRawContent += delta;
-    const currentLength = streamingRawContent.length;
+    markdownDiv.textContent = (markdownDiv.textContent || '') + delta;
     
     // Collapse activity box after first content
     const wrapper = element.querySelector('.activity-wrapper');
@@ -324,30 +278,6 @@ function appendContent(element: Element, delta: string): void {
       wrapper.classList.add('collapsed');
       const icon = wrapper.querySelector('.activity-icon');
       if (icon) icon.textContent = '▶';
-    }
-    
-    // Render incrementally when we have enough new content
-    const charsSinceLastRender = currentLength - lastRenderLength;
-    
-    const doRender = () => {
-      if (window.renderMarkdownElement) {
-        // Set textContent from our raw buffer, then render to HTML
-        markdownDiv.textContent = streamingRawContent;
-        window.renderMarkdownElement(element);
-        lastRenderLength = streamingRawContent.length;
-      }
-      streamingRenderTimeout = null;
-    };
-    
-    if (charsSinceLastRender >= MIN_CHARS_BEFORE_RENDER) {
-      // Enough new content - render now (debounced to batch rapid deltas)
-      if (streamingRenderTimeout) {
-        clearTimeout(streamingRenderTimeout);
-      }
-      streamingRenderTimeout = setTimeout(doRender, 50);
-    } else if (!streamingRenderTimeout) {
-      // Not enough yet, but schedule a render in case stream pauses
-      streamingRenderTimeout = setTimeout(doRender, STREAMING_RENDER_INTERVAL);
     }
     
     scrollToBottom();
@@ -358,14 +288,6 @@ function appendContent(element: Element, delta: string): void {
  * Finalize a streaming message (mark complete)
  */
 function finalizeMessage(element: Element, msg: ChatMessage): void {
-  // Clear any pending streaming render
-  if (streamingRenderTimeout) {
-    clearTimeout(streamingRenderTimeout);
-    streamingRenderTimeout = null;
-  }
-  lastRenderLength = 0;  // Reset for next message
-  streamingRawContent = '';  // Reset raw content buffer
-  
   element.classList.remove('pending');
   element.removeAttribute('id'); // Remove pending-response id
   
@@ -391,7 +313,7 @@ function finalizeMessage(element: Element, msg: ChatMessage): void {
   // Enable form
   setFormEnabled(true);
   
-  // Full markdown render (includes mermaid, syntax highlighting)
+  // Render markdown for the completed message
   (element as HTMLElement).dataset.markdownProcessed = 'false';
   if (window.renderMarkdown) window.renderMarkdown();
   
@@ -485,10 +407,6 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       // configures message filtering for the new session
     }
     
-    // Generate new correlation ID for this user-initiated flow
-    const correlationId = generateCorrelationId();
-    currentCorrelationId = correlationId;
-    
     // Step 2: POST message to session, get streamId
     const response = await fetch(`/api/sessions/${sessionId}/messages`, {
       method: 'POST',
@@ -496,7 +414,6 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       body: JSON.stringify({ 
         prompt, 
         imageData,
-        correlationId,
         ...(appletState && { appletState }),  // Only include if has data
         appletNavigation  // Always include navigation context
       })
@@ -676,6 +593,8 @@ export function setupFormHandler(): void {
     }
     
     // Definitive model logging
+    console.log('[MODEL] Client sending request with model:', model || '(undefined)');
+    if (isNewChat) console.log('[NEW CHAT] Creating new session with cwd:', cwd);
     
     if (!message) return;
     

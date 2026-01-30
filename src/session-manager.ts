@@ -88,13 +88,6 @@ interface GroupedSessions {
   [cwd: string]: SessionListItem[];
 }
 
-// Model info returned by listModels()
-export interface ModelInfo {
-  id: string;
-  name: string;
-  multiplier: number;
-}
-
 /**
  * SessionManager - Singleton that owns all SDK interactions
  * 
@@ -104,6 +97,10 @@ export interface ModelInfo {
 class SessionManager {
   // cwd → sessionId (lock)
   private cwdLocks = new Map<string, string>();
+  
+  // Correlation tracking for agent runaway guard
+  private correlations = new Map<string, CorrelationMetrics>();
+  private correlationRules: CorrelationRules = DEFAULT_RULES;
   
   // sessionId → { cwd, session, client }
   private activeSessions = new Map<string, ActiveSession>();
@@ -117,10 +114,6 @@ class SessionManager {
   // Cached model list from SDK
   private cachedModels: SDKModelInfo[] = [];
   
-  // Correlation tracking for runaway guard
-  private correlations = new Map<string, CorrelationMetrics>();
-  private correlationRules: CorrelationRules = DEFAULT_RULES;
-  
   private initialized = false;
 
   /**
@@ -132,6 +125,7 @@ class SessionManager {
     this._discoverSessions();
     await this._fetchModels();
     this.initialized = true;
+    console.log(`✓ SessionManager initialized (${this.sessionCache.size} sessions, ${this.cachedModels.length} models)`);
   }
   
   /**
@@ -143,8 +137,10 @@ class SessionManager {
       await client.start();
       this.cachedModels = await client.listModels();
       await client.stop();
+      console.log(`✓ Fetched ${this.cachedModels.length} models from SDK`);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
+      console.warn(`Could not fetch models from SDK: ${message}`);
       // Fall back to empty - client will use hardcoded list
       this.cachedModels = [];
     }
@@ -203,6 +199,7 @@ class SessionManager {
       throw new Error('Model is required when creating a session');
     }
     
+    console.log(`[MODEL] SessionManager.create() with model: ${config.model}`);
     
     // Create client with cwd
     const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
@@ -233,6 +230,7 @@ class SessionManager {
     // Register with storage layer for output persistence
     registerSession(cwd, session.sessionId);
     
+    console.log(`✓ Created session ${session.sessionId} for ${cwd} with model ${config.model}`);
     return session.sessionId;
   }
 
@@ -262,6 +260,7 @@ class SessionManager {
     
     // Already active?
     if (this.activeSessions.has(sessionId)) {
+      console.log(`Session ${sessionId} already active`);
       return sessionId;
     }
     
@@ -288,6 +287,7 @@ class SessionManager {
     // Register with storage layer for output persistence
     registerSession(cwd, sessionId);
     
+    console.log(`✓ Resumed session ${sessionId} for ${cwd}`);
     return sessionId;
   }
 
@@ -297,6 +297,7 @@ class SessionManager {
   async stop(sessionId: string): Promise<void> {
     const active = this.activeSessions.get(sessionId);
     if (!active) {
+      console.log(`Session ${sessionId} not active, nothing to stop`);
       return;
     }
     
@@ -306,12 +307,14 @@ class SessionManager {
       await session.destroy();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
+      console.warn(`Warning: session.destroy() failed: ${message}`);
     }
     
     try {
       await client.stop();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
+      console.warn(`Warning: client.stop() failed: ${message}`);
     }
     
     // Unlock and untrack
@@ -321,6 +324,7 @@ class SessionManager {
     // Unregister from storage layer
     unregisterSession(cwd);
     
+    console.log(`✓ Stopped session ${sessionId}`);
   }
 
   /**
@@ -418,6 +422,7 @@ class SessionManager {
     
     try {
       await client.deleteSession(sessionId);
+      console.log(`✓ Deleted session ${sessionId}`);
     } finally {
       await client.stop();
     }
@@ -531,26 +536,6 @@ class SessionManager {
       return lines.length > 1; // More than just session.start
     } catch {
       return false;
-    }
-  }
-
-  /**
-   * List available models from the SDK
-   * Creates a temporary client, fetches models, and stops it.
-   */
-  async listModels(): Promise<ModelInfo[]> {
-    const client = new CopilotClient({ cwd: process.cwd() }) as unknown as CopilotClientInstance;
-    await client.start();
-    
-    try {
-      const sdkModels = await client.listModels();
-      return sdkModels.map(m => ({
-        id: m.id,
-        name: m.name,
-        multiplier: m.billing?.multiplier ?? 1
-      }));
-    } finally {
-      await client.stop();
     }
   }
 

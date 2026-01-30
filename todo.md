@@ -1,10 +1,15 @@
 # things to do
 
-Do we need all these npm dependencies?  Are any dead?  Are any so trivially used we can implement it in a single JS line and remove the dep?
+More query strings and NavigationAPI support.  Analyze complexity of adding these query parameters:
+?view=sessions
+?view=chat
+?view=newchat
+?applet=applet-slug (exists but needs to co-exist)
 
-We have SO MANY INTERFACES.  Can some be combined or consolidated?  If they are logically groupable, perhaps this is ok.  Conceptual example: sessionMetadata sessionState sessionDetails sessionWhatever, combine?
-
-Multi-client support.  How far are from allowing multiple browsers?  Websocket might not be ready, or will spit everything to every client (they could filter to their own clientId?)  HTTP APIs are mostly stateless.
+Browser tab title is Caco, nice, but need to differentiate more.  Find a clean place to get the info for these, and a straightforward way to change it.  view-controller.ts could be leveraged to catch most changes.  May need to do some in Navi
+hostname
+hostname: cwd
+hostname: applet name
 
 API review.  Find all routes and compare to API.md and update API.md.  Document all HTTP API JSON payload formats.
 

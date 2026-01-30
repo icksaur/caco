@@ -56,7 +56,6 @@
 
     <!-- Session manager view -->
     <div id="sessionView" class="view">
-      <div id="usageInfo" class="usage-info"></div>
       <button type="button" class="new-chat-btn" onclick="showNewChat()">+ New Chat</button>
       <div id="sessionList"></div>
     </div>
@@ -88,7 +87,7 @@
       <input type="hidden" id="selectedModel" name="model" value="claude-sonnet-4">
       <textarea 
         name="message" 
-        placeholder="Ask anything..." 
+        placeholder="Ask Copilot anything... (Shift+Enter for newline)" 
         required
         autofocus
         rows="1"

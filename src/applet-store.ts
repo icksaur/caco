@@ -127,6 +127,7 @@ export async function saveApplet(
     await writeFile(paths.css, css);
   }
   
+  console.log(`[APPLET-STORE] Saved applet "${slug}" to ${paths.root}`);
   
   return paths;
 }
@@ -165,9 +166,11 @@ export async function loadApplet(
       // No CSS file
     }
     
+    console.log(`[APPLET-STORE] Loaded applet "${slug}" from ${paths.root}`);
     
     return { meta, html, js, css };
   } catch (error) {
+    console.log(`[APPLET-STORE] Applet "${slug}" not found`);
     return null;
   }
 }
@@ -219,6 +222,7 @@ export async function deleteApplet(
   
   try {
     await rm(paths.root, { recursive: true });
+    console.log(`[APPLET-STORE] Deleted applet "${slug}"`);
     return true;
   } catch {
     return false;

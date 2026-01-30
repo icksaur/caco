@@ -6,7 +6,8 @@
  * The router dispatches only to the currently active applet.
  */
 
-import { getViewState, getActiveAppletSlug } from './view-controller.js';
+import { getViewState } from './view-controller.js';
+import { getActiveAppletSlug } from './applet-runtime.js';
 
 export type KeyHandler = (e: KeyboardEvent) => void;
 

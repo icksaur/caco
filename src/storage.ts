@@ -117,6 +117,7 @@ export function storeOutput(
   if (!sessionId) {
     // Fallback: use old in-memory behavior if session not registered
     // This shouldn't happen in normal flow, but provides graceful degradation
+    console.warn(`[storage] No session registered for cwd: ${sessionCwd}, using memory cache`);
     return storeInMemory(data, fullMetadata);
   }
   

@@ -17,8 +17,14 @@ import { randomUUID } from 'crypto';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
 import sessionManager from '../session-manager.js';
 
-// Global connection pool - all clients, not per-session
+// Global connection pool - all clients
 const allConnections = new Set<WebSocket>();
+
+// Session subscriptions: sessionId → Set of subscribed WebSockets
+const sessionSubscribers = new Map<string, Set<WebSocket>>();
+
+// Reverse lookup: WebSocket → subscribed sessionId (one subscription per client)
+const clientSubscription = new Map<WebSocket, string>();
 
 /**
  * Message source identifies who sent a message.
@@ -28,9 +34,9 @@ export type MessageSource = 'user' | 'applet' | 'agent';
 
 // Message types from client
 interface ClientMessage {
-  type: 'setState' | 'getState' | 'sendMessage' | 'requestHistory' | 'ping';
+  type: 'setState' | 'getState' | 'sendMessage' | 'requestHistory' | 'ping' | 'subscribe';
   id?: string;  // For request/response correlation
-  sessionId?: string;  // For requestHistory
+  sessionId?: string;  // For requestHistory and subscribe
   data?: Record<string, unknown>;
   // For sendMessage
   content?: string;
@@ -113,6 +119,13 @@ export function setupWebSocket(server: Server): WebSocketServer {
     ws.on('close', () => {
       console.log(`[WS] Client disconnected`);
       allConnections.delete(ws);
+      
+      // Clean up subscription
+      const oldSessionId = clientSubscription.get(ws);
+      if (oldSessionId) {
+        sessionSubscribers.get(oldSessionId)?.delete(ws);
+        clientSubscription.delete(ws);
+      }
     });
     
     ws.on('error', (err) => {
@@ -143,7 +156,6 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
       break;
       
     case 'requestHistory':
-      console.log(`[WS] requestHistory received, sessionId: ${msg.sessionId}, type: ${typeof msg.sessionId}`);
       if (msg.sessionId) {
         streamHistory(ws, msg.sessionId);
       } else {
@@ -157,6 +169,25 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
       
     case 'ping':
       send(ws, { type: 'pong', id: msg.id });
+      break;
+    
+    case 'subscribe':
+      if (msg.sessionId) {
+        // Unsubscribe from previous session
+        const oldSessionId = clientSubscription.get(ws);
+        if (oldSessionId && oldSessionId !== msg.sessionId) {
+          sessionSubscribers.get(oldSessionId)?.delete(ws);
+        }
+        
+        // Subscribe to new session
+        if (!sessionSubscribers.has(msg.sessionId)) {
+          sessionSubscribers.set(msg.sessionId, new Set());
+        }
+        sessionSubscribers.get(msg.sessionId)!.add(ws);
+        clientSubscription.set(ws, msg.sessionId);
+        
+        console.log(`[WS] Client subscribed to session ${msg.sessionId} (${sessionSubscribers.get(msg.sessionId)!.size} subscribers)`);
+      }
       break;
       
     default:
@@ -262,10 +293,8 @@ export function broadcastUserMessageFromPost(
  * All messages include sessionId for client filtering
  */
 async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
-  console.log(`[WS] streamHistory called with sessionId: ${sessionId}, type: ${typeof sessionId}`);
   if (!sessionId || sessionId === 'default') {
     // No session, just send historyComplete
-    console.log(`[WS] Sending historyComplete for empty/default session: ${sessionId}`);
     send(ws, { type: 'historyComplete', sessionId });
     return;
   }
@@ -335,39 +364,36 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
       }
     }
     
-    console.log(`[WS] About to send historyComplete for sessionId: ${sessionId}`);
     send(ws, { type: 'historyComplete', sessionId });
     console.log(`[WS] Streamed ${messageCount} history messages for session ${sessionId}`);
     
   } catch (error) {
     console.error(`[WS] Error streaming history for ${sessionId}:`, error);
-    // Send empty history complete even on error so UI can proceed
-    send(ws, { type: 'historyComplete', sessionId });
+    send(ws, { type: 'historyComplete' });
   }
 }
 
 /**
- * Broadcast a message update to all connected clients
+ * Broadcast a message update to subscribed clients only
  * Used for streaming assistant responses - can create, append, or finalize
- * All clients receive the message; they filter by sessionId
  */
 export function broadcastMessage(
   sessionId: string,
   message: ChatMessage
 ): void {
-  if (allConnections.size === 0) {
-    console.log(`[WS] No connections to broadcast to for session ${sessionId}`);
+  const subscribers = sessionSubscribers.get(sessionId);
+  if (!subscribers || subscribers.size === 0) {
+    console.log(`[WS] No subscribers for session ${sessionId}`);
     return;
   }
   
   const now = Date.now();
-  console.log(`[WS:${now}] Broadcasting to ${allConnections.size} sockets (session ${sessionId}): ${message.role} ${message.status || '-'} ${message.deltaContent ? `delta(${message.deltaContent.length})` : (message.source ? `source=${message.source}` : '')}`);
+  console.log(`[WS:${now}] Broadcasting to ${subscribers.size} subscribers (session ${sessionId}): ${message.role} ${message.status || '-'} ${message.deltaContent ? `delta(${message.deltaContent.length})` : (message.source ? `source=${message.source}` : '')}`);
   
-  // Include sessionId so clients can filter
   const msg: ServerMessage = { type: 'message', sessionId, message };
   const data = JSON.stringify(msg);
   
-  for (const ws of allConnections) {
+  for (const ws of subscribers) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(data);
     }
@@ -375,21 +401,20 @@ export function broadcastMessage(
 }
 
 /**
- * Broadcast an activity item to all connected clients
+ * Broadcast an activity item to subscribed clients only
  * Used for tool calls, intents, errors during agent response
- * All clients receive the activity; they filter by sessionId
  */
 export function broadcastActivity(
   sessionId: string,
   item: ActivityItem
 ): void {
-  if (allConnections.size === 0) return;
+  const subscribers = sessionSubscribers.get(sessionId);
+  if (!subscribers || subscribers.size === 0) return;
   
-  // Include sessionId so clients can filter
   const msg: ServerMessage = { type: 'activity', sessionId, item };
   const data = JSON.stringify(msg);
   
-  for (const ws of allConnections) {
+  for (const ws of subscribers) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(data);
     }
@@ -405,12 +430,13 @@ export function broadcastOutput(
   sessionId: string,
   outputId: string
 ): void {
-  if (allConnections.size === 0) return;
+  const subscribers = sessionSubscribers.get(sessionId);
+  if (!subscribers || subscribers.size === 0) return;
   
   const msg: ServerMessage = { type: 'output', sessionId, outputId };
   const data = JSON.stringify(msg);
   
-  for (const ws of allConnections) {
+  for (const ws of subscribers) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(data);
     }

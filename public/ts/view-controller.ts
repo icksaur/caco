@@ -14,9 +14,6 @@ export type ViewState = 'sessions' | 'newChat' | 'chatting' | 'applet';
 /** Current view state */
 let currentState: ViewState = 'sessions';
 
-/** Active applet slug when in 'applet' view state */
-let activeAppletSlug: string | null = null;
-
 /** Cached DOM element references */
 interface ViewElements {
   chatView: HTMLElement | null;
@@ -58,30 +55,18 @@ export function getViewState(): ViewState {
 }
 
 /**
- * Get active applet slug (when in 'applet' view state)
- * Returns null if not in applet view or no applet active
- */
-export function getActiveAppletSlug(): string | null {
-  return currentState === 'applet' ? activeAppletSlug : null;
-}
-
-/**
  * Set the application view state
  * 
  * This atomically updates ALL relevant DOM elements to match the target state.
  * Invalid states are impossible - you can only set valid ViewState values.
- * 
- * @param state - The view state to transition to
- * @param appletSlug - Required when state is 'applet', identifies which applet is active
  */
-export function setViewState(state: ViewState, appletSlug?: string): void {
+export function setViewState(state: ViewState): void {
   const els = getElements();
   
-  // Skip if already in this state (and same applet if applicable)
-  if (state === currentState && (state !== 'applet' || appletSlug === activeAppletSlug)) return;
+  // Skip if already in this state
+  if (state === currentState) return;
   
   currentState = state;
-  activeAppletSlug = state === 'applet' ? (appletSlug ?? null) : null;
 
   // Reset all elements to default (hidden/inactive)
   els.chatView?.classList.remove('active');

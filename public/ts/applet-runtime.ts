@@ -9,13 +9,11 @@
  * Phase 4: WebSocket for real-time state sync.
  * Phase 5: Agent invocation - applets can POST to active session.
  * Phase 6: Navigation API for SPA routing.
- * Phase 7: Input routing - keyboard events routed to active applet only.
  */
 
 import { setViewState } from './view-controller.js';
 import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './websocket.js';
 import { getActiveSessionId } from './app-state.js';
-import { registerKeyHandler, unregisterKeyHandler, type KeyHandler } from './input-router.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -63,25 +61,10 @@ let pendingAppletState: Record<string, unknown> | null = null;
 let insideNavigateHandler = false;
 
 /**
- * Helper function for applet JS to expose functions globally.
- * Needed for onclick handlers since scripts are wrapped in IIFE.
- */
-function expose(nameOrObj: string | Record<string, unknown>, fn?: unknown): void {
-  if (typeof nameOrObj === 'string' && fn !== undefined) {
-    (window as Record<string, unknown>)[nameOrObj] = fn;
-  } else if (typeof nameOrObj === 'object') {
-    Object.assign(window, nameOrObj);
-  }
-}
-
-/**
  * Initialize applet runtime - exposes global functions for applet JS
  * Call this once at app startup
  */
 export function initAppletRuntime(): void {
-  // Expose helper for applets to expose their own functions
-  (window as unknown as { expose: typeof expose }).expose = expose;
-  
   // Expose setAppletState globally for applet JS to use
   (window as unknown as { setAppletState: typeof setAppletState }).setAppletState = setAppletState;
   // Expose listApplets globally for applet browser
@@ -89,7 +72,6 @@ export function initAppletRuntime(): void {
   
   // URL params API for applet JS
   (window as unknown as { getAppletUrlParams: typeof getAppletUrlParams }).getAppletUrlParams = getAppletUrlParams;
-  (window as unknown as { getAppletSlug: typeof getAppletSlug }).getAppletSlug = getAppletSlug;
   (window as unknown as { updateAppletUrlParam: typeof updateAppletUrlParam }).updateAppletUrlParam = updateAppletUrlParam;
   
   // WebSocket state subscription for applet JS
@@ -98,15 +80,6 @@ export function initAppletRuntime(): void {
   // Agent invocation API for applet JS
   (window as unknown as { getSessionId: typeof getActiveSessionId }).getSessionId = getActiveSessionId;
   (window as unknown as { sendAgentMessage: typeof sendAgentMessage }).sendAgentMessage = sendAgentMessage;
-  
-  // Temp file API for applet JS - save images for agent to view
-  (window as unknown as { saveTempFile: typeof saveTempFile }).saveTempFile = saveTempFile;
-  
-  // MCP tool API for applet JS - call MCP tools
-  (window as unknown as { callMCPTool: typeof callMCPTool }).callMCPTool = callMCPTool;
-  
-  // Input routing API for applet JS - register keyboard handler
-  (window as unknown as { registerKeyHandler: typeof registerKeyHandler }).registerKeyHandler = registerKeyHandler;
   
   // Navigation API: single handler for all navigation types
   // (links, back/forward, programmatic, address bar)
@@ -122,6 +95,7 @@ function setupNavigationHandler(): void {
   // TypeScript doesn't have Navigation API types yet
   const nav = (window as unknown as { navigation?: Navigation }).navigation;
   if (!nav) {
+    console.warn('[APPLET] Navigation API not available');
     return;
   }
   
@@ -148,6 +122,7 @@ function setupNavigationHandler(): void {
           handler: async () => {
             insideNavigateHandler = true;
             try {
+              console.log('[APPLET] navigate: leaving applet view');
               clearApplet();
             } finally {
               insideNavigateHandler = false;
@@ -173,19 +148,22 @@ function setupNavigationHandler(): void {
           const index = appletStack.findIndex(a => a.slug === appletSlug);
           if (index >= 0 && index < appletStack.length - 1) {
             // Pop down to existing entry (it's earlier in the stack)
+            console.log(`[APPLET] navigate: popping to stack index ${index}`);
             while (appletStack.length > index + 1) {
               const popped = appletStack.pop()!;
               destroyInstance(popped);
             }
             showInstance(appletStack[index]);
             updateBreadcrumbUI();
-            setViewState('applet', appletSlug);
+            setViewState('applet');
           } else if (index === appletStack.length - 1) {
             // Already showing this applet, just ensure it's visible
+            console.log(`[APPLET] navigate: already showing ${appletSlug}`);
             showInstance(appletStack[index]);
-            setViewState('applet', appletSlug);
+            setViewState('applet');
           } else {
             // Load applet (push new) - pushApplet will call setViewState
+            console.log(`[APPLET] navigate: loading ${appletSlug}`, Object.keys(params).length ? params : '');
             await loadAppletBySlug(appletSlug, Object.keys(params).length ? params : undefined);
           }
         } finally {
@@ -195,6 +173,7 @@ function setupNavigationHandler(): void {
     });
   });
   
+  console.log('[APPLET] Navigation API handler installed');
 }
 
 /**
@@ -210,14 +189,6 @@ export function getAppletUrlParams(): Record<string, string> {
     }
   });
   return result;
-}
-
-/**
- * Get the current applet's slug from URL
- * Returns null if not in an applet view
- */
-export function getAppletSlug(): string | null {
-  return new URLSearchParams(window.location.search).get('applet');
 }
 
 /**
@@ -242,18 +213,10 @@ function setAppletState(state: Record<string, unknown>): void {
   // If WebSocket connected, push immediately
   if (isWsConnected()) {
     wsSetState(state);
+    console.log('[APPLET] State pushed via WebSocket:', Object.keys(state));
   } else {
+    console.log('[APPLET] State queued (no WS):', Object.keys(state));
   }
-}
-
-/**
- * Options for sendAgentMessage
- */
-interface SendAgentMessageOptions {
-  /** Optional applet slug for context (defaults to current applet) */
-  appletSlug?: string;
-  /** Optional base64 data URL of image to send (e.g., from canvas.toDataURL()) */
-  imageData?: string;
 }
 
 /**
@@ -261,23 +224,19 @@ interface SendAgentMessageOptions {
  * Creates an "applet" bubble (orange) in the chat and triggers agent response
  * 
  * @param prompt - The message to send to the agent
- * @param options - Optional settings (appletSlug, imageData)
+ * @param appletSlug - Optional applet slug for context (defaults to current applet)
  * @returns Promise that resolves when message is sent (not when agent responds)
  */
-async function sendAgentMessage(prompt: string, options?: SendAgentMessageOptions | string): Promise<void> {
+async function sendAgentMessage(prompt: string, appletSlug?: string): Promise<void> {
   const sessionId = getActiveSessionId();
   if (!sessionId) {
     throw new Error('No active session - cannot send agent message');
   }
   
-  // Support legacy call signature: sendAgentMessage(prompt, appletSlug)
-  const opts: SendAgentMessageOptions = typeof options === 'string' 
-    ? { appletSlug: options } 
-    : (options ?? {});
-  
   // Default to current applet if not specified
-  const slug = opts.appletSlug ?? appletStack[appletStack.length - 1]?.slug;
+  const slug = appletSlug ?? appletStack[appletStack.length - 1]?.slug;
   
+  console.log(`[APPLET] Sending agent message: "${prompt.slice(0, 50)}..." (session: ${sessionId}, applet: ${slug})`);
   
   const response = await fetch(`/api/sessions/${sessionId}/messages`, {
     method: 'POST',
@@ -285,8 +244,7 @@ async function sendAgentMessage(prompt: string, options?: SendAgentMessageOption
     body: JSON.stringify({
       prompt,
       source: 'applet',
-      appletSlug: slug,
-      imageData: opts.imageData
+      appletSlug: slug
     })
   });
   
@@ -295,95 +253,7 @@ async function sendAgentMessage(prompt: string, options?: SendAgentMessageOption
     throw new Error(error.error || `HTTP ${response.status}`);
   }
   
-}
-
-/**
- * Result from saveTempFile
- */
-interface TempFileResult {
-  /** Absolute path to the saved file (for agent's view tool) */
-  path: string;
-  /** Filename used */
-  filename: string;
-  /** File size in bytes */
-  size: number;
-  /** Detected MIME type */
-  mimeType: string;
-}
-
-/**
- * Save a temporary file to ~/.caco/tmp/
- * 
- * Use this to save images/data that the agent can then view.
- * Returns the absolute path which you can include in a message to the agent.
- * 
- * @param data - Base64 data URL (data:image/png;base64,...) or raw base64
- * @param options - Optional filename or mimeType
- * @returns Promise with path information
- * 
- * @example
- * // From canvas
- * const dataUrl = canvas.toDataURL('image/png');
- * const { path } = await saveTempFile(dataUrl);
- * await sendAgentMessage(`Please analyze the image at ${path}`);
- * 
- * @example  
- * // With custom filename
- * const { path } = await saveTempFile(dataUrl, { filename: 'screenshot.png' });
- */
-async function saveTempFile(
-  data: string, 
-  options?: { filename?: string; mimeType?: string }
-): Promise<TempFileResult> {
-  const response = await fetch('/api/tmpfile', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      data,
-      filename: options?.filename,
-      mimeType: options?.mimeType
-    })
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || `HTTP ${response.status}`);
-  }
-  
-  const result = await response.json();
-  return result;
-}
-
-/**
- * Call an MCP tool from applet JS
- * Applets can use MCP tools the agent has access to via HTTP proxy
- * 
- * @param toolName - The MCP tool to call (e.g., "read_file", "write_file", "list_directory")
- * @param params - Tool parameters as key-value object
- * @returns Tool result
- */
-async function callMCPTool(toolName: string, params: Record<string, unknown>): Promise<unknown> {
-  const endpoint = `/api/mcp/${toolName}`;
-  
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || `HTTP ${response.status}`);
-  }
-  
-  const result = await response.json();
-  
-  // Check for tool error
-  if (!result.ok) {
-    throw new Error(result.error || 'Tool call failed');
-  }
-  
-  return result;
+  console.log('[APPLET] Agent message sent successfully');
 }
 
 /**
@@ -395,6 +265,7 @@ async function callMCPTool(toolName: string, params: Record<string, unknown>): P
  */
 async function loadAppletBySlug(slug: string, params?: Record<string, string>): Promise<void> {
   try {
+    console.log(`[APPLET] Loading applet: ${slug}`, params ? `with params: ${JSON.stringify(params)}` : '');
     
     // POST to load endpoint (updates server state + returns content)
     const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
@@ -418,6 +289,7 @@ async function loadAppletBySlug(slug: string, params?: Record<string, string>): 
     };
     pushApplet(slug, data.title || slug, content);
     
+    console.log(`[APPLET] Loaded: ${data.title} (${slug})`);
   } catch (error) {
     console.error(`[APPLET] Failed to load "${slug}":`, error);
     throw error;
@@ -433,6 +305,7 @@ export async function loadAppletFromUrl(): Promise<boolean> {
   const params = new URLSearchParams(window.location.search);
   const slug = params.get('applet');
   if (slug) {
+    console.log(`[APPLET] Loading from URL param: ${slug}`);
     try {
       await loadAppletBySlug(slug);
       return true;
@@ -493,7 +366,7 @@ export function getNavigationContext(): NavigationContext {
 }
 
 /**
- * Destroy an applet instance (remove from DOM, cleanup styles/scripts/handlers)
+ * Destroy an applet instance (remove from DOM, cleanup styles/scripts)
  */
 function destroyInstance(instance: AppletInstance): void {
   instance.element.remove();
@@ -501,8 +374,6 @@ function destroyInstance(instance: AppletInstance): void {
   // Remove scripts tagged with this instance's slug
   document.querySelectorAll(`script[data-applet-slug="${instance.slug}"]`)
     .forEach(el => el.remove());
-  // Unregister keyboard handler
-  unregisterKeyHandler(instance.slug);
 }
 
 /**
@@ -556,29 +427,6 @@ function renderAppletToInstance(
 })();
 `;
       document.body.appendChild(scriptElement);
-      
-      // Check for onclick handlers that reference undefined functions
-      setTimeout(() => {
-        const onclickHandlers = container.querySelectorAll('[onclick]');
-        onclickHandlers.forEach(el => {
-          const onclickAttr = el.getAttribute('onclick');
-          if (onclickAttr) {
-            // Extract function name from onclick="functionName(...)"
-            const match = onclickAttr.match(/^\s*(\w+)\s*\(/);
-            if (match) {
-              const handler = match[1];
-              if (typeof (window as Record<string, unknown>)[handler] !== 'function') {
-                console.warn(
-                  `[APPLET "${slug}"] onclick="${handler}(...)" but window.${handler} is not defined.`,
-                  `Did you forget to expose it? Add: window.${handler} = ${handler}; or use: expose('${handler}', ${handler});`,
-                  el
-                );
-              }
-            }
-          }
-        });
-      }, 0);
-      
     } catch (error) {
       console.error('[APPLET] JavaScript execution error:', error);
       const errorDiv = document.createElement('div');
@@ -628,6 +476,7 @@ function syncToUrl(): void {
     } else {
       history.pushState({ appletStack: stackData }, '', url.toString());
     }
+    console.log(`[APPLET] URL synced: ${url.searchParams.get('applet')}`);
   }
 }
 
@@ -720,10 +569,12 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
     return;
   }
   
+  console.log(`[APPLET] Pushing: ${label} (${slug})`);
   
   // Check for duplicate - if already in stack, navigate to it instead
   const existingIndex = appletStack.findIndex(a => a.slug === slug);
   if (existingIndex >= 0) {
+    console.log(`[APPLET] Dupe detected at index ${existingIndex}, truncating stack`);
     // Destroy all instances after the existing one
     while (appletStack.length > existingIndex + 1) {
       const popped = appletStack.pop()!;
@@ -733,13 +584,14 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
     showInstance(appletStack[existingIndex]);
     updateBreadcrumbUI();
     syncToUrl();
-    setViewState('applet', slug);
+    setViewState('applet');
     return;
   }
   
   // Enforce max depth - destroy oldest (bottom of stack)
   while (appletStack.length >= MAX_STACK_DEPTH) {
     const oldest = appletStack.shift()!;
+    console.log(`[APPLET] Stack limit reached, destroying oldest: ${oldest.slug}`);
     destroyInstance(oldest);
   }
   
@@ -769,7 +621,7 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   // Update UI
   updateBreadcrumbUI();
   syncToUrl();
-  setViewState('applet', slug);
+  setViewState('applet');
   
   // WebSocket is already connected on page load - no need to connect here
 }
@@ -806,11 +658,13 @@ export function clearApplet(): void {
  */
 export function popApplet(): void {
   if (appletStack.length <= 1) {
+    console.log('[APPLET] Cannot pop - at bottom of stack');
     return;
   }
   
   // Destroy current
   const current = appletStack.pop()!;
+  console.log(`[APPLET] Popping: ${current.slug}`);
   destroyInstance(current);
   
   // Show previous
@@ -826,6 +680,14 @@ export function popApplet(): void {
  */
 export function getAppletStack(): ReadonlyArray<{ slug: string; label: string }> {
   return appletStack.map(a => ({ slug: a.slug, label: a.label }));
+}
+
+/**
+ * Get the current (top) applet slug, or null if none active
+ */
+export function getActiveAppletSlug(): string | null {
+  if (appletStack.length === 0) return null;
+  return appletStack[appletStack.length - 1].slug;
 }
 
 /**

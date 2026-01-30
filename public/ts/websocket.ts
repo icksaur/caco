@@ -12,8 +12,6 @@
  * Client filters by active session.
  */
 
-import { showToast } from './toast.js';
-
 /**
  * Message source identifies who sent a message.
  * Extensible: add new sources here (e.g., 'agent' for agent-to-agent).
@@ -92,11 +90,17 @@ export function connectWs(): void {
 }
 
 /**
- * Set the active session ID. Messages for other sessions are filtered out.
+ * Set the active session ID and subscribe to it on the server.
+ * Only messages for subscribed sessions are received.
  */
 export function setActiveSession(sessionId: string | null): void {
   console.log(`[WS] setActiveSession: ${sessionId}`);
   activeSessionId = sessionId;
+  
+  // Subscribe on server so we only receive messages for this session
+  if (sessionId) {
+    send({ type: 'subscribe', sessionId });
+  }
 }
 
 /**
@@ -146,12 +150,12 @@ function doConnect(myConnectionId: number): void {
       return;
     }
     
-    // Show connected toast on reconnect (not initial connect)
-    const wasReconnect = reconnectAttempts > 0;
     reconnectAttempts = 0;
     
-    if (wasReconnect) {
-      showToast('✓ Connected', { type: 'success', autoHideMs: 2000 });
+    // Re-subscribe to active session after reconnect
+    if (activeSessionId) {
+      console.log(`[WS] Re-subscribing to session ${activeSessionId} after connect`);
+      send({ type: 'subscribe', sessionId: activeSessionId });
     }
     
     // Fire connect callbacks
@@ -205,7 +209,6 @@ function doConnect(myConnectionId: number): void {
 /**
  * Handle incoming message from server
  * Filters messages by activeSessionId - only messages for current session are processed
- * Exception: stateUpdate bypasses session filtering (applets receive state from any session)
  */
 function handleMessage(msg: { type: string; id?: string; sessionId?: string; data?: unknown; error?: string }): void {
   // Handle request/response messages (no session filtering)
@@ -221,30 +224,27 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
     return;
   }
   
-  // stateUpdate bypasses session filtering - applets receive state regardless of which session agent runs in
-  if (msg.type === 'stateUpdate') {
-    if (msg.data && typeof msg.data === 'object') {
-      for (const cb of stateCallbacks) {
-        try {
-          cb(msg.data as Record<string, unknown>);
-        } catch (err) {
-          console.error('[WS] State callback error:', err);
-        }
-      }
-    }
-    return;
-  }
-  
-  // Filter by active session for other broadcast messages
+  // Filter by active session for broadcast messages
   const msgSessionId = msg.sessionId;
   if (msgSessionId && activeSessionId && msgSessionId !== activeSessionId) {
     // Message for a different session - ignore
-    console.log(`[WS] Filtering out message type ${msg.type} for session ${msgSessionId} (active: ${activeSessionId})`);
     return;
   }
   
   // Handle broadcast messages
   switch (msg.type) {
+    case 'stateUpdate':
+      if (msg.data && typeof msg.data === 'object') {
+        for (const cb of stateCallbacks) {
+          try {
+            cb(msg.data as Record<string, unknown>);
+          } catch (err) {
+            console.error('[WS] State callback error:', err);
+          }
+        }
+      }
+      break;
+    
     case 'message': {
       // Chat message (user or assistant) - from history or live
       const msgWithData = msg as unknown as { message?: ChatMessage };
@@ -262,7 +262,6 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
     
     case 'historyComplete':
       // History streaming complete
-      console.log(`[WS] Received historyComplete for session ${msgSessionId}, firing ${historyCompleteCallbacks.size} callbacks`);
       for (const cb of historyCompleteCallbacks) {
         try {
           cb();
@@ -471,29 +470,12 @@ export function waitForConnect(): Promise<void> {
 
 /**
  * Reconnect to WebSocket (e.g., on visibility change)
- * After reconnecting, requests history for the active session if one exists.
  */
 export function reconnectIfNeeded(): void {
-  if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
-    console.log(`[WS] reconnectIfNeeded - reconnecting (socket state: ${socket?.readyState ?? 'null'})`);
+  if (!socket || socket.readyState === WebSocket.CLOSED) {
+    console.log(`[WS] reconnectIfNeeded - reconnecting`);
     reconnectAttempts = 0;
     connectionId++;
-    
-    // Store active session to reload history after reconnect
-    const sessionToReload = activeSessionId;
-    
-    // Set up one-time callback to reload history once connected
-    if (sessionToReload) {
-      const reloadHistory = () => {
-        console.log(`[WS] Reconnected - reloading history for ${sessionToReload}`);
-        requestHistory(sessionToReload);
-        connectCallbacks.delete(reloadHistory);
-      };
-      connectCallbacks.add(reloadHistory);
-    }
-    
     doConnect(connectionId);
-  } else {
-    console.log(`[WS] reconnectIfNeeded - already connected (state: ${socket.readyState})`);
   }
 }

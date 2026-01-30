@@ -11,10 +11,10 @@ const SCROLL_THRESHOLD = 150;
  * Check if chat is scrolled to bottom (or near it)
  */
 export function isAtBottom(): boolean {
-  const chatView = document.getElementById('chatView');
-  if (!chatView) return true;
+  const chatScroll = document.getElementById('chatScroll');
+  if (!chatScroll) return true;
   
-  const distanceFromBottom = chatView.scrollHeight - chatView.scrollTop - chatView.clientHeight;
+  const distanceFromBottom = chatScroll.scrollHeight - chatScroll.scrollTop - chatScroll.clientHeight;
   return distanceFromBottom <= SCROLL_THRESHOLD;
 }
 
@@ -33,13 +33,13 @@ export { isAutoScrollEnabled };
  * Always scrolls - the caller should check isAutoScrollEnabled() if conditional scroll is needed
  */
 export function scrollToBottom(force = false): void {
-  const chatView = document.getElementById('chatView');
-  if (!chatView) return;
+  const chatScroll = document.getElementById('chatScroll');
+  if (!chatScroll) return;
   
   // If not forcing, only scroll if auto-scroll is enabled
   if (!force && !isAutoScrollEnabled()) return;
   
-  chatView.scrollTop = chatView.scrollHeight;
+  chatScroll.scrollTop = chatScroll.scrollHeight;
 }
 
 /**
@@ -47,11 +47,11 @@ export function scrollToBottom(force = false): void {
  * Uses wheel event instead of scroll event to avoid detecting programmatic scrolls
  */
 export function setupScrollDetection(): void {
-  const chatView = document.getElementById('chatView');
-  if (!chatView) return;
+  const chatScroll = document.getElementById('chatScroll');
+  if (!chatScroll) return;
   
   // Wheel event fires only on user mouse wheel - not programmatic scrolls
-  chatView.addEventListener('wheel', (e: WheelEvent) => {
+  chatScroll.addEventListener('wheel', (e: WheelEvent) => {
     // Scrolling up (negative deltaY)
     if (e.deltaY < 0) {
       disableAutoScroll();
@@ -64,11 +64,11 @@ export function setupScrollDetection(): void {
   
   // Touch events for mobile
   let touchStartY = 0;
-  chatView.addEventListener('touchstart', (e: TouchEvent) => {
+  chatScroll.addEventListener('touchstart', (e: TouchEvent) => {
     touchStartY = e.touches[0].clientY;
   }, { passive: true });
   
-  chatView.addEventListener('touchmove', (e: TouchEvent) => {
+  chatScroll.addEventListener('touchmove', (e: TouchEvent) => {
     const touchY = e.touches[0].clientY;
     const deltaY = touchStartY - touchY; // positive = scroll up
     

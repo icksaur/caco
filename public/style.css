@@ -244,7 +244,7 @@ h1 {
 footer {
   position: relative;
   background: var(--bg-surface);
-  padding: var(--space-lg);
+  padding: var(--space-lg) 0;
   border-top: 1px solid var(--color-border);
   display: flex;
   justify-content: center;
@@ -391,10 +391,23 @@ main {
   display: none;
   flex-direction: column;
   flex: 1;
-  overflow-y: auto;
 }
 
 .view.active { display: flex; }
+
+/* Scrollbar attaches to this container */
+.chat-scroll {
+  height: 100%;
+  overflow-y: auto;
+  width: 100%;
+}
+
+/* Centered readable chat column */
+.chat-view {
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
 
 /* ========================================
    FLOATING NAV BUTTONS (Hamburger menus)
@@ -642,8 +655,8 @@ main {
   display: flex;
   align-items: center;
   background: var(--color-selector-bg);
-  padding: var(--space-md) var(--space-lg);
-  margin: var(--space-sm) 0;
+  padding: 4px;
+  margin: 4px 0;
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition: background var(--transition-fast);
@@ -753,7 +766,9 @@ main {
    SESSION VIEW
    ======================================== */
 #sessionView {
-  padding: var(--space-lg);
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 /* Usage info display */
@@ -1257,7 +1272,7 @@ html, body {
 
 /* Mobile: reduce padding, full width - no bottom padding (footer handles spacing) */
 main {
-  padding: var(--space-md) var(--space-md) 0;
+  padding: var(--space-md) 0 0;
 }
 
 /* Ensure fixed buttons stay in viewport on mobile */
@@ -1268,18 +1283,15 @@ main {
 
 @media (min-width: 768px) {
   main {
-    padding: var(--space-lg) var(--space-lg) 0;
+    padding: var(--space-lg) 0 0;
   }
   
-  #chat,
-  #sessionView,
   #appletView,
   .new-chat {
     padding-left: 4rem;
   }
   
-  /* Right padding for applet button (visible in chat/applet views) */
-  #chat,
+  /* Right padding for applet button (visible in applet view) */
   #appletView {
     padding-right: 4rem;
   }

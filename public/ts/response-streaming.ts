@@ -168,6 +168,11 @@ function registerWsHandlers(): void {
   // Activity handler for tool calls, intents, errors
   onActivity((item: ActivityItem) => {
     addActivityItem(item.type, item.text, item.details);
+    
+    // Handle reload signal from server
+    if (item.type === 'info' && item.text === 'Reload triggered') {
+      window.location.reload();
+    }
   });
   
   // Output handler for display-only tool results

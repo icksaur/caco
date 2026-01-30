@@ -36,21 +36,23 @@
 
   <main>
     <!-- Chat view -->
-    <div id="chatView" class="view active">
-      <!-- New chat form (shown when no messages) -->
-      <div id="newChat" class="new-chat">
-        <h2>New Chat</h2>
-        <div class="new-chat-cwd">
-          <label for="newChatCwd">Working directory</label>
-          <input type="text" id="newChatCwd" placeholder="/path/to/project">
+    <div id="chatScroll" class="chat-scroll view active">
+      <div id="chatView" class="chat-view">
+        <!-- New chat form (shown when no messages) -->
+        <div id="newChat" class="new-chat">
+          <h2>New Chat</h2>
+          <div class="new-chat-cwd">
+            <label for="newChatCwd">Working directory</label>
+            <input type="text" id="newChatCwd" placeholder="/path/to/project">
+          </div>
+          <h3>Select a model</h3>
+          <div id="modelList"></div>
+          <div id="newChatError" class="new-chat-error"></div>
         </div>
-        <h3>Select a model</h3>
-        <div id="modelList"></div>
-        <div id="newChatError" class="new-chat-error"></div>
-      </div>
-      <!-- Chat messages (shown when has messages) -->
-      <div id="chat" class="hidden">
-        <!-- Messages will appear here -->
+        <!-- Chat messages (shown when has messages) -->
+        <div id="chat" class="hidden">
+          <!-- Messages will appear here -->
+        </div>
       </div>
     </div>
 

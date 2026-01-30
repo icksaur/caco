@@ -36,7 +36,7 @@ let cachedElements: ViewElements | null = null;
 function getElements(): ViewElements {
   if (!cachedElements) {
     cachedElements = {
-      chatView: document.getElementById('chatView'),
+      chatView: document.getElementById('chatScroll'),
       sessionView: document.getElementById('sessionView'),
       appletView: document.getElementById('appletView'),
       chat: document.getElementById('chat'),

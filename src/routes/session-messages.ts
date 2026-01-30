@@ -360,8 +360,37 @@ export async function dispatchMessage(
       }
     });
     
-    // Send message (non-blocking)
-    sessionManager.sendStream(sessionId, prompt, messageOptions);
+    // Send message (non-blocking but can reject async)
+    // Wrap in Promise to catch SDK RPC errors that happen after initial call
+    const sendPromise = (async () => {
+      try {
+        // The sendStream call triggers an async RPC - errors surface when SDK processes response
+        sessionManager.sendStream(sessionId, prompt, messageOptions);
+      } catch (err) {
+        throw err;
+      }
+    })();
+    
+    // Handle errors from the send (async RPC failures like "Session not found")
+    sendPromise.catch((err) => {
+      console.error(`[DISPATCH] Send error for ${sessionId}:`, err);
+      const message = err instanceof Error ? err.message : String(err);
+      
+      // Check if session expired on SDK side
+      if (message.includes('Session not found') || message.includes('session.send failed')) {
+        onActivity({ type: 'error', text: 'Session expired - please start a new session' });
+        // Clean up stale session
+        sessionManager.stop(sessionId).catch(() => {});
+      } else {
+        onActivity({ type: 'error', text: `Error: ${message}` });
+      }
+      
+      unsubscribe();
+      if (tempFilePath) {
+        unlink(tempFilePath).catch(() => {});
+      }
+      dispatchComplete();
+    });
     
   } catch (error) {
     console.error('Dispatch error:', error);

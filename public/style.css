@@ -1166,6 +1166,46 @@ html, body {
   max-width: 100vw;
 }
 
+/* iOS: Fix nested scroll issue - body should not scroll on mobile */
+@media (max-width: 768px) {
+  /* Prevent body scroll overflow */
+  body {
+    overflow: hidden;
+  }
+  
+  /* Enable momentum scrolling for chat area */
+  #messages {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Prevent horizontal scroll in messages */
+  .message {
+    max-width: 100%;
+    overflow-x: hidden;
+    word-wrap: break-word;
+  }
+  
+  /* Code blocks: wrap instead of horizontal scroll */
+  .markdown-content pre {
+    overflow-x: auto;
+    max-width: 100%;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  
+  /* Tables: allow horizontal scroll only for tables */
+  .markdown-content table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  
+  /* Ensure input area is above iOS home indicator */
+  #user-input-container {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 /* Mobile: reduce padding, full width */
 main {
   padding: var(--space-md);

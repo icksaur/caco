@@ -3,6 +3,9 @@
 
 cd "$(dirname "$0")"
 
+# Port configuration: CACO_PORT → PORT → 3000
+PORT=${CACO_PORT:-${PORT:-3000}}
+
 if [ -f server.pid ]; then
   PID=$(cat server.pid)
   if kill -0 $PID 2>/dev/null; then
@@ -14,10 +17,10 @@ if [ -f server.pid ]; then
   rm -f server.pid
 else
   # Try to find and kill by port
-  PID=$(lsof -ti:3000 2>/dev/null)
+  PID=$(lsof -ti:$PORT 2>/dev/null)
   if [ -n "$PID" ]; then
     kill $PID
-    echo "✓ Killed process on port 3000 (PID: $PID)"
+    echo "✓ Killed process on port $PORT (PID: $PID)"
   else
     echo "No server running"
   fi

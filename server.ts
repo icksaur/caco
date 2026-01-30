@@ -20,12 +20,12 @@ import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
+import { PORT } from './src/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = 3000;
 
 // Tool factory - creates display tools + applet tools with session cwd baked in
 // Program CWD for applet storage (fixed at startup)
@@ -168,9 +168,11 @@ async function start(): Promise<void> {
   // Start schedule manager
   startScheduleManager();
   
-  // Start server (localhost only for security)
-  server.listen(PORT, '127.0.0.1', () => {
-    console.log(`✓ Server running at http://localhost:${PORT}`);
+  // Start server (0.0.0.0 = all interfaces - TEMPORARY for iOS testing)
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`✓ Server running at http://0.0.0.0:${PORT}`);
+    console.log(`  Local: http://localhost:${PORT}`);
+    console.log(`  Network: http://10.0.1.4:${PORT}`);
     console.log('  Press Ctrl+C to stop');
   });
 }
@@ -181,6 +183,12 @@ process.on('SIGINT', async () => {
   stopScheduleManager();
   await sessionState.shutdown();
   process.exit(0);
+});
+
+// Handle unhandled rejections (prevents crash from SDK async errors)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]', reason);
+  // Log but don't crash - SDK sometimes throws async errors we can't catch
 });
 
 start().catch(console.error);

@@ -3,6 +3,9 @@
 
 cd "$(dirname "$0")"
 
+# Port configuration: CACO_PORT → PORT → 3000
+export PORT=${CACO_PORT:-${PORT:-3000}}
+
 # Kill any existing server first
 ./stop.sh 2>/dev/null
 
@@ -15,7 +18,7 @@ sleep 1
 if kill -0 $(cat server.pid) 2>/dev/null; then
   echo "✓ Server started (PID: $(cat server.pid))"
   echo "  Log: server.log"
-  echo "  URL: http://localhost:3000"
+  echo "  URL: http://localhost:$PORT"
 else
   echo "✗ Server failed to start"
   cat server.log

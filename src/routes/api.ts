@@ -12,12 +12,11 @@
 
 import { Router, Request, Response } from 'express';
 import express from 'express';
-import { CopilotClient } from '@github/copilot-sdk';
 import { readdir, readFile, stat, writeFile, mkdir } from 'fs/promises';
 import { join, relative, resolve, dirname } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
-import sessionManager from '../session-manager.js';
+import sessionManager, { type ModelInfo } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
 import { setAppletUserState, getAppletUserState, clearAppletUserState } from '../applet-state.js';
@@ -30,7 +29,7 @@ const router = Router();
 const TEMP_DIR = join(homedir(), '.caco', 'tmp');
 
 // Cache models to avoid repeated SDK calls
-let cachedModels: Array<{ id: string; name: string; multiplier: number }> | null = null;
+let cachedModels: ModelInfo[] | null = null;
 let modelsCacheTime = 0;
 const MODELS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
@@ -42,30 +41,10 @@ router.get('/models', async (_req: Request, res: Response) => {
       return res.json({ models: cachedModels });
     }
     
-    // Create temporary client to list models
-    const client = new CopilotClient({ cwd: process.cwd() });
-    await client.start();
+    cachedModels = await sessionManager.listModels();
+    modelsCacheTime = Date.now();
     
-    try {
-      const sdkModels = await (client as unknown as { listModels(): Promise<Array<{
-        id: string;
-        name: string;
-        billing?: { multiplier: number };
-      }>> }).listModels();
-      
-      // Transform to our format
-      cachedModels = sdkModels.map(m => ({
-        id: m.id,
-        name: m.name,
-        multiplier: m.billing?.multiplier ?? 1
-      }));
-      modelsCacheTime = Date.now();
-      
-      
-      res.json({ models: cachedModels });
-    } finally {
-      await client.stop();
-    }
+    res.json({ models: cachedModels });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('[MODELS] Failed to fetch models:', message);

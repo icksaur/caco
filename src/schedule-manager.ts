@@ -8,7 +8,7 @@
  */
 
 import parser from 'cron-parser';
-import { 
+import {
   listSchedules, 
   loadDefinition, 
   loadLastRun, 
@@ -16,6 +16,7 @@ import {
   type ScheduleDefinition,
   type LastRunState
 } from './schedule-store.js';
+import { SERVER_URL } from './config.js';
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 const BUSY_DELAY_MS = 60 * 60 * 1000;     // 1 hour
@@ -114,7 +115,7 @@ async function executeSchedule(slug: string): Promise<void> {
   try {
     // Try to POST to existing session
     if (lastRun?.sessionId) {
-      const response = await fetch(`http://localhost:3000/api/sessions/${lastRun.sessionId}/messages`, {
+      const response = await fetch(`${SERVER_URL}/api/sessions/${lastRun.sessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -182,7 +183,7 @@ async function executeSchedule(slug: string): Promise<void> {
  */
 async function createAndExecute(slug: string, definition: ScheduleDefinition): Promise<void> {
   // Create session
-  const createResponse = await fetch('http://localhost:3000/api/sessions', {
+  const createResponse = await fetch(`${SERVER_URL}/api/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ 
@@ -199,7 +200,7 @@ async function createAndExecute(slug: string, definition: ScheduleDefinition): P
   console.log(`[SCHEDULER] Created session ${sessionId} for ${slug}`);
   
   // POST message
-  const messageResponse = await fetch(`http://localhost:3000/api/sessions/${sessionId}/messages`, {
+  const messageResponse = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ 

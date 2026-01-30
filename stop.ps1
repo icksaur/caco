@@ -1,13 +1,18 @@
 # Stop the Copilot web server
 Set-Location $PSScriptRoot
 
-# First, kill any process on port 3000
-$conn = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue
+# Port configuration: CACO_PORT → PORT → 3000
+if ($env:CACO_PORT) { $Port = $env:CACO_PORT }
+elseif ($env:PORT) { $Port = $env:PORT }
+else { $Port = 3000 }
+
+# First, kill any process on the port
+$conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($conn) {
     $procIds = $conn.OwningProcess | Where-Object { $_ -ne 0 } | Select-Object -Unique
     foreach ($procId in $procIds) {
         Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-        Write-Host "[OK] Killed process $procId on port 3000"
+        Write-Host "[OK] Killed process $procId on port $Port"
     }
 }
 

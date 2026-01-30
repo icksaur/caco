@@ -88,6 +88,13 @@ interface GroupedSessions {
   [cwd: string]: SessionListItem[];
 }
 
+// Model info returned by listModels()
+export interface ModelInfo {
+  id: string;
+  name: string;
+  multiplier: number;
+}
+
 /**
  * SessionManager - Singleton that owns all SDK interactions
  * 
@@ -524,6 +531,26 @@ class SessionManager {
       return lines.length > 1; // More than just session.start
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * List available models from the SDK
+   * Creates a temporary client, fetches models, and stops it.
+   */
+  async listModels(): Promise<ModelInfo[]> {
+    const client = new CopilotClient({ cwd: process.cwd() }) as unknown as CopilotClientInstance;
+    await client.start();
+    
+    try {
+      const sdkModels = await client.listModels();
+      return sdkModels.map(m => ({
+        id: m.id,
+        name: m.name,
+        multiplier: m.billing?.multiplier ?? 1
+      }));
+    } finally {
+      await client.stop();
     }
   }
 

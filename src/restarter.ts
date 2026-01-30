@@ -11,12 +11,11 @@ import { createConnection } from 'net';
 import { writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { PORT } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '..');
-
-const PORT = 3000;
 const POLL_INTERVAL = 500;  // ms
 const MAX_WAIT = 30000;     // 30s timeout
 

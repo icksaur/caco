@@ -10,9 +10,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-
-// Server base URL for HTTP calls
-const SERVER_URL = process.env.COPILOT_SERVER_URL || 'http://localhost:3000';
+import { SERVER_URL } from './config.js';
 
 // Session ID reference - mutable so it can be set after session creation
 export interface SessionIdRef {

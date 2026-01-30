@@ -102,8 +102,6 @@ export function setupWebSocket(server: Server): WebSocketServer {
   });
 
   wss.on('connection', (ws, req) => {
-    console.log(`[WS] Client connected`);
-    
     // Track in global pool
     allConnections.add(ws);
     
@@ -117,7 +115,6 @@ export function setupWebSocket(server: Server): WebSocketServer {
     });
     
     ws.on('close', () => {
-      console.log(`[WS] Client disconnected`);
       allConnections.delete(ws);
       
       // Clean up subscription
@@ -133,7 +130,6 @@ export function setupWebSocket(server: Server): WebSocketServer {
     });
   });
 
-  console.log('[WS] WebSocket server ready on /ws');
   return wss;
 }
 
@@ -185,8 +181,6 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
         }
         sessionSubscribers.get(msg.sessionId)!.add(ws);
         clientSubscription.set(ws, msg.sessionId);
-        
-        console.log(`[WS] Client subscribed to session ${msg.sessionId} (${sessionSubscribers.get(msg.sessionId)!.size} subscribers)`);
       }
       break;
       
@@ -240,12 +234,6 @@ export function pushStateToApplet(sessionId: string | null, state: Record<string
     }
   }
   
-  if (sent > 0) {
-    console.log(`[WS] Pushed state to ${sent} connections`);
-  } else {
-    console.log(`[WS] No connections available`);
-  }
-  
   return sent > 0;
 }
 
@@ -284,7 +272,6 @@ export function broadcastUserMessageFromPost(
   };
   
   broadcastMessage(sessionId, message);
-  console.log(`[WS] Broadcast user message for session ${sessionId}`);
 }
 
 /**
@@ -301,7 +288,6 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
   
   try {
     const events = await sessionManager.getHistory(sessionId);
-    let messageCount = 0;
     
     // Track outputs from tool completions for assistant messages
     const pendingOutputs: string[] = [];
@@ -360,12 +346,10 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
         
         // Include sessionId for client filtering
         send(ws, { type: 'message', sessionId, message });
-        messageCount++;
       }
     }
     
     send(ws, { type: 'historyComplete', sessionId });
-    console.log(`[WS] Streamed ${messageCount} history messages for session ${sessionId}`);
     
   } catch (error) {
     console.error(`[WS] Error streaming history for ${sessionId}:`, error);
@@ -383,12 +367,8 @@ export function broadcastMessage(
 ): void {
   const subscribers = sessionSubscribers.get(sessionId);
   if (!subscribers || subscribers.size === 0) {
-    console.log(`[WS] No subscribers for session ${sessionId}`);
     return;
   }
-  
-  const now = Date.now();
-  console.log(`[WS:${now}] Broadcasting to ${subscribers.size} subscribers (session ${sessionId}): ${message.role} ${message.status || '-'} ${message.deltaContent ? `delta(${message.deltaContent.length})` : (message.source ? `source=${message.source}` : '')}`);
   
   const msg: ServerMessage = { type: 'message', sessionId, message };
   const data = JSON.stringify(msg);

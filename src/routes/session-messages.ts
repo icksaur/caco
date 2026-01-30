@@ -77,7 +77,6 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   if (correlationId) {
     const guardResult = sessionManager.checkAgentCall(correlationId, sessionId);
     if (!guardResult.allowed) {
-      console.log(`[RUNAWAY GUARD] Rejected call to ${sessionId}: ${guardResult.reason}`);
       res.status(400).json({ error: `Agent call rejected: ${guardResult.reason}` });
       return;
     }
@@ -165,7 +164,6 @@ export async function dispatchMessage(
   options?: { tempFilePath?: string; clientId?: string },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
-  console.log(`[DISPATCH] Starting for session ${sessionId}`);
   
   const { tempFilePath, clientId } = options || {};
   const onMessage = callbacks?.onMessage || (() => {});
@@ -233,7 +231,6 @@ export async function dispatchMessage(
           // Text content from assistant - but DON'T finalize here
           // The agent may do more turns. Finalization happens on session.idle.
           const content = (eventData.content as string) || '';
-          console.log(`[DISPATCH] assistant.message event: hasStarted=${hasStarted}, content="${content?.slice(0,50)}", messageContent="${messageContent?.slice(0,50)}"`);
           
           // If we haven't started streaming yet, start now
           if (!hasStarted && content) {
@@ -291,7 +288,6 @@ export async function dispatchMessage(
           let details = result;
           if (toolTelemetry?.outputId) {
             // Broadcast output directly so client renders it immediately
-            console.log('[stream] Broadcasting output:', toolTelemetry.outputId);
             broadcastOutput(sessionId, toolTelemetry.outputId);
             details = `[Output: ${toolTelemetry.outputId}]`;
           }

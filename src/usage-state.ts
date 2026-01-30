@@ -40,7 +40,6 @@ export function loadUsageCache(): void {
     const cached = JSON.parse(data) as UsageInfo;
     cached.fromCache = true;
     currentUsage = cached;
-    console.log(`[USAGE] Loaded from cache: ${cached.remainingPercentage}% remaining (from ${cached.updatedAt})`);
   } catch {
     // No cache file or invalid - that's fine
   }
@@ -65,7 +64,6 @@ export function updateUsage(quotaSnapshots: Record<string, QuotaSnapshot> | unde
     fromCache: false
   };
   
-  console.log(`[USAGE] Updated: ${snapshot.remainingPercentage}% remaining`);
   
   // Persist to disk
   try {

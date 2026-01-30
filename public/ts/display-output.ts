@@ -204,7 +204,6 @@ export async function renderOutputById(outputId: string, container: Element): Pr
   try {
     const response = await fetch(`/api/outputs/${outputId}?format=json`);
     if (!response.ok) {
-      console.warn(`Output ${outputId} not found (may have expired)`);
       return;
     }
     

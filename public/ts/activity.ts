@@ -43,9 +43,7 @@ function ensurePendingResponse(): Element | null {
  * Add activity item to activity box
  */
 export function addActivityItem(type: string, text: string, details: string | null = null): void {
-  console.log('[ACTIVITY] addActivityItem:', type, text);
   const activityBox = ensurePendingResponse();
-  console.log('[ACTIVITY] activityBox:', activityBox ? 'found/created' : 'failed');
   if (!activityBox) return;
   
   const item = document.createElement('div');

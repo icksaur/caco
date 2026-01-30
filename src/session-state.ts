@@ -136,7 +136,6 @@ class SessionState {
       // Check if this session exists and has messages
       if (sessionManager.hasMessages(this._preferences.lastSessionId)) {
         this.setPendingResumeId(this._preferences.lastSessionId);
-        console.log(`✓ Will resume session ${this.getPendingResumeId()} on first message`);
         this._initialized = true;
         return;
       }
@@ -144,7 +143,6 @@ class SessionState {
     
     // If lastSessionId was explicitly null, wait for first message with model
     if (this._preferences.lastSessionId === null) {
-      console.log('✓ No existing session - will create on first message');
       this._initialized = true;
       return;
     }
@@ -157,12 +155,10 @@ class SessionState {
       this.setPendingResumeId(recentSessionId);
       this._preferences.lastSessionId = recentSessionId;
       await savePreferences(this._preferences);
-      console.log(`✓ Will resume session ${this.getPendingResumeId()} on first message`);
       this._initialized = true;
       return;
     }
     
-    console.log('✓ No existing session - will create on first message');
     this._initialized = true;
   }
 
@@ -188,7 +184,6 @@ class SessionState {
     // Explicit new chat request - just clear the active session reference
     // Don't stop the old session - it may still be running
     if (newChat && activeId) {
-      console.log(`[SESSION] New chat requested - clearing active session reference (${activeId} continues running)`);
       this.setActiveSessionId(null, clientId);
     }
     
@@ -200,7 +195,6 @@ class SessionState {
     // If we have an active session, return it
     const currentActiveId = this.getActiveSessionId(clientId);
     if (currentActiveId && sessionManager.isActive(currentActiveId)) {
-      console.log(`[MODEL] Reusing existing session ${currentActiveId} - requested model '${model || '(undefined)'}' is IGNORED`);
       return currentActiveId;
     }
     
@@ -219,20 +213,16 @@ class SessionState {
         this.setActiveSessionId(resumedId, clientId);
         this._preferences.lastSessionId = resumedId;
         await savePreferences(this._preferences);
-        console.log(`✓ Resumed pending session ${resumedId}`);
         this.setPendingResumeId(null, clientId); // Clear pending
         return resumedId;
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        console.warn(`Could not resume pending session: ${message}`);
         this.setPendingResumeId(null, clientId); // Clear and fall through to create
       }
     }
     
     // Create new session with specified model
     const finalModel = model || DEFAULT_MODEL;
-    console.log(`[MODEL] Creating SDK session with model: ${finalModel} (from param: ${model || '(undefined)'})`);
-    console.log(`[CWD] Creating session with cwd: ${sessionCwd}`);
     
     const newSessionId = await sessionManager.create(sessionCwd, {
       model: finalModel,
@@ -245,7 +235,6 @@ class SessionState {
     this._preferences.lastSessionId = newSessionId;
     this._preferences.lastCwd = sessionCwd; // Save cwd for next time
     await savePreferences(this._preferences);
-    console.log(`✓ Created session ${newSessionId} with model ${finalModel}`);
     
     return newSessionId;
   }
@@ -288,7 +277,6 @@ class SessionState {
   async prepareNewChat(cwd: string, clientId?: string): Promise<void> {
     const activeId = this.getActiveSessionId(clientId);
     if (activeId) {
-      console.log(`[SESSION] Preparing new chat - clearing reference to ${activeId} (session continues running)`);
       this.setActiveSessionId(null, clientId);
     }
     
@@ -299,7 +287,6 @@ class SessionState {
     this._preferences.lastCwd = cwd;
     await savePreferences(this._preferences);
     
-    console.log(`✓ New chat prepared for ${cwd} - session will create on first message`);
   }
 
   /**
@@ -356,7 +343,6 @@ class SessionState {
     // Stop all active sessions across all clients
     for (const [clientId, sessionId] of this._clientSessions) {
       if (sessionId) {
-        console.log(`[SHUTDOWN] Stopping session ${sessionId} for client ${clientId}`);
         await sessionManager.stop(sessionId);
       }
     }

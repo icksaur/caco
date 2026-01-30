@@ -22,7 +22,6 @@ const FALLBACK_MODELS: ModelInfo[] = [
  */
 export function setAvailableModels(models: ModelInfo[]): void {
   stateSetAvailableModels(models);
-  console.log(`[MODEL] Available models from SDK:`, models.map(m => m.id));
 }
 
 /**

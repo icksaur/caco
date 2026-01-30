@@ -30,7 +30,6 @@ let pendingReload = false;
  */
 export function setAppletUserState(state: Record<string, unknown>): void {
   appletUserState = { ...appletUserState, ...state };
-  console.log('[APPLET] User state updated:', Object.keys(state).join(', '));
 }
 
 /**
@@ -52,7 +51,6 @@ export function clearAppletUserState(): void {
  */
 export function setAppletNavigation(nav: NavigationContext): void {
   appletNavigation = nav;
-  console.log('[APPLET] Navigation context updated:', nav.stack.length, 'items in stack');
 }
 
 /**
@@ -67,7 +65,6 @@ export function getAppletNavigation(): NavigationContext {
  */
 export function triggerReload(): void {
   pendingReload = true;
-  console.log('[RELOAD] Page reload triggered');
 }
 
 /**

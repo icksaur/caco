@@ -61,7 +61,6 @@ router.get('/models', async (_req: Request, res: Response) => {
       }));
       modelsCacheTime = Date.now();
       
-      console.log(`[MODELS] Fetched ${cachedModels.length} models from SDK:`, cachedModels.map(m => m.id));
       
       res.json({ models: cachedModels });
     } finally {
@@ -610,7 +609,6 @@ router.post('/tmpfile', express.json({ limit: '10mb' }), async (req: Request, re
     const buffer = Buffer.from(base64Data, 'base64');
     await writeFile(fullPath, buffer);
     
-    console.log(`[API] Wrote temp file: ${fullPath} (${buffer.length} bytes)`);
     
     res.json({ 
       ok: true, 

@@ -40,7 +40,6 @@ export async function loadPreferences(): Promise<UserPreferences> {
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    console.warn('Could not load preferences:', message);
   }
   return { ...defaultPreferences };
 }
@@ -53,6 +52,5 @@ export async function savePreferences(prefs: UserPreferences): Promise<void> {
     await writeFile(PREFS_FILE, JSON.stringify(prefs, null, 2));
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    console.warn('Could not save preferences:', message);
   }
 }

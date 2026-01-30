@@ -125,7 +125,6 @@ class SessionManager {
     this._discoverSessions();
     await this._fetchModels();
     this.initialized = true;
-    console.log(`✓ SessionManager initialized (${this.sessionCache.size} sessions, ${this.cachedModels.length} models)`);
   }
   
   /**
@@ -137,10 +136,8 @@ class SessionManager {
       await client.start();
       this.cachedModels = await client.listModels();
       await client.stop();
-      console.log(`✓ Fetched ${this.cachedModels.length} models from SDK`);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      console.warn(`Could not fetch models from SDK: ${message}`);
       // Fall back to empty - client will use hardcoded list
       this.cachedModels = [];
     }
@@ -199,7 +196,6 @@ class SessionManager {
       throw new Error('Model is required when creating a session');
     }
     
-    console.log(`[MODEL] SessionManager.create() with model: ${config.model}`);
     
     // Create client with cwd
     const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
@@ -230,7 +226,6 @@ class SessionManager {
     // Register with storage layer for output persistence
     registerSession(cwd, session.sessionId);
     
-    console.log(`✓ Created session ${session.sessionId} for ${cwd} with model ${config.model}`);
     return session.sessionId;
   }
 
@@ -260,7 +255,6 @@ class SessionManager {
     
     // Already active?
     if (this.activeSessions.has(sessionId)) {
-      console.log(`Session ${sessionId} already active`);
       return sessionId;
     }
     
@@ -287,7 +281,6 @@ class SessionManager {
     // Register with storage layer for output persistence
     registerSession(cwd, sessionId);
     
-    console.log(`✓ Resumed session ${sessionId} for ${cwd}`);
     return sessionId;
   }
 
@@ -297,7 +290,6 @@ class SessionManager {
   async stop(sessionId: string): Promise<void> {
     const active = this.activeSessions.get(sessionId);
     if (!active) {
-      console.log(`Session ${sessionId} not active, nothing to stop`);
       return;
     }
     
@@ -307,14 +299,12 @@ class SessionManager {
       await session.destroy();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      console.warn(`Warning: session.destroy() failed: ${message}`);
     }
     
     try {
       await client.stop();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      console.warn(`Warning: client.stop() failed: ${message}`);
     }
     
     // Unlock and untrack
@@ -324,7 +314,6 @@ class SessionManager {
     // Unregister from storage layer
     unregisterSession(cwd);
     
-    console.log(`✓ Stopped session ${sessionId}`);
   }
 
   /**
@@ -422,7 +411,6 @@ class SessionManager {
     
     try {
       await client.deleteSession(sessionId);
-      console.log(`✓ Deleted session ${sessionId}`);
     } finally {
       await client.stop();
     }

@@ -107,7 +107,6 @@ function setupNavigationHandler(): void {
   // TypeScript doesn't have Navigation API types yet
   const nav = (window as unknown as { navigation?: Navigation }).navigation;
   if (!nav) {
-    console.warn('[APPLET] Navigation API not available');
     return;
   }
   
@@ -134,7 +133,6 @@ function setupNavigationHandler(): void {
           handler: async () => {
             insideNavigateHandler = true;
             try {
-              console.log('[APPLET] navigate: leaving applet view');
               clearApplet();
             } finally {
               insideNavigateHandler = false;
@@ -160,7 +158,6 @@ function setupNavigationHandler(): void {
           const index = appletStack.findIndex(a => a.slug === appletSlug);
           if (index >= 0 && index < appletStack.length - 1) {
             // Pop down to existing entry (it's earlier in the stack)
-            console.log(`[APPLET] navigate: popping to stack index ${index}`);
             while (appletStack.length > index + 1) {
               const popped = appletStack.pop()!;
               destroyInstance(popped);
@@ -170,12 +167,10 @@ function setupNavigationHandler(): void {
             setViewState('applet', appletSlug);
           } else if (index === appletStack.length - 1) {
             // Already showing this applet, just ensure it's visible
-            console.log(`[APPLET] navigate: already showing ${appletSlug}`);
             showInstance(appletStack[index]);
             setViewState('applet', appletSlug);
           } else {
             // Load applet (push new) - pushApplet will call setViewState
-            console.log(`[APPLET] navigate: loading ${appletSlug}`, Object.keys(params).length ? params : '');
             await loadAppletBySlug(appletSlug, Object.keys(params).length ? params : undefined);
           }
         } finally {
@@ -185,7 +180,6 @@ function setupNavigationHandler(): void {
     });
   });
   
-  console.log('[APPLET] Navigation API handler installed');
 }
 
 /**
@@ -233,9 +227,7 @@ function setAppletState(state: Record<string, unknown>): void {
   // If WebSocket connected, push immediately
   if (isWsConnected()) {
     wsSetState(state);
-    console.log('[APPLET] State pushed via WebSocket:', Object.keys(state));
   } else {
-    console.log('[APPLET] State queued (no WS):', Object.keys(state));
   }
 }
 
@@ -271,7 +263,6 @@ async function sendAgentMessage(prompt: string, options?: SendAgentMessageOption
   // Default to current applet if not specified
   const slug = opts.appletSlug ?? appletStack[appletStack.length - 1]?.slug;
   
-  console.log(`[APPLET] Sending agent message: "${prompt.slice(0, 50)}..." (session: ${sessionId}, applet: ${slug}, hasImage: ${!!opts.imageData})`);
   
   const response = await fetch(`/api/sessions/${sessionId}/messages`, {
     method: 'POST',
@@ -289,7 +280,6 @@ async function sendAgentMessage(prompt: string, options?: SendAgentMessageOption
     throw new Error(error.error || `HTTP ${response.status}`);
   }
   
-  console.log('[APPLET] Agent message sent successfully');
 }
 
 /**
@@ -346,7 +336,6 @@ async function saveTempFile(
   }
   
   const result = await response.json();
-  console.log(`[APPLET] Saved temp file: ${result.path}`);
   return result;
 }
 
@@ -379,7 +368,6 @@ async function callMCPTool(toolName: string, params: Record<string, unknown>): P
     throw new Error(result.error || 'Tool call failed');
   }
   
-  console.log(`[APPLET] MCP tool ${toolName} succeeded`);
   return result;
 }
 
@@ -392,7 +380,6 @@ async function callMCPTool(toolName: string, params: Record<string, unknown>): P
  */
 async function loadAppletBySlug(slug: string, params?: Record<string, string>): Promise<void> {
   try {
-    console.log(`[APPLET] Loading applet: ${slug}`, params ? `with params: ${JSON.stringify(params)}` : '');
     
     // POST to load endpoint (updates server state + returns content)
     const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
@@ -416,7 +403,6 @@ async function loadAppletBySlug(slug: string, params?: Record<string, string>): 
     };
     pushApplet(slug, data.title || slug, content);
     
-    console.log(`[APPLET] Loaded: ${data.title} (${slug})`);
   } catch (error) {
     console.error(`[APPLET] Failed to load "${slug}":`, error);
     throw error;
@@ -432,7 +418,6 @@ export async function loadAppletFromUrl(): Promise<boolean> {
   const params = new URLSearchParams(window.location.search);
   const slug = params.get('applet');
   if (slug) {
-    console.log(`[APPLET] Loading from URL param: ${slug}`);
     try {
       await loadAppletBySlug(slug);
       return true;
@@ -605,7 +590,6 @@ function syncToUrl(): void {
     } else {
       history.pushState({ appletStack: stackData }, '', url.toString());
     }
-    console.log(`[APPLET] URL synced: ${url.searchParams.get('applet')}`);
   }
 }
 
@@ -698,12 +682,10 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
     return;
   }
   
-  console.log(`[APPLET] Pushing: ${label} (${slug})`);
   
   // Check for duplicate - if already in stack, navigate to it instead
   const existingIndex = appletStack.findIndex(a => a.slug === slug);
   if (existingIndex >= 0) {
-    console.log(`[APPLET] Dupe detected at index ${existingIndex}, truncating stack`);
     // Destroy all instances after the existing one
     while (appletStack.length > existingIndex + 1) {
       const popped = appletStack.pop()!;
@@ -720,7 +702,6 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   // Enforce max depth - destroy oldest (bottom of stack)
   while (appletStack.length >= MAX_STACK_DEPTH) {
     const oldest = appletStack.shift()!;
-    console.log(`[APPLET] Stack limit reached, destroying oldest: ${oldest.slug}`);
     destroyInstance(oldest);
   }
   
@@ -787,13 +768,11 @@ export function clearApplet(): void {
  */
 export function popApplet(): void {
   if (appletStack.length <= 1) {
-    console.log('[APPLET] Cannot pop - at bottom of stack');
     return;
   }
   
   // Destroy current
   const current = appletStack.pop()!;
-  console.log(`[APPLET] Popping: ${current.slug}`);
   destroyInstance(current);
   
   // Show previous

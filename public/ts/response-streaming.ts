@@ -199,10 +199,8 @@ function registerWsHandlers(): void {
   
   // Output handler for display-only tool results
   onOutput((outputId: string) => {
-    console.log('[response-streaming] onOutput callback:', outputId);
     // Find the pending response's outputs container
     const container = document.querySelector('#pending-response .outputs-container');
-    console.log('[response-streaming] Container found:', !!container);
     if (container) {
       renderOutputById(outputId, container).catch(err => 
         console.error('Failed to render output:', err)
@@ -625,8 +623,6 @@ export function setupFormHandler(): void {
     }
     
     // Definitive model logging
-    console.log('[MODEL] Client sending request with model:', model || '(undefined)');
-    if (isNewChat) console.log('[NEW CHAT] Creating new session with cwd:', cwd);
     
     if (!message) return;
     

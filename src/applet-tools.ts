@@ -111,7 +111,6 @@ await sendAgentMessage(\`Analyze image at \${path}\`);  // Agent uses view tool
 \`\`\`javascript
 // Read a file
 const result = await callMCPTool('read_file', { path: '/path/to/file.txt' });
-console.log(result.content);
 
 // Write a file
 await callMCPTool('write_file', { 
@@ -121,7 +120,6 @@ await callMCPTool('write_file', {
 
 // List directory contents
 const files = await callMCPTool('list_directory', { path: '/home/user' });
-console.log(files.entries);  // Array of { name, type, size? }
 
 // Get available tools
 const tools = await callMCPTool('tools', {});

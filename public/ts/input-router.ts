@@ -25,7 +25,6 @@ let chatKeyHandler: KeyHandler | null = null;
  */
 export function registerKeyHandler(appletSlug: string, handler: KeyHandler): void {
   keyHandlers.set(appletSlug, handler);
-  console.log(`[INPUT] Registered key handler for: ${appletSlug}`);
 }
 
 /**
@@ -36,7 +35,6 @@ export function registerKeyHandler(appletSlug: string, handler: KeyHandler): voi
  */
 export function unregisterKeyHandler(appletSlug: string): void {
   keyHandlers.delete(appletSlug);
-  console.log(`[INPUT] Unregistered key handler for: ${appletSlug}`);
 }
 
 /**
@@ -88,7 +86,6 @@ export function initInputRouter(): void {
     }
   });
   
-  console.log('[INPUT] Input router initialized');
 }
 
 /**

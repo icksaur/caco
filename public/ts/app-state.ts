@@ -256,5 +256,4 @@ export function initFromSession(data: {
 
 /** Log current state to console */
 export function debugState(): void {
-  console.log('[APP STATE]', getState());
 }

@@ -1,15 +1,11 @@
 /**
- * WebSocket Client
+ * Applet WebSocket Client
  * 
- * Single persistent WebSocket connection for all client-server communication:
- * - Chat message streaming (user & assistant)
- * - Activity items (tool calls, intents, errors)
- * - History loading
- * - State sync
- * - Agent-to-agent messages
+ * ARCHITECTURE: Single persistent WebSocket connection (no session in URL).
+ * Server broadcasts ALL messages with sessionId. Client filters by active session.
  * 
- * Connect once on page load. Server broadcasts ALL messages with sessionId.
- * Client filters by active session.
+ * Connect once on page load. When switching sessions, call requestHistory().
+ * Messages for non-active sessions are ignored.
  */
 
 /**
@@ -54,13 +50,11 @@ let activeSessionId: string | null = null;
 type StateCallback = (state: Record<string, unknown>) => void;
 type MessageCallback = (msg: ChatMessage) => void;
 type ActivityCallback = (item: ActivityItem) => void;
-type OutputCallback = (outputId: string) => void;
 type HistoryCompleteCallback = () => void;
 type ConnectCallback = () => void;
 const stateCallbacks: Set<StateCallback> = new Set();
 const messageCallbacks: Set<MessageCallback> = new Set();
 const activityCallbacks: Set<ActivityCallback> = new Set();
-const outputCallbacks: Set<OutputCallback> = new Set();
 const historyCompleteCallbacks: Set<HistoryCompleteCallback> = new Set();
 const connectCallbacks: Set<ConnectCallback> = new Set();
 
@@ -75,8 +69,8 @@ let requestId = 0;
  * Connect to the WebSocket server (call once on page load).
  * No session parameter - server broadcasts all, client filters.
  */
-export function connectWs(): void {
-  console.log(`[WS] connectWs called, socket state: ${socket?.readyState ?? 'null'}`);
+export function connectAppletWs(): void {
+  console.log(`[WS] connectAppletWs called, socket state: ${socket?.readyState ?? 'null'}`);
   
   // Already connected or connecting
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
@@ -130,7 +124,7 @@ function doConnect(myConnectionId: number): void {
   }
   
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${protocol}//${window.location.host}/ws`;
+  const url = `${protocol}//${window.location.host}/ws/applet`;
   
   console.log(`[WS] Connecting: ${url} (connectionId: ${myConnectionId})`);
   const ws = new WebSocket(url);
@@ -197,7 +191,6 @@ function doConnect(myConnectionId: number): void {
 /**
  * Handle incoming message from server
  * Filters messages by activeSessionId - only messages for current session are processed
- * Exception: stateUpdate bypasses session filtering (applets receive state from any session)
  */
 function handleMessage(msg: { type: string; id?: string; sessionId?: string; data?: unknown; error?: string }): void {
   // Handle request/response messages (no session filtering)
@@ -213,21 +206,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
     return;
   }
   
-  // stateUpdate bypasses session filtering - applets receive state regardless of which session agent runs in
-  if (msg.type === 'stateUpdate') {
-    if (msg.data && typeof msg.data === 'object') {
-      for (const cb of stateCallbacks) {
-        try {
-          cb(msg.data as Record<string, unknown>);
-        } catch (err) {
-          console.error('[WS] State callback error:', err);
-        }
-      }
-    }
-    return;
-  }
-  
-  // Filter by active session for other broadcast messages
+  // Filter by active session for broadcast messages
   const msgSessionId = msg.sessionId;
   if (msgSessionId && activeSessionId && msgSessionId !== activeSessionId) {
     // Message for a different session - ignore
@@ -236,6 +215,18 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
   
   // Handle broadcast messages
   switch (msg.type) {
+    case 'stateUpdate':
+      if (msg.data && typeof msg.data === 'object') {
+        for (const cb of stateCallbacks) {
+          try {
+            cb(msg.data as Record<string, unknown>);
+          } catch (err) {
+            console.error('[WS] State callback error:', err);
+          }
+        }
+      }
+      break;
+    
     case 'message': {
       // Chat message (user or assistant) - from history or live
       const msgWithData = msg as unknown as { message?: ChatMessage };
@@ -271,22 +262,6 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
             cb(activityMsg.item);
           } catch (err) {
             console.error('[WS] Activity callback error:', err);
-          }
-        }
-      }
-      break;
-    }
-    
-    case 'output': {
-      // Output to render immediately
-      console.log('[WS] Received output message:', msg);
-      const outputMsg = msg as unknown as { outputId?: string };
-      if (outputMsg.outputId) {
-        for (const cb of outputCallbacks) {
-          try {
-            cb(outputMsg.outputId);
-          } catch (err) {
-            console.error('[WS] Output callback error:', err);
           }
         }
       }
@@ -338,7 +313,7 @@ function request<T = unknown>(type: string, data?: object): Promise<T> {
 
 /**
  * Push state to server (replaces HTTP batch)
- * Called by applet JS to make state queryable by agent
+ * Applet JS calls this to make state queryable by agent
  */
 export function wsSetState(state: Record<string, unknown>): void {
   send({ type: 'setState', data: state });
@@ -370,7 +345,7 @@ export function isWsConnected(): boolean {
 /**
  * Disconnect WebSocket
  */
-export function disconnectWs(): void {
+export function disconnectAppletWs(): void {
   if (socket) {
     socket.close();
     socket = null;
@@ -421,15 +396,6 @@ export function onActivity(callback: ActivityCallback): () => void {
 }
 
 /**
- * Subscribe to output events (display-only tool results)
- * Returns unsubscribe function
- */
-export function onOutput(callback: OutputCallback): () => void {
-  outputCallbacks.add(callback);
-  return () => outputCallbacks.delete(callback);
-}
-
-/**
  * Subscribe to connect event
  * If already connected, fires immediately
  * Returns unsubscribe function
@@ -461,29 +427,14 @@ export function waitForConnect(): Promise<void> {
 
 /**
  * Reconnect to WebSocket (e.g., on visibility change)
- * After reconnecting, requests history for the active session if one exists.
  */
 export function reconnectIfNeeded(): void {
   if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
-    console.log(`[WS] reconnectIfNeeded - reconnecting (socket state: ${socket?.readyState ?? 'null'})`);
+    console.log(`[APPLET-WS] reconnectIfNeeded - reconnecting (socket state: ${socket?.readyState ?? 'null'})`);
     reconnectAttempts = 0;
     connectionId++;
-    
-    // Store active session to reload history after reconnect
-    const sessionToReload = activeSessionId;
-    
-    // Set up one-time callback to reload history once connected
-    if (sessionToReload) {
-      const reloadHistory = () => {
-        console.log(`[WS] Reconnected - reloading history for ${sessionToReload}`);
-        requestHistory(sessionToReload);
-        connectCallbacks.delete(reloadHistory);
-      };
-      connectCallbacks.add(reloadHistory);
-    }
-    
     doConnect(connectionId);
   } else {
-    console.log(`[WS] reconnectIfNeeded - already connected (state: ${socket.readyState})`);
+    console.log(`[APPLET-WS] reconnectIfNeeded - already connected (state: ${socket.readyState})`);
   }
 }

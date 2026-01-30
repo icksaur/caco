@@ -82,6 +82,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
   
+  // Additional reconnection triggers for laptop sleep/lock scenarios (Windows compatibility)
+  window.addEventListener('focus', () => {
+    reconnectIfNeeded();
+  });
+  
+  window.addEventListener('online', () => {
+    reconnectIfNeeded();
+  });
+  
   // Set up event handlers
   setupImagePaste();
   setupFormHandler();

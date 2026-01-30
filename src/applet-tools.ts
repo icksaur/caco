@@ -63,7 +63,8 @@ HTML fragment (no doctype, html, head, body tags):
 
 ## script.js
 
-Plain JavaScript with global functions for onclick handlers:
+Plain JavaScript - functions for onclick handlers must be exposed to window:
+
 \`\`\`javascript
 function appendDigit(d) {
   document.getElementById('display').value += d;
@@ -73,9 +74,47 @@ function calculate() {
   const result = eval(document.getElementById('display').value);
   setAppletState({ lastResult: result });
 }
+
+// IMPORTANT: Expose functions for onclick handlers
+// Scripts are wrapped in IIFE, so functions aren't automatically global
+expose({ appendDigit, calculate });
+
+// Or expose individually:
+// window.appendDigit = appendDigit;
+// window.calculate = calculate;
 \`\`\`
 
+⚠️ **onclick Handler Gotcha:**
+
+Scripts are wrapped in an IIFE for isolation. Functions **aren't automatically global**.
+
+**For onclick handlers, you MUST expose functions:**
+\`\`\`javascript
+function myHandler() { console.log('clicked'); }
+expose('myHandler', myHandler);  // Now onclick="myHandler()" works
+\`\`\`
+
+**Alternative: Use addEventListener (recommended, no exposure needed)**
+\`\`\`javascript
+document.getElementById('my-btn').addEventListener('click', () => {
+  console.log('clicked');  // No window exposure required!
+});
+\`\`\`
+
+The runtime will warn in console if onclick handlers reference undefined functions.
+
 ## JavaScript APIs
+
+**Function Exposure (for onclick handlers):**
+
+\`expose(name, fn)\` or \`expose({ fn1, fn2 })\` - Expose functions to global scope
+\`\`\`javascript
+function handleClick() { /* ... */ }
+expose('handleClick', handleClick);  // Now onclick="handleClick()" works
+
+// Or expose multiple:
+expose({ handleClick, handleSubmit, handleCancel });
+\`\`\`
 
 **Navigation:**
 - \`loadApplet(slug)\` - Navigate to another applet
@@ -149,10 +188,12 @@ registerKeyHandler('my-applet', function(e) {
 
 ## Tips
 
-- Use onclick="functionName()" for button handlers
+- **For onclick handlers:** Use \`expose('functionName', functionName)\` to make functions globally accessible
+- **Preferred:** Use \`addEventListener\` instead of onclick attributes (no exposure needed)
 - Use registerKeyHandler() for keyboard shortcuts (not addEventListener)
 - Test with reload_page tool after file changes
 - Applet runs in main window scope with full DOM access
+- Check browser console for warnings about undefined onclick handlers
 
 ## After Creating/Updating
 

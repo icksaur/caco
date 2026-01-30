@@ -250,16 +250,28 @@ export async function dispatchMessage(
           break;
         }
         
-        case 'assistant.turn_start': {
-          const turnNum = parseInt(String(eventData.turnId || 0)) + 1;
-          onActivity({ type: 'turn', text: `Turn ${turnNum}...` });
-          break;
-        }
-        
         case 'assistant.intent': {
           const intent = eventData.intent as string;
           if (intent) {
-            onActivity({ type: 'intent', text: `Intent: ${intent}` });
+            onActivity({ type: 'intent', text: `💡 ${intent}` });
+          }
+          break;
+        }
+        
+        case 'assistant.reasoning_delta': {
+          // Streaming reasoning chunks - append to existing reasoning item
+          const delta = (eventData.deltaContent as string) || '';
+          if (delta) {
+            onActivity({ type: 'reasoning-delta', text: delta });
+          }
+          break;
+        }
+        
+        case 'assistant.reasoning': {
+          // Full reasoning text (fallback if no deltas)
+          const reasoning = (eventData.content as string) || '';
+          if (reasoning) {
+            onActivity({ type: 'reasoning', text: '🤔 Thinking', details: reasoning });
           }
           break;
         }

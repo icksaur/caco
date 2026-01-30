@@ -69,7 +69,7 @@ export interface ChatMessage {
 
 // Activity item for tool calls, intents, errors
 export interface ActivityItem {
-  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info';
+  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info' | 'reasoning' | 'reasoning-delta';
   text: string;
   details?: string;
 }
@@ -143,6 +143,7 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
       break;
       
     case 'requestHistory':
+      console.log(`[WS] requestHistory received, sessionId: ${msg.sessionId}, type: ${typeof msg.sessionId}`);
       if (msg.sessionId) {
         streamHistory(ws, msg.sessionId);
       } else {
@@ -261,8 +262,10 @@ export function broadcastUserMessageFromPost(
  * All messages include sessionId for client filtering
  */
 async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
+  console.log(`[WS] streamHistory called with sessionId: ${sessionId}, type: ${typeof sessionId}`);
   if (!sessionId || sessionId === 'default') {
     // No session, just send historyComplete
+    console.log(`[WS] Sending historyComplete for empty/default session: ${sessionId}`);
     send(ws, { type: 'historyComplete', sessionId });
     return;
   }
@@ -332,12 +335,14 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
       }
     }
     
+    console.log(`[WS] About to send historyComplete for sessionId: ${sessionId}`);
     send(ws, { type: 'historyComplete', sessionId });
     console.log(`[WS] Streamed ${messageCount} history messages for session ${sessionId}`);
     
   } catch (error) {
     console.error(`[WS] Error streaming history for ${sessionId}:`, error);
-    send(ws, { type: 'historyComplete' });
+    // Send empty history complete even on error so UI can proceed
+    send(ws, { type: 'historyComplete', sessionId });
   }
 }
 

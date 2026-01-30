@@ -63,10 +63,25 @@ let pendingAppletState: Record<string, unknown> | null = null;
 let insideNavigateHandler = false;
 
 /**
+ * Helper function for applet JS to expose functions globally.
+ * Needed for onclick handlers since scripts are wrapped in IIFE.
+ */
+function expose(nameOrObj: string | Record<string, unknown>, fn?: unknown): void {
+  if (typeof nameOrObj === 'string' && fn !== undefined) {
+    (window as Record<string, unknown>)[nameOrObj] = fn;
+  } else if (typeof nameOrObj === 'object') {
+    Object.assign(window, nameOrObj);
+  }
+}
+
+/**
  * Initialize applet runtime - exposes global functions for applet JS
  * Call this once at app startup
  */
 export function initAppletRuntime(): void {
+  // Expose helper for applets to expose their own functions
+  (window as unknown as { expose: typeof expose }).expose = expose;
+  
   // Expose setAppletState globally for applet JS to use
   (window as unknown as { setAppletState: typeof setAppletState }).setAppletState = setAppletState;
   // Expose listApplets globally for applet browser
@@ -541,6 +556,29 @@ function renderAppletToInstance(
 })();
 `;
       document.body.appendChild(scriptElement);
+      
+      // Check for onclick handlers that reference undefined functions
+      setTimeout(() => {
+        const onclickHandlers = container.querySelectorAll('[onclick]');
+        onclickHandlers.forEach(el => {
+          const onclickAttr = el.getAttribute('onclick');
+          if (onclickAttr) {
+            // Extract function name from onclick="functionName(...)"
+            const match = onclickAttr.match(/^\s*(\w+)\s*\(/);
+            if (match) {
+              const handler = match[1];
+              if (typeof (window as Record<string, unknown>)[handler] !== 'function') {
+                console.warn(
+                  `[APPLET "${slug}"] onclick="${handler}(...)" but window.${handler} is not defined.`,
+                  `Did you forget to expose it? Add: window.${handler} = ${handler}; or use: expose('${handler}', ${handler});`,
+                  el
+                );
+              }
+            }
+          }
+        });
+      }, 0);
+      
     } catch (error) {
       console.error('[APPLET] JavaScript execution error:', error);
       const errorDiv = document.createElement('div');

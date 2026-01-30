@@ -231,6 +231,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
   const msgSessionId = msg.sessionId;
   if (msgSessionId && activeSessionId && msgSessionId !== activeSessionId) {
     // Message for a different session - ignore
+    console.log(`[WS] Filtering out message type ${msg.type} for session ${msgSessionId} (active: ${activeSessionId})`);
     return;
   }
   
@@ -253,6 +254,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
     
     case 'historyComplete':
       // History streaming complete
+      console.log(`[WS] Received historyComplete for session ${msgSessionId}, firing ${historyCompleteCallbacks.size} callbacks`);
       for (const cb of historyCompleteCallbacks) {
         try {
           cb();

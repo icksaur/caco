@@ -46,6 +46,25 @@ export function addActivityItem(type: string, text: string, details: string | nu
   const activityBox = ensurePendingResponse();
   if (!activityBox) return;
   
+  // Special handling for reasoning-delta: append to existing reasoning item
+  if (type === 'reasoning-delta') {
+    const lastItem = activityBox.querySelector('.activity-item.reasoning:last-of-type');
+    if (lastItem) {
+      const detailsDiv = lastItem.querySelector('.activity-details');
+      if (detailsDiv) {
+        detailsDiv.textContent = (detailsDiv.textContent || '') + text;
+        // Auto-scroll activity box
+        activityBox.scrollTop = activityBox.scrollHeight;
+        scrollToBottom();
+        return;
+      }
+    }
+    // If no existing reasoning item, create one
+    type = 'reasoning';
+    text = '🤔 Thinking';
+    details = text; // Use the delta as initial details
+  }
+  
   const item = document.createElement('div');
   item.className = `activity-item ${type}`;
   

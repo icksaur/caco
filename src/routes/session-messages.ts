@@ -19,6 +19,7 @@ import { parseImageDataUrl } from '../image-utils.js';
 import { updateUsage } from '../usage-state.js';
 import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, broadcastOutput, type ActivityItem, type MessageSource, type ChatMessage } from './websocket.js';
 import { extractToolTelemetry, extractToolName, type ToolExecutionCompleteEvent } from '../sdk-event-parser.js';
+import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
 import { randomUUID } from 'crypto';
 
 const router = Router();
@@ -168,6 +169,9 @@ export async function dispatchMessage(
   const { tempFilePath, clientId } = options || {};
   const onMessage = callbacks?.onMessage || (() => {});
   const onActivity = callbacks?.onActivity || (() => {});
+  
+  // Track active dispatch for graceful restart
+  dispatchStarted();
   
   // Generate message ID for the assistant response
   const messageId = `msg_${randomUUID()}`;
@@ -349,6 +353,8 @@ export async function dispatchMessage(
           if (tempFilePath) {
             unlink(tempFilePath).catch(() => {});
           }
+          // Mark dispatch complete for graceful restart tracking
+          dispatchComplete();
           break;
         }
       }
@@ -365,6 +371,9 @@ export async function dispatchMessage(
     if (tempFilePath) {
       await unlink(tempFilePath).catch(() => {});
     }
+    
+    // Mark dispatch complete even on error
+    dispatchComplete();
   }
 }
 

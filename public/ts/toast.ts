@@ -8,24 +8,42 @@
  * - Floats above input, doesn't displace chat messages
  * - Auto-hides when WebSocket stream messages arrive
  * - Can be dismissed manually
+ * - Supports different types: error (default), success, info
  */
 
 let toastTimeout: number | null = null;
 
+export type ToastType = 'error' | 'success' | 'info';
+
+export interface ToastOptions {
+  type?: ToastType;
+  autoHideMs?: number;
+}
+
 /**
  * Show a toast notification
  */
-export function showToast(message: string, autoHideMs = 0): void {
+export function showToast(message: string, options: ToastOptions | number = {}): void {
   const toast = document.getElementById('toast');
   const messageSpan = toast?.querySelector('.toast-message');
   
   if (!toast || !messageSpan) return;
+  
+  // Support legacy call with just autoHideMs number
+  const opts: ToastOptions = typeof options === 'number' 
+    ? { autoHideMs: options } 
+    : options;
+  const { type = 'error', autoHideMs = 0 } = opts;
   
   // Clear any pending auto-hide
   if (toastTimeout) {
     clearTimeout(toastTimeout);
     toastTimeout = null;
   }
+  
+  // Set type class
+  toast.classList.remove('toast-error', 'toast-success', 'toast-info');
+  toast.classList.add(`toast-${type}`);
   
   messageSpan.textContent = message;
   toast.classList.remove('hidden');

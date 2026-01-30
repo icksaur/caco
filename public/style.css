@@ -22,11 +22,14 @@
   --color-accent: #007acc;
   --color-accent-hover: #005a9e;
   --color-accent-active: #004578;
-  --color-success: #1f4d28;
+  --color-success: #4caf50;
+  --color-success-bg: #1f3d23;
   --color-success-hover: #2a6b38;
   --color-success-bright: #4caf50;
   --color-error: #f48771;
   --color-error-bg: #4a2a2a;
+  --color-info: #4daafc;
+  --color-info-bg: #1e3a5f;
   --color-danger: #c42b1c;
   --color-danger-hover: #a32515;
 
@@ -225,6 +228,22 @@ footer.hidden { display: none; }
 }
 
 .toast.hidden { display: none; }
+
+/* Toast type variants */
+.toast.toast-error {
+  background: var(--color-error-bg);
+  border-color: var(--color-error);
+}
+
+.toast.toast-success {
+  background: var(--color-success-bg);
+  border-color: var(--color-success);
+}
+
+.toast.toast-info {
+  background: var(--color-info-bg);
+  border-color: var(--color-info);
+}
 
 .toast-message {
   flex: 1;

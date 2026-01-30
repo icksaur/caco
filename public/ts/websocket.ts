@@ -12,6 +12,8 @@
  * Client filters by active session.
  */
 
+import { showToast } from './toast.js';
+
 /**
  * Message source identifies who sent a message.
  * Extensible: add new sources here (e.g., 'agent' for agent-to-agent).
@@ -144,7 +146,13 @@ function doConnect(myConnectionId: number): void {
       return;
     }
     
+    // Show connected toast on reconnect (not initial connect)
+    const wasReconnect = reconnectAttempts > 0;
     reconnectAttempts = 0;
+    
+    if (wasReconnect) {
+      showToast('✓ Connected', { type: 'success', autoHideMs: 2000 });
+    }
     
     // Fire connect callbacks
     for (const cb of connectCallbacks) {

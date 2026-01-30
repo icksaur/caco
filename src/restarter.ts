@@ -8,7 +8,7 @@
 
 import { spawn } from 'child_process';
 import { createConnection } from 'net';
-import { writeFileSync } from 'fs';
+import { writeFileSync, appendFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { PORT } from './config.js';
@@ -18,6 +18,17 @@ const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '..');
 const POLL_INTERVAL = 500;  // ms
 const MAX_WAIT = 30000;     // 30s timeout
+const LOG_FILE = join(PROJECT_ROOT, 'restart.log');
+
+function log(msg: string): void {
+  const line = `[${new Date().toISOString()}] [RESTARTER] ${msg}\n`;
+  console.log(`[RESTARTER] ${msg}`);
+  try {
+    appendFileSync(LOG_FILE, line);
+  } catch {
+    // Ignore write errors
+  }
+}
 
 /**
  * Check if port is in use
@@ -52,13 +63,14 @@ async function waitForPortFree(): Promise<boolean> {
   while (Date.now() - start < MAX_WAIT) {
     const inUse = await isPortInUse(PORT);
     if (!inUse) {
-      console.log('[RESTARTER] Port is free');
+      log(`Port ${PORT} is free`);
       return true;
     }
+    log(`Port ${PORT} still in use, waiting...`);
     await new Promise(r => setTimeout(r, POLL_INTERVAL));
   }
   
-  console.error('[RESTARTER] Timeout waiting for port to free');
+  log(`Timeout waiting for port ${PORT} to free`);
   return false;
 }
 
@@ -66,7 +78,7 @@ async function waitForPortFree(): Promise<boolean> {
  * Start the server
  */
 function startServer(): void {
-  console.log('[RESTARTER] Starting server...');
+  log('Starting server...');
   
   // Use npx tsx to run server.ts
   const child = spawn('npx', ['tsx', 'server.ts'], {
@@ -80,9 +92,9 @@ function startServer(): void {
   if (child.pid) {
     const pidFile = join(PROJECT_ROOT, 'server.pid');
     writeFileSync(pidFile, String(child.pid));
-    console.log(`[RESTARTER] Server spawned with PID ${child.pid}`);
+    log(`Server spawned with PID ${child.pid}`);
   } else {
-    console.log('[RESTARTER] Server spawned (PID unknown)');
+    log('Server spawned (PID unknown)');
   }
   
   child.unref();
@@ -92,7 +104,7 @@ function startServer(): void {
  * Main
  */
 async function main(): Promise<void> {
-  console.log('[RESTARTER] Waiting for server to exit...');
+  log('Restarter started, waiting for server to exit...');
   
   // Small delay to let the old server start exiting
   await new Promise(r => setTimeout(r, 500));
@@ -102,13 +114,14 @@ async function main(): Promise<void> {
   if (portFree) {
     startServer();
   } else {
-    console.error('[RESTARTER] Giving up - server did not exit');
+    log('Giving up - server did not exit');
   }
   
+  log('Restarter exiting');
   process.exit(0);
 }
 
 main().catch(err => {
-  console.error('[RESTARTER] Error:', err);
+  log(`Error: ${err}`);
   process.exit(1);
 });

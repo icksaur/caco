@@ -7,11 +7,24 @@
  */
 
 import { spawn } from 'child_process';
+import { appendFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const PROJECT_ROOT = join(__dirname, '..');
+const LOG_FILE = join(PROJECT_ROOT, 'restart.log');
+
+function log(msg: string): void {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  console.log(`[RESTART] ${msg}`);
+  try {
+    appendFileSync(LOG_FILE, line);
+  } catch {
+    // Ignore write errors
+  }
+}
 
 let restartRequested = false;
 let activeDispatches = 0;
@@ -22,7 +35,7 @@ let onAllIdleCallback: (() => void) | null = null;
  * Server will restart when all active dispatches complete.
  */
 export function requestRestart(): void {
-  console.log('[RESTART] Restart requested');
+  log('Restart requested');
   restartRequested = true;
   checkAndRestart();
 }
@@ -39,7 +52,7 @@ export function isRestartRequested(): boolean {
  */
 export function dispatchStarted(): void {
   activeDispatches++;
-  console.log(`[RESTART] Dispatch started, active: ${activeDispatches}`);
+  log(`Dispatch started, active: ${activeDispatches}`);
 }
 
 /**
@@ -48,7 +61,7 @@ export function dispatchStarted(): void {
  */
 export function dispatchComplete(): void {
   activeDispatches = Math.max(0, activeDispatches - 1);
-  console.log(`[RESTART] Dispatch complete, active: ${activeDispatches}`);
+  log(`Dispatch complete, active: ${activeDispatches}`);
   checkAndRestart();
 }
 
@@ -73,18 +86,18 @@ export function onAllIdle(callback: () => void): void {
 function checkAndRestart(): void {
   if (!restartRequested) return;
   if (activeDispatches > 0) {
-    console.log(`[RESTART] Waiting for ${activeDispatches} active dispatches`);
+    log(`Waiting for ${activeDispatches} active dispatches`);
     return;
   }
   
-  console.log('[RESTART] All dispatches complete, initiating restart');
+  log('All dispatches complete, initiating restart');
   
   // Call cleanup callback if set
   if (onAllIdleCallback) {
     try {
       onAllIdleCallback();
     } catch (err) {
-      console.error('[RESTART] Cleanup callback error:', err);
+      log(`Cleanup callback error: ${err}`);
     }
   }
   
@@ -92,7 +105,7 @@ function checkAndRestart(): void {
   spawnRestarter();
   
   // Exit gracefully
-  console.log('[RESTART] Exiting for restart...');
+  log('Exiting for restart...');
   process.exit(0);
 }
 
@@ -102,15 +115,15 @@ function checkAndRestart(): void {
 function spawnRestarter(): void {
   const restarterPath = join(__dirname, 'restarter.ts');
   
-  console.log(`[RESTART] Spawning restarter: ${restarterPath}`);
+  log(`Spawning restarter: ${restarterPath}`);
   
   const child = spawn('npx', ['tsx', restarterPath], {
-    cwd: join(__dirname, '..'),
+    cwd: PROJECT_ROOT,
     detached: true,
     stdio: 'ignore',
     shell: true  // Required for Windows
   });
   
   child.unref();
-  console.log('[RESTART] Restarter spawned');
+  log(`Restarter spawned with PID: ${child.pid}`);
 }

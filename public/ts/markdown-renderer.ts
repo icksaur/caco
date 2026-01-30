@@ -141,6 +141,36 @@ async function renderMarkdown(): Promise<void> {
 declare global {
   interface Window {
     renderMarkdown: typeof renderMarkdown;
+    renderMarkdownElement: typeof renderMarkdownElement;
+  }
+}
+
+/**
+ * Render markdown for a single element (for incremental streaming)
+ * Unlike renderMarkdown(), this doesn't mark as processed and skips mermaid/hljs
+ * for performance during streaming.
+ */
+export function renderMarkdownElement(element: Element): void {
+  const contentDiv = element.querySelector('.markdown-content');
+  if (!contentDiv) return;
+  
+  const markdownText = contentDiv.textContent ?? '';
+  if (!markdownText.trim()) return;
+  
+  // Parse markdown
+  const rawHtml = marked.parse(markdownText);
+  
+  // Sanitize HTML
+  const html = DOMPurify.sanitize(rawHtml, {
+    FORBID_ATTR: FORBIDDEN_ATTRS,
+    FORBID_TAGS: FORBIDDEN_TAGS
+  });
+  
+  // Update content (keep streaming cursor if present)
+  const hadCursor = contentDiv.classList.contains('streaming-cursor');
+  contentDiv.innerHTML = html;
+  if (hadCursor) {
+    contentDiv.classList.add('streaming-cursor');
   }
 }
 
@@ -153,6 +183,7 @@ export function setupMarkdownRenderer(): void {
   
   // Export to window for other modules
   window.renderMarkdown = renderMarkdown;
+  window.renderMarkdownElement = renderMarkdownElement;
   
   // Render markdown when DOM is ready
   if (document.readyState === 'loading') {

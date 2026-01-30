@@ -2,9 +2,30 @@
 
 **Goal:** Enable applets to call MCP tools directly, reusing the same tools agents use.
 
+**Status:** ✅ **Implemented** (Simplified approach - see below)
+
 ---
 
-## Problem Statement
+## Implementation Summary
+
+Instead of wrapping the full MCP protocol, we implemented a **simplified HTTP API** that provides direct file operations:
+
+- **HTTP Endpoints:** `/api/mcp/read_file`, `/api/mcp/write_file`, `/api/mcp/list_directory`
+- **Security:** Path whitelist (workspace, ~/.caco, /tmp)
+- **Client API:** `callMCPTool(toolName, params)` exposed to applet JavaScript
+- **Documentation:** Added to `applet_howto` in applet-tools.ts
+
+**Example usage in applet:**
+```javascript
+const result = await callMCPTool('read_file', { path: '/path/to/file.txt' });
+console.log(result.content);
+```
+
+**Test applet:** file-viewer at `~/.caco/applets/file-viewer` demonstrates browse and view functionality.
+
+---
+
+## Original Problem Statement
 
 Currently:
 - **Agents** can use MCP tools (`read_file`, `write_file`, GitHub tools, etc.)

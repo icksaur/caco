@@ -87,6 +87,9 @@ export function initAppletRuntime(): void {
   // Temp file API for applet JS - save images for agent to view
   (window as unknown as { saveTempFile: typeof saveTempFile }).saveTempFile = saveTempFile;
   
+  // MCP tool API for applet JS - call MCP tools
+  (window as unknown as { callMCPTool: typeof callMCPTool }).callMCPTool = callMCPTool;
+  
   // Input routing API for applet JS - register keyboard handler
   (window as unknown as { registerKeyHandler: typeof registerKeyHandler }).registerKeyHandler = registerKeyHandler;
   
@@ -344,6 +347,39 @@ async function saveTempFile(
   
   const result = await response.json();
   console.log(`[APPLET] Saved temp file: ${result.path}`);
+  return result;
+}
+
+/**
+ * Call an MCP tool from applet JS
+ * Applets can use MCP tools the agent has access to via HTTP proxy
+ * 
+ * @param toolName - The MCP tool to call (e.g., "read_file", "write_file", "list_directory")
+ * @param params - Tool parameters as key-value object
+ * @returns Tool result
+ */
+async function callMCPTool(toolName: string, params: Record<string, unknown>): Promise<unknown> {
+  const endpoint = `/api/mcp/${toolName}`;
+  
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || `HTTP ${response.status}`);
+  }
+  
+  const result = await response.json();
+  
+  // Check for tool error
+  if (!result.ok) {
+    throw new Error(result.error || 'Tool call failed');
+  }
+  
+  console.log(`[APPLET] MCP tool ${toolName} succeeded`);
   return result;
 }
 

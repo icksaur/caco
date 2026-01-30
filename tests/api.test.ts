@@ -90,17 +90,27 @@ describe('API Routes', () => {
   describe('RESTful API', () => {
     let createdSessionId: string | null = null;
 
-    test('POST /sessions - creates new session', async () => {
+    test('POST /sessions - creates new session or returns existing (409)', async () => {
       const res = await fetch(`${BASE}/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cwd: process.cwd(), model: 'claude-sonnet' })
       });
-      assert.strictEqual(res.status, 200);
+      
+      // Either creates new session (200) or returns conflict for existing (409)
+      assert.ok([200, 409].includes(res.status), `Expected 200 or 409, got ${res.status}`);
       const data = await res.json();
-      assert.ok(data.sessionId, 'should return sessionId');
-      assert.ok(data.cwd, 'should return cwd');
-      createdSessionId = data.sessionId;
+      
+      if (res.status === 200) {
+        assert.ok(data.sessionId, 'should return sessionId');
+        assert.ok(data.cwd, 'should return cwd');
+        createdSessionId = data.sessionId;
+      } else {
+        // 409 returns existing sessionId in error response
+        assert.ok(data.sessionId, 'should return existing sessionId');
+        assert.ok(data.error.includes('locked'), 'should mention CWD locked');
+        createdSessionId = data.sessionId;
+      }
     });
 
     test('POST /sessions/:id/messages - sends message to session', async () => {
@@ -122,7 +132,7 @@ describe('API Routes', () => {
       });
       assert.strictEqual(res.status, 200);
       const data = await res.json();
-      assert.ok(data.streamId, 'should return streamId');
+      assert.strictEqual(data.ok, true, 'should return ok: true');
       assert.strictEqual(data.sessionId, createdSessionId, 'should echo sessionId');
     });
 
@@ -190,6 +200,127 @@ describe('API Routes', () => {
 
     test.todo('GET /outputs/:id - get output by id');
     test.todo('GET /file - read file');
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // MCP Routes (applet file operations)
+  // ─────────────────────────────────────────────────────────────
+  describe('MCP routes', () => {
+    test('GET /mcp/tools - list available tools', async () => {
+      const res = await fetch(`${BASE}/mcp/tools`);
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.ok(Array.isArray(data.tools), 'should return tools array');
+      assert.ok(Array.isArray(data.allowedDirectories), 'should return allowed directories');
+      assert.ok(data.tools.length >= 3, 'should have at least 3 tools');
+    });
+
+    test('POST /mcp/read_file - reads file from workspace', async () => {
+      const res = await fetch(`${BASE}/mcp/read_file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: process.cwd() + '/package.json' })
+      });
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.strictEqual(data.ok, true);
+      assert.ok(data.content.includes('"name"'), 'should read package.json content');
+    });
+
+    test('POST /mcp/read_file - returns 400 without path', async () => {
+      const res = await fetch(`${BASE}/mcp/read_file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      assert.strictEqual(res.status, 400);
+      const data = await res.json();
+      assert.strictEqual(data.ok, false);
+      assert.ok(data.error.includes('required'));
+    });
+
+    test('POST /mcp/read_file - returns 403 for unauthorized path', async () => {
+      const res = await fetch(`${BASE}/mcp/read_file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: '/etc/passwd' })
+      });
+      assert.strictEqual(res.status, 403);
+      const data = await res.json();
+      assert.strictEqual(data.ok, false);
+      assert.ok(data.error.includes('Access denied'));
+    });
+
+    test('POST /mcp/read_file - returns 400 for nonexistent file', async () => {
+      const res = await fetch(`${BASE}/mcp/read_file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: '/tmp/nonexistent-file-12345.txt' })
+      });
+      assert.strictEqual(res.status, 400);
+      const data = await res.json();
+      assert.strictEqual(data.ok, false);
+    });
+
+    test('POST /mcp/list_directory - lists workspace directory', async () => {
+      const res = await fetch(`${BASE}/mcp/list_directory`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: process.cwd() })
+      });
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.strictEqual(data.ok, true);
+      assert.ok(Array.isArray(data.files), 'should return files array');
+      assert.ok(data.files.length > 0, 'workspace should have files');
+      
+      // Check file structure
+      const file = data.files[0];
+      assert.ok('name' in file, 'file should have name');
+      assert.ok('path' in file, 'file should have path');
+      assert.ok('isDirectory' in file, 'file should have isDirectory');
+    });
+
+    test('POST /mcp/list_directory - returns 403 for unauthorized path', async () => {
+      const res = await fetch(`${BASE}/mcp/list_directory`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: '/root' })
+      });
+      assert.strictEqual(res.status, 403);
+    });
+
+    test('POST /mcp/write_file - writes to /tmp', async () => {
+      const testPath = '/tmp/caco-test-' + Date.now() + '.txt';
+      const testContent = 'test content from MCP API';
+      
+      const writeRes = await fetch(`${BASE}/mcp/write_file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: testPath, content: testContent })
+      });
+      assert.strictEqual(writeRes.status, 200);
+      const writeData = await writeRes.json();
+      assert.strictEqual(writeData.ok, true);
+      
+      // Verify by reading back
+      const readRes = await fetch(`${BASE}/mcp/read_file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: testPath })
+      });
+      const readData = await readRes.json();
+      assert.strictEqual(readData.content, testContent);
+    });
+
+    test('POST /mcp/write_file - returns 403 for unauthorized path', async () => {
+      const res = await fetch(`${BASE}/mcp/write_file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: '/etc/malicious.txt', content: 'bad' })
+      });
+      assert.strictEqual(res.status, 403);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────

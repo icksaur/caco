@@ -105,6 +105,35 @@ const { path } = await saveTempFile(canvas.toDataURL('image/png'));
 await sendAgentMessage(\`Analyze image at \${path}\`);  // Agent uses view tool
 \`\`\`
 
+**MCP Tools:**
+
+\`callMCPTool(toolName, params)\` - Call MCP tools for file operations
+\`\`\`javascript
+// Read a file
+const result = await callMCPTool('read_file', { path: '/path/to/file.txt' });
+console.log(result.content);
+
+// Write a file
+await callMCPTool('write_file', { 
+  path: '/path/to/output.txt', 
+  content: 'Hello world' 
+});
+
+// List directory contents
+const files = await callMCPTool('list_directory', { path: '/home/user' });
+console.log(files.entries);  // Array of { name, type, size? }
+
+// Get available tools
+const tools = await callMCPTool('tools', {});
+\`\`\`
+
+Available tools:
+- \`read_file\` - Read file contents (params: \`{ path }\`)
+- \`write_file\` - Write file contents (params: \`{ path, content }\`)
+- \`list_directory\` - List directory entries (params: \`{ path }\`)
+
+Allowed directories: workspace, ~/.caco, /tmp
+
 **Keyboard Input:**
 
 \`registerKeyHandler(slug, handler)\` - Register keyboard handler for this applet

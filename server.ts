@@ -14,7 +14,7 @@ import { createDisplayTools } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools, type SessionIdRef } from './src/agent-tools.js';
 import { storeOutput, detectLanguage } from './src/storage.js';
-import { sessionRoutes, apiRoutes, sessionMessageRoutes } from './src/routes/index.js';
+import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes } from './src/routes/index.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
@@ -138,6 +138,8 @@ app.get('/', (_req, res) => {
 app.use('/api', sessionRoutes);
 app.use('/api', apiRoutes);
 app.use('/api', sessionMessageRoutes);
+app.use('/api/mcp', mcpRoutes);
+app.use('/api/mcp', mcpRoutes);
 
 // ============================================================
 // Server Lifecycle

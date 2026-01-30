@@ -6,7 +6,6 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { spawn } from 'child_process';
 import { getAppletUserState, getAppletNavigation, triggerReload } from './applet-state.js';
 import { pushStateToApplet } from './routes/websocket.js';
 
@@ -179,31 +178,32 @@ export function createAppletTools(_programCwd: string) {
   });
 
   const restartServer = defineTool('restart_server', {
-    description: 'Schedule a server restart to apply backend code changes. Use as final action after modifying src/*.ts files.',
+    description: 'Schedule a graceful server restart to apply backend code changes. Server waits for all active sessions to finish responding before restarting. Use as final action after modifying src/*.ts files.',
 
     parameters: z.object({
       delay: z.number()
         .min(1)
         .max(30)
         .default(3)
+        .optional()
         .describe('Seconds to wait before restarting (1-30, default: 3)')
     }),
 
-    handler: async ({ delay = 3 }) => {
-      const script = `sleep ${delay} && kill -TERM ${process.pid}`;
+    handler: async () => {
+      // Import dynamically to avoid circular dependency
+      const { requestRestart, getActiveDispatches } = await import('./restart-manager.js');
       
-      const child = spawn('sh', ['-c', script], {
-        detached: true,
-        stdio: 'ignore'
-      });
-      child.unref();
+      requestRestart();
+      const active = getActiveDispatches();
       
       return {
-        textResultForLlm: `Server restart scheduled in ${delay} seconds. This MUST be your final action.`,
+        textResultForLlm: active > 0 
+          ? `Server restart scheduled. Waiting for ${active} active session(s) to complete. Server will restart when your session and all others are idle.`
+          : `Server restart initiated. This MUST be your final action.`,
         resultType: 'success' as const,
         toolTelemetry: {
           restartScheduled: true,
-          delaySeconds: delay,
+          activeDispatches: active,
           pid: process.pid
         }
       };

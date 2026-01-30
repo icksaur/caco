@@ -352,8 +352,18 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     send(ws, { type: 'historyComplete', sessionId });
     
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     console.error(`[WS] Error streaming history for ${sessionId}:`, error);
-    send(ws, { type: 'historyComplete' });
+    
+    // Check if SDK session expired
+    if (message.includes('Session not found') || message.includes('session.getMessages failed')) {
+      // Session expired on SDK side - clean up our state
+      console.log(`[WS] Session ${sessionId} expired on SDK side, cleaning up`);
+      await sessionManager.stop(sessionId).catch(() => {});
+      send(ws, { type: 'error', error: 'Session expired - please start a new session' });
+    }
+    
+    send(ws, { type: 'historyComplete', sessionId });
   }
 }
 

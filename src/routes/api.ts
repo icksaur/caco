@@ -15,13 +15,19 @@ import express from 'express';
 import { CopilotClient } from '@github/copilot-sdk';
 import { readdir, readFile, stat, writeFile, mkdir } from 'fs/promises';
 import { join, relative, resolve, dirname } from 'path';
+import { homedir } from 'os';
+import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
 import { setAppletUserState, getAppletUserState, clearAppletUserState } from '../applet-state.js';
 import { listApplets, loadApplet } from '../applet-store.js';
+import { getUsage } from '../usage-state.js';
 
 const router = Router();
+
+// Temp file directory (~/.caco/tmp)
+const TEMP_DIR = join(homedir(), '.caco', 'tmp');
 
 // Cache models to avoid repeated SDK calls
 let cachedModels: Array<{ id: string; name: string; multiplier: number }> | null = null;
@@ -65,6 +71,85 @@ router.get('/models', async (_req: Request, res: Response) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error('[MODELS] Failed to fetch models:', message);
     res.status(500).json({ error: message, models: [] });
+  }
+});
+
+// Get current usage/quota info
+router.get('/usage', (_req: Request, res: Response) => {
+  const usage = getUsage();
+  res.json({ usage });
+});
+
+/**
+ * POST /api/tmpfile - Write temporary file to ~/.caco/tmp/
+ * Body: { data: string, mimeType?: string, filename?: string }
+ *
+ * For applets to save images/files that the agent can then view.
+ * Returns absolute path for use with agent's view tool.
+ */
+router.post('/tmpfile', express.json({ limit: '10mb' }), async (req: Request, res: Response) => {
+  const { data, mimeType, filename } = req.body as { data?: string; mimeType?: string; filename?: string };
+  
+  if (!data) {
+    res.status(400).json({ error: 'data is required' });
+    return;
+  }
+  
+  try {
+    // Parse data URL or use raw base64
+    let base64Data: string;
+    let detectedMime: string;
+    
+    if (data.startsWith('data:')) {
+      // Parse data URL: data:image/png;base64,iVBOR...
+      const matches = data.match(/^data:([^;]+);base64,(.+)$/);
+      if (!matches) {
+        res.status(400).json({ error: 'Invalid data URL format' });
+        return;
+      }
+      detectedMime = matches[1];
+      base64Data = matches[2];
+    } else {
+      // Raw base64, require mimeType
+      base64Data = data;
+      detectedMime = mimeType || 'application/octet-stream';
+    }
+    
+    // Determine file extension from mime type
+    const extMap: Record<string, string> = {
+      'image/png': 'png',
+      'image/jpeg': 'jpg',
+      'image/gif': 'gif',
+      'image/webp': 'webp',
+      'image/svg+xml': 'svg',
+      'application/pdf': 'pdf',
+      'text/plain': 'txt',
+      'application/json': 'json',
+    };
+    const ext = extMap[detectedMime] || 'bin';
+    
+    // Generate filename if not provided
+    const finalFilename = filename || `${randomUUID()}.${ext}`;
+    
+    // Ensure tmp directory exists
+    await mkdir(TEMP_DIR, { recursive: true });
+    
+    // Write file
+    const fullPath = join(TEMP_DIR, finalFilename);
+    const buffer = Buffer.from(base64Data, 'base64');
+    await writeFile(fullPath, buffer);
+    
+    res.json({ 
+      ok: true, 
+      path: fullPath,
+      filename: finalFilename,
+      size: buffer.length,
+      mimeType: detectedMime
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[TMPFILE] Error:', message);
+    res.status(500).json({ error: message });
   }
 });
 

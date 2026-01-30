@@ -9,6 +9,7 @@
  * Phase 4: WebSocket for real-time state sync.
  * Phase 5: Agent invocation - applets can POST to active session.
  * Phase 6: Navigation API for SPA routing.
+ * Phase 7: Input routing - keyboard events routed to active applet only.
  */
 
 import { setViewState, updateTitle } from './view-controller.js';
@@ -30,6 +31,12 @@ interface Navigation extends EventTarget {
   navigate(url: string, options?: { state?: unknown }): { committed: Promise<void>; finished: Promise<void> };
   currentEntry: { getState(): unknown };
   updateCurrentEntry(options: { state: unknown }): void;
+}
+
+// Result type for saveTempFile
+interface TempFileResult {
+  path: string;
+  filename: string;
 }
 
 export interface AppletContent {
@@ -61,10 +68,25 @@ let pendingAppletState: Record<string, unknown> | null = null;
 let insideNavigateHandler = false;
 
 /**
+ * Helper function for applet JS to expose functions globally.
+ * Needed for onclick handlers since scripts are wrapped in IIFE.
+ */
+function expose(nameOrObj: string | Record<string, unknown>, fn?: unknown): void {
+  if (typeof nameOrObj === 'string' && fn !== undefined) {
+    (window as Record<string, unknown>)[nameOrObj] = fn;
+  } else if (typeof nameOrObj === 'object') {
+    Object.assign(window, nameOrObj);
+  }
+}
+
+/**
  * Initialize applet runtime - exposes global functions for applet JS
  * Call this once at app startup
  */
 export function initAppletRuntime(): void {
+  // Expose helper for applets to expose their own functions
+  (window as unknown as { expose: typeof expose }).expose = expose;
+
   // Expose setAppletState globally for applet JS to use
   (window as unknown as { setAppletState: typeof setAppletState }).setAppletState = setAppletState;
   // Expose listApplets globally for applet browser
@@ -72,6 +94,7 @@ export function initAppletRuntime(): void {
   
   // URL params API for applet JS
   (window as unknown as { getAppletUrlParams: typeof getAppletUrlParams }).getAppletUrlParams = getAppletUrlParams;
+  (window as unknown as { getAppletSlug: typeof getAppletSlug }).getAppletSlug = getAppletSlug;
   (window as unknown as { updateAppletUrlParam: typeof updateAppletUrlParam }).updateAppletUrlParam = updateAppletUrlParam;
   
   // WebSocket state subscription for applet JS
@@ -80,6 +103,12 @@ export function initAppletRuntime(): void {
   // Agent invocation API for applet JS
   (window as unknown as { getSessionId: typeof getActiveSessionId }).getSessionId = getActiveSessionId;
   (window as unknown as { sendAgentMessage: typeof sendAgentMessage }).sendAgentMessage = sendAgentMessage;
+
+  // Temp file API for applet JS - save images for agent to view
+  (window as unknown as { saveTempFile: typeof saveTempFile }).saveTempFile = saveTempFile;
+
+  // MCP tool API for applet JS - call MCP tools
+  (window as unknown as { callMCPTool: typeof callMCPTool }).callMCPTool = callMCPTool;
   
   // Navigation API: single handler for all navigation types
   // (links, back/forward, programmatic, address bar)
@@ -194,6 +223,14 @@ export function getAppletUrlParams(): Record<string, string> {
 }
 
 /**
+ * Get the current applet's slug from URL
+ * Returns null if not in an applet view
+ */
+export function getAppletSlug(): string | null {
+  return new URLSearchParams(window.location.search).get('applet');
+}
+
+/**
  * Update a URL query param (for applet state sharing)
  * Uses replaceState so it doesn't create history entries
  */
@@ -256,6 +293,68 @@ async function sendAgentMessage(prompt: string, appletSlug?: string): Promise<vo
   }
   
   console.log('[APPLET] Agent message sent successfully');
+}
+
+/**
+ * Save a temporary file (e.g., image from canvas) to ~/.caco/tmp/
+ * Returns the file path for agent viewing
+ * 
+ * @param data - Base64 data URL (data:image/png;base64,...) or raw base64
+ * @param options - Optional filename and mimeType
+ */
+async function saveTempFile(
+  data: string, 
+  options?: { filename?: string; mimeType?: string }
+): Promise<TempFileResult> {
+  const response = await fetch('/api/tmpfile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      data,
+      filename: options?.filename,
+      mimeType: options?.mimeType
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || `HTTP ${response.status}`);
+  }
+  
+  const result = await response.json();
+  return result;
+}
+
+/**
+ * Call an MCP tool from applet JS
+ * Applets can use MCP tools the agent has access to via HTTP proxy
+ * 
+ * @param toolName - The MCP tool to call (e.g., "read_file", "write_file", "list_directory")
+ * @param params - Tool parameters as key-value object
+ * @returns Tool result
+ */
+async function callMCPTool(toolName: string, params: Record<string, unknown>): Promise<unknown> {
+  const endpoint = `/api/mcp/${toolName}`;
+  
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || `HTTP ${response.status}`);
+  }
+  
+  const result = await response.json();
+  
+  // Check for tool error
+  if (!result.ok) {
+    throw new Error(result.error || 'Tool call failed');
+  }
+  
+  return result;
 }
 
 /**

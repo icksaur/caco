@@ -312,10 +312,15 @@ form {
   align-items: flex-end;
 }
 
-/* Footer submit button - don't stretch with textarea */
+/* Footer submit button - fixed size, doesn't stretch with textarea */
 #chatForm button[type="submit"] {
   flex-shrink: 0;
-  height: fit-content;
+  align-self: flex-end;
+  width: 80px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   /* Hostname-based 4-corner gradient (colors set via JS) */
   background: 
     radial-gradient(ellipse at 0% 0%, var(--host-color-tl, var(--color-accent)), transparent 70%),
@@ -324,7 +329,11 @@ form {
     radial-gradient(ellipse at 100% 100%, var(--host-color-br, var(--color-accent)), transparent 70%),
     #333;
   border: none;
-  transition: opacity 0.2s, transform 0.1s;
+  transition: opacity 0.2s, transform 0.1s, background 0.2s;
+}
+
+#chatForm button[type="submit"].stop-btn {
+  background: #c62828;
 }
 
 #chatForm button[type="submit"]:hover {

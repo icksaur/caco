@@ -536,21 +536,21 @@ export function setFormEnabled(enabled: boolean): void {
   if (enabled) {
     // Restore to Send button
     submitBtn.disabled = false;
-    submitBtn.textContent = 'Send';
+    submitBtn.firstChild!.textContent = 'Send';
     submitBtn.classList.remove('stop-btn');
     submitBtn.onclick = null;
     input.focus();
   } else {
     // Briefly disable to prevent double-tap, then show Stop
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Send';
+    submitBtn.firstChild!.textContent = 'Send';
     submitBtn.classList.remove('stop-btn');
     
     stopButtonTimeout = setTimeout(() => {
       // Only show stop if still streaming
       if (isStreaming()) {
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Stop';
+        submitBtn.firstChild!.textContent = 'Stop';
         submitBtn.classList.add('stop-btn');
         submitBtn.onclick = (e) => {
           e.preventDefault();

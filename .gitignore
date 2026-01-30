@@ -37,6 +37,7 @@ public/build/
 
 # Runtime files
 server.pid
+server.err
 
 # Applet storage (has its own git repo)
 .copilot-web/

@@ -130,8 +130,7 @@ body {
 }
 
 /* Text input styling */
-input[type="text"],
-#chatForm textarea {
+input[type="text"] {
   flex: 1;
   padding: var(--space-md);
   background: var(--bg-input);
@@ -141,20 +140,42 @@ input[type="text"],
   font-size: var(--text-base);
 }
 
-input[type="text"]:focus,
-#chatForm textarea:focus {
+input[type="text"]:focus {
   outline: none;
   border-color: var(--color-accent);
 }
 
-/* Multiline chat textarea */
-#chatForm textarea {
-  min-height: 42px;
+/* Chat input textarea */
+#chatForm .input-text {
+  flex: 1;
+  min-height: 1lh;
+  height: auto;
   max-height: 180px;
   resize: none;
-  line-height: 1.4;
+  border: none;
+  outline: none;
   font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.4;
+  color: var(--color-text);
+  background: transparent;
   overflow-y: hidden;
+}
+
+/* Input bar - horizontal flex container */
+#chatForm .input-bar {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+#chatForm .input-bar:focus-within {
+  border-color: var(--color-accent);
 }
 
 /* ========================================
@@ -312,15 +333,15 @@ form {
   align-items: flex-end;
 }
 
-/* Footer submit button - fixed size, doesn't stretch with textarea */
-#chatForm button[type="submit"] {
-  flex-shrink: 0;
-  align-self: flex-end;
-  width: 80px;
-  padding: 12px;
+/* Input button - removes baseline behavior */
+#chatForm .input-button {
+  align-self: auto;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
   /* Hostname-based 4-corner gradient (colors set via JS) */
   background: 
     radial-gradient(ellipse at 0% 0%, var(--host-color-tl, var(--color-accent)), transparent 70%),
@@ -329,19 +350,20 @@ form {
     radial-gradient(ellipse at 100% 100%, var(--host-color-br, var(--color-accent)), transparent 70%),
     #333;
   border: none;
+  cursor: pointer;
   transition: opacity 0.2s, transform 0.1s, background 0.2s;
 }
 
-#chatForm button[type="submit"].stop-btn {
+#chatForm .input-button.stop-btn {
   background: #c62828;
 }
 
-#chatForm button[type="submit"]:hover {
+#chatForm .input-button:hover {
   opacity: 0.9;
   transform: scale(1.02);
 }
 
-#chatForm button[type="submit"]:active {
+#chatForm .input-button:active {
   transform: scale(0.98);
 }
 

@@ -7,7 +7,6 @@
  * - Auto-expands up to max height, then scrolls
  */
 
-const MIN_HEIGHT = 42;  // ~1 line
 const MAX_HEIGHT = 180; // ~6 lines
 
 /**
@@ -33,20 +32,17 @@ export function setupMultilineInput(): void {
     }
     // Shift+Enter: default behavior (newline) - no action needed
   });
-  
-  // Initial sizing
-  autoResize(textarea);
 }
 
 /**
  * Auto-resize textarea to fit content
  */
 function autoResize(textarea: HTMLTextAreaElement): void {
-  // Reset to min to get accurate scrollHeight
+  // Reset to auto to get accurate scrollHeight
   textarea.style.height = 'auto';
   
-  // Calculate new height
-  const newHeight = Math.min(Math.max(textarea.scrollHeight, MIN_HEIGHT), MAX_HEIGHT);
+  // Calculate new height (capped at max)
+  const newHeight = Math.min(textarea.scrollHeight, MAX_HEIGHT);
   textarea.style.height = `${newHeight}px`;
   
   // Show scrollbar only when at max
@@ -54,12 +50,12 @@ function autoResize(textarea: HTMLTextAreaElement): void {
 }
 
 /**
- * Reset textarea to single line (call after submit)
+ * Reset textarea to natural height (call after submit)
  */
 export function resetTextareaHeight(): void {
   const textarea = document.querySelector('#chatForm textarea[name="message"]') as HTMLTextAreaElement;
   if (textarea) {
-    textarea.style.height = `${MIN_HEIGHT}px`;
+    textarea.style.height = 'auto';
     textarea.style.overflowY = 'hidden';
   }
 }

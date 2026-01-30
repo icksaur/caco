@@ -216,18 +216,71 @@ List available MCP servers and their tools:
 
 ### Phase 1: MCP Client Manager
 
-Create server-side MCP client pool:
+Create server-side MCP client pool with idle timeout:
 
 ```typescript
 // src/mcp-client-manager.ts
+interface ClientEntry {
+  client: MCPClient;
+  lastUsed: number;
+  timeout?: NodeJS.Timeout;
+}
+
 class MCPClientManager {
-  private clients = new Map<string, MCPClient>();
+  private clients = new Map<string, ClientEntry>();
+  private readonly IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
   
-  async getClient(serverName: string): Promise<MCPClient>;
-  async callTool(server: string, tool: string, args: unknown): Promise<unknown>;
-  async listTools(): Promise<ServerToolMap>;
+  async callTool(server: string, tool: string, args: unknown): Promise<unknown> {
+    const entry = await this.getOrCreateClient(server);
+    
+    // Reset idle timer on each use
+    this.resetIdleTimer(server, entry);
+    
+    return await entry.client.call(tool, args);
+  }
+  
+  private async getOrCreateClient(server: string): Promise<ClientEntry> {
+    let entry = this.clients.get(server);
+    if (!entry) {
+      const client = await this.createClient(server);
+      entry = { client, lastUsed: Date.now() };
+      this.clients.set(server, entry);
+    }
+    return entry;
+  }
+  
+  private resetIdleTimer(server: string, entry: ClientEntry): void {
+    entry.lastUsed = Date.now();
+    
+    // Clear existing timeout
+    if (entry.timeout) {
+      clearTimeout(entry.timeout);
+    }
+    
+    // Set new timeout to close after idle period
+    entry.timeout = setTimeout(async () => {
+      console.log(`[MCP] Closing idle client: ${server}`);
+      await entry.client.shutdown();
+      this.clients.delete(server);
+    }, this.IDLE_TIMEOUT);
+  }
+  
+  async shutdown(): Promise<void> {
+    // Close all clients on server shutdown
+    for (const [server, entry] of this.clients) {
+      if (entry.timeout) clearTimeout(entry.timeout);
+      await entry.client.shutdown();
+    }
+    this.clients.clear();
+  }
 }
 ```
+
+**Idle timeout strategy:**
+- Close stdio processes after 5 minutes of inactivity
+- Reset timer on each tool call
+- Clean up all clients on server shutdown
+- Balance: avoid spawn overhead vs memory usage
 
 ### Phase 2: API Endpoint
 

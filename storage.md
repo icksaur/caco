@@ -21,7 +21,7 @@ Current gaps in persistence:
 - `display_image` — base64 images
 - `embed_media` — oEmbed content (YouTube, etc.)
 
-These prepend content to responses. On session reload, SDK returns message history but our injected outputs are gone.
+These prepend content to responses.
 
 ---
 

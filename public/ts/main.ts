@@ -115,13 +115,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load preferences to check for active session
   const prefs = await loadPreferences();
   
-  // Check for ?applet=slug param early
-  const hasAppletParam = new URLSearchParams(window.location.search).has('applet');
+  // Check URL params
+  const urlParams = new URLSearchParams(window.location.search);
+  const hasAppletParam = urlParams.has('applet');
+  const sessionParam = urlParams.get('session');
   
-  if (prefs?.lastSessionId) {
-    // Active session exists - set active and request history
-    setActiveSession(prefs.lastSessionId);
-    requestHistory(prefs.lastSessionId);
+  // Determine which session to load: URL param takes priority over preferences
+  const targetSessionId = sessionParam || prefs?.lastSessionId;
+  
+  if (targetSessionId) {
+    // Session specified - set active and request history
+    setActiveSession(targetSessionId);
+    requestHistory(targetSessionId);
     await waitForHistoryComplete();
     
     // Set view based on URL param (applet takes priority)
@@ -137,7 +142,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
   } else {
-    // No active session
+    // No session specified
     if (hasAppletParam) {
       // Applet requested but no session - load applet anyway
       await loadAppletFromUrl();

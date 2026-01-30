@@ -140,20 +140,40 @@ export function setViewState(viewState: ViewState): boolean {
 }
 
 /**
- * Set active session and sync to WebSocket
+ * Set active session and sync to WebSocket + URL
  */
 export function setActiveSession(sessionId: string | null, cwd: string): void {
   state.activeSessionId = sessionId;
   state.currentCwd = cwd;
   setWsActiveSession(sessionId);
+  
+  // Update URL with session param
+  if (typeof window !== 'undefined') {
+    const url = new URL(window.location.href);
+    if (sessionId) {
+      url.searchParams.set('session', sessionId);
+    } else {
+      url.searchParams.delete('session');
+    }
+    history.replaceState(null, '', url.toString());
+  }
 }
 
 /**
  * Clear active session (for new chat)
+ * Also clears session and applet from URL
  */
 export function clearActiveSession(): void {
   state.activeSessionId = null;
   // Note: Don't clear cwd - it's useful as default for next session
+  
+  // Remove session and applet from URL (starting fresh)
+  if (typeof window !== 'undefined') {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('session');
+    url.searchParams.delete('applet');
+    history.replaceState(null, '', url.toString());
+  }
 }
 
 /**

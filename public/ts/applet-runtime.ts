@@ -638,6 +638,9 @@ export function clearApplet(): void {
     destroyInstance(instance);
   }
   
+  // Update breadcrumb UI (now empty)
+  updateBreadcrumbUI();
+  
   // Also remove any orphaned applet styles and scripts (legacy cleanup)
   document.querySelectorAll('style[data-applet]').forEach(el => el.remove());
   document.querySelectorAll('script[data-applet]').forEach(el => el.remove());

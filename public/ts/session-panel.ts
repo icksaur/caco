@@ -9,6 +9,7 @@ import { setAvailableModels, loadModels, getNewChatCwd } from './model-selector.
 import { waitForHistoryComplete } from './history.js';
 import { setActiveSession as setWsActiveSession, requestHistory } from './websocket.js';
 import { setViewState, getViewState, isViewState } from './view-controller.js';
+import { clearApplet } from './applet-runtime.js';
 
 /**
  * Show session manager as the main view (landing page)
@@ -139,9 +140,13 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
 export async function switchSession(sessionId: string): Promise<void> {
   // If already on this session, just switch to chat view
   if (sessionId === getActiveSessionId()) {
+    clearApplet();
     setViewState('chatting');
     return;
   }
+  
+  // Clear any active applet first
+  clearApplet();
   
   // Show loading state on clicked item
   const clickedItem = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
@@ -219,6 +224,9 @@ export function showNewChatUI(): void {
   // Clear old chat messages
   const chat = document.getElementById('chat');
   if (chat) chat.innerHTML = '';
+  
+  // Clear any active applet
+  clearApplet();
   
   // Pre-fill cwd from last session
   const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;

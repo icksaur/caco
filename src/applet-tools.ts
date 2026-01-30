@@ -62,7 +62,7 @@ HTML fragment (no doctype, html, head, body tags):
 
 ## script.js
 
-Plain JavaScript with global functions for onclick handlers:
+Plain JavaScript - functions for onclick handlers must be exposed to window:
 \`\`\`javascript
 function appendDigit(d) {
   document.getElementById('display').value += d;
@@ -72,13 +72,45 @@ function calculate() {
   const result = eval(document.getElementById('display').value);
   setAppletState({ lastResult: result });
 }
+
+// IMPORTANT: Expose functions for onclick handlers
+// Scripts are wrapped in IIFE, so functions aren't automatically global
+expose({ appendDigit, calculate });
+\`\`\`
+
+⚠️ **onclick Handler Gotcha:**
+
+Scripts are wrapped in an IIFE for isolation. Functions **aren't automatically global**.
+
+**For onclick handlers, you MUST expose functions:**
+\`\`\`javascript
+function myHandler() { console.log('clicked'); }
+expose('myHandler', myHandler);  // Now onclick="myHandler()" works
+\`\`\`
+
+**Alternative: Use addEventListener (recommended, no exposure needed)**
+\`\`\`javascript
+document.getElementById('my-btn').addEventListener('click', () => {
+  console.log('clicked');  // No window exposure required!
+});
 \`\`\`
 
 ## JavaScript APIs
 
+**Function Exposure (for onclick handlers):**
+\`expose(name, fn)\` or \`expose({ fn1, fn2 })\` - Expose functions to global scope
+\`\`\`javascript
+function handleClick() { /* ... */ }
+expose('handleClick', handleClick);  // Now onclick="handleClick()" works
+
+// Or expose multiple:
+expose({ handleClick, handleSubmit, handleCancel });
+\`\`\`
+
 **Navigation:**
 - \`loadApplet(slug)\` - Navigate to another applet
 - \`listApplets()\` - Get array of saved applets (async)
+- \`getAppletSlug()\` - Get current applet slug from URL
 - \`appletContainer\` - Reference to container element
 
 **Agent Communication (two patterns):**
@@ -100,9 +132,33 @@ await sendAgentMessage('Get MSFT stock price and set_applet_state with result');
 **Use passive** when storing data for agent to read on demand.
 **Use active** when you want the agent to do something RIGHT NOW.
 
+**File Operations:**
+
+\`saveTempFile(dataUrl, options?)\` - Save image to ~/.caco/tmp/ for agent viewing
+\`\`\`javascript
+const { path } = await saveTempFile(canvas.toDataURL('image/png'));
+await sendAgentMessage(\`Analyze image at \${path}\`);  // Agent uses view tool
+\`\`\`
+
+\`callMCPTool(toolName, params)\` - Call MCP tools for file operations
+\`\`\`javascript
+// Read a file
+const result = await callMCPTool('read_file', { path: '/path/to/file.txt' });
+
+// Write a file
+await callMCPTool('write_file', { 
+  path: '/path/to/output.txt', 
+  content: 'Hello world' 
+});
+
+// List directory
+const files = await callMCPTool('list_directory', { path: '/home/user' });
+\`\`\`
+
 ## Tips
 
-- Use onclick="functionName()" for button handlers (not addEventListener)
+- **For onclick handlers:** Use \`expose('functionName', functionName)\` to make functions globally accessible
+- **Preferred:** Use \`addEventListener\` instead of onclick attributes (no exposure needed)
 - Test with reload_page tool after file changes
 - Applet runs in sandboxed scope but has full DOM access
 - Use relative paths for any fetch() calls to local APIs

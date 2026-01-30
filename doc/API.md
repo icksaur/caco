@@ -293,6 +293,61 @@ The agent's response will stream to the chat as usual.
 |----------|-------------|
 | `appletContainer` | Reference to `.applet-content` element |
 
+### expose(name, fn) / expose({ fn1, fn2 })
+
+Expose functions to global scope for onclick handlers.
+
+```javascript
+// Scripts are wrapped in IIFE, so functions aren't automatically global
+function handleClick() { /* ... */ }
+expose('handleClick', handleClick);  // Now onclick="handleClick()" works
+
+// Or expose multiple at once:
+expose({ handleClick, handleSubmit, handleCancel });
+```
+
+**Alternative:** Use addEventListener instead (no exposure needed):
+```javascript
+document.getElementById('btn').addEventListener('click', handleClick);
+```
+
+### getAppletSlug()
+
+Get the current applet slug from URL.
+
+```javascript
+const slug = getAppletSlug();
+// Returns: string | null ('calculator' if URL is /?applet=calculator)
+```
+
+### saveTempFile(dataUrl, options?)
+
+Save image data to `~/.caco/tmp/` for agent viewing.
+
+```javascript
+const canvas = document.getElementById('myCanvas');
+const { path } = await saveTempFile(canvas.toDataURL('image/png'));
+await sendAgentMessage(`Analyze image at ${path}`);
+```
+
+### callMCPTool(toolName, params)
+
+Call MCP tools directly from applet JavaScript.
+
+```javascript
+// Read a file
+const result = await callMCPTool('read_file', { path: '/path/to/file.txt' });
+
+// Write a file
+await callMCPTool('write_file', { 
+  path: '/path/to/output.txt', 
+  content: 'Hello world' 
+});
+
+// List directory
+const files = await callMCPTool('list_directory', { path: '/home/user' });
+```
+
 ### DOM APIs
 
 Applet JS runs in global scope with full DOM access:

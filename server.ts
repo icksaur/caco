@@ -15,9 +15,10 @@ import { createDisplayTools } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools, type SessionIdRef } from './src/agent-tools.js';
 import { storeOutput, detectLanguage } from './src/storage.js';
-import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes } from './src/routes/index.js';
+import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, scheduleRoutes } from './src/routes/index.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
+import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -140,7 +141,7 @@ app.use('/api', sessionRoutes);
 app.use('/api', apiRoutes);
 app.use('/api', sessionMessageRoutes);
 app.use('/api/mcp', mcpRoutes);
-app.use('/api/mcp', mcpRoutes);
+app.use('/api', scheduleRoutes);
 
 // ============================================================
 // Server Lifecycle
@@ -164,6 +165,9 @@ async function start(): Promise<void> {
   // WS is for server→client push (rendering); POST is for client→server send
   setupWebSocket(server);
   
+  // Start schedule manager
+  startScheduleManager();
+  
   // Start server (localhost only for security)
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`✓ Server running at http://localhost:${PORT}`);
@@ -174,6 +178,7 @@ async function start(): Promise<void> {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('\n✓ Shutting down gracefully...');
+  stopScheduleManager();
   await sessionState.shutdown();
   process.exit(0);
 });

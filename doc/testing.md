@@ -10,7 +10,7 @@
 | `src/session-parsing.ts` | 20 | ✅ Covered |
 | `public/ts/ui-utils.ts` | 6 | ✅ Covered |
 | `public/ts/state.ts` | 6 | ✅ Covered |
-| `public/ts/activity.ts` | 9 | ✅ Covered |
+| `public/ts/element-inserter` | 5 | ✅ Covered |
 | `public/ts/sse-parser.ts` | 22 | ✅ Covered |
 | `public/ts/markdown-builders.ts` | 6 | ✅ Covered |
 | **Total** | **110** | **Focused regression tests** |
@@ -28,12 +28,11 @@ Extract pure functions, then test those.
 | 1.2 | ✅ | Write tests for session parsing edge cases (25 tests) |
 | 1.3 | ⬜ | Extract `SessionStore` interface for file I/O |
 
-### Phase 2: Activity Formatting (client)
+### Phase 2: Element Inserter (client)
 
 | Step | Status | Description |
 |------|--------|-------------|
-| 2.1 | ✅ | Add tests for `formatToolArgs(args)` - already pure |
-| 2.2 | ✅ | Add tests for `formatToolResult(result)` - already pure |
+| 2.1 | ✅ | Add tests for `ElementInserter` class |
 
 ### Phase 3: Stream Event Parsing (client)
 
@@ -70,7 +69,7 @@ npm run test:coverage # With coverage report
 
 ```
 tests/unit/
-  activity.test.ts        # Tool formatting
+  element-inserter.test.ts # ElementInserter class
   image-utils.test.ts     # Image data URL parsing
   markdown-builders.test.ts # Terminal/code markdown building
   oembed.test.ts          # URL detection, provider matching

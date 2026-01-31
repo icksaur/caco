@@ -1,19 +1,20 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
-    "src/**/*.ts",
-    "public/ts/**/*.ts"
+    "src/**/*.ts!",
+    "public/ts/**/*.ts!"
   ],
   "project": [
-    "src/**/*.ts",
-    "public/ts/**/*.ts"
+    "src/**/*.ts!",
+    "public/ts/**/*.ts!",
+    "tests/**/*.ts"
   ],
   "ignore": [
     "public/*.min.js",
     "public/bundle.js",
     "public/chat.js",
     "public/markdown-renderer.js",
-    "public/script.js"
-  ],
-  "ignoreExportsUsedInFile": true
+    "public/script.js",
+    "tests/api.test.ts"
+  ]
 }

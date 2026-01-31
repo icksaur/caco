@@ -17,18 +17,11 @@ import { sessionState } from '../session-state.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
 import { updateUsage } from '../usage-state.js';
-import { broadcastUserMessageFromPost, broadcastMessage, broadcastActivity, broadcastOutput, type ActivityItem, type MessageSource, type ChatMessage } from './websocket.js';
-import { extractToolTelemetry, extractToolName, type ToolExecutionCompleteEvent } from '../sdk-event-parser.js';
+import { broadcastUserMessageFromPost, broadcastEvent, type MessageSource, type SessionEvent } from './websocket.js';
+import { extractToolTelemetry, type ToolExecutionCompleteEvent } from '../sdk-event-parser.js';
 import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
-import { randomUUID } from 'crypto';
 
 const router = Router();
-
-// Session event type
-interface SessionEvent {
-  type: string;
-  data?: Record<string, unknown>;
-}
 
 /**
  * POST /api/sessions/:sessionId/messages - Send message to specific session
@@ -129,8 +122,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     promptToSend, 
     { tempFilePath, clientId },
     {
-      onMessage: (msg) => broadcastMessage(sessionId, msg),
-      onActivity: (item) => broadcastActivity(sessionId, item)
+      onEvent: (evt) => broadcastEvent(sessionId, evt)
     }
   ).catch(err => {
     console.error(`[DISPATCH] Error:`, err);
@@ -140,24 +132,22 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
 /**
  * Callback types for dispatch observers
  */
-export type MessageCallback = (message: ChatMessage) => void;
-export type ActivityCallback = (item: ActivityItem) => void;
+export type EventCallback = (event: SessionEvent) => void;
 
 export interface DispatchCallbacks {
-  onMessage?: MessageCallback;
-  onActivity?: ActivityCallback;
+  onEvent?: EventCallback;
 }
 
 /**
- * Dispatch a message to a session and handle SDK events
+ * Dispatch a message to a session and forward SDK events
  * 
- * Core dispatch function - works without WebSocket.
- * Optional callbacks allow observers (like WS broadcast) to receive events.
+ * Core dispatch function - just forwards SDK events as-is.
+ * Server-side processing (usage tracking, cleanup) happens here.
  * 
  * @param sessionId - Target session
  * @param prompt - Message to send
  * @param options - Optional: tempFilePath for image, clientId for session switching
- * @param callbacks - Optional: onMessage and onActivity callbacks for observers
+ * @param callbacks - Optional: onEvent callback for observers
  */
 export async function dispatchMessage(
   sessionId: string,
@@ -166,31 +156,22 @@ export async function dispatchMessage(
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePath, clientId } = options || {};
-  const onMessage = callbacks?.onMessage || (() => {});
-  const onActivity = callbacks?.onActivity || (() => {});
+  const { tempFilePath } = options || {};
+  const onEvent = callbacks?.onEvent || (() => {});
   
   // Track active dispatch for graceful restart
   dispatchStarted();
   
-  // Generate message ID for the assistant response
-  const messageId = `msg_${randomUUID()}`;
-  let messageContent = '';
-  let reasoningContent = '';
-  let hasStarted = false;
-  
   try {
-    // Ensure session is active (loads SDK client into memory)
-    // Uses resume() directly - doesn't stop other sessions
-    // MUST pass config so tools are attached!
+    // Ensure session is active
     if (!sessionManager.isActive(sessionId)) {
       await sessionManager.resume(sessionId, sessionState.getSessionConfig());
     }
     
-    // Get session
     const session = sessionManager.getSession(sessionId);
     if (!session) {
-      onActivity({ type: 'error', text: 'No active session' });
+      onEvent({ type: 'session.error', data: { message: 'No active session' } });
+      dispatchComplete();
       return;
     }
     
@@ -199,198 +180,57 @@ export async function dispatchMessage(
       attachments?: Array<{ type: string; path: string }> 
     } = { prompt };
     
-    // Add image attachment if present
     if (tempFilePath) {
       messageOptions.attachments = [{ type: 'file', path: tempFilePath }];
     }
     
-    // Subscribe to events and call callbacks
-    type EventCallback = (event: SessionEvent) => void;
-    const unsubscribe = (session as unknown as { on: (cb: EventCallback) => () => void }).on((event: SessionEvent) => {
-      const eventData: Record<string, unknown> = event.data || {};
+    // Subscribe to SDK events and forward them
+    type SDKEventCallback = (event: SessionEvent) => void;
+    const unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on((event: SessionEvent) => {
+      // Forward event as-is
+      onEvent(event);
       
-      switch (event.type) {
-        case 'assistant.message_delta': {
-          // Start streaming message if first delta
-          if (!hasStarted) {
-            onMessage({
-              id: messageId,
-              role: 'assistant',
-              content: '',
-              status: 'streaming'
-            });
-            hasStarted = true;
-          }
-          // Append delta content
-          const delta = (eventData.deltaContent as string) || '';
-          messageContent += delta;
-          onMessage({
-            id: messageId,
-            role: 'assistant',
-            deltaContent: delta
-          });
-          break;
+      // Server-side processing
+      const eventData = event.data || {};
+      
+      if (event.type === 'assistant.usage') {
+        const quotaSnapshots = eventData.quotaSnapshots as Record<string, {
+          isUnlimitedEntitlement: boolean;
+          entitlementRequests: number;
+          usedRequests: number;
+          remainingPercentage: number;
+          resetDate?: string;
+        }> | undefined;
+        updateUsage(quotaSnapshots);
+      }
+      
+      if (event.type === 'tool.execution_complete') {
+        const toolTelemetry = extractToolTelemetry(eventData as ToolExecutionCompleteEvent);
+        if (toolTelemetry?.reloadTriggered && consumeReloadSignal()) {
+          onEvent({ type: 'caco.reload', data: {} });
         }
-        
-        case 'assistant.message': {
-          // Text content from assistant - but DON'T finalize here
-          // The agent may do more turns. Finalization happens on session.idle.
-          const content = (eventData.content as string) || '';
-          
-          // If we haven't started streaming yet, start now
-          if (!hasStarted && content) {
-            onMessage({
-              id: messageId,
-              role: 'assistant',
-              content: '',
-              status: 'streaming'
-            });
-            hasStarted = true;
-          }
-          
-          // Update accumulated content (for final message)
-          if (content && content.length > messageContent.length) {
-            messageContent = content;
-          }
-          break;
+      }
+      
+      if (event.type === 'session.idle' || event.type === 'session.error') {
+        unsubscribe();
+        if (tempFilePath) {
+          unlink(tempFilePath).catch(() => {});
         }
-        
-        case 'assistant.intent': {
-          const intent = eventData.intent as string;
-          if (intent) {
-            onActivity({ type: 'intent', text: `💡 ${intent}` });
-          }
-          break;
-        }
-        
-        case 'assistant.reasoning_delta': {
-          // Streaming reasoning chunks - accumulate and update header
-          const delta = (eventData.deltaContent as string) || '';
-          if (delta) {
-            reasoningContent += delta;
-            // Send accumulated reasoning to header (truncate for display)
-            const preview = reasoningContent.length > 100 
-              ? reasoningContent.substring(0, 100) + '...' 
-              : reasoningContent;
-            onActivity({ type: 'header-update', text: `🤔 ${preview}` });
-          }
-          break;
-        }
-        
-        case 'assistant.reasoning': {
-          // Full reasoning text - add complete item to activity box
-          const reasoning = (eventData.content as string) || reasoningContent || '';
-          if (reasoning) {
-            onActivity({ type: 'reasoning', text: '🤔 Thinking', details: reasoning });
-          }
-          // Reset accumulated reasoning
-          reasoningContent = '';
-          break;
-        }
-        
-        case 'tool.execution_start': {
-          const toolName = (eventData.toolName || eventData.name || 'tool') as string;
-          const args = eventData.arguments ? JSON.stringify(eventData.arguments) : undefined;
-          onActivity({ 
-            type: 'tool', 
-            text: toolName,
-            details: args ? `Arguments: ${args}` : undefined
-          });
-          break;
-        }
-        
-        case 'tool.execution_complete': {
-          const toolName = extractToolName(eventData as ToolExecutionCompleteEvent);
-          const success = eventData.success as boolean;
-          const status = success ? '✓' : '✗';
-          const resultObj = eventData.result as { content?: string } | undefined;
-          const result = resultObj ? JSON.stringify(resultObj) : undefined;
-          
-          // Extract toolTelemetry from SDK's nested JSON format
-          const toolTelemetry = extractToolTelemetry(eventData as ToolExecutionCompleteEvent);
-          
-          let details = result;
-          if (toolTelemetry?.outputId) {
-            // Broadcast output directly so client renders it immediately
-            broadcastOutput(sessionId, toolTelemetry.outputId);
-            details = `[Output: ${toolTelemetry.outputId}]`;
-          }
-          
-          onActivity({ 
-            type: 'tool-result', 
-            text: `${status} ${toolName}`,
-            details
-          });
-          
-          if (toolTelemetry?.reloadTriggered && consumeReloadSignal()) {
-            onActivity({ type: 'info', text: 'Reload triggered' });
-          }
-          break;
-        }
-        
-        case 'assistant.usage': {
-          // Capture quota/budget info
-          const quotaSnapshots = eventData.quotaSnapshots as Record<string, {
-            isUnlimitedEntitlement: boolean;
-            entitlementRequests: number;
-            usedRequests: number;
-            remainingPercentage: number;
-            resetDate?: string;
-          }> | undefined;
-          updateUsage(quotaSnapshots);
-          break;
-        }
-        
-        case 'session.error': {
-          const msg = (eventData.message as string) || 'Unknown error';
-          onActivity({ type: 'error', text: `Error: ${msg}` });
-          // Fall through to cleanup
-        }
-        // eslint-disable-next-line no-fallthrough
-        case 'session.idle': {
-          // Ensure message is finalized if we haven't sent complete
-          if (hasStarted && messageContent) {
-            onMessage({
-              id: messageId,
-              role: 'assistant',
-              content: messageContent,
-              status: 'complete'
-            });
-          }
-          unsubscribe();
-          if (tempFilePath) {
-            unlink(tempFilePath).catch(() => {});
-          }
-          // Mark dispatch complete for graceful restart tracking
-          dispatchComplete();
-          break;
-        }
+        dispatchComplete();
       }
     });
     
-    // Send message (non-blocking but can reject async)
-    // Wrap in Promise to catch SDK RPC errors that happen after initial call
-    const sendPromise = (async () => {
-      try {
-        // The sendStream call triggers an async RPC - errors surface when SDK processes response
-        sessionManager.sendStream(sessionId, prompt, messageOptions);
-      } catch (err) {
-        throw err;
-      }
-    })();
-    
-    // Handle errors from the send (async RPC failures like "Session not found")
-    sendPromise.catch((err) => {
-      console.error(`[DISPATCH] Send error for ${sessionId}:`, err);
+    // Send message
+    try {
+      sessionManager.sendStream(sessionId, prompt, messageOptions);
+    } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       
-      // Check if session expired on SDK side
       if (message.includes('Session not found') || message.includes('session.send failed')) {
-        onActivity({ type: 'error', text: 'Session expired - please start a new session' });
-        // Clean up stale session
+        onEvent({ type: 'session.error', data: { message: 'Session expired - please start a new session' } });
         sessionManager.stop(sessionId).catch(() => {});
       } else {
-        onActivity({ type: 'error', text: `Error: ${message}` });
+        onEvent({ type: 'session.error', data: { message } });
       }
       
       unsubscribe();
@@ -398,18 +238,15 @@ export async function dispatchMessage(
         unlink(tempFilePath).catch(() => {});
       }
       dispatchComplete();
-    });
+    }
     
   } catch (error) {
-    console.error('Dispatch error:', error);
     const message = error instanceof Error ? error.message : String(error);
-    onActivity({ type: 'error', text: `Error: ${message}` });
+    onEvent({ type: 'session.error', data: { message } });
     
     if (tempFilePath) {
       await unlink(tempFilePath).catch(() => {});
     }
-    
-    // Mark dispatch complete even on error
     dispatchComplete();
   }
 }
@@ -426,16 +263,8 @@ router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) =
     try {
       // SDK session has abort() method, but TypeScript types don't expose it
       await (session as unknown as { abort: () => Promise<void> }).abort();
-      broadcastActivity(sessionId, { 
-        type: 'info', 
-        text: 'Streaming cancelled' 
-      });
     } catch (error) {
       console.error('Failed to abort session:', error);
-      broadcastActivity(sessionId, { 
-        type: 'error', 
-        text: 'Cancel failed' 
-      });
     }
   }
   

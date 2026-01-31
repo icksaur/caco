@@ -13,13 +13,12 @@
  *   inner.textContent = content  // REPLACE
  */
 
-import { escapeHtml, scrollToBottom } from './ui-utils.js';
-import { setStreaming, isStreaming, getActiveSessionId, setActiveSession, isLoadingHistory, setLoadingHistory } from './app-state.js';
+import { scrollToBottom } from './ui-utils.js';
+import { getActiveSessionId, setActiveSession, setLoadingHistory } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { isViewState, setViewState } from './view-controller.js';
-import { onMessage, onHistoryComplete, onActivity, onOutput, type ChatMessage, type ActivityItem } from './websocket.js';
+import { onEvent, type SessionEvent } from './websocket.js';
 import { showToast, hideToast } from './toast.js';
-import { renderOutputById, restoreOutputsFromHistory } from './display-output.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 import { resetTextareaHeight } from './multiline-input.js';
 
@@ -36,52 +35,7 @@ declare global {
 export { setLoadingHistory };
 
 // ============================================================================
-// Formatting Utilities
-// ============================================================================
-
-interface ToolResult {
-  content?: string | unknown;
-  [key: string]: unknown;
-}
-
-/**
- * Format tool arguments for display
- */
-export function formatToolArgs(args: Record<string, unknown> | undefined): string {
-  if (!args) return '';
-  
-  const parts: string[] = [];
-  for (const [key, value] of Object.entries(args)) {
-    if (typeof value === 'string') {
-      const display = value.length > 80 ? value.substring(0, 80) + '...' : value;
-      parts.push(`${key}: ${display}`);
-    } else if (typeof value === 'object') {
-      parts.push(`${key}: ${JSON.stringify(value).substring(0, 60)}...`);
-    } else {
-      parts.push(`${key}: ${value}`);
-    }
-  }
-  return parts.join(', ');
-}
-
-/**
- * Format tool result for display
- */
-export function formatToolResult(result: ToolResult | undefined): string {
-  if (!result) return '';
-  
-  if (result.content) {
-    const content = typeof result.content === 'string' 
-      ? result.content 
-      : JSON.stringify(result.content);
-    return content.length > 500 ? content.substring(0, 500) + '...' : content;
-  }
-  
-  return JSON.stringify(result).substring(0, 200);
-}
-
-// ============================================================================
-// MessageInserter - Core DOM manipulation
+// ElementInserter - Core DOM manipulation
 // ============================================================================
 
 /** 
@@ -97,8 +51,6 @@ const EVENT_TO_OUTER: Record<string, string> = {
   'assistant.message_delta': 'assistant-message',
   
   // Activity (all activity goes in same box)
-  'assistant.turn_start': 'assistant-activity',
-  'assistant.turn_end': 'assistant-activity',
   'assistant.intent': 'assistant-activity',
   'assistant.reasoning': 'assistant-activity',
   'assistant.reasoning_delta': 'assistant-activity',
@@ -106,18 +58,14 @@ const EVENT_TO_OUTER: Record<string, string> = {
   'tool.execution_progress': 'assistant-activity',
   'tool.execution_partial_result': 'assistant-activity',
   'tool.execution_complete': 'assistant-activity',
-  'session.start': 'assistant-activity',
-  'session.idle': 'assistant-activity',
   'session.error': 'assistant-activity',
-  'session.truncation': 'assistant-activity',
   'session.compaction_start': 'assistant-activity',
   'session.compaction_complete': 'assistant-activity',
-  'session.usage_info': 'assistant-activity',
-  'assistant.usage': 'assistant-activity',
   
   // Caco synthetic types
   'caco.agent': 'agent-message',
   'caco.applet': 'applet-message',
+  'caco.info': 'assistant-activity',
 };
 
 /**
@@ -132,8 +80,6 @@ const EVENT_TO_INNER: Record<string, string | null> = {
   'assistant.message_delta': 'assistant-text',
   
   // Activity inner types
-  'assistant.turn_start': null,  // omit
-  'assistant.turn_end': null,    // omit
   'assistant.intent': 'intent-text',
   'assistant.reasoning': 'reasoning-text',
   'assistant.reasoning_delta': 'reasoning-text',
@@ -141,18 +87,14 @@ const EVENT_TO_INNER: Record<string, string | null> = {
   'tool.execution_progress': 'tool-text',
   'tool.execution_partial_result': 'tool-text',
   'tool.execution_complete': 'tool-text',
-  'session.start': null,         // omit
-  'session.idle': null,          // omit
   'session.error': null,         // omit
-  'session.truncation': null,    // omit
   'session.compaction_start': 'compact-text',
   'session.compaction_complete': 'compact-text',
-  'session.usage_info': null,    // omit
-  'assistant.usage': null,       // omit
   
   // Caco synthetic types
   'caco.agent': 'agent-text',
   'caco.applet': 'applet-text',
+  'caco.info': null,  // omit - internal signal
 };
 
 /** Get outer class for event type, or undefined if not mapped */
@@ -171,9 +113,13 @@ export function getInnerClass(eventType: string): string | null | undefined {
  */
 export class ElementInserter {
   private map: Record<string, string | null>;
+  private name: string;
+  private debug: (msg: string) => void;
   
-  constructor(map: Record<string, string | null>) {
+  constructor(map: Record<string, string | null>, name: string, debug?: (msg: string) => void) {
     this.map = map;
+    this.name = name;
+    this.debug = debug || (() => {});
   }
   
   /**
@@ -188,6 +134,7 @@ export class ElementInserter {
     // Reuse last child if it matches
     const last = parent.lastElementChild as HTMLElement | null;
     if (last?.classList.contains(cssClass)) {
+      this.debug(`[INSERTER] "${this.name}" reuse existing div for type "${eventType}"`);
       return last;
     }
     
@@ -195,40 +142,32 @@ export class ElementInserter {
     const div = document.createElement('div');
     div.className = cssClass;
     parent.appendChild(div);
+    this.debug(`[INSERTER] "${this.name}" create new div for type "${eventType}"`);
     return div;
   }
 }
 
+// Debug logger - set to console.log to enable
+const inserterDebug: (msg: string) => void = console.log;
+
 // Two inserters with their respective maps
-const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>);
-const innerInserter = new ElementInserter(EVENT_TO_INNER);
+const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>, 'outer', inserterDebug);
+const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', inserterDebug);
 
 // ============================================================================
-// Message Handlers
+// Event Handlers
 // ============================================================================
 
 /**
- * Map ChatMessage to SDK event type for new Phase 1 rendering
+ * Handle incoming SDK event (history or live)
+ * Uses outer + inner inserters with event.type for routing
  */
-function messageToEventType(msg: ChatMessage): string {
-  if (msg.role === 'user') {
-    if (msg.source === 'agent') return 'caco.agent';
-    if (msg.source === 'applet') return 'caco.applet';
-    return 'user.message';
-  }
-  // Assistant
-  if (msg.deltaContent) return 'assistant.message_delta';
-  return 'assistant.message';
-}
-
-/**
- * Handle incoming chat message (history or live)
- * Phase 2: Uses outer + inner inserters with REPLACE semantics
- */
-function handleMessage(msg: ChatMessage): void {
+function handleEvent(event: SessionEvent): void {
+  console.log('[handleEvent]', event.type, event.data);
   hideToast();
   const chat = document.getElementById('chat')!;
-  const eventType = messageToEventType(msg);
+  const eventType = event.type;
+  const data = event.data || {};
   
   // Get outer div
   const outer = outerInserter.getElement(eventType, chat);
@@ -238,178 +177,60 @@ function handleMessage(msg: ChatMessage): void {
   const inner = innerInserter.getElement(eventType, outer);
   if (!inner) return;
   
-  const content = msg.content || msg.deltaContent || '';
+  // Extract content from event.data
+  const content = data.content as string | undefined;
+  const deltaContent = data.deltaContent as string | undefined;
   
-  if (msg.role === 'user') {
-    // User messages: escape HTML, show image indicator
-    const imageIndicator = msg.hasImage ? ' [img]' : '';
-    inner.innerHTML = escapeHtml(content) + imageIndicator;
-    outer.setAttribute('data-message-id', msg.id);
-  } else {
-    // Assistant: REPLACE content in inner div (deltas accumulate naturally)
-    if (msg.deltaContent) {
-      inner.textContent = (inner.textContent || '') + msg.deltaContent;
-    } else if (msg.content) {
-      inner.textContent = msg.content;
-      outer.setAttribute('data-markdown', '');
-      
-      if (msg.outputs) {
-        const existing = outer.getAttribute('data-outputs') || '';
-        const combined = existing ? existing + ',' + msg.outputs.join(',') : msg.outputs.join(',');
-        outer.setAttribute('data-outputs', combined);
-      }
-    }
-    
-    // Render markdown when complete
-    if (msg.status === 'complete' && window.renderMarkdownElement) {
+  // Set content based on what's present
+  if (deltaContent) {
+    // Streaming: append delta
+    inner.textContent = (inner.textContent || '') + deltaContent;
+  } else if (content) {
+    // Complete message: replace
+    inner.textContent = content;
+  }
+  
+  // Render markdown on assistant.message (complete)
+  if (eventType === 'assistant.message') {
+    if (window.renderMarkdownElement) {
       window.renderMarkdownElement(inner);
     }
   }
   
-  if (msg.status === 'complete') {
-    setStreaming(false);
+  // Re-enable form on session.idle
+  if (eventType === 'session.idle') {
     setFormEnabled(true);
   }
   
   scrollToBottom();
 }
 
-/**
- * Map ActivityItem type to SDK event type
- */
-function activityToEventType(item: ActivityItem): string {
-  switch (item.type) {
-    case 'intent': return 'assistant.intent';
-    case 'tool': return 'tool.execution_start';
-    case 'tool-result': return 'tool.execution_complete';
-    case 'error': return 'session.error';
-    case 'turn': return 'assistant.turn_start';
-    default: return 'assistant.intent';  // fallback for info, etc.
-  }
-}
-
-/**
- * Handle activity item
- * Phase 2: Uses outer + inner inserters
- */
-function handleActivity(item: ActivityItem): void {
-  // Handle reload signal
-  if (item.type === 'info' && item.text === 'Reload triggered') {
-    window.location.reload();
-    return;
-  }
-  
-  const chat = document.getElementById('chat')!;
-  const eventType = activityToEventType(item);
-  
-  // Get outer div
-  const outer = outerInserter.getElement(eventType, chat);
-  if (!outer) return;
-  
-  // Get inner div (null = omit this event type)
-  const inner = innerInserter.getElement(eventType, outer);
-  if (!inner) return;
-  
-  // REPLACE content in inner div
-  inner.textContent = item.text;
-  if (item.details) {
-    inner.title = item.details;
-  }
-  
-  scrollToBottom();
-}
-
-/**
- * Handle output
- * TODO: Phase 5 - outputs need proper container
- */
-function handleOutput(outputId: string): void {
-  // Find last assistant-message as container for now
-  const chat = document.getElementById('chat');
-  const lastAssistant = chat?.querySelector('.assistant-message:last-of-type');
-  if (lastAssistant) {
-    renderOutputById(outputId, lastAssistant as HTMLElement).catch(err => 
-      console.error('Failed to render output:', err)
-    );
-  }
-}
-
-/**
- * Handle history complete
- */
-function handleHistoryComplete(): void {
-  setLoadingHistory(false);
-  
-  if (window.renderMarkdown) window.renderMarkdown();
-  
-  restoreOutputsFromHistory().catch(err => 
-    console.error('Failed to restore outputs:', err)
-  );
-  
-  scrollToBottom(true);
-}
-
 // ============================================================================
 // WebSocket Registration
 // ============================================================================
 
-let wsHandlersRegistered = false;
-
 function registerWsHandlers(): void {
-  if (wsHandlersRegistered) return;
-  wsHandlersRegistered = true;
-  
-  onMessage(handleMessage);
-  onHistoryComplete(handleHistoryComplete);
-  onActivity(handleActivity);
-  onOutput(handleOutput);
+  onEvent(handleEvent);
 }
 
 // ============================================================================
 // Form Handling
 // ============================================================================
 
-let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
-
 /**
  * Enable/disable form during streaming
+ * Just toggles a class - CSS handles visual state
  */
 export function setFormEnabled(enabled: boolean): void {
-  const form = document.getElementById('chatForm') as HTMLFormElement;
-  const input = form?.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
-  const submitBtn = form?.querySelector('button[type="submit"]') as HTMLButtonElement;
-  
-  if (!form || !input || !submitBtn) return;
-  
-  if (stopButtonTimeout) {
-    clearTimeout(stopButtonTimeout);
-    stopButtonTimeout = null;
-  }
-  
-  input.disabled = !enabled;
+  const form = document.getElementById('chatForm');
+  if (!form) return;
   
   if (enabled) {
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Send';
-    submitBtn.classList.remove('stop-btn');
-    submitBtn.onclick = null;
-    input.focus();
+    form.classList.remove('streaming');
+    const input = form.querySelector('textarea') as HTMLTextAreaElement;
+    input?.focus();
   } else {
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Send';
-    submitBtn.classList.remove('stop-btn');
-    
-    stopButtonTimeout = setTimeout(() => {
-      if (isStreaming()) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Stop';
-        submitBtn.classList.add('stop-btn');
-        submitBtn.onclick = (e) => {
-          e.preventDefault();
-          stopStreaming();
-        };
-      }
-    }, 400);
+    form.classList.add('streaming');
   }
 }
 
@@ -423,7 +244,6 @@ export function stopStreaming(): void {
       .catch(err => console.error('Failed to cancel:', err));
   }
   
-  setStreaming(false);
   setFormEnabled(true);
 }
 
@@ -431,7 +251,7 @@ export function stopStreaming(): void {
  * Stream response via REST API + WebSocket
  */
 export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
-  setStreaming(true);
+  setFormEnabled(false);
   
   try {
     const appletState = getAndClearPendingAppletState();
@@ -478,7 +298,6 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     
   } catch (error) {
     console.error('Send message error:', error);
-    setStreaming(false);
     setFormEnabled(true);
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

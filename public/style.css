@@ -336,8 +336,8 @@ form {
   align-items: flex-end;
 }
 
-/* Input button - removes baseline behavior */
-#chatForm .input-button {
+/* Send button */
+#chatForm .send-btn {
   align-self: auto;
   display: flex;
   align-items: center;
@@ -357,23 +357,40 @@ form {
   transition: opacity 0.2s, transform 0.1s, background 0.2s;
 }
 
-#chatForm .input-button.stop-btn {
-  background: #c62828;
-}
-
-#chatForm .input-button:hover {
+#chatForm .send-btn:hover {
   opacity: 0.9;
   transform: scale(1.02);
 }
 
-#chatForm .input-button:active {
+#chatForm .send-btn:active {
   transform: scale(0.98);
 }
 
-/* Hide loading indicator by default */
-#chatForm .loading {
+/* Stop button */
+#chatForm .stop-btn {
   display: none;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  background: #c62828;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
 }
+
+#chatForm .stop-btn:hover {
+  opacity: 0.9;
+  transform: scale(1.02);
+}
+
+#chatForm .stop-btn:active {
+  transform: scale(0.98);
+}
+
+/* Streaming state - swap buttons, disable input */
+#chatForm.streaming .send-btn { display: none; }
+#chatForm.streaming .stop-btn { display: flex; }
+#chatForm.streaming textarea { pointer-events: none; opacity: 0.6; }
 
 /* ========================================
    MAIN CONTENT AREA

@@ -16,6 +16,7 @@ import type { Server } from 'http';
 import { randomUUID } from 'crypto';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
 import sessionManager from '../session-manager.js';
+import { shouldFilter } from '../event-filter.js';
 
 // Global connection pool - all clients
 const allConnections = new Set<WebSocket>();
@@ -56,39 +57,18 @@ export interface UserMessage {
   hasImage: boolean;
 }
 
-// Message types to client
-// ChatMessage for history and live messages
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content?: string;           // Full content (create or replace)
-  deltaContent?: string;      // Append to existing (streaming)
-  status?: 'streaming' | 'complete';  // Defaults to 'complete'
-  timestamp?: string;
-  source?: MessageSource;
-  appletSlug?: string;        // For applet source messages
-  fromSession?: string;       // For agent source messages
-  hasImage?: boolean;
-  // For assistant messages
-  outputs?: string[];  // Output IDs
-  activityIds?: string[];  // Activity IDs
-}
-
-// Activity item for tool calls, intents, errors
-export interface ActivityItem {
-  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info' | 'reasoning' | 'reasoning-delta' | 'header-update';
-  text: string;
-  details?: string;
+// SDK event - passed through as-is
+export interface SessionEvent {
+  type: string;
+  data?: Record<string, unknown>;
 }
 
 interface ServerMessage {
-  type: 'stateUpdate' | 'state' | 'message' | 'activity' | 'output' | 'historyComplete' | 'pong' | 'error';
+  type: 'stateUpdate' | 'state' | 'event' | 'historyComplete' | 'pong' | 'error';
   id?: string;
   sessionId?: string;  // All broadcasts include sessionId for client filtering
   data?: unknown;
-  message?: ChatMessage;
-  item?: ActivityItem;
-  outputId?: string;   // For output type: ID to fetch and render
+  event?: SessionEvent;
   error?: string;
 }
 
@@ -261,18 +241,19 @@ export function broadcastUserMessageFromPost(
   appletSlug?: string,
   fromSession?: string
 ): void {
-  const message: ChatMessage = {
-    id: randomUUID(),
-    role: 'user',
-    content,
-    timestamp: new Date().toISOString(),
-    source,
-    appletSlug,
-    fromSession,
-    hasImage
+  // Create a user.message event
+  const event: SessionEvent = {
+    type: 'user.message',
+    data: {
+      content,
+      source,
+      appletSlug,
+      fromSession,
+      hasImage
+    }
   };
   
-  broadcastMessage(sessionId, message);
+  broadcastEvent(sessionId, event);
 }
 
 /**
@@ -290,63 +271,10 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
   try {
     const events = await sessionManager.getHistory(sessionId);
     
-    // Track outputs from tool completions for assistant messages
-    const pendingOutputs: string[] = [];
-    
+    // Forward all SDK events, filtered
     for (const evt of events) {
-      // Collect output IDs from tool completions
-      if (evt.type === 'tool.execution_complete') {
-        const result = (evt.data as { result?: { content?: string } })?.result;
-        if (result?.content) {
-          const matches = result.content.matchAll(/\[output:([^\]]+)\]/g);
-          pendingOutputs.push(...[...matches].map(m => m[1]));
-        }
-      }
-      
-      // Convert message events to ChatMessage
-      if (evt.type === 'user.message' || evt.type === 'assistant.message') {
-        const isUser = evt.type === 'user.message';
-        let content = (evt.data as { content?: string })?.content || '';
-        
-        // Parse applet/agent marker from user messages: [applet:slug] or [agent:sessionId]
-        let source: MessageSource = 'user';
-        let appletSlug: string | undefined;
-        let fromSession: string | undefined;
-        
-        if (isUser) {
-          const appletMatch = content.match(/^\[applet:([^\]]+)\]\s*/);
-          const agentMatch = content.match(/^\[agent:([^\]]+)\]\s*/);
-          if (appletMatch) {
-            source = 'applet';
-            appletSlug = appletMatch[1];
-            content = content.slice(appletMatch[0].length);
-          } else if (agentMatch) {
-            source = 'agent';
-            fromSession = agentMatch[1];
-            content = content.slice(agentMatch[0].length);
-          }
-        }
-        
-        if (!content && pendingOutputs.length === 0) continue;
-        
-        const message: ChatMessage = {
-          id: randomUUID(),
-          role: isUser ? 'user' : 'assistant',
-          content,
-          timestamp: new Date().toISOString(),
-          source: isUser ? source : undefined,
-          appletSlug: isUser ? appletSlug : undefined,
-          fromSession: isUser ? fromSession : undefined,
-          outputs: isUser ? undefined : [...pendingOutputs]
-        };
-        
-        // Clear pending outputs after assistant message
-        if (!isUser) {
-          pendingOutputs.length = 0;
-        }
-        
-        // Include sessionId for client filtering
-        send(ws, { type: 'message', sessionId, message });
+      if (!shouldFilter(evt)) {
+        send(ws, { type: 'event', sessionId, event: evt });
       }
     }
     
@@ -358,7 +286,6 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     
     // Check if SDK session expired
     if (message.includes('Session not found') || message.includes('session.getMessages failed')) {
-      // Session expired on SDK side - clean up our state
       console.log(`[WS] Session ${sessionId} expired on SDK side, cleaning up`);
       await sessionManager.stop(sessionId).catch(() => {});
       send(ws, { type: 'error', error: 'Session expired - please start a new session' });
@@ -369,62 +296,19 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
 }
 
 /**
- * Broadcast a message update to subscribed clients only
- * Used for streaming assistant responses - can create, append, or finalize
+ * Broadcast an SDK event to subscribed clients only
+ * Used for all session events - messages, activity, etc.
  */
-export function broadcastMessage(
+export function broadcastEvent(
   sessionId: string,
-  message: ChatMessage
+  event: SessionEvent
 ): void {
   const subscribers = sessionSubscribers.get(sessionId);
-  if (!subscribers || subscribers.size === 0) {
+  if (!subscribers || subscribers.size === 0 || shouldFilter(event)) {
     return;
   }
   
-  const msg: ServerMessage = { type: 'message', sessionId, message };
-  const data = JSON.stringify(msg);
-  
-  for (const ws of subscribers) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
-    }
-  }
-}
-
-/**
- * Broadcast an activity item to subscribed clients only
- * Used for tool calls, intents, errors during agent response
- */
-export function broadcastActivity(
-  sessionId: string,
-  item: ActivityItem
-): void {
-  const subscribers = sessionSubscribers.get(sessionId);
-  if (!subscribers || subscribers.size === 0) return;
-  
-  const msg: ServerMessage = { type: 'activity', sessionId, item };
-  const data = JSON.stringify(msg);
-  
-  for (const ws of subscribers) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
-    }
-  }
-}
-
-/**
- * Broadcast an output to render immediately
- * Used for display-only tools (embed_media, render_file_contents, etc.)
- * Client fetches output data and renders into pending response
- */
-export function broadcastOutput(
-  sessionId: string,
-  outputId: string
-): void {
-  const subscribers = sessionSubscribers.get(sessionId);
-  if (!subscribers || subscribers.size === 0) return;
-  
-  const msg: ServerMessage = { type: 'output', sessionId, outputId };
+  const msg: ServerMessage = { type: 'event', sessionId, event };
   const data = JSON.stringify(msg);
   
   for (const ws of subscribers) {

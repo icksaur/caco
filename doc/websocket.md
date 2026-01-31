@@ -143,17 +143,18 @@ interface OutputMeta {
 
 ### Activity Events
 
-Activity items (tool calls, intents, errors) are sent separately from message content:
+Activity items (tool calls, intents, errors) are sent separately from message content.
+Activity items use SDK event types directly:
 
 ```typescript
-{ type: 'activity', item: { type: 'turn', text: 'Turn 1...' } }
-{ type: 'activity', item: { type: 'tool', text: '▶ read_file', details: 'Arguments: ...' } }
-{ type: 'activity', item: { type: 'tool-result', text: '✓ read_file', details: '...' } }
+{ type: 'activity', item: { type: 'assistant.intent', text: '💡 Reading file...' } }
+{ type: 'activity', item: { type: 'tool.execution_start', text: 'read_file', details: 'Arguments: ...' } }
+{ type: 'activity', item: { type: 'tool.execution_complete', text: '✓ read_file', details: '...' } }
 ```
 
 ```typescript
 interface ActivityItem {
-  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info';
+  type: string;  // SDK event type (e.g., 'assistant.intent', 'tool.execution_start')
   text: string;
   details?: string;
 }

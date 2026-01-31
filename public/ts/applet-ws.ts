@@ -31,7 +31,7 @@ export interface ChatMessage {
 
 // Activity item for tool calls, intents, errors
 export interface ActivityItem {
-  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info';
+  type: string;  // SDK event type (e.g., 'assistant.intent', 'tool.execution_start')
   text: string;
   details?: string;
 }

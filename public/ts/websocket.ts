@@ -20,26 +20,10 @@ import { showToast } from './toast.js';
  */
 export type MessageSource = 'user' | 'applet' | 'agent';
 
-// Re-export ChatMessage type (matches server)
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content?: string;           // Full content (create or replace)
-  deltaContent?: string;      // Append to existing (streaming)
-  status?: 'streaming' | 'complete';  // Defaults to 'complete'
-  timestamp?: string;
-  source?: MessageSource;
-  appletSlug?: string;        // For applet source messages
-  fromSession?: string;       // For agent source messages
-  hasImage?: boolean;
-  outputs?: string[];
-}
-
-// Activity item for tool calls, intents, errors
-export interface ActivityItem {
-  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info';
-  text: string;
-  details?: string;
+// SDK event - passed through as-is from server
+export interface SessionEvent {
+  type: string;
+  data?: Record<string, unknown>;
 }
 
 // Connection state
@@ -54,15 +38,11 @@ let activeSessionId: string | null = null;
 
 // Callbacks
 type StateCallback = (state: Record<string, unknown>) => void;
-type MessageCallback = (msg: ChatMessage) => void;
-type ActivityCallback = (item: ActivityItem) => void;
-type OutputCallback = (outputId: string) => void;
+type EventCallback = (event: SessionEvent) => void;
 type HistoryCompleteCallback = () => void;
 type ConnectCallback = () => void;
 const stateCallbacks: Set<StateCallback> = new Set();
-const messageCallbacks: Set<MessageCallback> = new Set();
-const activityCallbacks: Set<ActivityCallback> = new Set();
-const outputCallbacks: Set<OutputCallback> = new Set();
+const eventCallbacks: Set<EventCallback> = new Set();
 const historyCompleteCallbacks: Set<HistoryCompleteCallback> = new Set();
 const connectCallbacks: Set<ConnectCallback> = new Set();
 
@@ -253,15 +233,15 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       }
       break;
     
-    case 'message': {
-      // Chat message (user or assistant) - from history or live
-      const msgWithData = msg as unknown as { message?: ChatMessage };
-      if (msgWithData.message) {
-        for (const cb of messageCallbacks) {
+    case 'event': {
+      // SDK event - pass through to handlers
+      const msgWithEvent = msg as unknown as { event?: SessionEvent };
+      if (msgWithEvent.event) {
+        for (const cb of eventCallbacks) {
           try {
-            cb(msgWithData.message);
+            cb(msgWithEvent.event);
           } catch (err) {
-            console.error('[WS] Message callback error:', err);
+            console.error('[WS] Event callback error:', err);
           }
         }
       }
@@ -279,36 +259,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       }
       break;
     
-    case 'activity': {
-      // Activity item (tool calls, intents, errors)
-      const activityMsg = msg as unknown as { item?: ActivityItem };
-      if (activityMsg.item) {
-        for (const cb of activityCallbacks) {
-          try {
-            cb(activityMsg.item);
-          } catch (err) {
-            console.error('[WS] Activity callback error:', err);
-          }
-        }
-      }
-      break;
-    }
-    
-    case 'output': {
-      // Output to render immediately
-      console.log('[WS] Received output message:', msg);
-      const outputMsg = msg as unknown as { outputId?: string };
-      if (outputMsg.outputId) {
-        for (const cb of outputCallbacks) {
-          try {
-            cb(outputMsg.outputId);
-          } catch (err) {
-            console.error('[WS] Output callback error:', err);
-          }
-        }
-      }
-      break;
-    }
+
       
     case 'pong':
       // Heartbeat response - no action needed
@@ -411,12 +362,12 @@ export function wsSendMessage(content: string, imageData?: string, source: Messa
 }
 
 /**
- * Subscribe to chat messages (user or assistant)
+ * Subscribe to SDK events
  * Returns unsubscribe function
  */
-export function onMessage(callback: MessageCallback): () => void {
-  messageCallbacks.add(callback);
-  return () => messageCallbacks.delete(callback);
+export function onEvent(callback: EventCallback): () => void {
+  eventCallbacks.add(callback);
+  return () => eventCallbacks.delete(callback);
 }
 
 /**
@@ -426,24 +377,6 @@ export function onMessage(callback: MessageCallback): () => void {
 export function onHistoryComplete(callback: HistoryCompleteCallback): () => void {
   historyCompleteCallbacks.add(callback);
   return () => historyCompleteCallbacks.delete(callback);
-}
-
-/**
- * Subscribe to activity events (tool calls, intents, errors)
- * Returns unsubscribe function
- */
-export function onActivity(callback: ActivityCallback): () => void {
-  activityCallbacks.add(callback);
-  return () => activityCallbacks.delete(callback);
-}
-
-/**
- * Subscribe to output events (display-only tool results)
- * Returns unsubscribe function
- */
-export function onOutput(callback: OutputCallback): () => void {
-  outputCallbacks.add(callback);
-  return () => outputCallbacks.delete(callback);
 }
 
 /**

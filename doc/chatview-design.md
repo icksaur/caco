@@ -73,6 +73,23 @@
 | `caco.agent` | `agent-text` |
 | `caco.applet` | `applet-text` |
 
+### Event Property Filter (Whitelist)
+
+Events are allowed through if ANY of these `data.*` properties are present and non-empty.
+This filters out empty SDK events (e.g., `assistant.message` with no content but only `toolRequests`).
+
+| Property | SDK Events Using It | Description |
+|----------|---------------------|-------------|
+| `content` | `user.message`, `assistant.message`, `assistant.reasoning`, `system.message` | Full message text |
+| `deltaContent` | `assistant.message_delta`, `assistant.reasoning_delta` | Streaming text chunk |
+| `intent` | `assistant.intent` | Intent description |
+| `toolName` | `tool.execution_start`, `tool.user_requested` | Tool being executed |
+| `toolCallId` | `tool.execution_complete`, `tool.execution_progress`, `tool.execution_partial_result` | Tool call reference |
+| `message` | `session.error`, `session.info` | Error/info message |
+| `progressMessage` | `tool.execution_progress` | Progress update text |
+| `partialOutput` | `tool.execution_partial_result` | Partial tool output |
+| `agentName` | `subagent.started`, `subagent.completed`, `subagent.failed`, `subagent.selected` | Subagent identifier |
+
 ## WORK
 
 ### Phase 1: new "outer" divs in id="chat" div

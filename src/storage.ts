@@ -342,7 +342,7 @@ export function detectLanguage(filepath: string): string {
 // ============================================================================
 
 export interface ActivityMetadata {
-  type: 'intent' | 'tool' | 'tool-result' | 'reasoning' | 'error' | 'info';
+  type: string;  // SDK event type (e.g., 'assistant.intent', 'tool.execution_start')
   text: string;
   details?: string;
   createdAt: string;

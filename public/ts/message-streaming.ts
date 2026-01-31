@@ -184,6 +184,11 @@ export class ElementInserter {
       return last;
     }
     
+    // Auto-collapse previous activity boxes when creating any new outer div
+    parent.querySelectorAll('.assistant-activity:not(.collapsed)').forEach(el => {
+      el.classList.add('collapsed');
+    });
+    
     // Create new
     const div = document.createElement('div');
     div.className = cssClass;
@@ -378,6 +383,22 @@ function removeImage(): void {
  */
 export function setupFormHandler(): void {
   registerWsHandlers();
+  
+  // Toggle collapsed activity boxes - only first child (header) is clickable
+  const chatDiv = document.getElementById('chat');
+  if (chatDiv) {
+    chatDiv.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      const activity = target.closest('.assistant-activity');
+      if (!activity) return;
+      
+      // Only toggle if clicking the first child (header)
+      const firstChild = activity.firstElementChild;
+      if (firstChild && (target === firstChild || firstChild.contains(target))) {
+        activity.classList.toggle('collapsed');
+      }
+    });
+  }
   
   // Expose toggleActivityBox globally
   window.toggleActivityBox = (header: HTMLElement) => {

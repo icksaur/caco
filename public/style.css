@@ -662,6 +662,14 @@ main {
   padding: var(--space-lg);
 }
 
+/* Activity box collapsed state - first child is header */
+.assistant-activity.collapsed > *:not(:first-child) {
+  display: none;
+}
+.assistant-activity > *:first-child {
+  cursor: pointer;
+}
+
 /* ========================================
    MARKDOWN CONTENT
    ======================================== */

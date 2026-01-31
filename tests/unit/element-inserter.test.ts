@@ -31,7 +31,8 @@ function createMockElement(className: string = ''): HTMLElement & { _children: H
         return children.find(c => (c as unknown as { dataset: Record<string, string> }).dataset?.key === keyValue) || null;
       }
       return null;
-    })
+    }),
+    querySelectorAll: vi.fn(() => [])  // Auto-collapse - no activity boxes to collapse in tests
   };
   
   return el as unknown as HTMLElement & { _children: HTMLElement[] };

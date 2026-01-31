@@ -341,10 +341,51 @@ The `renderMarkdownElement(element)` function in `markdown-renderer.ts`:
 
 ## auto-collapse
 
-When adding a new div, should collapse the previous div if it is of a certain class of events (or CSS class).
-This is the job of the event dispatch function.
-Collapsed divs must be toggleable.
-Can this be pure CSS?
+### Behavior
+When a new activity box is added, collapse previous activity boxes.
+First child (usually `report_intent` with intent description) acts as clickable header.
+When collapsed, only header is visible. Click header to expand/collapse.
+
+### Implementation
+
+**CSS** (`style.css`):
+```css
+/* Hide non-first children when collapsed */
+.assistant-activity.collapsed > *:not(:first-child) {
+  display: none;
+}
+/* First child is clickable header */
+.assistant-activity > *:first-child {
+  cursor: pointer;
+}
+```
+
+**Auto-collapse on insert** (`message-streaming.ts` in `ElementInserter.getElement()`):
+```typescript
+// Before creating any new outer div, collapse all activity boxes
+parent.querySelectorAll('.assistant-activity:not(.collapsed)').forEach(el => {
+  el.classList.add('collapsed');
+});
+```
+
+**Toggle handler** (`message-streaming.ts` in `setupFormHandler()`):
+```typescript
+chatDiv.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+  const activity = target.closest('.assistant-activity');
+  if (!activity) return;
+  
+  // Only toggle if clicking the first child (header)
+  const firstChild = activity.firstElementChild;
+  if (firstChild && (target === firstChild || firstChild.contains(target))) {
+    activity.classList.toggle('collapsed');
+  }
+});
+```
+
+### Files
+- `public/style.css` - collapsed state styling
+- `public/ts/message-streaming.ts` - auto-collapse logic + click handler
 
 ## stream formats
 

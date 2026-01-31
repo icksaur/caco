@@ -299,21 +299,28 @@ The inserter calls `window.renderMarkdownElement(element)` for:
 | Event Type | Content Format | Markdown |
 |------------|----------------|----------|
 | `assistant.message` | Full response content | ✓ |
-| `tool.execution_complete` | `icon **name**` + input + output | ✓ |
+| `tool.execution_complete` | `**name**` + code block | ✓ |
 
 ### Tool Display Format
 
 ```
-🔧 **bash**           ← tool.execution_start
+🔧 **bash**           ← tool.execution_start (running)
 `ls -la`              ← stored input (command/description)
 
 ↓ becomes on completion ↓
 
-✓ **bash**            ← tool.execution_complete (success)
-`ls -la`              ← retrieved from element.dataset
+**bash**              ← tool.execution_complete
+```bash
+ls -la                ← input from element.dataset
 total 42              ← result.content
 drwxr-xr-x ...
+```                   ← fenced code block
 ```
+
+### Special Case: report_intent
+
+The `report_intent` tool displays as `💡 {intent}` and does not change on completion.
+Acts as clickable header for activity box collapse.
 
 ### Data Flow
 
@@ -328,16 +335,6 @@ The `renderMarkdownElement(element)` function in `markdown-renderer.ts`:
 - Reads `textContent`, parses with marked, sanitizes with DOMPurify
 - Sets `innerHTML` with rendered HTML
 - Preserves `.streaming-cursor` class if present
-
-### Icon Legend
-
-| Icon | Meaning |
-|------|---------|
-| 🔧 | Tool running |
-| ✓ | Tool succeeded |
-| ✗ | Tool failed |
-| 💡 | Intent |
-| 📦 | Compaction |
 
 ## auto-collapse
 

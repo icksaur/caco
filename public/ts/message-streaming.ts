@@ -244,15 +244,8 @@ function handleEvent(event: SessionEvent): void {
   const inner = innerInserter.getElement(eventType, outer, data);
   if (!inner) return;
   
-  // Insert event content into element (handles data storage internally)
+  // Insert event content into element (handles data storage and markdown rendering)
   insertEvent(event, inner);
-  
-  // Render markdown on assistant.message (complete)
-  if (eventType === 'assistant.message') {
-    if (window.renderMarkdownElement) {
-      window.renderMarkdownElement(inner);
-    }
-  }
   
   // Re-enable form on terminal events (streaming complete)
   if (isTerminalEvent(eventType)) {

@@ -291,7 +291,60 @@ Object { toolCallId: "toolu_01NpSHEd7DiuPV1g2D2pbHi3", success: true, result: {�
 
 ## tool output styles
 
-todo
+### Terminal Events with Markdown Rendering
+
+Terminal events are events that mark completion and trigger markdown rendering.
+The inserter calls `window.renderMarkdownElement(element)` for:
+
+| Event Type | Content Format | Markdown |
+|------------|----------------|----------|
+| `assistant.message` | Full response content | ✓ |
+| `tool.execution_complete` | `icon **name**` + input + output | ✓ |
+
+### Tool Display Format
+
+```
+🔧 **bash**           ← tool.execution_start
+`ls -la`              ← stored input (command/description)
+
+↓ becomes on completion ↓
+
+✓ **bash**            ← tool.execution_complete (success)
+`ls -la`              ← retrieved from element.dataset
+total 42              ← result.content
+drwxr-xr-x ...
+```
+
+### Data Flow
+
+1. `tool.execution_start` stores `toolName` and `toolInput` in `element.dataset`
+2. `tool.execution_complete` reads from `element.dataset` (not from event data)
+3. Markdown rendered after content is set
+
+### renderMarkdownElement
+
+The `renderMarkdownElement(element)` function in `markdown-renderer.ts`:
+- Takes the element directly (not a child `.markdown-content` wrapper)
+- Reads `textContent`, parses with marked, sanitizes with DOMPurify
+- Sets `innerHTML` with rendered HTML
+- Preserves `.streaming-cursor` class if present
+
+### Icon Legend
+
+| Icon | Meaning |
+|------|---------|
+| 🔧 | Tool running |
+| ✓ | Tool succeeded |
+| ✗ | Tool failed |
+| 💡 | Intent |
+| 📦 | Compaction |
+
+## auto-collapse
+
+When adding a new div, should collapse the previous div if it is of a certain class of events (or CSS class).
+This is the job of the event dispatch function.
+Collapsed divs must be toggleable.
+Can this be pure CSS?
 
 ## stream formats
 

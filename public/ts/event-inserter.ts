@@ -7,6 +7,13 @@
  * @remarks Unit test all changes - see tests/unit/event-inserter.test.ts
  */
 
+// Window type for markdown rendering (browser only)
+declare global {
+  interface Window {
+    renderMarkdownElement?: (element: Element) => void;
+  }
+}
+
 /**
  * Element interface for DOM manipulation
  * Subset of HTMLElement to allow testing without real DOM
@@ -65,7 +72,14 @@ function appendPath(p: string): EventInserterFn {
 const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   // User/assistant messages
   'user.message': setPath('content'),
-  'assistant.message': setPath('content'),
+  'assistant.message': (element, data) => {
+    const value = getByPath(data, 'content');
+    element.textContent = typeof value === 'string' ? value : '';
+    // Render markdown in browser (no-op in tests)
+    if (typeof window !== 'undefined' && window.renderMarkdownElement) {
+      window.renderMarkdownElement(element as unknown as Element);
+    }
+  },
   'assistant.message_delta': appendPath('deltaContent'),
   
   // Reasoning
@@ -109,6 +123,11 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
       if (error) content += `\n${error}`;
     }
     element.textContent = content;
+    
+    // Render markdown in browser (no-op in tests)
+    if (typeof window !== 'undefined' && window.renderMarkdownElement) {
+      window.renderMarkdownElement(element as unknown as Element);
+    }
   },
   
   'tool.execution_progress': (element, data) => {

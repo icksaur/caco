@@ -149,12 +149,11 @@ declare global {
  * Render markdown for a single element (for incremental streaming)
  * Unlike renderMarkdown(), this doesn't mark as processed and skips mermaid/hljs
  * for performance during streaming.
+ * 
+ * @param element - Element containing markdown text (uses element directly, not a child)
  */
 export function renderMarkdownElement(element: Element): void {
-  const contentDiv = element.querySelector('.markdown-content');
-  if (!contentDiv) return;
-  
-  const markdownText = contentDiv.textContent ?? '';
+  const markdownText = element.textContent ?? '';
   if (!markdownText.trim()) return;
   
   // Parse markdown
@@ -167,10 +166,10 @@ export function renderMarkdownElement(element: Element): void {
   });
   
   // Update content (keep streaming cursor if present)
-  const hadCursor = contentDiv.classList.contains('streaming-cursor');
-  contentDiv.innerHTML = html;
+  const hadCursor = element.classList.contains('streaming-cursor');
+  element.innerHTML = html;
   if (hadCursor) {
-    contentDiv.classList.add('streaming-cursor');
+    element.classList.add('streaming-cursor');
   }
 }
 

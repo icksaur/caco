@@ -69,5 +69,23 @@ export function extractToolTelemetry(eventData: ToolExecutionCompleteEvent): Too
  * Extract the tool name from event data (handles SDK field name variations)
  */
 export function extractToolName(eventData: ToolExecutionCompleteEvent): string {
-  return (eventData.toolName || eventData.name || 'tool') as string;
+  // Try standard fields first
+  if (eventData.toolName) return eventData.toolName as string;
+  if (eventData.name) return eventData.name as string;
+  
+  // Fallback: try to extract from result content
+  if (eventData.result?.content) {
+    try {
+      const parsed = JSON.parse(eventData.result.content);
+      if (parsed.textResultForLlm) {
+        // Extract first meaningful word from result
+        const match = parsed.textResultForLlm.match(/^(\w+)/);
+        if (match) return match[1];
+      }
+    } catch {
+      // Not JSON, ignore
+    }
+  }
+  
+  return 'tool';
 }

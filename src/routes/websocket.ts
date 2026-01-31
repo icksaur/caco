@@ -75,7 +75,7 @@ export interface ChatMessage {
 
 // Activity item for tool calls, intents, errors
 export interface ActivityItem {
-  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info' | 'reasoning' | 'reasoning-delta';
+  type: 'turn' | 'intent' | 'tool' | 'tool-result' | 'error' | 'info' | 'reasoning' | 'reasoning-delta' | 'header-update';
   text: string;
   details?: string;
 }

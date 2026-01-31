@@ -167,11 +167,16 @@ export function initViewState(): void {
   const els = getElements();
   
   // Detect initial state from DOM
+  let detectedState: ViewState;
   if (els.sessionView?.classList.contains('active')) {
-    currentState = 'sessions';
+    detectedState = 'sessions';
   } else if (els.newChat && !els.newChat.classList.contains('hidden')) {
-    currentState = 'newChat';
+    detectedState = 'newChat';
   } else {
-    currentState = 'chatting';
+    detectedState = 'chatting';
   }
+  
+  // Force proper state by calling setViewState to clean up any inconsistencies
+  currentState = detectedState === 'sessions' ? 'chatting' : 'sessions'; // Set to different state first
+  setViewState(detectedState); // Now properly transition to detected state
 }

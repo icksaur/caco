@@ -176,6 +176,7 @@ export async function dispatchMessage(
   // Generate message ID for the assistant response
   const messageId = `msg_${randomUUID()}`;
   let messageContent = '';
+  let reasoningContent = '';
   let hasStarted = false;
   
   try {
@@ -263,20 +264,27 @@ export async function dispatchMessage(
         }
         
         case 'assistant.reasoning_delta': {
-          // Streaming reasoning chunks - append to existing reasoning item
+          // Streaming reasoning chunks - accumulate and update header
           const delta = (eventData.deltaContent as string) || '';
           if (delta) {
-            onActivity({ type: 'reasoning-delta', text: delta });
+            reasoningContent += delta;
+            // Send accumulated reasoning to header (truncate for display)
+            const preview = reasoningContent.length > 100 
+              ? reasoningContent.substring(0, 100) + '...' 
+              : reasoningContent;
+            onActivity({ type: 'header-update', text: `🤔 ${preview}` });
           }
           break;
         }
         
         case 'assistant.reasoning': {
-          // Full reasoning text (fallback if no deltas)
-          const reasoning = (eventData.content as string) || '';
+          // Full reasoning text - add complete item to activity box
+          const reasoning = (eventData.content as string) || reasoningContent || '';
           if (reasoning) {
             onActivity({ type: 'reasoning', text: '🤔 Thinking', details: reasoning });
           }
+          // Reset accumulated reasoning
+          reasoningContent = '';
           break;
         }
         
@@ -285,7 +293,7 @@ export async function dispatchMessage(
           const args = eventData.arguments ? JSON.stringify(eventData.arguments) : undefined;
           onActivity({ 
             type: 'tool', 
-            text: `▶ ${toolName}`,
+            text: toolName,
             details: args ? `Arguments: ${args}` : undefined
           });
           break;
@@ -405,6 +413,34 @@ export async function dispatchMessage(
     dispatchComplete();
   }
 }
+
+/**
+ * POST /api/sessions/:sessionId/cancel - Cancel current streaming
+ */
+router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  
+  // Get the session and abort it
+  const session = sessionManager.getSession(sessionId);
+  if (session) {
+    try {
+      // SDK session has abort() method, but TypeScript types don't expose it
+      await (session as unknown as { abort: () => Promise<void> }).abort();
+      broadcastActivity(sessionId, { 
+        type: 'info', 
+        text: 'Streaming cancelled' 
+      });
+    } catch (error) {
+      console.error('Failed to abort session:', error);
+      broadcastActivity(sessionId, { 
+        type: 'error', 
+        text: 'Cancel failed' 
+      });
+    }
+  }
+  
+  res.json({ ok: true });
+});
 
 export default router;
 

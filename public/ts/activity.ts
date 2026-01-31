@@ -6,37 +6,64 @@ import type { ToolEventData } from './types.js';
 import { scrollToBottom } from './ui-utils.js';
 
 /**
- * Ensure pending response exists for activity items
- * Creates one if it doesn't exist (activity can arrive before first delta)
+ * Ensure an activity box exists for the current activity phase
+ * Creates a new activity-wrapper if the last one has been "closed" by chat content
  */
 function ensurePendingResponse(): Element | null {
-  let activityBox = document.querySelector('#pending-response .activity-box');
-  if (activityBox) return activityBox;
+  const pendingResponse = document.getElementById('pending-response');
   
-  // Create pending response bubble for activity
-  const chat = document.getElementById('chat');
-  if (!chat) return null;
+  // If no pending response at all, create initial bubble
+  if (!pendingResponse) {
+    const chat = document.getElementById('chat');
+    if (!chat) return null;
+    
+    const assistantDiv = document.createElement('div');
+    assistantDiv.className = 'message assistant pending';
+    assistantDiv.id = 'pending-response';
+    assistantDiv.setAttribute('data-markdown', '');
+    assistantDiv.setAttribute('data-message-id', `pending_${Date.now()}`);
+    
+    // Create first activity wrapper
+    const activityWrapper = createActivityWrapper();
+    assistantDiv.appendChild(activityWrapper);
+    
+    chat.appendChild(assistantDiv);
+    scrollToBottom();
+    
+    return activityWrapper.querySelector('.activity-box');
+  }
   
-  const assistantDiv = document.createElement('div');
-  assistantDiv.className = 'message assistant pending';
-  assistantDiv.id = 'pending-response';
-  assistantDiv.setAttribute('data-markdown', '');
-  assistantDiv.setAttribute('data-message-id', `pending_${Date.now()}`);
-  assistantDiv.innerHTML = `
-    <div class="activity-wrapper">
-      <div class="activity-header" onclick="toggleActivityBox(this)">
-        <span class="activity-icon">▼</span>
-        <span class="activity-label">Activity</span>
-        <span class="activity-count"></span>
-      </div>
-      <div class="activity-box"></div>
+  // Pending response exists - check if we need a new activity wrapper
+  // If the last element is markdown-content, we need a new activity block
+  const lastChild = pendingResponse.lastElementChild;
+  if (lastChild && (lastChild.classList.contains('markdown-content') || lastChild.classList.contains('outputs-container'))) {
+    // Append new activity wrapper after chat content
+    const activityWrapper = createActivityWrapper();
+    pendingResponse.appendChild(activityWrapper);
+    scrollToBottom();
+    return activityWrapper.querySelector('.activity-box');
+  }
+  
+  // Last element is already an activity-wrapper, reuse it
+  const activityBox = pendingResponse.querySelector('.activity-wrapper:last-child .activity-box');
+  return activityBox;
+}
+
+/**
+ * Create a new activity wrapper element
+ */
+function createActivityWrapper(): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'activity-wrapper';
+  wrapper.innerHTML = `
+    <div class="activity-header" onclick="toggleActivityBox(this)">
+      <span class="activity-icon">▼</span>
+      <span class="activity-label">Activity</span>
+      <span class="activity-count"></span>
     </div>
-    <div class="outputs-container"></div>
-    <div class="markdown-content streaming-cursor"></div>
+    <div class="activity-box"></div>
   `;
-  chat.appendChild(assistantDiv);
-  
-  return assistantDiv.querySelector('.activity-box');
+  return wrapper;
 }
 
 /**

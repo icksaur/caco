@@ -5,7 +5,7 @@
  * Unified message protocol: all messages (history and live) use same handler.
  */
 
-import { escapeHtml, scrollToBottom, isAutoScrollEnabled, enableAutoScroll } from './ui-utils.js';
+import { escapeHtml, scrollToBottom } from './ui-utils.js';
 import { addActivityItem } from './activity.js';
 import { setStreaming, isStreaming, getActiveSessionId, setActiveSession, isLoadingHistory, setLoadingHistory } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
@@ -240,7 +240,6 @@ function createMessage(msg: ChatMessage): void {
       appletSlug: msg.appletSlug,
     });
     
-    enableAutoScroll();
     scrollToBottom(true);
   } else {
     // Assistant message - could be complete (history) or streaming (live)
@@ -250,9 +249,23 @@ function createMessage(msg: ChatMessage): void {
       if (existingPending) {
         // Update the ID to match the server's message ID
         existingPending.setAttribute('data-message-id', msg.id);
+        
+        // If no markdown-content section exists yet, append one
+        if (!existingPending.querySelector('.markdown-content')) {
+          const outputsContainer = document.createElement('div');
+          outputsContainer.className = 'outputs-container';
+          existingPending.appendChild(outputsContainer);
+          
+          const markdownDiv = document.createElement('div');
+          markdownDiv.className = 'markdown-content streaming-cursor';
+          markdownDiv.textContent = '\u00A0'; // nbsp
+          existingPending.appendChild(markdownDiv);
+          scrollToBottom();
+        }
+        
         setStreaming(true);
       } else {
-        // Start streaming response
+        // Start streaming response (no activity yet)
         renderBubble({
           id: msg.id,
           role: 'assistant',
@@ -282,19 +295,14 @@ function createMessage(msg: ChatMessage): void {
  * Uses debounced markdown rendering for smooth incremental display
  */
 function appendContent(element: Element, delta: string): void {
-  const markdownDiv = element.querySelector('.markdown-content');
+  // Get LAST markdown-content section (in case there are multiple after interleaved activity)
+  const markdownDivs = element.querySelectorAll('.markdown-content');
+  const markdownDiv = markdownDivs[markdownDivs.length - 1];
+  
   if (markdownDiv) {
     // Accumulate raw content (don't read textContent - it gets replaced by innerHTML)
     streamingRawContent += delta;
     const currentLength = streamingRawContent.length;
-
-    // Collapse activity box after first content
-    const wrapper = element.querySelector('.activity-wrapper');
-    if (wrapper && !wrapper.classList.contains('collapsed')) {
-      wrapper.classList.add('collapsed');
-      const icon = wrapper.querySelector('.activity-icon');
-      if (icon) icon.textContent = '▶';
-    }
 
     // Render incrementally when we have enough new content
     const charsSinceLastRender = currentLength - lastRenderLength;
@@ -387,7 +395,6 @@ export function addUserBubble(message: string, hasImage: boolean): HTMLElement {
     hasImage,
   });
   
-  enableAutoScroll();
   scrollToBottom(true);
   
   // Render pending assistant bubble and return it
@@ -502,14 +509,21 @@ export async function streamResponse(prompt: string, model: string, imageData: s
  * Stop streaming response
  */
 export function stopStreaming(): void {
-  // With WebSocket, we just mark the UI as stopped
-  // TODO: Send cancel signal to server if needed
+  // Send cancel signal to server
+  const sessionId = getActiveSessionId();
+  if (sessionId) {
+    fetch(`/api/sessions/${sessionId}/cancel`, {
+      method: 'POST',
+    }).catch(err => console.error('Failed to cancel:', err));
+  }
+  
+  // Mark UI as stopped
   setStreaming(false);
   
   // Add visual feedback
   addActivityItem('info', 'Stopped by user');
   
-  // Mark all response divs as stopped (multi-turn creates multiple)
+  // Mark all response divs as stopped
   const pending = document.getElementById('pending-response');
   if (pending) {
     pending.querySelectorAll('.markdown-content').forEach(div => {
@@ -543,20 +557,16 @@ async function finishPendingResponse(): Promise<void> {
     }
     
     // Check if auto-scroll is still enabled (user didn't scroll up)
-    const shouldScroll = isAutoScrollEnabled();
-    
     // Render markdown (may not have been triggered if no assistant.message event)
     pending.dataset.markdownProcessed = 'false';
     if (typeof window.renderMarkdown === 'function') {
       await window.renderMarkdown();
     }
     
-    // Scroll after markdown render if auto-scroll still enabled
-    if (shouldScroll) {
-      requestAnimationFrame(() => {
-        scrollToBottom(true);
-      });
-    }
+    // Scroll after markdown render
+    requestAnimationFrame(() => {
+      scrollToBottom();
+    });
   }
   
   // Re-enable form

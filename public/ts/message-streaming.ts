@@ -240,6 +240,12 @@ function handleEvent(event: SessionEvent): void {
   const eventType = event.type;
   const data = event.data || {};
   
+  // Re-enable form on terminal events (streaming complete)
+  // Check BEFORE outer/inner logic since terminal events may not have display elements
+  if (isTerminalEvent(eventType)) {
+    setFormEnabled(true);
+  }
+  
   // Get outer div
   const outer = outerInserter.getElement(eventType, chat);
   if (!outer) return;
@@ -251,11 +257,6 @@ function handleEvent(event: SessionEvent): void {
   
   // Insert event content into element (handles data storage and markdown rendering)
   insertEvent(event, inner);
-  
-  // Re-enable form on terminal events (streaming complete)
-  if (isTerminalEvent(eventType)) {
-    setFormEnabled(true);
-  }
   
   scrollToBottom();
 }

@@ -123,17 +123,17 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     const input = element.dataset.toolInput || '';
     const success = data.success as boolean;
     const result = getByPath(data, 'result.content') as string | undefined;
-    const icon = success ? '✓' : '✗';
     
-    // Build: icon name + input + output
-    let content = `${icon} **${name}**`;
-    if (input) content += `\n\`${input}\``;
+    // Build: **name** + code block with input + output
+    let content = `**${name}**\n\`\`\`${name}\n`;
+    if (input) content += `${input}\n`;
     if (success && result) {
-      content += `\n${result}`;
+      content += result;
     } else if (!success) {
       const error = data.error as string | undefined;
-      if (error) content += `\n${error}`;
+      if (error) content += error;
     }
+    content += '\n```';
     element.textContent = content;
     
     // Render markdown in browser (no-op in tests)

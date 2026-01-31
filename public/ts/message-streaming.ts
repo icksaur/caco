@@ -278,14 +278,17 @@ function registerWsHandlers(): void {
  */
 export function setFormEnabled(enabled: boolean): void {
   const form = document.getElementById('chatForm');
+  const cursor = document.getElementById('workingCursor');
   if (!form) return;
   
   if (enabled) {
     form.classList.remove('streaming');
+    cursor?.classList.add('hidden');
     const input = form.querySelector('textarea') as HTMLTextAreaElement;
     input?.focus();
   } else {
     form.classList.add('streaming');
+    cursor?.classList.remove('hidden');
   }
 }
 

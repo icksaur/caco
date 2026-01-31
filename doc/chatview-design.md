@@ -317,6 +317,10 @@ drwxr-xr-x ...
 ```                   ← fenced code block
 ```
 
+## cursor
+
+When copilot is working and we are waiting for streaming, we should show the colored cursor.
+
 ### Special Case: report_intent
 
 The `report_intent` tool displays as `💡 {intent}` and does not change on completion.

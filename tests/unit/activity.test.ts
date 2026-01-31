@@ -1,8 +1,8 @@
 /**
- * Tests for activity.ts - Tool argument/result formatting
+ * Tests for message-streaming.ts - Tool argument/result formatting
  */
 import { describe, it, expect } from 'vitest';
-import { formatToolArgs, formatToolResult } from '../../public/ts/activity.js';
+import { formatToolArgs, formatToolResult } from '../../public/ts/message-streaming.js';
 
 describe('formatToolArgs', () => {
   it('returns empty string for undefined/empty', () => {

@@ -28,11 +28,21 @@ describe('view-controller', () => {
     
     // Mock app-state to avoid import issues
     vi.doMock('../../public/ts/app-state.js', () => ({
-      clearActiveSession: vi.fn()
+      clearActiveSession: vi.fn(),
+      getCurrentCwd: vi.fn(() => '/test/path')
     }));
     
     vi.doMock('../../public/ts/ui-utils.js', () => ({
       scrollToBottom: vi.fn()
+    }));
+    
+    vi.doMock('../../public/ts/applet-runtime.js', () => ({
+      getActiveAppletSlug: vi.fn(() => null),
+      getActiveAppletLabel: vi.fn(() => null)
+    }));
+    
+    vi.doMock('../../public/ts/hostname-hash.js', () => ({
+      getServerHostname: vi.fn(() => 'test-host')
     }));
     
     viewController = await import('../../public/ts/view-controller.js');

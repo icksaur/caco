@@ -5,7 +5,7 @@
 import type { Preferences } from './types.js';
 import { applyModelPreference, loadModels } from './model-selector.js';
 import { initFromPreferences } from './app-state.js';
-import { setLoadingHistory } from './response-streaming.js';
+import { setLoadingHistory } from './message-streaming.js';
 import { onHistoryComplete } from './websocket.js';
 
 /**

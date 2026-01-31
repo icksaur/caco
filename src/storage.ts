@@ -336,3 +336,106 @@ export function detectLanguage(filepath: string): string {
   };
   return langMap[ext] || 'plaintext';
 }
+
+// ============================================================================
+// Activity Storage
+// ============================================================================
+
+export interface ActivityMetadata {
+  type: 'intent' | 'tool' | 'tool-result' | 'reasoning' | 'error' | 'info';
+  text: string;
+  details?: string;
+  createdAt: string;
+  sessionId: string;
+}
+
+export interface StoredActivity {
+  id: string;
+  metadata: ActivityMetadata;
+}
+
+/**
+ * Store activity item to disk
+ * Returns activityId for later retrieval
+ */
+export function storeActivity(
+  sessionId: string,
+  type: ActivityMetadata['type'],
+  text: string,
+  details?: string
+): string {
+  const activityId = `activity_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const sessionDir = join(STORAGE_ROOT, 'sessions', sessionId);
+  const activityDir = join(sessionDir, 'activity');
+  
+  ensureDir(activityDir);
+  
+  const metadata: ActivityMetadata = {
+    type,
+    text,
+    details,
+    createdAt: new Date().toISOString(),
+    sessionId
+  };
+  
+  const activityPath = join(activityDir, `${activityId}.json`);
+  writeFileSync(activityPath, JSON.stringify(metadata, null, 2), 'utf-8');
+  
+  return activityId;
+}
+
+/**
+ * Retrieve activity item by ID
+ */
+export function getActivity(activityId: string): StoredActivity | null {
+  // Find activity file across all sessions
+  const sessionsDir = join(STORAGE_ROOT, 'sessions');
+  if (!existsSync(sessionsDir)) return null;
+  
+  const sessionDirs = readdirSync(sessionsDir);
+  
+  for (const sessionId of sessionDirs) {
+    const activityPath = join(sessionsDir, sessionId, 'activity', `${activityId}.json`);
+    if (existsSync(activityPath)) {
+      try {
+        const content = readFileSync(activityPath, 'utf-8');
+        const metadata = JSON.parse(content) as ActivityMetadata;
+        return { id: activityId, metadata };
+      } catch (error) {
+        console.error(`Failed to read activity ${activityId}:`, error);
+        return null;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * List all activity items for a session
+ */
+export function listActivities(sessionId: string): StoredActivity[] {
+  const activityDir = join(STORAGE_ROOT, 'sessions', sessionId, 'activity');
+  
+  if (!existsSync(activityDir)) {
+    return [];
+  }
+  
+  const files = readdirSync(activityDir);
+  const activities: StoredActivity[] = [];
+  
+  for (const file of files) {
+    if (file.endsWith('.json')) {
+      const activityId = file.replace('.json', '');
+      const activity = getActivity(activityId);
+      if (activity) {
+        activities.push(activity);
+      }
+    }
+  }
+  
+  // Sort by creation time
+  return activities.sort((a, b) => 
+    a.metadata.createdAt.localeCompare(b.metadata.createdAt)
+  );
+}

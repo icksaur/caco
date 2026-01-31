@@ -71,6 +71,7 @@ export interface ChatMessage {
   hasImage?: boolean;
   // For assistant messages
   outputs?: string[];  // Output IDs
+  activityIds?: string[];  // Activity IDs
 }
 
 // Activity item for tool calls, intents, errors

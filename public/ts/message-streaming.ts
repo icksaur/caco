@@ -1,11 +1,17 @@
 /**
- * Response Streaming
+ * Message Streaming
  * 
- * Brutally simple message rendering:
- * - ensureLastDiv(className) - get or create the right type of div
- * - All messages (history and live) use same code path
- * - Ignore deltas, only render complete content
- * - Activity and chat-content are peer divs in #chat
+ * Unified message rendering for chat, activity, and special message types.
+ * Uses MessageInserter class to manage nested div structure:
+ * 
+ * #chat (parent)
+ *   └─ message div (outer: user/assistant/activity/agent)
+ *       └─ content div (inner: markdown-content, activity-item, etc.)
+ * 
+ * Pattern:
+ * 1. ensureOuter(type) - get/create outer message div
+ * 2. ensureInner(type) - get/create inner content div (for types that need it)
+ * 3. Insert content into inner div
  */
 
 import { escapeHtml, scrollToBottom } from './ui-utils.js';
@@ -23,68 +29,269 @@ declare global {
   interface Window {
     renderMarkdown?: () => void;
     renderMarkdownElement?: (element: Element) => void;
+    toggleActivityBox?: (el: HTMLElement) => void;
   }
 }
-
-/** Timeout for stop button appearance */
-let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
-
-/** Track if WS handlers are registered */
-let wsHandlersRegistered = false;
 
 // Re-export for external callers
 export { setLoadingHistory };
 
 // ============================================================================
-// Core: ensureLastDiv - the only DOM manipulation we need
+// Formatting Utilities
 // ============================================================================
 
+interface ToolResult {
+  content?: string | unknown;
+  [key: string]: unknown;
+}
+
 /**
- * Get last div in #chat if it has targetClass, otherwise create and append one.
- * This is the ONLY function that creates divs in #chat.
+ * Format tool arguments for display
  */
-function ensureLastDiv(targetClass: 'user' | 'activity' | 'chat-content'): HTMLElement {
-  const chat = document.getElementById('chat')!;
-  const lastDiv = chat.lastElementChild as HTMLElement | null;
+export function formatToolArgs(args: Record<string, unknown> | undefined): string {
+  if (!args) return '';
   
-  // For user messages, always create new (never reuse)
-  if (targetClass === 'user') {
-    const div = document.createElement('div');
-    div.className = 'message user';
-    chat.appendChild(div);
-    return div;
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value === 'string') {
+      const display = value.length > 80 ? value.substring(0, 80) + '...' : value;
+      parts.push(`${key}: ${display}`);
+    } else if (typeof value === 'object') {
+      parts.push(`${key}: ${JSON.stringify(value).substring(0, 60)}...`);
+    } else {
+      parts.push(`${key}: ${value}`);
+    }
+  }
+  return parts.join(', ');
+}
+
+/**
+ * Format tool result for display
+ */
+export function formatToolResult(result: ToolResult | undefined): string {
+  if (!result) return '';
+  
+  if (result.content) {
+    const content = typeof result.content === 'string' 
+      ? result.content 
+      : JSON.stringify(result.content);
+    return content.length > 500 ? content.substring(0, 500) + '...' : content;
   }
   
-  // For activity and chat-content, reuse if same class
-  if (lastDiv?.classList.contains(targetClass === 'activity' ? 'activity' : 'chat-content')) {
-    return lastDiv;
-  }
-  
-  // Create new div of the right type
-  const div = document.createElement('div');
-  
-  if (targetClass === 'activity') {
-    div.className = 'message activity';
-    div.innerHTML = `
+  return JSON.stringify(result).substring(0, 200);
+}
+
+// ============================================================================
+// MessageInserter - Core DOM manipulation
+// ============================================================================
+
+/** Outer message types */
+type OuterType = 'user' | 'assistant' | 'activity' | 'agent';
+
+/** Outer div configurations */
+const OUTER_CONFIG: Record<OuterType, { cssClass: string; template?: string }> = {
+  user: {
+    cssClass: 'message user'
+  },
+  assistant: {
+    cssClass: 'chat-content',
+    template: '<div class="outputs-container"></div><div class="markdown-content"></div>'
+  },
+  activity: {
+    cssClass: 'message activity',
+    template: `
       <div class="activity-header" onclick="window.toggleActivityBox?.(this)">
         <span class="activity-icon">▼</span>
         <span class="activity-label">Activity</span>
         <span class="activity-count"></span>
       </div>
       <div class="activity-box"></div>
-    `;
-  } else if (targetClass === 'chat-content') {
-    div.className = 'chat-content';
-    div.setAttribute('data-markdown', '');
-    div.innerHTML = `
-      <div class="outputs-container"></div>
-      <div class="markdown-content"></div>
-    `;
+    `
+  },
+  agent: {
+    cssClass: 'message user agent'  // Agent messages look like user but styled differently
+  }
+};
+
+/**
+ * MessageInserter - manages nested message structure in #chat
+ */
+export class MessageInserter {
+  private chat: HTMLElement;
+  
+  constructor() {
+    this.chat = document.getElementById('chat')!;
   }
   
-  chat.appendChild(div);
-  scrollToBottom();
-  return div;
+  /**
+   * Ensure outer message div exists for given type.
+   * - user/agent: always create new
+   * - assistant/activity: reuse if last div matches, else create new
+   */
+  ensureOuter(type: OuterType, forceNew: boolean = false): HTMLElement {
+    const config = OUTER_CONFIG[type];
+    const lastDiv = this.chat.lastElementChild as HTMLElement | null;
+    
+    // User and agent always create new div
+    if (type === 'user' || type === 'agent' || forceNew) {
+      return this.createOuter(type);
+    }
+    
+    // For assistant/activity, check if we can reuse
+    const mainClass = config.cssClass.split(' ')[0];
+    if (lastDiv?.classList.contains(mainClass)) {
+      return lastDiv;
+    }
+    
+    return this.createOuter(type);
+  }
+  
+  /**
+   * Create new outer div
+   */
+  private createOuter(type: OuterType): HTMLElement {
+    const config = OUTER_CONFIG[type];
+    const div = document.createElement('div');
+    div.className = config.cssClass;
+    
+    if (config.template) {
+      div.innerHTML = config.template;
+    }
+    
+    if (type === 'assistant') {
+      div.setAttribute('data-markdown', '');
+    }
+    
+    this.chat.appendChild(div);
+    scrollToBottom();
+    return div;
+  }
+  
+  /**
+   * Ensure inner content element exists within outer div.
+   * Returns the element where content should be inserted.
+   */
+  ensureInner(outer: HTMLElement, type: OuterType): HTMLElement {
+    switch (type) {
+      case 'assistant':
+        return outer.querySelector('.markdown-content') || outer;
+      case 'activity':
+        return outer.querySelector('.activity-box') || outer;
+      default:
+        return outer;
+    }
+  }
+  
+  /**
+   * Insert user message
+   */
+  insertUser(content: string, hasImage: boolean = false, source?: 'user' | 'applet' | 'agent', appletSlug?: string): HTMLElement {
+    const type: OuterType = source === 'agent' ? 'agent' : 'user';
+    const outer = this.ensureOuter(type);
+    
+    const imageIndicator = hasImage ? ' <span class="image-indicator">[img]</span>' : '';
+    outer.innerHTML = escapeHtml(content) + imageIndicator;
+    
+    if (source === 'applet') {
+      outer.classList.add('applet');
+      if (appletSlug) outer.dataset.appletSource = appletSlug;
+    }
+    
+    scrollToBottom();
+    return outer;
+  }
+  
+  /**
+   * Insert assistant content
+   */
+  insertAssistant(content: string, append: boolean = true): HTMLElement {
+    const outer = this.ensureOuter('assistant');
+    const inner = this.ensureInner(outer, 'assistant');
+    
+    if (append) {
+      const existing = inner.textContent || '';
+      if (existing) {
+        inner.textContent = existing + '\n\n' + content;
+      } else {
+        inner.textContent = content;
+      }
+    } else {
+      inner.textContent = content;
+    }
+    
+    scrollToBottom();
+    return outer;
+  }
+  
+  /**
+   * Insert activity item
+   */
+  insertActivity(itemType: string, text: string, details?: string): HTMLElement {
+    const outer = this.ensureOuter('activity');
+    const activityBox = this.ensureInner(outer, 'activity');
+    
+    // Create activity item element
+    const itemDiv = document.createElement('div');
+    itemDiv.className = `activity-item ${itemType}`;
+    
+    if (details) {
+      const summary = document.createElement('div');
+      summary.className = 'activity-summary';
+      summary.textContent = text;
+      summary.onclick = () => itemDiv.classList.toggle('expanded');
+      itemDiv.appendChild(summary);
+      
+      const detailsDiv = document.createElement('div');
+      detailsDiv.className = 'activity-details';
+      detailsDiv.textContent = details;
+      itemDiv.appendChild(detailsDiv);
+    } else {
+      itemDiv.textContent = text;
+    }
+    
+    activityBox.appendChild(itemDiv);
+    
+    // Update count
+    const count = activityBox.querySelectorAll('.activity-item').length;
+    const countSpan = outer.querySelector('.activity-count');
+    if (countSpan) countSpan.textContent = `(${count})`;
+    
+    // Scroll
+    (activityBox as HTMLElement).scrollTop = activityBox.scrollHeight;
+    scrollToBottom();
+    
+    return itemDiv;
+  }
+  
+  /**
+   * Get outputs container for current assistant message
+   */
+  getOutputsContainer(): HTMLElement | null {
+    const chatDivs = this.chat.querySelectorAll('.chat-content');
+    const lastChatDiv = chatDivs[chatDivs.length - 1];
+    return lastChatDiv?.querySelector('.outputs-container') || null;
+  }
+  
+  /**
+   * Store output IDs on current assistant message
+   */
+  storeOutputIds(outer: HTMLElement, outputs: string[]): void {
+    if (outputs.length > 0) {
+      const existing = outer.getAttribute('data-outputs') || '';
+      const combined = existing ? existing + ',' + outputs.join(',') : outputs.join(',');
+      outer.setAttribute('data-outputs', combined);
+    }
+  }
+}
+
+// Singleton inserter
+let inserter: MessageInserter | null = null;
+
+function getInserter(): MessageInserter {
+  if (!inserter) {
+    inserter = new MessageInserter();
+  }
+  return inserter;
 }
 
 // ============================================================================
@@ -92,32 +299,26 @@ function ensureLastDiv(targetClass: 'user' | 'activity' | 'chat-content'): HTMLE
 // ============================================================================
 
 /**
- * Handle incoming chat message (history or live, same code path)
+ * Handle incoming chat message (history or live)
  */
 function handleMessage(msg: ChatMessage): void {
   hideToast();
+  const ins = getInserter();
   
   if (msg.role === 'user') {
-    // User message - always create new div
-    const div = ensureLastDiv('user');
-    const imageIndicator = msg.hasImage ? ' <span class="image-indicator">[img]</span>' : '';
-    div.innerHTML = escapeHtml(msg.content || '') + imageIndicator;
+    const div = ins.insertUser(
+      msg.content || '',
+      msg.hasImage,
+      msg.source,
+      msg.appletSlug
+    );
     div.setAttribute('data-message-id', msg.id);
-    
-    // Source styling
-    if (msg.source === 'applet') {
-      div.classList.add('applet');
-      if (msg.appletSlug) div.dataset.appletSource = msg.appletSlug;
-    } else if (msg.source === 'agent') {
-      div.classList.add('agent');
-    }
     
   } else {
     // Assistant message
     
-    // Skip deltas - we only render complete content
+    // Skip deltas - we only render complete content (for now)
     if (msg.deltaContent) {
-      // But still check for completion signal!
       if (msg.status === 'complete') {
         setStreaming(false);
         setFormEnabled(true);
@@ -125,33 +326,20 @@ function handleMessage(msg: ChatMessage): void {
       return;
     }
     
-    // Complete content - append to chat-content div
+    // Complete content
     if (msg.content) {
-      const div = ensureLastDiv('chat-content');
-      const markdownDiv = div.querySelector('.markdown-content')!;
+      const outer = ins.insertAssistant(msg.content);
       
-      // Append content (don't replace - allows multiple assistant messages)
-      const existingContent = markdownDiv.textContent || '';
-      if (existingContent) {
-        markdownDiv.textContent = existingContent + '\n\n' + msg.content;
-      } else {
-        markdownDiv.textContent = msg.content;
+      if (msg.outputs) {
+        ins.storeOutputIds(outer, msg.outputs);
       }
       
-      // Store output IDs for restoration
-      if (msg.outputs && msg.outputs.length > 0) {
-        const existing = div.getAttribute('data-outputs') || '';
-        const combined = existing ? existing + ',' + msg.outputs.join(',') : msg.outputs.join(',');
-        div.setAttribute('data-outputs', combined);
-      }
-      
-      // Render markdown unless loading history (batch render after)
+      // Render markdown unless loading history
       if (!isLoadingHistory() && window.renderMarkdown) {
         window.renderMarkdown();
       }
     }
     
-    // Completion signal
     if (msg.status === 'complete') {
       setStreaming(false);
       setFormEnabled(true);
@@ -162,7 +350,7 @@ function handleMessage(msg: ChatMessage): void {
 }
 
 /**
- * Handle activity item (tool call, intent, error, etc)
+ * Handle activity item
  */
 function handleActivity(item: ActivityItem): void {
   // Handle reload signal
@@ -171,56 +359,14 @@ function handleActivity(item: ActivityItem): void {
     return;
   }
   
-  // Ensure we have an activity div
-  const activityDiv = ensureLastDiv('activity');
-  const activityBox = activityDiv.querySelector('.activity-box');
-  if (!activityBox) return;
-  
-  // Create activity item element
-  const itemDiv = document.createElement('div');
-  itemDiv.className = `activity-item ${item.type}`;
-  
-  if (item.details) {
-    // Expandable item with details
-    const summary = document.createElement('div');
-    summary.className = 'activity-summary';
-    summary.textContent = item.text;
-    summary.onclick = () => itemDiv.classList.toggle('expanded');
-    itemDiv.appendChild(summary);
-    
-    const detailsDiv = document.createElement('div');
-    detailsDiv.className = 'activity-details';
-    detailsDiv.textContent = item.details;
-    itemDiv.appendChild(detailsDiv);
-  } else {
-    itemDiv.textContent = item.text;
-  }
-  
-  activityBox.appendChild(itemDiv);
-  
-  // Update count in header
-  const count = activityBox.querySelectorAll('.activity-item').length;
-  const countSpan = activityDiv.querySelector('.activity-count');
-  if (countSpan) countSpan.textContent = `(${count})`;
-  
-  // Scroll activity box and chat
-  activityBox.scrollTop = activityBox.scrollHeight;
-  scrollToBottom();
+  getInserter().insertActivity(item.type, item.text, item.details);
 }
 
 /**
- * Handle output (display-only tool result)
+ * Handle output
  */
 function handleOutput(outputId: string): void {
-  // Find the last chat-content's outputs container
-  const chat = document.getElementById('chat');
-  if (!chat) return;
-  
-  // Look for most recent chat-content div
-  const chatDivs = chat.querySelectorAll('.chat-content');
-  const lastChatDiv = chatDivs[chatDivs.length - 1];
-  const container = lastChatDiv?.querySelector('.outputs-container');
-  
+  const container = getInserter().getOutputsContainer();
   if (container) {
     renderOutputById(outputId, container).catch(err => 
       console.error('Failed to render output:', err)
@@ -234,10 +380,8 @@ function handleOutput(outputId: string): void {
 function handleHistoryComplete(): void {
   setLoadingHistory(false);
   
-  // Batch render markdown for all history
   if (window.renderMarkdown) window.renderMarkdown();
   
-  // Restore outputs from data-outputs attributes
   restoreOutputsFromHistory().catch(err => 
     console.error('Failed to restore outputs:', err)
   );
@@ -248,6 +392,8 @@ function handleHistoryComplete(): void {
 // ============================================================================
 // WebSocket Registration
 // ============================================================================
+
+let wsHandlersRegistered = false;
 
 function registerWsHandlers(): void {
   if (wsHandlersRegistered) return;
@@ -263,6 +409,8 @@ function registerWsHandlers(): void {
 // Form Handling
 // ============================================================================
 
+let stopButtonTimeout: ReturnType<typeof setTimeout> | null = null;
+
 /**
  * Enable/disable form during streaming
  */
@@ -273,7 +421,6 @@ export function setFormEnabled(enabled: boolean): void {
   
   if (!form || !input || !submitBtn) return;
   
-  // Clear pending timeout
   if (stopButtonTimeout) {
     clearTimeout(stopButtonTimeout);
     stopButtonTimeout = null;
@@ -282,14 +429,12 @@ export function setFormEnabled(enabled: boolean): void {
   input.disabled = !enabled;
   
   if (enabled) {
-    // Restore to Send button
     submitBtn.disabled = false;
     submitBtn.textContent = 'Send';
     submitBtn.classList.remove('stop-btn');
     submitBtn.onclick = null;
     input.focus();
   } else {
-    // Briefly disable, then show Stop
     submitBtn.disabled = true;
     submitBtn.textContent = 'Send';
     submitBtn.classList.remove('stop-btn');
@@ -309,7 +454,7 @@ export function setFormEnabled(enabled: boolean): void {
 }
 
 /**
- * Stop streaming response
+ * Stop streaming
  */
 export function stopStreaming(): void {
   const sessionId = getActiveSessionId();
@@ -334,7 +479,6 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     
     let sessionId = getActiveSessionId();
     
-    // Create new session if needed
     if (newChat || !sessionId) {
       const res = await fetch('/api/sessions', {
         method: 'POST',
@@ -356,7 +500,6 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       setViewState('chatting');
     }
     
-    // Send message
     const res = await fetch(`/api/sessions/${sessionId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -373,8 +516,6 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       throw new Error(error.error || `HTTP ${res.status}`);
     }
     
-    // Response streams via WebSocket, handlers already registered
-    
   } catch (error) {
     console.error('Send message error:', error);
     setStreaming(false);
@@ -382,7 +523,6 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    // Restore message to input for retry
     const input = document.querySelector('#chatForm textarea') as HTMLTextAreaElement;
     if (input) {
       input.value = prompt;
@@ -393,7 +533,10 @@ export async function streamResponse(prompt: string, model: string, imageData: s
   }
 }
 
-// Helper to remove image from form
+// ============================================================================
+// Setup
+// ============================================================================
+
 function removeImage(): void {
   const imageData = document.getElementById('imageData') as HTMLInputElement;
   const imagePreview = document.getElementById('imagePreview');
@@ -407,8 +550,8 @@ function removeImage(): void {
 export function setupFormHandler(): void {
   registerWsHandlers();
   
-  // Expose toggleActivityBox globally for onclick
-  (window as unknown as { toggleActivityBox: (el: HTMLElement) => void }).toggleActivityBox = (header: HTMLElement) => {
+  // Expose toggleActivityBox globally
+  window.toggleActivityBox = (header: HTMLElement) => {
     const wrapper = header.closest('.message.activity');
     if (!wrapper) return;
     const box = wrapper.querySelector('.activity-box') as HTMLElement;
@@ -444,7 +587,6 @@ export function setupFormHandler(): void {
     
     setFormEnabled(false);
     
-    // Clear input
     input.value = '';
     resetTextareaHeight();
     removeImage();

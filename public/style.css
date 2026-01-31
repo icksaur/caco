@@ -505,6 +505,65 @@ main {
   /* Full width - no right margin */
 }
 
+/* Plain chat content divs (no bubble wrapper) */
+.chat-content {
+  padding: var(--space-lg);
+  line-height: 1.5;
+}
+
+.chat-content.streaming {
+  /* Streaming content - minimal styling */
+}
+
+/* Activity bubbles - peer to user/assistant messages */
+.message.activity {
+  background: var(--bg-raised);
+  border-left: 3px solid var(--color-info);
+}
+
+.message.activity .activity-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.message.activity .activity-header:hover {
+  background: #363636;
+  color: #a0a0a0;
+}
+
+.message.activity .activity-icon {
+  font-size: 0.65rem;
+  transition: transform var(--transition-fast) ease;
+}
+
+.message.activity .activity-box {
+  background: #252525;
+  padding: var(--space-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.message.activity .activity-box.collapsed {
+  display: none;
+}
+
+.message.activity .activity-icon.collapsed {
+  transform: rotate(0deg);
+}
+
+.message.activity .activity-icon:not(.collapsed) {
+  transform: rotate(90deg);
+}
+
 /* Applet-invoked messages (agent called by applet, not user) */
 .message.applet {
   background: var(--color-applet-bg);

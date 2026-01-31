@@ -64,6 +64,7 @@ export function getHostnameColors(): string[] {
  * Get the server hostname for use in titles etc.
  */
 export function getServerHostname(): string {
+  if (typeof window === 'undefined') return 'test';
   return window.SERVER_HOSTNAME || window.location.hostname;
 }
 

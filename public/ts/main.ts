@@ -7,8 +7,7 @@ import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences, waitForHistoryComplete } from './history.js';
 import { toggleSessionPanel, switchSession, deleteSession, showSessionManager, showNewChatUI } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
-import { toggleActivityBox } from './activity.js';
-import { setupFormHandler, stopStreaming } from './response-streaming.js';
+import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initViewState, setViewState, isViewState } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
@@ -40,7 +39,7 @@ declare global {
     deleteSession: typeof deleteSession;
     selectModel: typeof selectModel;
     loadModels: typeof loadModels;
-    toggleActivityBox: typeof toggleActivityBox;
+    toggleActivityBox?: (el: HTMLElement) => void;
     stopStreaming: typeof stopStreaming;
     toggleApplet: typeof toggleApplet;
     hideToast: typeof hideToast;
@@ -56,7 +55,7 @@ window.switchSession = switchSession;
 window.deleteSession = deleteSession;
 window.selectModel = selectModel;
 window.loadModels = loadModels;
-window.toggleActivityBox = toggleActivityBox;
+// toggleActivityBox is set by setupFormHandler()
 window.stopStreaming = stopStreaming;
 window.toggleApplet = toggleApplet;
 window.hideToast = hideToast;

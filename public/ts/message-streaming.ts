@@ -2,16 +2,15 @@
  * Message Streaming
  * 
  * Unified message rendering for chat, activity, and special message types.
- * Uses MessageInserter class to manage nested div structure:
+ * Uses ElementInserter class with two maps:
  * 
- * #chat (parent)
- *   └─ message div (outer: user/assistant/activity/agent)
- *       └─ content div (inner: markdown-content, activity-item, etc.)
+ * 1. EVENT_TO_OUTER - Maps event type → outer div class (5 types)
+ * 2. EVENT_TO_INNER - Maps event type → inner div class (content target)
  * 
  * Pattern:
- * 1. ensureOuter(type) - get/create outer message div
- * 2. ensureInner(type) - get/create inner content div (for types that need it)
- * 3. Insert content into inner div
+ *   outer = outerInserter.getElement(eventType, chat)
+ *   inner = innerInserter.getElement(eventType, outer)
+ *   inner.textContent = content  // REPLACE
  */
 
 import { escapeHtml, scrollToBottom } from './ui-utils.js';
@@ -121,276 +120,88 @@ const EVENT_TO_OUTER: Record<string, string> = {
   'caco.applet': 'applet-message',
 };
 
+/**
+ * Phase 2: Event Type → Inner Div Class Mapping
+ * Maps SDK event.type strings to inner content div classes
+ * 'omit' means don't render this event type
+ */
+const EVENT_TO_INNER: Record<string, string | null> = {
+  // User/assistant content
+  'user.message': 'user-text',
+  'assistant.message': 'assistant-text',
+  'assistant.message_delta': 'assistant-text',
+  
+  // Activity inner types
+  'assistant.turn_start': null,  // omit
+  'assistant.turn_end': null,    // omit
+  'assistant.intent': 'intent-text',
+  'assistant.reasoning': 'reasoning-text',
+  'assistant.reasoning_delta': 'reasoning-text',
+  'tool.execution_start': 'tool-text',
+  'tool.execution_progress': 'tool-text',
+  'tool.execution_partial_result': 'tool-text',
+  'tool.execution_complete': 'tool-text',
+  'session.start': null,         // omit
+  'session.idle': null,          // omit
+  'session.error': null,         // omit
+  'session.truncation': null,    // omit
+  'session.compaction_start': 'compact-text',
+  'session.compaction_complete': 'compact-text',
+  'session.usage_info': null,    // omit
+  'assistant.usage': null,       // omit
+  
+  // Caco synthetic types
+  'caco.agent': 'agent-text',
+  'caco.applet': 'applet-text',
+};
+
 /** Get outer class for event type, or undefined if not mapped */
 export function getOuterClass(eventType: string): string | undefined {
   return EVENT_TO_OUTER[eventType];
 }
 
-/** Legacy outer types for backward compatibility during migration */
-type OuterType = 'user' | 'assistant' | 'activity' | 'agent';
-
-/** Legacy outer div configurations (will be removed in Phase 2) */
-const OUTER_CONFIG: Record<OuterType, { cssClass: string; template?: string }> = {
-  user: {
-    cssClass: 'message user'
-  },
-  assistant: {
-    cssClass: 'chat-content',
-    template: '<div class="outputs-container"></div><div class="markdown-content"></div>'
-  },
-  activity: {
-    cssClass: 'message activity',
-    template: `
-      <div class="activity-header" onclick="window.toggleActivityBox?.(this)">
-        <span class="activity-icon">▼</span>
-        <span class="activity-label">Activity</span>
-        <span class="activity-count"></span>
-      </div>
-      <div class="activity-box"></div>
-    `
-  },
-  agent: {
-    cssClass: 'message user agent'  // Agent messages look like user but styled differently
-  }
-};
+/** Get inner class for event type, or null if omitted, undefined if not mapped */
+export function getInnerClass(eventType: string): string | null | undefined {
+  return EVENT_TO_INNER[eventType];
+}
 
 /**
- * MessageInserter - manages nested message structure in #chat
+ * Generic element inserter - works with any map and parent
+ * Reuses last child if it matches, otherwise creates new
  */
-export class MessageInserter {
-  private chat: HTMLElement;
+export class ElementInserter {
+  private map: Record<string, string | null>;
   
-  constructor() {
-    this.chat = document.getElementById('chat')!;
-  }
-  
-  // ==========================================================================
-  // Phase 1: New event-type-based API
-  // ==========================================================================
-  
-  /**
-   * Get or create outer div for given event type.
-   * Uses EVENT_TO_OUTER map to determine CSS class.
-   * 
-   * Reuse rules:
-   * - user-message, agent-message, applet-message: always create new
-   * - assistant-message, assistant-activity: reuse if last div matches
-   */
-  ensureOuterByEventType(eventType: string, forceNew: boolean = false): HTMLElement | null {
-    const cssClass = EVENT_TO_OUTER[eventType];
-    if (!cssClass) return null;
-    
-    const lastDiv = this.chat.lastElementChild as HTMLElement | null;
-    
-    // These types always create new div
-    const alwaysNew = ['user-message', 'agent-message', 'applet-message'];
-    if (forceNew || alwaysNew.includes(cssClass)) {
-      return this.createOuterByClass(cssClass);
-    }
-    
-    // For assistant-message and assistant-activity, reuse if matches
-    if (lastDiv?.classList.contains(cssClass)) {
-      return lastDiv;
-    }
-    
-    return this.createOuterByClass(cssClass);
+  constructor(map: Record<string, string | null>) {
+    this.map = map;
   }
   
   /**
-   * Create new outer div with given CSS class
+   * Get or create element for event type within parent.
+   * Returns null if event type maps to null (omit) or undefined (not in map).
+   * Reuses last child if it has the same class, otherwise creates new.
    */
-  private createOuterByClass(cssClass: string): HTMLElement {
+  getElement(eventType: string, parent: HTMLElement): HTMLElement | null {
+    const cssClass = this.map[eventType];
+    if (cssClass === null || cssClass === undefined) return null;
+    
+    // Reuse last child if it matches
+    const last = parent.lastElementChild as HTMLElement | null;
+    if (last?.classList.contains(cssClass)) {
+      return last;
+    }
+    
+    // Create new
     const div = document.createElement('div');
     div.className = cssClass;
-    this.chat.appendChild(div);
-    scrollToBottom();
+    parent.appendChild(div);
     return div;
-  }
-  
-  /**
-   * Append content to outer div (Phase 1: just append, will be messy with deltas)
-   */
-  appendContent(outer: HTMLElement, content: string): void {
-    // For now, just append raw content
-    // Phase 2 will add inner divs with replace logic
-    outer.textContent = (outer.textContent || '') + content;
-    scrollToBottom();
-  }
-  
-  // ==========================================================================
-  // Legacy API (will be removed in Phase 2)
-  // ==========================================================================
-  
-  /**
-   * Ensure outer message div exists for given type.
-   * - user/agent: always create new
-   * - assistant/activity: reuse if last div matches, else create new
-   */
-  ensureOuter(type: OuterType, forceNew: boolean = false): HTMLElement {
-    const config = OUTER_CONFIG[type];
-    const lastDiv = this.chat.lastElementChild as HTMLElement | null;
-    
-    // User and agent always create new div
-    if (type === 'user' || type === 'agent' || forceNew) {
-      return this.createOuter(type);
-    }
-    
-    // For assistant/activity, check if we can reuse
-    const mainClass = config.cssClass.split(' ')[0];
-    if (lastDiv?.classList.contains(mainClass)) {
-      return lastDiv;
-    }
-    
-    return this.createOuter(type);
-  }
-  
-  /**
-   * Create new outer div
-   */
-  private createOuter(type: OuterType): HTMLElement {
-    const config = OUTER_CONFIG[type];
-    const div = document.createElement('div');
-    div.className = config.cssClass;
-    
-    if (config.template) {
-      div.innerHTML = config.template;
-    }
-    
-    if (type === 'assistant') {
-      div.setAttribute('data-markdown', '');
-    }
-    
-    this.chat.appendChild(div);
-    scrollToBottom();
-    return div;
-  }
-  
-  /**
-   * Ensure inner content element exists within outer div.
-   * Returns the element where content should be inserted.
-   */
-  ensureInner(outer: HTMLElement, type: OuterType): HTMLElement {
-    switch (type) {
-      case 'assistant':
-        return outer.querySelector('.markdown-content') || outer;
-      case 'activity':
-        return outer.querySelector('.activity-box') || outer;
-      default:
-        return outer;
-    }
-  }
-  
-  /**
-   * Insert user message
-   */
-  insertUser(content: string, hasImage: boolean = false, source?: 'user' | 'applet' | 'agent', appletSlug?: string): HTMLElement {
-    const type: OuterType = source === 'agent' ? 'agent' : 'user';
-    const outer = this.ensureOuter(type);
-    
-    const imageIndicator = hasImage ? ' <span class="image-indicator">[img]</span>' : '';
-    outer.innerHTML = escapeHtml(content) + imageIndicator;
-    
-    if (source === 'applet') {
-      outer.classList.add('applet');
-      if (appletSlug) outer.dataset.appletSource = appletSlug;
-    }
-    
-    scrollToBottom();
-    return outer;
-  }
-  
-  /**
-   * Insert assistant content
-   */
-  insertAssistant(content: string, append: boolean = true): HTMLElement {
-    const outer = this.ensureOuter('assistant');
-    const inner = this.ensureInner(outer, 'assistant');
-    
-    if (append) {
-      const existing = inner.textContent || '';
-      if (existing) {
-        inner.textContent = existing + '\n\n' + content;
-      } else {
-        inner.textContent = content;
-      }
-    } else {
-      inner.textContent = content;
-    }
-    
-    scrollToBottom();
-    return outer;
-  }
-  
-  /**
-   * Insert activity item
-   */
-  insertActivity(itemType: string, text: string, details?: string): HTMLElement {
-    const outer = this.ensureOuter('activity');
-    const activityBox = this.ensureInner(outer, 'activity');
-    
-    // Create activity item element
-    const itemDiv = document.createElement('div');
-    itemDiv.className = `activity-item ${itemType}`;
-    
-    if (details) {
-      const summary = document.createElement('div');
-      summary.className = 'activity-summary';
-      summary.textContent = text;
-      summary.onclick = () => itemDiv.classList.toggle('expanded');
-      itemDiv.appendChild(summary);
-      
-      const detailsDiv = document.createElement('div');
-      detailsDiv.className = 'activity-details';
-      detailsDiv.textContent = details;
-      itemDiv.appendChild(detailsDiv);
-    } else {
-      itemDiv.textContent = text;
-    }
-    
-    activityBox.appendChild(itemDiv);
-    
-    // Update count
-    const count = activityBox.querySelectorAll('.activity-item').length;
-    const countSpan = outer.querySelector('.activity-count');
-    if (countSpan) countSpan.textContent = `(${count})`;
-    
-    // Scroll
-    (activityBox as HTMLElement).scrollTop = activityBox.scrollHeight;
-    scrollToBottom();
-    
-    return itemDiv;
-  }
-  
-  /**
-   * Get outputs container for current assistant message
-   */
-  getOutputsContainer(): HTMLElement | null {
-    const chatDivs = this.chat.querySelectorAll('.chat-content');
-    const lastChatDiv = chatDivs[chatDivs.length - 1];
-    return lastChatDiv?.querySelector('.outputs-container') || null;
-  }
-  
-  /**
-   * Store output IDs on current assistant message
-   */
-  storeOutputIds(outer: HTMLElement, outputs: string[]): void {
-    if (outputs.length > 0) {
-      const existing = outer.getAttribute('data-outputs') || '';
-      const combined = existing ? existing + ',' + outputs.join(',') : outputs.join(',');
-      outer.setAttribute('data-outputs', combined);
-    }
   }
 }
 
-// Singleton inserter
-let inserter: MessageInserter | null = null;
-
-function getInserter(): MessageInserter {
-  if (!inserter) {
-    inserter = new MessageInserter();
-  }
-  return inserter;
-}
+// Two inserters with their respective maps
+const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>);
+const innerInserter = new ElementInserter(EVENT_TO_INNER);
 
 // ============================================================================
 // Message Handlers
@@ -412,102 +223,59 @@ function messageToEventType(msg: ChatMessage): string {
 
 /**
  * Handle incoming chat message (history or live)
- * Phase 1: Uses new outer div classes via event type mapping
+ * Phase 2: Uses outer + inner inserters with REPLACE semantics
  */
 function handleMessage(msg: ChatMessage): void {
   hideToast();
-  const ins = getInserter();
+  const chat = document.getElementById('chat')!;
   const eventType = messageToEventType(msg);
   
-  // Try new Phase 1 rendering
-  const outer = ins.ensureOuterByEventType(eventType);
+  // Get outer div
+  const outer = outerInserter.getElement(eventType, chat);
+  if (!outer) return;
   
-  if (outer) {
-    // New Phase 1 path
-    const content = msg.content || msg.deltaContent || '';
-    
-    if (msg.role === 'user') {
-      // User messages: escape HTML, show image indicator
-      const imageIndicator = msg.hasImage ? ' [img]' : '';
-      outer.innerHTML = escapeHtml(content) + imageIndicator;
-      outer.setAttribute('data-message-id', msg.id);
-    } else {
-      // Assistant: append content (Phase 1 = messy deltas, Phase 2 = replace with inner)
-      if (msg.deltaContent) {
-        // Append delta
-        outer.textContent = (outer.textContent || '') + msg.deltaContent;
-      } else if (msg.content) {
-        // Full content - for now just set it (overwrites deltas if any came first)
-        outer.textContent = msg.content;
-        outer.setAttribute('data-markdown', '');
-        
-        if (msg.outputs) {
-          ins.storeOutputIds(outer, msg.outputs);
-        }
-      }
-      
-      // Render markdown when complete
-      if (msg.status === 'complete' && window.renderMarkdownElement) {
-        window.renderMarkdownElement(outer);
-      }
-    }
-    
-    if (msg.status === 'complete') {
-      setStreaming(false);
-      setFormEnabled(true);
-    }
-    
-    scrollToBottom();
-    return;
-  }
+  // Get inner div (null = omit this event type)
+  const inner = innerInserter.getElement(eventType, outer);
+  if (!inner) return;
   
-  // Fallback to legacy path (should not happen with complete map)
+  const content = msg.content || msg.deltaContent || '';
+  
   if (msg.role === 'user') {
-    const div = ins.insertUser(
-      msg.content || '',
-      msg.hasImage,
-      msg.source,
-      msg.appletSlug
-    );
-    div.setAttribute('data-message-id', msg.id);
-    
+    // User messages: escape HTML, show image indicator
+    const imageIndicator = msg.hasImage ? ' [img]' : '';
+    inner.innerHTML = escapeHtml(content) + imageIndicator;
+    outer.setAttribute('data-message-id', msg.id);
   } else {
-    // Assistant message
-    
-    // Skip deltas - we only render complete content (for now)
+    // Assistant: REPLACE content in inner div (deltas accumulate naturally)
     if (msg.deltaContent) {
-      if (msg.status === 'complete') {
-        setStreaming(false);
-        setFormEnabled(true);
-      }
-      return;
-    }
-    
-    // Complete content
-    if (msg.content) {
-      const outer = ins.insertAssistant(msg.content);
+      inner.textContent = (inner.textContent || '') + msg.deltaContent;
+    } else if (msg.content) {
+      inner.textContent = msg.content;
+      outer.setAttribute('data-markdown', '');
       
       if (msg.outputs) {
-        ins.storeOutputIds(outer, msg.outputs);
-      }
-      
-      // Render markdown unless loading history
-      if (!isLoadingHistory() && window.renderMarkdown) {
-        window.renderMarkdown();
+        const existing = outer.getAttribute('data-outputs') || '';
+        const combined = existing ? existing + ',' + msg.outputs.join(',') : msg.outputs.join(',');
+        outer.setAttribute('data-outputs', combined);
       }
     }
     
-    if (msg.status === 'complete') {
-      setStreaming(false);
-      setFormEnabled(true);
+    // Render markdown when complete
+    if (msg.status === 'complete' && window.renderMarkdownElement) {
+      window.renderMarkdownElement(inner);
     }
+  }
+  
+  if (msg.status === 'complete') {
+    setStreaming(false);
+    setFormEnabled(true);
   }
   
   scrollToBottom();
 }
 
 /**
- * Map ActivityItem type to SDK event type for Phase 1 rendering
+ * Map ActivityItem type to SDK event type
  */
 function activityToEventType(item: ActivityItem): string {
   switch (item.type) {
@@ -522,7 +290,7 @@ function activityToEventType(item: ActivityItem): string {
 
 /**
  * Handle activity item
- * Phase 1: Uses new assistant-activity class
+ * Phase 2: Uses outer + inner inserters
  */
 function handleActivity(item: ActivityItem): void {
   // Handle reload signal
@@ -531,36 +299,36 @@ function handleActivity(item: ActivityItem): void {
     return;
   }
   
-  const ins = getInserter();
+  const chat = document.getElementById('chat')!;
   const eventType = activityToEventType(item);
   
-  // Try new Phase 1 rendering
-  const outer = ins.ensureOuterByEventType(eventType);
+  // Get outer div
+  const outer = outerInserter.getElement(eventType, chat);
+  if (!outer) return;
   
-  if (outer) {
-    // Phase 1: just append activity text
-    const line = document.createElement('div');
-    line.className = 'activity-line';
-    line.textContent = item.text;
-    if (item.details) {
-      line.title = item.details;  // Show details on hover
-    }
-    outer.appendChild(line);
-    scrollToBottom();
-    return;
+  // Get inner div (null = omit this event type)
+  const inner = innerInserter.getElement(eventType, outer);
+  if (!inner) return;
+  
+  // REPLACE content in inner div
+  inner.textContent = item.text;
+  if (item.details) {
+    inner.title = item.details;
   }
   
-  // Fallback to legacy
-  ins.insertActivity(item.type, item.text, item.details);
+  scrollToBottom();
 }
 
 /**
  * Handle output
+ * TODO: Phase 5 - outputs need proper container
  */
 function handleOutput(outputId: string): void {
-  const container = getInserter().getOutputsContainer();
-  if (container) {
-    renderOutputById(outputId, container).catch(err => 
+  // Find last assistant-message as container for now
+  const chat = document.getElementById('chat');
+  const lastAssistant = chat?.querySelector('.assistant-message:last-of-type');
+  if (lastAssistant) {
+    renderOutputById(outputId, lastAssistant as HTMLElement).catch(err => 
       console.error('Failed to render output:', err)
     );
   }

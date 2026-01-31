@@ -2,27 +2,9 @@
 
 ## Requirements
 
-1. **Unified Rendering**: History and live streaming use identical code path (`handleMessage`)
-2. **Flat Structure**: Activity and chat content are peer divs in `#chat`, never nested
-3. **Simple Pattern**: `ensureLastDiv(targetClass)` - get or create the right type of div
-4. **Append-Only**: Messages append to last div of matching class, or create new
+1. **unified rendering**: all streaming message have identical code
+2. **data driven**: map from type string to target class
 
-## Current State
-
-**Working:**
-- ✅ `ensureLastDiv('user' | 'activity' | 'chat-content')` - single DOM manipulation function
-- ✅ User messages always create new div
-- ✅ Activity items append to last `.activity` div or create new
-- ✅ Chat content appends to last `.chat-content` div or create new
-- ✅ `msg.status === 'complete'` restores Send button
-- ✅ History and streaming use same `handleMessage()` function
-
-**Temporary Simplifications:**
-- ⚠️ Deltas skipped (`msg.deltaContent` ignored, only `msg.content` rendered)
-- ⚠️ No streaming cursor/animation during response
-- ⚠️ Activity not persisted to disk (renders live only)
-
-## Current DOM Structure
 
 ### Chat Div Classes
 
@@ -91,7 +73,7 @@
 | `caco.agent` | `agent-text` |
 | `caco.applet` | `applet-text` |
 
-## TODO
+## WORK
 
 ### Phase 1: new "outer" divs in id="chat" div
 create five named CSS types as above with specified colors, no funny styles
@@ -108,6 +90,7 @@ use phase2 "inner" MessageInserter with map to get child
 REPLACE content (free collapse)
 
 ### Phase 3: make it pretty
+re-implement debounced rendering for all
 
 ### Phase 4: Activity Persistence
 Store activity items to disk like outputs (done?)

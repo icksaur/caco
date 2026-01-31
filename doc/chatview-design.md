@@ -209,84 +209,83 @@ When an incoming type has a replacer in the map, instead of the LAST child, it s
 
 We can fully unit test ElementInserter.  The innerInserter can take the new map as defined above.
 
-## content extraction
+## content insertion
 
-Content extraction is data-driven using `content-extractor.ts`.
+Content insertion is handled by `event-inserter.ts`.
 
-### Design Pattern: Hybrid Extractors
+### Design Pattern: Event Inserter
 
-Uses a map of `eventType → ContentExtractor` where:
+Uses a map of `eventType → EventInserterFn` where:
 ```typescript
-type ContentExtractor = (data: Record<string, unknown>, existing: string) => string;
+type EventInserterFn = (element: InserterElement, data: Record<string, unknown>) => void;
 ```
 
-The `existing` parameter enables append mode for delta events.
+The inserter directly mutates the element - sets `textContent` and stores `dataset` values.
 
 ### Helper Functions
 
-- `path(p)` - Simple property path extraction (replace mode)
+- `setPath(p)` - Simple property path extraction (replace mode)
 - `appendPath(p)` - Append delta to existing content
-- Custom functions for complex formatting
+- Custom functions for complex formatting and data storage
 
-### Extractor Map
+### Inserter Map
 
 ```typescript
-const CONTENT_EXTRACTORS: Record<string, ContentExtractor> = {
+const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   // Replace mode - simple paths
-  'user.message': path('content'),
-  'assistant.message': path('content'),
-  'assistant.reasoning': path('content'),
+  'user.message': setPath('content'),
+  'assistant.message': setPath('content'),
+  'assistant.reasoning': setPath('content'),
   
   // Append mode - delta accumulation
   'assistant.message_delta': appendPath('deltaContent'),
   'assistant.reasoning_delta': appendPath('deltaContent'),
   
-  // Custom formatting
-  'tool.execution_start': (d) => `🔧 ${d.toolName}`,
-  'tool.execution_complete': (d) => d.success ? `✓ ${name}` : `✗ ${name}: ${error}`,
-  'assistant.intent': (d) => `💡 ${d.intent}`,
+  // Custom formatting with data storage
+  'tool.execution_start': (el, d) => {
+    el.dataset.toolName = d.toolName;
+    el.dataset.toolInput = d.arguments?.command;
+    el.textContent = `🔧 **${name}**\n\`${input}\``;
+  },
+  'tool.execution_complete': (el, d) => {
+    const name = el.dataset.toolName;  // read stored value
+    el.textContent = d.success ? `✓ **${name}**` : `✗ **${name}**: ${error}`;
+  },
+  'assistant.intent': (el, d) => { el.textContent = `💡 ${d.intent}`; },
 };
 ```
-
-### Nested Property Paths
-
-Supports dot notation for nested properties:
-- `result.content` → `data.result.content`
 
 ### Usage in handleEvent
 
 ```typescript
-const content = extractContent(eventType, data, inner.textContent || '');
-if (content !== null) {
-  inner.textContent = content;
-}
+insertEvent(event, inner);  // event = { type, data }
 ```
 
-Returns `null` for unmapped events (no content to set).
+Returns `true` if event was handled, `false` if no inserter exists.
 
 ### Benefits
 
-1. **Testable** - Pure function, no DOM
-2. **Extensible** - Add new event types easily
-3. **Consistent** - All content formatting in one place
-4. **Flexible** - Custom functions for complex cases
+1. **Encapsulated** - All DOM manipulation in one place
+2. **Testable** - Mock element interface, no real DOM needed
+3. **Extensible** - Add new event types easily
+4. **Data storage** - Tool events store/retrieve from `element.dataset`
 
 ## tool event example
 
 ```
 [handleEvent] tool.execution_start 
-Object { toolCallId: "toolu_01SJ59wiWrSShZd2dduiJ3Fd", toolName: "report_intent", arguments: {…} }
-arguments: Object { intent: "Testing session.idle handling" }
-toolCallId: "toolu_01SJ59wiWrSShZd2dduiJ3Fd"
-toolName: "report_intent"
+Object { toolCallId: "toolu_01NpSHEd7DiuPV1g2D2pbHi3", toolName: "bash", arguments: {…} }
+arguments: Object { command: 'cat ~/copilot-web/server.pid && echo ""', description: "Get current server PID" }
+​toolCallId: "toolu_01NpSHEd7DiuPV1g2D2pbHi3"
+​toolName: "bash"
 ​<prototype>: Object { … }
-message-streaming.ts:231:11
+
 [handleEvent] tool.execution_complete 
-Object { toolCallId: "toolu_01SJ59wiWrSShZd2dduiJ3Fd", success: true, result: {…}, toolTelemetry: {} }
-​result: Object { content: "Intent logged", detailedContent: "Testing session.idle handling" }
+Object { toolCallId: "toolu_01NpSHEd7DiuPV1g2D2pbHi3", success: true, result: {…}, toolTelemetry: {…} }
+​result: Object { content: "1273570\n<exited with exit code 0>", detailedContent: "1273570\n<exited with exit code 0>" }
 ​success: true
-​toolCallId: "toolu_01SJ59wiWrSShZd2dduiJ3Fd"
-​toolTelemetry: Object {  }
+​toolCallId: "toolu_01NpSHEd7DiuPV1g2D2pbHi3"
+​toolTelemetry: Object { properties: {…}, metrics: {…} }
 ​<prototype>: Object { … }
 ```
 

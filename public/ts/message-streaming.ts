@@ -22,7 +22,7 @@ import { showToast, hideToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 import { resetTextareaHeight } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
-import { extractContent } from './content-extractor.js';
+import { insertEvent } from './event-inserter.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -244,11 +244,8 @@ function handleEvent(event: SessionEvent): void {
   const inner = innerInserter.getElement(eventType, outer, data);
   if (!inner) return;
   
-  // Extract and set content using data-driven extractor
-  const content = extractContent(eventType, data, inner.textContent || '');
-  if (content !== null) {
-    inner.textContent = content;
-  }
+  // Insert event content into element (handles data storage internally)
+  insertEvent(event, inner);
   
   // Render markdown on assistant.message (complete)
   if (eventType === 'assistant.message') {

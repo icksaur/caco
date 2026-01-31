@@ -1240,6 +1240,10 @@ main {
 }
 
 /* Streaming cursor */
+.streaming-cursor.hidden {
+  display: none;
+}
+
 .streaming-cursor::after {
   content: '';
   animation: blink 0.7s infinite;

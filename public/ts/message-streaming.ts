@@ -21,6 +21,8 @@ import { onEvent, type SessionEvent } from './websocket.js';
 import { showToast, hideToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 import { resetTextareaHeight } from './multiline-input.js';
+import { isTerminalEvent } from './terminal-events.js';
+import { extractContent } from './content-extractor.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -97,6 +99,24 @@ const EVENT_TO_INNER: Record<string, string | null> = {
   'caco.info': null,  // omit - internal signal
 };
 
+/**
+ * Keyed events - events that use data-key for find-and-replace
+ * Maps event type → property name to extract key value from event.data
+ */
+const EVENT_KEY_PROPERTY: Record<string, string> = {
+  // Tool events use toolCallId
+  'tool.execution_start': 'toolCallId',
+  'tool.execution_progress': 'toolCallId',
+  'tool.execution_partial_result': 'toolCallId',
+  'tool.execution_complete': 'toolCallId',
+  // Reasoning events use reasoningId
+  'assistant.reasoning': 'reasoningId',
+  'assistant.reasoning_delta': 'reasoningId',
+  // Message deltas use messageId
+  'assistant.message': 'messageId',
+  'assistant.message_delta': 'messageId',
+};
+
 /** Get outer class for event type, or undefined if not mapped */
 export function getOuterClass(eventType: string): string | undefined {
   return EVENT_TO_OUTER[eventType];
@@ -109,29 +129,55 @@ export function getInnerClass(eventType: string): string | null | undefined {
 
 /**
  * Generic element inserter - works with any map and parent
- * Reuses last child if it matches, otherwise creates new
+ * Reuses last child if it matches, otherwise creates new.
+ * 
+ * With keyProperty map: uses data-key attribute for find-and-replace
+ * (e.g., multiple tool calls within same activity box)
+ * 
+ * @remarks Unit test all changes - see tests/unit/element-inserter.test.ts
  */
 export class ElementInserter {
   private map: Record<string, string | null>;
   private name: string;
   private debug: (msg: string) => void;
+  private keyProperty: Record<string, string>;
   
-  constructor(map: Record<string, string | null>, name: string, debug?: (msg: string) => void) {
+  constructor(
+    map: Record<string, string | null>, 
+    name: string, 
+    debug?: (msg: string) => void,
+    keyProperty?: Record<string, string>
+  ) {
     this.map = map;
     this.name = name;
     this.debug = debug || (() => {});
+    this.keyProperty = keyProperty || {};
   }
   
   /**
    * Get or create element for event type within parent.
    * Returns null if event type maps to null (omit) or undefined (not in map).
-   * Reuses last child if it has the same class, otherwise creates new.
+   * 
+   * If event type has a keyProperty, uses data-key attribute for lookup:
+   * - Finds existing child with matching data-key, OR
+   * - Creates new child with data-key set
+   * 
+   * Otherwise uses simple last-child matching.
    */
-  getElement(eventType: string, parent: HTMLElement): HTMLElement | null {
+  getElement(eventType: string, parent: HTMLElement, data?: Record<string, unknown>): HTMLElement | null {
     const cssClass = this.map[eventType];
     if (cssClass === null || cssClass === undefined) return null;
     
-    // Reuse last child if it matches
+    // Check if this event type uses keyed lookup
+    const keyProp = this.keyProperty[eventType];
+    if (keyProp && data) {
+      const keyValue = data[keyProp];
+      if (typeof keyValue === 'string' && keyValue) {
+        return this.getOrCreateKeyed(cssClass, parent, keyValue, eventType);
+      }
+    }
+    
+    // Default: reuse last child if it matches
     const last = parent.lastElementChild as HTMLElement | null;
     if (last?.classList.contains(cssClass)) {
       this.debug(`[INSERTER] "${this.name}" reuse existing div for type "${eventType}"`);
@@ -145,14 +191,34 @@ export class ElementInserter {
     this.debug(`[INSERTER] "${this.name}" create new div for type "${eventType}"`);
     return div;
   }
+  
+  /**
+   * Get or create element by data-key attribute
+   */
+  private getOrCreateKeyed(cssClass: string, parent: HTMLElement, keyValue: string, eventType: string): HTMLElement {
+    // Search for existing child with matching data-key
+    const existing = parent.querySelector(`[data-key="${keyValue}"]`) as HTMLElement | null;
+    if (existing) {
+      this.debug(`[INSERTER] "${this.name}" found keyed div for "${eventType}" key="${keyValue}"`);
+      return existing;
+    }
+    
+    // Create new with data-key
+    const div = document.createElement('div');
+    div.className = cssClass;
+    div.dataset.key = keyValue;
+    parent.appendChild(div);
+    this.debug(`[INSERTER] "${this.name}" create keyed div for "${eventType}" key="${keyValue}"`);
+    return div;
+  }
 }
 
 // Debug logger - set to console.log to enable
 const inserterDebug: (msg: string) => void = console.log;
 
 // Two inserters with their respective maps
-const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>, 'outer', inserterDebug);
-const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', inserterDebug);
+const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>, 'outer');//inserterDebug);
+const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', undefined, EVENT_KEY_PROPERTY);
 
 // ============================================================================
 // Event Handlers
@@ -174,19 +240,13 @@ function handleEvent(event: SessionEvent): void {
   if (!outer) return;
   
   // Get inner div (null = omit this event type)
-  const inner = innerInserter.getElement(eventType, outer);
+  // Pass data for keyed lookup (tool calls, reasoning, messages)
+  const inner = innerInserter.getElement(eventType, outer, data);
   if (!inner) return;
   
-  // Extract content from event.data
-  const content = data.content as string | undefined;
-  const deltaContent = data.deltaContent as string | undefined;
-  
-  // Set content based on what's present
-  if (deltaContent) {
-    // Streaming: append delta
-    inner.textContent = (inner.textContent || '') + deltaContent;
-  } else if (content) {
-    // Complete message: replace
+  // Extract and set content using data-driven extractor
+  const content = extractContent(eventType, data, inner.textContent || '');
+  if (content !== null) {
     inner.textContent = content;
   }
   
@@ -197,8 +257,8 @@ function handleEvent(event: SessionEvent): void {
     }
   }
   
-  // Re-enable form on session.idle
-  if (eventType === 'session.idle') {
+  // Re-enable form on terminal events (streaming complete)
+  if (isTerminalEvent(eventType)) {
     setFormEnabled(true);
   }
   

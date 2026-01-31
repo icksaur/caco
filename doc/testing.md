@@ -10,10 +10,10 @@
 | `src/session-parsing.ts` | 20 | ✅ Covered |
 | `public/ts/ui-utils.ts` | 6 | ✅ Covered |
 | `public/ts/state.ts` | 6 | ✅ Covered |
-| `public/ts/element-inserter` | 5 | ✅ Covered |
-| `public/ts/sse-parser.ts` | 22 | ✅ Covered |
+| `public/ts/element-inserter` | 10 | ✅ Covered |
+| `public/ts/terminal-events.ts` | 7 | ✅ Covered |
 | `public/ts/markdown-builders.ts` | 6 | ✅ Covered |
-| **Total** | **110** | **Focused regression tests** |
+| **Total** | **96** | **Focused regression tests** |
 
 ## Refactoring Plan: Extract Pure Logic
 
@@ -69,13 +69,13 @@ npm run test:coverage # With coverage report
 
 ```
 tests/unit/
-  element-inserter.test.ts # ElementInserter class
-  image-utils.test.ts     # Image data URL parsing
+  element-inserter.test.ts  # ElementInserter class
+  image-utils.test.ts       # Image data URL parsing
   markdown-builders.test.ts # Terminal/code markdown building
-  oembed.test.ts          # URL detection, provider matching
-  output-cache.test.ts    # Store/get/TTL, language detection
-  session-parsing.test.ts # Session start/workspace.yaml parsing
-  sse-parser.test.ts      # SSE buffer parsing
-  state.test.ts           # Client state management
-  ui-utils.test.ts        # escapeHtml, formatAge
+  oembed.test.ts            # URL detection, provider matching
+  output-cache.test.ts      # Store/get/TTL, language detection
+  session-parsing.test.ts   # Session start/workspace.yaml parsing
+  terminal-events.test.ts   # Terminal event detection
+  state.test.ts             # Client state management
+  ui-utils.test.ts          # escapeHtml, formatAge
 ```

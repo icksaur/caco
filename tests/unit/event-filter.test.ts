@@ -106,4 +106,25 @@ describe('shouldFilter', () => {
       })).toBe(false);
     });
   });
+
+  describe('returns false (keep event) - passthrough types', () => {
+    it('session.idle always passes through even with no data', () => {
+      expect(shouldFilter({ type: 'session.idle' })).toBe(false);
+    });
+
+    it('session.idle passes through with empty data', () => {
+      expect(shouldFilter({ type: 'session.idle', data: {} })).toBe(false);
+    });
+
+    it('session.error always passes through even with no data', () => {
+      expect(shouldFilter({ type: 'session.error' })).toBe(false);
+    });
+
+    it('session.error passes through with message', () => {
+      expect(shouldFilter({ 
+        type: 'session.error', 
+        data: { message: 'Something failed' } 
+      })).toBe(false);
+    });
+  });
 });

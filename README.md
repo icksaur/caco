@@ -18,7 +18,7 @@ A local web interface for Copilot that the agent can extend at runtime. The agen
 
 ```
 Browser (localhost:3000)
-    ↓ fetch / SSE
+    ↓ WebSocket + fetch
 Express Server
     ↓ JSON-RPC
 Copilot SDK → Copilot CLI → AI Models
@@ -26,7 +26,7 @@ Copilot SDK → Copilot CLI → AI Models
 
 **Frontend:** TypeScript, bundled with esbuild  
 **Backend:** Node.js + Express + Copilot SDK  
-**Streaming:** Server-Sent Events (SSE)
+**Streaming:** WebSocket (real-time events)
 
 ## Requirements
 
@@ -78,7 +78,7 @@ See [doc/API.md](doc/API.md) for complete API reference including:
 - HTTP endpoints (sessions, streaming, applets, files)
 - MCP tools (set_applet_content, save_applet, display tools)
 - JavaScript APIs for applet code (setAppletState, loadApplet, navigation)
-- SSE events for response streaming
+- WebSocket events for real-time streaming
 - File storage structure
 
 ## License

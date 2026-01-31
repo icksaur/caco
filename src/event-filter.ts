@@ -3,6 +3,7 @@
  * 
  * Filters SDK events before broadcasting to clients.
  * Uses a whitelist approach - events are allowed if ANY listed property is present and non-empty.
+ * Certain event types always pass through (e.g., session lifecycle events).
  * See doc/chatview-design.md for the property whitelist table.
  */
 
@@ -10,6 +11,15 @@ export interface FilterableEvent {
   type: string;
   data?: Record<string, unknown>;
 }
+
+/**
+ * Event types that always pass through regardless of content.
+ * These are lifecycle/signal events the frontend needs.
+ */
+const PASSTHROUGH_TYPES = new Set([
+  'session.idle',     // Signals streaming complete, re-enables form
+  'session.error',    // Error messages
+]);
 
 /**
  * Whitelist of properties that indicate an event has displayable content.
@@ -40,10 +50,18 @@ function isNonEmpty(value: unknown): boolean {
 /**
  * Determine if an event should be filtered (not broadcast)
  * 
- * Returns true (filter out) if NONE of the whitelisted properties are present and non-empty.
+ * Returns false (keep) for passthrough event types.
  * Returns false (keep) if ANY whitelisted property is present and non-empty.
+ * Returns true (filter out) otherwise.
+ * 
+ * @remarks Unit test all changes - see tests/unit/event-filter.test.ts
  */
 export function shouldFilter(event: FilterableEvent): boolean {
+  // Passthrough types always allowed
+  if (PASSTHROUGH_TYPES.has(event.type)) {
+    return false;
+  }
+  
   const data = event.data;
   if (!data) return true;
   

@@ -47,6 +47,8 @@ export type RuleResult =
 
 /**
  * Rules engine for evaluating agent call flows
+ * 
+ * @remarks Unit test all changes - see tests/unit/rules-engine.test.ts
  */
 export class RunawayRulesEngine {
   constructor(private limits: RunawayLimits = DEFAULT_LIMITS) {}

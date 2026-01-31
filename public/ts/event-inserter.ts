@@ -21,6 +21,10 @@ declare global {
 export interface InserterElement {
   textContent: string | null;
   dataset: Record<string, string | undefined>;
+  classList?: {
+    add: (className: string) => void;
+    remove: (className: string) => void;
+  };
 }
 
 /**
@@ -53,12 +57,15 @@ function setPath(p: string): EventInserterFn {
 
 /**
  * Create an append-mode inserter for delta events
+ * Adds streaming-cursor class to show blinking cursor
  */
 function appendPath(p: string): EventInserterFn {
   return (element, data) => {
     const existing = element.textContent || '';
     const value = getByPath(data, p);
     element.textContent = existing + (typeof value === 'string' ? value : '');
+    // Add streaming cursor during deltas
+    element.classList?.add('streaming-cursor');
   };
 }
 
@@ -75,6 +82,8 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'assistant.message': (element, data) => {
     const value = getByPath(data, 'content');
     element.textContent = typeof value === 'string' ? value : '';
+    // Remove streaming cursor on terminal event
+    element.classList?.remove('streaming-cursor');
     // Render markdown in browser (no-op in tests)
     if (typeof window !== 'undefined' && window.renderMarkdownElement) {
       window.renderMarkdownElement(element as unknown as Element);

@@ -85,10 +85,51 @@ export function formatToolResult(result: ToolResult | undefined): string {
 // MessageInserter - Core DOM manipulation
 // ============================================================================
 
-/** Outer message types */
+/** 
+ * Phase 1: Event Type → Outer Div Class Mapping
+ * Maps SDK event.type strings to the 5 chat div classes
+ */
+const EVENT_TO_OUTER: Record<string, string> = {
+  // User message
+  'user.message': 'user-message',
+  
+  // Assistant messages
+  'assistant.message': 'assistant-message',
+  'assistant.message_delta': 'assistant-message',
+  
+  // Activity (all activity goes in same box)
+  'assistant.turn_start': 'assistant-activity',
+  'assistant.turn_end': 'assistant-activity',
+  'assistant.intent': 'assistant-activity',
+  'assistant.reasoning': 'assistant-activity',
+  'assistant.reasoning_delta': 'assistant-activity',
+  'tool.execution_start': 'assistant-activity',
+  'tool.execution_progress': 'assistant-activity',
+  'tool.execution_partial_result': 'assistant-activity',
+  'tool.execution_complete': 'assistant-activity',
+  'session.start': 'assistant-activity',
+  'session.idle': 'assistant-activity',
+  'session.error': 'assistant-activity',
+  'session.truncation': 'assistant-activity',
+  'session.compaction_start': 'assistant-activity',
+  'session.compaction_complete': 'assistant-activity',
+  'session.usage_info': 'assistant-activity',
+  'assistant.usage': 'assistant-activity',
+  
+  // Caco synthetic types
+  'caco.agent': 'agent-message',
+  'caco.applet': 'applet-message',
+};
+
+/** Get outer class for event type, or undefined if not mapped */
+export function getOuterClass(eventType: string): string | undefined {
+  return EVENT_TO_OUTER[eventType];
+}
+
+/** Legacy outer types for backward compatibility during migration */
 type OuterType = 'user' | 'assistant' | 'activity' | 'agent';
 
-/** Outer div configurations */
+/** Legacy outer div configurations (will be removed in Phase 2) */
 const OUTER_CONFIG: Record<OuterType, { cssClass: string; template?: string }> = {
   user: {
     cssClass: 'message user'
@@ -122,6 +163,63 @@ export class MessageInserter {
   constructor() {
     this.chat = document.getElementById('chat')!;
   }
+  
+  // ==========================================================================
+  // Phase 1: New event-type-based API
+  // ==========================================================================
+  
+  /**
+   * Get or create outer div for given event type.
+   * Uses EVENT_TO_OUTER map to determine CSS class.
+   * 
+   * Reuse rules:
+   * - user-message, agent-message, applet-message: always create new
+   * - assistant-message, assistant-activity: reuse if last div matches
+   */
+  ensureOuterByEventType(eventType: string, forceNew: boolean = false): HTMLElement | null {
+    const cssClass = EVENT_TO_OUTER[eventType];
+    if (!cssClass) return null;
+    
+    const lastDiv = this.chat.lastElementChild as HTMLElement | null;
+    
+    // These types always create new div
+    const alwaysNew = ['user-message', 'agent-message', 'applet-message'];
+    if (forceNew || alwaysNew.includes(cssClass)) {
+      return this.createOuterByClass(cssClass);
+    }
+    
+    // For assistant-message and assistant-activity, reuse if matches
+    if (lastDiv?.classList.contains(cssClass)) {
+      return lastDiv;
+    }
+    
+    return this.createOuterByClass(cssClass);
+  }
+  
+  /**
+   * Create new outer div with given CSS class
+   */
+  private createOuterByClass(cssClass: string): HTMLElement {
+    const div = document.createElement('div');
+    div.className = cssClass;
+    this.chat.appendChild(div);
+    scrollToBottom();
+    return div;
+  }
+  
+  /**
+   * Append content to outer div (Phase 1: just append, will be messy with deltas)
+   */
+  appendContent(outer: HTMLElement, content: string): void {
+    // For now, just append raw content
+    // Phase 2 will add inner divs with replace logic
+    outer.textContent = (outer.textContent || '') + content;
+    scrollToBottom();
+  }
+  
+  // ==========================================================================
+  // Legacy API (will be removed in Phase 2)
+  // ==========================================================================
   
   /**
    * Ensure outer message div exists for given type.
@@ -299,12 +397,71 @@ function getInserter(): MessageInserter {
 // ============================================================================
 
 /**
+ * Map ChatMessage to SDK event type for new Phase 1 rendering
+ */
+function messageToEventType(msg: ChatMessage): string {
+  if (msg.role === 'user') {
+    if (msg.source === 'agent') return 'caco.agent';
+    if (msg.source === 'applet') return 'caco.applet';
+    return 'user.message';
+  }
+  // Assistant
+  if (msg.deltaContent) return 'assistant.message_delta';
+  return 'assistant.message';
+}
+
+/**
  * Handle incoming chat message (history or live)
+ * Phase 1: Uses new outer div classes via event type mapping
  */
 function handleMessage(msg: ChatMessage): void {
   hideToast();
   const ins = getInserter();
+  const eventType = messageToEventType(msg);
   
+  // Try new Phase 1 rendering
+  const outer = ins.ensureOuterByEventType(eventType);
+  
+  if (outer) {
+    // New Phase 1 path
+    const content = msg.content || msg.deltaContent || '';
+    
+    if (msg.role === 'user') {
+      // User messages: escape HTML, show image indicator
+      const imageIndicator = msg.hasImage ? ' [img]' : '';
+      outer.innerHTML = escapeHtml(content) + imageIndicator;
+      outer.setAttribute('data-message-id', msg.id);
+    } else {
+      // Assistant: append content (Phase 1 = messy deltas, Phase 2 = replace with inner)
+      if (msg.deltaContent) {
+        // Append delta
+        outer.textContent = (outer.textContent || '') + msg.deltaContent;
+      } else if (msg.content) {
+        // Full content - for now just set it (overwrites deltas if any came first)
+        outer.textContent = msg.content;
+        outer.setAttribute('data-markdown', '');
+        
+        if (msg.outputs) {
+          ins.storeOutputIds(outer, msg.outputs);
+        }
+      }
+      
+      // Render markdown when complete
+      if (msg.status === 'complete' && window.renderMarkdownElement) {
+        window.renderMarkdownElement(outer);
+      }
+    }
+    
+    if (msg.status === 'complete') {
+      setStreaming(false);
+      setFormEnabled(true);
+    }
+    
+    scrollToBottom();
+    return;
+  }
+  
+  // Fallback to legacy path (should not happen with complete map)
   if (msg.role === 'user') {
     const div = ins.insertUser(
       msg.content || '',
@@ -350,7 +507,22 @@ function handleMessage(msg: ChatMessage): void {
 }
 
 /**
+ * Map ActivityItem type to SDK event type for Phase 1 rendering
+ */
+function activityToEventType(item: ActivityItem): string {
+  switch (item.type) {
+    case 'intent': return 'assistant.intent';
+    case 'tool': return 'tool.execution_start';
+    case 'tool-result': return 'tool.execution_complete';
+    case 'error': return 'session.error';
+    case 'turn': return 'assistant.turn_start';
+    default: return 'assistant.intent';  // fallback for info, etc.
+  }
+}
+
+/**
  * Handle activity item
+ * Phase 1: Uses new assistant-activity class
  */
 function handleActivity(item: ActivityItem): void {
   // Handle reload signal
@@ -359,7 +531,27 @@ function handleActivity(item: ActivityItem): void {
     return;
   }
   
-  getInserter().insertActivity(item.type, item.text, item.details);
+  const ins = getInserter();
+  const eventType = activityToEventType(item);
+  
+  // Try new Phase 1 rendering
+  const outer = ins.ensureOuterByEventType(eventType);
+  
+  if (outer) {
+    // Phase 1: just append activity text
+    const line = document.createElement('div');
+    line.className = 'activity-line';
+    line.textContent = item.text;
+    if (item.details) {
+      line.title = item.details;  // Show details on hover
+    }
+    outer.appendChild(line);
+    scrollToBottom();
+    return;
+  }
+  
+  // Fallback to legacy
+  ins.insertActivity(item.type, item.text, item.details);
 }
 
 /**

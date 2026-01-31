@@ -36,9 +36,10 @@
 
   /* Colors - Chat messages */
   --color-user-bg: #2c4258;
-  --color-assistant-bg: #1a1a1a;
+  --color-assistant-bg: transparent;
   --color-applet-bg: #9b7514;
   --color-agent-bg: #5c3d6e;
+  --color-activity-bg: #2d2d2d;
   --color-selector-bg: #2d333b;
   --color-selector-hover: #3d434b;
 
@@ -612,6 +613,55 @@ main {
   display: block;
   margin-bottom: var(--space-sm);
   color: var(--color-text-bright);
+}
+
+/* ========================================
+   PHASE 1: NEW OUTER DIV CLASSES
+   5 chat bubble types with simple colors
+   ======================================== */
+
+.user-message {
+  background: var(--color-user-bg);
+  padding: var(--space-lg);
+  border-radius: var(--radius-lg);
+  margin-left: var(--space-xl);
+  white-space: pre-wrap;
+}
+
+.assistant-message {
+  background: var(--color-assistant-bg);
+  padding: var(--space-lg);
+  line-height: 1.5;
+}
+
+.agent-message {
+  background: var(--color-agent-bg);
+  padding: var(--space-lg);
+  border-radius: var(--radius-lg);
+  margin-left: var(--space-xl);
+  white-space: pre-wrap;
+}
+
+.applet-message {
+  background: var(--color-applet-bg);
+  padding: var(--space-lg);
+  border-radius: var(--radius-lg);
+  margin-left: var(--space-xl);
+  white-space: pre-wrap;
+}
+
+.assistant-activity {
+  background: var(--color-activity-bg);
+  padding: var(--space-lg);
+  border-radius: var(--radius-lg);
+  border-left: 3px solid var(--color-info);
+}
+
+.assistant-activity .activity-line {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  padding: var(--space-xs) 0;
 }
 
 /* ========================================

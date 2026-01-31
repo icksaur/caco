@@ -219,9 +219,16 @@ onMessage((msg) => {
 ## Open Questions
 
 1. Should activity bubbles be stored in chat history?
+   **✓ YES** - Activity bubbles are first-class messages, stored in history
+
 2. How to handle activity that arrives after response is "complete"?
+   **✓ Create new activity bubble** - Check if last message is activity, create new if not
+
 3. Should we show activity timestamps?
+   **✓ NO** - Keep activity bubbles simple, no timestamps
+
 4. Max activity items per bubble before creating new?
+   **✓ NO LIMIT** - All activity for a phase goes into one bubble until chat starts
 
 ## Related Files
 

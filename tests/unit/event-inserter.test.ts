@@ -91,12 +91,21 @@ describe('insertEvent', () => {
     });
 
     it('formats tool.execution_complete without result content', () => {
-      const el = mockElement('', { toolName: 'report_intent' });
+      const el = mockElement('', { toolName: 'read_file' });
       insertEvent({ type: 'tool.execution_complete', data: { 
         success: true,
         result: {}
       } }, el);
-      expect(el.textContent).toBe('✓ **report_intent**');
+      expect(el.textContent).toBe('✓ **read_file**');
+    });
+    
+    it('report_intent keeps intent display on complete (no change)', () => {
+      const el = mockElement('💡 Testing intent', { toolName: 'report_intent' });
+      insertEvent({ type: 'tool.execution_complete', data: { 
+        success: true,
+        result: {}
+      } }, el);
+      expect(el.textContent).toBe('💡 Testing intent');
     });
   });
 

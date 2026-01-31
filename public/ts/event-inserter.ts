@@ -95,6 +95,14 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'tool.execution_start': (element, data) => {
     const name = (data.toolName || 'tool') as string;
     const args = data.arguments as Record<string, unknown> | undefined;
+    
+    // Special case: report_intent shows intent as header
+    if (name === 'report_intent' && args?.intent) {
+      element.textContent = `💡 ${args.intent}`;
+      element.dataset.toolName = name;
+      return;
+    }
+    
     const input = (args?.command || args?.description || '') as string;
     
     // Store for later use by tool.execution_complete
@@ -108,6 +116,10 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'tool.execution_complete': (element, data) => {
     // Read stored values
     const name = element.dataset.toolName || 'tool';
+    
+    // Special case: report_intent keeps its intent display (no change on complete)
+    if (name === 'report_intent') return;
+    
     const input = element.dataset.toolInput || '';
     const success = data.success as boolean;
     const result = getByPath(data, 'result.content') as string | undefined;

@@ -45,7 +45,7 @@ describe('MCP path security', () => {
     it('handles relative paths within workspace', () => {
       // Relative paths should resolve to workspace when cwd is workspace
       expect(isPathAllowed('./src/file.ts')).toBe(true);
-      expect(isPathAllowed('../copilot-web/src/file.ts')).toBe(true);
+      expect(isPathAllowed('./src/../src/file.ts')).toBe(true);
     });
   });
 

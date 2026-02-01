@@ -18,6 +18,7 @@ import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent }
 import { setActiveSession as setWsActiveSession, requestHistory } from './websocket.js';
 import { waitForHistoryComplete } from './history.js';
 import { loadSessions } from './session-panel.js';
+import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 
 // Navigation API types (not yet in TypeScript lib)
@@ -138,8 +139,11 @@ export function toggleSessions(): void {
  * Switches to session, loads history, updates URL
  */
 export async function sessionClick(sessionId: string): Promise<void> {
-  // If already on this session, just hide sessions overlay
-  if (sessionId === getActiveSessionId()) {
+  const chat = document.getElementById('chat');
+  const hasHistory = chat && chat.children.length > 0;
+  
+  // If already on this session AND we have history, just hide sessions overlay
+  if (sessionId === getActiveSessionId() && hasHistory) {
     setViewState('chatting');
     updateUrl({ session: sessionId });
     return;
@@ -249,8 +253,11 @@ async function activateSession(sessionId: string): Promise<void> {
     });
     
     if (!response.ok) {
-      console.error('[ROUTER] Failed to resume session:', sessionId);
-      return;
+      const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+      const errorMsg = errorData.error || `Failed to resume session (${response.status})`;
+      console.error('[ROUTER] Failed to resume session:', sessionId, errorMsg);
+      showToast(errorMsg);
+      return; // Don't change view, just show toast
     }
     
     const data = await response.json();
@@ -265,7 +272,10 @@ async function activateSession(sessionId: string): Promise<void> {
     
     setViewState('chatting');
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Network error';
     console.error('[ROUTER] Error activating session:', error);
+    showToast(errorMsg);
+    // Don't change view, just show toast
   }
 }
 

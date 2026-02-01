@@ -185,13 +185,17 @@ class SessionManager {
   /**
    * Create a new session for the given cwd
    * @param config - Required config with toolFactory (prevents sessions without tools)
-   * @throws CwdLockedError if cwd is already locked
+   * @throws CwdLockedError if cwd is already locked by an active session
    */
   async create(cwd: string, config: CreateConfig): Promise<string> {
-    // Check lock
-    if (this.cwdLocks.has(cwd)) {
-      const existingSessionId = this.cwdLocks.get(cwd)!;
-      throw new CwdLockedError(cwd, existingSessionId);
+    // Check lock - only block if lock holder is actually active
+    const existingSessionId = this.cwdLocks.get(cwd);
+    if (existingSessionId) {
+      if (this.activeSessions.has(existingSessionId)) {
+        throw new CwdLockedError(cwd, existingSessionId);
+      }
+      // Clear stale lock from idle session
+      this.cwdLocks.delete(cwd);
     }
     
     // Model is REQUIRED - fail loudly if not provided
@@ -252,10 +256,14 @@ class SessionManager {
       throw new Error(`Session ${sessionId} has no cwd recorded`);
     }
     
-    // Check lock
+    // Check lock - only block if the lock holder is actually active
     const lockHolder = this.cwdLocks.get(cwd);
     if (lockHolder && lockHolder !== sessionId) {
-      throw new CwdLockedError(cwd, lockHolder);
+      if (this.activeSessions.has(lockHolder)) {
+        throw new CwdLockedError(cwd, lockHolder);
+      }
+      // Clear stale lock from idle session
+      this.cwdLocks.delete(cwd);
     }
     
     // Already active?

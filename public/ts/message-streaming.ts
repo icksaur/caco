@@ -319,6 +319,10 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     let sessionId = getActiveSessionId();
     
     if (newChat || !sessionId) {
+      // Clear chat history for new session
+      const chat = document.getElementById('chat');
+      if (chat) chat.innerHTML = '';
+      
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

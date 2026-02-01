@@ -18,6 +18,7 @@ import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent }
 import { setActiveSession as setWsActiveSession, requestHistory } from './websocket.js';
 import { waitForHistoryComplete } from './history.js';
 import { loadSessions } from './session-panel.js';
+import { loadModels } from './model-selector.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -150,6 +151,7 @@ export async function sessionClick(sessionId: string): Promise<void> {
  */
 export function newSessionClick(): void {
   setViewState('newChat');
+  loadModels();
   updateUrl({ session: null }); // Remove session from URL
 }
 

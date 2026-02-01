@@ -1,8 +1,185 @@
-# Caco OS: Client State Management
+# Caco OS: UI revamp
 
-Simple client-side view state and navigation.
+## Requirements
+
+One specification doc for UI states including applets.
+Minimize UI state code, ideally single file.
+URL can encode work state (session id + apps)
+Rationalize non-visible but active state (applets and chat)
+
+## ideas
+
+? complete rewrite of consolidated NavigationAPI + viewController + applet
+? combine newChat and chatting views into one logical view that manages its own state
+? session view decoupled from chat view
+? applet stack decoupled from chat view
+? centralized URL modification management
+
+## challenge
+
+can views be decoupled while simultaneously encoding state in URL
 
 ---
+
+# Proposals
+
+## Option A: Two-Panel Always-Visible Layout
+
+Instead of switching between mutually exclusive views, use a persistent layout:
+
+```
+┌─────────────┬──────────────────────────────────────┐
+│             │                                      │
+│  Sessions   │    Chat / Applet (swappable)         │
+│  (sidebar)  │                                      │
+│             │                                      │
+│  - sess 1   │    [chat input]                      │
+│  - sess 2   │                                      │
+└─────────────┴──────────────────────────────────────┘
+```
+
+**Pros:**
+- Sessions always visible (quick switching)
+- Only one toggle: chat ↔ applet
+- Simpler mental model
+
+**Cons:**
+- Less screen space for main content
+- Mobile layout needs thought
+
+**URL encoding:** `?session=abc&applet=browser` (both can coexist)
+
+---
+
+## Option B: Chat+Applet Split View
+
+Main content area splits between chat and applet when both active:
+
+```
+┌──────────────────────┬───────────────────────────┐
+│                      │                           │
+│      Chat            │        Applet             │
+│      (scrollable)    │        (interactive)      │
+│                      │                           │
+│  [chat input]        │                           │
+└──────────────────────┴───────────────────────────┘
+```
+
+**Pros:**
+- See chat and applet simultaneously
+- Agent can update applet while chatting
+- No context switching
+
+**Cons:**
+- Complexity: resizable panels, responsive breakpoints
+- May be overkill for simple applets
+
+**URL encoding:** `?session=abc&applet=browser&split=50`
+
+---
+
+## Option C: Unified URL Router (Minimal Rewrite)
+
+Keep current layout but unify URL handling in one place:
+
+```typescript
+// Single source of truth for URL → state
+type AppRoute = {
+  session?: string;      // Active session
+  applet?: string;       // Active applet (if any)
+  appletParams?: Record<string, string>;  // Applet-specific state
+};
+
+// Navigation API handles ALL routing
+navigation.addEventListener('navigate', (event) => {
+  const route = parseUrl(event.destination.url);
+  applyRoute(route);  // Updates both view-controller and app-state
+});
+```
+
+**Pros:**
+- Minimal UI change
+- Consolidates URL logic
+- Clear data flow
+
+**Cons:**
+- Still have exclusive view switching
+- Doesn't solve chat+applet visibility
+
+---
+
+## Option D: Layered Architecture
+
+Applets as overlays/modals on top of chat:
+
+```
+┌─────────────────────────────────────────────────┐
+│  ┌─────────────────────────────────────────┐    │
+│  │                                         │    │
+│  │            Applet (modal)               │ X  │
+│  │                                         │    │
+│  └─────────────────────────────────────────┘    │
+│                                                 │
+│                 Chat (dimmed)                   │
+│                                                 │
+│  [chat input]                                   │
+└─────────────────────────────────────────────────┘
+```
+
+**Pros:**
+- Chat always there (context preserved)
+- Applets feel transient
+- Simple dismiss action
+
+**Cons:**
+- Limited applet visibility
+- No side-by-side work
+
+---
+
+# Open Questions
+
+1. **Should session sidebar always be visible?** 
+   - Current: No, it's a toggle
+   - Alternative: Yes, like Slack/Discord/ChatGPT
+
+2. **Should chat and applet be viewable simultaneously?**
+   - Current: No, exclusive toggle
+   - Alternative: Split view or applet-as-sidebar
+
+3. **Who owns URL state?**
+   - Current: app-state.ts manages `session`, applet-runtime.ts manages `applet`
+   - Alternative: Single URL router module
+
+4. **What about mobile?**
+   - Split views collapse to single panel
+   - Swipe gestures for switching?
+
+5. **History behavior for applet stack?**
+   - Current: Navigation API + pushState for breadcrumbs
+   - Is this worth the complexity?
+
+---
+
+# Recommendation
+
+**Short-term:** Option C (Unified URL Router)
+- Consolidate URL handling into single module
+- Keep current UI layout
+- Reduce bugs like the `?applet=` clearing issue
+
+**Medium-term:** Option A (Two-Panel)
+- Sessions sidebar always visible
+- Main content toggles chat/applet
+- Simpler state model
+
+**Long-term exploration:** Option B (Split View)
+- When user feedback demands simultaneous visibility
+- Requires more design work
+
+---
+
+# current UI management
 
 ## Client UI State Management
 

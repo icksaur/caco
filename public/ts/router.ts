@@ -17,6 +17,7 @@ import { setActiveSession, getActiveSessionId, getCurrentCwd } from './app-state
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { setActiveSession as setWsActiveSession, requestHistory } from './websocket.js';
 import { waitForHistoryComplete } from './history.js';
+import { loadSessions } from './session-panel.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -34,7 +35,7 @@ interface Navigation extends EventTarget {
 }
 
 // Track the previous main panel state (for toggleSessions restore)
-let previousMainPanel: 'chat' | 'newChat' = 'newChat';
+let previousMainPanel: ViewState = 'newChat';
 
 /**
  * Initialize router - set up Navigation API handler
@@ -116,12 +117,15 @@ export function toggleSessions(): void {
     setViewState(previousMainPanel);
   } else {
     // Remember current state and show sessions
-    if (current === 'chat' || current === 'chatting') {
-      previousMainPanel = 'chat';
+    if (current === 'chatting') {
+      previousMainPanel = 'chatting';
     } else if (current === 'newChat') {
       previousMainPanel = 'newChat';
+    } else if (current === 'applet') {
+      previousMainPanel = 'applet';
     }
     setViewState('sessions');
+    loadSessions(); // Fetch and render session list
   }
 }
 

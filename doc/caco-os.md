@@ -2,339 +2,234 @@
 
 ## Requirements
 
-One specification doc for UI states including applet.
-Minimize UI state code, ideally single file.
-URL can encode work state (session id + applet)
-Rationalize non-visible but active state (applet and chat)
-Applets and chat can co-exist with UI to switch without losing applet nor chat state.
-
-## ideas
-
-? complete rewrite of consolidated NavigationAPI + viewController + applet
-? combine newChat and chatting views into one logical view that manages its own state
-? session view decoupled from chat view
-? applet stack decoupled from chat view
-? centralized URL modification management
-
-## challenge
-
-can views be decoupled while simultaneously encoding state in URL
+- One specification doc for UI states including applet
+- Minimize UI state code, ideally single file
+- URL encodes work state (session id + applet slug)
+- Applets and chat co-exist - switching doesn't destroy either
+- Session view is full-screen for choosing cwd
 
 ---
 
-# Proposals
+# Minimal SPA Design
 
-## Option A: Two-Panel Always-Visible Layout
+## Layout
 
-Instead of switching between mutually exclusive views, use a persistent layout:
+### Desktop (wide viewport)
 
-```
-┌─────────────┬──────────────────────────────────────┐
-│             │                                      │
-│  Sessions   │    Chat / Applet (swappable)         │
-│  (sidebar)  │                                      │
-│             │                                      │
-│  - sess 1   │    [chat input]                      │
-│  - sess 2   │                                      │
-└─────────────┴──────────────────────────────────────┘
-```
-
-**Pros:**
-- Sessions always visible (quick switching)
-- Only one toggle: chat ↔ applet
-- Simpler mental model
-
-**Cons:**
-- Less screen space for main content
-- Mobile layout needs thought
-
-**URL encoding:** `?session=abc&applet=browser` (both can coexist)
-
----
-
-## Option B: Chat+Applet Split View
-
-Main content area splits between chat and applet when both active:
-
-```
-┌──────────────────────┬───────────────────────────┐
-│                      │                           │
-│      Chat            │        Applet             │
-│      (scrollable)    │        (interactive)      │
-│                      │                           │
-│  [chat input]        │                           │
-└──────────────────────┴───────────────────────────┘
+```mermaid
+block-beta
+  columns 2
+  block:main:1
+    columns 1
+    A["☰ Sessions Toggle"]
+    B["Main Panel<br/>(sessions | newChat | chat)"]
+    C["[input]"]
+  end
+  block:applet:1
+    columns 1
+    D["⬡ Applet Toggle"]
+    E["Applet (optional)"]
+    space
+  end
 ```
 
-**Pros:**
-- See chat and applet simultaneously
-- Agent can update applet while chatting
-- No context switching
+### Mobile (narrow viewport)
 
-**Cons:**
-- Complexity: resizable panels, responsive breakpoints
-- May be overkill for simple applets
+```mermaid
+block-beta
+  columns 1
+  block:header
+    A["☰"] space:2 B["⬡"]
+  end
+  C["Main Panel OR Applet<br/>(toggle switches)"]
+  D["[input]"]
+```
 
-**URL encoding:** `?session=abc&applet=browser&split=50`
+## Current HTML Assessment
 
----
+| Element | Status | Notes |
+|---------|--------|-------|
+| `#menuBtn` (☰) | ✅ Ready | Upper-left sessions toggle |
+| `#appletBtn` (⬡) | ✅ Ready | Upper-right applet toggle |
+| `#sessionView` | ✅ Ready | Full-screen session list |
+| `#newChat` | ✅ Ready | Model selector, nested in chatView |
+| `#chat` | ✅ Ready | Message container |
+| `#appletView` | ⚠️ Needs work | Has breadcrumbs to remove |
+| `<main>` | ❌ Needs rework | Views stacked, not side-by-side |
+| CSS | ❌ Needs rework | No split layout for desktop |
 
-## Option C: Unified URL Router (Minimal Rewrite)
+**Key changes needed:**
+1. Rework `<main>` to have chat/applet side-by-side on desktop
+2. Remove `.applet-breadcrumbs` from appletView
+3. CSS media queries for responsive split
+4. Remove all existing Navigation API handlers
+5. Consolidate into router.ts
 
-Keep current layout but unify URL handling in one place:
+## State Model
 
 ```typescript
-// Single source of truth for URL → state
-type AppRoute = {
-  session?: string;      // Active session
-  applet?: string;       // Active applet (if any)
-  appletParams?: Record<string, string>;  // Applet-specific state
-};
-
-// Navigation API handles ALL routing
-navigation.addEventListener('navigate', (event) => {
-  const route = parseUrl(event.destination.url);
-  applyRoute(route);  // Updates both view-controller and app-state
-});
+interface UIState {
+  mainPanel: 'sessions' | 'newChat' | 'chat';
+  appletSlug: string | null;      // null = no applet loaded
+  appletVisible: boolean;         // mobile: which panel has focus
+}
 ```
 
-**Pros:**
-- Minimal UI change
-- Consolidates URL logic
-- Clear data flow
-
-**Cons:**
-- Still have exclusive view switching
-- Doesn't solve chat+applet visibility
+**Key insight:** Applet is orthogonal to main panel. Sessions list can show with applet beside it on desktop.
 
 ---
 
-## Option D: Layered Architecture
+## Navigation UI
 
-Applets as overlays/modals on top of chat:
+Two toggle buttons:
 
-```
-┌─────────────────────────────────────────────────┐
-│  ┌─────────────────────────────────────────┐    │
-│  │                                         │    │
-│  │            Applet (modal)               │ X  │
-│  │                                         │    │
-│  └─────────────────────────────────────────┘    │
-│                                                 │
-│                 Chat (dimmed)                   │
-│                                                 │
-│  [chat input]                                   │
-└─────────────────────────────────────────────────┘
-```
-
-**Pros:**
-- Chat always there (context preserved)
-- Applets feel transient
-- Simple dismiss action
-
-**Cons:**
-- Limited applet visibility
-- No side-by-side work
+| Button | Position | Color | Action |
+|--------|----------|-------|--------|
+| ☰ Sessions | upper-left | blue | toggle main panel to/from sessions |
+| ⬡ Applet | upper-right | orange | toggle applet visibility |
 
 ---
 
-# Open Questions
+## Main Panel Actions
 
-1. **Should session sidebar always be visible?** 
-   - **Decision: NO** - iOS won't fit
-   - Keep current toggle approach
+No state machine. Just actions:
 
-2. **Should chat and applet be viewable simultaneously?**
-   - **Decision: YES on desktop** - useful for agent-applet workflows
-   - Collapse to single panel on mobile
+```
+toggleSessions
+  → if showing sessions: restore previous (chat or newChat)
+  → else: show sessions
 
-3. **Who owns URL state?**
-   - **Decision: Single owner** - consolidate into one module
-   - No more split between app-state.ts and applet-runtime.ts
+sessionClick(id)
+  → hide sessions
+  → switch to session id
+  → clear chat div
+  → load history
+  → show chat
+  → URL: set ?session=id
 
-4. **What about mobile?**
-   - **Target: iOS Safari**
-   - Single panel, no split views
-   - Session list as overlay/drawer
+newSessionClick
+  → hide sessions
+  → clear chat div
+  → show model selector (newChat)
+  → URL: remove ?session
 
-5. **History behavior for applet stack?**
-   - **Decision: SIMPLIFY** - get rid of breadcrumb history!
-   - Just show current applet, browser back = close applet
-   - No stack, no complexity
+modelSelectorSend(message)
+  → hide model selector
+  → POST to create session → get id
+  → post user message
+  → subscribe to session stream
+  → show chat
+  → URL: set ?session=id
+```
+
+## Applet Actions
+
+```
+toggleApplet
+  → if no applet loaded: no-op (or open applet-browser?)
+  → mobile: switch focus between main panel and applet
+  → desktop: no-op (always visible when loaded)
+
+loadApplet(slug)
+  → destroy current applet if any
+  → fetch and render new applet
+  → set appletSlug
+  → mobile: show applet
+  → URL: set ?applet=slug
+```
+
+**No closeApplet action.** To close an applet:
+- Navigate to URL without `?applet=` (back button, manual)
+- Or load a different applet (replaces current)
 
 ---
 
-# Recommendation
+## URL Philosophy
 
-**Revised approach based on decisions:**
+URL is for **bookmarking**, not state destruction.
 
-1. **Single URL router** - one module owns all URL params
-2. **Desktop split view** - chat + applet side by side (optional)
-3. **Mobile single panel** - toggle between chat/applet, iOS Safari first
-4. **No applet stack** - just current applet, back = close
-5. **Session toggle overlay** - not always-visible sidebar
-
-This is simpler than any of Options A-D. Call it **Option E: Minimal SPA**.
-
-```
-Desktop:                          Mobile:
-┌────────────────┬───────────┐    ┌─────────────────┐
-│                │           │    │                 │
-│     Chat       │  Applet   │    │  Chat OR Applet │
-│                │  (opt)    │    │                 │
-│                │           │    │  [input]        │
-│  [input]       │           │    └─────────────────┘
-└────────────────┴───────────┘
-```
-
----
-
-## URL Philosophy: Bookmark, Not Controller
-
-**Key insight:** URL is for sharing/bookmarking, not for controlling app state destruction.
-
-**URL format:** `?session=abc&applet=browser`
+**Format:** `?session=abc&applet=browser`
 
 **Rules:**
-1. Navigating TO `?applet=X` → loads/shows applet X
-2. Navigating AWAY from `?applet=` → hides applet, does NOT destroy it
-3. Session is NEVER closed by URL changes
-4. Chat state persists regardless of URL
+1. `?session=X` → show chat view, if not current session Id, set Id, clear, request history
+2. `?applet=X` → show applet X, if not loaded, load
+3. Removing `?applet=` → nothing, do not close applet dom or unload current applet
+4. Removing `?session=` → nothing, do not clear session or go to new session UI
+5. Chat DOM persists regardless of URL
+6. Applet DOM (with or without loaded Applet) persists regardless of URL
 
-**Result:** Both chat and applet co-exist in memory. URL just controls visibility/focus.
-
-```
-URL: ?session=abc                → show chat, applet hidden but alive
-URL: ?session=abc&applet=browser → show applet (or split view), chat alive
-URL: ?session=abc&applet=files   → switch to different applet, browser preserved? (TBD)
-```
-
-**Open question:** Do we preserve multiple applets in memory, or just one?
-
-**Decision: One applet at a time.** Switching applets destroys previous. Chat always persists.
-
-This means:
-- No applet stack, no tabs
-- Simpler memory model
-- URL `?applet=X` replaces current applet entirely
-- Agent can create new applet, old one gone
+**One applet at a time.** Switching to different applet destroys previous.
 
 ---
 
-# current UI management
+## Navigation API
 
-## Client UI State Management
-
-Three mutually exclusive views:
-
-| View | Element | Purpose |
-|------|---------|---------|
-| `sessions` | `#sessionView` | Session list (sidebar) |
-| `chatting` | `#chatScroll` | Chat history + footer input |
-| `newChat` | `#chatScroll` | Model selector + footer input |
-| `applet` | `#appletView` | Applet stack with breadcrumbs |
-
-Only ONE view is `.active` at a time. CSS handles visibility.
-
----
-
-## view-controller.ts
-
-Single source of truth for view state.
-
-```typescript
-type ViewState = 'sessions' | 'newChat' | 'chatting' | 'applet';
-
-setViewState(state: ViewState)  // Atomically updates all DOM elements
-getViewState(): ViewState       // Returns current state
-isViewState(state): boolean     // Check current state
-```
-
-**What it does:**
-- Toggles `.active` on view containers
-- Toggles `.hidden` on chat/newChat/footer
-- Toggles menu/applet button states
-- Updates browser tab title
-
-**Key principle:** All view transitions go through `setViewState()`. No direct DOM manipulation elsewhere.
-
----
-
-## Applet Navigation
-
-Applets use a stack model with breadcrumb trail:
-
-```
-Applet Browser > File Browser > config.yaml
-```
-
-### Navigation API
-
-Modern browsers have a Navigation API that intercepts ALL navigation types in one handler:
+Single handler for all navigation:
 
 ```typescript
 navigation.addEventListener('navigate', (event) => {
-  const url = new URL(event.destination.url);
-  const slug = url.searchParams.get('applet');
+  if (!event.canIntercept) return;
   
-  if (slug) {
-    event.intercept({
-      handler: async () => {
-        await loadAppletBySlug(slug);
-        setViewState('applet');
-      }
-    });
-  }
+  const url = new URL(event.destination.url);
+  const session = url.searchParams.get('session');
+  const applet = url.searchParams.get('applet');
+  
+  event.intercept({
+    handler: async () => {
+      if (session) activateSession(session);
+      if (applet) await loadApplet(applet);
+      else hideApplet();  // hide, don't destroy
+    }
+  });
 });
 ```
 
-**Benefits:**
-- Single handler catches links, back/forward, programmatic navigation
-- URL stays in sync: `/?applet=file-browser`
-- Browser history works naturally
-
-### Breadcrumb Links
-
-Breadcrumbs are simple `<a>` tags:
-
-```html
-<a href="?applet=applet-browser">Applet Browser</a> > 
-<a href="?applet=file-browser">File Browser</a>
-```
-
-Navigation API intercepts the click, loads the applet, no page reload.
-
-### Stack Management
-
-- Navigate forward → hide current, push new to stack
-- Navigate back → pop current, show previous (DOM preserved)
-- Click breadcrumb → truncate stack to that point
-
-**Limits:**
-- Max depth: 5 applets
-- Oldest destroyed when exceeded
+No breadcrumbs. No stack. Just current state.
 
 ---
 
-## URL Parameters
-
-| Param | Purpose |
-|-------|---------|
-| `session` | Active session ID |
-| `applet` | Current applet slug |
-
-Applet-specific params also allowed: `?applet=file-browser&path=/src`
-
----
-
-## Files
+## Files (Target)
 
 | File | Purpose |
 |------|---------|
-| `public/ts/view-controller.ts` | **View state** - which view is active (sessions/newChat/chatting/applet) + DOM updates |
-| `public/ts/app-state.ts` | **App state** - session ID, model, cwd, UI flags (isStreaming, loadingHistory) |
-| `public/ts/applet-runtime.ts` | Applet stack, Navigation API handler, breadcrumbs |
+| `public/ts/router.ts` | **Single owner** of URL + view state |
 
-**Separation of concerns:**
-- `view-controller.ts` = what's visible (DOM classes)
-- `app-state.ts` = data state (no DOM manipulation)
+Consolidate view-controller.ts + app-state.ts URL logic + applet-runtime.ts navigation into one module.
+
+---
+
+## Work Phases
+
+### Phase 1: DOM & CSS restructure
+- [ ] Rework `<main>` structure for split layout (chat-container + applet-container)
+- [ ] Remove `.applet-breadcrumbs` from appletView
+- [ ] Add CSS grid/flexbox for desktop split view
+- [ ] Add CSS media queries for mobile single-panel
+- [ ] Test responsive breakpoint behavior
+
+### Phase 2: Strip old navigation
+- [ ] Remove Navigation API handlers from app-state.ts
+- [ ] Remove navigation handling from applet-runtime.ts
+- [ ] Remove view switching from view-controller.ts
+- [ ] Remove popstate/hashchange handlers if any
+- [ ] Verify nothing breaks (expect broken nav)
+
+### Phase 3: Create router.ts
+- [ ] Create `public/ts/router.ts` as single URL owner
+- [ ] Implement UIState interface
+- [ ] Implement Navigation API handler
+- [ ] Wire up `toggleSessions` action
+- [ ] Wire up `sessionClick(id)` action
+- [ ] Wire up `newSessionClick` action
+- [ ] Wire up `modelSelectorSend(message)` action
+- [ ] Wire up `toggleApplet` action
+- [ ] Wire up `loadApplet(slug)` action
+
+### Phase 4: Integration & cleanup
+- [ ] Update index.html onclick handlers to call router actions
+- [ ] Delete dead code from view-controller.ts
+- [ ] Delete dead code from app-state.ts
+- [ ] Delete dead code from applet-runtime.ts
+- [ ] Test all flows end-to-end
+- [ ] Test URL bookmarking behavior
+- [ ] Test back/forward navigation

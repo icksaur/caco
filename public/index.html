@@ -67,6 +67,31 @@
             <div id="workingCursor" class="streaming-cursor hidden"></div>
           </div>
         </div>
+
+        <!-- Footer with chat input (inside chat panel) -->
+        <footer id="chatFooter">
+          <div id="imagePreview" class="image-preview">
+            <img id="previewImg" src="" alt="Pasted image">
+            <span>Image attached</span>
+            <button type="button" class="remove-btn" onclick="removeImage()">× Remove</button>
+          </div>
+          <form id="chatForm">
+            <input type="hidden" id="imageData" name="imageData">
+            <input type="hidden" id="selectedModel" name="model" value="claude-sonnet-4">
+            <div class="input-bar">
+              <textarea 
+                class="input-text"
+                name="message" 
+                placeholder="Ask anything..." 
+                required
+                autofocus
+                rows="1"
+              ></textarea>
+              <button type="submit" class="send-btn">Send</button>
+              <button type="button" class="stop-btn" onclick="stopStreaming()">Stop</button>
+            </div>
+          </form>
+        </footer>
       </div>
 
       <!-- Applet panel (right on desktop, toggled on mobile) -->
@@ -78,36 +103,11 @@
     </div>
   </main>
 
-  <!-- Toast notifications (floats above input) -->
+  <!-- Toast notifications (floats above all content) -->
   <div id="toast" class="toast hidden" role="alert">
     <span class="toast-message"></span>
     <button type="button" class="toast-close" onclick="hideToast()" aria-label="Close">×</button>
   </div>
-
-  <!-- Footer with chat input -->
-  <footer id="chatFooter">
-    <div id="imagePreview" class="image-preview">
-      <img id="previewImg" src="" alt="Pasted image">
-      <span>Image attached</span>
-      <button type="button" class="remove-btn" onclick="removeImage()">× Remove</button>
-    </div>
-    <form id="chatForm">
-      <input type="hidden" id="imageData" name="imageData">
-      <input type="hidden" id="selectedModel" name="model" value="claude-sonnet-4">
-      <div class="input-bar">
-        <textarea 
-          class="input-text"
-          name="message" 
-          placeholder="Ask anything..." 
-          required
-          autofocus
-          rows="1"
-        ></textarea>
-        <button type="submit" class="send-btn">Send</button>
-        <button type="button" class="stop-btn" onclick="stopStreaming()">Stop</button>
-      </div>
-    </form>
-  </footer>
 
   <script type="module" src="bundle.js"></script>
 </body>

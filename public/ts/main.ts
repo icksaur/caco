@@ -5,7 +5,7 @@
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences, waitForHistoryComplete } from './history.js';
-import { deleteSession, showSessionManager } from './session-panel.js';
+import { deleteSession } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
@@ -122,26 +122,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     requestHistory(targetSessionId);
     await waitForHistoryComplete();
     
-    // Set view based on URL param (applet takes priority)
+    // Show chat view
+    const chat = document.getElementById('chat');
+    if (chat && chat.children.length > 0) {
+      setViewState('chatting');
+    } else {
+      setViewState('newChat');
+    }
+    
+    // Load applet if requested (orthogonal to main panel)
     if (hasAppletParam) {
       await loadAppletFromUrl();
-    } else {
-      // No applet - show chat or new chat based on history
-      const chat = document.getElementById('chat');
-      if (chat && chat.children.length > 0) {
-        setViewState('chatting');
-      } else {
-        setViewState('newChat');
-      }
     }
   } else {
-    // No session specified
+    // No session specified - show new chat as default
+    setViewState('newChat');
+    loadModels();
+    
+    // Load applet if requested (orthogonal to main panel)
     if (hasAppletParam) {
-      // Applet requested but no session - load applet anyway
       await loadAppletFromUrl();
-    } else {
-      // Show session manager as landing page
-      showSessionManager();
     }
   }
 });

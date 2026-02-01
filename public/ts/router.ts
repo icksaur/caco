@@ -12,7 +12,7 @@
  * - Removing them does NOT destroy loaded content
  */
 
-import { setViewState, getViewState, type ViewState } from './view-controller.js';
+import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, type ViewState } from './view-controller.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { setActiveSession as setWsActiveSession, requestHistory } from './websocket.js';
@@ -32,7 +32,7 @@ interface NavigateEvent extends Event {
 
 interface Navigation extends EventTarget {
   addEventListener(type: 'navigate', listener: (event: NavigateEvent) => void): void;
-  navigate(url: string, options?: { state?: unknown }): { committed: Promise<void>; finished: Promise<void> };
+  navigate(url: string, options?: { state?: unknown; history?: 'auto' | 'push' | 'replace' }): { committed: Promise<void>; finished: Promise<void> };
 }
 
 // Track the previous main panel state (for toggleSessions restore)
@@ -51,8 +51,15 @@ export function initRouter(): void {
   }
 
   nav.addEventListener('navigate', (event: NavigateEvent) => {
+    // Debug: uncomment to verify event fires
+    // alert('navigate: ' + event.navigationType + ' ' + event.destination.url);
+    console.log('[ROUTER] navigate event:', event.navigationType, event.destination.url, 'canIntercept:', event.canIntercept);
+    
     // Skip if we can't intercept
-    if (!event.canIntercept) return;
+    if (!event.canIntercept) {
+      console.log('[ROUTER] Cannot intercept, skipping');
+      return;
+    }
     
     // Skip downloads, hash-only changes, reloads
     if (event.downloadRequest !== null || event.hashChange) return;
@@ -62,6 +69,8 @@ export function initRouter(): void {
     
     // Only intercept same-origin
     if (url.origin !== window.location.origin) return;
+    
+    console.log('[ROUTER] Intercepting navigation to:', url.toString());
     
     event.intercept({
       handler: async () => {
@@ -89,10 +98,10 @@ async function handleNavigation(url: URL): Promise<void> {
   // Handle applet param
   if (appletSlug && appletSlug !== getActiveAppletSlug()) {
     await loadApplet(appletSlug);
+  } else if (!appletSlug && isAppletPanelVisible()) {
+    // URL has no applet param - hide panel (but preserve content)
+    hideAppletPanel();
   }
-  
-  // Note: We do NOT clear session/applet when params are removed
-  // per URL philosophy: "removing param does not destroy content"
 }
 
 /**
@@ -118,13 +127,7 @@ export function toggleSessions(): void {
     setViewState(previousMainPanel);
   } else {
     // Remember current state and show sessions
-    if (current === 'chatting') {
-      previousMainPanel = 'chatting';
-    } else if (current === 'newChat') {
-      previousMainPanel = 'newChat';
-    } else if (current === 'applet') {
-      previousMainPanel = 'applet';
-    }
+    previousMainPanel = current;
     setViewState('sessions');
     loadSessions(); // Fetch and render session list
   }
@@ -143,13 +146,17 @@ export async function sessionClick(sessionId: string): Promise<void> {
   }
   
   await activateSession(sessionId);
-  updateUrl({ session: sessionId });
+  updateUrl({ session: sessionId }, true); // push=true creates history entry
 }
 
 /**
  * Handle new session click from session list
  */
 export function newSessionClick(): void {
+  // Clear chat div
+  const chat = document.getElementById('chat');
+  if (chat) chat.innerHTML = '';
+  
   setViewState('newChat');
   loadModels();
   updateUrl({ session: null }); // Remove session from URL
@@ -164,28 +171,30 @@ export function onSessionCreated(sessionId: string): void {
 }
 
 /**
- * Toggle applet visibility (mobile: switch focus, desktop: no-op if visible)
+ * Toggle applet visibility
+ * On mobile: toggles between showing main panel and applet
+ * On desktop: applet panel is always visible when loaded, this is no-op
  */
 export function toggleApplet(): void {
-  const current = getViewState();
-  
   if (!hasAppletContent()) {
     // No applet loaded - could open applet browser here
     console.log('[ROUTER] No applet loaded, toggle ignored');
     return;
   }
   
-  if (current === 'applet') {
-    // Switch back to chat (preserves applet DOM)
-    setViewState('chatting');
+  // Toggle applet panel visibility
+  // CSS handles the responsive behavior (mobile: full screen, desktop: split)
+  if (isAppletPanelVisible()) {
+    hideAppletPanel();
   } else {
-    // Show applet
-    setViewState('applet');
+    showAppletPanel();
   }
 }
 
 /**
  * Load an applet by slug
+ * Does NOT modify URL - caller is responsible for URL state
+ * (Navigation API intercept already has correct URL, page load already has param)
  */
 export async function loadApplet(slug: string): Promise<void> {
   try {
@@ -212,7 +221,7 @@ export async function loadApplet(slug: string): Promise<void> {
     };
     
     pushApplet(slug, data.title || slug, content);
-    updateUrl({ applet: slug });
+    showAppletPanel();
     
     console.log(`[ROUTER] Applet loaded: ${data.title || slug}`);
   } catch (error) {
@@ -261,9 +270,11 @@ async function activateSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Update URL with new params (uses replaceState, no history entry)
+ * Update URL with new params
+ * Uses Navigation API if available for proper back button support
+ * @param push - If true, creates history entry (back button works). If false, replaces current entry.
  */
-function updateUrl(params: { session?: string | null; applet?: string | null }): void {
+function updateUrl(params: { session?: string | null; applet?: string | null }, push = false): void {
   const url = new URL(window.location.href);
   
   if ('session' in params) {
@@ -282,7 +293,16 @@ function updateUrl(params: { session?: string | null; applet?: string | null }):
     }
   }
   
-  history.replaceState(null, '', url.toString());
+  const nav = (window as unknown as { navigation?: Navigation }).navigation;
+  
+  if (push && nav) {
+    // Use Navigation API for proper traverse interception
+    nav.navigate(url.toString(), { history: 'push' });
+  } else if (push) {
+    history.pushState(null, '', url.toString());
+  } else {
+    history.replaceState(null, '', url.toString());
+  }
 }
 
 /**

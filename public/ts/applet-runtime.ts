@@ -7,7 +7,7 @@
  * Navigation is handled by router.ts - this module just renders applets.
  */
 
-import { setViewState, updateTitle } from './view-controller.js';
+import { showAppletPanel, updateTitle } from './view-controller.js';
 import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './websocket.js';
 import { getActiveSessionId } from './app-state.js';
 
@@ -442,7 +442,7 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   if (currentApplet?.slug === slug) {
     console.log(`[APPLET] Already loaded: ${slug}`);
     showInstance(currentApplet);
-    setViewState('applet');
+    showAppletPanel();
     return;
   }
   
@@ -470,32 +470,9 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
     styleElement
   };
   
-  setViewState('applet');
+  showAppletPanel();
   
   // WebSocket is already connected on page load - no need to connect here
-}
-
-/**
- * Clear the current applet content
- */
-export function clearApplet(): void {
-  if (currentApplet) {
-    destroyInstance(currentApplet);
-    currentApplet = null;
-  }
-  
-  // Also remove any orphaned applet styles and scripts (legacy cleanup)
-  document.querySelectorAll('style[data-applet]').forEach(el => el.remove());
-  document.querySelectorAll('script[data-applet]').forEach(el => el.remove());
-  
-  // Clear legacy style element if any
-  if (currentStyleElement) {
-    currentStyleElement.remove();
-    currentStyleElement = null;
-  }
-  
-  // Switch back to chat view
-  setViewState('chatting');
 }
 
 /**

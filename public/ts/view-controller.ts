@@ -1,21 +1,23 @@
 /**
  * View State Controller
  * 
- * SINGLE SOURCE OF TRUTH for which view is active (sessions/newChat/chatting/applet).
- * All view transitions must go through setViewState() to prevent invalid states.
+ * SINGLE SOURCE OF TRUTH for which view is active.
+ * Main panel: sessions | newChat | chatting (mutually exclusive)
+ * Applet panel: shown/hidden (orthogonal, toggled separately)
  * 
+ * All view transitions must go through setViewState() to prevent invalid states.
  * This manages VIEW state only. For session/model/UI flags, see app-state.ts.
  */
 
 import { scrollToBottom } from './ui-utils.js';
 import { clearActiveSession, getCurrentCwd } from './app-state.js';
-import { getActiveAppletSlug, getActiveAppletLabel } from './applet-runtime.js';
+import { getActiveAppletLabel } from './applet-runtime.js';
 import { getServerHostname } from './hostname-hash.js';
 
-/** Valid application view states */
-export type ViewState = 'sessions' | 'newChat' | 'chatting' | 'applet';
+/** Valid main panel states */
+export type ViewState = 'sessions' | 'newChat' | 'chatting';
 
-/** Current view state */
+/** Current main panel state */
 let currentState: ViewState = 'sessions';
 
 /** Cached DOM element references */
@@ -61,10 +63,10 @@ export function getViewState(): ViewState {
 }
 
 /**
- * Set the application view state
+ * Set the main panel view state
  * 
- * This atomically updates ALL relevant DOM elements to match the target state.
- * Invalid states are impossible - you can only set valid ViewState values.
+ * This atomically updates main panel DOM elements.
+ * Applet panel visibility is managed separately via showAppletPanel/hideAppletPanel.
  */
 export function setViewState(state: ViewState): void {
   const els = getElements();
@@ -74,16 +76,12 @@ export function setViewState(state: ViewState): void {
   
   currentState = state;
 
-  // Reset main panel elements (sessions overlay, newChat/chat toggle)
+  // Reset main panel elements
   els.sessionView?.classList.remove('active');
   els.chat?.classList.add('hidden');
   els.newChat?.classList.add('hidden');
   els.footer?.classList.add('hidden');
   els.menuBtn?.classList.remove('active');
-  
-  // Note: applet panel visibility is independent of view state
-  // It persists across sessions/newChat/chatting transitions
-  // Only explicitly toggled via toggleApplet or loadApplet
 
   // Apply state-specific classes
   switch (state) {
@@ -105,30 +103,41 @@ export function setViewState(state: ViewState): void {
       // Scroll to bottom after view is painted
       requestAnimationFrame(() => scrollToBottom());
       break;
-      
-    case 'applet':
-      // Show applet panel (make it visible)
-      els.appletPanel?.classList.remove('hidden');
-      els.appletBtn?.classList.add('active');
-      break;
-  }
-  
-  // Applet button visibility: show when applet is loaded
-  const hasApplet = !els.appletPanel?.classList.contains('hidden');
-  if (hasApplet) {
-    els.appletBtn?.classList.remove('hidden');
-    if (state === 'applet') {
-      els.appletBtn?.classList.add('active');
-    } else {
-      els.appletBtn?.classList.remove('active');
-    }
-  } else {
-    els.appletBtn?.classList.add('hidden');
-    els.appletBtn?.classList.remove('active');
   }
   
   // Update browser tab title
   updateTitle();
+}
+
+/**
+ * Show the applet panel (orthogonal to main panel state)
+ */
+export function showAppletPanel(): void {
+  const els = getElements();
+  els.appletPanel?.classList.remove('hidden');
+  els.appletBtn?.classList.remove('hidden');
+  els.appletBtn?.classList.add('active');
+  updateTitle();
+}
+
+/**
+ * Hide the applet panel (but preserve its content)
+ * Button stays visible so user can re-show the panel
+ */
+export function hideAppletPanel(): void {
+  const els = getElements();
+  els.appletPanel?.classList.add('hidden');
+  els.appletBtn?.classList.remove('active');
+  // Note: button stays visible - user can toggle panel back
+  updateTitle();
+}
+
+/**
+ * Check if applet panel is visible
+ */
+export function isAppletPanelVisible(): boolean {
+  const els = getElements();
+  return !els.appletPanel?.classList.contains('hidden');
 }
 
 /**
@@ -155,12 +164,13 @@ export function updateTitle(): void {
       }
       break;
     }
-    case 'applet': {
-      const label = getActiveAppletLabel();
-      if (label) {
-        title = `${baseTitle} ${label}`;
-      }
-      break;
+  }
+  
+  // If applet is visible, show its label
+  if (isAppletPanelVisible()) {
+    const label = getActiveAppletLabel();
+    if (label) {
+      title = `${baseTitle} ${label}`;
     }
   }
   
@@ -181,14 +191,12 @@ export function isViewState(state: ViewState): boolean {
 export function initViewState(): void {
   const els = getElements();
   
-  // Detect initial state from DOM
+  // Detect initial main panel state from DOM
   let detectedState: ViewState;
   if (els.sessionView?.classList.contains('active')) {
     detectedState = 'sessions';
   } else if (els.newChat && !els.newChat.classList.contains('hidden')) {
     detectedState = 'newChat';
-  } else if (!els.appletPanel?.classList.contains('hidden')) {
-    detectedState = 'applet';
   } else {
     detectedState = 'chatting';
   }

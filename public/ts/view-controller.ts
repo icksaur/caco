@@ -22,6 +22,7 @@ let currentState: ViewState = 'sessions';
 interface ViewElements {
   chatView: HTMLElement | null;
   sessionView: HTMLElement | null;
+  appletPanel: HTMLElement | null;  // New: container for applet split
   appletView: HTMLElement | null;
   chat: HTMLElement | null;
   newChat: HTMLElement | null;
@@ -40,6 +41,7 @@ function getElements(): ViewElements {
     cachedElements = {
       chatView: document.getElementById('chatScroll'),
       sessionView: document.getElementById('sessionView'),
+      appletPanel: document.getElementById('appletPanel'),
       appletView: document.getElementById('appletView'),
       chat: document.getElementById('chat'),
       newChat: document.getElementById('newChat'),
@@ -72,16 +74,16 @@ export function setViewState(state: ViewState): void {
   
   currentState = state;
 
-  // Reset all elements to default (hidden/inactive)
-  els.chatView?.classList.remove('active');
+  // Reset main panel elements (sessions overlay, newChat/chat toggle)
   els.sessionView?.classList.remove('active');
-  els.appletView?.classList.remove('active');
   els.chat?.classList.add('hidden');
   els.newChat?.classList.add('hidden');
   els.footer?.classList.add('hidden');
   els.menuBtn?.classList.remove('active');
-  els.appletBtn?.classList.add('hidden');
-  els.appletBtn?.classList.remove('active');
+  
+  // Note: applet panel visibility is independent of view state
+  // It persists across sessions/newChat/chatting transitions
+  // Only explicitly toggled via toggleApplet or loadApplet
 
   // Apply state-specific classes
   switch (state) {
@@ -91,7 +93,6 @@ export function setViewState(state: ViewState): void {
       break;
       
     case 'newChat':
-      els.chatView?.classList.add('active');
       els.newChat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
       // Clear session so messages don't go to old session
@@ -99,19 +100,31 @@ export function setViewState(state: ViewState): void {
       break;
       
     case 'chatting':
-      els.chatView?.classList.add('active');
       els.chat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
-      els.appletBtn?.classList.remove('hidden');
       // Scroll to bottom after view is painted
       requestAnimationFrame(() => scrollToBottom());
       break;
       
     case 'applet':
-      els.appletView?.classList.add('active');
-      els.appletBtn?.classList.remove('hidden');
+      // Show applet panel (make it visible)
+      els.appletPanel?.classList.remove('hidden');
       els.appletBtn?.classList.add('active');
       break;
+  }
+  
+  // Applet button visibility: show when applet is loaded
+  const hasApplet = !els.appletPanel?.classList.contains('hidden');
+  if (hasApplet) {
+    els.appletBtn?.classList.remove('hidden');
+    if (state === 'applet') {
+      els.appletBtn?.classList.add('active');
+    } else {
+      els.appletBtn?.classList.remove('active');
+    }
+  } else {
+    els.appletBtn?.classList.add('hidden');
+    els.appletBtn?.classList.remove('active');
   }
   
   // Update browser tab title
@@ -174,6 +187,8 @@ export function initViewState(): void {
     detectedState = 'sessions';
   } else if (els.newChat && !els.newChat.classList.contains('hidden')) {
     detectedState = 'newChat';
+  } else if (!els.appletPanel?.classList.contains('hidden')) {
+    detectedState = 'applet';
   } else {
     detectedState = 'chatting';
   }

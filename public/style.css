@@ -397,23 +397,63 @@ form {
    ======================================== */
 main {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg);
+  position: relative;
   /* padding defined in responsive section */
 }
 
 /* ========================================
-   VIEW SWITCHING
+   SESSION OVERLAY (Full-screen when active)
    ======================================== */
-.view {
+.session-overlay {
   display: none;
   flex-direction: column;
-  flex: 1;
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg-base);
+  padding: var(--space-lg);
+  padding-top: 60px; /* Clear hamburger button */
+  overflow-y: auto;
 }
 
-.view.active { display: flex; }
+.session-overlay.active {
+  display: flex;
+}
+
+/* ========================================
+   WORK AREA (Split layout container)
+   ======================================== */
+.work-area {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+/* Chat panel - always visible, takes remaining space */
+.chat-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* Allow shrinking */
+  overflow: hidden;
+}
+
+/* Applet panel - hidden by default, shown when applet loaded */
+.applet-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--color-border);
+  background: var(--bg-surface);
+}
+
+.applet-panel.hidden {
+  display: none;
+}
 
 /* Scrollbar attaches to this container */
 .chat-scroll {
@@ -919,59 +959,11 @@ main {
   overflow: hidden;
 }
 
-#appletView.active {
+#appletView {
   display: flex;
-}
-
-.applet-header {
-  padding: var(--space-md) var(--space-lg);
-  padding-left: 60px; /* Clear the hamburger menu button */
-  color: #ffb347;
-  font-size: var(--text-lg);
-  font-weight: 500;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-/* Breadcrumb navigation */
-.applet-breadcrumbs {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.125rem;
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-}
-
-.breadcrumb-item {
-  cursor: pointer;
-  color: var(--color-link, #0e639c);
-  transition: color 0.15s;
-}
-
-.breadcrumb-item:hover {
-  text-decoration: underline;
-  color: var(--color-link-hover, #1177bb);
-}
-
-.breadcrumb-item.active {
-  cursor: default;
-  color: #ffb347;
-  font-weight: 500;
-}
-
-.breadcrumb-item.active:hover {
-  text-decoration: none;
-}
-
-.breadcrumb-sep {
-  color: var(--color-text-muted);
-  user-select: none;
-}
-
-.breadcrumb-ellipsis {
-  color: var(--color-text-muted);
-  padding: 0 0.25rem;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
 }
 
 /* Applet instance container */
@@ -1353,9 +1345,7 @@ main {
 .output-embed[data-provider="spotify"] .embed-frame { min-height: 152px; }
 
 /* ========================================
-   RESPONSIVE: Desktop gets padding to avoid
-   floating nav buttons covering content.
-   Mobile uses full width (buttons overlay).
+   RESPONSIVE: Desktop split view, mobile toggle
    ======================================== */
 
 /* Mobile: ensure no horizontal overflow */
@@ -1364,15 +1354,33 @@ html, body {
   max-width: 100vw;
 }
 
-/* iOS: Fix nested scroll issue - body should not scroll on mobile */
+/* Mobile: single panel, toggle between chat and applet */
 @media (max-width: 768px) {
   /* Prevent body scroll overflow */
   body {
     overflow: hidden;
   }
   
+  /* Mobile: work-area stacks, only one visible at a time */
+  .work-area {
+    flex-direction: column;
+  }
+  
+  /* On mobile, applet panel takes full screen when visible */
+  .applet-panel:not(.hidden) {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    border-left: none;
+  }
+  
+  /* Hide chat panel when applet is shown on mobile */
+  .work-area:has(.applet-panel:not(.hidden)) .chat-panel {
+    display: none;
+  }
+  
   /* Enable momentum scrolling for chat area */
-  #messages {
+  .chat-scroll {
     -webkit-overflow-scrolling: touch;
   }
   
@@ -1399,34 +1407,45 @@ html, body {
   }
   
   /* Ensure input area is above iOS home indicator */
-  #user-input-container {
+  footer {
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
 
-/* Mobile: reduce padding, full width - no bottom padding (footer handles spacing) */
+/* Mobile: reduce padding, full width */
 main {
   padding: var(--space-md) 0 0;
 }
 
-/* Ensure fixed buttons stay in viewport on mobile */
-.menu-btn,
-.applet-btn {
-  /* Already fixed position, ensure they don't get pushed off */
-}
-
-@media (min-width: 768px) {
+/* Desktop: split view with applet on right */
+@media (min-width: 769px) {
   main {
     padding: var(--space-lg) 0 0;
   }
   
-  #appletView,
-  .new-chat {
-    padding-left: 4rem;
+  /* Desktop: applet panel takes 40% width when visible */
+  .applet-panel:not(.hidden) {
+    width: 40%;
+    min-width: 300px;
+    max-width: 600px;
   }
   
-  /* Right padding for applet button (visible in applet view) */
-  #appletView {
-    padding-right: 4rem;
+  /* Left padding to clear hamburger button */
+  .chat-panel {
+    padding-left: 60px;
+  }
+  
+  .new-chat {
+    padding-left: var(--space-lg);
+  }
+  
+  /* Right padding to clear applet button when applet shown */
+  .applet-panel {
+    padding-right: 60px;
+  }
+  
+  /* Session overlay needs padding for buttons */
+  .session-overlay {
+    padding-left: 60px;
   }
 }

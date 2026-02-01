@@ -35,42 +35,46 @@
   </button>
 
   <main>
-    <!-- Chat view -->
-    <div id="chatScroll" class="chat-scroll view active">
-      <div id="chatView" class="chat-view">
-        <!-- New chat form (shown when no messages) -->
-        <div id="newChat" class="new-chat">
-          <h2>New Chat</h2>
-          <div class="new-chat-cwd">
-            <label for="newChatCwd">Working directory</label>
-            <input type="text" id="newChatCwd" placeholder="/path/to/project">
-          </div>
-          <h3>Select a model</h3>
-          <div id="modelList"></div>
-          <div id="newChatError" class="new-chat-error"></div>
-        </div>
-        <!-- Chat messages (shown when has messages) -->
-        <div id="chat" class="hidden">
-          <!-- Messages will appear here -->
-        </div>
-        <!-- Working cursor (shown during streaming) -->
-        <div id="workingCursor" class="streaming-cursor hidden"></div>
-      </div>
-    </div>
-
-    <!-- Session manager view -->
-    <div id="sessionView" class="view">
+    <!-- Session manager view (full-screen overlay) -->
+    <div id="sessionView" class="session-overlay">
       <div id="usageInfo" class="usage-info"></div>
       <button type="button" class="new-chat-btn" onclick="showNewChat()">+ New Chat</button>
       <div id="sessionList"></div>
     </div>
 
-    <!-- Applet view -->
-    <div id="appletView" class="view">
-      <div class="applet-header">
-        <div class="applet-breadcrumbs"></div>
+    <!-- Work area: chat and applet side-by-side on desktop -->
+    <div class="work-area">
+      <!-- Chat panel (left on desktop, main on mobile) -->
+      <div id="chatPanel" class="chat-panel">
+        <div id="chatScroll" class="chat-scroll">
+          <div id="chatView" class="chat-view">
+            <!-- New chat form (shown when no messages) -->
+            <div id="newChat" class="new-chat">
+              <h2>New Chat</h2>
+              <div class="new-chat-cwd">
+                <label for="newChatCwd">Working directory</label>
+                <input type="text" id="newChatCwd" placeholder="/path/to/project">
+              </div>
+              <h3>Select a model</h3>
+              <div id="modelList"></div>
+              <div id="newChatError" class="new-chat-error"></div>
+            </div>
+            <!-- Chat messages (shown when has messages) -->
+            <div id="chat" class="hidden">
+              <!-- Messages will appear here -->
+            </div>
+            <!-- Working cursor (shown during streaming) -->
+            <div id="workingCursor" class="streaming-cursor hidden"></div>
+          </div>
+        </div>
       </div>
-      <!-- .applet-instance divs are created dynamically by applet-runtime -->
+
+      <!-- Applet panel (right on desktop, toggled on mobile) -->
+      <div id="appletPanel" class="applet-panel hidden">
+        <div id="appletView">
+          <!-- .applet-instance divs are created dynamically by applet-runtime -->
+        </div>
+      </div>
     </div>
   </main>
 

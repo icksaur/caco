@@ -4,7 +4,7 @@
 
 - One specification doc for UI states including applet
 - Minimize UI state code, ideally single file
-- URL encodes work state (session id + applet slug)
+- URL encodes work state "bookmark" (session id + applet slug)
 - Applets and chat co-exist - switching doesn't destroy either
 - Session view is full-screen for choosing cwd
 
@@ -207,12 +207,12 @@ Consolidate view-controller.ts + app-state.ts URL logic + applet-runtime.ts navi
 - [x] Add CSS media queries for mobile single-panel
 - [x] Test responsive breakpoint behavior
 
-### Phase 2: Strip old navigation
-- [ ] Remove Navigation API handlers from app-state.ts
-- [ ] Remove navigation handling from applet-runtime.ts
-- [ ] Remove view switching from view-controller.ts
-- [ ] Remove popstate/hashchange handlers if any
-- [ ] Verify nothing breaks (expect broken nav)
+### Phase 2: Strip old navigation ✅
+- [x] Remove Navigation API handlers from applet-runtime.ts
+- [x] Remove syncToUrl() and updateBreadcrumbUI() functions
+- [x] Remove URL handling from app-state.ts
+- [x] Simplify to single applet (no stack)
+- [x] Verify build passes
 
 ### Phase 3: Create router.ts
 - [ ] Create `public/ts/router.ts` as single URL owner

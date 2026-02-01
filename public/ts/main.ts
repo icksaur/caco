@@ -16,23 +16,14 @@ import { setupMultilineInput } from './multiline-input.js';
 import { connectWs, setActiveSession, requestHistory, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
-
-/**
- * Toggle between chatting and applet views
- */
-function toggleApplet(): void {
-  if (isViewState('applet')) {
-    setViewState('chatting');
-  } else {
-    setViewState('applet');
-  }
-}
+import { initRouter, toggleSessions, toggleApplet, sessionClick, newSessionClick, loadApplet } from './router.js';
 
 // Export functions to global scope for onclick handlers in HTML
 declare global {
   interface Window {
     removeImage: typeof removeImage;
     scrollToBottom: typeof scrollToBottom;
+    toggleSessions: typeof toggleSessions;
     toggleSessionPanel: typeof toggleSessionPanel;
     showNewChat: typeof showNewChatUI;
     switchSession: typeof switchSession;
@@ -49,6 +40,7 @@ declare global {
 // Attach to window for HTML onclick handlers
 window.removeImage = removeImage;
 window.scrollToBottom = scrollToBottom;
+window.toggleSessions = toggleSessions;
 window.toggleSessionPanel = toggleSessionPanel;
 window.showNewChat = showNewChatUI;
 window.switchSession = switchSession;
@@ -64,6 +56,9 @@ window.hideToast = hideToast;
 document.addEventListener('DOMContentLoaded', async () => {
   // Initialize view state from DOM
   initViewState();
+  
+  // Initialize router (Navigation API handler)
+  initRouter();
   
   // Initialize input router (global keyboard event routing)
   initInputRouter();

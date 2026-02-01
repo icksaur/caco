@@ -210,10 +210,14 @@ URL: ?session=abc&applet=files   → switch to different applet, browser preserv
 ```
 
 **Open question:** Do we preserve multiple applets in memory, or just one?
-- Simple: Only one applet at a time (switching destroys previous)
-- Complex: Keep N applets alive (like browser tabs)
 
-For now: **One applet at a time, but chat always persists.**
+**Decision: One applet at a time.** Switching applets destroys previous. Chat always persists.
+
+This means:
+- No applet stack, no tabs
+- Simpler memory model
+- URL `?applet=X` replaces current applet entirely
+- Agent can create new applet, old one gone
 
 ---
 

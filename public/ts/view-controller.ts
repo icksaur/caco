@@ -1,8 +1,10 @@
 /**
- * Centralized view state management
+ * View State Controller
  * 
- * This module is the SINGLE SOURCE OF TRUTH for which view is active.
+ * SINGLE SOURCE OF TRUTH for which view is active (sessions/newChat/chatting/applet).
  * All view transitions must go through setViewState() to prevent invalid states.
+ * 
+ * This manages VIEW state only. For session/model/UI flags, see app-state.ts.
  */
 
 import { scrollToBottom } from './ui-utils.js';

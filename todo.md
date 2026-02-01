@@ -1,6 +1,8 @@
 # things to do
 
-?applet=applet-browser query does not show applet (broken somewhere)
+app state management
+
+remove absolute path from test (copilot-web)
 
 split view for chat+applets so we can see both
 

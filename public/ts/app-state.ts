@@ -1,34 +1,23 @@
 /**
- * Consolidated Application State
+ * Application State (non-view)
  * 
- * SINGLE SOURCE OF TRUTH for all client-side state.
- * All state changes go through this module's setters.
+ * SINGLE SOURCE OF TRUTH for session, model, and UI flag state.
+ * Does NOT manage view state - see view-controller.ts for that.
  * 
  * Design principles:
  * - State is private, accessed via getters
  * - Mutations are explicit functions with clear names
- * - Side effects (DOM updates, WS sync) are handled in setters
- * - State can be inspected for debugging
+ * - Side effects (URL sync, WS sync) are handled in setters
  */
 
 import type { ModelInfo } from './types.js';
 import { setActiveSession as setWsActiveSession } from './websocket.js';
 
 // ============================================================
-// View State Types
-// ============================================================
-
-/** Valid application view states */
-export type ViewState = 'sessions' | 'newChat' | 'chatting' | 'applet';
-
-// ============================================================
 // State Interface
 // ============================================================
 
 export interface AppState {
-  // === View State ===
-  viewState: ViewState;
-  
   // === Session State ===
   activeSessionId: string | null;
   currentCwd: string;
@@ -55,7 +44,6 @@ export const DEFAULT_MODEL = 'claude-sonnet-4';
 // ============================================================
 
 const state: AppState = {
-  viewState: 'sessions',
   activeSessionId: null,
   currentCwd: '',
   selectedModel: DEFAULT_MODEL,
@@ -73,16 +61,6 @@ const state: AppState = {
 /** Get a shallow copy of entire state (for debugging) */
 export function getState(): Readonly<AppState> {
   return { ...state };
-}
-
-/** Get current view state */
-export function getViewState(): ViewState {
-  return state.viewState;
-}
-
-/** Check if in a specific view state */
-export function isViewState(viewState: ViewState): boolean {
-  return state.viewState === viewState;
 }
 
 /** Get active session ID */
@@ -128,16 +106,6 @@ export function hasImage(): boolean {
 // ============================================================
 // State Mutations
 // ============================================================
-
-/** 
- * Set view state
- * Note: Does NOT update DOM - caller must handle that
- */
-export function setViewState(viewState: ViewState): boolean {
-  if (state.viewState === viewState) return false; // No change
-  state.viewState = viewState;
-  return true;
-}
 
 /**
  * Set active session and sync to WebSocket + URL

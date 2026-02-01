@@ -1,5 +1,6 @@
 /**
- * Tests for consolidated application state
+ * Tests for application state (non-view)
+ * View state tests are in view-controller.test.ts
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -19,34 +20,6 @@ describe('app-state', () => {
     }));
     
     appState = await import('../../public/ts/app-state.js');
-  });
-  
-  describe('view state', () => {
-    it('getViewState returns current view', () => {
-      const state = appState.getState();
-      expect(appState.getViewState()).toBe(state.viewState);
-    });
-    
-    it('setViewState updates view and returns true on change', () => {
-      const initial = appState.getViewState();
-      const newState = initial === 'sessions' ? 'newChat' : 'sessions';
-      
-      const changed = appState.setViewState(newState);
-      expect(changed).toBe(true);
-      expect(appState.getViewState()).toBe(newState);
-    });
-    
-    it('setViewState returns false when no change', () => {
-      const current = appState.getViewState();
-      const changed = appState.setViewState(current);
-      expect(changed).toBe(false);
-    });
-    
-    it('isViewState checks current view', () => {
-      appState.setViewState('chatting');
-      expect(appState.isViewState('chatting')).toBe(true);
-      expect(appState.isViewState('sessions')).toBe(false);
-    });
   });
   
   describe('session state', () => {
@@ -157,13 +130,11 @@ describe('app-state', () => {
   
   describe('getState', () => {
     it('returns snapshot of all state', () => {
-      appState.setViewState('applet');
       appState.setActiveSession('snapshot-test', '/snapshot');
       appState.setStreaming(true);
       
       const snapshot = appState.getState();
       
-      expect(snapshot.viewState).toBe('applet');
       expect(snapshot.activeSessionId).toBe('snapshot-test');
       expect(snapshot.currentCwd).toBe('/snapshot');
       expect(snapshot.isStreaming).toBe(true);

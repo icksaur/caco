@@ -161,17 +161,16 @@ export function setActiveSession(sessionId: string | null, cwd: string): void {
 
 /**
  * Clear active session (for new chat)
- * Also clears session and applet from URL
+ * Clears session from URL but preserves applet param
  */
 export function clearActiveSession(): void {
   state.activeSessionId = null;
   // Note: Don't clear cwd - it's useful as default for next session
   
-  // Remove session and applet from URL (starting fresh)
+  // Remove session from URL (but preserve applet - that's applet-runtime's domain)
   if (typeof window !== 'undefined') {
     const url = new URL(window.location.href);
     url.searchParams.delete('session');
-    url.searchParams.delete('applet');
     history.replaceState(null, '', url.toString());
   }
 }

@@ -1,7 +1,5 @@
 # things to do
 
-blinking colored cursor support in new message-streaming.  Should always be the last div in "chat" and will show and hide with send/stop button enable/disable code.
-
 ?applet=applet-browser query does not show applet (broken somewhere)
 
 split view for chat+applets so we can see both

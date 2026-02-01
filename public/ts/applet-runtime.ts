@@ -4,34 +4,12 @@
  * Client-side applet execution.
  * Handles receiving applet content from SSE and injecting it into the DOM.
  * 
- * Phase 2: Exposes setAppletState() for applet JS to push state to server.
- * Phase 3: Exposes loadApplet(slug) for loading saved applets from applet JS.
- * Phase 4: WebSocket for real-time state sync.
- * Phase 5: Agent invocation - applets can POST to active session.
- * Phase 6: Navigation API for SPA routing.
- * Phase 7: Input routing - keyboard events routed to active applet only.
+ * Navigation is handled by router.ts - this module just renders applets.
  */
 
 import { setViewState, updateTitle } from './view-controller.js';
 import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './websocket.js';
 import { getActiveSessionId } from './app-state.js';
-
-// Navigation API types (not yet in TypeScript lib)
-interface NavigateEvent extends Event {
-  canIntercept: boolean;
-  downloadRequest: string | null;
-  hashChange: boolean;
-  navigationType: 'push' | 'replace' | 'reload' | 'traverse';
-  destination: { url: string };
-  intercept(options: { handler: () => Promise<void> }): void;
-}
-
-interface Navigation extends EventTarget {
-  addEventListener(type: 'navigate', listener: (event: NavigateEvent) => void): void;
-  navigate(url: string, options?: { state?: unknown }): { committed: Promise<void>; finished: Promise<void> };
-  currentEntry: { getState(): unknown };
-  updateCurrentEntry(options: { state: unknown }): void;
-}
 
 // Result type for saveTempFile
 interface TempFileResult {
@@ -46,7 +24,7 @@ export interface AppletContent {
   title?: string;
 }
 
-// Applet instance in the navigation stack
+// Current applet instance (one at a time per spec)
 interface AppletInstance {
   slug: string;
   label: string;
@@ -54,18 +32,14 @@ interface AppletInstance {
   styleElement: HTMLStyleElement | null;
 }
 
-// Navigation stack - applets are hidden, not destroyed on forward nav
-const MAX_STACK_DEPTH = 5;
-const appletStack: AppletInstance[] = [];
+// Single current applet (no stack - switching destroys previous)
+let currentApplet: AppletInstance | null = null;
 
 // Current applet style element (for cleanup) - legacy, migrating to per-instance
 let currentStyleElement: HTMLStyleElement | null = null;
 
 // Pending applet state - accumulated until next message is sent
 let pendingAppletState: Record<string, unknown> | null = null;
-
-// Flag to prevent recursive navigation when inside a navigate handler
-let insideNavigateHandler = false;
 
 /**
  * Helper function for applet JS to expose functions globally.
@@ -110,101 +84,8 @@ export function initAppletRuntime(): void {
   // MCP tool API for applet JS - call MCP tools
   (window as unknown as { callMCPTool: typeof callMCPTool }).callMCPTool = callMCPTool;
   
-  // Navigation API: single handler for all navigation types
-  // (links, back/forward, programmatic, address bar)
-  // Applets use <a href="?applet=slug"> links - no JS API needed
-  setupNavigationHandler();
-}
-
-/**
- * Set up Navigation API handler for applet routing
- * Intercepts all navigations with ?applet= param
- */
-function setupNavigationHandler(): void {
-  // TypeScript doesn't have Navigation API types yet
-  const nav = (window as unknown as { navigation?: Navigation }).navigation;
-  if (!nav) {
-    console.warn('[APPLET] Navigation API not available');
-    return;
-  }
-  
-  nav.addEventListener('navigate', (event: NavigateEvent) => {
-    // Skip if we can't intercept (e.g., cross-origin)
-    if (!event.canIntercept) return;
-    
-    // Skip downloads, hash-only changes, and page reloads
-    // Page reloads are handled by loadAppletFromUrl() in main.ts
-    if (event.downloadRequest !== null || event.hashChange) return;
-    if (event.navigationType === 'reload') return;
-    
-    const url = new URL(event.destination.url);
-    const appletSlug = url.searchParams.get('applet');
-    
-    // Only intercept same-origin applet navigations
-    if (url.origin !== window.location.origin) return;
-    
-    // Check if navigating away from applet (no ?applet= param)
-    if (!appletSlug) {
-      // If we're currently showing an applet, intercept to clear it
-      if (appletStack.length > 0) {
-        event.intercept({
-          handler: async () => {
-            insideNavigateHandler = true;
-            try {
-              console.log('[APPLET] navigate: leaving applet view');
-              clearApplet();
-              updateTitle();
-            } finally {
-              insideNavigateHandler = false;
-            }
-          }
-        });
-      }
-      return;
-    }
-    
-    // Extract URL params for applet state
-    const params: Record<string, string> = {};
-    url.searchParams.forEach((value, key) => {
-      if (key !== 'applet') params[key] = value;
-    });
-    
-    // Intercept and handle applet navigation
-    event.intercept({
-      handler: async () => {
-        insideNavigateHandler = true;
-        try {
-          // Check if slug is already in stack (breadcrumb click or back navigation)
-          const index = appletStack.findIndex(a => a.slug === appletSlug);
-          if (index >= 0 && index < appletStack.length - 1) {
-            // Pop down to existing entry (it's earlier in the stack)
-            console.log(`[APPLET] navigate: popping to stack index ${index}`);
-            while (appletStack.length > index + 1) {
-              const popped = appletStack.pop()!;
-              destroyInstance(popped);
-            }
-            showInstance(appletStack[index]);
-            updateBreadcrumbUI();
-            setViewState('applet');
-          } else if (index === appletStack.length - 1) {
-            // Already showing this applet, just ensure it's visible
-            console.log(`[APPLET] navigate: already showing ${appletSlug}`);
-            showInstance(appletStack[index]);
-            setViewState('applet');
-          } else {
-            // Load applet (push new) - pushApplet will call setViewState
-            console.log(`[APPLET] navigate: loading ${appletSlug}`, Object.keys(params).length ? params : '');
-            await loadAppletBySlug(appletSlug, Object.keys(params).length ? params : undefined);
-          }
-          updateTitle();
-        } finally {
-          insideNavigateHandler = false;
-        }
-      }
-    });
-  });
-  
-  console.log('[APPLET] Navigation API handler installed');
+  // Navigation will be handled by router.ts (Phase 3)
+  // For now, applets are loaded via loadAppletBySlug() directly
 }
 
 /**
@@ -273,7 +154,7 @@ async function sendAgentMessage(prompt: string, appletSlug?: string): Promise<vo
   }
   
   // Default to current applet if not specified
-  const slug = appletSlug ?? appletStack[appletStack.length - 1]?.slug;
+  const slug = appletSlug ?? currentApplet?.slug;
   
   console.log(`[APPLET] Sending agent message: "${prompt.slice(0, 50)}..." (session: ${sessionId}, applet: ${slug})`);
   
@@ -461,7 +342,7 @@ export interface NavigationContext {
  */
 export function getNavigationContext(): NavigationContext {
   return {
-    stack: appletStack.map(a => ({ slug: a.slug, label: a.label })),
+    stack: currentApplet ? [{ slug: currentApplet.slug, label: currentApplet.label }] : [],
     urlParams: getAppletUrlParams()
   };
 }
@@ -541,126 +422,11 @@ function renderAppletToInstance(
 }
 
 /**
- * Sync current applet to URL using Navigation API
- * Enables browser back/forward navigation
- */
-function syncToUrl(): void {
-  // Skip if we're inside a navigate handler - the URL is already being handled
-  if (insideNavigateHandler) return;
-  
-  const nav = (window as unknown as { navigation?: Navigation }).navigation;
-  
-  const current = appletStack[appletStack.length - 1];
-  const url = new URL(window.location.href);
-  const currentSlugInUrl = url.searchParams.get('applet');
-  
-  if (!current) {
-    // No applets - clear the URL param
-    if (url.searchParams.has('applet')) {
-      url.searchParams.delete('applet');
-      if (nav) {
-        nav.navigate(url.toString(), { state: { appletStack: [] } });
-      } else {
-        history.pushState({ appletStack: [] }, '', url.toString());
-      }
-    }
-    return;
-  }
-  
-  // Only navigate if different from current URL
-  if (currentSlugInUrl !== current.slug) {
-    url.searchParams.set('applet', current.slug);
-    const stackData = appletStack.map(a => ({ slug: a.slug, label: a.label }));
-    
-    if (nav) {
-      nav.navigate(url.toString(), { state: { appletStack: stackData } });
-    } else {
-      history.pushState({ appletStack: stackData }, '', url.toString());
-    }
-    console.log(`[APPLET] URL synced: ${url.searchParams.get('applet')}`);
-  }
-}
-
-/**
- * Update the breadcrumb UI based on current stack
- * Shows clickable trail with overflow collapse for 5+ items
- * Uses simple hrefs - Navigation API handles the actual navigation
- */
-function updateBreadcrumbUI(): void {
-  const container = document.querySelector('.applet-breadcrumbs');
-  if (!container) return;
-  
-  container.innerHTML = '';
-  
-  if (appletStack.length === 0) {
-    container.textContent = 'Applet';
-    return;
-  }
-  
-  // Determine which items to show
-  const MAX_VISIBLE = 5;
-  let itemsToShow: Array<{ instance: AppletInstance; originalIndex: number }>;
-  let showEllipsis = false;
-  
-  if (appletStack.length <= MAX_VISIBLE) {
-    itemsToShow = appletStack.map((instance, i) => ({ instance, originalIndex: i }));
-  } else {
-    // Show: first, ..., last 3
-    showEllipsis = true;
-    const first = { instance: appletStack[0], originalIndex: 0 };
-    const lastThree = appletStack.slice(-3).map((instance, i) => ({
-      instance,
-      originalIndex: appletStack.length - 3 + i
-    }));
-    itemsToShow = [first, ...lastThree];
-  }
-  
-  itemsToShow.forEach((item, displayIndex) => {
-    const isLast = item.originalIndex === appletStack.length - 1;
-    
-    // Add ellipsis after first item if needed
-    if (showEllipsis && displayIndex === 1) {
-      const ellipsis = document.createElement('span');
-      ellipsis.className = 'breadcrumb-sep';
-      ellipsis.textContent = ' > ';
-      container.appendChild(ellipsis);
-      
-      const dots = document.createElement('span');
-      dots.className = 'breadcrumb-ellipsis';
-      dots.textContent = '...';
-      container.appendChild(dots);
-    }
-    
-    // Add separator before item (except first)
-    if (displayIndex > 0) {
-      const sep = document.createElement('span');
-      sep.className = 'breadcrumb-sep';
-      sep.textContent = ' > ';
-      container.appendChild(sep);
-    }
-    
-    // Create breadcrumb item - use <a> for clickable, <span> for current
-    if (isLast) {
-      const crumb = document.createElement('span');
-      crumb.className = 'breadcrumb-item active';
-      crumb.textContent = item.instance.label;
-      container.appendChild(crumb);
-    } else {
-      const link = document.createElement('a');
-      link.className = 'breadcrumb-item';
-      link.href = `?applet=${item.instance.slug}`;
-      link.textContent = item.instance.label;
-      container.appendChild(link);
-    }
-  });
-}
-
-/**
- * Push a new applet onto the navigation stack
- * Handles deduplication and max depth limit
+ * Load an applet, destroying any previous one
+ * One applet at a time - no stack
  * 
  * @param slug - Unique identifier for the applet
- * @param label - Display name for breadcrumbs
+ * @param label - Display name
  * @param content - The applet HTML/CSS/JS content
  */
 export function pushApplet(slug: string, label: string, content: AppletContent): void {
@@ -670,36 +436,21 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
     return;
   }
   
-  console.log(`[APPLET] Pushing: ${label} (${slug})`);
+  console.log(`[APPLET] Loading: ${label} (${slug})`);
   
-  // Check for duplicate - if already in stack, navigate to it instead
-  const existingIndex = appletStack.findIndex(a => a.slug === slug);
-  if (existingIndex >= 0) {
-    console.log(`[APPLET] Dupe detected at index ${existingIndex}, truncating stack`);
-    // Destroy all instances after the existing one
-    while (appletStack.length > existingIndex + 1) {
-      const popped = appletStack.pop()!;
-      destroyInstance(popped);
-    }
-    // Show the existing instance
-    showInstance(appletStack[existingIndex]);
-    updateBreadcrumbUI();
-    syncToUrl();
+  // If same applet already loaded, just show it
+  if (currentApplet?.slug === slug) {
+    console.log(`[APPLET] Already loaded: ${slug}`);
+    showInstance(currentApplet);
     setViewState('applet');
     return;
   }
   
-  // Enforce max depth - destroy oldest (bottom of stack)
-  while (appletStack.length >= MAX_STACK_DEPTH) {
-    const oldest = appletStack.shift()!;
-    console.log(`[APPLET] Stack limit reached, destroying oldest: ${oldest.slug}`);
-    destroyInstance(oldest);
-  }
-  
-  // Hide current top of stack (don't destroy)
-  const current = appletStack[appletStack.length - 1];
-  if (current) {
-    hideInstance(current);
+  // Destroy current applet if any
+  if (currentApplet) {
+    console.log(`[APPLET] Destroying previous: ${currentApplet.slug}`);
+    destroyInstance(currentApplet);
+    currentApplet = null;
   }
   
   // Create new instance container
@@ -711,17 +462,14 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   // Render content into instance
   const styleElement = renderAppletToInstance(instanceDiv, content, slug);
   
-  // Push to stack
-  appletStack.push({
+  // Store as current
+  currentApplet = {
     slug,
     label,
     element: instanceDiv,
     styleElement
-  });
+  };
   
-  // Update UI
-  updateBreadcrumbUI();
-  syncToUrl();
   setViewState('applet');
   
   // WebSocket is already connected on page load - no need to connect here
@@ -729,18 +477,12 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
 
 /**
  * Clear the current applet content
- * Clears entire stack when leaving applet view completely
  */
 export function clearApplet(): void {
-  
-  // Destroy all instances in stack
-  while (appletStack.length > 0) {
-    const instance = appletStack.pop()!;
-    destroyInstance(instance);
+  if (currentApplet) {
+    destroyInstance(currentApplet);
+    currentApplet = null;
   }
-  
-  // Update breadcrumb UI (now empty)
-  updateBreadcrumbUI();
   
   // Also remove any orphaned applet styles and scripts (legacy cleanup)
   document.querySelectorAll('style[data-applet]').forEach(el => el.remove());
@@ -757,55 +499,22 @@ export function clearApplet(): void {
 }
 
 /**
- * Pop the current applet from the stack and show previous
- * Used for back navigation
- */
-export function popApplet(): void {
-  if (appletStack.length <= 1) {
-    console.log('[APPLET] Cannot pop - at bottom of stack');
-    return;
-  }
-  
-  // Destroy current
-  const current = appletStack.pop()!;
-  console.log(`[APPLET] Popping: ${current.slug}`);
-  destroyInstance(current);
-  
-  // Show previous
-  const previous = appletStack[appletStack.length - 1];
-  showInstance(previous);
-  
-  updateBreadcrumbUI();
-  syncToUrl();
-}
-
-/**
- * Get the current applet stack (read-only)
- */
-export function getAppletStack(): ReadonlyArray<{ slug: string; label: string }> {
-  return appletStack.map(a => ({ slug: a.slug, label: a.label }));
-}
-
-/**
- * Get the current (top) applet slug, or null if none active
+ * Get the current applet slug, or null if none active
  */
 export function getActiveAppletSlug(): string | null {
-  if (appletStack.length === 0) return null;
-  return appletStack[appletStack.length - 1].slug;
+  return currentApplet?.slug ?? null;
 }
 
 /**
- * Get the current (top) applet label (friendly name), or null if none active
+ * Get the current applet label (friendly name), or null if none active
  */
 export function getActiveAppletLabel(): string | null {
-  if (appletStack.length === 0) return null;
-  return appletStack[appletStack.length - 1].label;
+  return currentApplet?.label ?? null;
 }
 
 /**
  * Check if applet view has content
  */
 export function hasAppletContent(): boolean {
-  const contentContainer = document.querySelector('#appletView .applet-content');
-  return contentContainer !== null && contentContainer.innerHTML.trim() !== '';
+  return currentApplet !== null;
 }

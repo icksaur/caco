@@ -108,39 +108,21 @@ export function hasImage(): boolean {
 // ============================================================
 
 /**
- * Set active session and sync to WebSocket + URL
+ * Set active session and sync to WebSocket
+ * URL is managed by router.ts
  */
 export function setActiveSession(sessionId: string | null, cwd: string): void {
   state.activeSessionId = sessionId;
   state.currentCwd = cwd;
   setWsActiveSession(sessionId);
-  
-  // Update URL with session param
-  if (typeof window !== 'undefined') {
-    const url = new URL(window.location.href);
-    if (sessionId) {
-      url.searchParams.set('session', sessionId);
-    } else {
-      url.searchParams.delete('session');
-    }
-    history.replaceState(null, '', url.toString());
-  }
 }
 
 /**
  * Clear active session (for new chat)
- * Clears session from URL but preserves applet param
  */
 export function clearActiveSession(): void {
   state.activeSessionId = null;
   // Note: Don't clear cwd - it's useful as default for next session
-  
-  // Remove session from URL (but preserve applet - that's applet-runtime's domain)
-  if (typeof window !== 'undefined') {
-    const url = new URL(window.location.href);
-    url.searchParams.delete('session');
-    history.replaceState(null, '', url.toString());
-  }
 }
 
 /**

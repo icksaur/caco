@@ -200,12 +200,12 @@ Consolidate view-controller.ts + app-state.ts URL logic + applet-runtime.ts navi
 
 ## Work Phases
 
-### Phase 1: DOM & CSS restructure
-- [ ] Rework `<main>` structure for split layout (chat-container + applet-container)
-- [ ] Remove `.applet-breadcrumbs` from appletView
-- [ ] Add CSS grid/flexbox for desktop split view
-- [ ] Add CSS media queries for mobile single-panel
-- [ ] Test responsive breakpoint behavior
+### Phase 1: DOM & CSS restructure ✅
+- [x] Rework `<main>` structure for split layout (chat-container + applet-container)
+- [x] Remove `.applet-breadcrumbs` from appletView
+- [x] Add CSS grid/flexbox for desktop split view
+- [x] Add CSS media queries for mobile single-panel
+- [x] Test responsive breakpoint behavior
 
 ### Phase 2: Strip old navigation
 - [ ] Remove Navigation API handlers from app-state.ts

@@ -78,7 +78,7 @@ describe('insertEvent', () => {
         success: true,
         result: { content: 'output here' }
       } }, el);
-      expect(el.textContent).toBe('**bash**\n```bash\nls -la\noutput here\n```');
+      expect(el.textContent).toBe('**bash**\n\n```bash\nls -la\noutput here\n```');
     });
 
     it('formats failed tool.execution_complete with error', () => {
@@ -87,7 +87,7 @@ describe('insertEvent', () => {
         success: false,
         error: 'command not found'
       } }, el);
-      expect(el.textContent).toBe('**bash**\n```bash\nbadcmd\ncommand not found\n```');
+      expect(el.textContent).toBe('**bash**\n\n```bash\nbadcmd\ncommand not found\n```');
     });
 
     it('formats tool.execution_complete without result content', () => {
@@ -96,7 +96,7 @@ describe('insertEvent', () => {
         success: true,
         result: {}
       } }, el);
-      expect(el.textContent).toBe('**read_file**\n```read_file\n\n```');
+      expect(el.textContent).toBe('**read_file**\n\n```read_file\n\n```');
     });
     
     it('report_intent keeps intent display on complete (no change)', () => {

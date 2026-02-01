@@ -82,8 +82,15 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   },
   'assistant.message_delta': appendPath('deltaContent'),
   
-  // Reasoning
-  'assistant.reasoning': setPath('content'),
+  // Reasoning - render markdown on final event for proper collapse structure
+  'assistant.reasoning': (element, data) => {
+    const value = getByPath(data, 'content');
+    element.textContent = typeof value === 'string' ? value : '';
+    // Render markdown in browser (no-op in tests)
+    if (typeof window !== 'undefined' && window.renderMarkdownElement) {
+      window.renderMarkdownElement(element as unknown as Element);
+    }
+  },
   'assistant.reasoning_delta': appendPath('deltaContent'),
   
   // Intent
@@ -124,8 +131,10 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     const success = data.success as boolean;
     const result = getByPath(data, 'result.content') as string | undefined;
     
-    // Build: **name** + code block with input + output
-    let content = `**${name}**\n\`\`\`${name}\n`;
+    // Build: **name** + blank line + code block with input + output
+    // Blank line ensures markdown renders header and code as separate blocks
+    // This enables two-layer CSS collapse (show only header when collapsed)
+    let content = `**${name}**\n\n\`\`\`${name}\n`;
     if (input) content += `${input}\n`;
     if (success && result) {
       content += result;

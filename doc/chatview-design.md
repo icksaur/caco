@@ -347,12 +347,46 @@ When a new activity box is added, collapse previous activity boxes.
 First child (usually `report_intent` with intent description) acts as clickable header.
 When collapsed, only header is visible. Click header to expand/collapse.
 
+### Two-Layer Collapse
+
+Activity boxes use a two-layer collapse to handle large tool outputs:
+
+1. **Layer 1 (Outer)**: When activity box is collapsed, show only its first child div
+2. **Layer 2 (Inner)**: That first child also collapses to show only its first element
+
+This handles scenarios where the first child is a tool output with large content:
+```html
+<div class="assistant-activity collapsed">
+  <div class="tool-text">
+    <p><strong>grep</strong></p>          <!-- Only this shows (Layer 2) -->
+    <pre><code>[500 lines]</code></pre>   <!-- Hidden by Layer 2 -->
+  </div>
+  <div class="tool-text">...</div>         <!-- Hidden by Layer 1 -->
+</div>
+```
+
+For this to work, tool output format includes a blank line between header and code:
+```markdown
+**toolname**
+
+```toolname
+input
+output
+```
+```
+
+This ensures markdown renders as separate `<p>` and `<pre>` elements, enabling Layer 2 collapse.
+
 ### Implementation
 
 **CSS** (`style.css`):
 ```css
-/* Hide non-first children when collapsed */
+/* Layer 1: Hide non-first children when collapsed */
 .assistant-activity.collapsed > *:not(:first-child) {
+  display: none;
+}
+/* Layer 2: First child also collapses to its first child */
+.assistant-activity.collapsed > *:first-child > *:not(:first-child) {
   display: none;
 }
 /* First child is clickable header */
@@ -384,9 +418,20 @@ chatDiv.addEventListener('click', (e) => {
 });
 ```
 
+### Markdown Rendering for Collapse
+
+For two-layer collapse to work, inner content needs child elements. These events render markdown:
+- `assistant.message` - final message content
+- `assistant.reasoning` - final reasoning content  
+- `tool.execution_complete` - completed tool output
+
+Delta events (`assistant.message_delta`, `assistant.reasoning_delta`) accumulate text without rendering,
+then the final event renders markdown creating the element structure needed for collapse.
+
 ### Files
-- `public/style.css` - collapsed state styling
+- `public/style.css` - two-layer collapsed state styling
 - `public/ts/message-streaming.ts` - auto-collapse logic + click handler
+- `public/ts/event-inserter.ts` - markdown rendering on terminal events
 
 ## stream formats
 

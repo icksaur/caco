@@ -4,7 +4,8 @@ See what docs we have in chatview-design.md.  This was a lot of work to simplify
 I don't know what to do.  Probably use the functionality in #event-inserter.ts to make all innerInserter content collapsible to a single line.  This will take some investigation to see what properties are best on the first line of the inner activity divs. There is a record map data driving the behavior for when to make an activity class div. We probably need to teach the event inserter to put a one-line div for each known type that goes into activity (these are documented in chatview-design.md) and collapse that too.  It should all be collapsed.  Would be nice if reasoning streams and collapses later.  Needs a clean data-driven solution though.
 The end result is two layers of collapses: chatView children collapse to first child div.  Each of those children also collapse to first child div.  Then keep it all collapsed.
 This streams new content into the divs without any code changes, and they do not take a huge amount of space.
-Look into this and if it's clear, fix.  Otherwise propose solutions.  You'll have to trace the code.  Do not add complexity to the front-end.  Keep it simple.
+Look into this and if it's clear, fix.  Otherwise propose solutions.  You'll have to trace the code.  Do not add much complexity, state, or special cases to the front-end.  Keep it simple.  Front-end regressions are awful.
+Document anything in #chatview-design.md
 
 investigate how git front-ends work.  Make case study for git status applet.  Consider streaming to applet changes or what applet functionality is required.
 

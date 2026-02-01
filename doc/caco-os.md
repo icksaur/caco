@@ -2,10 +2,11 @@
 
 ## Requirements
 
-One specification doc for UI states including applets.
+One specification doc for UI states including applet.
 Minimize UI state code, ideally single file.
-URL can encode work state (session id + apps)
-Rationalize non-visible but active state (applets and chat)
+URL can encode work state (session id + applet)
+Rationalize non-visible but active state (applet and chat)
+Applets and chat can co-exist with UI to switch without losing applet nor chat state.
 
 ## ideas
 
@@ -186,10 +187,33 @@ Desktop:                          Mobile:
 └────────────────┴───────────┘
 ```
 
-**URL format:** `?session=abc&applet=browser&path=/src`
-- `session` = active session
-- `applet` = current applet (if any)
-- other params = applet-specific state
+---
+
+## URL Philosophy: Bookmark, Not Controller
+
+**Key insight:** URL is for sharing/bookmarking, not for controlling app state destruction.
+
+**URL format:** `?session=abc&applet=browser`
+
+**Rules:**
+1. Navigating TO `?applet=X` → loads/shows applet X
+2. Navigating AWAY from `?applet=` → hides applet, does NOT destroy it
+3. Session is NEVER closed by URL changes
+4. Chat state persists regardless of URL
+
+**Result:** Both chat and applet co-exist in memory. URL just controls visibility/focus.
+
+```
+URL: ?session=abc                → show chat, applet hidden but alive
+URL: ?session=abc&applet=browser → show applet (or split view), chat alive
+URL: ?session=abc&applet=files   → switch to different applet, browser preserved? (TBD)
+```
+
+**Open question:** Do we preserve multiple applets in memory, or just one?
+- Simple: Only one applet at a time (switching destroys previous)
+- Complex: Keep N applets alive (like browser tabs)
+
+For now: **One applet at a time, but chat always persists.**
 
 ---
 

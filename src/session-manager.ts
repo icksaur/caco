@@ -105,6 +105,9 @@ class SessionManager {
   // sessionId → { cwd, session, client }
   private activeSessions = new Map<string, ActiveSession>();
   
+  // Sessions currently processing a message (busy)
+  private busySessions = new Set<string>();
+  
   // sessionId → { cwd, summary } (cached from disk)
   private sessionCache = new Map<string, CachedSession>();
   
@@ -529,6 +532,27 @@ class SessionManager {
    */
   isActive(sessionId: string): boolean {
     return this.activeSessions.has(sessionId);
+  }
+
+  /**
+   * Check if a session is currently processing a message
+   */
+  isBusy(sessionId: string): boolean {
+    return this.busySessions.has(sessionId);
+  }
+
+  /**
+   * Mark a session as busy (processing a message)
+   */
+  markBusy(sessionId: string): void {
+    this.busySessions.add(sessionId);
+  }
+
+  /**
+   * Mark a session as idle (done processing)
+   */
+  markIdle(sessionId: string): void {
+    this.busySessions.delete(sessionId);
   }
 
   /**

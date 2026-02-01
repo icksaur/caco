@@ -61,6 +61,12 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     return;
   }
   
+  // Check if session is busy processing another message
+  if (sessionManager.isBusy(sessionId)) {
+    res.status(409).json({ error: 'Session is busy processing another message', code: 'SESSION_BUSY' });
+    return;
+  }
+  
   // Self-POST prevention: block agent posting to its own session
   if (source === 'agent' && fromSession === sessionId) {
     res.status(400).json({ error: 'Cannot post to own session' });
@@ -212,6 +218,7 @@ export async function dispatchMessage(
       }
       
       if (event.type === 'session.idle' || event.type === 'session.error') {
+        sessionManager.markIdle(sessionId);
         unsubscribe();
         if (tempFilePath) {
           unlink(tempFilePath).catch(() => {});
@@ -222,6 +229,7 @@ export async function dispatchMessage(
     
     // Send message
     try {
+      sessionManager.markBusy(sessionId);
       sessionManager.sendStream(sessionId, prompt, messageOptions);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -233,6 +241,7 @@ export async function dispatchMessage(
         onEvent({ type: 'session.error', data: { message } });
       }
       
+      sessionManager.markIdle(sessionId);
       unsubscribe();
       if (tempFilePath) {
         unlink(tempFilePath).catch(() => {});
@@ -244,6 +253,7 @@ export async function dispatchMessage(
     const message = error instanceof Error ? error.message : String(error);
     onEvent({ type: 'session.error', data: { message } });
     
+    sessionManager.markIdle(sessionId);
     if (tempFilePath) {
       await unlink(tempFilePath).catch(() => {});
     }

@@ -715,19 +715,13 @@ main {
   padding: var(--space-lg);
 }
 
-/* Activity box collapsed state - two-layer collapse:
-   Layer 1: Show only first child of activity box
-   Layer 2: Within that first child, show only its first child (header line)
-   This handles grep/tool output that has: <p>**tool**</p><pre>huge output</pre>
-   When collapsed, only the <p>**tool**</p> header shows */
-.assistant-activity.collapsed > *:not(:first-child) {
+/* Inner activity items (tool calls, reasoning) are individually collapsible
+   Each inner child shows only its first element when collapsed
+   Click to expand and see full content */
+.assistant-activity > .collapsed > *:not(:first-child) {
   display: none;
 }
-/* Layer 2: First child also collapses to its first child */
-.assistant-activity.collapsed > *:first-child > *:not(:first-child) {
-  display: none;
-}
-.assistant-activity > *:first-child {
+.assistant-activity > * {
   cursor: pointer;
 }
 

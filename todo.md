@@ -1,13 +1,25 @@
 # things to do
 
-See what docs we have in chatview-design.md.  This was a lot of work to simplify the streaming into clear chat log divs.  There is an annoying problems: Our current design streams into the first activity div with a pretty clean and well-designed inserter strategy.  The first div in an activity div is USUALLY a short intent string.  However, when activity is interleaved with chat responses, it may be a grep tool.  This produces a huge block of text.  Our collapse strategy collapses to a single child div (it was simple).  This works well for single-string intent.  It doesn't do much at all for a grep with all output.  We stream a huge grep output clogging the chatview, and then it can't get any smaller, because the first div with the grep string is huge.  So our design is not sufficient for anything but intent activity divs.
-I don't know what to do.  Probably use the functionality in #event-inserter.ts to make all innerInserter content collapsible to a single line.  This will take some investigation to see what properties are best on the first line of the inner activity divs. There is a record map data driving the behavior for when to make an activity class div. We probably need to teach the event inserter to put a one-line div for each known type that goes into activity (these are documented in chatview-design.md) and collapse that too.  It should all be collapsed.  Would be nice if reasoning streams and collapses later.  Needs a clean data-driven solution though.
-The end result is two layers of collapses: chatView children collapse to first child div.  Each of those children also collapse to first child div.  Then keep it all collapsed.
-This streams new content into the divs without any code changes, and they do not take a huge amount of space.
-Look into this and if it's clear, fix.  Otherwise propose solutions.  You'll have to trace the code.  Do not add much complexity, state, or special cases to the front-end.  Keep it simple.  Front-end regressions are awful.
-Document anything in #chatview-design.md
+We are still working on addressing streaming in tool output like built-ins such as grep and glob.  The issue is that they produce very large amounts of text that bloats the responses.  The current status is that tool output is debounced rendering the tool output, but it shows all of tool output during stream (which is only rarely useful).  It would be better if tool output is pre-collapsed to a single first div.  What IS useful is seeing the reasoning stream.  Perhaps we can:
+ensure a smallish descriptive first child is added (tool name, reasoning text, etc).  This can be be done in event-inserter.  Either collapse immediately, or add all assistant-activity divs with collapsed CSS from the beginning.  We can re-add delta streaming for reasoning later after handling the primary case of keeping the output legible.  The current state also is expandable and that works just fine.  But it also shows all tool output.  The individual tools calls do not collapse, unfortunately.  I think it would be ideal if each inner tool call (innerInserter) were collapsed.  The outerInserter div would NOT collapse.  The ideal result is:
+
+(begin grey assitant div) (never collapses!)
+reasoning text stream div (post-collapsed click to expand)
+"bash" tool div (pre-collapsed w/ click to expand)
+"grep" tool div (pre-collapsed w/ cclick to expand)
+reasoning text or anything else
+(end grey assitant div)
+
+We vastly prefer simple CSS solutions, but a line of JS goes a long way.  It's less risky to have "leaf" JS which is entirely used in one file for rendering nice HTMLElements. State is trouble, and coupling is trouble.
+
+---
+for later:
 
 investigate how git front-ends work.  Make case study for git status applet.  Consider streaming to applet changes or what applet functionality is required.
+
+Dead CSS analysis.  Any tools we can use?
+
+Front-end javascript dead code search.
 
 API review.  Find all routes and compare to API.md and update API.md.  Document all HTTP API JSON payload formats.
 

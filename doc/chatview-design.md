@@ -340,67 +340,70 @@ The `renderMarkdownElement(element)` function in `markdown-renderer.ts`:
 - Sets `innerHTML` with rendered HTML
 - Preserves `.streaming-cursor` class if present
 
-## auto-collapse
+## Inner Child Collapse
 
 ### Behavior
-When a new activity box is added, collapse previous activity boxes.
-First child (usually `report_intent` with intent description) acts as clickable header.
-When collapsed, only header is visible. Click header to expand/collapse.
+Each inner child within an activity box (tool calls, reasoning) is individually collapsible.
+The outer activity box never collapses - all children are always visible.
+When an inner child is collapsed, only its first element (header) shows.
 
-### Two-Layer Collapse
+### Collapse Types
 
-Activity boxes use a two-layer collapse to handle large tool outputs:
+| Inner Type | Collapse Timing | Behavior |
+|------------|----------------|----------|
+| Tool calls | Pre-collapsed | Created with `.collapsed`, user clicks to expand |
+| Reasoning | Post-collapsed | Streams visibly, collapses when `assistant.reasoning` arrives |
+| Messages | Never collapsed | Always fully visible |
 
-1. **Layer 1 (Outer)**: When activity box is collapsed, show only its first child div
-2. **Layer 2 (Inner)**: That first child also collapses to show only its first element
-
-This handles scenarios where the first child is a tool output with large content:
+### Example Structure
 ```html
-<div class="assistant-activity collapsed">
-  <div class="tool-text">
-    <p><strong>grep</strong></p>          <!-- Only this shows (Layer 2) -->
-    <pre><code>[500 lines]</code></pre>   <!-- Hidden by Layer 2 -->
+<div class="assistant-activity">              <!-- Never collapses -->
+  <div class="reasoning-text collapsed">      <!-- Post-collapsed after streaming -->
+    <p>First paragraph of reasoning...</p>    <!-- Only this shows when collapsed -->
+    <p>More reasoning...</p>                  <!-- Hidden -->
   </div>
-  <div class="tool-text">...</div>         <!-- Hidden by Layer 1 -->
+  <div class="tool-text collapsed">           <!-- Pre-collapsed on creation -->
+    <p><strong>bash</strong></p>              <!-- Only this shows when collapsed -->
+    <pre><code>[output]</code></pre>          <!-- Hidden -->
+  </div>
+  <div class="tool-text collapsed">           <!-- Each tool independently collapsible -->
+    <p><strong>grep</strong></p>
+    <pre><code>[output]</code></pre>
+  </div>
 </div>
 ```
-
-For this to work, tool output format includes a blank line between header and code:
-```markdown
-**toolname**
-
-```toolname
-input
-output
-```
-```
-
-This ensures markdown renders as separate `<p>` and `<pre>` elements, enabling Layer 2 collapse.
 
 ### Implementation
 
 **CSS** (`style.css`):
 ```css
-/* Layer 1: Hide non-first children when collapsed */
-.assistant-activity.collapsed > *:not(:first-child) {
+/* Inner activity items are individually collapsible
+   When collapsed, show only first child element (header) */
+.assistant-activity > .collapsed > *:not(:first-child) {
   display: none;
 }
-/* Layer 2: First child also collapses to its first child */
-.assistant-activity.collapsed > *:first-child > *:not(:first-child) {
-  display: none;
-}
-/* First child is clickable header */
-.assistant-activity > *:first-child {
+/* All inner children are clickable */
+.assistant-activity > * {
   cursor: pointer;
 }
 ```
 
-**Auto-collapse on insert** (`message-streaming.ts` in `ElementInserter.getElement()`):
+**Pre-collapse on creation** (`message-streaming.ts`):
 ```typescript
-// Before creating any new outer div, collapse all activity boxes
-parent.querySelectorAll('.assistant-activity:not(.collapsed)').forEach(el => {
-  el.classList.add('collapsed');
-});
+// PRE_COLLAPSED_EVENTS defines which event types create collapsed elements
+const PRE_COLLAPSED_EVENTS = new Set(['tool.execution_start']);
+
+// In getOrCreateKeyed():
+const shouldCollapse = this.preCollapsed.has(eventType);
+div.className = shouldCollapse ? cssClass + ' collapsed' : cssClass;
+```
+
+**Post-collapse on completion** (`message-streaming.ts` in `handleEvent()`):
+```typescript
+// Reasoning collapses after streaming is complete
+if (eventType === 'assistant.reasoning') {
+  inner.classList.add('collapsed');
+}
 ```
 
 **Toggle handler** (`message-streaming.ts` in `setupFormHandler()`):
@@ -410,23 +413,36 @@ chatDiv.addEventListener('click', (e) => {
   const activity = target.closest('.assistant-activity');
   if (!activity) return;
   
-  // Only toggle if clicking the first child (header)
-  const firstChild = activity.firstElementChild;
-  if (firstChild && (target === firstChild || firstChild.contains(target))) {
-    activity.classList.toggle('collapsed');
+  // Find the direct child that was clicked and toggle it
+  let innerItem = target;
+  while (innerItem.parentElement && innerItem.parentElement !== activity) {
+    innerItem = innerItem.parentElement;
+  }
+  if (innerItem && innerItem.parentElement === activity) {
+    innerItem.classList.toggle('collapsed');
   }
 });
 ```
 
 ### Markdown Rendering for Collapse
 
-For two-layer collapse to work, inner content needs child elements. These events render markdown:
-- `assistant.message` - final message content
-- `assistant.reasoning` - final reasoning content  
-- `tool.execution_complete` - completed tool output
+For inner children to collapse properly, they need child elements (not just text).
+These events render markdown to create structure:
+- `assistant.message` - renders immediately
+- `assistant.reasoning` - renders on final event (after delta streaming)
+- `tool.execution_complete` - renders immediately
 
-Delta events (`assistant.message_delta`, `assistant.reasoning_delta`) accumulate text without rendering,
-then the final event renders markdown creating the element structure needed for collapse.
+The tool output format includes a blank line between header and code block:
+```markdown
+**toolname**
+
+```toolname
+input
+output
+```
+```
+
+This ensures markdown renders as separate `<p>` and `<pre>` elements.
 
 ### Files
 - `public/style.css` - two-layer collapsed state styling

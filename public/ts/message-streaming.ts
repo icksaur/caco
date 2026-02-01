@@ -117,6 +117,14 @@ const EVENT_KEY_PROPERTY: Record<string, string> = {
   'assistant.message_delta': 'messageId',
 };
 
+/**
+ * Events that should create pre-collapsed inner children
+ * Tool calls start collapsed; reasoning streams visibly then collapses on completion
+ */
+const PRE_COLLAPSED_EVENTS = new Set([
+  'tool.execution_start',
+]);
+
 /** Get outer class for event type, or undefined if not mapped */
 export function getOuterClass(eventType: string): string | undefined {
   return EVENT_TO_OUTER[eventType];
@@ -141,17 +149,20 @@ export class ElementInserter {
   private name: string;
   private debug: (msg: string) => void;
   private keyProperty: Record<string, string>;
+  private preCollapsed: Set<string>;
   
   constructor(
     map: Record<string, string | null>, 
     name: string, 
     debug?: (msg: string) => void,
-    keyProperty?: Record<string, string>
+    keyProperty?: Record<string, string>,
+    preCollapsed?: Set<string>
   ) {
     this.map = map;
     this.name = name;
     this.debug = debug || (() => {});
     this.keyProperty = keyProperty || {};
+    this.preCollapsed = preCollapsed || new Set();
   }
   
   /**
@@ -184,11 +195,6 @@ export class ElementInserter {
       return last;
     }
     
-    // Auto-collapse previous activity boxes when creating any new outer div
-    parent.querySelectorAll('.assistant-activity:not(.collapsed)').forEach(el => {
-      el.classList.add('collapsed');
-    });
-    
     // Create new
     const div = document.createElement('div');
     div.className = cssClass;
@@ -199,6 +205,7 @@ export class ElementInserter {
   
   /**
    * Get or create element by data-key attribute
+   * Tool calls start collapsed; other keyed elements do not
    */
   private getOrCreateKeyed(cssClass: string, parent: HTMLElement, keyValue: string, eventType: string): HTMLElement {
     // Search for existing child with matching data-key
@@ -210,10 +217,12 @@ export class ElementInserter {
     
     // Create new with data-key
     const div = document.createElement('div');
-    div.className = cssClass;
+    // Only pre-collapse certain event types (tool calls)
+    const shouldCollapse = this.preCollapsed.has(eventType);
+    div.className = shouldCollapse ? cssClass + ' collapsed' : cssClass;
     div.dataset.key = keyValue;
     parent.appendChild(div);
-    this.debug(`[INSERTER] "${this.name}" create keyed div for "${eventType}" key="${keyValue}"`);
+    this.debug(`[INSERTER] "${this.name}" create keyed div for "${eventType}" key="${keyValue}" collapsed=${shouldCollapse}`);
     return div;
   }
 }
@@ -222,8 +231,8 @@ export class ElementInserter {
 const inserterDebug: (msg: string) => void = console.log;
 
 // Two inserters with their respective maps
-const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>, 'outer');//inserterDebug);
-const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', undefined, EVENT_KEY_PROPERTY);
+const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>, 'outer');
+const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', undefined, EVENT_KEY_PROPERTY, PRE_COLLAPSED_EVENTS);
 
 // ============================================================================
 // Event Handlers
@@ -257,6 +266,11 @@ function handleEvent(event: SessionEvent): void {
   
   // Insert event content into element (handles data storage and markdown rendering)
   insertEvent(event, inner);
+  
+  // Post-collapse: reasoning collapses after streaming is complete
+  if (eventType === 'assistant.reasoning') {
+    inner.classList.add('collapsed');
+  }
   
   scrollToBottom();
 }
@@ -392,7 +406,8 @@ function removeImage(): void {
 export function setupFormHandler(): void {
   registerWsHandlers();
   
-  // Toggle collapsed activity boxes - only first child (header) is clickable
+  // Toggle collapsed inner items within activity boxes
+  // Each tool-text, reasoning-text etc. is individually collapsible
   const chatDiv = document.getElementById('chat');
   if (chatDiv) {
     chatDiv.addEventListener('click', (e) => {
@@ -400,10 +415,16 @@ export function setupFormHandler(): void {
       const activity = target.closest('.assistant-activity');
       if (!activity) return;
       
-      // Only toggle if clicking the first child (header)
-      const firstChild = activity.firstElementChild;
-      if (firstChild && (target === firstChild || firstChild.contains(target))) {
-        activity.classList.toggle('collapsed');
+      // Find the direct child of activity that was clicked
+      // This is the inner item (tool-text, reasoning-text, etc.)
+      let innerItem = target;
+      while (innerItem.parentElement && innerItem.parentElement !== activity) {
+        innerItem = innerItem.parentElement;
+      }
+      
+      // Toggle collapse on the inner item
+      if (innerItem && innerItem.parentElement === activity) {
+        innerItem.classList.toggle('collapsed');
       }
     });
   }

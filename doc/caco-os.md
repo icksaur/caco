@@ -112,6 +112,10 @@ Applet-specific params also allowed: `?applet=file-browser&path=/src`
 
 | File | Purpose |
 |------|---------|
-| `public/ts/view-controller.ts` | View state management |
-| `public/ts/applet-runtime.ts` | Applet stack, Navigation API handler |
-| `public/ts/app-state.ts` | Session state, URL session param |
+| `public/ts/view-controller.ts` | **View state** - which view is active (sessions/newChat/chatting/applet) + DOM updates |
+| `public/ts/app-state.ts` | **App state** - session ID, model, cwd, UI flags (isStreaming, loadingHistory) |
+| `public/ts/applet-runtime.ts` | Applet stack, Navigation API handler, breadcrumbs |
+
+**Separation of concerns:**
+- `view-controller.ts` = what's visible (DOM classes)
+- `app-state.ts` = data state (no DOM manipulation)

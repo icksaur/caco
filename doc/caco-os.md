@@ -224,11 +224,9 @@ Consolidate view-controller.ts + app-state.ts URL logic + applet-runtime.ts navi
 - [x] Wire up `toggleApplet` action
 - [x] Wire up `loadApplet(slug)` action
 
-### Phase 4: Integration & cleanup
-- [ ] Update index.html onclick handlers to call router actions
-- [ ] Delete dead code from view-controller.ts
-- [ ] Delete dead code from app-state.ts
-- [ ] Delete dead code from applet-runtime.ts
-- [ ] Test all flows end-to-end
-- [ ] Test URL bookmarking behavior
-- [ ] Test back/forward navigation
+### Phase 4: Integration & cleanup ✅
+- [x] Update index.html onclick handlers to call router actions
+- [x] Delete dead code from session-panel.ts
+- [x] Clean up unused imports
+- [x] Test all flows end-to-end
+- [x] Build passes with knip (no unused exports)

@@ -140,42 +140,56 @@ Applets as overlays/modals on top of chat:
 # Open Questions
 
 1. **Should session sidebar always be visible?** 
-   - Current: No, it's a toggle
-   - Alternative: Yes, like Slack/Discord/ChatGPT
+   - **Decision: NO** - iOS won't fit
+   - Keep current toggle approach
 
 2. **Should chat and applet be viewable simultaneously?**
-   - Current: No, exclusive toggle
-   - Alternative: Split view or applet-as-sidebar
+   - **Decision: YES on desktop** - useful for agent-applet workflows
+   - Collapse to single panel on mobile
 
 3. **Who owns URL state?**
-   - Current: app-state.ts manages `session`, applet-runtime.ts manages `applet`
-   - Alternative: Single URL router module
+   - **Decision: Single owner** - consolidate into one module
+   - No more split between app-state.ts and applet-runtime.ts
 
 4. **What about mobile?**
-   - Split views collapse to single panel
-   - Swipe gestures for switching?
+   - **Target: iOS Safari**
+   - Single panel, no split views
+   - Session list as overlay/drawer
 
 5. **History behavior for applet stack?**
-   - Current: Navigation API + pushState for breadcrumbs
-   - Is this worth the complexity?
+   - **Decision: SIMPLIFY** - get rid of breadcrumb history!
+   - Just show current applet, browser back = close applet
+   - No stack, no complexity
 
 ---
 
 # Recommendation
 
-**Short-term:** Option C (Unified URL Router)
-- Consolidate URL handling into single module
-- Keep current UI layout
-- Reduce bugs like the `?applet=` clearing issue
+**Revised approach based on decisions:**
 
-**Medium-term:** Option A (Two-Panel)
-- Sessions sidebar always visible
-- Main content toggles chat/applet
-- Simpler state model
+1. **Single URL router** - one module owns all URL params
+2. **Desktop split view** - chat + applet side by side (optional)
+3. **Mobile single panel** - toggle between chat/applet, iOS Safari first
+4. **No applet stack** - just current applet, back = close
+5. **Session toggle overlay** - not always-visible sidebar
 
-**Long-term exploration:** Option B (Split View)
-- When user feedback demands simultaneous visibility
-- Requires more design work
+This is simpler than any of Options A-D. Call it **Option E: Minimal SPA**.
+
+```
+Desktop:                          Mobile:
+┌────────────────┬───────────┐    ┌─────────────────┐
+│                │           │    │                 │
+│     Chat       │  Applet   │    │  Chat OR Applet │
+│                │  (opt)    │    │                 │
+│                │           │    │  [input]        │
+│  [input]       │           │    └─────────────────┘
+└────────────────┴───────────┘
+```
+
+**URL format:** `?session=abc&applet=browser&path=/src`
+- `session` = active session
+- `applet` = current applet (if any)
+- other params = applet-specific state
 
 ---
 

@@ -214,16 +214,15 @@ Consolidate view-controller.ts + app-state.ts URL logic + applet-runtime.ts navi
 - [x] Simplify to single applet (no stack)
 - [x] Verify build passes
 
-### Phase 3: Create router.ts
-- [ ] Create `public/ts/router.ts` as single URL owner
-- [ ] Implement UIState interface
-- [ ] Implement Navigation API handler
-- [ ] Wire up `toggleSessions` action
-- [ ] Wire up `sessionClick(id)` action
-- [ ] Wire up `newSessionClick` action
-- [ ] Wire up `modelSelectorSend(message)` action
-- [ ] Wire up `toggleApplet` action
-- [ ] Wire up `loadApplet(slug)` action
+### Phase 3: Create router.ts ✅
+- [x] Create `public/ts/router.ts` as single URL owner
+- [x] Implement UIState interface
+- [x] Implement Navigation API handler
+- [x] Wire up `toggleSessions` action
+- [x] Wire up `sessionClick(id)` action
+- [x] Wire up `newSessionClick` action
+- [x] Wire up `toggleApplet` action
+- [x] Wire up `loadApplet(slug)` action
 
 ### Phase 4: Integration & cleanup
 - [ ] Update index.html onclick handlers to call router actions

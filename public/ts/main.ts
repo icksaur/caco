@@ -5,18 +5,18 @@
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences, waitForHistoryComplete } from './history.js';
-import { toggleSessionPanel, switchSession, deleteSession, showSessionManager, showNewChatUI } from './session-panel.js';
+import { deleteSession, showSessionManager } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
-import { initViewState, setViewState, isViewState } from './view-controller.js';
+import { initViewState, setViewState } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { initInputRouter } from './input-router.js';
 import { setupMultilineInput } from './multiline-input.js';
 import { connectWs, setActiveSession, requestHistory, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
-import { initRouter, toggleSessions, toggleApplet, sessionClick, newSessionClick, loadApplet } from './router.js';
+import { initRouter, toggleSessions, toggleApplet, newSessionClick } from './router.js';
 
 // Export functions to global scope for onclick handlers in HTML
 declare global {
@@ -24,9 +24,7 @@ declare global {
     removeImage: typeof removeImage;
     scrollToBottom: typeof scrollToBottom;
     toggleSessions: typeof toggleSessions;
-    toggleSessionPanel: typeof toggleSessionPanel;
-    showNewChat: typeof showNewChatUI;
-    switchSession: typeof switchSession;
+    newSessionClick: typeof newSessionClick;
     deleteSession: typeof deleteSession;
     selectModel: typeof selectModel;
     loadModels: typeof loadModels;
@@ -41,9 +39,7 @@ declare global {
 window.removeImage = removeImage;
 window.scrollToBottom = scrollToBottom;
 window.toggleSessions = toggleSessions;
-window.toggleSessionPanel = toggleSessionPanel;
-window.showNewChat = showNewChatUI;
-window.switchSession = switchSession;
+window.newSessionClick = newSessionClick;
 window.deleteSession = deleteSession;
 window.selectModel = selectModel;
 window.loadModels = loadModels;

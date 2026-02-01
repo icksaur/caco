@@ -4,42 +4,18 @@
 
 import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge } from './ui-utils.js';
-import { getActiveSessionId, getCurrentCwd, setActiveSession } from './app-state.js';
-import { setAvailableModels, loadModels, getNewChatCwd } from './model-selector.js';
-import { waitForHistoryComplete } from './history.js';
-import { setActiveSession as setWsActiveSession, requestHistory } from './websocket.js';
-import { setViewState, getViewState, isViewState } from './view-controller.js';
-import { clearApplet } from './applet-runtime.js';
+import { getActiveSessionId, getCurrentCwd } from './app-state.js';
+import { setAvailableModels } from './model-selector.js';
+import { setViewState } from './view-controller.js';
+import { sessionClick } from './router.js';
 
 /**
  * Show session manager as the main view (landing page)
- * Different from toggleSessionPanel - this is for initial page load
  */
 export function showSessionManager(): void {
   setViewState('sessions');
   loadSessions();
   loadUsage();
-}
-
-/**
- * Toggle session panel visibility
- */
-export function toggleSessionPanel(): void {
-  if (isViewState('sessions')) {
-    // Switch to chat view - check if we have messages
-    const chat = document.getElementById('chat');
-    if (chat && chat.children.length === 0) {
-      setViewState('newChat');
-      loadModels();
-    } else {
-      setViewState('chatting');
-    }
-  } else {
-    // Switch to session view
-    setViewState('sessions');
-    loadSessions();
-    loadUsage();
-  }
 }
 
 /**
@@ -120,7 +96,7 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
   const summary = session.summary || 'No summary';
   const age = session.updatedAt ? ` (${formatAge(session.updatedAt)})` : '';
   summarySpan.textContent = summary + age;
-  summarySpan.onclick = () => switchSession(session.sessionId);
+  summarySpan.onclick = () => sessionClick(session.sessionId);
   item.appendChild(summarySpan);
   
   // Delete button
@@ -134,52 +110,6 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
   item.appendChild(deleteBtn);
   
   return item;
-}
-
-/**
- * Switch to a different session
- */
-export async function switchSession(sessionId: string): Promise<void> {
-  // If already on this session, just switch to chat view
-  if (sessionId === getActiveSessionId()) {
-    clearApplet();
-    setViewState('chatting');
-    return;
-  }
-  
-  // Clear any active applet first
-  clearApplet();
-  
-  // Show loading state on clicked item
-  const clickedItem = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
-  if (clickedItem) {
-    clickedItem.classList.add('loading');
-  }
-  
-  try {
-    const response = await fetch(`/api/sessions/${sessionId}/resume`, {
-      method: 'POST'
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      // Update client state with new session
-      setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
-      
-      // Set WS active session and request history
-      setWsActiveSession(data.sessionId);
-      requestHistory(data.sessionId);
-      await waitForHistoryComplete();
-      setViewState('chatting');
-    } else {
-      const err = await response.json();
-      if (clickedItem) clickedItem.classList.remove('loading');
-      alert('Failed to switch session: ' + err.error);
-    }
-  } catch (error) {
-    console.error('Failed to switch session:', error);
-    if (clickedItem) clickedItem.classList.remove('loading');
-  }
 }
 
 /**
@@ -217,30 +147,6 @@ export async function deleteSession(sessionId: string, summary?: string): Promis
     console.error('Failed to delete session:', error);
     alert('Failed to delete session: ' + (error as Error).message);
   }
-}
-
-/**
- * Show new chat UI (switches from session manager to chat view with new chat form)
- */
-export function showNewChatUI(): void {
-  // Clear old chat messages
-  const chat = document.getElementById('chat');
-  if (chat) chat.innerHTML = '';
-  
-  // Clear any active applet
-  clearApplet();
-  
-  // Pre-fill cwd from last session
-  const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
-  if (cwdInput) cwdInput.value = getCurrentCwd() || '';
-  
-  // Switch to new chat view
-  setViewState('newChat');
-  loadModels();
-  
-  // Focus the message input
-  const messageInput = document.querySelector('form input[name="message"]') as HTMLInputElement;
-  messageInput?.focus();
 }
 
 /**

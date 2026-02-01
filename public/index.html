@@ -34,14 +34,16 @@
     <span></span>
   </button>
 
-  <main>
-    <!-- Session manager view (full-screen overlay) -->
-    <div id="sessionView" class="session-overlay">
+  <!-- Session manager view (full-screen overlay, outside main for proper stacking) -->
+  <div id="sessionView" class="session-overlay">
+    <div class="session-content">
       <div id="usageInfo" class="usage-info"></div>
       <button type="button" class="new-chat-btn" onclick="newSessionClick()">+ New Chat</button>
       <div id="sessionList"></div>
     </div>
+  </div>
 
+  <main>
     <!-- Work area: chat and applet side-by-side on desktop -->
     <div class="work-area">
       <!-- Chat panel (left on desktop, main on mobile) -->

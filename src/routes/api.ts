@@ -235,9 +235,7 @@ router.get('/debug/messages', async (_req: Request, res: Response) => {
   }
 });
 
-// ============================================================
 // Applet State Endpoints (Phase 2)
-// ============================================================
 
 /**
  * POST /api/applet/state - Receive state updates from applet JS
@@ -260,9 +258,7 @@ router.get('/applet/state', (_req: Request, res: Response) => {
   res.json({ state: getAppletUserState() });
 });
 
-// ============================================================
 // Applet Browser Endpoints (Phase 3)
-// ============================================================
 
 const programCwd = process.cwd();
 

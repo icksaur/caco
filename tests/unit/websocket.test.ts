@@ -88,9 +88,7 @@ export function buildChatMessage(
   }
 }
 
-// ============================================================
 // Tests
-// ============================================================
 
 describe('parseMessageSource', () => {
   it('parses plain user messages', () => {

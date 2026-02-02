@@ -103,9 +103,7 @@ Include callback instructions so other agents can report back when finished.
 - When users share media URLs, embed them directly`
 };
 
-// ============================================================
 // Middleware
-// ============================================================
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -125,9 +123,7 @@ app.use((_req, res, next) => {
   next();
 });
 
-// ============================================================
 // Routes
-// ============================================================
 
 // Serve chat interface with injected server hostname (BEFORE static files)
 const indexHtmlPath = join(__dirname, 'public', 'index.html');
@@ -152,9 +148,7 @@ app.use('/api', sessionMessageRoutes);
 app.use('/api/mcp', mcpRoutes);
 app.use('/api', scheduleRoutes);
 
-// ============================================================
 // Server Lifecycle
-// ============================================================
 
 async function start(): Promise<void> {
   // Load cached usage from disk

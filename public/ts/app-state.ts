@@ -13,9 +13,7 @@
 import type { ModelInfo } from './types.js';
 import { setActiveSession as setWsActiveSession } from './websocket.js';
 
-// ============================================================
 // State Interface
-// ============================================================
 
 export interface AppState {
   // === Session State ===
@@ -33,15 +31,11 @@ export interface AppState {
   hasImage: boolean;
 }
 
-// ============================================================
 // Constants
-// ============================================================
 
 export const DEFAULT_MODEL = 'claude-sonnet-4';
 
-// ============================================================
 // State Store (private singleton)
-// ============================================================
 
 const state: AppState = {
   activeSessionId: null,
@@ -54,9 +48,7 @@ const state: AppState = {
   hasImage: false
 };
 
-// ============================================================
 // State Accessors (read-only)
-// ============================================================
 
 /** Get a shallow copy of entire state (for debugging) */
 export function getState(): Readonly<AppState> {
@@ -103,9 +95,7 @@ export function hasImage(): boolean {
   return state.hasImage;
 }
 
-// ============================================================
 // State Mutations
-// ============================================================
 
 /**
  * Set active session and sync to WebSocket
@@ -182,9 +172,7 @@ export function setHasImage(hasImage: boolean): void {
   state.hasImage = hasImage;
 }
 
-// ============================================================
 // Initialization
-// ============================================================
 
 /**
  * Initialize from server preferences
@@ -219,9 +207,7 @@ export function initFromSession(data: {
   setActiveSession(sessionId, cwd);
 }
 
-// ============================================================
 // Debug
-// ============================================================
 
 /** Log current state to console */
 export function debugState(): void {

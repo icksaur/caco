@@ -35,9 +35,7 @@ declare global {
 // Re-export for external callers
 export { setLoadingHistory };
 
-// ============================================================================
 // ElementInserter - Core DOM manipulation
-// ============================================================================
 
 /** 
  * Phase 1: Event Type → Outer Div Class Mapping
@@ -233,9 +231,7 @@ const inserterDebug: (msg: string) => void = console.log;
 const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>, 'outer');
 const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', undefined, EVENT_KEY_PROPERTY, PRE_COLLAPSED_EVENTS);
 
-// ============================================================================
 // Event Handlers
-// ============================================================================
 
 /**
  * Handle incoming SDK event (history or live)
@@ -293,17 +289,13 @@ function handleEvent(event: SessionEvent): void {
   scrollToBottom();
 }
 
-// ============================================================================
 // WebSocket Registration
-// ============================================================================
 
 function registerWsHandlers(): void {
   onEvent(handleEvent);
 }
 
-// ============================================================================
 // Form Handling
-// ============================================================================
 
 /**
  * Enable/disable form during streaming
@@ -407,9 +399,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
   }
 }
 
-// ============================================================================
 // Setup
-// ============================================================================
 
 function removeImage(): void {
   const imageData = document.getElementById('imageData') as HTMLInputElement;

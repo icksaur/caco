@@ -2,8 +2,6 @@
 
 **when working with this doc re-read it after doing compaction/summary and after significant changes**
 
-#code-quality.md brutal code review for front-end - document in frontend-cr.md in project root.
-
 #code-quality.md brutal code review for back-end
 
 remove run_and_display, render_file_contents, display_image.  Applets and embed_media can handle.

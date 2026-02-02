@@ -20,6 +20,7 @@ import { updateUsage } from '../usage-state.js';
 import { broadcastUserMessageFromPost, broadcastEvent, type MessageSource, type SessionEvent } from './websocket.js';
 import { extractToolTelemetry, type ToolExecutionCompleteEvent } from '../sdk-event-parser.js';
 import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
+import { DISPATCH_TIMEOUT_MS } from '../config.js';
 
 const router = Router();
 
@@ -192,6 +193,36 @@ export async function dispatchMessage(
     
     // Subscribe to SDK events and forward them
     type SDKEventCallback = (event: SessionEvent) => void;
+    let dispatchCompleted = false;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    
+    const cleanupAndComplete = (reason: string) => {
+      if (dispatchCompleted) return;
+      dispatchCompleted = true;
+      
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
+      }
+      
+      sessionManager.markIdle(sessionId);
+      if (tempFilePath) {
+        unlink(tempFilePath).catch(() => {});
+      }
+      dispatchComplete();
+      console.log(`[DISPATCH] Completed: ${reason}`);
+    };
+    
+    // Timeout watchdog - force cleanup if stream hangs
+    timeoutHandle = setTimeout(() => {
+      if (!dispatchCompleted) {
+        console.warn(`[DISPATCH] Timeout after ${DISPATCH_TIMEOUT_MS / 1000}s for session ${sessionId}`);
+        onEvent({ type: 'session.error', data: { message: `Request timed out after ${DISPATCH_TIMEOUT_MS / 1000 / 60} minutes` } });
+        cleanupAndComplete('timeout');
+        unsubscribe();
+      }
+    }, DISPATCH_TIMEOUT_MS);
+    
     const unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on((event: SessionEvent) => {
       // Forward event as-is
       onEvent(event);
@@ -218,12 +249,8 @@ export async function dispatchMessage(
       }
       
       if (event.type === 'session.idle' || event.type === 'session.error') {
-        sessionManager.markIdle(sessionId);
+        cleanupAndComplete(event.type);
         unsubscribe();
-        if (tempFilePath) {
-          unlink(tempFilePath).catch(() => {});
-        }
-        dispatchComplete();
       }
     });
     
@@ -241,12 +268,8 @@ export async function dispatchMessage(
         onEvent({ type: 'session.error', data: { message } });
       }
       
-      sessionManager.markIdle(sessionId);
+      cleanupAndComplete('send error');
       unsubscribe();
-      if (tempFilePath) {
-        unlink(tempFilePath).catch(() => {});
-      }
-      dispatchComplete();
     }
     
   } catch (error) {

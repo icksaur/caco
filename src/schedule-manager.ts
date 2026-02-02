@@ -16,10 +16,7 @@ import {
   type ScheduleDefinition,
   type LastRunState
 } from './schedule-store.js';
-import { SERVER_URL } from './config.js';
-
-const CHECK_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
-const BUSY_DELAY_MS = 60 * 60 * 1000;     // 1 hour
+import { SERVER_URL, SCHEDULE_CHECK_INTERVAL_MS, SCHEDULE_BUSY_DELAY_MS } from './config.js';
 
 let checkTimer: NodeJS.Timeout | null = null;
 let isExecuting = false;
@@ -40,7 +37,7 @@ export function startScheduleManager(): void {
     checkSchedules().catch(err => {
       console.error('[SCHEDULER] Error in periodic check:', err);
     });
-  }, CHECK_INTERVAL_MS);
+  }, SCHEDULE_CHECK_INTERVAL_MS);
 }
 
 /**
@@ -132,7 +129,7 @@ async function executeSchedule(slug: string): Promise<void> {
           lastResult: 'error',
           lastError: 'Session busy',
           sessionId: lastRun.sessionId,
-          nextRun: new Date(Date.now() + BUSY_DELAY_MS).toISOString()
+          nextRun: new Date(Date.now() + SCHEDULE_BUSY_DELAY_MS).toISOString()
         });
         return;
       }

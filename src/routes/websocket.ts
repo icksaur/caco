@@ -13,8 +13,8 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
-import { randomUUID } from 'crypto';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
+import { registerStatePushHandler } from '../applet-push.js';
 import sessionManager from '../session-manager.js';
 import { shouldFilter } from '../event-filter.js';
 
@@ -69,6 +69,9 @@ interface ServerMessage {
  * Single persistent connection - no session in URL
  */
 export function setupWebSocket(server: Server): WebSocketServer {
+  // Register the push handler so applet-tools can push state without direct import
+  registerStatePushHandler(pushStateToAppletInternal);
+  
   const wss = new WebSocketServer({ 
     server, 
     path: '/ws' 
@@ -191,11 +194,10 @@ function broadcastToAll(msg: ServerMessage, exclude?: WebSocket): void {
 }
 
 /**
- * Push state to applet connections
+ * Push state to applet connections (internal implementation)
  * Broadcasts to all connections (client filters by active session)
- * Called from set_applet_state MCP tool
  */
-export function pushStateToApplet(sessionId: string | null, state: Record<string, unknown>): boolean {
+function pushStateToAppletInternal(sessionId: string | null, state: Record<string, unknown>): boolean {
   const msg: ServerMessage = { type: 'stateUpdate', sessionId: sessionId || undefined, data: state };
   const data = JSON.stringify(msg);
   
@@ -208,6 +210,14 @@ export function pushStateToApplet(sessionId: string | null, state: Record<string
   }
   
   return sent > 0;
+}
+
+/**
+ * Push state to applet connections
+ * @deprecated Import from applet-push.js instead
+ */
+export function pushStateToApplet(sessionId: string | null, state: Record<string, unknown>): boolean {
+  return pushStateToAppletInternal(sessionId, state);
 }
 
 /**

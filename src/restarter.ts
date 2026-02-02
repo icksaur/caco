@@ -11,13 +11,11 @@ import { createConnection } from 'net';
 import { writeFileSync, appendFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { PORT } from './config.js';
+import { PORT, RESTARTER_POLL_MS, RESTARTER_TIMEOUT_MS } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '..');
-const POLL_INTERVAL = 500;  // ms
-const MAX_WAIT = 30000;     // 30s timeout
 const LOG_FILE = join(PROJECT_ROOT, 'restart.log');
 
 function log(msg: string): void {
@@ -60,14 +58,14 @@ function isPortInUse(port: number): Promise<boolean> {
 async function waitForPortFree(): Promise<boolean> {
   const start = Date.now();
   
-  while (Date.now() - start < MAX_WAIT) {
+  while (Date.now() - start < RESTARTER_TIMEOUT_MS) {
     const inUse = await isPortInUse(PORT);
     if (!inUse) {
       log(`Port ${PORT} is free`);
       return true;
     }
     log(`Port ${PORT} still in use, waiting...`);
-    await new Promise(r => setTimeout(r, POLL_INTERVAL));
+    await new Promise(r => setTimeout(r, RESTARTER_POLL_MS));
   }
   
   log(`Timeout waiting for port ${PORT} to free`);

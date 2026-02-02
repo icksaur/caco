@@ -7,8 +7,9 @@
 
 import { Router, Request, Response } from 'express';
 import { readFile, writeFile, readdir, stat } from 'fs/promises';
-import { join, resolve, dirname } from 'path';
+import { join } from 'path';
 import { homedir } from 'os';
+import { validatePathMultiple } from '../path-utils.js';
 
 const router = Router();
 
@@ -18,14 +19,6 @@ const ALLOWED_BASES = [
   join(homedir(), '.caco'), // Caco directory
   '/tmp'                    // Temp directory
 ];
-
-/**
- * Check if path is within allowed directories
- */
-function isPathAllowed(requestedPath: string): boolean {
-  const resolved = resolve(requestedPath);
-  return ALLOWED_BASES.some(base => resolved.startsWith(resolve(base)));
-}
 
 /**
  * POST /api/mcp/read_file
@@ -40,12 +33,13 @@ router.post('/read_file', async (req: Request, res: Response) => {
       return;
     }
     
-    if (!isPathAllowed(path)) {
-      res.status(403).json({ ok: false, error: 'Access denied: path not in allowed directories' });
+    const validation = validatePathMultiple(ALLOWED_BASES, path);
+    if (!validation.valid) {
+      res.status(403).json({ ok: false, error: validation.error });
       return;
     }
     
-    const content = await readFile(path, 'utf-8');
+    const content = await readFile(validation.resolved, 'utf-8');
     res.json({ ok: true, content });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -66,16 +60,14 @@ router.post('/write_file', async (req: Request, res: Response) => {
       return;
     }
     
-    if (!isPathAllowed(path)) {
-      res.status(403).json({ ok: false, error: 'Access denied: path not in allowed directories' });
+    const validation = validatePathMultiple(ALLOWED_BASES, path);
+    if (!validation.valid) {
+      res.status(403).json({ ok: false, error: validation.error });
       return;
     }
     
-    // Create parent directories if needed
-    const dir = dirname(path);
-    await writeFile(path, content, 'utf-8');
-    
-    res.json({ ok: true, path });
+    await writeFile(validation.resolved, content, 'utf-8');
+    res.json({ ok: true, path: validation.resolved });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(400).json({ ok: false, error: message });
@@ -95,15 +87,16 @@ router.post('/list_directory', async (req: Request, res: Response) => {
       return;
     }
     
-    if (!isPathAllowed(path)) {
-      res.status(403).json({ ok: false, error: 'Access denied: path not in allowed directories' });
+    const validation = validatePathMultiple(ALLOWED_BASES, path);
+    if (!validation.valid) {
+      res.status(403).json({ ok: false, error: validation.error });
       return;
     }
     
-    const entries = await readdir(path);
+    const entries = await readdir(validation.resolved);
     const files = await Promise.all(
       entries.map(async (name) => {
-        const fullPath = join(path, name);
+        const fullPath = join(validation.resolved, name);
         const stats = await stat(fullPath);
         return {
           name,

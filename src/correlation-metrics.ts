@@ -6,6 +6,12 @@
 
 import { RateAggregator, type RateConfig } from './rate-aggregator.js';
 import { RunawayRulesEngine, type RunawayLimits } from './rules-engine.js';
+import {
+  AGENT_MAX_DEPTH,
+  AGENT_MAX_AGE_SECONDS,
+  AGENT_RATE_LIMIT_CALLS,
+  AGENT_RATE_LIMIT_WINDOW_SECONDS
+} from './config.js';
 
 export interface CorrelationRules {
   maxDepth: number;
@@ -14,11 +20,11 @@ export interface CorrelationRules {
 }
 
 export const DEFAULT_RULES: CorrelationRules = {
-  maxDepth: 2,
-  maxAgeSeconds: 60 * 60, // 1 hour
+  maxDepth: AGENT_MAX_DEPTH,
+  maxAgeSeconds: AGENT_MAX_AGE_SECONDS,
   rateLimit: {
-    maxCalls: 10,
-    windowSeconds: 60
+    maxCalls: AGENT_RATE_LIMIT_CALLS,
+    windowSeconds: AGENT_RATE_LIMIT_WINDOW_SECONDS
   }
 };
 

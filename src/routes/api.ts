@@ -14,7 +14,7 @@ import { Router, Request, Response } from 'express';
 import express from 'express';
 import { CopilotClient } from '@github/copilot-sdk';
 import { readdir, readFile, stat, writeFile, mkdir } from 'fs/promises';
-import { join, relative, resolve, dirname } from 'path';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
@@ -23,6 +23,9 @@ import { getOutput } from '../storage.js';
 import { setAppletUserState, getAppletUserState, clearAppletUserState } from '../applet-state.js';
 import { listApplets, loadApplet } from '../applet-store.js';
 import { getUsage } from '../usage-state.js';
+import { MODEL_CACHE_TTL_MS, MAX_FILE_SIZE_BYTES, MAX_LEGACY_FILE_SIZE_BYTES } from '../config.js';
+import { validatePath } from '../path-utils.js';
+import { apiError } from '../api-error.js';
 
 const router = Router();
 
@@ -30,12 +33,11 @@ const TEMP_DIR = join(homedir(), '.caco', 'tmp');
 
 let cachedModels: Array<{ id: string; name: string; multiplier: number }> | null = null;
 let modelsCacheTime = 0;
-const MODELS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 router.get('/models', async (_req: Request, res: Response) => {
   try {
     // Return cached models if fresh
-    if (cachedModels && Date.now() - modelsCacheTime < MODELS_CACHE_TTL) {
+    if (cachedModels && Date.now() - modelsCacheTime < MODEL_CACHE_TTL_MS) {
       return res.json({ models: cachedModels });
     }
     
@@ -339,25 +341,20 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
  * Locked to programCwd - cannot escape
  */
 router.get('/files', async (req: Request, res: Response) => {
-  const requestedPath = (req.query.path as string) || '';
+  const requestedPath = (req.query.path as string) || '.';
   
   try {
-    // Resolve and validate path is within programCwd
-    const fullPath = resolve(programCwd, requestedPath);
-    const relativePath = relative(programCwd, fullPath);
-    
-    // Security: prevent escaping programCwd
-    if (relativePath.startsWith('..') || resolve(programCwd, relativePath) !== fullPath) {
-      res.status(403).json({ error: 'Access denied: path outside workspace' });
-      return;
+    const validation = validatePath(programCwd, requestedPath);
+    if (!validation.valid) {
+      return apiError.forbidden(res, validation.error);
     }
     
-    const entries = await readdir(fullPath, { withFileTypes: true });
+    const entries = await readdir(validation.resolved, { withFileTypes: true });
     const files = await Promise.all(
       entries
         .filter(e => !e.name.startsWith('.')) // Hide hidden files
         .map(async (entry) => {
-          const entryPath = join(fullPath, entry.name);
+          const entryPath = join(validation.resolved, entry.name);
           const stats = await stat(entryPath).catch(() => null);
           return {
             name: entry.name,
@@ -374,13 +371,13 @@ router.get('/files', async (req: Request, res: Response) => {
     });
     
     res.json({ 
-      path: relativePath || '.',
+      path: validation.relative,
       cwd: programCwd,
       files 
     });
   } catch (error) {
     console.error('[API] Failed to list files:', error);
-    res.status(500).json({ error: 'Failed to list directory' });
+    return apiError.internal(res, 'Failed to list directory');
   }
 });
 
@@ -389,40 +386,33 @@ router.get('/files', async (req: Request, res: Response) => {
  * Query params:
  *   path: relative path from programCwd
  * Returns: raw file content with appropriate Content-Type header
- * Limited to 10MB files
  */
 router.get('/file', async (req: Request, res: Response) => {
   const requestedPath = req.query.path as string;
   
   if (!requestedPath) {
-    res.status(400).send('path parameter required');
-    return;
+    return apiError.badRequest(res, 'path parameter required');
   }
   
   try {
-    // Resolve and validate path
-    const fullPath = resolve(programCwd, requestedPath);
-    const relativePath = relative(programCwd, fullPath);
-    
-    if (relativePath.startsWith('..') || resolve(programCwd, relativePath) !== fullPath) {
-      res.status(403).send('Access denied: path outside workspace');
-      return;
+    const validation = validatePath(programCwd, requestedPath);
+    if (!validation.valid) {
+      return apiError.forbidden(res, validation.error);
     }
     
-    const stats = await stat(fullPath);
+    const stats = await stat(validation.resolved);
     
     if (stats.isDirectory()) {
-      res.status(400).send('Cannot serve directory');
-      return;
+      return apiError.badRequest(res, 'Cannot serve directory');
     }
     
-    if (stats.size > 10 * 1024 * 1024) {
-      res.status(413).send('File too large (max 10MB)');
+    if (stats.size > MAX_FILE_SIZE_BYTES) {
+      res.status(413).json({ ok: false, error: `File too large (max ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB)` });
       return;
     }
     
     // Determine content type from extension
-    const ext = fullPath.split('.').pop()?.toLowerCase() || '';
+    const ext = validation.resolved.split('.').pop()?.toLowerCase() || '';
     const mimeTypes: Record<string, string> = {
       // Images
       jpg: 'image/jpeg',
@@ -461,16 +451,16 @@ router.get('/file', async (req: Request, res: Response) => {
     const contentType = mimeTypes[ext] || 'application/octet-stream';
     const isText = contentType.startsWith('text/') || contentType === 'application/json';
     
-    const fileData = await readFile(fullPath);
+    const fileData = await readFile(validation.resolved);
     res.setHeader('Content-Type', contentType + (isText ? '; charset=utf-8' : ''));
     res.setHeader('Content-Length', stats.size);
     res.send(fileData);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      res.status(404).send('File not found');
+      return apiError.notFound(res, 'File not found');
     } else {
       console.error('[API] Failed to serve file:', error);
-      res.status(500).send('Failed to serve file');
+      return apiError.internal(res, 'Failed to serve file');
     }
   }
 });
@@ -480,43 +470,36 @@ router.get('/file', async (req: Request, res: Response) => {
  * Query params:
  *   path: relative path from programCwd
  * Returns: { path, content, size }
- * Limited to 100KB files
+ * @deprecated Use GET /api/file instead
  */
 router.get('/files/read', async (req: Request, res: Response) => {
   const requestedPath = req.query.path as string;
   
   if (!requestedPath) {
-    res.status(400).json({ error: 'path parameter required' });
-    return;
+    return apiError.badRequest(res, 'path parameter required');
   }
   
   try {
-    // Resolve and validate path
-    const fullPath = resolve(programCwd, requestedPath);
-    const relativePath = relative(programCwd, fullPath);
-    
-    if (relativePath.startsWith('..') || resolve(programCwd, relativePath) !== fullPath) {
-      res.status(403).json({ error: 'Access denied: path outside workspace' });
-      return;
+    const validation = validatePath(programCwd, requestedPath);
+    if (!validation.valid) {
+      return apiError.forbidden(res, validation.error);
     }
     
-    const stats = await stat(fullPath);
+    const stats = await stat(validation.resolved);
     
     if (stats.isDirectory()) {
-      res.status(400).json({ error: 'Cannot read directory' });
-      return;
+      return apiError.badRequest(res, 'Cannot read directory');
     }
     
-    if (stats.size > 100 * 1024) {
-      res.status(400).json({ error: 'File too large (max 100KB)' });
-      return;
+    if (stats.size > MAX_LEGACY_FILE_SIZE_BYTES) {
+      return apiError.badRequest(res, `File too large (max ${MAX_LEGACY_FILE_SIZE_BYTES / 1024}KB)`);
     }
     
-    const content = await readFile(fullPath, 'utf-8');
-    res.json({ path: relativePath, content, size: stats.size });
+    const content = await readFile(validation.resolved, 'utf-8');
+    res.json({ ok: true, path: validation.relative, content, size: stats.size });
   } catch (error) {
     console.error('[API] Failed to read file:', error);
-    res.status(500).json({ error: 'Failed to read file' });
+    return apiError.internal(res, 'Failed to read file');
   }
 });
 
@@ -532,71 +515,59 @@ router.put('/files/*path', express.text({ type: '*/*', limit: '10mb' }), async (
   const requestedPath = pathSegments.join('/');
   
   if (!requestedPath) {
-    res.status(400).json({ error: 'file path required in URL' });
-    return;
+    return apiError.badRequest(res, 'file path required in URL');
   }
   
   const content = req.body;
   if (typeof content !== 'string') {
-    res.status(400).json({ error: 'request body required' });
-    return;
+    return apiError.badRequest(res, 'request body required');
   }
   
   try {
-    // Resolve and validate path
-    const fullPath = resolve(programCwd, requestedPath);
-    const relativePath = relative(programCwd, fullPath);
-    
-    if (relativePath.startsWith('..') || resolve(programCwd, relativePath) !== fullPath) {
-      res.status(403).json({ error: 'Access denied: path outside workspace' });
-      return;
+    const validation = validatePath(programCwd, requestedPath);
+    if (!validation.valid) {
+      return apiError.forbidden(res, validation.error);
     }
     
     // Ensure parent directory exists
-    const parentDir = dirname(fullPath);
+    const parentDir = dirname(validation.resolved);
     await mkdir(parentDir, { recursive: true });
     
-    await writeFile(fullPath, content, 'utf-8');
-    res.json({ ok: true, path: relativePath, size: content.length });
+    await writeFile(validation.resolved, content, 'utf-8');
+    res.json({ ok: true, path: validation.relative, size: content.length });
   } catch (error) {
     console.error('[API] Failed to write file:', error);
-    res.status(500).json({ error: 'Failed to write file' });
+    return apiError.internal(res, 'Failed to write file');
   }
 });
 
 /**
  * POST /api/files/write - Write file content (LEGACY - use PUT /api/files/* instead)
  * Body: { path: string, content: string }
- * Locked to programCwd - cannot escape
+ * @deprecated Use PUT /api/files/* instead
  */
 router.post('/files/write', async (req: Request, res: Response) => {
   const { path: requestedPath, content } = req.body;
   
   if (!requestedPath) {
-    res.status(400).json({ error: 'path parameter required' });
-    return;
+    return apiError.badRequest(res, 'path parameter required');
   }
   
   if (typeof content !== 'string') {
-    res.status(400).json({ error: 'content parameter required' });
-    return;
+    return apiError.badRequest(res, 'content parameter required');
   }
   
   try {
-    // Resolve and validate path
-    const fullPath = resolve(programCwd, requestedPath);
-    const relativePath = relative(programCwd, fullPath);
-    
-    if (relativePath.startsWith('..') || resolve(programCwd, relativePath) !== fullPath) {
-      res.status(403).json({ error: 'Access denied: path outside workspace' });
-      return;
+    const validation = validatePath(programCwd, requestedPath);
+    if (!validation.valid) {
+      return apiError.forbidden(res, validation.error);
     }
     
-    await writeFile(fullPath, content, 'utf-8');
-    res.json({ ok: true, path: relativePath, size: content.length });
+    await writeFile(validation.resolved, content, 'utf-8');
+    res.json({ ok: true, path: validation.relative, size: content.length });
   } catch (error) {
     console.error('[API] Failed to write file:', error);
-    res.status(500).json({ error: 'Failed to write file' });
+    return apiError.internal(res, 'Failed to write file');
   }
 });
 

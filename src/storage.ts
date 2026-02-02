@@ -13,13 +13,13 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { OUTPUT_CACHE_TTL_MS } from './config.js';
 
 // Storage root (~/.caco, set once at module load)
 const STORAGE_ROOT = join(homedir(), '.caco');
 
 // In-memory cache for frequently accessed outputs (avoids disk reads)
 const outputCache = new Map<string, CacheEntry>();
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 interface CacheEntry {
   data: string | Buffer;
@@ -145,7 +145,7 @@ export function storeOutput(
   });
   
   // Auto-cleanup cache after TTL
-  setTimeout(() => outputCache.delete(outputId), CACHE_TTL);
+  setTimeout(() => outputCache.delete(outputId), OUTPUT_CACHE_TTL_MS);
   
   return outputId;
 }
@@ -162,7 +162,7 @@ function storeInMemory(data: string | Buffer, metadata: OutputMetadata): string 
     cachedAt: Date.now()
   });
   
-  setTimeout(() => outputCache.delete(outputId), CACHE_TTL);
+  setTimeout(() => outputCache.delete(outputId), OUTPUT_CACHE_TTL_MS);
   
   return outputId;
 }
@@ -211,7 +211,7 @@ export function getOutput(outputId: string): StoredOutput | null {
             metadata,
             cachedAt: Date.now()
           });
-          setTimeout(() => outputCache.delete(outputId), CACHE_TTL);
+          setTimeout(() => outputCache.delete(outputId), OUTPUT_CACHE_TTL_MS);
           
           return { data, metadata };
         }

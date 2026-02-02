@@ -15,7 +15,7 @@
 import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, type ViewState } from './view-controller.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
-import { setActiveSession as setWsActiveSession, requestHistory } from './websocket.js';
+import { subscribeToSession, requestHistory } from './websocket.js';
 import { waitForHistoryComplete } from './history.js';
 import { loadSessions } from './session-panel.js';
 import { showToast } from './toast.js';
@@ -256,7 +256,7 @@ async function activateSession(sessionId: string): Promise<void> {
     
     // Update client state
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
-    setWsActiveSession(data.sessionId);
+    subscribeToSession(data.sessionId);
     
     // Load history
     requestHistory(data.sessionId);

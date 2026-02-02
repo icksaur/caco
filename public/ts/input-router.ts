@@ -65,14 +65,6 @@ export function initInputRouter(): void {
     const viewState = getViewState();
     
     switch (viewState) {
-      case 'applet': {
-        const slug = getActiveAppletSlug();
-        if (slug && keyHandlers.has(slug)) {
-          keyHandlers.get(slug)!(e);
-        }
-        break;
-      }
-      
       case 'chatting':
       case 'newChat': {
         if (chatKeyHandler) {

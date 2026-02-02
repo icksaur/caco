@@ -28,8 +28,10 @@ export function escapeHtml(text: string): string {
 
 /**
  * Format relative time
+ * @param dateStr - ISO date string
+ * @param compact - If true, use compact format (e.g., '5m ago' instead of '5 min')
  */
-export function formatAge(dateStr: string | undefined): string {
+export function formatAge(dateStr: string | undefined, compact = false): string {
   if (!dateStr) return '';
   
   const now = Date.now();
@@ -42,6 +44,14 @@ export function formatAge(dateStr: string | undefined): string {
   const weeks = Math.floor(days / 7);
   const months = Math.floor(days / 30);
   const years = Math.floor(days / 365);
+  
+  if (compact) {
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return new Date(dateStr).toLocaleDateString();
+  }
   
   if (years >= 1) return `${years} year${years > 1 ? 's' : ''}`;
   if (months >= 1) return `${months} month${months > 1 ? 's' : ''}`;

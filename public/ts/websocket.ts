@@ -13,6 +13,8 @@
  */
 
 import { showToast } from './toast.js';
+import { getActiveSessionId } from './app-state.js';
+import type { SessionEvent } from './types.js';
 
 /**
  * Message source identifies who sent a message.
@@ -20,18 +22,14 @@ import { showToast } from './toast.js';
  */
 export type MessageSource = 'user' | 'applet' | 'agent';
 
-export interface SessionEvent {
-  type: string;
-  data?: Record<string, unknown>;
-}
+// Re-export SessionEvent for consumers that import from websocket.ts
+export type { SessionEvent };
 
 let socket: WebSocket | null = null;
 let connectionId = 0;  // Incremented on each new connection
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 1000;
-
-let activeSessionId: string | null = null;
 
 type StateCallback = (state: Record<string, unknown>) => void;
 type EventCallback = (event: SessionEvent) => void;
@@ -67,24 +65,17 @@ export function connectWs(): void {
 }
 
 /**
- * Set the active session ID and subscribe to it on the server.
+ * Subscribe to a session on the server.
  * Only messages for subscribed sessions are received.
+ * Note: Does NOT store session state - use app-state.ts for that.
  */
-export function setActiveSession(sessionId: string | null): void {
-  console.log(`[WS] setActiveSession: ${sessionId}`);
-  activeSessionId = sessionId;
+export function subscribeToSession(sessionId: string | null): void {
+  console.log(`[WS] subscribeToSession: ${sessionId}`);
   
   // Subscribe on server so we only receive messages for this session
   if (sessionId) {
     send({ type: 'subscribe', sessionId });
   }
-}
-
-/**
- * Get the active session ID.
- */
-export function getActiveSessionId(): string | null {
-  return activeSessionId;
 }
 
 /**
@@ -136,9 +127,10 @@ function doConnect(myConnectionId: number): void {
     }
     
     // Re-subscribe to active session after reconnect
-    if (activeSessionId) {
-      console.log(`[WS] Re-subscribing to session ${activeSessionId} after connect`);
-      send({ type: 'subscribe', sessionId: activeSessionId });
+    const currentSessionId = getActiveSessionId();
+    if (currentSessionId) {
+      console.log(`[WS] Re-subscribing to session ${currentSessionId} after connect`);
+      send({ type: 'subscribe', sessionId: currentSessionId });
     }
     
     // Fire connect callbacks
@@ -209,7 +201,8 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
   
   // Filter by active session for broadcast messages
   const msgSessionId = msg.sessionId;
-  if (msgSessionId && activeSessionId && msgSessionId !== activeSessionId) {
+  const currentSessionId = getActiveSessionId();
+  if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
     // Message for a different session - ignore
     return;
   }
@@ -338,7 +331,6 @@ export function disconnectWs(): void {
     socket.close();
     socket = null;
   }
-  activeSessionId = null;
   reconnectAttempts = MAX_RECONNECT_ATTEMPTS; // Prevent auto-reconnect
 }
 

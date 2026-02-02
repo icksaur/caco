@@ -11,7 +11,6 @@
  */
 
 import type { ModelInfo } from './types.js';
-import { setActiveSession as setWsActiveSession } from './websocket.js';
 
 export interface AppState {
   // === Session State
@@ -88,13 +87,12 @@ export function hasImage(): boolean {
 }
 
 /**
- * Set active session and sync to WebSocket
- * URL is managed by router.ts
+ * Set active session (pure state mutation)
+ * Callers should also call websocket.subscribeToSession() for WS sync
  */
 export function setActiveSession(sessionId: string | null, cwd: string): void {
   state.activeSessionId = sessionId;
   state.currentCwd = cwd;
-  setWsActiveSession(sessionId);
 }
 
 /**

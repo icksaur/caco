@@ -123,12 +123,12 @@ export function selectModel(modelId: string): void {
     }
   });
   
-  // Save preference to server
+  // Save preference to server (best-effort, don't block UI)
   fetch('/api/preferences', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ lastModel: modelId })
-  }).catch(() => {}); // Ignore errors
+  }).catch(err => console.error('Failed to save model preference:', err));
 }
 
 /**

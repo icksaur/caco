@@ -7,6 +7,8 @@
  * @remarks Unit test all changes - see tests/unit/event-inserter.test.ts
  */
 
+import type { SessionEvent } from './types.js';
+
 declare global {
   interface Window {
     renderMarkdownElement?: (element: Element) => void;
@@ -174,14 +176,6 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'caco.agent': setPath('content'),
   'caco.applet': setPath('content'),
 };
-
-/**
- * SDK event structure
- */
-export interface SessionEvent {
-  type: string;
-  data?: Record<string, unknown>;
-}
 
 /**
  * Insert event content into element

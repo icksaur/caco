@@ -56,6 +56,14 @@ function getElements(): ViewElements {
 }
 
 /**
+ * Get a cached DOM element by key
+ * Use this instead of document.getElementById for commonly accessed elements
+ */
+export function getCachedElement(key: keyof ViewElements): HTMLElement | null {
+  return getElements()[key];
+}
+
+/**
  * Get current view state
  */
 export function getViewState(): ViewState {

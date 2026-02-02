@@ -2,6 +2,15 @@
  * Client-side type definitions
  */
 
+/**
+ * SDK event structure
+ * Used throughout the front-end for event handling
+ */
+export interface SessionEvent {
+  type: string;
+  data?: Record<string, unknown>;
+}
+
 export interface ModelInfo {
   id: string;
   name: string;

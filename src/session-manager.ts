@@ -4,10 +4,10 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import type { SessionConfig, CreateConfig, ResumeConfig, SystemMessage } from './types.js';
-import { CwdLockedError } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
 import { registerSession, unregisterSession } from './storage.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
+import { cwdLockManager } from './cwd-lock-manager.js';
 
 interface CopilotClientInstance {
   start(): Promise<void>;
@@ -92,18 +92,12 @@ interface GroupedSessions {
  * Discovers existing sessions from ~/.copilot/session-state/
  */
 class SessionManager {
-  // cwd → sessionId (lock)
-  private cwdLocks = new Map<string, string>();
-  
   // Correlation tracking for agent runaway guard
   private correlations = new Map<string, CorrelationMetrics>();
   private correlationRules: CorrelationRules = DEFAULT_RULES;
   
   // sessionId → { cwd, session, client }
   private activeSessions = new Map<string, ActiveSession>();
-  
-  // Sessions currently processing a message (busy)
-  private busySessions = new Set<string>();
   
   // sessionId → { cwd, summary } (cached from disk)
   private sessionCache = new Map<string, CachedSession>();
@@ -188,16 +182,6 @@ class SessionManager {
    * @throws CwdLockedError if cwd is already locked by an active session
    */
   async create(cwd: string, config: CreateConfig): Promise<string> {
-    // Check lock - only block if lock holder is actually active
-    const existingSessionId = this.cwdLocks.get(cwd);
-    if (existingSessionId) {
-      if (this.activeSessions.has(existingSessionId)) {
-        throw new CwdLockedError(cwd, existingSessionId);
-      }
-      // Clear stale lock from idle session
-      this.cwdLocks.delete(cwd);
-    }
-    
     // Model is REQUIRED - fail loudly if not provided
     if (!config.model) {
       throw new Error('Model is required when creating a session');
@@ -226,8 +210,8 @@ class SessionManager {
     // Update the ref so tool handlers can access the real session ID
     sessionRef.id = session.sessionId;
     
-    // Lock and track
-    this.cwdLocks.set(cwd, session.sessionId);
+    // Acquire lock and track
+    cwdLockManager.acquire(cwd, session.sessionId);
     this.activeSessions.set(session.sessionId, { cwd, session, client });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
     
@@ -256,16 +240,6 @@ class SessionManager {
       throw new Error(`Session ${sessionId} has no cwd recorded`);
     }
     
-    // Check lock - only block if the lock holder is actually active
-    const lockHolder = this.cwdLocks.get(cwd);
-    if (lockHolder && lockHolder !== sessionId) {
-      if (this.activeSessions.has(lockHolder)) {
-        throw new CwdLockedError(cwd, lockHolder);
-      }
-      // Clear stale lock from idle session
-      this.cwdLocks.delete(cwd);
-    }
-    
     // Already active?
     if (this.activeSessions.has(sessionId)) {
       console.log(`Session ${sessionId} already active`);
@@ -288,8 +262,8 @@ class SessionManager {
       excludedTools: config.excludedTools
     });
     
-    // Lock and track
-    this.cwdLocks.set(cwd, sessionId);
+    // Acquire lock and track
+    cwdLockManager.acquire(cwd, sessionId);
     this.activeSessions.set(sessionId, { cwd, session, client });
     
     // Register with storage layer for output persistence
@@ -325,8 +299,8 @@ class SessionManager {
       console.warn(`Warning: client.stop() failed: ${message}`);
     }
     
-    // Unlock and untrack
-    this.cwdLocks.delete(cwd);
+    // Release lock and untrack
+    cwdLockManager.release(sessionId);
     this.activeSessions.delete(sessionId);
     
     // Unregister from storage layer
@@ -514,7 +488,7 @@ class SessionManager {
    * Get active sessionId for a cwd (or null)
    */
   getActive(cwd: string): string | null {
-    return this.cwdLocks.get(cwd) || null;
+    return cwdLockManager.getHolder(cwd);
   }
 
   /**
@@ -535,21 +509,21 @@ class SessionManager {
    * Check if a session is currently processing a message
    */
   isBusy(sessionId: string): boolean {
-    return this.busySessions.has(sessionId);
+    return cwdLockManager.isBusy(sessionId);
   }
 
   /**
    * Mark a session as busy (processing a message)
    */
   markBusy(sessionId: string): void {
-    this.busySessions.add(sessionId);
+    cwdLockManager.markBusy(sessionId);
   }
 
   /**
    * Mark a session as idle (done processing)
    */
   markIdle(sessionId: string): void {
-    this.busySessions.delete(sessionId);
+    cwdLockManager.markIdle(sessionId);
   }
 
   /**

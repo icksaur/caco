@@ -47,7 +47,7 @@ describe('ElementInserter', () => {
       createElement: () => createMockElement()
     });
     
-    const { ElementInserter } = await import('../../public/ts/message-streaming.js');
+    const { ElementInserter } = await import('../../public/ts/element-inserter.js');
     const inserter = new ElementInserter(map, 'test');
     
     const el = inserter.getElement('test.event', mockParent);
@@ -64,7 +64,7 @@ describe('ElementInserter', () => {
       createElement: () => createMockElement()
     });
     
-    const { ElementInserter } = await import('../../public/ts/message-streaming.js');
+    const { ElementInserter } = await import('../../public/ts/element-inserter.js');
     const inserter = new ElementInserter(map, 'test');
     
     const el = inserter.getElement('unknown.event', mockParent);
@@ -80,7 +80,7 @@ describe('ElementInserter', () => {
       createElement: () => createMockElement()
     });
     
-    const { ElementInserter } = await import('../../public/ts/message-streaming.js');
+    const { ElementInserter } = await import('../../public/ts/element-inserter.js');
     const inserter = new ElementInserter(map, 'test');
     
     const el = inserter.getElement('test.event', mockParent);
@@ -99,7 +99,7 @@ describe('ElementInserter', () => {
       createElement: () => createMockElement()
     });
     
-    const { ElementInserter } = await import('../../public/ts/message-streaming.js');
+    const { ElementInserter } = await import('../../public/ts/element-inserter.js');
     const inserter = new ElementInserter(map, 'test');
     
     const el = inserter.getElement('test.event', mockParent);
@@ -119,7 +119,7 @@ describe('ElementInserter', () => {
       createElement: () => createMockElement()
     });
     
-    const { ElementInserter } = await import('../../public/ts/message-streaming.js');
+    const { ElementInserter } = await import('../../public/ts/element-inserter.js');
     const inserter = new ElementInserter(map, 'test');
     
     const el = inserter.getElement('test.event', mockParent);
@@ -143,7 +143,7 @@ describe('ElementInserter keyed lookup', () => {
       createElement: () => createMockElement('tool-text')
     });
     
-    const { ElementInserter } = await import('../../public/ts/message-streaming.js');
+    const { ElementInserter } = await import('../../public/ts/element-inserter.js');
     const inserter = new ElementInserter(map, 'test', undefined, keyProperty);
     
     const el = inserter.getElement('tool.execution_start', mockParent, { toolCallId: 'tool_123' });
@@ -167,7 +167,7 @@ describe('ElementInserter keyed lookup', () => {
       createElement: () => createMockElement()
     });
     
-    const { ElementInserter } = await import('../../public/ts/message-streaming.js');
+    const { ElementInserter } = await import('../../public/ts/element-inserter.js');
     const inserter = new ElementInserter(map, 'test', undefined, keyProperty);
     
     const el = inserter.getElement('tool.execution_complete', mockParent, { toolCallId: 'tool_123' });
@@ -190,7 +190,7 @@ describe('ElementInserter keyed lookup', () => {
       createElement: () => createMockElement('tool-text')
     });
     
-    const { ElementInserter } = await import('../../public/ts/message-streaming.js');
+    const { ElementInserter } = await import('../../public/ts/element-inserter.js');
     const inserter = new ElementInserter(map, 'test', undefined, keyProperty);
     
     const el = inserter.getElement('tool.execution_start', mockParent, { toolCallId: 'tool_789' });
@@ -211,7 +211,7 @@ describe('ElementInserter keyed lookup', () => {
       createElement: () => createMockElement()
     });
     
-    const { ElementInserter } = await import('../../public/ts/message-streaming.js');
+    const { ElementInserter } = await import('../../public/ts/element-inserter.js');
     const inserter = new ElementInserter(map, 'test', undefined, keyProperty);
     
     const el = inserter.getElement('user.message', mockParent, { content: 'hello' });
@@ -232,7 +232,7 @@ describe('ElementInserter keyed lookup', () => {
       createElement: () => createMockElement()
     });
     
-    const { ElementInserter } = await import('../../public/ts/message-streaming.js');
+    const { ElementInserter } = await import('../../public/ts/element-inserter.js');
     const inserter = new ElementInserter(map, 'test', undefined, keyProperty);
     
     // data without toolCallId

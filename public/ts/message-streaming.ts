@@ -17,12 +17,22 @@ import { scrollToBottom } from './ui-utils.js';
 import { getActiveSessionId, setActiveSession, setLoadingHistory } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { isViewState, setViewState } from './view-controller.js';
-import { onEvent, type SessionEvent } from './websocket.js';
+import { onEvent, subscribeToSession, type SessionEvent } from './websocket.js';
 import { showToast, hideToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 import { resetTextareaHeight } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
 import { insertEvent } from './event-inserter.js';
+import { removeImage } from './image-paste.js';
+import { 
+  ElementInserter,
+  EVENT_TO_OUTER,
+  EVENT_TO_INNER,
+  EVENT_KEY_PROPERTY,
+  PRE_COLLAPSED_EVENTS,
+  getOuterClass,
+  getInnerClass
+} from './element-inserter.js';
 
 // Declare renderMarkdown global
 declare global {
@@ -34,195 +44,8 @@ declare global {
 
 // Re-export for external callers
 export { setLoadingHistory };
-
-/** 
- * Phase 1: Event Type → Outer Div Class Mapping
- * Maps SDK event.type strings to the 5 chat div classes
- */
-const EVENT_TO_OUTER: Record<string, string> = {
-  // User message
-  'user.message': 'user-message',
-  
-  // Assistant messages
-  'assistant.message': 'assistant-message',
-  'assistant.message_delta': 'assistant-message',
-  
-  // Activity (all activity goes in same box)
-  'assistant.intent': 'assistant-activity',
-  'assistant.reasoning': 'assistant-activity',
-  'assistant.reasoning_delta': 'assistant-activity',
-  'tool.execution_start': 'assistant-activity',
-  'tool.execution_progress': 'assistant-activity',
-  'tool.execution_partial_result': 'assistant-activity',
-  'tool.execution_complete': 'assistant-activity',
-  'session.error': 'assistant-activity',
-  'session.compaction_start': 'assistant-activity',
-  'session.compaction_complete': 'assistant-activity',
-  
-  // Caco synthetic types
-  'caco.agent': 'agent-message',
-  'caco.applet': 'applet-message',
-  'caco.info': 'assistant-activity',
-};
-
-/**
- * Phase 2: Event Type → Inner Div Class Mapping
- * Maps SDK event.type strings to inner content div classes
- * 'omit' means don't render this event type
- */
-const EVENT_TO_INNER: Record<string, string | null> = {
-  // User/assistant content
-  'user.message': 'user-text',
-  'assistant.message': 'assistant-text',
-  'assistant.message_delta': 'assistant-text',
-  
-  // Activity inner types
-  'assistant.intent': 'intent-text',
-  'assistant.reasoning': 'reasoning-text',
-  'assistant.reasoning_delta': 'reasoning-text',
-  'tool.execution_start': 'tool-text',
-  'tool.execution_progress': 'tool-text',
-  'tool.execution_partial_result': 'tool-text',
-  'tool.execution_complete': 'tool-text',
-  'session.error': null,         // omit
-  'session.compaction_start': 'compact-text',
-  'session.compaction_complete': 'compact-text',
-  
-  // Caco synthetic types
-  'caco.agent': 'agent-text',
-  'caco.applet': 'applet-text',
-  'caco.info': null,  // omit - internal signal
-};
-
-/**
- * Keyed events - events that use data-key for find-and-replace
- * Maps event type → property name to extract key value from event.data
- */
-const EVENT_KEY_PROPERTY: Record<string, string> = {
-  // Tool events use toolCallId
-  'tool.execution_start': 'toolCallId',
-  'tool.execution_progress': 'toolCallId',
-  'tool.execution_partial_result': 'toolCallId',
-  'tool.execution_complete': 'toolCallId',
-  // Reasoning events use reasoningId
-  'assistant.reasoning': 'reasoningId',
-  'assistant.reasoning_delta': 'reasoningId',
-  // Message deltas use messageId
-  'assistant.message': 'messageId',
-  'assistant.message_delta': 'messageId',
-};
-
-/**
- * Events that should create pre-collapsed inner children
- * Tool calls start collapsed; reasoning streams visibly then collapses on completion
- */
-const PRE_COLLAPSED_EVENTS = new Set([
-  'tool.execution_start',
-]);
-
-/** Get outer class for event type, or undefined if not mapped */
-export function getOuterClass(eventType: string): string | undefined {
-  return EVENT_TO_OUTER[eventType];
-}
-
-/** Get inner class for event type, or null if omitted, undefined if not mapped */
-export function getInnerClass(eventType: string): string | null | undefined {
-  return EVENT_TO_INNER[eventType];
-}
-
-/**
- * Generic element inserter - works with any map and parent
- * Reuses last child if it matches, otherwise creates new.
- * 
- * With keyProperty map: uses data-key attribute for find-and-replace
- * (e.g., multiple tool calls within same activity box)
- * 
- * @remarks Unit test all changes - see tests/unit/element-inserter.test.ts
- */
-export class ElementInserter {
-  private map: Record<string, string | null>;
-  private name: string;
-  private debug: (msg: string) => void;
-  private keyProperty: Record<string, string>;
-  private preCollapsed: Set<string>;
-  
-  constructor(
-    map: Record<string, string | null>, 
-    name: string, 
-    debug?: (msg: string) => void,
-    keyProperty?: Record<string, string>,
-    preCollapsed?: Set<string>
-  ) {
-    this.map = map;
-    this.name = name;
-    this.debug = debug || (() => {});
-    this.keyProperty = keyProperty || {};
-    this.preCollapsed = preCollapsed || new Set();
-  }
-  
-  /**
-   * Get or create element for event type within parent.
-   * Returns null if event type maps to null (omit) or undefined (not in map).
-   * 
-   * If event type has a keyProperty, uses data-key attribute for lookup:
-   * - Finds existing child with matching data-key, OR
-   * - Creates new child with data-key set
-   * 
-   * Otherwise uses simple last-child matching.
-   */
-  getElement(eventType: string, parent: HTMLElement, data?: Record<string, unknown>): HTMLElement | null {
-    const cssClass = this.map[eventType];
-    if (cssClass === null || cssClass === undefined) return null;
-    
-    // Check if this event type uses keyed lookup
-    const keyProp = this.keyProperty[eventType];
-    if (keyProp && data) {
-      const keyValue = data[keyProp];
-      if (typeof keyValue === 'string' && keyValue) {
-        return this.getOrCreateKeyed(cssClass, parent, keyValue, eventType);
-      }
-    }
-    
-    // Default: reuse last child if it matches
-    const last = parent.lastElementChild as HTMLElement | null;
-    if (last?.classList.contains(cssClass)) {
-      this.debug(`[INSERTER] "${this.name}" reuse existing div for type "${eventType}"`);
-      return last;
-    }
-    
-    // Create new
-    const div = document.createElement('div');
-    div.className = cssClass;
-    parent.appendChild(div);
-    this.debug(`[INSERTER] "${this.name}" create new div for type "${eventType}"`);
-    return div;
-  }
-  
-  /**
-   * Get or create element by data-key attribute
-   * Tool calls start collapsed; other keyed elements do not
-   */
-  private getOrCreateKeyed(cssClass: string, parent: HTMLElement, keyValue: string, eventType: string): HTMLElement {
-    // Search for existing child with matching data-key
-    const existing = parent.querySelector(`[data-key="${keyValue}"]`) as HTMLElement | null;
-    if (existing) {
-      this.debug(`[INSERTER] "${this.name}" found keyed div for "${eventType}" key="${keyValue}"`);
-      return existing;
-    }
-    
-    // Create new with data-key
-    const div = document.createElement('div');
-    // Only pre-collapse certain event types (tool calls)
-    const shouldCollapse = this.preCollapsed.has(eventType);
-    div.className = shouldCollapse ? cssClass + ' collapsed' : cssClass;
-    div.dataset.key = keyValue;
-    parent.appendChild(div);
-    this.debug(`[INSERTER] "${this.name}" create keyed div for "${eventType}" key="${keyValue}" collapsed=${shouldCollapse}`);
-    return div;
-  }
-}
-
-const inserterDebug: (msg: string) => void = console.log;
+// Re-export element-inserter functions for external callers
+export { getOuterClass, getInnerClass };
 
 const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>, 'outer');
 const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', undefined, EVENT_KEY_PROPERTY, PRE_COLLAPSED_EVENTS);
@@ -232,7 +55,6 @@ const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', undefined, EV
  * Uses outer + inner inserters with event.type for routing
  */
 function handleEvent(event: SessionEvent): void {
-  console.log('[handleEvent]', event.type, event.data);
   hideToast();
   const chat = document.getElementById('chat')!;
   const eventType = event.type;
@@ -354,6 +176,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       const data = await res.json();
       sessionId = data.sessionId;
       setActiveSession(sessionId, data.cwd);
+      subscribeToSession(sessionId);
       setViewState('chatting');
     }
     
@@ -390,13 +213,6 @@ export async function streamResponse(prompt: string, model: string, imageData: s
 }
 
 // Setup
-
-function removeImage(): void {
-  const imageData = document.getElementById('imageData') as HTMLInputElement;
-  const imagePreview = document.getElementById('imagePreview');
-  if (imageData) imageData.value = '';
-  if (imagePreview) imagePreview.classList.add('hidden');
-}
 
 /**
  * Set up form submission handler

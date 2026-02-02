@@ -13,10 +13,11 @@ import { initViewState, setViewState } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { initInputRouter } from './input-router.js';
 import { setupMultilineInput } from './multiline-input.js';
-import { connectWs, setActiveSession, requestHistory, waitForConnect, reconnectIfNeeded } from './websocket.js';
+import { connectWs, subscribeToSession, requestHistory, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
 import { initRouter, toggleSessions, toggleApplet, newSessionClick } from './router.js';
+import { setActiveSession } from './app-state.js';
 
 declare global {
   interface Window {
@@ -113,7 +114,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   if (targetSessionId) {
     // Session specified - set active and request history
-    setActiveSession(targetSessionId);
+    setActiveSession(targetSessionId, prefs?.lastCwd || '');
+    subscribeToSession(targetSessionId);
     requestHistory(targetSessionId);
     await waitForHistoryComplete();
     

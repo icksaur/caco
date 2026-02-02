@@ -8,7 +8,7 @@
  */
 
 import { showAppletPanel, updateTitle } from './view-controller.js';
-import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './websocket.js';
+import { wsSetState, onStateUpdate, isWsConnected } from './websocket.js';
 import { getActiveSessionId } from './app-state.js';
 
 interface TempFileResult {
@@ -47,38 +47,56 @@ function expose(nameOrObj: string | Record<string, unknown>, fn?: unknown): void
 }
 
 /**
+ * Applet API interface - exposed as window.appletAPI
+ */
+interface AppletAPI {
+  expose: typeof expose;
+  setAppletState: typeof setAppletState;
+  listApplets: typeof listSavedApplets;
+  getAppletUrlParams: typeof getAppletUrlParams;
+  getAppletSlug: typeof getAppletSlug;
+  updateAppletUrlParam: typeof updateAppletUrlParam;
+  onStateUpdate: typeof onStateUpdate;
+  getSessionId: typeof getActiveSessionId;
+  sendAgentMessage: typeof sendAgentMessage;
+  saveTempFile: typeof saveTempFile;
+  callMCPTool: typeof callMCPTool;
+}
+
+declare global {
+  interface Window {
+    appletAPI: AppletAPI;
+    // Legacy globals (kept for backward compatibility)
+    expose: typeof expose;
+    setAppletState: typeof setAppletState;
+  }
+}
+
+/**
  * Initialize applet runtime - exposes global functions for applet JS
  * Call this once at app startup
  */
 export function initAppletRuntime(): void {
-  // Expose helper for applets to expose their own functions
-  (window as unknown as { expose: typeof expose }).expose = expose;
-
-  // Expose setAppletState globally for applet JS to use
-  (window as unknown as { setAppletState: typeof setAppletState }).setAppletState = setAppletState;
-  // Expose listApplets globally for applet browser
-  (window as unknown as { listApplets: typeof listSavedApplets }).listApplets = listSavedApplets;
+  // Create unified appletAPI object
+  const api: AppletAPI = {
+    expose,
+    setAppletState,
+    listApplets: listSavedApplets,
+    getAppletUrlParams,
+    getAppletSlug,
+    updateAppletUrlParam,
+    onStateUpdate,
+    getSessionId: getActiveSessionId,
+    sendAgentMessage,
+    saveTempFile,
+    callMCPTool
+  };
   
-  // URL params API for applet JS
-  (window as unknown as { getAppletUrlParams: typeof getAppletUrlParams }).getAppletUrlParams = getAppletUrlParams;
-  (window as unknown as { getAppletSlug: typeof getAppletSlug }).getAppletSlug = getAppletSlug;
-  (window as unknown as { updateAppletUrlParam: typeof updateAppletUrlParam }).updateAppletUrlParam = updateAppletUrlParam;
+  window.appletAPI = api;
   
-  // WebSocket state subscription for applet JS
-  (window as unknown as { onStateUpdate: typeof onStateUpdate }).onStateUpdate = onStateUpdate;
-  
-  // Agent invocation API for applet JS
-  (window as unknown as { getSessionId: typeof getActiveSessionId }).getSessionId = getActiveSessionId;
-  (window as unknown as { sendAgentMessage: typeof sendAgentMessage }).sendAgentMessage = sendAgentMessage;
-
-  // Temp file API for applet JS - save images for agent to view
-  (window as unknown as { saveTempFile: typeof saveTempFile }).saveTempFile = saveTempFile;
-
-  // MCP tool API for applet JS - call MCP tools
-  (window as unknown as { callMCPTool: typeof callMCPTool }).callMCPTool = callMCPTool;
-  
-  // Navigation will be handled by router.ts (Phase 3)
-  // For now, applets are loaded via loadAppletBySlug() directly
+  // Legacy globals (for backward compatibility with existing applets)
+  window.expose = expose;
+  window.setAppletState = setAppletState;
 }
 
 /**

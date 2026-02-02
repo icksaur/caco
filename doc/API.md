@@ -191,28 +191,14 @@ Defined in `src/display-tools.ts`
 
 | Tool | Description |
 |------|-------------|
-| `render_file_contents` | Display file to user without reading into context |
-| `run_and_display` | Run command and display output |
-| `display_image` | Display image file |
 | `embed_media` | Embed YouTube/Vimeo/SoundCloud/Spotify |
-
-**render_file_contents** parameters:
-- `path` (string, required) - Absolute file path
-- `startLine` (number, optional) - First line (1-indexed)
-- `endLine` (number, optional) - Last line (inclusive)
-- `highlight` (string, optional) - Language for syntax highlighting
-
-**run_and_display** parameters:
-- `command` (string, required) - Shell command
-- `cwd` (string, optional) - Working directory
-
-**display_image** parameters:
-- `path` (string, required) - Absolute path to image
 
 **embed_media** parameters:
 - `url` (string, required) - Media URL
 
 Supported providers: YouTube, Vimeo, SoundCloud, Spotify, Twitter/X
+
+Note: Embedding happens client-side. The tool returns confirmation that the embed was queued, but cannot confirm successful rendering.
 
 ---
 

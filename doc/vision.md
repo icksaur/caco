@@ -135,8 +135,8 @@ stream.getTracks().forEach(t => t.stop());
 **Question:** Can the agent read image files from disk?
 
 **Current state:**
-- `display_image` tool shows image to user but agent doesn't see contents
-- No tool currently sends image data TO the agent
+- Use SDK's `view` tool with image paths
+- Agent receives image content for analysis
 
 **Solution: MCP tools CAN return images**
 

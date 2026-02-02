@@ -41,57 +41,52 @@ When the user just wants to view something, our display tools:
 
 | Tool | Use Case | LLM Sees |
 |------|----------|----------|
-| `render_file_contents` | "Show me config.js" | "Displayed config.js (50 lines)" |
-| `run_and_display` | "Run the tests" | "Command completed (exit 0, 200 lines)" |
-| `display_image` | "Show me logo.png" | "Displayed image logo.png" |
+| `embed_media` | "Show me this YouTube video" | "Embedding queued for YouTube: ..." |
 
-### Implementation: [src/display-tools.js](src/display-tools.js)
+### Implementation: [src/display-tools.ts](src/display-tools.ts)
 
 ```javascript
-const renderFileContents = defineTool("render_file_contents", {
-  description: `Display a file directly to the user. Use for "show me", "cat", "view".
-                You receive confirmation only, not the file contents.`,
+const embedMedia = defineTool("embed_media", {
+  description: `Embed media (YouTube, Vimeo, SoundCloud, Spotify) inline in chat.`,
   
   parameters: z.object({
-    path: z.string(),
-    startLine: z.number().optional(),
-    endLine: z.number().optional()
+    url: z.string().describe('URL of the media to embed')
   }),
 
-  handler: async ({ path, startLine, endLine }) => {
-    const content = await readFile(path, 'utf-8');
-    
-    // Store full content in cache
-    const outputId = storeOutput(content, { type: 'file', path });
+  handler: async ({ url }) => {
+    const embedData = await fetchOEmbed(url);
+    const outputId = storeOutput(embedData.html, { type: 'embed', ... });
     
     // LLM only sees this
     return {
-      textResultForLlm: `Displayed ${path} to user (${lines.length} lines)`,
-      toolTelemetry: { outputId }  // UI uses this to fetch content
+      textResultForLlm: `[output:${outputId}] Embedding queued for ${provider}: ...`,
+      toolTelemetry: { outputId }
     };
   }
 });
 ```
 
+Note: Rendering happens client-side. Success cannot be confirmed at tool layer.
+
 ---
 
 ## Server Components
 
-### Output Cache ([server.js](server.js#L59-L77))
+### Output Cache ([src/storage.ts](src/storage.ts))
 
 ```javascript
-const displayOutputs = new Map();
+const outputCache = new Map();
 const OUTPUT_TTL = 30 * 60 * 1000;  // 30 minutes
 
 function storeOutput(data, metadata = {}) {
   const id = `out_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  displayOutputs.set(id, { data, metadata, createdAt: Date.now() });
-  setTimeout(() => displayOutputs.delete(id), OUTPUT_TTL);
+  outputCache.set(id, { data, metadata, cachedAt: Date.now() });
+  setTimeout(() => outputCache.delete(id), OUTPUT_TTL);
   return id;
 }
 ```
 
-### Output API ([server.js](server.js#L237-L264))
+### Output API ([src/routes/api.ts](src/routes/api.ts))
 
 ```javascript
 app.get('/api/outputs/:id', (req, res) => {
@@ -103,45 +98,21 @@ app.get('/api/outputs/:id', (req, res) => {
 });
 ```
 
-### SSE Event Processing ([server.js](server.js#L475-L495))
-
-The `tool.execution_complete` event contains `outputId` in `toolTelemetry`. The server extracts it and forwards to the client.
-
 ---
 
-## Client Rendering ([public/chat.js](public/chat.js#L639-L720))
+## Client Rendering
 
-```javascript
-async function renderDisplayOutput(output) {
-  const res = await fetch(`/api/outputs/${output.id}?format=json`);
-  const { data, metadata } = await res.json();
-  
-  if (metadata.type === 'file') {
-    // Syntax-highlighted code block
-    const markdown = `\`\`\`${metadata.highlight}\n${data}\n\`\`\``;
-    container.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
-    hljs.highlightAll();
-    
-  } else if (metadata.type === 'image') {
-    // Direct image element
-    const img = document.createElement('img');
-    img.src = `/api/outputs/${output.id}`;
-    container.appendChild(img);
-  }
-}
-```
+The `tool.execution_complete` event contains `outputId` in `toolTelemetry`. The client fetches content from `/api/outputs/:id` and renders appropriately based on metadata type.
 
 ---
 
 ## Configuration
 
-Built-in `view` tool is disabled so the agent prefers our display tools:
-
 ```javascript
-// server.js - session creation
-activeSessionId = await sessionManager.create(cwd, {
+// server.ts - session creation
+const session = await sessionManager.create(cwd, {
   tools: displayTools,
-  excludedTools: ['view']  // Use our display_image instead
+  // ...
 });
 ```
 

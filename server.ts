@@ -70,13 +70,10 @@ const SYSTEM_MESSAGE: SystemMessage = {
 - **Applets**: Create custom interactive UI in the applet panel
 
 ## Display Tools
-You have special tools that display content directly to the user:
-- \`render_file_contents\` - Show files with syntax highlighting
-- \`run_and_display\` - Run commands and show output
-- \`display_image\` - Display image files
+You have a tool that displays content directly to the user:
 - \`embed_media\` - Embed YouTube/SoundCloud/Vimeo/Spotify content
 
-Use display tools when users want to SEE content. Use regular tools when you need to analyze content.
+Use embed_media when users want to watch or listen to media inline.
 
 ## Applet Tool
 You can create custom interactive interfaces using:

@@ -16,9 +16,6 @@ Current gaps in persistence:
 | Applet state | Not implemented | User data between sessions |
 
 **Display tools affected:**
-- `render_file_contents` — file content shown to user
-- `run_and_display` — terminal output
-- `display_image` — base64 images
 - `embed_media` — oEmbed content (YouTube, etc.)
 
 These prepend content to responses.

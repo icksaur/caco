@@ -3,7 +3,13 @@
 1. correctness - code that does what we want
 2. maintainability - it's easy to add new features and easier to fix defects (bugs)
 
-The purpose of code quality is to achieve these two.  The purpose of code review is code quality. This list is not exhaustive, but a good set to think about.
+The purpose of code quality is to achieve correctness and maintainability. Code review supports code quality. A review is constructive.  A review is composed of comments and suggestions.
+
+# concepts
+
+code is a liability
+less is more
+simple is best
 
 ## worst
 
@@ -14,13 +20,14 @@ wrong abstraction - expensive forever!
 ## bad
 
 global state
-unnecessary abstraction
+unnecessary layers of abstraction
 side effects
 mutable objects
 huge comments - variables and class names should explain why
 
 ## good
 
+obvious directory structure
 layers
 minimal code
 separation of concerns

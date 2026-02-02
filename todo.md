@@ -2,14 +2,9 @@
 
 **when working with this doc re-read it after doing compaction/summary and after significant changes**
 
-Remove superfluous comments.
-Remove ===== garbage.
-Remove comments saying what the code does when it's obvious. (BAD)
-Keep comments that say WHY the code does what it does. (GOOD)
+#code-quality.md brutal code review for front-end - document in frontend-cr.md in project root.
 
----
-
-Front-end javascript dead code search.
+#code-quality.md brutal code review for back-end
 
 investigate how git front-ends work.  Make case study for git status applet.  Consider streaming to applet changes or what applet functionality is required.
 

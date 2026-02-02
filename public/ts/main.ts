@@ -28,7 +28,6 @@ declare global {
     deleteSession: typeof deleteSession;
     selectModel: typeof selectModel;
     loadModels: typeof loadModels;
-    toggleActivityBox?: (el: HTMLElement) => void;
     stopStreaming: typeof stopStreaming;
     toggleApplet: typeof toggleApplet;
     hideToast: typeof hideToast;
@@ -43,7 +42,6 @@ window.newSessionClick = newSessionClick;
 window.deleteSession = deleteSession;
 window.selectModel = selectModel;
 window.loadModels = loadModels;
-// toggleActivityBox is set by setupFormHandler()
 window.stopStreaming = stopStreaming;
 window.toggleApplet = toggleApplet;
 window.hideToast = hideToast;

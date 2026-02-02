@@ -29,7 +29,6 @@ declare global {
   interface Window {
     renderMarkdown?: () => void;
     renderMarkdownElement?: (element: Element) => void;
-    toggleActivityBox?: (el: HTMLElement) => void;
   }
 }
 
@@ -255,6 +254,25 @@ function handleEvent(event: SessionEvent): void {
     setFormEnabled(true);
   }
   
+  // Special case: assistant.reasoning arrives after deltas, may be in a different outer div
+  // Search entire chat for existing reasoning element by reasoningId
+  if (eventType === 'assistant.reasoning' && data.reasoningId) {
+    const existing = chat.querySelector(`[data-key="${data.reasoningId}"]`) as HTMLElement | null;
+    if (existing) {
+      // Found the delta-streamed element - update and collapse it
+      insertEvent(event, existing);
+      // Add header AFTER insertEvent (which replaces content via renderMarkdown)
+      const header = document.createElement('p');
+      header.className = 'reasoning-header';
+      header.textContent = 'reasoning';
+      existing.insertBefore(header, existing.firstChild);
+      existing.classList.add('collapsed');
+      scrollToBottom();
+      return;
+    }
+    // Not found (no deltas were streamed) - fall through to normal flow
+  }
+  
   // Get outer div
   const outer = outerInserter.getElement(eventType, chat);
   if (!outer) return;
@@ -428,19 +446,6 @@ export function setupFormHandler(): void {
       }
     });
   }
-  
-  // Expose toggleActivityBox globally
-  window.toggleActivityBox = (header: HTMLElement) => {
-    const wrapper = header.closest('.message.activity');
-    if (!wrapper) return;
-    const box = wrapper.querySelector('.activity-box') as HTMLElement;
-    const icon = header.querySelector('.activity-icon');
-    if (box) {
-      const isHidden = box.style.display === 'none';
-      box.style.display = isHidden ? '' : 'none';
-      if (icon) icon.textContent = isHidden ? '▼' : '▶';
-    }
-  };
   
   const form = document.getElementById('chatForm') as HTMLFormElement;
   if (!form) return;

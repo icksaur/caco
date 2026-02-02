@@ -586,55 +586,6 @@ main {
   /* Streaming content - minimal styling */
 }
 
-/* Activity bubbles - peer to user/assistant messages */
-.message.activity {
-  background: var(--bg-raised);
-  border-left: 3px solid var(--color-info);
-}
-
-.message.activity .activity-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm);
-  cursor: pointer;
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  user-select: none;
-}
-
-.message.activity .activity-header:hover {
-  background: #363636;
-  color: #a0a0a0;
-}
-
-.message.activity .activity-icon {
-  font-size: 0.65rem;
-  transition: transform var(--transition-fast) ease;
-}
-
-.message.activity .activity-box {
-  background: #252525;
-  padding: var(--space-sm);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.message.activity .activity-box.collapsed {
-  display: none;
-}
-
-.message.activity .activity-icon.collapsed {
-  transform: rotate(0deg);
-}
-
-.message.activity .activity-icon:not(.collapsed) {
-  transform: rotate(90deg);
-}
-
 /* Applet-invoked messages (agent called by applet, not user) */
 .message.applet {
   background: var(--color-applet-bg);
@@ -723,6 +674,13 @@ main {
 }
 .assistant-activity > * {
   cursor: pointer;
+}
+
+/* Reasoning header - visible when collapsed */
+.reasoning-header {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0;
 }
 
 /* ========================================
@@ -1144,94 +1102,6 @@ main {
 .new-chat-cancel:hover { background: var(--bg-hover); }
 
 .new-chat-error.visible { display: block; }
-
-/* ========================================
-   ACTIVITY BOX (Streaming)
-   ======================================== */
-.activity-wrapper { margin-bottom: var(--space-sm); }
-
-.activity-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: 0.35rem var(--space-sm);
-  background: var(--bg-raised);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  user-select: none;
-}
-
-.activity-header:hover {
-  background: #363636;
-  color: #a0a0a0;
-}
-
-.activity-icon {
-  font-size: 0.65rem;
-  transition: transform var(--transition-fast) ease;
-}
-
-.activity-wrapper:not(.collapsed) .activity-icon {
-  transform: rotate(90deg);
-}
-
-.activity-label { font-weight: 500; }
-
-.activity-count {
-  color: var(--color-text-dim);
-  font-size: var(--text-xs);
-}
-
-.activity-wrapper.collapsed .activity-box { display: none; }
-
-.activity-box {
-  background: #252525;
-  border-radius: 0 0 var(--radius-md) var(--radius-md);
-  padding: var(--space-sm);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  max-height: 150px;
-  overflow-y: auto;
-  font-family: var(--font-mono);
-  border-top: 1px solid var(--color-border);
-}
-
-.activity-box.collapsed { display: none; }
-
-.activity-item {
-  margin: var(--space-xs) 0;
-  padding: 0.15rem 0;
-}
-
-.activity-item.tool { color: var(--color-link); }
-.activity-item.tool-result { color: #6a9955; }
-.activity-item.tool-result .activity-summary::before { content: ''; }
-.activity-item.intent { color: #dcdcaa; }
-.activity-item.reasoning { color: #9cdcfe; }
-.activity-item.error { color: var(--color-error); }
-.activity-item.turn { color: var(--color-text-muted); font-style: italic; }
-
-/* Expandable activity items */
-.activity-summary { cursor: pointer; }
-.activity-summary:hover { text-decoration: underline; }
-
-.activity-details {
-  display: none;
-  margin-top: var(--space-xs);
-  padding: var(--space-sm);
-  background: var(--bg-base);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  color: #a0a0a0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.activity-item.expanded .activity-details { display: block; }
 
 /* ========================================
    ANIMATIONS

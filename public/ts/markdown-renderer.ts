@@ -168,6 +168,8 @@ export function renderMarkdownElement(element: Element): void {
   // Update content (keep streaming cursor if present)
   const hadCursor = element.classList.contains('streaming-cursor');
   element.innerHTML = html;
+  // Add markdown-content class for CSS styling (lists, headings, etc.)
+  element.classList.add('markdown-content');
   if (hadCursor) {
     element.classList.add('streaming-cursor');
   }

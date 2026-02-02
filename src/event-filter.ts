@@ -51,6 +51,7 @@ function isNonEmpty(value: unknown): boolean {
  * Determine if an event should be filtered (not broadcast)
  * 
  * Returns false (keep) for passthrough event types.
+ * Returns false (keep) for Caco synthetic events (caco.* prefix).
  * Returns false (keep) if ANY whitelisted property is present and non-empty.
  * Returns true (filter out) otherwise.
  * 
@@ -59,6 +60,11 @@ function isNonEmpty(value: unknown): boolean {
 export function shouldFilter(event: FilterableEvent): boolean {
   // Passthrough types always allowed
   if (PASSTHROUGH_TYPES.has(event.type)) {
+    return false;
+  }
+  
+  // Caco synthetic events always pass through - we control them
+  if (event.type.startsWith('caco.')) {
     return false;
   }
   

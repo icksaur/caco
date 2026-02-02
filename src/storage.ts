@@ -251,6 +251,42 @@ export function listOutputs(sessionId: string): OutputMetadata[] {
 }
 
 /**
+ * List embed outputs for a session (for history replay)
+ * Returns outputId + metadata for each embed type output
+ */
+export function listEmbedOutputs(sessionId: string): Array<{ outputId: string; metadata: OutputMetadata }> {
+  const outputDir = getSessionOutputDir(sessionId);
+  if (!existsSync(outputDir)) {
+    return [];
+  }
+  
+  const embeds: Array<{ outputId: string; metadata: OutputMetadata }> = [];
+  
+  for (const file of readdirSync(outputDir)) {
+    if (file.endsWith('.meta.json')) {
+      try {
+        const metaPath = join(outputDir, file);
+        const metadata: OutputMetadata = JSON.parse(readFileSync(metaPath, 'utf-8'));
+        if (metadata.type === 'embed') {
+          // Extract outputId from filename (e.g., "out_12345_abc.meta.json" -> "out_12345_abc")
+          const outputId = file.replace('.meta.json', '');
+          embeds.push({ outputId, metadata });
+        }
+      } catch (e) {
+        // Skip malformed files
+      }
+    }
+  }
+  
+  // Sort by creation time
+  embeds.sort((a, b) => 
+    new Date(a.metadata.createdAt).getTime() - new Date(b.metadata.createdAt).getTime()
+  );
+  
+  return embeds;
+}
+
+/**
  * Parse [output:xxx] markers from text
  * Used when reloading history to find output references
  */

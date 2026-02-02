@@ -42,6 +42,7 @@
 | `assistant.usage` | `assistant-activity` |
 | `caco.agent` | `agent-message` |
 | `caco.applet` | `applet-message` |
+| `caco.embed` | `embed-message` |
 
 ### Event Type → Chat Bubble Child Div Mapping
 
@@ -72,6 +73,7 @@
 | `assistant.usage` | `omit` |
 | `caco.agent` | `agent-text` |
 | `caco.applet` | `applet-text` |
+| `caco.embed` | `embed-content` |
 
 ### Event Property Filter (Whitelist)
 
@@ -118,6 +120,122 @@ everything should just work
 fabricate new type="caco.output"
 emit WS message when agent idle
 emit from persistence when loading and streaming history (when?)
+
+---
+
+## Caco Event Scheduling
+
+### Problem
+
+Caco synthetic events (e.g., `caco.embed`) are emitted by tool handlers during tool execution.
+This causes two issues:
+
+1. **Live stream timing**: Events appear between `tool.execution_start` and `tool.execution_complete`
+2. **Multiple embeds overwrite**: ElementInserter reuses last child, so embeds overwrite each other
+
+### Design: Event Queue + Keyed Lookup
+
+#### Server-Side Event Queue
+
+Queue caco events and flush on trigger events. **Same trigger for both live and history.**
+
+```
+LIVE STREAM:
+┌─────────────────┐     ┌──────────────┐     ┌────────────────────┐
+│ Tool emits      │────▶│ Queue event  │────▶│ Flush before       │────▶ Client
+│ caco.embed      │     │ (pending)    │     │ assistant.message  │
+└─────────────────┘     └──────────────┘     └────────────────────┘
+
+HISTORY REPLAY:
+┌─────────────────┐     ┌──────────────┐     ┌────────────────────┐
+│ Parse [output:] │────▶│ Queue event  │────▶│ Flush before       │────▶ Client  
+│ from tool result│     │ (pending)    │     │ assistant.message  │
+└─────────────────┘     └──────────────┘     └────────────────────┘
+```
+
+**SDK Response Structure** (one user.message can have multiple turns):
+```
+user.message
+  Turn 1: reasoning → tool calls → assistant.message
+  Turn 2: reasoning → tool calls → assistant.message
+  ...
+session.idle
+```
+
+**Unified flush trigger** (same for live and history):
+- `assistant.message` - Turn ends = emit that turn's embeds
+- `session.error` - Error ends session
+
+**History embed detection**:
+- When processing `tool.execution_complete`, parse `result.content` for `[output:xxx]` markers
+- Look up outputId in embed storage
+- If found, queue `caco.embed` event
+- Queue flushes before next `assistant.message`
+
+**Implementation**: `src/caco-event-queue.ts`
+
+```typescript
+interface CacoEventQueue {
+  queue(event: CacoEvent): void;    // Add event to pending queue
+  flush(): CacoEvent[];             // Return and clear pending events
+}
+
+// Usage in session-messages.ts (live stream):
+if (isTriggerEvent(event.type)) {
+  for (const queued of cacoQueue.flush()) {
+    broadcastEvent(sessionId, queued);
+  }
+}
+
+// Usage in websocket.ts (history):
+// Same pattern - process SDK events, flush queue on triggers
+```
+
+#### Client-Side Keyed Lookup for Embeds
+
+Each embed gets its own DOM element via `data-key` attribute using `outputId`.
+
+**Add to `EVENT_KEY_PROPERTY`**:
+```typescript
+'caco.embed': 'outputId'
+```
+
+This ensures multiple embeds create separate elements instead of overwriting.
+
+### Unit Testable Components
+
+| Component | Test File | Tests |
+|-----------|-----------|-------|
+| `CacoEventQueue` | `caco-event-queue.test.ts` | queue, flush, empty queue |
+| `EVENT_KEY_PROPERTY` | `element-inserter.test.ts` | caco.embed uses outputId key |
+| `SDK Normalizer` | `sdk-normalizer.test.ts` | handles wrapped/unwrapped SDK events |
+| `Embed History` | `embed-history.test.ts` | integration tests for history replay |
+
+### SDK Event Normalization
+
+**Problem**: SDK events have inconsistent structures:
+- Live events: properties at root `{ type, toolCallId, result }`
+- History events: properties wrapped `{ type, data: { toolCallId, result } }`
+
+**Solution**: `src/sdk-normalizer.ts` provides a single place to handle this:
+- `extractProperty(event, name)` - checks both root and `data` wrapper
+- `normalizeToolComplete(event)` - returns consistent `NormalizedToolComplete` shape
+- `extractToolResultText(content)` - handles JSON-wrapped results
+
+All code should use the normalizer instead of accessing SDK properties directly.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/caco-event-queue.ts` | New - queue implementation |
+| `src/sdk-normalizer.ts` | New - SDK event normalization |
+| `src/display-tools.ts` | Queue instead of direct emit |
+| `src/routes/session-messages.ts` | Flush queue on triggers |
+| `src/routes/websocket.ts` | Use normalizer + queue for history |
+| `public/ts/element-inserter.ts` | Add caco.embed keyed lookup |
+
+---
 
 ## Copilot SDK Event Types (Complete Reference)
 

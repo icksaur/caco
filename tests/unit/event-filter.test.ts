@@ -127,4 +127,32 @@ describe('shouldFilter', () => {
       })).toBe(false);
     });
   });
+
+  describe('returns false (keep event) - caco synthetic events', () => {
+    it('caco.embed passes through with outputId', () => {
+      expect(shouldFilter({ 
+        type: 'caco.embed', 
+        data: { outputId: 'out_123', provider: 'YouTube' } 
+      })).toBe(false);
+    });
+
+    it('caco.embed passes through even with empty data', () => {
+      expect(shouldFilter({ type: 'caco.embed', data: {} })).toBe(false);
+    });
+
+    it('caco.reload passes through', () => {
+      expect(shouldFilter({ type: 'caco.reload', data: {} })).toBe(false);
+    });
+
+    it('caco.agent passes through', () => {
+      expect(shouldFilter({ 
+        type: 'caco.agent', 
+        data: { content: 'Hello from agent' } 
+      })).toBe(false);
+    });
+
+    it('any caco.* type passes through', () => {
+      expect(shouldFilter({ type: 'caco.anything', data: {} })).toBe(false);
+    });
+  });
 });

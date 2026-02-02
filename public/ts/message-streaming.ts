@@ -60,6 +60,9 @@ function handleEvent(event: SessionEvent): void {
   const eventType = event.type;
   const data = event.data || {};
   
+  // DEBUG: Log all event types received
+  console.log(`[EVENT] ${eventType}`, data);
+  
   // Re-enable form on terminal events (streaming complete)
   // Check BEFORE outer/inner logic since terminal events may not have display elements
   if (isTerminalEvent(eventType)) {

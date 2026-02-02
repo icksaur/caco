@@ -242,3 +242,18 @@ describe('ElementInserter keyed lookup', () => {
     expect(mockParent.appendChild).not.toHaveBeenCalled();
   });
 });
+
+describe('EVENT_KEY_PROPERTY', () => {
+  it('includes caco.embed with outputId key', async () => {
+    const { EVENT_KEY_PROPERTY } = await import('../../public/ts/element-inserter.js');
+    
+    expect(EVENT_KEY_PROPERTY['caco.embed']).toBe('outputId');
+  });
+
+  it('includes tool events with toolCallId key', async () => {
+    const { EVENT_KEY_PROPERTY } = await import('../../public/ts/element-inserter.js');
+    
+    expect(EVENT_KEY_PROPERTY['tool.execution_start']).toBe('toolCallId');
+    expect(EVENT_KEY_PROPERTY['tool.execution_complete']).toBe('toolCallId');
+  });
+});

@@ -37,6 +37,7 @@ export const EVENT_TO_OUTER: Record<string, string> = {
   // Caco synthetic types
   'caco.agent': 'agent-message',
   'caco.applet': 'applet-message',
+  'caco.embed': 'embed-message',
   'caco.info': 'assistant-activity',
 };
 
@@ -66,6 +67,7 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
   // Caco synthetic types
   'caco.agent': 'agent-text',
   'caco.applet': 'applet-text',
+  'caco.embed': 'embed-content',
   'caco.info': null,  // omit - internal signal
 };
 
@@ -85,6 +87,8 @@ export const EVENT_KEY_PROPERTY: Record<string, string> = {
   // Message deltas use messageId
   'assistant.message': 'messageId',
   'assistant.message_delta': 'messageId',
+  // Embed events use outputId (each embed gets own element)
+  'caco.embed': 'outputId',
 };
 
 /**

@@ -19,15 +19,19 @@ wrong abstraction - expensive forever!
 
 ## bad
 
+relying on side effects
 global state
 unnecessary layers of abstraction
 side effects
 mutable objects
 huge comments - variables and class names should explain why
+code must be kept in sync
 
 ## good
 
-obvious directory structure
+strong typing catches issues at compile time
+unit testable
+directory structure matches layers and components
 layers
 minimal code
 separation of concerns
@@ -43,3 +47,8 @@ data driven behavior
 descriptive, self-documenting names
 immutable objects
 consistent naming
+
+# improving codebases
+
+Ask these questions after fixing a bug:
+What was the **code quality** issue or issues that allowed this bug in the first place?

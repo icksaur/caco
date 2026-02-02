@@ -3,6 +3,12 @@
  * 
  * Tools that display content directly to the UI and return confirmation to agent.
  * embed_media is the primary display tool - others have been removed.
+ * 
+ * Tools emit their own caco.* events directly via the provided emit function,
+ * rather than relying on SDK event parsing. This ensures:
+ * - Tool knows its own identity (no toolName parsing needed)
+ * - Event emitted immediately when tool completes
+ * - Clean separation of concerns
  */
 
 import { defineTool } from '@github/copilot-sdk';
@@ -17,10 +23,22 @@ interface OutputMeta {
 
 type StoreOutputFn = (data: string | Buffer, metadata: OutputMeta) => string;
 
+// Caco event for embed display - follows SDK event structure with data property
+export interface CacoEmbedEvent {
+  type: 'caco.embed';
+  data: {
+    outputId: string;
+    provider: string;
+    title: string;
+  };
+}
+
+type EmitCacoEventFn = (event: CacoEmbedEvent) => void;
+
 /**
- * Create display tools that use a provided storeOutput function
+ * Create display tools that use provided storeOutput and emit functions
  */
-export function createDisplayTools(storeOutput: StoreOutputFn, _detectLanguage: unknown) {
+export function createDisplayTools(storeOutput: StoreOutputFn, emitCacoEvent: EmitCacoEventFn) {
   // Build provider list for tool description
   const providerList = getSupportedProviders()
     .map(p => p.name)
@@ -61,6 +79,16 @@ export function createDisplayTools(storeOutput: StoreOutputFn, _detectLanguage: 
         const info = embedData.title 
           ? `"${embedData.title}"${embedData.author ? ` by ${embedData.author}` : ''}`
           : url;
+
+        // Emit caco.embed event directly - tool knows its own identity
+        emitCacoEvent({
+          type: 'caco.embed',
+          data: {
+            outputId,
+            provider: embedData.provider,
+            title: embedData.title || 'Embedded content'
+          }
+        });
 
         return {
           textResultForLlm: `[output:${outputId}] Embedding queued for ${embedData.provider}: ${info}. Rendering happens client-side; success cannot be confirmed at tool layer.`,

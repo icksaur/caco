@@ -1224,6 +1224,15 @@ main {
 .output-embed[data-provider="soundcloud"] .embed-frame { min-height: 166px; }
 .output-embed[data-provider="spotify"] .embed-frame { min-height: 152px; }
 
+/* Embed message container (caco.embed event) */
+.embed-message {
+  margin: var(--space-md) 0;
+}
+
+.embed-content {
+  max-width: 640px;
+}
+
 /* ========================================
    RESPONSIVE: Desktop split view, mobile toggle
    ======================================== */

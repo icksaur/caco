@@ -19,7 +19,9 @@ import { parseImageDataUrl } from '../image-utils.js';
 import { updateUsage } from '../usage-state.js';
 import { broadcastUserMessageFromPost, broadcastEvent, type MessageSource, type SessionEvent } from './websocket.js';
 import { extractToolTelemetry, type ToolExecutionCompleteEvent } from '../sdk-event-parser.js';
+import { transformForClient, shouldEmitReload } from '../event-transformer.js';
 import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
+import { getQueue, isFlushTrigger } from '../caco-event-queue.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
 
 const router = Router();
@@ -224,8 +226,22 @@ export async function dispatchMessage(
     }, DISPATCH_TIMEOUT_MS);
     
     const unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on((event: SessionEvent) => {
-      // Forward event as-is
-      onEvent(event);
+      // Flush queued caco events before trigger events (so embeds appear at natural break)
+      if (isFlushTrigger(event.type)) {
+        const queue = getQueue(sessionId);
+        const queued = queue.flush();
+        if (queued.length > 0) {
+          console.log(`[QUEUE] Flushing ${queued.length} caco events before ${event.type}`);
+          for (const cacoEvent of queued) {
+            onEvent(cacoEvent as unknown as SessionEvent);
+          }
+        }
+      }
+      
+      // Transform event and emit all results (original + synthetic caco.* events)
+      for (const transformed of transformForClient(event)) {
+        onEvent(transformed);
+      }
       
       // Server-side processing
       const eventData = event.data || {};
@@ -241,11 +257,9 @@ export async function dispatchMessage(
         updateUsage(quotaSnapshots);
       }
       
-      if (event.type === 'tool.execution_complete') {
-        const toolTelemetry = extractToolTelemetry(eventData as ToolExecutionCompleteEvent);
-        if (toolTelemetry?.reloadTriggered && consumeReloadSignal()) {
-          onEvent({ type: 'caco.reload', data: {} });
-        }
+      // Reload requires external state (consumeReloadSignal), so handled separately
+      if (shouldEmitReload(event) && consumeReloadSignal()) {
+        onEvent({ type: 'caco.reload', data: {} });
       }
       
       if (event.type === 'session.idle' || event.type === 'session.error') {

@@ -12,14 +12,15 @@ import { dirname, join } from 'path';
 import { homedir, hostname } from 'os';
 import { readFileSync } from 'fs';
 import { sessionState } from './src/session-state.js';
-import { createDisplayTools } from './src/display-tools.js';
+import { createDisplayTools, type CacoEmbedEvent } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools, type SessionIdRef } from './src/agent-tools.js';
-import { storeOutput, detectLanguage } from './src/storage.js';
+import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, scheduleRoutes } from './src/routes/index.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
+import { getQueue } from './src/caco-event-queue.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
 import { PORT } from './src/config.js';
 
@@ -33,10 +34,21 @@ const app = express();
 const programCwd = process.cwd();
 
 const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
-  // Display tools need sessionCwd for storage scoping
+  // Queue function for caco.* events - tools queue, events flush on session.idle
+  const queueCacoEvent = (event: CacoEmbedEvent) => {
+    if (sessionRef.id) {
+      const queue = getQueue(sessionRef.id);
+      queue.queue(event);
+      console.log(`[QUEUE] caco.embed queued for session ${sessionRef.id}, pending: ${queue.length}`);
+    } else {
+      console.log(`[QUEUE] No sessionRef.id, event not queued`);
+    }
+  };
+  
+  // Display tools need sessionCwd for storage scoping and queue for caco events
   const displayTools = createDisplayTools(
     (data, meta) => storeOutput(sessionCwd, data, meta),
-    detectLanguage
+    queueCacoEvent
   );
   
   // Applet tools need programCwd for persistent storage
@@ -66,7 +78,6 @@ const SYSTEM_MESSAGE: SystemMessage = {
 - **Terminal**: Execute commands in any directory  
 - **Images**: View pasted images, display image files
 - **Media embeds**: Embed YouTube, SoundCloud, Vimeo, Spotify content inline
-- **Code**: Syntax highlighting for all major languages
 - **Applets**: Create custom interactive UI in the applet panel
 
 ## Display Tools
@@ -77,7 +88,7 @@ Use embed_media when users want to watch or listen to media inline.
 
 ## Applet Tool
 You can create custom interactive interfaces using:
-- \`set_applet_content\` - Set HTML/JS/CSS content in the applet panel
+- \`applet_howto\` - Access applet development instructions
 
 Use this when users ask for interactive tools, editors, viewers, forms, or dashboards.
 The applet runs in a dedicated panel with full JavaScript capabilities.

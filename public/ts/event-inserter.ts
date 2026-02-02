@@ -200,24 +200,19 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     // Special case: report_intent keeps its intent display (no change on complete)
     if (name === 'report_intent') return;
     
+    // Special case: embed_media tool completion is handled by caco.embed event
+    // The tool activity shows minimal info; actual embed renders in separate div
+    if (name === 'embed_media') {
+      element.textContent = '**embed_media**\n\n```\nEmbed rendered below\n```';
+      if (typeof window !== 'undefined' && window.renderMarkdownElement) {
+        window.renderMarkdownElement(element as unknown as Element);
+      }
+      return;
+    }
+    
     const input = element.dataset.toolInput || '';
     const success = data.success as boolean;
     const result = getByPath(data, 'result.content') as string | undefined;
-    
-    // Special case: embed_media renders an iframe
-    if (name === 'embed_media' && success && result) {
-      const outputId = extractOutputId(result);
-      if (outputId) {
-        // Set placeholder while loading
-        element.textContent = '⏳ Loading embed...';
-        
-        // Async fetch and render (only in browser)
-        if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-          fetchAndRenderEmbed(element as unknown as HTMLElement, outputId);
-        }
-        return;
-      }
-    }
     
     // Build: **name** + blank line + code block with input + output
     // Blank line ensures markdown renders header and code as separate blocks
@@ -262,6 +257,23 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   // Caco synthetic types
   'caco.agent': setPath('content'),
   'caco.applet': setPath('content'),
+  
+  // Embed media - renders iframe from outputId
+  'caco.embed': (element, data) => {
+    const outputId = data.outputId as string | undefined;
+    if (!outputId) {
+      element.textContent = '❌ Missing embed outputId';
+      return;
+    }
+    
+    // Set placeholder while loading
+    element.textContent = '⏳ Loading embed...';
+    
+    // Async fetch and render (only in browser)
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetchAndRenderEmbed(element as unknown as HTMLElement, outputId);
+    }
+  },
 };
 
 /**

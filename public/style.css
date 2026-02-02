@@ -838,6 +838,26 @@ main {
   to { transform: translateY(-50%) rotate(360deg); }
 }
 
+@keyframes spin-in-place {
+  to { transform: rotate(360deg); }
+}
+
+/* Session busy state (non-idle, processing) */
+.session-item.busy {
+  border-left: 3px solid var(--color-accent);
+}
+
+.session-busy-indicator {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-right: var(--space-sm);
+  border: 2px solid var(--color-text-muted);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin-in-place 0.8s linear infinite;
+}
+
 /* Session delete button */
 .session-delete {
   flex-shrink: 0;

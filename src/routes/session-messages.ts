@@ -17,7 +17,7 @@ import { sessionState } from '../session-state.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
 import { updateUsage } from '../usage-state.js';
-import { broadcastUserMessageFromPost, broadcastEvent, type MessageSource, type SessionEvent } from './websocket.js';
+import { broadcastUserMessageFromPost, broadcastEvent, broadcastGlobalEvent, type MessageSource, type SessionEvent } from './websocket.js';
 import { extractToolTelemetry, type ToolExecutionCompleteEvent } from '../sdk-event-parser.js';
 import { transformForClient, shouldEmitReload } from '../event-transformer.js';
 import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
@@ -208,6 +208,7 @@ export async function dispatchMessage(
       }
       
       sessionManager.markIdle(sessionId);
+      broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
       if (tempFilePath) {
         unlink(tempFilePath).catch(() => {});
       }
@@ -271,6 +272,7 @@ export async function dispatchMessage(
     // Send message
     try {
       sessionManager.markBusy(sessionId);
+      broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: true } });
       sessionManager.sendStream(sessionId, prompt, messageOptions);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -291,6 +293,7 @@ export async function dispatchMessage(
     onEvent({ type: 'session.error', data: { message } });
     
     sessionManager.markIdle(sessionId);
+    broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
     if (tempFilePath) {
       await unlink(tempFilePath).catch(() => {});
     }

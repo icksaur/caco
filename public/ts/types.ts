@@ -21,6 +21,7 @@ export interface SessionData {
   sessionId: string;
   summary?: string;
   updatedAt?: string;
+  isBusy?: boolean;
 }
 
 export interface SessionsResponse {

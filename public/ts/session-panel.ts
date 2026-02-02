@@ -8,6 +8,58 @@ import { getActiveSessionId, getCurrentCwd } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { setViewState } from './view-controller.js';
 import { sessionClick } from './router.js';
+import { onGlobalEvent } from './websocket.js';
+
+/**
+ * Initialize session panel - subscribe to global events
+ */
+export function initSessionPanel(): void {
+  onGlobalEvent((event) => {
+    if (event.type === 'session.busy' && event.data) {
+      const { sessionId, isBusy } = event.data as { sessionId: string; isBusy: boolean };
+      updateSessionItemState(sessionId, isBusy);
+    }
+  });
+}
+
+/**
+ * Update a single session item's busy state in the DOM
+ */
+function updateSessionItemState(sessionId: string, isBusy: boolean): void {
+  const item = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
+  if (!item) return;
+  
+  if (isBusy) {
+    item.classList.add('busy');
+    // Add throbber if not present
+    if (!item.querySelector('.session-busy-indicator')) {
+      const throbber = document.createElement('span');
+      throbber.className = 'session-busy-indicator';
+      throbber.setAttribute('aria-label', 'Session is processing');
+      item.insertBefore(throbber, item.firstChild);
+    }
+    // Remove delete button
+    const deleteBtn = item.querySelector('.session-delete');
+    if (deleteBtn) deleteBtn.remove();
+  } else {
+    item.classList.remove('busy');
+    // Remove throbber
+    const throbber = item.querySelector('.session-busy-indicator');
+    if (throbber) throbber.remove();
+    // Add delete button if not present
+    if (!item.querySelector('.session-delete')) {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'session-delete';
+      deleteBtn.textContent = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        const summary = item.querySelector('.session-summary')?.textContent || undefined;
+        deleteSession(sessionId, summary);
+      };
+      item.appendChild(deleteBtn);
+    }
+  }
+}
 
 /**
  * Show session manager as the main view (landing page)
@@ -88,7 +140,18 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
   if (session.sessionId === activeSessionId) {
     item.classList.add('active');
   }
+  if (session.isBusy) {
+    item.classList.add('busy');
+  }
   item.dataset.sessionId = session.sessionId;
+  
+  // Busy indicator (throbber)
+  if (session.isBusy) {
+    const throbber = document.createElement('span');
+    throbber.className = 'session-busy-indicator';
+    throbber.setAttribute('aria-label', 'Session is processing');
+    item.appendChild(throbber);
+  }
   
   // Summary text (truncated)
   const summarySpan = document.createElement('span');
@@ -99,15 +162,17 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
   summarySpan.onclick = () => sessionClick(session.sessionId);
   item.appendChild(summarySpan);
   
-  // Delete button
-  const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'session-delete';
-  deleteBtn.textContent = '×';
-  deleteBtn.onclick = (e) => {
-    e.stopPropagation();
-    deleteSession(session.sessionId, session.summary);
-  };
-  item.appendChild(deleteBtn);
+  // Delete button (hidden when busy)
+  if (!session.isBusy) {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'session-delete';
+    deleteBtn.textContent = '×';
+    deleteBtn.onclick = (e) => {
+      e.stopPropagation();
+      deleteSession(session.sessionId, session.summary);
+    };
+    item.appendChild(deleteBtn);
+  }
   
   return item;
 }

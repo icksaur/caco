@@ -1,12 +1,9 @@
 # TODO
 
 **when working with this doc re-read it after doing compaction/summary and after significant changes**
+**after making changes do not commit, review code-quality.md and review the changes for quality issues**
 
-Increase session list fidelity.  Investigate adding more clarity: session is "active" in that it's currently non-idle in SDK.  Put the little spinning throbber there when sessions are active.  I think we have that in the HTML or DOM.  It was a previous feature which hid the delete button.  Sessions in that state cannot be deleted.  Deletion via API should result in a 40x (400 I think).  
-
----
-
-
+Remove CWD lock.  Copilot-CLI allows partying on same CWD.  Caco can too.
 
 # every so often
 

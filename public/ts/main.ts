@@ -5,7 +5,7 @@
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences, waitForHistoryComplete } from './history.js';
-import { deleteSession } from './session-panel.js';
+import { deleteSession, initSessionPanel } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
@@ -57,6 +57,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Initialize applet runtime (exposes setAppletState globally)
   initAppletRuntime();
+  
+  // Initialize session panel (subscribe to WS session state events)
+  initSessionPanel();
   
   // Connect WebSocket once on page load
   connectWs();

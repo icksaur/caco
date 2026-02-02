@@ -112,6 +112,14 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const clientId = req.headers['x-client-id'] as string | undefined;
   
+  // Prevent deletion of busy sessions
+  if (sessionManager.isBusy(sessionId)) {
+    return res.status(400).json({ 
+      error: 'Cannot delete session while it is processing',
+      code: 'SESSION_BUSY'
+    });
+  }
+  
   try {
     const wasActive = await sessionState.deleteSession(sessionId, clientId);
     res.json({ success: true, wasActive });

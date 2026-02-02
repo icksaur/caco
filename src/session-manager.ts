@@ -79,6 +79,7 @@ interface SessionListItem {
   cwd: string | null;
   summary: string | null;
   updatedAt: string | Date | null;
+  isBusy: boolean;
 }
 
 interface GroupedSessions {
@@ -424,7 +425,8 @@ class SessionManager {
         const yaml = parseYaml(readFileSync(yamlPath, 'utf8')) as { updated_at?: string };
         updatedAt = yaml.updated_at || null;
       } catch { /* missing */ }
-      result.push({ sessionId, cwd, summary, updatedAt });
+      const isBusy = this.isBusy(sessionId);
+      result.push({ sessionId, cwd, summary, updatedAt, isBusy });
     }
     return result;
   }

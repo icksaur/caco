@@ -35,10 +35,12 @@ type StateCallback = (state: Record<string, unknown>) => void;
 type EventCallback = (event: SessionEvent) => void;
 type HistoryCompleteCallback = () => void;
 type ConnectCallback = () => void;
+type GlobalEventCallback = (event: SessionEvent) => void;
 const stateCallbacks: Set<StateCallback> = new Set();
 const eventCallbacks: Set<EventCallback> = new Set();
 const historyCompleteCallbacks: Set<HistoryCompleteCallback> = new Set();
 const connectCallbacks: Set<ConnectCallback> = new Set();
+const globalEventCallbacks: Set<GlobalEventCallback> = new Set();
 
 const pendingRequests = new Map<string, {
   resolve: (data: unknown) => void;
@@ -183,7 +185,8 @@ function doConnect(myConnectionId: number): void {
 
 /**
  * Handle incoming message from server
- * Filters messages by activeSessionId - only messages for current session are processed
+ * - globalEvent: dispatched to all global handlers (no session filtering)
+ * - event: filtered by active session, then dispatched to session handlers
  */
 function handleMessage(msg: { type: string; id?: string; sessionId?: string; data?: unknown; error?: string }): void {
   // Handle request/response messages (no session filtering)
@@ -199,7 +202,22 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
     return;
   }
   
-  // Filter by active session for broadcast messages
+  // Handle global events (no session filtering - affects all clients)
+  if (msg.type === 'globalEvent') {
+    const msgWithEvent = msg as unknown as { event?: SessionEvent };
+    if (msgWithEvent.event) {
+      for (const cb of globalEventCallbacks) {
+        try {
+          cb(msgWithEvent.event);
+        } catch (err) {
+          console.error('[WS] GlobalEvent callback error:', err);
+        }
+      }
+    }
+    return;
+  }
+  
+  // Filter by active session for session-scoped broadcasts
   const msgSessionId = msg.sessionId;
   const currentSessionId = getActiveSessionId();
   if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
@@ -314,6 +332,16 @@ export function wsGetState(): Promise<Record<string, unknown>> {
 export function onStateUpdate(callback: StateCallback): () => void {
   stateCallbacks.add(callback);
   return () => stateCallbacks.delete(callback);
+}
+
+/**
+ * Subscribe to global events (not filtered by session)
+ * Used for events that affect UI outside of active session (e.g., session list updates)
+ * Returns unsubscribe function
+ */
+export function onGlobalEvent(callback: GlobalEventCallback): () => void {
+  globalEventCallbacks.add(callback);
+  return () => globalEventCallbacks.delete(callback);
 }
 
 /**

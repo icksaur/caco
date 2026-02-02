@@ -61,9 +61,9 @@ export interface SessionEvent {
 }
 
 interface ServerMessage {
-  type: 'stateUpdate' | 'state' | 'event' | 'historyComplete' | 'pong' | 'error';
+  type: 'stateUpdate' | 'state' | 'event' | 'globalEvent' | 'historyComplete' | 'pong' | 'error';
   id?: string;
-  sessionId?: string;  // All broadcasts include sessionId for client filtering
+  sessionId?: string;  // For session-scoped broadcasts (client filters by this)
   data?: unknown;
   event?: SessionEvent;
   error?: string;
@@ -196,6 +196,15 @@ function broadcastToAll(msg: ServerMessage, exclude?: WebSocket): void {
       ws.send(data);
     }
   }
+}
+
+/**
+ * Broadcast a global event to ALL clients (no session filtering)
+ * Used for events that affect the session list UI regardless of active session
+ */
+export function broadcastGlobalEvent(event: SessionEvent): void {
+  const msg: ServerMessage = { type: 'globalEvent', event };
+  broadcastToAll(msg);
 }
 
 /**

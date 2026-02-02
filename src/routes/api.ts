@@ -23,7 +23,7 @@ import { getOutput } from '../storage.js';
 import { setAppletUserState, getAppletUserState, clearAppletUserState } from '../applet-state.js';
 import { listApplets, loadApplet } from '../applet-store.js';
 import { getUsage } from '../usage-state.js';
-import { MODEL_CACHE_TTL_MS, MAX_FILE_SIZE_BYTES, MAX_LEGACY_FILE_SIZE_BYTES } from '../config.js';
+import { MODEL_CACHE_TTL_MS, MAX_FILE_SIZE_BYTES } from '../config.js';
 import { validatePath } from '../path-utils.js';
 import { apiError } from '../api-error.js';
 
@@ -271,35 +271,6 @@ router.get('/applets', async (_req: Request, res: Response) => {
 });
 
 /**
- * GET /api/applets/:slug - Get applet content
- * Returns HTML/JS/CSS for client-side execution
- */
-router.get('/applets/:slug', async (req: Request, res: Response) => {
-  const slug = req.params.slug as string;
-  
-  try {
-    const stored = await loadApplet(slug);
-    
-    if (!stored) {
-      res.status(404).json({ error: `Applet "${slug}" not found` });
-      return;
-    }
-    
-    res.json({
-      slug,
-      title: stored.meta.name,
-      html: stored.html,
-      js: stored.js || null,
-      css: stored.css || null,
-      meta: stored.meta
-    });
-  } catch (error) {
-    console.error(`[API] Failed to load applet "${slug}":`, error);
-    res.status(500).json({ error: 'Failed to load applet' });
-  }
-});
-
-/**
  * POST /api/applets/:slug/load - Load applet content
  * Called by applet browser to switch to a different applet
  * Clears user state since applet is changing
@@ -466,44 +437,6 @@ router.get('/file', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/files/read - Read file content (LEGACY - use GET /api/file instead)
- * Query params:
- *   path: relative path from programCwd
- * Returns: { path, content, size }
- * @deprecated Use GET /api/file instead
- */
-router.get('/files/read', async (req: Request, res: Response) => {
-  const requestedPath = req.query.path as string;
-  
-  if (!requestedPath) {
-    return apiError.badRequest(res, 'path parameter required');
-  }
-  
-  try {
-    const validation = validatePath(programCwd, requestedPath);
-    if (!validation.valid) {
-      return apiError.forbidden(res, validation.error);
-    }
-    
-    const stats = await stat(validation.resolved);
-    
-    if (stats.isDirectory()) {
-      return apiError.badRequest(res, 'Cannot read directory');
-    }
-    
-    if (stats.size > MAX_LEGACY_FILE_SIZE_BYTES) {
-      return apiError.badRequest(res, `File too large (max ${MAX_LEGACY_FILE_SIZE_BYTES / 1024}KB)`);
-    }
-    
-    const content = await readFile(validation.resolved, 'utf-8');
-    res.json({ ok: true, path: validation.relative, content, size: stats.size });
-  } catch (error) {
-    console.error('[API] Failed to read file:', error);
-    return apiError.internal(res, 'Failed to read file');
-  }
-});
-
-/**
  * PUT /api/files/*path - Write file content
  * Path: file path relative to workspace (e.g., PUT /api/files/src/app.ts)
  * Body: raw file content (text/plain)
@@ -532,36 +465,6 @@ router.put('/files/*path', express.text({ type: '*/*', limit: '10mb' }), async (
     // Ensure parent directory exists
     const parentDir = dirname(validation.resolved);
     await mkdir(parentDir, { recursive: true });
-    
-    await writeFile(validation.resolved, content, 'utf-8');
-    res.json({ ok: true, path: validation.relative, size: content.length });
-  } catch (error) {
-    console.error('[API] Failed to write file:', error);
-    return apiError.internal(res, 'Failed to write file');
-  }
-});
-
-/**
- * POST /api/files/write - Write file content (LEGACY - use PUT /api/files/* instead)
- * Body: { path: string, content: string }
- * @deprecated Use PUT /api/files/* instead
- */
-router.post('/files/write', async (req: Request, res: Response) => {
-  const { path: requestedPath, content } = req.body;
-  
-  if (!requestedPath) {
-    return apiError.badRequest(res, 'path parameter required');
-  }
-  
-  if (typeof content !== 'string') {
-    return apiError.badRequest(res, 'content parameter required');
-  }
-  
-  try {
-    const validation = validatePath(programCwd, requestedPath);
-    if (!validation.valid) {
-      return apiError.forbidden(res, validation.error);
-    }
     
     await writeFile(validation.resolved, content, 'utf-8');
     res.json({ ok: true, path: validation.relative, size: content.length });

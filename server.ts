@@ -16,7 +16,7 @@ import { createDisplayTools, type CacoEmbedEvent } from './src/display-tools.js'
 import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools, type SessionIdRef } from './src/agent-tools.js';
 import { storeOutput } from './src/storage.js';
-import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, scheduleRoutes } from './src/routes/index.js';
+import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
@@ -155,6 +155,7 @@ app.use('/api', apiRoutes);
 app.use('/api', sessionMessageRoutes);
 app.use('/api/mcp', mcpRoutes);
 app.use('/api', scheduleRoutes);
+app.use('/api', shellRoutes);
 
 // Server Lifecycle
 

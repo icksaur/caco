@@ -378,6 +378,55 @@ Returns:
 }
 ```
 
+### Shell Execution
+
+Execute allowlisted shell commands for applets and developer tools.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/shell` | POST | Execute shell command |
+
+**POST /api/shell** - Execute command
+
+Body:
+```json
+{
+  "command": "git",
+  "args": ["status", "--porcelain=v2"],
+  "cwd": "/optional/working/directory"
+}
+```
+
+Returns (success):
+```json
+{
+  "stdout": "1 M. N... 100644 src/file.ts\n",
+  "stderr": "",
+  "code": 0
+}
+```
+
+Returns (command error, e.g., not a git repo):
+```json
+{
+  "stdout": "",
+  "stderr": "fatal: not a git repository\n",
+  "code": 128
+}
+```
+
+**Security:**
+- Uses `execFile` with args array (no shell metacharacter interpretation)
+- Working directory must be absolute path and exist
+- Timeout: 60s, max output: 10MB
+
+**Output sanitization:**
+- ANSI escape codes stripped
+- CRLF normalized to LF
+- Carriage returns removed
+
+See [shell-api.md](shell-api.md) for full specification.
+
 ### Debug
 
 | Endpoint | Method | Description |

@@ -11,7 +11,6 @@ import { showAppletPanel, updateTitle } from './view-controller.js';
 import { wsSetState, onStateUpdate, isWsConnected, getActiveSessionId as getWsActiveSession } from './websocket.js';
 import { getActiveSessionId } from './app-state.js';
 
-// Result type for saveTempFile
 interface TempFileResult {
   path: string;
   filename: string;
@@ -24,7 +23,6 @@ export interface AppletContent {
   title?: string;
 }
 
-// Current applet instance (one at a time per spec)
 interface AppletInstance {
   slug: string;
   label: string;
@@ -32,13 +30,8 @@ interface AppletInstance {
   styleElement: HTMLStyleElement | null;
 }
 
-// Single current applet (no stack - switching destroys previous)
 let currentApplet: AppletInstance | null = null;
-
-// Current applet style element (for cleanup) - legacy, migrating to per-instance
 let currentStyleElement: HTMLStyleElement | null = null;
-
-// Pending applet state - accumulated until next message is sent
 let pendingAppletState: Record<string, unknown> | null = null;
 
 /**

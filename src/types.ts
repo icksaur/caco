@@ -15,21 +15,18 @@ export class CwdLockedError extends Error {
   }
 }
 
-// Model configuration
 export interface ModelInfo {
   id: string;
   name: string;
   cost: number;
 }
 
-// User preferences persisted to disk
 export interface UserPreferences {
   lastCwd: string;
   lastModel: string;
   lastSessionId: string | null;
 }
 
-// Session cache entry (persisted)
 export interface SessionCacheEntry {
   cwd: string;
   summary: string | null;
@@ -37,21 +34,18 @@ export interface SessionCacheEntry {
   lastActiveAt?: string;
 }
 
-// Active session tracking (in-memory)
 export interface ActiveSession {
   cwd: string;
   session: CopilotSession;
   client: CopilotClient;
 }
 
-// Output cache entry
 export interface OutputEntry {
   content: string;
   language: string;
   createdAt: number;
 }
 
-// Grouped sessions by cwd for UI
 export interface GroupedSessions {
   [cwd: string]: SessionListItem[];
 }
@@ -64,13 +58,11 @@ export interface SessionListItem {
   lastActiveAt?: string;
 }
 
-// System message configuration
 export interface SystemMessage {
   mode: 'replace' | 'append';
   content: string;
 }
 
-// Session creation config
 export interface SessionConfig {
   model?: string;
   streaming?: boolean;
@@ -79,7 +71,6 @@ export interface SessionConfig {
   excludedTools?: string[];
 }
 
-// Create config - toolFactory is REQUIRED to prevent sessions without tools
 export interface CreateConfig {
   model?: string;
   systemMessage?: SystemMessage;
@@ -87,29 +78,23 @@ export interface CreateConfig {
   excludedTools?: string[];
 }
 
-// Resume config - toolFactory is REQUIRED to prevent sessions resuming without tools
 export interface ResumeConfig {
   toolFactory: ToolFactory;
   excludedTools?: string[];
 }
 
-// Session ID reference - mutable for agent tools
 export interface SessionIdRef {
   id: string;
 }
 
-// Tool factory - creates tools with session cwd and sessionId ref
-// The ref allows updating sessionId after session creation for new sessions
 export type ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => unknown[];
 
-// Session config with tool factory (for init)
 export interface SessionStateConfig {
   systemMessage: SystemMessage;
   toolFactory: ToolFactory;
   excludedTools: string[];
 }
 
-// API response types
 export interface SessionResponse {
   sessionId: string | null;
   cwd: string;
@@ -123,7 +108,6 @@ export interface SessionsListResponse {
   grouped: GroupedSessions;
 }
 
-// Copilot SDK types (minimal definitions for what we use)
 export interface CopilotClient {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -152,7 +136,6 @@ export interface SessionEvent {
   [key: string]: unknown;
 }
 
-// oEmbed types
 export interface OEmbedProvider {
   name: string;
   patterns: RegExp[];

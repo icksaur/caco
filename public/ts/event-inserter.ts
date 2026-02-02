@@ -7,7 +7,6 @@
  * @remarks Unit test all changes - see tests/unit/event-inserter.test.ts
  */
 
-// Window type for markdown rendering (browser only)
 declare global {
   interface Window {
     renderMarkdownElement?: (element: Element) => void;

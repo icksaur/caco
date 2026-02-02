@@ -35,8 +35,6 @@ declare global {
 // Re-export for external callers
 export { setLoadingHistory };
 
-// ElementInserter - Core DOM manipulation
-
 /** 
  * Phase 1: Event Type → Outer Div Class Mapping
  * Maps SDK event.type strings to the 5 chat div classes
@@ -224,14 +222,10 @@ export class ElementInserter {
   }
 }
 
-// Debug logger - set to console.log to enable
 const inserterDebug: (msg: string) => void = console.log;
 
-// Two inserters with their respective maps
 const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>, 'outer');
 const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', undefined, EVENT_KEY_PROPERTY, PRE_COLLAPSED_EVENTS);
-
-// Event Handlers
 
 /**
  * Handle incoming SDK event (history or live)
@@ -289,13 +283,9 @@ function handleEvent(event: SessionEvent): void {
   scrollToBottom();
 }
 
-// WebSocket Registration
-
 function registerWsHandlers(): void {
   onEvent(handleEvent);
 }
-
-// Form Handling
 
 /**
  * Enable/disable form during streaming

@@ -337,8 +337,6 @@ export function detectLanguage(filepath: string): string {
   return langMap[ext] || 'plaintext';
 }
 
-// Activity Storage
-
 export interface ActivityMetadata {
   type: string;  // SDK event type (e.g., 'assistant.intent', 'tool.execution_start')
   text: string;

@@ -9,7 +9,6 @@ import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js
 import { registerSession, unregisterSession } from './storage.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 
-// SDK types (minimal definitions for what we use)
 interface CopilotClientInstance {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -19,7 +18,6 @@ interface CopilotClientInstance {
   listModels(): Promise<SDKModelInfo[]>;
 }
 
-// SDK model info from listModels()
 interface SDKModelInfo {
   id: string;
   name: string;
@@ -65,7 +63,6 @@ interface SessionEvent {
   [key: string]: unknown;
 }
 
-// Internal types
 interface ActiveSession {
   cwd: string;
   session: CopilotSessionInstance;
@@ -645,6 +642,5 @@ class SessionManager {
   }
 }
 
-// Singleton instance
 const sessionManager = new SessionManager();
 export default sessionManager;

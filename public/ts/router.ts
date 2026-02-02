@@ -113,8 +113,6 @@ function handlePopState(): void {
   handleNavigation(url);
 }
 
-// Actions - called by UI event handlers
-
 /**
  * Toggle sessions overlay
  */
@@ -231,8 +229,6 @@ export async function loadApplet(slug: string): Promise<void> {
     throw error;
   }
 }
-
-// Internal helpers
 
 /**
  * Activate a session - clear chat, set state, load history

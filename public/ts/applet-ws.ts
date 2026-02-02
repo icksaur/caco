@@ -14,7 +14,6 @@
  */
 export type MessageSource = 'user' | 'applet' | 'agent';
 
-// Re-export ChatMessage type (matches server)
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -29,24 +28,19 @@ export interface ChatMessage {
   outputs?: string[];
 }
 
-// Activity item for tool calls, intents, errors
 export interface ActivityItem {
   type: string;  // SDK event type (e.g., 'assistant.intent', 'tool.execution_start')
   text: string;
   details?: string;
 }
 
-// Connection state
 let socket: WebSocket | null = null;
-let connectionId = 0;  // Incremented on each new connection
+let connectionId = 0;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 1000;
-
-// Active session - messages for other sessions are filtered out
 let activeSessionId: string | null = null;
 
-// Callbacks
 type StateCallback = (state: Record<string, unknown>) => void;
 type MessageCallback = (msg: ChatMessage) => void;
 type ActivityCallback = (item: ActivityItem) => void;
@@ -58,7 +52,6 @@ const activityCallbacks: Set<ActivityCallback> = new Set();
 const historyCompleteCallbacks: Set<HistoryCompleteCallback> = new Set();
 const connectCallbacks: Set<ConnectCallback> = new Set();
 
-// Pending requests (for request/response pattern)
 const pendingRequests = new Map<string, {
   resolve: (data: unknown) => void;
   reject: (error: Error) => void;

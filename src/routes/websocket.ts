@@ -18,13 +18,8 @@ import { setAppletUserState, getAppletUserState } from '../applet-state.js';
 import sessionManager from '../session-manager.js';
 import { shouldFilter } from '../event-filter.js';
 
-// Global connection pool - all clients
 const allConnections = new Set<WebSocket>();
-
-// Session subscriptions: sessionId → Set of subscribed WebSockets
 const sessionSubscribers = new Map<string, Set<WebSocket>>();
-
-// Reverse lookup: WebSocket → subscribed sessionId (one subscription per client)
 const clientSubscription = new Map<WebSocket, string>();
 
 /**
@@ -33,7 +28,6 @@ const clientSubscription = new Map<WebSocket, string>();
  */
 export type MessageSource = 'user' | 'applet' | 'agent';
 
-// Message types from client
 interface ClientMessage {
   type: 'setState' | 'getState' | 'sendMessage' | 'requestHistory' | 'ping' | 'subscribe';
   id?: string;  // For request/response correlation
@@ -46,7 +40,6 @@ interface ClientMessage {
   appletSlug?: string;
 }
 
-// User message structure (echoed back to client for rendering)
 export interface UserMessage {
   id: string;
   role: 'user';
@@ -57,7 +50,6 @@ export interface UserMessage {
   hasImage: boolean;
 }
 
-// SDK event - passed through as-is
 export interface SessionEvent {
   type: string;
   data?: Record<string, unknown>;

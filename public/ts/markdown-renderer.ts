@@ -20,7 +20,6 @@ declare const hljs: {
   highlightAll(): void;
 } | undefined;
 
-// Event handler attributes to block (XSS protection)
 const FORBIDDEN_ATTRS = [
   // JavaScript event handlers
   'onclick', 'ondblclick', 'onmousedown', 'onmouseup', 'onmouseover',

@@ -365,5 +365,4 @@ class SessionState {
   }
 }
 
-// Singleton instance
 export const sessionState = new SessionState();

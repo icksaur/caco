@@ -12,7 +12,6 @@ import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { SERVER_URL } from './config.js';
 
-// Session ID reference - mutable so it can be set after session creation
 export interface SessionIdRef {
   id: string;
 }

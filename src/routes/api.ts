@@ -26,15 +26,12 @@ import { getUsage } from '../usage-state.js';
 
 const router = Router();
 
-// Temp file directory (~/.caco/tmp)
 const TEMP_DIR = join(homedir(), '.caco', 'tmp');
 
-// Cache models to avoid repeated SDK calls
 let cachedModels: Array<{ id: string; name: string; multiplier: number }> | null = null;
 let modelsCacheTime = 0;
 const MODELS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-// Get available models from SDK
 router.get('/models', async (_req: Request, res: Response) => {
   try {
     // Return cached models if fresh
@@ -74,7 +71,6 @@ router.get('/models', async (_req: Request, res: Response) => {
   }
 });
 
-// Get current usage/quota info
 router.get('/usage', (_req: Request, res: Response) => {
   const usage = getUsage();
   res.json({ usage });
@@ -153,7 +149,6 @@ router.post('/tmpfile', express.json({ limit: '10mb' }), async (req: Request, re
   }
 });
 
-// HTML escape helper
 function escapeHtml(text: string): string {
   const map: Record<string, string> = {
     '&': '&amp;',
@@ -165,18 +160,15 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, m => map[m]);
 }
 
-// Get preferences
 router.get('/preferences', (_req: Request, res: Response) => {
   res.json(sessionState.preferences);
 });
 
-// Update preferences
 router.post('/preferences', async (req: Request, res: Response) => {
   const updated = await sessionState.updatePreferences(req.body);
   res.json(updated);
 });
 
-// Get display output by ID
 router.get('/outputs/:id', (req: Request, res: Response) => {
   const id = req.params.id as string;
   const output = getOutput(id);
@@ -208,10 +200,6 @@ router.get('/outputs/:id', (req: Request, res: Response) => {
   res.send(data);
 });
 
-// History is now streamed via WebSocket on connect
-// See: src/routes/websocket.ts streamHistory()
-
-// Debug: raw message structure
 router.get('/debug/messages', async (_req: Request, res: Response) => {
   try {
     const sessionId = sessionState.sessionIdForHistory;
@@ -235,8 +223,6 @@ router.get('/debug/messages', async (_req: Request, res: Response) => {
   }
 });
 
-// Applet State Endpoints (Phase 2)
-
 /**
  * POST /api/applet/state - Receive state updates from applet JS
  * Client-side applet calls setAppletState({...}) which hits this endpoint
@@ -257,8 +243,6 @@ router.post('/applet/state', (req: Request, res: Response) => {
 router.get('/applet/state', (_req: Request, res: Response) => {
   res.json({ state: getAppletUserState() });
 });
-
-// Applet Browser Endpoints (Phase 3)
 
 const programCwd = process.cwd();
 

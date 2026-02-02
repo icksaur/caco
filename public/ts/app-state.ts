@@ -13,29 +13,23 @@
 import type { ModelInfo } from './types.js';
 import { setActiveSession as setWsActiveSession } from './websocket.js';
 
-// State Interface
-
 export interface AppState {
-  // === Session State ===
+  // === Session State
   activeSessionId: string | null;
   currentCwd: string;
   
-  // === Model State ===
+  // === Model State 
   selectedModel: string;
   availableModels: ModelInfo[];
   
-  // === UI Flags ===
+  // === UI Flags
   isStreaming: boolean;
   loadingHistory: boolean;
   autoScrollEnabled: boolean;
   hasImage: boolean;
 }
 
-// Constants
-
 export const DEFAULT_MODEL = 'claude-sonnet-4';
-
-// State Store (private singleton)
 
 const state: AppState = {
   activeSessionId: null,
@@ -47,8 +41,6 @@ const state: AppState = {
   autoScrollEnabled: true,
   hasImage: false
 };
-
-// State Accessors (read-only)
 
 /** Get a shallow copy of entire state (for debugging) */
 export function getState(): Readonly<AppState> {
@@ -94,8 +86,6 @@ export function isAutoScrollEnabled(): boolean {
 export function hasImage(): boolean {
   return state.hasImage;
 }
-
-// State Mutations
 
 /**
  * Set active session and sync to WebSocket
@@ -171,8 +161,6 @@ export function disableAutoScroll(): void {
 export function setHasImage(hasImage: boolean): void {
   state.hasImage = hasImage;
 }
-
-// Initialization
 
 /**
  * Initialize from server preferences

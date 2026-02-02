@@ -16,13 +16,8 @@ export interface NavigationContext {
   urlParams: Record<string, string>;
 }
 
-// User state pushed from applet JS
 let appletUserState: Record<string, unknown> = {};
-
-// Navigation context from client
 let appletNavigation: NavigationContext = { stack: [], urlParams: {} };
-
-// Reload signal for client
 let pendingReload = false;
 
 /**

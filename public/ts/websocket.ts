@@ -20,23 +20,19 @@ import { showToast } from './toast.js';
  */
 export type MessageSource = 'user' | 'applet' | 'agent';
 
-// SDK event - passed through as-is from server
 export interface SessionEvent {
   type: string;
   data?: Record<string, unknown>;
 }
 
-// Connection state
 let socket: WebSocket | null = null;
 let connectionId = 0;  // Incremented on each new connection
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 1000;
 
-// Active session - messages for other sessions are filtered out
 let activeSessionId: string | null = null;
 
-// Callbacks
 type StateCallback = (state: Record<string, unknown>) => void;
 type EventCallback = (event: SessionEvent) => void;
 type HistoryCompleteCallback = () => void;
@@ -46,7 +42,6 @@ const eventCallbacks: Set<EventCallback> = new Set();
 const historyCompleteCallbacks: Set<HistoryCompleteCallback> = new Set();
 const connectCallbacks: Set<ConnectCallback> = new Set();
 
-// Pending requests (for request/response pattern)
 const pendingRequests = new Map<string, {
   resolve: (data: unknown) => void;
   reject: (error: Error) => void;

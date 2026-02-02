@@ -18,7 +18,6 @@ import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
 import { initRouter, toggleSessions, toggleApplet, newSessionClick } from './router.js';
 
-// Export functions to global scope for onclick handlers in HTML
 declare global {
   interface Window {
     removeImage: typeof removeImage;
@@ -34,7 +33,6 @@ declare global {
   }
 }
 
-// Attach to window for HTML onclick handlers
 window.removeImage = removeImage;
 window.scrollToBottom = scrollToBottom;
 window.toggleSessions = toggleSessions;
@@ -46,7 +44,6 @@ window.stopStreaming = stopStreaming;
 window.toggleApplet = toggleApplet;
 window.hideToast = hideToast;
 
-// Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
   // Initialize view state from DOM
   initViewState();

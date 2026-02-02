@@ -16,8 +16,6 @@ import { sessionState } from '../session-state.js';
 
 const router = Router();
 
-// Get current session info
-// Stateless: accepts ?sessionId to query specific session
 router.get('/session', async (req: Request, res: Response) => {
   const sessionId = (req.query.sessionId as string) || sessionState.activeSessionId;
   
@@ -42,7 +40,6 @@ router.get('/session', async (req: Request, res: Response) => {
   });
 });
 
-// List all sessions grouped by cwd
 router.get('/sessions', (_req: Request, res: Response) => {
   const grouped = sessionManager.listAllGrouped();
   const models = sessionManager.getModels();
@@ -59,8 +56,6 @@ router.get('/sessions', (_req: Request, res: Response) => {
   });
 });
 
-// Create a new session (RESTful replacement for POST /message with newChat: true)
-// Returns sessionId that client uses for subsequent POST /sessions/:id/messages
 router.post('/sessions', async (req: Request, res: Response) => {
   const { cwd, model } = req.body as { cwd?: string; model?: string };
   const clientId = req.headers['x-client-id'] as string | undefined;
@@ -99,8 +94,6 @@ router.post('/sessions', async (req: Request, res: Response) => {
   }
 });
 
-// Switch to a different session
-// Accepts X-Client-ID header for multi-client isolation
 router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const clientId = req.headers['x-client-id'] as string | undefined;
@@ -115,8 +108,6 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
   }
 });
 
-// Delete a session
-// Accepts X-Client-ID header for multi-client isolation
 router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const clientId = req.headers['x-client-id'] as string | undefined;

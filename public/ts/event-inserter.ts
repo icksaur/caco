@@ -43,6 +43,78 @@ function getByPath(obj: Record<string, unknown>, path: string): unknown {
 }
 
 /**
+ * Extract outputId from tool result content.
+ * Handles both JSON-wrapped and plain text [output:xxx] markers.
+ */
+function extractOutputId(resultContent: string): string | null {
+  // Try JSON parse first (tool handler returns JSON with toolTelemetry)
+  try {
+    const parsed = JSON.parse(resultContent);
+    if (parsed.toolTelemetry?.outputId) {
+      return parsed.toolTelemetry.outputId;
+    }
+    // Also check textResultForLlm for marker
+    if (parsed.textResultForLlm) {
+      const match = parsed.textResultForLlm.match(/\[output:([^\]]+)\]/);
+      if (match) return match[1];
+    }
+  } catch {
+    // Not JSON, try regex on plain text
+  }
+  
+  // Fallback: regex on plain text
+  const match = resultContent.match(/\[output:([^\]]+)\]/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Fetch embed output and render into element.
+ * Replaces placeholder content with actual embed iframe.
+ */
+async function fetchAndRenderEmbed(element: HTMLElement, outputId: string): Promise<void> {
+  try {
+    const res = await fetch(`/api/outputs/${outputId}?format=json`);
+    if (!res.ok) {
+      element.textContent = '❌ Failed to load embed';
+      return;
+    }
+    
+    const { data, metadata } = await res.json();
+    
+    // Create embed container (matches CSS .output-embed structure)
+    const container = document.createElement('div');
+    container.className = 'output-embed';
+    if (metadata?.provider) {
+      container.dataset.provider = metadata.provider.toLowerCase();
+    }
+    
+    // Create frame wrapper
+    const frame = document.createElement('div');
+    frame.className = 'embed-frame';
+    
+    // Sanitize and inject HTML (allow iframes for trusted embeds)
+    // Note: DOMPurify is available globally from script tag
+    const purify = (window as unknown as { DOMPurify?: { sanitize: (html: string, options?: { ADD_TAGS?: string[] }) => string } }).DOMPurify;
+    if (purify) {
+      frame.innerHTML = purify.sanitize(data, { ADD_TAGS: ['iframe'] });
+    } else {
+      // Fallback: no sanitization (dev only)
+      frame.innerHTML = data;
+    }
+    
+    container.appendChild(frame);
+    
+    // Replace element content
+    element.textContent = '';
+    element.appendChild(container);
+    
+  } catch (err) {
+    element.textContent = '❌ Embed failed to load';
+    console.error('[embed] Failed to fetch:', err);
+  }
+}
+
+/**
  * Create a simple path-based inserter (replace mode)
  */
 function setPath(p: string): EventInserterFn {
@@ -131,6 +203,21 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     const input = element.dataset.toolInput || '';
     const success = data.success as boolean;
     const result = getByPath(data, 'result.content') as string | undefined;
+    
+    // Special case: embed_media renders an iframe
+    if (name === 'embed_media' && success && result) {
+      const outputId = extractOutputId(result);
+      if (outputId) {
+        // Set placeholder while loading
+        element.textContent = '⏳ Loading embed...';
+        
+        // Async fetch and render (only in browser)
+        if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+          fetchAndRenderEmbed(element as unknown as HTMLElement, outputId);
+        }
+        return;
+      }
+    }
     
     // Build: **name** + blank line + code block with input + output
     // Blank line ensures markdown renders header and code as separate blocks

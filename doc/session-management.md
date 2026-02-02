@@ -326,26 +326,27 @@ This is managed by the **Copilot CLI**, not your application.
 Each session directory contains:
 ```
 ~/.copilot/session-state/{sessionId}/
-├── events.jsonl     # Full event history (session.start, messages, tool calls, etc.)
-├── workspace.yaml   # Session metadata (id, summary_count, created_at, updated_at, summary)
-├── checkpoints/     # Context compaction checkpoints (for infinite sessions)
-├── plan.md          # Agent planning/thinking state
-└── files/           # Session-specific generated files
+├── workspace.yaml   # Session metadata (id, cwd, summary, timestamps)
+├── checkpoints/     # Context compaction checkpoints
+│   └── index.md     # Compacted conversation summary
+└── files/           # Session-specific generated files (usually empty)
 ```
+
+**Note**: Older SDK versions stored events in `events.jsonl` and cwd in the session.start event. Current versions store cwd directly in `workspace.yaml` and may not have `events.jsonl`.
 
 #### Subdirectory Purposes
 
-| Directory | Purpose |
-|-----------|---------|
+| Path | Purpose |
+|------|---------|
 | `checkpoints/` | Stores context compaction checkpoints when infinite sessions are enabled. The SDK automatically compacts conversation history to stay within context limits, saving the compacted state here. |
-| `plan.md` | Contains the agent's current task plan or thinking state. Created when the agent formulates multi-step plans for complex tasks. |
+| `checkpoints/index.md` | Markdown summary of compacted conversation history. |
 | `files/` | Reserved for session-specific files that may be generated during conversation. This could include downloaded content, generated artifacts, or temporary files the agent creates. In typical usage, this directory remains empty—it's infrastructure for features that may create session-scoped files. |
 
 **Note**: These directories are created automatically and managed by the SDK. Your application should treat them as read-only.
 
-#### events.jsonl Format
+#### events.jsonl Format (Legacy)
 
-The `events.jsonl` file is a newline-delimited JSON log of all session events:
+Older sessions may have an `events.jsonl` file with a newline-delimited JSON log of all session events:
 
 ```json
 {"type":"session.start","data":{"sessionId":"abc-123","context":{"cwd":"/path/to/project","gitRoot":"/path/to/project","branch":"main"}}}
@@ -365,13 +366,20 @@ The `events.jsonl` file is a newline-delimited JSON log of all session events:
 
 ```yaml
 id: abc-123-def-456
+cwd: /home/user/project
 summary_count: 0
 created_at: 2026-01-24T05:15:54.341Z
 updated_at: 2026-01-24T05:16:14.639Z
 summary: User asked about session management.
 ```
 
-Note: The `summary` field here is auto-generated from conversation content, not manually set.
+**Key fields:**
+- `id` - The session identifier
+- `cwd` - **Original working directory** (important for safety!)
+- `summary` - Auto-generated from conversation content, not manually set
+- `summary_count` - Number of compaction cycles performed
+
+**Note**: The `cwd` field was added in newer SDK versions. Older sessions stored cwd only in `events.jsonl`.
 
 ### When Sessions Are Written
 

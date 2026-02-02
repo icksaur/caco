@@ -45,31 +45,31 @@ block-beta
   D["[input]"]
 ```
 
-## Current HTML Assessment
+## Current HTML Structure
 
 | Element | Status | Notes |
 |---------|--------|-------|
-| `#menuBtn` (☰) | ✅ Ready | Upper-left sessions toggle |
-| `#appletBtn` (⬡) | ✅ Ready | Upper-right applet toggle |
-| `#sessionView` | ✅ Ready | Full-screen session list |
-| `#newChat` | ✅ Ready | Model selector, nested in chatView |
-| `#chat` | ✅ Ready | Message container |
-| `#appletView` | ⚠️ Needs work | Has breadcrumbs to remove |
-| `<main>` | ❌ Needs rework | Views stacked, not side-by-side |
-| CSS | ❌ Needs rework | No split layout for desktop |
+| `#menuBtn` (☰) | ✅ Done | Upper-left sessions toggle |
+| `#appletBtn` (⬡) | ✅ Done | Upper-right applet toggle |
+| `#sessionView` | ✅ Done | Full-screen session overlay |
+| `#newChat` | ✅ Done | Model selector, nested in `#chatView` |
+| `#chat` | ✅ Done | Message container |
+| `#chatPanel` | ✅ Done | Left panel containing chat scroll + footer |
+| `#appletPanel` | ✅ Done | Right panel for applet, toggles via `.hidden` |
+| `#appletView` | ✅ Done | Breadcrumbs removed, clean container |
+| `.work-area` | ✅ Done | Flex container for split layout |
+| CSS | ✅ Done | Media queries for mobile/desktop split |
 
-**Key changes needed:**
-1. Rework `<main>` to have chat/applet side-by-side on desktop
-2. Remove `.applet-breadcrumbs` from appletView
-3. CSS media queries for responsive split
-4. Remove all existing Navigation API handlers
-5. Consolidate into router.ts
+**Current structure:**
+- `<main>` → `.work-area` → `#chatPanel` + `#appletPanel`
+- Navigation handled by `router.ts` (Navigation API)
+- View state managed by `view-controller.ts`
 
 ## State Model
 
 ```typescript
 interface UIState {
-  mainPanel: 'sessions' | 'newChat' | 'chat';
+  mainPanel: 'sessions' | 'newChat' | 'chatting';  // ViewState from view-controller.ts
   appletSlug: string | null;      // null = no applet loaded
   appletVisible: boolean;         // mobile: which panel has focus
 }
@@ -188,13 +188,16 @@ No breadcrumbs. No stack. Just current state.
 
 ---
 
-## Files (Target)
+## Files (Current)
 
 | File | Purpose |
 |------|---------|
-| `public/ts/router.ts` | **Single owner** of URL + view state |
+| `public/ts/router.ts` | **Single owner** of URL + Navigation API |
+| `public/ts/view-controller.ts` | Main panel view state (`ViewState`) |
+| `public/ts/app-state.ts` | Session/model/UI flag state (non-view) |
+| `public/ts/applet-runtime.ts` | Applet rendering (no navigation logic) |
 
-Consolidate view-controller.ts + app-state.ts URL logic + applet-runtime.ts navigation into one module.
+Router imports from the others, doesn't replace them.
 
 ---
 

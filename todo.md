@@ -4,7 +4,15 @@
 **after making changes do not commit, review code-quality.md and review the changes for quality issues**
 **after making changes do not commit until the user tests**
 
-Review all MCP tools in #api.md and ensure all are covered.  Create a review of agent ability to introspect the environment through tools.  We may want to have a caco_howto tool that tells to look at API.md to discover all HTTP APIs, or add http_api_docs tool?
+
+Suggest a design to allow Caco agents to discover and use applet functionality to do useful things without LLM round-trip.
+open applet with query to relevant directory, image, text, diff, repo.  Agent can respond with markdown URLs for most useful functionality.
+
+Markdown render user.message.
+
+Debounced rendering for assistant.delta_message for incremental markdown.
+
+Review vision.md.  Create doodle applet with button to send sketch to prompt using image paste UI and code.  Ensure caco agents can read doodle image data.  See applet.md for considerations to the communication method.
 
 Do we have too many internal tools?  Do the tool descriptions clog context for weaker models?
 

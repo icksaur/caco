@@ -14,7 +14,7 @@ import { Router, Request, Response } from 'express';
 import express from 'express';
 import { CopilotClient } from '@github/copilot-sdk';
 import { readdir, readFile, stat, writeFile, mkdir } from 'fs/promises';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import sessionManager from '../session-manager.js';
@@ -357,8 +357,11 @@ router.get('/files', async (req: Request, res: Response) => {
 /**
  * GET /api/file - Serve file content with proper Content-Type
  * Query params:
- *   path: relative path from programCwd
+ *   path: absolute path or relative path from cwd
  * Returns: raw file content with appropriate Content-Type header
+ * 
+ * Note: This is personal software - allows any filesystem path.
+ * The agent already has full filesystem access via Copilot tools.
  */
 router.get('/file', async (req: Request, res: Response) => {
   const requestedPath = req.query.path as string;
@@ -368,12 +371,12 @@ router.get('/file', async (req: Request, res: Response) => {
   }
   
   try {
-    const validation = validatePath(programCwd, requestedPath);
-    if (!validation.valid) {
-      return apiError.forbidden(res, validation.error);
-    }
+    // Allow absolute paths directly, resolve relative paths from cwd
+    const resolvedPath = requestedPath.startsWith('/') 
+      ? requestedPath 
+      : resolve(programCwd, requestedPath);
     
-    const stats = await stat(validation.resolved);
+    const stats = await stat(resolvedPath);
     
     if (stats.isDirectory()) {
       return apiError.badRequest(res, 'Cannot serve directory');
@@ -385,7 +388,7 @@ router.get('/file', async (req: Request, res: Response) => {
     }
     
     // Determine content type from extension
-    const ext = validation.resolved.split('.').pop()?.toLowerCase() || '';
+    const ext = resolvedPath.split('.').pop()?.toLowerCase() || '';
     const mimeTypes: Record<string, string> = {
       // Images
       jpg: 'image/jpeg',
@@ -424,7 +427,7 @@ router.get('/file', async (req: Request, res: Response) => {
     const contentType = mimeTypes[ext] || 'application/octet-stream';
     const isText = contentType.startsWith('text/') || contentType === 'application/json';
     
-    const fileData = await readFile(validation.resolved);
+    const fileData = await readFile(resolvedPath);
     res.setHeader('Content-Type', contentType + (isText ? '; charset=utf-8' : ''));
     res.setHeader('Content-Length', stats.size);
     res.send(fileData);

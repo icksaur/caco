@@ -2,19 +2,6 @@
  * Shared types for Caco
  */
 
-// Custom error for when a cwd is locked by another session
-export class CwdLockedError extends Error {
-  public readonly sessionId: string;
-  public readonly cwd: string;
-  
-  constructor(cwd: string, sessionId: string) {
-    super(`Directory ${cwd} is locked by session ${sessionId}`);
-    this.name = 'CwdLockedError';
-    this.cwd = cwd;
-    this.sessionId = sessionId;
-  }
-}
-
 export interface ModelInfo {
   id: string;
   name: string;

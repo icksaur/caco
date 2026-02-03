@@ -72,10 +72,10 @@ describe('API Error Utilities', () => {
 
     it('conflict sends 409 with custom code', () => {
       const res = createMockResponse();
-      apiError.conflict(res, 'Resource locked', 'CWD_LOCKED');
+      apiError.conflict(res, 'Session busy', 'SESSION_BUSY');
       expect(res.status).toHaveBeenCalledWith(409);
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        code: 'CWD_LOCKED'
+        code: 'SESSION_BUSY'
       }));
     });
 

@@ -82,14 +82,6 @@ router.post('/sessions', async (req: Request, res: Response) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    // Return 409 Conflict for locked directory
-    if (error instanceof Error && error.name === 'CwdLockedError') {
-      return res.status(409).json({ 
-        error: message,
-        code: 'CWD_LOCKED',
-        sessionId: (error as { sessionId?: string }).sessionId
-      });
-    }
     res.status(500).json({ error: message });
   }
 });

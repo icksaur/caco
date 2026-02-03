@@ -3,7 +3,9 @@
 **when working with this doc re-read it after doing compaction/summary and after significant changes**
 **after making changes do not commit, review code-quality.md and review the changes for quality issues**
 
-Remove CWD lock.  Copilot-CLI allows partying on same CWD.  Caco can too.
+Add query parameter support to file-browser applet.  See image-viewer for example.
+
+Add syntax highlighting to text-editor applet.
 
 # every so often
 

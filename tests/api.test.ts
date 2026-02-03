@@ -97,20 +97,13 @@ describe('API Routes', () => {
         body: JSON.stringify({ cwd: process.cwd(), model: 'claude-sonnet' })
       });
       
-      // Either creates new session (200) or returns conflict for existing (409)
-      assert.ok([200, 409].includes(res.status), `Expected 200 or 409, got ${res.status}`);
+      // Should always create a new session (no CWD locking anymore)
+      assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
       const data = await res.json();
       
-      if (res.status === 200) {
-        assert.ok(data.sessionId, 'should return sessionId');
-        assert.ok(data.cwd, 'should return cwd');
-        createdSessionId = data.sessionId;
-      } else {
-        // 409 returns existing sessionId in error response
-        assert.ok(data.sessionId, 'should return existing sessionId');
-        assert.ok(data.error.includes('locked'), 'should mention CWD locked');
-        createdSessionId = data.sessionId;
-      }
+      assert.ok(data.sessionId, 'should return sessionId');
+      assert.ok(data.cwd, 'should return cwd');
+      createdSessionId = data.sessionId;
     });
 
     test('POST /sessions/:id/messages - sends message to session', async () => {

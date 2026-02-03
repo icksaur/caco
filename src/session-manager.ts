@@ -7,7 +7,7 @@ import type { SessionConfig, CreateConfig, ResumeConfig, SystemMessage } from '.
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
 import { registerSession, unregisterSession } from './storage.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
-import { cwdLockManager } from './cwd-lock-manager.js';
+import { busyTracker } from './busy-tracker.js';
 
 interface CopilotClientInstance {
   start(): Promise<void>;
@@ -180,7 +180,6 @@ class SessionManager {
   /**
    * Create a new session for the given cwd
    * @param config - Required config with toolFactory (prevents sessions without tools)
-   * @throws CwdLockedError if cwd is already locked by an active session
    */
   async create(cwd: string, config: CreateConfig): Promise<string> {
     // Model is REQUIRED - fail loudly if not provided
@@ -211,8 +210,7 @@ class SessionManager {
     // Update the ref so tool handlers can access the real session ID
     sessionRef.id = session.sessionId;
     
-    // Acquire lock and track
-    cwdLockManager.acquire(cwd, session.sessionId);
+    // Track active session
     this.activeSessions.set(session.sessionId, { cwd, session, client });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
     
@@ -226,7 +224,6 @@ class SessionManager {
   /**
    * Resume an existing session
    * @param config - Required config with toolFactory (prevents resuming without tools)
-   * @throws Error if session's cwd is already locked by another session
    * @throws Error if session doesn't exist
    */
   async resume(sessionId: string, config: ResumeConfig): Promise<string> {
@@ -263,8 +260,7 @@ class SessionManager {
       excludedTools: config.excludedTools
     });
     
-    // Acquire lock and track
-    cwdLockManager.acquire(cwd, sessionId);
+    // Track active session
     this.activeSessions.set(sessionId, { cwd, session, client });
     
     // Register with storage layer for output persistence
@@ -300,8 +296,8 @@ class SessionManager {
       console.warn(`Warning: client.stop() failed: ${message}`);
     }
     
-    // Release lock and untrack
-    cwdLockManager.release(sessionId);
+    // Clear busy state and untrack
+    busyTracker.markIdle(sessionId);
     this.activeSessions.delete(sessionId);
     
     // Unregister from storage layer
@@ -487,13 +483,6 @@ class SessionManager {
   }
 
   /**
-   * Get active sessionId for a cwd (or null)
-   */
-  getActive(cwd: string): string | null {
-    return cwdLockManager.getHolder(cwd);
-  }
-
-  /**
    * Get cwd for a session
    */
   getSessionCwd(sessionId: string): string | null {
@@ -511,21 +500,21 @@ class SessionManager {
    * Check if a session is currently processing a message
    */
   isBusy(sessionId: string): boolean {
-    return cwdLockManager.isBusy(sessionId);
+    return busyTracker.isBusy(sessionId);
   }
 
   /**
    * Mark a session as busy (processing a message)
    */
   markBusy(sessionId: string): void {
-    cwdLockManager.markBusy(sessionId);
+    busyTracker.markBusy(sessionId);
   }
 
   /**
    * Mark a session as idle (done processing)
    */
   markIdle(sessionId: string): void {
-    cwdLockManager.markIdle(sessionId);
+    busyTracker.markIdle(sessionId);
   }
 
   /**

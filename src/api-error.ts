@@ -16,7 +16,6 @@ export type ApiErrorCode =
   | 'NOT_FOUND'
   | 'FORBIDDEN'
   | 'CONFLICT'
-  | 'CWD_LOCKED'
   | 'SESSION_BUSY'
   | 'SESSION_EXPIRED'
   | 'VALIDATION_ERROR'

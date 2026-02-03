@@ -170,9 +170,6 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Session creation failed' }));
-        if (res.status === 409 && error.code === 'CWD_LOCKED') {
-          throw new Error(error.error || 'Directory is locked by another session');
-        }
         throw new Error(error.error || `HTTP ${res.status}`);
       }
       

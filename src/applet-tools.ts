@@ -175,6 +175,14 @@ Returns: \`{ stdout, stderr, code }\` - exit code 0 = success
 
 **URL Parameters:**
 
+\`onUrlParamsChange(callback)\` - React to URL param changes (RECOMMENDED)
+\`\`\`javascript
+// Handles initial load AND navigation (back/forward, chat links)
+appletAPI.onUrlParamsChange(function(params) {
+  loadContent(params.path || '');
+});
+\`\`\`
+
 \`getAppletUrlParams()\` - Get URL query params (excluding 'applet')
 \`\`\`javascript
 // URL: /?applet=my-applet&file=/path/to/file&mode=edit

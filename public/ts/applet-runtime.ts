@@ -57,6 +57,7 @@ interface AppletAPI {
   getAppletSlug: typeof getAppletSlug;
   updateAppletUrlParam: typeof updateAppletUrlParam;
   navigateAppletUrlParam: typeof navigateAppletUrlParam;
+  onUrlParamsChange: typeof onUrlParamsChange;
   onStateUpdate: typeof onStateUpdate;
   getSessionId: typeof getActiveSessionId;
   sendAgentMessage: typeof sendAgentMessage;
@@ -87,6 +88,7 @@ export function initAppletRuntime(): void {
     getAppletSlug,
     updateAppletUrlParam,
     navigateAppletUrlParam,
+    onUrlParamsChange,
     onStateUpdate,
     getSessionId: getActiveSessionId,
     sendAgentMessage,
@@ -146,6 +148,27 @@ export function navigateAppletUrlParam(key: string, value: string): void {
     url.searchParams.delete(key);
   }
   history.pushState(null, '', url.toString());
+}
+
+/**
+ * Register callback for URL param changes (including initial load)
+ * 
+ * This is the recommended way to handle URL params in applets.
+ * Handles both initial load and navigation (back/forward, param changes).
+ * 
+ * @example
+ * window.appletAPI.onUrlParamsChange(function(params) {
+ *   loadImage(params.path || '');
+ * });
+ */
+export function onUrlParamsChange(callback: (params: Record<string, string>) => void): void {
+  // Call immediately with current params
+  callback(getAppletUrlParams());
+  
+  // Listen for future changes (popstate from browser or router)
+  window.addEventListener('popstate', () => {
+    callback(getAppletUrlParams());
+  });
 }
 
 /**

@@ -112,6 +112,9 @@ async function handleNavigation(url: URL): Promise<void> {
   // Handle applet param
   if (appletSlug && appletSlug !== getActiveAppletSlug()) {
     await loadApplet(appletSlug);
+  } else if (appletSlug && appletSlug === getActiveAppletSlug()) {
+    // Same applet, but params may have changed - notify applet via popstate
+    window.dispatchEvent(new PopStateEvent('popstate'));
   } else if (!appletSlug && isAppletPanelVisible()) {
     // URL has no applet param - hide panel (but preserve content)
     hideAppletPanel();

@@ -604,6 +604,19 @@ const slug = getAppletSlug();
 // Returns: string | null ('calculator' if URL is /?applet=calculator)
 ```
 
+#### onUrlParamsChange(callback)
+
+Register callback for URL param changes. **Recommended** for applets that use URL params.
+
+Handles both initial load and navigation (back/forward, chat links to same applet with different params).
+
+```javascript
+// Single handler for initial load + all param changes
+window.appletAPI.onUrlParamsChange(function(params) {
+  loadContent(params.path || '');
+});
+```
+
 #### getAppletUrlParams()
 
 Get URL query params (excluding 'applet' slug).

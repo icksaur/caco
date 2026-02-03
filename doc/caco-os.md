@@ -148,7 +148,7 @@ loadApplet(slug)
 
 URL is for **bookmarking**, not state destruction.
 
-**Format:** `?session=abc&applet=browser`
+**Format:** `?session=abc&applet=browser&path=subdir`
 
 **Rules:**
 1. `?session=X` → show chat view, if not current session Id, set Id, clear, request history
@@ -159,6 +159,16 @@ URL is for **bookmarking**, not state destruction.
 6. Applet DOM (with or without loaded Applet) persists regardless of URL
 
 **One applet at a time.** Switching to different applet destroys previous.
+
+### Applet URL Params
+
+Applets can use additional query params (e.g., `?path=`) for their own state.
+
+**Two update modes:**
+- `updateAppletUrlParam(key, value)` - replaceState, no history entry (for state sync)
+- `navigateAppletUrlParam(key, value)` - pushState, creates history entry (for user navigation)
+
+**Rule:** User-initiated navigation (clicking folders, links) should use `navigateAppletUrlParam` so back/forward buttons work. Applets must listen to `popstate` events to handle navigation.
 
 ---
 

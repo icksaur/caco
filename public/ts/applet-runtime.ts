@@ -56,6 +56,7 @@ interface AppletAPI {
   getAppletUrlParams: typeof getAppletUrlParams;
   getAppletSlug: typeof getAppletSlug;
   updateAppletUrlParam: typeof updateAppletUrlParam;
+  navigateAppletUrlParam: typeof navigateAppletUrlParam;
   onStateUpdate: typeof onStateUpdate;
   getSessionId: typeof getActiveSessionId;
   sendAgentMessage: typeof sendAgentMessage;
@@ -85,6 +86,7 @@ export function initAppletRuntime(): void {
     getAppletUrlParams,
     getAppletSlug,
     updateAppletUrlParam,
+    navigateAppletUrlParam,
     onStateUpdate,
     getSessionId: getActiveSessionId,
     sendAgentMessage,
@@ -130,6 +132,20 @@ export function updateAppletUrlParam(key: string, value: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set(key, value);
   history.replaceState(history.state, '', url.toString());
+}
+
+/**
+ * Navigate to new applet URL params (creates history entry for back button)
+ * Use this for user-initiated navigation within an applet
+ */
+export function navigateAppletUrlParam(key: string, value: string): void {
+  const url = new URL(window.location.href);
+  if (value) {
+    url.searchParams.set(key, value);
+  } else {
+    url.searchParams.delete(key);
+  }
+  history.pushState(null, '', url.toString());
 }
 
 /**

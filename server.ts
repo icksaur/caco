@@ -21,6 +21,7 @@ import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { getQueue } from './src/caco-event-queue.js';
+import { getAppletSlugsForPrompt } from './src/applet-store.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
 import { PORT } from './src/config.js';
 
@@ -61,10 +62,15 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
   return [...displayTools, ...appletTools, ...agentTools];
 };
 
-// System message for sessions
-const SYSTEM_MESSAGE: SystemMessage = {
-  mode: 'replace',
-  content: `You are an AI assistant in a browser-based chat interface powered by the Copilot SDK.
+// System message for sessions - built at startup with applet list
+let SYSTEM_MESSAGE: SystemMessage;
+
+async function buildSystemMessage(): Promise<SystemMessage> {
+  const appletPrompt = await getAppletSlugsForPrompt();
+  
+  return {
+    mode: 'replace',
+    content: `You are an AI assistant in a browser-based chat interface powered by the Copilot SDK.
 
 ## Environment
 - **Runtime**: Web browser UI connected to Copilot SDK (Node.js backend)
@@ -78,7 +84,7 @@ const SYSTEM_MESSAGE: SystemMessage = {
 - **Terminal**: Execute commands in any directory  
 - **Images**: View pasted images, display image files
 - **Media embeds**: Embed YouTube, SoundCloud, Vimeo, Spotify content inline
-- **Applets**: Create custom interactive UI in the applet panel
+- **Applets**: Interactive UI panels the user can open via markdown links
 
 ## Display Tools
 You have a tool that displays content directly to the user:
@@ -86,12 +92,10 @@ You have a tool that displays content directly to the user:
 
 Use embed_media when users want to watch or listen to media inline.
 
-## Applet Tool
-You can create custom interactive interfaces using:
-- \`applet_howto\` - Access applet development instructions
-
-Use this when users ask for interactive tools, editors, viewers, forms, or dashboards.
-The applet runs in a dedicated panel with full JavaScript capabilities.
+## Applets
+${appletPrompt || 'No applets installed. Use applet_howto to create one.'}
+Provide clickable markdown links: \`[View status](/?applet=git-status&path=/repo)\`
+Use \`applet_howto\` tool for creating new applets.
 
 ## Agent-to-Agent Tools
 You can communicate with other agent sessions:
@@ -109,7 +113,8 @@ Include callback instructions so other agents can report back when finished.
 - Be concise unless detail is requested
 - When asked to read or show files, just do it - don't ask for confirmation
 - When users share media URLs, embed them directly`
-};
+  };
+}
 
 // Middleware
 
@@ -162,6 +167,10 @@ app.use('/api', shellRoutes);
 async function start(): Promise<void> {
   // Load cached usage from disk
   loadUsageCache();
+  
+  // Build system message with applet discovery
+  SYSTEM_MESSAGE = await buildSystemMessage();
+  console.log('✓ System message built with applet discovery');
   
   // Initialize session state
   await sessionState.init({

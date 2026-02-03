@@ -251,6 +251,7 @@ const programCwd = process.cwd();
 /**
  * GET /api/applets - List all saved applets
  * Used by applet browser to show available applets
+ * Returns params schema for constructing applet URLs
  */
 router.get('/applets', async (_req: Request, res: Response) => {
   try {
@@ -260,6 +261,7 @@ router.get('/applets', async (_req: Request, res: Response) => {
         slug: a.slug,
         name: a.name,
         description: a.description || null,
+        params: a.params || {},
         updatedAt: a.updatedAt,
         paths: a.paths
       }))

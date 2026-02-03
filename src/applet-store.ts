@@ -26,6 +26,7 @@ export interface AppletMeta {
   slug: string;
   name: string;
   description?: string;
+  params?: Record<string, { required?: boolean; description?: string }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -242,5 +243,22 @@ export async function appletExists(
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Get applet slugs for system prompt injection
+ * Returns a minimal summary string suitable for system prompt
+ */
+export async function getAppletSlugsForPrompt(): Promise<string> {
+  try {
+    const applets = await listApplets();
+    if (applets.length === 0) {
+      return '';
+    }
+    const slugs = applets.map(a => a.slug).join(', ');
+    return `Available applets: ${slugs}. Use list_applets tool for URL params and details.`;
+  } catch {
+    return '';
   }
 }

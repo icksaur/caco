@@ -194,16 +194,14 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   },
   
   'tool.execution_complete': (element, data) => {
-    // Read stored values
     const name = element.dataset.toolName || 'tool';
     
-    // Special case: report_intent keeps its intent display (no change on complete)
+    // report_intent keeps its intent display
     if (name === 'report_intent') return;
     
-    // Special case: embed_media tool completion is handled by caco.embed event
-    // The tool activity shows minimal info; actual embed renders in separate div
+    // embed_media completion is handled by caco.embed event
     if (name === 'embed_media') {
-      element.textContent = '**embed_media**\n\n```\nEmbed rendered below\n```';
+      element.textContent = '**embed_media**\n```\nEmbed rendered below\n```';
       if (typeof window !== 'undefined' && window.renderMarkdownElement) {
         window.renderMarkdownElement(element as unknown as Element);
       }
@@ -212,23 +210,15 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     
     const input = element.dataset.toolInput || '';
     const success = data.success as boolean;
-    const result = getByPath(data, 'result.content') as string | undefined;
+    const result = (getByPath(data, 'result.content') as string | undefined)?.trim() || '';
+    const error = (data.error as string | undefined)?.trim() || '';
+    const output = success ? result : error;
     
-    // Build: **name** + blank line + code block with input + output
-    // Blank line ensures markdown renders header and code as separate blocks
-    // This enables two-layer CSS collapse (show only header when collapsed)
-    let content = `**${name}**\n\n\`\`\`${name}\n`;
-    if (input) content += `${input}\n`;
-    if (success && result) {
-      content += result;
-    } else if (!success) {
-      const error = data.error as string | undefined;
-      if (error) content += error;
-    }
-    content += '\n```';
+    // Build: *name* + code block with input and output
+    const parts = [input, output].filter(Boolean);
+    const content = `*${name}*\n\`\`\`${name}\n${parts.join('\n')}\n\`\`\``;
     element.textContent = content;
     
-    // Render markdown in browser (no-op in tests)
     if (typeof window !== 'undefined' && window.renderMarkdownElement) {
       window.renderMarkdownElement(element as unknown as Element);
     }

@@ -23,7 +23,7 @@
   --color-accent: #007acc;
   --color-accent-hover: #005a9e;
   --color-accent-active: #004578;
-  --color-success: #4caf50;
+  --color-success: #285b2a;
   --color-success-bg: #1f3d23;
   --color-success-hover: #2a6b38;
   --color-success-bright: #4caf50;
@@ -46,9 +46,9 @@
   /* Spacing */
   --space-xs: 0.25rem;
   --space-sm: 0.5rem;
-  --space-md: 0.75rem;
-  --space-lg: 1rem;
-  --space-xl: 2rem;
+  --space-md: 0.5rem;
+  --space-lg: 0.75rem;
+  --space-xl: 1.5rem;
 
   /* Radii */
   --radius-sm: 3px;
@@ -648,7 +648,7 @@ main {
 
 .assistant-message {
   background: var(--color-assistant-bg);
-  padding: var(--space-lg);
+  padding: var(--space-md);
 }
 
 .agent-message {
@@ -663,7 +663,18 @@ main {
 
 .assistant-activity {
   background: var(--color-activity-bg);
-  padding: var(--space-lg);
+  padding: var(--space-sm);
+}
+
+/* Compact tool output - reduce padding/margins from markdown defaults */
+.assistant-activity .markdown-content p {
+  margin: 0;
+}
+
+/* Empty tool output (no visible content) - collapse completely */
+.assistant-activity .markdown-content:empty,
+.assistant-activity .markdown-content:not(:has(*)) {
+  display: none;
 }
 
 /* Inner activity items (tool calls, reasoning) are individually collapsible
@@ -724,6 +735,17 @@ main {
   border-radius: var(--radius-md);
   overflow-x: auto;
   margin: var(--space-sm) 0;
+}
+
+/* Compact tool output inside activity - override defaults above */
+.assistant-activity .markdown-content pre {
+  margin: 0;
+  padding: var(--space-sm);
+}
+
+.assistant-activity .markdown-content pre code {
+  padding: 0;
+  margin: 0;
 }
 
 .markdown-content pre code {

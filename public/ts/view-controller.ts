@@ -11,7 +11,7 @@
 
 import { scrollToBottom } from './ui-utils.js';
 import { clearActiveSession, getCurrentCwd } from './app-state.js';
-import { getActiveAppletLabel } from './applet-runtime.js';
+import { getActiveAppletLabel, getActiveAppletSlug } from './applet-runtime.js';
 import { getServerHostname } from './hostname-hash.js';
 
 /** Valid main panel states */
@@ -96,6 +96,8 @@ export function setViewState(state: ViewState): void {
     case 'sessions':
       els.sessionView?.classList.add('active');
       els.menuBtn?.classList.add('active');
+      // Hide applet button when sessions overlay is up
+      els.appletBtn?.classList.add('hidden');
       break;
       
     case 'newChat':
@@ -103,6 +105,8 @@ export function setViewState(state: ViewState): void {
       els.footer?.classList.remove('hidden');
       // Clear session so messages don't go to old session
       clearActiveSession();
+      // Restore applet button if applet is loaded
+      if (getActiveAppletSlug()) els.appletBtn?.classList.remove('hidden');
       break;
       
     case 'chatting':
@@ -110,6 +114,8 @@ export function setViewState(state: ViewState): void {
       els.footer?.classList.remove('hidden');
       // Scroll to bottom after view is painted
       requestAnimationFrame(() => scrollToBottom());
+      // Restore applet button if applet is loaded
+      if (getActiveAppletSlug()) els.appletBtn?.classList.remove('hidden');
       break;
   }
   

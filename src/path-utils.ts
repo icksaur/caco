@@ -5,7 +5,7 @@
  * Prevents path traversal attacks and escaping allowed directories.
  */
 
-import { resolve, relative, normalize } from 'path';
+import { resolve, relative, normalize, sep } from 'path';
 
 /**
  * Result of path validation
@@ -59,7 +59,7 @@ export function validatePath(base: string, requested: string): PathValidationRes
   // Ensure the resolved path truly starts with base
   // (handles edge cases like base=/tmp matching /tmpfoo)
   const resolvedBase = resolve(base);
-  if (!normalized.startsWith(resolvedBase + '/') && normalized !== resolvedBase) {
+  if (!normalized.startsWith(resolvedBase + sep) && normalized !== resolvedBase) {
     return { valid: false, error: 'Path escapes allowed directory' };
   }
   

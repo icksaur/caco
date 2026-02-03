@@ -4,11 +4,13 @@
 **after making changes do not commit, review code-quality.md and review the changes for quality issues**
 **after making changes do not commit until the user tests**
 
-Provide easy access to applet browser.  One idea - always show applet button (we hide it now if no applets).  Click and hold for one second or long press on touch can navigate to applet-browser.
-Would require some changes in view-controller.ts and perhaps app-state.ts.  Investigate if this is straightforward.
-Reqirements:
-easy access to applet-browser on desktop and mobile
-maintain iOS/mobile screen real estate (avoid more buttons)
+Review applet-tools.md and the applet_howto tool text.  Are we covering all APIs?  Shell API is not covered.  Check API.md and consolidate.
+
+Review all MCP tools in #api.md and ensure all are covered.  Create a review of agent ability to introspect the environment through tools.  We may want to have a caco_howto tool that tells to look at API.md to discover all HTTP APIs, or add http_api_docs tool?
+
+Do we have too many internal tools?  Do the tool descriptions clog context for weaker models?
+
+eventually want to combine schedule and session-list.  Currently jobs applet is schedule UI.  User needs to use it more.
 
 # every so often
 

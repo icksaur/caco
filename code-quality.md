@@ -51,5 +51,9 @@ consistent naming
 
 # improving codebases
 
+Ask these questions before adding a feature:
+Can we get 90% of the requirement with 10% of the code?
+Should we refactor before adding behavior to ensure correctness?
+
 Ask these questions after fixing a bug:
 What was the **code quality** issue or issues that allowed this bug in the first place?

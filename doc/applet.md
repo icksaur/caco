@@ -4,7 +4,7 @@
 
 ## Goal
 
-The agent can invoke one or more MCP tools to set custom DOM content inside the applet view, creating dynamic, interactive interfaces for specific tasks.
+The agent can invoke one or more MCP tools to set custom DOM content inside the applet view, creating dynamic, interactive interfaces for various tasks.
 
 ---
 
@@ -414,7 +414,35 @@ Applets are stored as separate files for easy agent inspection:
 - `get_applet_state` - Now returns metadata including `activeSlug`, `appletTitle`, `hasApplet`
 - `load_applet` returns `toolTelemetry.appletSet` to trigger SSE push (same as `set_applet_content`)
 
-### Phase 4: Polish
+### Phase 4: Lifecycle API (DEFERRED - See Analysis)
+
+Applet lifecycle hooks were considered for safe polling/cleanup.
+
+**Decision: Deferred** - The complexity isn't justified by current use cases.
+
+See [git-applet.md Phase 6](git-applet.md#phase-6-auto-refresh-analysis-not-recommended) for full analysis.
+
+**Summary:**
+- Polling is the main use case, but manual refresh is simpler and already works
+- Lifecycle API introduces coupling between runtime ↔ view-controller
+- Multiple edge cases (browser sleep, callback throws, race conditions)
+- ~100-150 lines of code for marginal benefit
+
+**If needed later**, the design should ensure:
+- `onCleanup` can NEVER fail (try/catch each callback)
+- Visibility is derived fresh, not cached
+- Cleanup is idempotent
+- Callbacks are synchronous only
+
+For now, applets should use manual refresh patterns.
+
+### Phase 5: File Operations
+
+- [ ] `GET /api/applet/file?path=` - Read file content
+- [ ] `POST /api/applet/file?path=` - Write file content
+- [ ] `GET /api/applet/list?path=` - List directory
+
+### Phase 6: Polish
 
 - [ ] Applet library (reusable patterns)
 - [ ] Templates for common applets
@@ -426,10 +454,7 @@ Applets are stored as separate files for easy agent inspection:
 
 1. **Iframe sandboxing**: Worth the complexity? Or trust the agent context?
 
-2. **Applet lifecycle**: When does applet content get cleared?
-   - On new chat?
-   - On explicit clear?
-   - Never (persists)?
+2. ~~**Applet lifecycle**: When does applet content get cleared?~~ **Resolved**: Applet persists until replaced by another applet or page refresh. Lifecycle hooks (onCleanup, onVisibilityChange) were analyzed and **deferred** - manual refresh is simpler. See [git-applet.md Phase 6](git-applet.md#phase-6-auto-refresh-analysis-not-recommended).
 
 3. **Multiple applets**: Can agent create multiple applets? Tabs?
 

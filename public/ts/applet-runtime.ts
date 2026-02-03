@@ -28,6 +28,7 @@ interface AppletInstance {
   label: string;
   element: HTMLElement;        // The .applet-instance div
   styleElement: HTMLStyleElement | null;
+  popstateHandler: (() => void) | null;  // URL param change listener
 }
 
 let currentApplet: AppletInstance | null = null;
@@ -156,19 +157,36 @@ export function navigateAppletUrlParam(key: string, value: string): void {
  * This is the recommended way to handle URL params in applets.
  * Handles both initial load and navigation (back/forward, param changes).
  * 
+ * Note: Only ONE handler is active at a time. When a new applet registers,
+ * the previous handler is automatically removed.
+ * 
  * @example
  * window.appletAPI.onUrlParamsChange(function(params) {
  *   loadImage(params.path || '');
  * });
  */
 export function onUrlParamsChange(callback: (params: Record<string, string>) => void): void {
+  // Remove any previous handler from current applet
+  if (currentApplet?.popstateHandler) {
+    window.removeEventListener('popstate', currentApplet.popstateHandler);
+    currentApplet.popstateHandler = null;
+  }
+  
   // Call immediately with current params
   callback(getAppletUrlParams());
+
+  // Create new handler
+  const handler = () => {
+    callback(getAppletUrlParams());
+  };
+  
+  // Store on current applet instance if one exists
+  if (currentApplet) {
+    currentApplet.popstateHandler = handler;
+  }
   
   // Listen for future changes (popstate from browser or router)
-  window.addEventListener('popstate', () => {
-    callback(getAppletUrlParams());
-  });
+  window.addEventListener('popstate', handler);
 }
 
 /**
@@ -398,7 +416,7 @@ export function getNavigationContext(): NavigationContext {
 }
 
 /**
- * Destroy an applet instance (remove from DOM, cleanup styles/scripts)
+ * Destroy an applet instance (remove from DOM, cleanup styles/scripts/listeners)
  */
 function destroyInstance(instance: AppletInstance): void {
   instance.element.remove();
@@ -406,6 +424,11 @@ function destroyInstance(instance: AppletInstance): void {
   // Remove scripts tagged with this instance's slug
   document.querySelectorAll(`script[data-applet-slug="${instance.slug}"]`)
     .forEach(el => el.remove());
+  // Remove popstate handler if any
+  if (instance.popstateHandler) {
+    window.removeEventListener('popstate', instance.popstateHandler);
+    instance.popstateHandler = null;
+  }
 }
 
 /**
@@ -517,7 +540,8 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
     slug,
     label,
     element: instanceDiv,
-    styleElement
+    styleElement,
+    popstateHandler: null
   };
   
   showAppletPanel();

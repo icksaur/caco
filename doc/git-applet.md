@@ -192,14 +192,24 @@ Click file → shows diff in expanded section or side panel.
 - [x] Stage all / Unstage all buttons
 - [x] Call `git add` / `git restore --staged` via shell
 
-### Phase 3: Diff View → Separate applet: `git-diff`
+### Phase 3: Diff View - `git-diff` applet ✅
 
-Moved to separate applet for simplicity. Click file in git-status → opens git-diff.
+Separate applet for viewing file diffs. Click file in git-status → navigates to git-diff.
 
-- [ ] Create git-diff applet
-- [ ] Accept file path via URL param
-- [ ] Call `git diff [--cached] <file>` via shell
-- [ ] Basic syntax highlighting (diff2html or raw)
+**URL params:**
+- `?path=/path/to/repo` - Repository path (required)
+- `?file=src/example.ts` - File path relative to repo (required)
+- `?staged=1` - Show staged diff (`git diff --cached`) vs unstaged
+
+**Features:**
+- [x] Create git-diff applet
+- [x] Accept file and path via URL params
+- [x] Call `git diff [--cached] <file>` via shell
+- [x] Basic diff display with +/- line coloring
+- [x] Header shows file path and back button
+- [x] Clicking files in git-status navigates here
+
+**Usage:** `/?applet=git-diff&path=/home/carl/project&file=src/app.ts`
 
 ### Phase 4: Commit ✅
 

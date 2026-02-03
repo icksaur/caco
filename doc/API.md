@@ -619,7 +619,16 @@ Update URL query param (uses replaceState, no history entry).
 
 ```javascript
 updateAppletUrlParam('page', '2');
-// URL becomes /?applet=my-app&page=2
+// URL becomes /?applet=my-app&page=2 (no back button entry)
+```
+
+#### navigateAppletUrlParam(key, value)
+
+Update URL query param with history entry (uses pushState).
+
+```javascript
+navigateAppletUrlParam('file', '/new/path');
+// URL changes, creates back button entry
 ```
 
 ### Agent Communication
@@ -719,6 +728,23 @@ document.querySelectorAll('button')
 // Fetch API for HTTP requests
 const response = await fetch('/api/applets');
 const data = await response.json();
+```
+
+### Shell Commands
+
+Use `fetch('/api/shell', ...)` for shell command execution (see [Shell Execution](#shell-execution)):
+
+```javascript
+const result = await fetch('/api/shell', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    command: 'git',
+    args: ['status', '--porcelain=v2'],
+    cwd: '/path/to/repo'
+  })
+});
+const { stdout, stderr, code } = await result.json();
 ```
 
 ---

@@ -155,6 +155,61 @@ await callMCPTool('write_file', {
 const files = await callMCPTool('list_directory', { path: '/home/user' });
 \`\`\`
 
+**Shell Commands:**
+
+\`fetch('/api/shell', ...)\` - Execute shell commands for developer tools
+\`\`\`javascript
+const result = await fetch('/api/shell', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    command: 'git',
+    args: ['status', '--porcelain=v2'],
+    cwd: '/path/to/repo'  // Optional working directory
+  })
+});
+const { stdout, stderr, code } = await result.json();
+\`\`\`
+
+Returns: \`{ stdout, stderr, code }\` - exit code 0 = success
+
+**URL Parameters:**
+
+\`getAppletUrlParams()\` - Get URL query params (excluding 'applet')
+\`\`\`javascript
+// URL: /?applet=my-applet&file=/path/to/file&mode=edit
+const params = appletAPI.getAppletUrlParams();
+// { file: '/path/to/file', mode: 'edit' }
+\`\`\`
+
+\`updateAppletUrlParam(key, value)\` - Update param without navigation (replaceState)
+\`\`\`javascript
+appletAPI.updateAppletUrlParam('file', '/new/path');  // No page reload
+\`\`\`
+
+\`navigateAppletUrlParam(key, value)\` - Update param with history entry (pushState)
+\`\`\`javascript
+appletAPI.navigateAppletUrlParam('file', '/new/path');  // Creates back button entry
+\`\`\`
+
+**Agent-Pushed State:**
+
+\`onStateUpdate(callback)\` - Receive state pushed from agent via WebSocket
+\`\`\`javascript
+appletAPI.onStateUpdate((state) => {
+  console.log('Agent pushed:', state);
+  // Update UI based on agent-provided data
+});
+\`\`\`
+
+**Session Info:**
+
+\`getSessionId()\` - Get active chat session ID
+\`\`\`javascript
+const sessionId = appletAPI.getSessionId();
+// Use for session-specific operations
+\`\`\`
+
 ## Tips
 
 - **For onclick handlers:** Use \`expose('functionName', functionName)\` to make functions globally accessible

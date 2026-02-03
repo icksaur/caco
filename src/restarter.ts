@@ -78,15 +78,16 @@ async function waitForPortFree(): Promise<boolean> {
 function startServer(): void {
   log('Starting server...');
   
-  // Use npx tsx to run server.ts
-  const child = spawn('npx', ['tsx', 'server.ts'], {
+  // Spawn node directly with tsx loader - no shell needed
+  // This avoids console windows on Windows
+  const child = spawn('node', ['--import', 'tsx', 'server.ts'], {
     cwd: PROJECT_ROOT,
     detached: true,
     stdio: 'ignore',
-    shell: true  // Required for Windows
+    windowsHide: true
   });
   
-  // Write PID file so stop.sh works
+  // Write PID file so stop.ps1/stop.sh works
   if (child.pid) {
     const pidFile = join(PROJECT_ROOT, 'server.pid');
     writeFileSync(pidFile, String(child.pid));

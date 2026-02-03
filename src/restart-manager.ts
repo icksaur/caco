@@ -110,20 +110,20 @@ function checkAndRestart(): void {
 }
 
 /**
- * Spawn the restarter process
+ * Spawn the new server process directly (no restarter needed)
+ * Server has retry logic for port binding.
  */
 function spawnRestarter(): void {
-  const restarterPath = join(__dirname, 'restarter.ts');
+  log('Spawning new server...');
   
-  log(`Spawning restarter: ${restarterPath}`);
-  
-  const child = spawn('npx', ['tsx', restarterPath], {
+  // Spawn server directly - it will retry binding until port is free
+  const child = spawn('node', ['--import', 'tsx', 'server.ts'], {
     cwd: PROJECT_ROOT,
     detached: true,
     stdio: 'ignore',
-    shell: true  // Required for Windows
+    windowsHide: true
   });
   
   child.unref();
-  log(`Restarter spawned with PID: ${child.pid}`);
+  log(`New server spawned with PID: ${child.pid}`);
 }

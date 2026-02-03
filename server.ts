@@ -189,13 +189,34 @@ async function start(): Promise<void> {
   // Start schedule manager
   startScheduleManager();
   
-  // Start server (0.0.0.0 = all interfaces - TEMPORARY for iOS testing)
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`✓ Server running at http://0.0.0.0:${PORT}`);
-    console.log(`  Local: http://localhost:${PORT}`);
-    console.log(`  Network: http://10.0.1.4:${PORT}`);
-    console.log('  Press Ctrl+C to stop');
-  });
+  // Start server with retry (for restart scenarios where port may not be free yet)
+  const MAX_RETRIES = 10;
+  const RETRY_DELAY_MS = 500;
+  
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(PORT, '0.0.0.0', () => {
+          server.removeListener('error', reject);
+          resolve();
+        });
+      });
+      
+      console.log(`✓ Server running at http://0.0.0.0:${PORT}`);
+      console.log(`  Local: http://localhost:${PORT}`);
+      console.log('  Press Ctrl+C to stop');
+      return; // Success
+    } catch (err: unknown) {
+      const error = err as NodeJS.ErrnoException;
+      if (error.code === 'EADDRINUSE' && attempt < MAX_RETRIES) {
+        console.log(`Port ${PORT} in use, retrying (${attempt}/${MAX_RETRIES})...`);
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      } else {
+        throw err;
+      }
+    }
+  }
 }
 
 // Graceful shutdown

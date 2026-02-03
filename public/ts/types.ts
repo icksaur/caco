@@ -19,7 +19,8 @@ export interface ModelInfo {
 
 export interface SessionData {
   sessionId: string;
-  summary?: string;
+  name?: string;     // Custom name from Caco storage
+  summary?: string;  // SDK-generated summary
   updatedAt?: string;
   isBusy?: boolean;
 }

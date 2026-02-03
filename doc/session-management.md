@@ -17,9 +17,9 @@ const client = new CopilotClient();
 await client.start();
 
 // Create multiple sessions
-const session1 = await client.createSession({ model: "gpt-5" });
-const session2 = await client.createSession({ model: "gpt-5" });
-const session3 = await client.createSession({ model: "claude-sonnet-4.5" });
+const session1 = await client.createSession({ model: "claude-sonnet-4" });
+const session2 = await client.createSession({ model: "claude-sonnet-4" });
+const session3 = await client.createSession({ model: "claude-opus-4.5" });
 
 // Each session is completely independent
 await session1.sendAndWait({ prompt: "You are helping with a Python project" });
@@ -86,7 +86,7 @@ This is **rarely needed** - most applications don't need to set this.
 When **infinite sessions** are enabled (default), each session gets a workspace directory for persistence:
 
 ```javascript
-const session = await client.createSession({ model: "gpt-5" });
+const session = await client.createSession({ model: "claude-sonnet-4" });
 
 console.log(session.workspacePath);
 // => ~/.copilot/session-state/{sessionId}/
@@ -112,7 +112,7 @@ Create sessions with memorable IDs for easy resumption:
 // Create with custom ID
 const session = await client.createSession({
     sessionId: "user-123-conversation",
-    model: "gpt-5"
+    model: "claude-sonnet-4"
 });
 
 await session.sendAndWait({ prompt: "Let's discuss TypeScript generics" });
@@ -488,7 +488,7 @@ By default, sessions use **infinite sessions** which:
 When infinite sessions are enabled (default):
 
 ```javascript
-const session = await client.createSession({ model: "gpt-5" });
+const session = await client.createSession({ model: "claude-sonnet-4" });
 
 console.log(session.workspacePath);
 // => ~/.copilot/session-state/{sessionId}/
@@ -505,7 +505,7 @@ Configure when compaction occurs:
 
 ```javascript
 const session = await client.createSession({
-    model: "gpt-5",
+    model: "claude-sonnet-4",
     infiniteSessions: {
         enabled: true,
         backgroundCompactionThreshold: 0.80,  // Start compacting at 80% context usage
@@ -520,7 +520,7 @@ For short-lived sessions that don't need persistence:
 
 ```javascript
 const session = await client.createSession({
-    model: "gpt-5",
+    model: "claude-sonnet-4",
     infiniteSessions: { enabled: false }
 });
 

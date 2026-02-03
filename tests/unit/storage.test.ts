@@ -9,8 +9,18 @@ import {
   detectLanguage,
   registerSession,
   unregisterSession,
-  parseOutputMarkers
+  parseOutputMarkers,
+  ensureSessionMeta,
+  getSessionMeta,
+  setSessionMeta
 } from '../../src/storage.js';
+import { existsSync, rmSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+
+// Test session ID for metadata tests (uses real filesystem)
+const TEST_SESSION_ID = 'test-session-meta-' + Date.now();
+const TEST_META_DIR = join(homedir(), '.caco', 'sessions', TEST_SESSION_ID);
 
 // For tests without session registration, outputs go to in-memory fallback
 const TEST_CWD = '/test/workspace';
@@ -98,5 +108,63 @@ describe('detectLanguage', () => {
   it('handles paths and is case-insensitive', () => {
     expect(detectLanguage('/src/app.ts')).toBe('typescript');
     expect(detectLanguage('file.PY')).toBe('python');
+  });
+});
+
+describe('session metadata (ensureSessionMeta, getSessionMeta, setSessionMeta)', () => {
+  afterEach(() => {
+    // Clean up test session directory
+    if (existsSync(TEST_META_DIR)) {
+      rmSync(TEST_META_DIR, { recursive: true });
+    }
+  });
+
+  it('ensureSessionMeta creates meta.json with empty name', () => {
+    expect(existsSync(TEST_META_DIR)).toBe(false);
+    
+    ensureSessionMeta(TEST_SESSION_ID);
+    
+    expect(existsSync(join(TEST_META_DIR, 'meta.json'))).toBe(true);
+    const meta = getSessionMeta(TEST_SESSION_ID);
+    expect(meta).toEqual({ name: '' });
+  });
+
+  it('ensureSessionMeta does not overwrite existing meta.json', () => {
+    // Create with custom name first
+    setSessionMeta(TEST_SESSION_ID, { name: 'My Custom Name' });
+    
+    // ensureSessionMeta should not overwrite
+    ensureSessionMeta(TEST_SESSION_ID);
+    
+    const meta = getSessionMeta(TEST_SESSION_ID);
+    expect(meta?.name).toBe('My Custom Name');
+  });
+
+  it('getSessionMeta returns undefined for non-existent session', () => {
+    expect(getSessionMeta('nonexistent-session-id')).toBeUndefined();
+  });
+
+  it('setSessionMeta creates directory and writes meta.json', () => {
+    expect(existsSync(TEST_META_DIR)).toBe(false);
+    
+    setSessionMeta(TEST_SESSION_ID, { name: 'Test Session' });
+    
+    expect(existsSync(TEST_META_DIR)).toBe(true);
+    const meta = getSessionMeta(TEST_SESSION_ID);
+    expect(meta).toEqual({ name: 'Test Session' });
+  });
+
+  it('setSessionMeta overwrites existing name', () => {
+    setSessionMeta(TEST_SESSION_ID, { name: 'First' });
+    setSessionMeta(TEST_SESSION_ID, { name: 'Second' });
+    
+    expect(getSessionMeta(TEST_SESSION_ID)?.name).toBe('Second');
+  });
+
+  it('setSessionMeta handles empty name', () => {
+    setSessionMeta(TEST_SESSION_ID, { name: 'Something' });
+    setSessionMeta(TEST_SESSION_ID, { name: '' });
+    
+    expect(getSessionMeta(TEST_SESSION_ID)?.name).toBe('');
   });
 });

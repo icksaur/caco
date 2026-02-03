@@ -13,6 +13,7 @@ import { Router, Request, Response } from 'express';
 import { existsSync, statSync } from 'fs';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
+import { getSessionMeta, setSessionMeta } from '../storage.js';
 
 const router = Router();
 
@@ -119,6 +120,25 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
     const message = error instanceof Error ? error.message : String(error);
     res.status(400).json({ error: message });
   }
+});
+
+/**
+ * PATCH /api/sessions/:sessionId
+ * Update session metadata (custom name)
+ */
+router.patch('/sessions/:sessionId', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const { name } = req.body as { name?: string };
+  
+  // Validate session exists
+  const cwd = sessionManager.getSessionCwd(sessionId);
+  if (!cwd) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+  
+  setSessionMeta(sessionId, { name: name ?? '' });
+  res.json({ success: true });
 });
 
 /**

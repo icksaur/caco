@@ -6,8 +6,13 @@
  * 
  * Structure:
  *   ~/.caco/
- *   ├── sessions/<sessionId>/outputs/   # Display tool outputs
- *   └── applets/<slug>/                 # Saved applets
+ *   ├── sessions/<sessionId>/
+ *   │   ├── meta.json               # Session metadata (custom name)
+ *   │   └── outputs/                # Display tool outputs
+ *   └── applets/<slug>/             # Saved applets
+ * 
+ * Note: SDK stores session data in ~/.copilot/session-state/{id}/workspace.yaml
+ * We store Caco-specific metadata separately to avoid coupling with SDK internals.
  */
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'fs';
@@ -25,6 +30,13 @@ interface CacheEntry {
   data: string | Buffer;
   metadata: OutputMetadata;
   cachedAt: number;
+}
+
+/**
+ * Session metadata stored in ~/.caco/sessions/<id>/meta.json
+ */
+export interface SessionMeta {
+  name: string;
 }
 
 export interface OutputMetadata {
@@ -78,10 +90,56 @@ function ensureDir(dirPath: string): void {
 }
 
 /**
+ * Get storage path for a session
+ */
+function getSessionDir(sessionId: string): string {
+  return join(STORAGE_ROOT, 'sessions', sessionId);
+}
+
+/**
  * Get storage path for a session's outputs
  */
 function getSessionOutputDir(sessionId: string): string {
-  return join(STORAGE_ROOT, 'sessions', sessionId, 'outputs');
+  return join(getSessionDir(sessionId), 'outputs');
+}
+
+// ============================================================================
+// Session Metadata
+// ============================================================================
+
+/**
+ * Ensure session meta.json exists with default values
+ * Called from session-manager on create/resume (NOT from registerSession)
+ */
+export function ensureSessionMeta(sessionId: string): void {
+  const sessionDir = getSessionDir(sessionId);
+  ensureDir(sessionDir);
+  const metaPath = join(sessionDir, 'meta.json');
+  if (!existsSync(metaPath)) {
+    writeFileSync(metaPath, JSON.stringify({ name: '' }, null, 2));
+  }
+}
+
+/**
+ * Get session metadata
+ */
+export function getSessionMeta(sessionId: string): SessionMeta | undefined {
+  const metaPath = join(getSessionDir(sessionId), 'meta.json');
+  if (!existsSync(metaPath)) return undefined;
+  try {
+    return JSON.parse(readFileSync(metaPath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Set session metadata
+ */
+export function setSessionMeta(sessionId: string, meta: SessionMeta): void {
+  const sessionDir = getSessionDir(sessionId);
+  ensureDir(sessionDir);
+  writeFileSync(join(sessionDir, 'meta.json'), JSON.stringify(meta, null, 2));
 }
 
 /**

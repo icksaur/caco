@@ -18,7 +18,7 @@ import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent }
 import { initAppletButton } from './applet-button.js';
 import { subscribeToSession, requestHistory } from './websocket.js';
 import { waitForHistoryComplete } from './history.js';
-import { loadSessions } from './session-panel.js';
+import { loadSessions, showSessionManager } from './session-panel.js';
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 
@@ -138,8 +138,7 @@ export function toggleSessions(): void {
   } else {
     // Remember current state and show sessions
     previousMainPanel = current;
-    setViewState('sessions');
-    loadSessions(); // Fetch and render session list
+    showSessionManager(); // Sets state and loads sessions + usage
   }
 }
 

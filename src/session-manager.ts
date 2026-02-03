@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import type { SessionConfig, CreateConfig, ResumeConfig, SystemMessage } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
-import { registerSession, unregisterSession } from './storage.js';
+import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta } from './storage.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { busyTracker } from './busy-tracker.js';
 
@@ -77,7 +77,8 @@ interface CachedSession {
 interface SessionListItem {
   sessionId: string;
   cwd: string | null;
-  summary: string | null;
+  name: string;           // Custom name from ~/.caco/sessions/<id>/meta.json
+  summary: string | null; // SDK-generated summary
   updatedAt: string | Date | null;
   isBusy: boolean;
 }
@@ -216,6 +217,7 @@ class SessionManager {
     
     // Register with storage layer for output persistence
     registerSession(cwd, session.sessionId);
+    ensureSessionMeta(session.sessionId);
     
     console.log(`✓ Created session ${session.sessionId} for ${cwd} with model ${config.model}`);
     return session.sessionId;
@@ -265,6 +267,7 @@ class SessionManager {
     
     // Register with storage layer for output persistence
     registerSession(cwd, sessionId);
+    ensureSessionMeta(sessionId);
     
     console.log(`✓ Resumed session ${sessionId} for ${cwd}`);
     return sessionId;
@@ -422,7 +425,9 @@ class SessionManager {
         updatedAt = yaml.updated_at || null;
       } catch { /* missing */ }
       const isBusy = this.isBusy(sessionId);
-      result.push({ sessionId, cwd, summary, updatedAt, isBusy });
+      const meta = getSessionMeta(sessionId);
+      const name = meta?.name || '';
+      result.push({ sessionId, cwd, name, summary, updatedAt, isBusy });
     }
     return result;
   }

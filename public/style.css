@@ -825,7 +825,31 @@ main {
   border-left: 3px solid var(--color-success-bright);
 }
 
-.session-summary,
+/* Session item content wrapper (summary + age) */
+.session-item-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0; /* Allow flex child to shrink below content size */
+  cursor: pointer;
+}
+
+.session-summary {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.session-age {
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
 .model-name {
   flex: 1;
   white-space: nowrap;
@@ -878,6 +902,31 @@ main {
   border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: spin-in-place 0.8s linear infinite;
+}
+
+/* Session edit button */
+.session-edit {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+}
+
+.session-edit:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 /* Session delete button */

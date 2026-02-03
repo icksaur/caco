@@ -10,6 +10,7 @@ The purpose of code quality is to achieve correctness and maintainability. Code 
 code is a liability
 less is more
 simple is best
+correct by design
 
 ## worst
 
@@ -30,15 +31,15 @@ code must be kept in sync
 ## good
 
 strong typing catches issues at compile time
-unit testable
+unit tests prevent regressions and toil
 directory structure matches layers and components
-layers
+proper layering
 minimal code
 separation of concerns
 encapsulation over inheritance
 leverage runtime behavior - polymorphism branches
-leverage language features - 
-classes have one purpose
+leverage language features - reduces code
+classes have one purpose (SRP)
 functional procedures
 enforced valid classes
 only one way to do one thing

@@ -14,6 +14,7 @@ All endpoints are prefixed with `/api/`.
 | `/api/sessions` | GET | List all sessions with available models |
 | `/api/sessions` | POST | Create new session |
 | `/api/sessions/:id/resume` | POST | Resume an existing session |
+| `/api/sessions/:id` | PATCH | Update session metadata (custom name) |
 | `/api/sessions/:id` | DELETE | Delete a session |
 | `/api/sessions/:id/state` | GET | Get session state (for agent-to-agent polling) |
 | `/api/sessions/:id/messages` | POST | Send message to session |
@@ -41,10 +42,23 @@ Returns:
 {
   "activeSessionId": "uuid | null",
   "currentCwd": "/path/to/cwd",
-  "grouped": { "/path": [{ "id": "uuid", "cwd": "/path", "hasMessages": true }] },
+  "grouped": { 
+    "/path": [
+      { 
+        "sessionId": "uuid", 
+        "cwd": "/path", 
+        "name": "Custom Name",
+        "summary": "SDK-generated summary",
+        "updatedAt": "2026-01-27T12:00:00.000Z",
+        "isBusy": false
+      }
+    ] 
+  },
   "models": [{ "id": "model-id", "name": "Model Name", "cost": 1 }]
 }
 ```
+
+Session display: Use `name || summary` - custom name takes precedence over SDK summary.
 
 **POST /api/sessions** - Create new session
 ```json
@@ -58,6 +72,17 @@ Returns: `{ sessionId: "uuid", cwd: "string", model: "string" }`
 **POST /api/sessions/:id/resume** - Resume session
 
 Returns: `{ success: true, sessionId: "uuid", cwd: "string" }`
+
+**PATCH /api/sessions/:id** - Update session metadata
+
+Body:
+```json
+{
+  "name": "string (custom session name, empty to clear)"
+}
+```
+
+Returns: `{ success: true }`
 
 **DELETE /api/sessions/:id** - Delete session
 

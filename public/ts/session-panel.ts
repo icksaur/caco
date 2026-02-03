@@ -153,14 +153,42 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
     item.appendChild(throbber);
   }
   
-  // Summary text (truncated)
+  // Content wrapper (summary + age) - clickable area
+  const content = document.createElement('div');
+  content.className = 'session-item-content';
+  content.onclick = () => sessionClick(session.sessionId);
+  
+  // Display name: custom name or SDK summary
+  const displayName = session.name || session.summary || 'No summary';
+  
+  // Summary text (truncated with ellipsis)
   const summarySpan = document.createElement('span');
   summarySpan.className = 'session-summary';
-  const summary = session.summary || 'No summary';
-  const age = session.updatedAt ? ` (${formatAge(session.updatedAt)})` : '';
-  summarySpan.textContent = summary + age;
-  summarySpan.onclick = () => sessionClick(session.sessionId);
-  item.appendChild(summarySpan);
+  summarySpan.textContent = displayName;
+  content.appendChild(summarySpan);
+  
+  // Age (fixed on right)
+  if (session.updatedAt) {
+    const ageSpan = document.createElement('span');
+    ageSpan.className = 'session-age';
+    ageSpan.textContent = formatAge(session.updatedAt);
+    content.appendChild(ageSpan);
+  }
+  
+  item.appendChild(content);
+  
+  // Edit button (rename session)
+  if (!session.isBusy) {
+    const editBtn = document.createElement('button');
+    editBtn.className = 'session-edit';
+    editBtn.textContent = '✏️';
+    editBtn.title = 'Rename session';
+    editBtn.onclick = (e) => {
+      e.stopPropagation();
+      renameSession(session.sessionId, displayName);
+    };
+    item.appendChild(editBtn);
+  }
   
   // Delete button (hidden when busy)
   if (!session.isBusy) {
@@ -169,7 +197,7 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
     deleteBtn.textContent = '×';
     deleteBtn.onclick = (e) => {
       e.stopPropagation();
-      deleteSession(session.sessionId, session.summary);
+      deleteSession(session.sessionId, displayName);
     };
     item.appendChild(deleteBtn);
   }
@@ -178,11 +206,37 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
 }
 
 /**
+ * Rename a session (custom name)
+ */
+async function renameSession(sessionId: string, currentName: string): Promise<void> {
+  const newName = prompt('Session name:', currentName);
+  if (newName === null) return; // Cancelled
+  
+  try {
+    const response = await fetch(`/api/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName })
+    });
+    
+    if (response.ok) {
+      loadSessions(); // Refresh list
+    } else {
+      const data = await response.json();
+      alert(`Failed to rename: ${data.error || 'Unknown error'}`);
+    }
+  } catch (error) {
+    console.error('Failed to rename session:', error);
+    alert('Failed to rename session');
+  }
+}
+
+/**
  * Delete a session
  */
-export async function deleteSession(sessionId: string, summary?: string): Promise<void> {
-  const displayName = summary || sessionId.slice(0, 8);
-  if (!confirm(`Delete session "${displayName}"?\n\nThis cannot be undone.`)) {
+export async function deleteSession(sessionId: string, displayName?: string): Promise<void> {
+  const name = displayName || sessionId.slice(0, 8);
+  if (!confirm(`Delete session "${name}"?\n\nThis cannot be undone.`)) {
     return;
   }
   

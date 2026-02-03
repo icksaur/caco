@@ -15,6 +15,7 @@
 import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, type ViewState } from './view-controller.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
+import { initAppletButton } from './applet-button.js';
 import { subscribeToSession, requestHistory } from './websocket.js';
 import { waitForHistoryComplete } from './history.js';
 import { loadSessions } from './session-panel.js';
@@ -81,6 +82,18 @@ export function initRouter(): void {
   });
   
   console.log('[ROUTER] Navigation API handler installed');
+  
+  // Set up applet button with gesture callbacks
+  initAppletButton({
+    onPress: () => toggleApplet(),
+    onLongPress: () => {
+      const currentApplet = new URL(window.location.href).searchParams.get('applet');
+      if (currentApplet !== 'applet-browser') {
+        console.log('[ROUTER] Long press, opening applet-browser');
+        nav.navigate('?applet=applet-browser');
+      }
+    }
+  });
 }
 
 /**
@@ -174,11 +187,13 @@ export function onSessionCreated(sessionId: string): void {
  * Toggle applet visibility
  * On mobile: toggles between showing main panel and applet
  * On desktop: applet panel is always visible when loaded, this is no-op
+ * If no applet loaded, opens applet-browser
  */
 export function toggleApplet(): void {
   if (!hasAppletContent()) {
-    // No applet loaded - could open applet browser here
-    console.log('[ROUTER] No applet loaded, toggle ignored');
+    // No applet loaded - open applet browser
+    console.log('[ROUTER] No applet loaded, opening applet-browser');
+    navigation.navigate('?applet=applet-browser');
     return;
   }
   
@@ -317,3 +332,4 @@ export function getUrlParams(): { session: string | null; applet: string | null 
     applet: url.searchParams.get('applet')
   };
 }
+

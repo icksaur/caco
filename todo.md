@@ -4,7 +4,11 @@
 **after making changes do not commit, review code-quality.md and review the changes for quality issues**
 **after making changes do not commit until the user tests**
 
-Add syntax highlighting to text-editor applet.  I think we have syntax highlighting but it might be for markdown.  Look into options online, github, etc.  If we need a new one, please choose a simple and performant one that handles these programming languages (lua C++ typescript css bash C# powershell markdown)  Markdown doesn't need to render, just highlight.
+Provide easy access to applet browser.  One idea - always show applet button (we hide it now if no applets).  Click and hold for one second or long press on touch can navigate to applet-browser.
+Would require some changes in view-controller.ts and perhaps app-state.ts.  Investigate if this is straightforward.
+Reqirements:
+easy access to applet-browser on desktop and mobile
+maintain iOS/mobile screen real estate (avoid more buttons)
 
 # every so often
 

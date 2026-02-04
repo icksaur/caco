@@ -1,20 +1,23 @@
-# Copilot Web
+# Caco
 
 A self-extensible chat front-end for the [GitHub Copilot CLI SDK](https://github.com/github/copilot-sdk).
 
 ## What is this?
 
-A local web interface for Copilot that the agent can extend at runtime. The agent can create custom interactive applets in the browser—file browsers, dashboards, forms—without modifying the codebase.
+A local web interface for Copilot that the agent can extend at runtime.
 
 **Key capabilities:**
 - Chat interface with streaming responses
-- Session management (multiple conversations)
-- Image attachments (paste to send)
-- Agent-generated custom applets via MCP tools
-- Applet navigation stack with breadcrumbs
-- File operations for custom applets
+- Session management (multiple simultaneous conversations)
+- Image attachments (paste in chat input)
+- Media embedding
+- Agent-generated custom "applets"
+- Applet-to-agent collaboration
+- Agent-to-agent collaboration
+- Session scheduling
+- Self modification and self introspection
 
-## Architecture
+## Basic Architecture
 
 ```
 Browser (localhost:3000)
@@ -59,17 +62,27 @@ npm test           # Run tests
 
 ```
 public/
-├── ts/            # TypeScript source (bundled to bundle.js)
+├── ts/            # Frontend TypeScript (bundled to bundle.js)
 ├── index.html     # Single-page app
 └── style.css      # All styling
 
 src/
-├── server.ts      # Express server
-├── session-manager.js  # Copilot session lifecycle
-└── routes/        # API endpoints
+├── server.ts      # Express server entry point
+├── session-manager.ts  # Copilot session lifecycle
+├── routes/        # API endpoints
+└── tools/         # MCP tool implementations
 
-doc/
-└── API.md         # Complete API reference
+doc/                # Design docs and API reference
+tests/              # Vitest unit tests
+```
+
+## User Data (`~/.caco/`)
+
+```
+~/.caco/
+├── applets/       # Saved applets (each: meta.json, content.html, script.js, style.css)
+├── sessions/      # Chat session state (UUID dirs with messages, outputs, state)
+└── usage.json     # Token usage tracking
 ```
 
 ## Documentation

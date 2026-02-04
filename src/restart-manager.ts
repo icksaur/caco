@@ -3,7 +3,7 @@
  * 
  * Tracks active dispatches and handles graceful server restart.
  * When restart is requested via tool, waits for all sessions to be idle
- * before spawning restarter and exiting.
+ * before spawning new server process and exiting.
  */
 
 import { spawn } from 'child_process';
@@ -29,6 +29,29 @@ function log(msg: string): void {
 let restartRequested = false;
 let activeDispatches = 0;
 let onAllIdleCallback: (() => void) | null = null;
+
+// Test hooks - allow tests to intercept restart behavior
+let exitHandler: (() => void) | null = null;
+let spawnHandler: (() => void) | null = null;
+
+/**
+ * Reset state (for testing only)
+ */
+export function _resetForTest(): void {
+  restartRequested = false;
+  activeDispatches = 0;
+  onAllIdleCallback = null;
+  exitHandler = null;
+  spawnHandler = null;
+}
+
+/**
+ * Set custom handlers for testing (avoids process.exit and spawn)
+ */
+export function _setTestHandlers(handlers: { onExit?: () => void; onSpawn?: () => void }): void {
+  exitHandler = handlers.onExit ?? null;
+  spawnHandler = handlers.onSpawn ?? null;
+}
 
 /**
  * Request a graceful restart.
@@ -101,29 +124,41 @@ function checkAndRestart(): void {
     }
   }
   
-  // Spawn restarter
-  spawnRestarter();
+  // Spawn new server (or call test handler)
+  if (spawnHandler) {
+    spawnHandler();
+  } else {
+    spawnServer();
+  }
   
-  // Exit gracefully
+  // Exit gracefully (or call test handler)
   log('Exiting for restart...');
-  process.exit(0);
+  if (exitHandler) {
+    exitHandler();
+  } else {
+    process.exit(0);
+  }
 }
 
 /**
- * Spawn the new server process directly (no restarter needed)
+ * Spawn the new server process directly.
  * Server has retry logic for port binding.
  */
-function spawnRestarter(): void {
+function spawnServer(): void {
   log('Spawning new server...');
   
-  // Spawn server directly - it will retry binding until port is free
-  const child = spawn('node', ['--import', 'tsx', 'server.ts'], {
-    cwd: PROJECT_ROOT,
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true
-  });
-  
-  child.unref();
-  log(`New server spawned with PID: ${child.pid}`);
+  try {
+    // Use process.execPath for cross-platform reliability (avoids PATH issues)
+    const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
+      cwd: PROJECT_ROOT,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    });
+    
+    child.unref();
+    log(`New server spawned with PID: ${child.pid}`);
+  } catch (err) {
+    log(`Failed to spawn server: ${err}`);
+  }
 }

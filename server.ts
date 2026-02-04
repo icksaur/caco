@@ -217,6 +217,8 @@ async function start(): Promise<void> {
       }
     }
   }
+  
+  throw new Error(`Failed to bind to port ${PORT} after ${MAX_RETRIES} attempts`);
 }
 
 // Graceful shutdown

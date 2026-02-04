@@ -4,9 +4,18 @@
 **after making changes do not commit, review code-quality.md and review the changes for quality issues**
 **after making changes do not commit until the user tests**
 
-
-Suggest a design to allow Caco agents to discover and use applet functionality to do useful things without LLM round-trip.
-open applet with query to relevant directory, image, text, diff, repo.  Agent can respond with markdown URLs for most useful functionality.
+Spec how to improve Caco applet introspection and ability to use in doc/applet-usability.md
+consider moving applets into caco/applets and symlink this directory from ~/.caco/applets, putting all in this repo
+Suggestions: system prompt generated from brief applet meta.json URL parameter documentation.  Current parameter docs are user-oriented, not agent-oriented and not obvious that params means url query params.  System prompt is not sufficient for Copilot-CLI originated sessions, so must be discoverable in a new tool as well, like caco_applet_usage
+Examples : "to show file to user, include markdown url to ?applet=text-editor&path=path/to/file.txt"
+when making changes to files, link to ?applet=git-diff&path=path/to/file.txt"
+big change complete -> git-status applet (etc)
+Review introspection tools and custom tools for clarity in name and purpose:
+applet_howto -> caco_applet_howto: is tool description clear?
+caco_applet_usage -> Lists all Applet meta.json?something to show all applet interfaces defined by applets that are accessed via
+include get_applet_state and set_applet_state json schemas for applets
+Improve applet_howto text for property meta.json format and documentation
+Ensure suggestions adhere to [code quality](code-quality.md)
 
 Markdown render user.message.
 

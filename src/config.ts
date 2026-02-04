@@ -15,8 +15,6 @@ export const SERVER_URL = process.env.CACO_SERVER_URL || `http://localhost:${POR
 export const DISPATCH_TIMEOUT_MS = 5 * 60 * 1000;
 export const SCHEDULE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 export const SCHEDULE_BUSY_DELAY_MS = 60 * 60 * 1000;
-export const RESTARTER_POLL_MS = 500;
-export const RESTARTER_TIMEOUT_MS = 30 * 1000;
 
 // Cache TTLs (milliseconds)
 export const OUTPUT_CACHE_TTL_MS = 30 * 60 * 1000;

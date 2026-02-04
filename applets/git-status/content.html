@@ -1,0 +1,62 @@
+<div class="git-status">
+  <header class="git-header">
+    <div class="header-left">
+      <div class="branch-info">
+        <span class="branch-icon">⎇</span>
+        <span id="branchName">loading...</span>
+        <span id="aheadBehind" class="ahead-behind hidden"></span>
+      </div>
+      <div class="repo-path" id="repoPath"></div>
+    </div>
+    <div class="header-actions">
+      <button id="pullBtn" class="header-btn pull-btn" title="Pull">↓</button>
+      <button id="pushBtn" class="header-btn push-btn" title="Push">↑</button>
+      <button id="refreshBtn" class="refresh-btn" title="Refresh">↻</button>
+    </div>
+  </header>
+  
+  <div id="errorMessage" class="error-message hidden"></div>
+  <div id="noPathMessage" class="no-path-message hidden">
+    No repository path specified.<br>
+    <small>Use ?path=/path/to/repo in the URL</small>
+  </div>
+  
+  <section class="file-section staged-section">
+    <h3 class="section-header">
+      <span class="section-icon">✓</span>
+      Staged Changes
+      <span id="stagedCount" class="count">(0)</span>
+      <button id="unstageAllBtn" class="section-action hidden" title="Unstage all">− all</button>
+    </h3>
+    <ul id="stagedFiles" class="file-list"></ul>
+  </section>
+  
+  <section class="file-section unstaged-section">
+    <h3 class="section-header">
+      <span class="section-icon">○</span>
+      Changes
+      <span id="unstagedCount" class="count">(0)</span>
+      <button id="stageAllBtn" class="section-action hidden" title="Stage all">+ all</button>
+    </h3>
+    <ul id="unstagedFiles" class="file-list"></ul>
+  </section>
+  
+  <section class="file-section untracked-section">
+    <h3 class="section-header">
+      <span class="section-icon">?</span>
+      Untracked
+      <span id="untrackedCount" class="count">(0)</span>
+      <button id="stageUntrackedBtn" class="section-action hidden" title="Stage all untracked">+ all</button>
+    </h3>
+    <ul id="untrackedFiles" class="file-list"></ul>
+  </section>
+  
+  <div id="cleanMessage" class="clean-message hidden">
+    ✓ Working tree clean
+  </div>
+  
+  <footer class="commit-section" id="commitSection">
+    <input type="text" id="commitMessage" class="commit-input" placeholder="Commit message..." />
+    <button id="commitBtn" class="commit-btn" disabled>Commit</button>
+  </footer>
+</div>

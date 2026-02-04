@@ -1,0 +1,10 @@
+{
+  "slug": "drum-machine",
+  "name": "Drum Machine",
+  "description": "4-track 16-step drum sequencer with kick, snare, hihat, clap",
+  "createdAt": "2026-01-27T07:11:37.205Z",
+  "updatedAt": "2026-01-27T07:11:37.205Z",
+  "agentUsage": {
+    "purpose": "Play drum beats"
+  }
+}

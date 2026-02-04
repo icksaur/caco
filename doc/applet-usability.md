@@ -158,7 +158,7 @@ caco/
 | Unit test for `formatAppletUsage` | Low | ✅ Done |
 | Add `stateSchema` to meta.json | Low | ✅ Done |
 | Include state in `caco_applet_usage` output | Low | ✅ Done |
-| Move applets to repo + symlink | Medium | Phase 4 |
+| Move applets to repo + symlink | Medium | ✅ Done |
 
 ## get_applet_state / set_applet_state Schemas
 
@@ -420,6 +420,12 @@ const appletsDir = getAppletsDir();
 const realPath = await fs.realpath(appletsDir);
 // Write to realPath to ensure it goes to repo
 ```
+
+**Status: ✅ Complete**
+- Applets copied to `/home/carl/caco/applets/`
+- Symlink: `~/.caco/applets -> /home/carl/caco/applets`
+- ESLint updated to ignore `applets/**`
+- `~/.caco/.git` removed (backup complete)
 
 ---
 

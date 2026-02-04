@@ -1,0 +1,13 @@
+<div class="jobs-container">
+  <div class="header">
+    <h1>📅 Scheduled Jobs</h1>
+    <button onclick="refreshJobs()" class="refresh-btn" title="Refresh">🔄</button>
+  </div>
+  
+  <div id="loading" class="loading">Loading jobs...</div>
+  <div id="error" class="error" style="display: none;"></div>
+  <div id="jobs-list" class="jobs-list"></div>
+  <div id="empty" class="empty" style="display: none;">
+    <p>No scheduled jobs found</p>
+  </div>
+</div>

@@ -1,0 +1,24 @@
+{
+  "slug": "image-viewer",
+  "name": "Image Viewer",
+  "description": "View images with zoom and pan controls",
+  "params": {
+    "path": {
+      "required": true,
+      "description": "Absolute path to image file"
+    }
+  },
+  "createdAt": "2026-01-27T06:56:02.771Z",
+  "updatedAt": "2026-02-02T23:00:00.000Z",
+  "agentUsage": {
+    "purpose": "Display an image file"
+  },
+  "stateSchema": {
+    "get": {
+      "imagePath": "string",
+      "loaded": "boolean",
+      "dimensions": "{ width, height }"
+    },
+    "set": null
+  }
+}

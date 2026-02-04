@@ -1,0 +1,24 @@
+{
+  "slug": "file-browser",
+  "name": "File Browser",
+  "description": "Browse directories with click-to-navigate",
+  "params": {
+    "path": {
+      "required": false,
+      "description": "Starting directory path (defaults to cwd)"
+    }
+  },
+  "createdAt": "2026-01-27T05:20:57.498Z",
+  "updatedAt": "2026-02-02T23:00:00.000Z",
+  "agentUsage": {
+    "purpose": "Browse directory contents"
+  },
+  "stateSchema": {
+    "get": {
+      "currentPath": "string",
+      "selectedFile": "string",
+      "action": "string"
+    },
+    "set": null
+  }
+}

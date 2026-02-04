@@ -1,0 +1,32 @@
+{
+  "slug": "git-diff",
+  "name": "Git Diff",
+  "description": "View file diffs in a git repository",
+  "params": {
+    "path": {
+      "required": true,
+      "description": "Absolute path to git repository"
+    },
+    "file": {
+      "required": true,
+      "description": "File path relative to repository root"
+    },
+    "staged": {
+      "required": false,
+      "description": "Set to 1 for staged diff, omit for unstaged"
+    }
+  },
+  "createdAt": "2026-02-02T22:57:00.000Z",
+  "updatedAt": "2026-02-02T23:00:00.000Z",
+  "agentUsage": {
+    "purpose": "Show file diff in a git repository"
+  },
+  "stateSchema": {
+    "get": {
+      "path": "string",
+      "file": "string",
+      "staged": "boolean"
+    },
+    "set": null
+  }
+}

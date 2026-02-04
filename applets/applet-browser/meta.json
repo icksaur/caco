@@ -1,0 +1,10 @@
+{
+  "slug": "applet-browser",
+  "name": "Applet Browser",
+  "description": "Browse and load saved applets with one click",
+  "createdAt": "2026-01-27T04:37:07.238Z",
+  "updatedAt": "2026-01-27T04:37:07.238Z",
+  "agentUsage": {
+    "purpose": "Browse and launch available applets"
+  }
+}

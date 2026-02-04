@@ -1,0 +1,22 @@
+<div class="git-diff">
+  <header class="diff-header">
+    <button id="backBtn" class="back-btn" title="Back to status">←</button>
+    <div class="file-info">
+      <span id="fileName" class="file-name">loading...</span>
+      <span id="diffType" class="diff-type"></span>
+    </div>
+    <button id="refreshBtn" class="refresh-btn" title="Refresh">↻</button>
+  </header>
+  
+  <div id="errorMessage" class="error-message hidden"></div>
+  <div id="noParamsMessage" class="no-params-message hidden">
+    Missing parameters.<br>
+    <small>Use ?path=/repo&file=path/to/file</small>
+  </div>
+  
+  <div id="noDiffMessage" class="no-diff-message hidden">
+    No changes in this file.
+  </div>
+  
+  <pre id="diffContent" class="diff-content"></pre>
+</div>

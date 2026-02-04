@@ -1,0 +1,11 @@
+{
+  "slug": "jobs",
+  "name": "Job Scheduler",
+  "description": "View and manage scheduled jobs",
+  "params": {},
+  "createdAt": "2026-01-30T03:08:06.079Z",
+  "updatedAt": "2026-02-02T23:00:00.000Z",
+  "agentUsage": {
+    "purpose": "View and manage scheduled agent jobs"
+  }
+}

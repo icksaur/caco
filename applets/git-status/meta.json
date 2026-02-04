@@ -1,0 +1,25 @@
+{
+  "slug": "git-status",
+  "name": "Git Status",
+  "description": "View and manage git repository status - staging, commits, push/pull",
+  "params": {
+    "path": {
+      "required": true,
+      "description": "Absolute path to git repository"
+    }
+  },
+  "createdAt": "2026-02-02T22:00:00.000Z",
+  "updatedAt": "2026-02-02T23:00:00.000Z",
+  "agentUsage": {
+    "purpose": "Show git repository status with staging controls"
+  },
+  "stateSchema": {
+    "get": {
+      "path": "string",
+      "staged": "string[]",
+      "unstaged": "string[]",
+      "untracked": "string[]"
+    },
+    "set": null
+  }
+}

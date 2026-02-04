@@ -1,0 +1,10 @@
+{
+  "slug": "calculator",
+  "name": "Calculator",
+  "description": "iOS-style calculator with basic operations, keyboard support, and calculation history",
+  "createdAt": "2026-01-27T04:23:18.850Z",
+  "updatedAt": "2026-01-27T04:23:18.850Z",
+  "agentUsage": {
+    "purpose": "Perform calculations"
+  }
+}

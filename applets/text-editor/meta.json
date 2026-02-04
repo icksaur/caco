@@ -1,0 +1,27 @@
+{
+  "slug": "text-editor",
+  "name": "Text Editor",
+  "description": "Edit text files with syntax highlighting, Ctrl+S to save",
+  "params": {
+    "path": {
+      "required": true,
+      "description": "Absolute path to text file"
+    }
+  },
+  "createdAt": "2026-01-27T07:09:00.843Z",
+  "updatedAt": "2026-02-02T23:00:00.000Z",
+  "agentUsage": {
+    "purpose": "Show or edit a text file"
+  },
+  "stateSchema": {
+    "get": {
+      "path": "string",
+      "loaded": "boolean",
+      "size": "number",
+      "language": "string"
+    },
+    "set": {
+      "content": "string - replaces editor content"
+    }
+  }
+}

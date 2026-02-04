@@ -27,6 +27,14 @@ export interface AppletMeta {
   name: string;
   description?: string;
   params?: Record<string, { required?: boolean; description?: string }>;
+  agentUsage?: {
+    purpose?: string;
+    example?: string;
+  };
+  stateSchema?: {
+    get?: Record<string, string>;
+    set?: Record<string, string> | null;
+  };
   createdAt: string;
   updatedAt: string;
 }

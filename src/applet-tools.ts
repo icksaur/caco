@@ -8,9 +8,43 @@ import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { getAppletUserState, getAppletNavigation, triggerReload } from './applet-state.js';
 import { pushStateToApplet } from './applet-push.js';
+import { listApplets, type AppletMeta } from './applet-store.js';
 
 /**
- * Documentation returned by applet_howto tool.
+ * Format applet metadata for agent consumption.
+ * Returns a concise usage block with URL pattern and parameter info.
+ */
+function formatAppletUsage(applet: AppletMeta & { paths: unknown }): string {
+  const params = Object.entries(applet.params || {});
+  const required = params.filter(([, v]) => v.required).map(([k, v]) => `${k} - ${v.description || ''}`);
+  const optional = params.filter(([, v]) => !v.required).map(([k, v]) => `${k} - ${v.description || ''}`);
+  
+  // Build example URL params
+  const urlParams = params.map(([k]) => `${k}=<${k}>`).join('&');
+  const urlSuffix = urlParams ? `&${urlParams}` : '';
+  
+  const lines = [
+    `## ${applet.slug}`,
+    applet.agentUsage?.purpose || applet.description || applet.name,
+    `Link: \`[${applet.name}](/?applet=${applet.slug}${urlSuffix})\``
+  ];
+  
+  if (required.length) lines.push(`Required: ${required.join('; ')}`);
+  if (optional.length) lines.push(`Optional: ${optional.join('; ')}`);
+  
+  // Add state schema info if available
+  if (applet.stateSchema) {
+    const getKeys = applet.stateSchema.get ? Object.keys(applet.stateSchema.get).join(', ') : null;
+    const setKeys = applet.stateSchema.set ? Object.keys(applet.stateSchema.set).join(', ') : null;
+    if (getKeys) lines.push(`State (get_applet_state): ${getKeys}`);
+    if (setKeys) lines.push(`State (set_applet_state): ${setKeys}`);
+  }
+  
+  return lines.join('\n');
+}
+
+/**
+ * Documentation returned by caco_applet_howto tool.
  * This teaches agents how to create applets using file tools.
  */
 const APPLET_HOWTO = `
@@ -329,14 +363,44 @@ export function createAppletTools(_programCwd: string) {
     }
   });
 
-  const appletHowto = defineTool('applet_howto', {
-    description: 'Get documentation for creating interactive applets. Call this when user asks to create an applet, widget, or interactive UI component.',
+  const cacoAppletHowto = defineTool('caco_applet_howto', {
+    description: 'Get documentation for CREATING new applets (HTML/JS/CSS widgets). Call when user asks to build a custom dashboard, form, or interactive component. For USING existing applets, call caco_applet_usage instead.',
 
     parameters: z.object({}),
 
     handler: async () => {
       return {
         textResultForLlm: APPLET_HOWTO,
+        resultType: 'success' as const
+      };
+    }
+  });
+
+  const cacoAppletUsage = defineTool('caco_applet_usage', {
+    description: 'Get applet URL patterns for linking users to interactive panels. Returns markdown link examples for showing files, diffs, git status, images, etc. Call when you want to display content to the user via an applet.',
+
+    parameters: z.object({
+      slug: z.string().optional().describe('Filter to a specific applet by slug')
+    }),
+
+    handler: async ({ slug }) => {
+      const applets = await listApplets();
+      const filtered = slug 
+        ? applets.filter(a => a.slug === slug)
+        : applets;
+      
+      if (filtered.length === 0) {
+        return {
+          textResultForLlm: slug 
+            ? `Applet "${slug}" not found. Available: ${applets.map(a => a.slug).join(', ') || 'none'}`
+            : 'No applets installed. Use caco_applet_howto to create one.',
+          resultType: 'success' as const
+        };
+      }
+      
+      const usage = filtered.map(formatAppletUsage).join('\n\n');
+      return {
+        textResultForLlm: `# Applet Usage\n\nProvide markdown links to open applets for users.\n\n${usage}`,
         resultType: 'success' as const
       };
     }
@@ -371,5 +435,5 @@ export function createAppletTools(_programCwd: string) {
     }
   });
 
-  return [appletHowto, getAppletState, setAppletState, reloadPage, restartServer];
+  return [cacoAppletHowto, cacoAppletUsage, getAppletState, setAppletState, reloadPage, restartServer];
 }

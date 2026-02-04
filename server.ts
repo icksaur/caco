@@ -93,9 +93,10 @@ You have a tool that displays content directly to the user:
 Use embed_media when users want to watch or listen to media inline.
 
 ## Applets
-${appletPrompt || 'No applets installed. Use applet_howto to create one.'}
-Provide clickable markdown links: \`[View status](/?applet=git-status&path=/repo)\`
-Use \`applet_howto\` tool for creating new applets.
+Interactive panels. Provide markdown links to open for users.
+${appletPrompt || 'No applets installed.'}
+Examples: \`[View file](/?applet=text-editor&path=/file)\` | \`[Git status](/?applet=git-status&path=/repo)\`
+Call \`caco_applet_usage\` for all applet URL patterns. Call \`caco_applet_howto\` to create new applets.
 
 ## Agent-to-Agent Tools
 You can communicate with other agent sessions:

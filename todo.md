@@ -4,16 +4,6 @@
 **after making changes do not commit, review code-quality.md and review the changes for quality issues**
 **after making changes do not commit until the user tests**
 
-Implement [doc/applet-usability.md](doc/applet-usability.md):
-- [ ] Add `caco_applet_usage` tool (returns URL patterns and examples for linking)
-- [ ] Add `agentUsage` field to all applet meta.json
-- [ ] Rename `applet_howto` → `caco_applet_howto` (clarify: create vs use)
-- [ ] Update system prompt with applet hints
-- [ ] Move applets to repo + symlink from ~/.caco/applets
-- [ ] Document get/set_applet_state schemas in meta.json
-
-Markdown render user.message.
-
 Debounced rendering for assistant.delta_message for incremental markdown.
 
 Review vision.md.  Create doodle applet with button to send sketch to prompt using image paste UI and code.  Ensure caco agents can read doodle image data.  See applet.md for considerations to the communication method.

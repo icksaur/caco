@@ -143,8 +143,15 @@ function appendPath(p: string): EventInserterFn {
  * Complex events use custom functions for formatting and data storage.
  */
 const EVENT_INSERTERS: Record<string, EventInserterFn> = {
-  // User/assistant messages
-  'user.message': setPath('content'),
+  // User/assistant messages - both render markdown
+  'user.message': (element, data) => {
+    const value = getByPath(data, 'content');
+    element.textContent = typeof value === 'string' ? value : '';
+    // Render markdown in browser (no-op in tests)
+    if (typeof window !== 'undefined' && window.renderMarkdownElement) {
+      window.renderMarkdownElement(element as unknown as Element);
+    }
+  },
   'assistant.message': (element, data) => {
     const value = getByPath(data, 'content');
     element.textContent = typeof value === 'string' ? value : '';

@@ -226,7 +226,7 @@ class SessionManager {
   /**
    * Resume an existing session
    * @param config - Required config with toolFactory (prevents resuming without tools)
-   * @throws Error if session doesn't exist
+   * @throws Error if session doesn't exist or cwd is gone
    */
   async resume(sessionId: string, config: ResumeConfig): Promise<string> {
     // Get cwd from cache
@@ -240,13 +240,18 @@ class SessionManager {
       throw new Error(`Session ${sessionId} has no cwd recorded`);
     }
     
+    // Validate cwd exists - fail clearly if not
+    if (!existsSync(cwd)) {
+      throw new Error(`Session directory no longer exists: ${cwd}`);
+    }
+    
     // Already active?
     if (this.activeSessions.has(sessionId)) {
       console.log(`Session ${sessionId} already active`);
       return sessionId;
     }
     
-    // Create client with correct cwd
+    // Create client with cwd
     const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
     await client.start();
     

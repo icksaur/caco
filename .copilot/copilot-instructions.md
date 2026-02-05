@@ -1,1 +1,2 @@
+Re-read doc/code-quality.md after making changes.  Identify the code quality issues that allowed bugs or defects to exist.  Fix those issues before committing.
 Do not commit without testing and user test.

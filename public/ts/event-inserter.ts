@@ -8,6 +8,7 @@
  */
 
 import type { SessionEvent } from './types.js';
+import { handleDelta, finalize } from './streaming-markdown.js';
 
 declare global {
   interface Window {
@@ -22,6 +23,7 @@ declare global {
 export interface InserterElement {
   textContent: string | null;
   dataset: Record<string, string | undefined>;
+  classList?: { add(name: string): void; remove(name: string): void };
 }
 
 /**
@@ -147,20 +149,34 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'user.message': (element, data) => {
     const value = getByPath(data, 'content');
     element.textContent = typeof value === 'string' ? value : '';
-    // Render markdown in browser (no-op in tests)
     if (typeof window !== 'undefined' && window.renderMarkdownElement) {
       window.renderMarkdownElement(element as unknown as Element);
     }
   },
   'assistant.message': (element, data) => {
-    const value = getByPath(data, 'content');
-    element.textContent = typeof value === 'string' ? value : '';
-    // Render markdown in browser (no-op in tests)
-    if (typeof window !== 'undefined' && window.renderMarkdownElement) {
-      window.renderMarkdownElement(element as unknown as Element);
+    const content = getByPath(data, 'content');
+    const messageId = data.messageId as string | undefined;
+    if (messageId && typeof window !== 'undefined') {
+      finalize(element as unknown as HTMLElement, messageId, typeof content === 'string' ? content : '');
+    } else {
+      element.textContent = typeof content === 'string' ? content : '';
+      if (typeof window !== 'undefined' && window.renderMarkdownElement) {
+        window.renderMarkdownElement(element as unknown as Element);
+      }
     }
   },
-  'assistant.message_delta': appendPath('deltaContent'),
+  'assistant.message_delta': (element, data) => {
+    const messageId = data.messageId as string | undefined;
+    const delta = getByPath(data, 'deltaContent');
+    const deltaStr = typeof delta === 'string' ? delta : '';
+    
+    if (messageId && typeof window !== 'undefined') {
+      handleDelta(element as unknown as HTMLElement, messageId, deltaStr);
+    } else {
+      // Fallback: no messageId, just append
+      element.textContent = (element.textContent || '') + deltaStr;
+    }
+  },
   
   // Reasoning - render markdown on final event for proper collapse structure
   'assistant.reasoning': (element, data) => {

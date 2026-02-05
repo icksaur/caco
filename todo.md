@@ -4,9 +4,7 @@
 **after making changes do not commit, review code-quality.md and review the changes for quality issues**
 **after making changes do not commit until the user tests**
 
-Review applet.md which is mostly old information, and prune it down to the UI and experience aspects: minimum width, fills 100% somehow in CSS, hideable by applet button, can be opened or navigated with UI and query params.
-
-Applet view wideining.  Either a button (only in applet div) to expand to full-window, a draggable separator, or something else.  Not an issue on Mobile, applets fill the limited space whenever open.  Review our view-controller.ts and index.html and suggest options.  We should spec this in applet.md
+Applet view widening.  Either a button (only in applet div) to expand to full-window, a draggable separator, or something else.  Not an issue on Mobile, applets fill the limited space whenever open.  Review our view-controller.ts and index.html and suggest options.  We should spec this in applet.md
 
 Review vision.md.  Create doodle applet with button to send sketch to prompt using image paste UI and code.  Ensure caco agents can read doodle image data.  See applet.md for considerations to the communication method.
 

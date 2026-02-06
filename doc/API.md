@@ -1,26 +1,20 @@
 # API Reference
 
-Complete catalog of all APIs in Caco.
+Complete catalog of all APIs in Caco. All endpoints are prefixed with `/api/`.
 
-## HTTP Endpoints
+## Sessions & Messages
 
-All endpoints are prefixed with `/api/`.
+All session endpoints accept `X-Client-ID` header for multi-client isolation.
 
-### Sessions & Messages
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/session` | GET | Get session info (accepts `?sessionId=`) |
-| `/api/sessions` | GET | List all sessions with available models |
-| `/api/sessions` | POST | Create new session |
-| `/api/sessions/:id/resume` | POST | Resume an existing session |
-| `/api/sessions/:id` | PATCH | Update session metadata (custom name) |
-| `/api/sessions/:id` | DELETE | Delete a session |
-| `/api/sessions/:id/state` | GET | Get session state (for agent-to-agent polling) |
-| `/api/sessions/:id/messages` | POST | Send message to session |
-| `/api/sessions/:id/cancel` | POST | Cancel current streaming |
-
-**Headers:** All session endpoints accept `X-Client-ID` header for multi-client isolation.
+- `GET /api/session` - Get session info (accepts `?sessionId=`)
+- `GET /api/sessions` - List all sessions with available models
+- `POST /api/sessions` - Create new session
+- `POST /api/sessions/:id/resume` - Resume an existing session
+- `PATCH /api/sessions/:id` - Update session metadata (custom name)
+- `DELETE /api/sessions/:id` - Delete a session
+- `GET /api/sessions/:id/state` - Get session state (for agent-to-agent polling)
+- `POST /api/sessions/:id/messages` - Send message to session
+- `POST /api/sessions/:id/cancel` - Cancel current streaming
 
 **GET /api/session** query params:
 - `sessionId` - Optional session ID (defaults to active session)
@@ -121,14 +115,12 @@ Response streams via WebSocket (not SSE).
 
 Returns: `{ ok: true }`
 
-### Preferences & Models
+## Preferences & Models
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/preferences` | GET | Get user preferences |
-| `/api/preferences` | POST | Update preferences |
-| `/api/models` | GET | List available models from SDK |
-| `/api/usage` | GET | Get usage statistics |
+- `GET /api/preferences` - Get user preferences
+- `POST /api/preferences` - Update preferences
+- `GET /api/models` - List available models from SDK
+- `GET /api/usage` - Get usage statistics
 
 **GET /api/preferences**
 
@@ -165,12 +157,10 @@ Returns:
 
 Note: History is streamed via WebSocket on connect, not HTTP.
 
-### Display Outputs
+## Display Outputs
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/outputs/:id` | GET | Get display output by ID |
-| `/api/tmpfile` | POST | Write temporary file to ~/.caco/tmp/ |
+- `GET /api/outputs/:id` - Get display output by ID
+- `POST /api/tmpfile` - Write temporary file to ~/.caco/tmp/
 
 **GET /api/outputs/:id**
 
@@ -209,19 +199,15 @@ Returns:
 }
 ```
 
-### Applet State
+## Applet State
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/applet/state` | GET | Get current applet state (debug) |
-| `/api/applet/state` | POST | Update applet state |
+- `GET /api/applet/state` - Get current applet state (debug)
+- `POST /api/applet/state` - Update applet state
 
-### Saved Applets
+## Saved Applets
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/applets` | GET | List all saved applets |
-| `/api/applets/:slug/load` | POST | Load applet + clear server state |
+- `GET /api/applets` - List all saved applets
+- `POST /api/applets/:slug/load` - Load applet + clear server state
 
 **GET /api/applets** response:
 ```json
@@ -243,13 +229,11 @@ Returns:
 }
 ```
 
-### File Browser
+## File Browser
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/files` | GET | List files in directory |
-| `/api/file` | GET | Serve raw file content (max 10MB) |
-| `/api/files/*` | PUT | Write file content (path in URL) |
+- `GET /api/files` - List files in directory
+- `GET /api/file` - Serve raw file content (max 10MB)
+- `PUT /api/files/*` - Write file content (path in URL)
 
 **GET /api/files** query params:
 - `path` - Relative path from workspace root
@@ -286,15 +270,13 @@ curl -X PUT http://localhost:3000/api/files/src/hello.txt \
 
 Security: All file endpoints are locked to workspace root.
 
-### Scheduled Tasks
+## Scheduled Tasks
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/schedule` | GET | List all schedules |
-| `/api/schedule/:slug` | GET | Get specific schedule |
-| `/api/schedule/:slug` | PUT | Create or update schedule |
-| `/api/schedule/:slug` | DELETE | Delete schedule |
-| `/api/schedule/:slug/run` | POST | Manually trigger schedule |
+- `GET /api/schedule` - List all schedules
+- `GET /api/schedule/:slug` - Get specific schedule
+- `PUT /api/schedule/:slug` - Create or update schedule
+- `DELETE /api/schedule/:slug` - Delete schedule
+- `POST /api/schedule/:slug/run` - Manually trigger schedule
 
 **GET /api/schedule** - List all schedules
 
@@ -353,16 +335,14 @@ Returns: `{ success: true }`
 
 Returns: `{ slug: "daily-backup", status: "executed", sessionId: "uuid" }`
 
-### MCP Tools (HTTP Proxy)
+## MCP Tools (HTTP Proxy)
 
 HTTP endpoints for applet JS to call MCP tools directly.
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/mcp/tools` | GET | List available MCP tools |
-| `/api/mcp/read_file` | POST | Read file contents |
-| `/api/mcp/write_file` | POST | Write file contents |
-| `/api/mcp/list_directory` | POST | List directory contents |
+- `GET /api/mcp/tools` - List available MCP tools
+- `POST /api/mcp/read_file` - Read file contents
+- `POST /api/mcp/write_file` - Write file contents
+- `POST /api/mcp/list_directory` - List directory contents
 
 **Allowed directories:** Current workspace, `~/.caco/`, `/tmp/`
 
@@ -403,13 +383,11 @@ Returns:
 }
 ```
 
-### Shell Execution
+## Shell Execution
 
 Execute allowlisted shell commands for applets and developer tools.
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/shell` | POST | Execute shell command |
+- `POST /api/shell` - Execute shell command
 
 **POST /api/shell** - Execute command
 
@@ -452,11 +430,9 @@ Returns (command error, e.g., not a git repo):
 
 See [shell-api.md](shell-api.md) for full specification.
 
-### Debug
+## Debug
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/debug/messages` | GET | Raw message structure |
+- `GET /api/debug/messages` - Raw message structure
 
 Returns:
 ```json
@@ -468,23 +444,19 @@ Returns:
 }
 ```
 
----
-
 ## Agent Tools (Custom MCP Tools)
 
 Custom tools available to the Copilot agent via SDK.
 
 ### Applet Tools
 
-Defined in `src/applet-tools.ts`
+Defined in `src/applet-tools.ts`:
 
-| Tool | Description |
-|------|-------------|
-| `applet_howto` | Get documentation for creating applets |
-| `get_applet_state` | Query state pushed by applet JS |
-| `set_applet_state` | Push state to running applet via WebSocket |
-| `reload_page` | Trigger browser page refresh |
-| `restart_server` | Schedule server restart after delay |
+- `applet_howto` - Get documentation for creating applets
+- `get_applet_state` - Query state pushed by applet JS
+- `set_applet_state` - Push state to running applet via WebSocket
+- `reload_page` - Trigger browser page refresh
+- `restart_server` - Schedule server restart after delay
 
 **applet_howto** - no parameters
 
@@ -516,20 +488,11 @@ Schedules graceful restart, waiting for active sessions to complete.
 
 ### Display Tools
 
-Defined in `src/display-tools.ts`
+Defined in `src/display-tools.ts`:
 
-| Tool | Description |
-|------|-------------|
-| `embed_media` | Embed YouTube/Vimeo/SoundCloud/Spotify |
-
-**embed_media** parameters:
-- `url` (string, required) - Media URL
-
-Supported providers: YouTube, Vimeo, SoundCloud, Spotify, Twitter/X
+- `embed_media` - Embed YouTube/Vimeo/SoundCloud/Spotify/Twitter. Takes `url` (string, required).
 
 Note: Embedding happens client-side. The tool returns confirmation that the embed was queued, but cannot confirm successful rendering.
-
----
 
 ## JavaScript APIs (Applet Runtime)
 

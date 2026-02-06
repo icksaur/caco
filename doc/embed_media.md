@@ -1,73 +1,17 @@
 # embed_media Tool
 
-**Status**: Implemented (needs testing)  
-**Last Updated**: 2026-02-01
-
----
-
-## Current State
-
-### What Works ✅
-
-1. **Tool execution** - Agent calls `embed_media(url)`, server fetches oEmbed data
-2. **Storage** - Embed HTML stored in `~/.caco/sessions/<id>/outputs/`
-3. **Tool response** - Returns `[output:xxx]` marker with `toolTelemetry.outputId`
-4. **oEmbed providers** - YouTube, Vimeo, SoundCloud, Spotify, Twitter/X
-5. **Server emits `caco.embed`** - Synthetic event after tool completion
-6. **Client renders embed** - Fetches output, injects iframe with DOMPurify
-7. **History reload** - Works identically to live stream
-
----
+Embeds media from external providers (YouTube, Vimeo, SoundCloud, Spotify, Twitter/X) using oEmbed.
 
 ## Data Flow
 
-```
-User: "embed this youtube video"
-          │
-          ▼
-┌─────────────────────┐
-│ embed_media tool    │
-│ 1. fetchOEmbed(url) │
-│ 2. storeOutput(html)│
-│ 3. return outputId  │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ SDK event: tool.execution_complete      │
-│ {                                       │
-│   toolName: 'embed_media',              │
-│   result: { content: '[output:xxx]...' }│
-│   // toolTelemetry extracted by parser  │
-│ }                                       │
-└──────────┬──────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ Server: session-messages.ts             │
-│ Emits synthetic caco.embed event with   │
-│ { outputId, provider, title }           │
-└──────────┬──────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ Client: element-inserter.ts             │
-│ caco.embed → embed-message (outer)      │
-│           → embed-content (inner)       │
-└──────────┬──────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────┐
-│ Client: event-inserter.ts               │
-│ 'caco.embed' handler                    │
-│ Fetches /api/outputs/:id                │
-│ Injects iframe with DOMPurify           │
-└─────────────────────────────────────────┘
-```
+1. Agent calls `embed_media(url)`, server fetches oEmbed data
+2. Embed HTML stored in `~/.caco/sessions/<id>/outputs/`
+3. Returns `[output:xxx]` marker with `toolTelemetry.outputId`
+4. Server emits synthetic `caco.embed` event after tool completion
+5. Client fetches output via `/api/outputs/:id`, injects iframe with DOMPurify
+6. History reload: Server re-emits `caco.embed` for each `embed_media` tool, client handles identically
 
----
-
-## Implementation (Completed)
+## Implementation
 
 ### Server: Emit caco.embed event
 

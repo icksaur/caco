@@ -12,7 +12,7 @@
  * - Removing them does NOT destroy loaded content
  */
 
-import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, type ViewState } from './view-controller.js';
+import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, toggleAppletExpanded, type ViewState } from './view-controller.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
@@ -94,6 +94,10 @@ export function initRouter(): void {
       }
     }
   });
+  
+  // Set up expand button click handler
+  const expandBtn = document.getElementById('expandBtn');
+  expandBtn?.addEventListener('click', toggleAppletExpanded);
 }
 
 /**

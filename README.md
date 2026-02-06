@@ -87,12 +87,9 @@ tests/              # Vitest unit tests
 
 ## Documentation
 
-See [doc/API.md](doc/API.md) for complete API reference including:
-- HTTP endpoints (sessions, streaming, applets, files)
-- MCP tools (set_applet_content, save_applet, display tools)
-- JavaScript APIs for applet code (setAppletState, loadApplet, navigation)
-- WebSocket events for real-time streaming
-- File storage structure
+- [doc/index.md](doc/index.md) - Documentation index
+- [doc/doc-guidelines.md](doc/doc-guidelines.md) - Documentation standards
+- [doc/API.md](doc/API.md) - Complete API reference
 
 ## License
 

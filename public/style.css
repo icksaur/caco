@@ -548,6 +548,42 @@ main {
 }
 .applet-btn.active span { background: #ffffff; }
 
+/* Expand button - next to applet button, toggles full-width mode */
+.expand-btn {
+  position: fixed;
+  top: var(--space-lg);
+  right: calc(var(--space-lg) + 48px);  /* 40px applet btn + 8px gap */
+  z-index: 200;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 28px;
+  height: 40px;
+  padding: 0;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: #4a3520;
+  border: 1px solid #5f4530;
+  color: #d4956a;
+  font-size: 28px;
+  line-height: 1;
+}
+.expand-btn .expand-icon {
+  transform: translateY(-3px);  /* Adjust for glyph baseline */
+}
+.expand-btn:hover { background: #5c4328; }
+.expand-btn.hidden { display: none; }
+.expand-btn.active {
+  background: #b5702d;
+  border-color: #d98c4a;
+  color: #ffffff;
+}
+
+/* Hide expand button on mobile (already full-screen) */
+@media (max-width: 768px) {
+  .expand-btn { display: none; }
+}
+
 /* ========================================
    CHAT MESSAGES
    ======================================== */
@@ -1410,8 +1446,14 @@ main {
     max-width: 600px;
   }
   
+  /* Expanded: applet takes full width, hides chat */
+  .applet-panel.expanded:not(.hidden) {
+    width: 100%;
+    max-width: none;
+    z-index: 51;
+  }
+  
   .new-chat {
     padding-left: var(--space-lg);
   }
-}
 }

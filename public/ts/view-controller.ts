@@ -20,6 +20,9 @@ export type ViewState = 'sessions' | 'newChat' | 'chatting';
 /** Current main panel state */
 let currentState: ViewState = 'sessions';
 
+/** Applet expanded state (session-only, not persisted) */
+let appletExpanded = false;
+
 /** Cached DOM element references */
 interface ViewElements {
   chatView: HTMLElement | null;
@@ -31,6 +34,7 @@ interface ViewElements {
   footer: HTMLElement | null;
   menuBtn: HTMLElement | null;
   appletBtn: HTMLElement | null;
+  expandBtn: HTMLElement | null;
 }
 
 let cachedElements: ViewElements | null = null;
@@ -50,6 +54,7 @@ function getElements(): ViewElements {
       footer: document.getElementById('chatFooter'),
       menuBtn: document.getElementById('menuBtn'),
       appletBtn: document.getElementById('appletBtn'),
+      expandBtn: document.getElementById('expandBtn'),
     };
   }
   return cachedElements;
@@ -96,8 +101,9 @@ export function setViewState(state: ViewState): void {
     case 'sessions':
       els.sessionView?.classList.add('active');
       els.menuBtn?.classList.add('active');
-      // Hide applet button when sessions overlay is up
+      // Hide applet and expand buttons when sessions overlay is up
       els.appletBtn?.classList.add('hidden');
+      els.expandBtn?.classList.add('hidden');
       break;
       
     case 'newChat':
@@ -129,8 +135,13 @@ export function setViewState(state: ViewState): void {
 export function showAppletPanel(): void {
   const els = getElements();
   els.appletPanel?.classList.remove('hidden');
+  // Restore expanded state if previously set
+  if (appletExpanded) {
+    els.appletPanel?.classList.add('expanded');
+  }
   els.appletBtn?.classList.remove('hidden');
   els.appletBtn?.classList.add('active');
+  els.expandBtn?.classList.remove('hidden');
   updateTitle();
 }
 
@@ -142,7 +153,8 @@ export function hideAppletPanel(): void {
   const els = getElements();
   els.appletPanel?.classList.add('hidden');
   els.appletBtn?.classList.remove('active');
-  // Note: button stays visible - user can toggle panel back
+  els.expandBtn?.classList.add('hidden');
+  // Note: applet button stays visible - user can toggle panel back
   updateTitle();
 }
 
@@ -152,6 +164,27 @@ export function hideAppletPanel(): void {
 export function isAppletPanelVisible(): boolean {
   const els = getElements();
   return !els.appletPanel?.classList.contains('hidden');
+}
+
+/**
+ * Toggle applet panel expanded state
+ */
+export function toggleAppletExpanded(): void {
+  const els = getElements();
+  appletExpanded = !appletExpanded;
+  els.appletPanel?.classList.toggle('expanded', appletExpanded);
+  els.expandBtn?.classList.toggle('active', appletExpanded);
+  
+  // Update icon: « (expand) ↔ » (collapse)
+  const icon = document.querySelector('.expand-icon');
+  if (icon) icon.textContent = appletExpanded ? '»' : '«';
+}
+
+/**
+ * Check if applet panel is expanded
+ */
+export function isAppletExpanded(): boolean {
+  return appletExpanded;
 }
 
 /**

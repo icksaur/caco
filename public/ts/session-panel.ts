@@ -331,6 +331,12 @@ export async function loadSessions(): Promise<void> {
       return 0;
     });
     
+    // Add sessions heading
+    const heading = document.createElement('div');
+    heading.className = 'section-header';
+    heading.textContent = 'sessions';
+    container.appendChild(heading);
+    
     // Render each session with CWD below
     for (const session of allSessions) {
       const item = createSessionItem(session, activeSessionId ?? undefined);

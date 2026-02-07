@@ -1183,7 +1183,8 @@ main {
   margin-bottom: var(--space-lg);
 }
 
-.schedules-section .section-header {
+/* Section headers (schedules, sessions) */
+.section-header {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   padding: var(--space-sm) 0;

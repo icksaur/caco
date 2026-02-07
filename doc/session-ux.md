@@ -99,19 +99,30 @@ Session is marked observed when:
 
 ### Layout
 
-Schedules appear below New Chat, above session list:
+Schedules appear below New Chat, above session list. Both sections have headings:
 
 ```
 ┌─────────────────────────────────────────────────┐
 │ + New Chat                                      │
 ├─────────────────────────────────────────────────┤
-│ SCHEDULES                                       │
+│ schedules                                       │
 │  ▶ daily-standup    next: 9:00 AM   ✓ enabled  │
 │  ▶ nightly-backup   next: 2:00 AM   ○ disabled │
 ├─────────────────────────────────────────────────┤
-│ [sessions...]                                   │
+│ sessions                                        │
+│  ● Refactored auth module              5m ago  │
+│    /home/carl/project-b                        │
+│    Fixed login bug                     1h ago  │
+│    /home/carl/project-a                        │
 └─────────────────────────────────────────────────┘
 ```
+
+### Section Headings
+
+| Heading | Style | Content |
+|---------|-------|---------|
+| `schedules` | Lowercase, muted text | Scheduled sessions (cron-triggered) |
+| `sessions` | Lowercase, muted text | Manual/interactive sessions |
 
 ### Schedule Item Display
 

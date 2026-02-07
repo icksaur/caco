@@ -4,22 +4,54 @@
 
 import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge } from './ui-utils.js';
-import { getActiveSessionId, getCurrentCwd } from './app-state.js';
+import { getActiveSessionId } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { setViewState } from './view-controller.js';
 import { sessionClick } from './router.js';
 import { onGlobalEvent } from './websocket.js';
 
+// Module state for fuzzy search
+let allSessions: SessionData[] = [];
+let searchQuery = '';
+
 /**
  * Initialize session panel - subscribe to global events for session list changes
  */
 export function initSessionPanel(): void {
+  // Set up search input handlers
+  const searchInput = document.getElementById('sessionSearchInput') as HTMLInputElement | null;
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      searchQuery = searchInput.value.toLowerCase().trim();
+      renderFilteredSessions();
+    });
+    
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (searchQuery) {
+          // Clear search first
+          searchInput.value = '';
+          searchQuery = '';
+          renderFilteredSessions();
+          e.stopPropagation();
+        }
+        // Otherwise let Escape close the panel (handled by view-controller)
+      } else if (e.key === 'Enter') {
+        // Select first session in filtered list
+        const firstSession = document.querySelector('.session-item') as HTMLElement;
+        if (firstSession?.dataset.sessionId) {
+          void sessionClick(firstSession.dataset.sessionId);
+        }
+      }
+    });
+  }
+
   // Subscribe to unified session list change event
   onGlobalEvent((event) => {
     // Unified event for any session list mutation (created, deleted, idle, observed, renamed)
     if (event.type === 'session.listChanged') {
       console.log('[SESSION-PANEL] Session list changed, refreshing...', event.data);
-      loadSessions();
+      void loadSessions();
       return;
     }
     
@@ -64,7 +96,7 @@ function updateSessionItemState(sessionId: string, isBusy: boolean): void {
       deleteBtn.onclick = (e) => {
         e.stopPropagation();
         const summary = item.querySelector('.session-summary')?.textContent || undefined;
-        deleteSession(sessionId, summary);
+        void deleteSession(sessionId, summary);
       };
       item.appendChild(deleteBtn);
     }
@@ -140,6 +172,15 @@ export function showSessionManager(): void {
   loadSessions();
   loadSchedules();
   loadUsage();
+  
+  // Focus search input for keyboard-first navigation
+  // Use setTimeout to ensure DOM is updated after view state change
+  setTimeout(() => {
+    const searchInput = document.getElementById('sessionSearchInput') as HTMLInputElement | null;
+    if (searchInput) {
+      searchInput.focus();
+    }
+  }, 0);
 }
 
 /**
@@ -288,17 +329,13 @@ export async function loadSessions(): Promise<void> {
     
     // DEBUG: Log session data to verify unobserved state is coming from server
     console.log(`[SESSION-PANEL] Loaded sessions: ${Object.values(grouped).flat().length} total, ${unobservedCount} unobserved`);
-    for (const [cwd, sessions] of Object.entries(grouped)) {
+    for (const [_cwd, sessions] of Object.entries(grouped)) {
       for (const s of sessions) {
         if (s.isUnobserved || s.isBusy) {
           console.log(`[SESSION-PANEL] ${s.sessionId.slice(0, 8)}: isUnobserved=${s.isUnobserved}, isBusy=${s.isBusy}`);
         }
       }
     }
-    
-    // Use client state as source of truth (not server response)
-    const activeSessionId = getActiveSessionId();
-    const currentCwd = getCurrentCwd();
     
     // Store available models from SDK
     if (models && models.length > 0) {
@@ -312,7 +349,8 @@ export async function loadSessions(): Promise<void> {
     
     // Flatten all sessions from grouped structure into single MRU list
     // Preserve cwd from the grouping key, omit sessions without CWD
-    const allSessions: SessionData[] = [];
+    // Store in module state for fuzzy filtering
+    allSessions = [];
     for (const [cwd, sessions] of Object.entries(grouped)) {
       // Skip sessions without a valid CWD (incomplete or corrupted)
       if (cwd === '(unknown)') continue;
@@ -331,23 +369,101 @@ export async function loadSessions(): Promise<void> {
       return 0;
     });
     
-    // Add sessions heading
-    const heading = document.createElement('div');
-    heading.className = 'section-header';
-    heading.textContent = 'sessions';
-    container.appendChild(heading);
-    
-    // Render each session with CWD below
-    for (const session of allSessions) {
-      const item = createSessionItem(session, activeSessionId ?? undefined);
-      container.appendChild(item);
-    }
+    // Render sessions (respecting current search filter)
+    renderFilteredSessions();
     
     // Update menu button busy indicator after all sessions rendered
     updateMenuBusyIndicator();
   } catch (error) {
     console.error('Failed to load sessions:', error);
   }
+}
+
+/**
+ * Render sessions filtered by current search query
+ */
+function renderFilteredSessions(): void {
+  const container = document.getElementById('sessionList');
+  if (!container) return;
+  
+  const activeSessionId = getActiveSessionId();
+  
+  container.innerHTML = '';
+  
+  // Add sessions heading
+  const heading = document.createElement('div');
+  heading.className = 'section-header';
+  heading.textContent = 'sessions';
+  container.appendChild(heading);
+  
+  // Filter sessions by search query
+  const filtered = searchQuery
+    ? allSessions.filter(s => matchesSearch(s, searchQuery))
+    : allSessions;
+  
+  // Show empty state if no matches
+  if (filtered.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'schedules-empty';
+    empty.textContent = searchQuery ? 'no matching sessions' : 'no sessions';
+    container.appendChild(empty);
+    return;
+  }
+  
+  // Render each session with CWD below
+  for (const session of filtered) {
+    const item = createSessionItem(session, activeSessionId ?? undefined);
+    container.appendChild(item);
+  }
+}
+
+/**
+ * Fuzzy match: each character in query must appear in target in order.
+ * Returns score (higher = better match), or -1 if no match.
+ * 
+ * Scoring:
+ * - +10 for consecutive character matches
+ * - +5 for matching at word boundary (after -, _, /, space, or start)
+ * - +1 for any match
+ */
+function fuzzyScore(target: string, query: string): number {
+  if (query.length === 0) return 0;
+  if (target.length === 0) return -1;
+  
+  let score = 0;
+  let queryIdx = 0;
+  let prevMatchIdx = -2; // -2 so first match isn't "consecutive"
+  
+  for (let i = 0; i < target.length && queryIdx < query.length; i++) {
+    if (target[i] === query[queryIdx]) {
+      score += 1; // Base score for match
+      
+      // Bonus for consecutive matches
+      if (i === prevMatchIdx + 1) {
+        score += 10;
+      }
+      
+      // Bonus for word boundary (start, or after separator)
+      if (i === 0 || '-_/ '.includes(target[i - 1])) {
+        score += 5;
+      }
+      
+      prevMatchIdx = i;
+      queryIdx++;
+    }
+  }
+  
+  // All query characters must be found
+  return queryIdx === query.length ? score : -1;
+}
+
+/**
+ * Check if a session matches the search query (fuzzy match)
+ */
+function matchesSearch(session: SessionData, query: string): boolean {
+  const name = (session.name || session.summary || '').toLowerCase();
+  const cwd = (session.cwd || '').toLowerCase();
+  return fuzzyScore(name, query) >= 0 || fuzzyScore(cwd, query) >= 0;
 }
 
 /**

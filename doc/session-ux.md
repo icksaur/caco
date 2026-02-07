@@ -8,7 +8,30 @@ User experience for session management, listing, and scheduling.
 
 - **Trigger**: Hamburger button (☰) in upper-left
 - **Overlay**: Full-screen overlay above chat content
-- **Structure**: New Chat button → Schedules section → Session list
+- **Structure**: Search + New Session row → Schedules section → Session list
+
+### Top Row: Search + New Session
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ [🔍 Search sessions...                    ] [+ New session   ] │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Layout**: Search input (flex: 4) + New Session button (flex: 1) = 4:1 width ratio.
+
+**Keyboard-first navigation** - panel auto-focuses search input when opened.
+
+**Search input** filters sessions in real-time:
+- Matches against session name/summary AND cwd path
+- Fuzzy matching: characters must appear in order (e.g., "zads" matches "zalem-daily-stats")
+- Case-insensitive
+- Empty input shows all sessions
+- `Escape` clears search (or closes panel if search empty)
+- `Enter` selects first visible session
+- `↑`/`↓` arrows navigate filtered results (future enhancement)
+
+**Rationale**: With many sessions, clicking through pages is slow. Typing a few characters of project name or task finds the session instantly.
 
 ### Session List
 

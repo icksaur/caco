@@ -135,7 +135,6 @@ body {
 
 /* Text input styling */
 input[type="text"] {
-  flex: 1;
   padding: var(--space-md);
   background: var(--bg-input);
   border: 1px solid var(--color-border);
@@ -1190,6 +1189,51 @@ main {
   padding: var(--space-sm) 0;
   border-bottom: 1px solid var(--color-border);
   margin-bottom: var(--space-sm);
+}
+
+/* Session top row: search + new session button */
+.session-top-row {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-lg);
+}
+
+.session-search-input {
+  flex: 4 1 0;  /* grow:4, shrink:1, basis:0 for proper ratio */
+  min-width: 0;
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--text-base);
+  background: var(--bg-input);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.session-search-input:focus {
+  border-color: var(--color-accent);
+}
+
+.session-search-input::placeholder {
+  color: var(--color-text-dim);
+}
+
+.new-session-btn {
+  flex: 1 1 0;  /* grow:1, shrink:1, basis:0 for proper ratio */
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-success);
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--color-text-bright);
+  font-size: var(--text-base);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast);
+}
+
+.new-session-btn:hover {
+  background: var(--color-success-hover);
 }
 
 .schedules-list {

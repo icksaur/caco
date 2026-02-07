@@ -46,7 +46,12 @@
   <div id="sessionView" class="session-overlay">
     <div class="session-content">
       <div id="usageInfo" class="usage-info"></div>
-      <button type="button" class="new-chat-btn" onclick="newSessionClick()">+ New Chat</button>
+      
+      <!-- Search + New Session row (4:1 ratio) -->
+      <div class="session-top-row">
+        <input type="text" id="sessionSearchInput" class="session-search-input" placeholder="Search sessions..." autocomplete="off">
+        <button type="button" class="new-session-btn" onclick="newSessionClick()">+ New session</button>
+      </div>
       
       <!-- Schedules section -->
       <div id="schedulesSection" class="schedules-section">

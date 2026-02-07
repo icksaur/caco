@@ -4,10 +4,19 @@
 **after making changes do not commit, review code-quality.md and review the changes for quality issues**
 **after making changes do not commit until the user tests**
 
-image paste is broken.
+fuzzy-find session description:
+work in session-ux.md
+Session panel puts user input in text input, which fuzzy finds sessions so minimize keypress
+
+keyboard input:
+keyboard shortcuts for major actions:
+toggle session panel
+toggle applet panel
+expand applet panel
+
 
 out-of-band agent input:
-Is there anything in the SDK or design that would allow us to inject content into a busy agent session?  Something that causes it to change course without interrupting the "premium request"
+Inject content into a busy agent session.  Something that causes it to change course without interrupting the "premium request" due to outside influence, similar to stop or permission requests, but automated via arbitrary external factors.
 
 Applet-to-agent efficiency:
 review docs for applet-to-agent two-way communication, and ensure they are up-to date

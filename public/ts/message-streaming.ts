@@ -58,8 +58,14 @@ const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', undefined, EV
 function handleEvent(event: SessionEvent): void {
   hideToast();
   const chat = document.getElementById('chat')!;
-  const eventType = event.type;
+  let eventType = event.type;
   const data = event.data || {};
+  
+  // Transform user.message with non-user source to synthetic type
+  // This allows applet/agent/scheduler messages to have distinct styling
+  if (eventType === 'user.message' && data.source && data.source !== 'user') {
+    eventType = `caco.${data.source}`;
+  }
   
   // DEBUG: Log all event types received
   console.log(`[EVENT] ${eventType}`, data);

@@ -1,10 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-/**
- * Parse message source markers from content
- * Extracted from src/routes/applet-ws.ts streamHistory for testability
- */
-export type MessageSource = 'user' | 'applet' | 'agent';
+import { parseMessageSource, type MessageSource } from '../../src/message-source.js';
 
 export interface ParsedMessage {
   source: MessageSource;
@@ -13,28 +8,21 @@ export interface ParsedMessage {
   cleanContent: string;
 }
 
-export function parseMessageSource(content: string): ParsedMessage {
-  // Parse applet marker: [applet:slug]
-  const appletMatch = content.match(/^\[applet:([^\]]+)\]\s*/);
-  if (appletMatch) {
-    return {
-      source: 'applet',
-      appletSlug: appletMatch[1],
-      cleanContent: content.slice(appletMatch[0].length)
-    };
+/**
+ * Adapt parseMessageSource for legacy interface used in tests
+ */
+function parseMessageSourceLegacy(content: string): ParsedMessage {
+  const result = parseMessageSource(content);
+  const legacy: ParsedMessage = {
+    source: result.source,
+    cleanContent: result.cleanContent
+  };
+  if (result.source === 'applet') {
+    legacy.appletSlug = result.identifier;
+  } else if (result.source === 'agent') {
+    legacy.fromSession = result.identifier;
   }
-  
-  // Parse agent marker: [agent:sessionId]
-  const agentMatch = content.match(/^\[agent:([^\]]+)\]\s*/);
-  if (agentMatch) {
-    return {
-      source: 'agent',
-      fromSession: agentMatch[1],
-      cleanContent: content.slice(agentMatch[0].length)
-    };
-  }
-  
-  return { source: 'user', cleanContent: content };
+  return legacy;
 }
 
 /**
@@ -65,7 +53,7 @@ export function buildChatMessage(
   pendingOutputs: string[] = []
 ): ChatMessage | null {
   if (role === 'user') {
-    const parsed = parseMessageSource(content);
+    const parsed = parseMessageSourceLegacy(content);
     if (!parsed.cleanContent) return null;
     
     return {
@@ -95,21 +83,20 @@ describe('parseMessageSource', () => {
     const result = parseMessageSource('Hello world');
     expect(result.source).toBe('user');
     expect(result.cleanContent).toBe('Hello world');
-    expect(result.appletSlug).toBeUndefined();
-    expect(result.fromSession).toBeUndefined();
+    expect(result.identifier).toBeUndefined();
   });
 
   it('parses applet messages', () => {
     const result = parseMessageSource('[applet:file-browser] Show files');
     expect(result.source).toBe('applet');
-    expect(result.appletSlug).toBe('file-browser');
+    expect(result.identifier).toBe('file-browser');
     expect(result.cleanContent).toBe('Show files');
   });
 
   it('parses agent messages', () => {
     const result = parseMessageSource('[agent:session-abc] Query data');
     expect(result.source).toBe('agent');
-    expect(result.fromSession).toBe('session-abc');
+    expect(result.identifier).toBe('session-abc');
     expect(result.cleanContent).toBe('Query data');
   });
 

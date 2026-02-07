@@ -19,9 +19,8 @@ import type { SessionEvent } from './types.js';
 
 /**
  * Message source identifies who sent a message.
- * Extensible: add new sources here (e.g., 'agent' for agent-to-agent).
  */
-export type MessageSource = 'user' | 'applet' | 'agent';
+export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler';
 
 // Re-export SessionEvent for consumers that import from websocket.ts
 export type { SessionEvent };

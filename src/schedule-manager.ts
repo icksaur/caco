@@ -117,7 +117,8 @@ async function executeSchedule(slug: string): Promise<void> {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           prompt: definition.prompt,
-          source: 'scheduler'
+          source: 'scheduler',
+          scheduleSlug: slug
         })
       });
       
@@ -203,7 +204,8 @@ async function createAndExecute(slug: string, definition: ScheduleDefinition): P
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ 
       prompt: definition.prompt,
-      source: 'scheduler'
+      source: 'scheduler',
+      scheduleSlug: slug
     })
   });
   

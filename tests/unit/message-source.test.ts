@@ -1,36 +1,5 @@
 import { describe, it, expect } from 'vitest';
-
-/**
- * Parse message source markers from content
- * Matches the logic in src/routes/applet-ws.ts streamHistory
- */
-function parseMessageSource(content: string): {
-  source: 'user' | 'applet' | 'agent';
-  identifier?: string;
-  cleanContent: string;
-} {
-  // Parse applet marker: [applet:slug]
-  const appletMatch = content.match(/^\[applet:([^\]]+)\]\s*/);
-  if (appletMatch) {
-    return {
-      source: 'applet',
-      identifier: appletMatch[1],
-      cleanContent: content.slice(appletMatch[0].length)
-    };
-  }
-  
-  // Parse agent marker: [agent:sessionId]
-  const agentMatch = content.match(/^\[agent:([^\]]+)\]\s*/);
-  if (agentMatch) {
-    return {
-      source: 'agent',
-      identifier: agentMatch[1],
-      cleanContent: content.slice(agentMatch[0].length)
-    };
-  }
-  
-  return { source: 'user', cleanContent: content };
-}
+import { parseMessageSource, prefixMessageSource } from '../../src/message-source.js';
 
 describe('parseMessageSource', () => {
   describe('user messages', () => {
@@ -94,6 +63,22 @@ describe('parseMessageSource', () => {
     });
   });
 
+  describe('scheduler messages', () => {
+    it('parses [scheduler:slug] prefix', () => {
+      const result = parseMessageSource('[scheduler:daily-standup] Generate standup summary');
+      expect(result.source).toBe('scheduler');
+      expect(result.identifier).toBe('daily-standup');
+      expect(result.cleanContent).toBe('Generate standup summary');
+    });
+
+    it('handles scheduler slug with underscores', () => {
+      const result = parseMessageSource('[scheduler:weekly_report] Create report');
+      expect(result.source).toBe('scheduler');
+      expect(result.identifier).toBe('weekly_report');
+      expect(result.cleanContent).toBe('Create report');
+    });
+  });
+
   describe('edge cases', () => {
     it('handles empty content after prefix', () => {
       const result = parseMessageSource('[applet:test] ');
@@ -103,7 +88,6 @@ describe('parseMessageSource', () => {
 
     it('does not match [applet:] without slug', () => {
       const result = parseMessageSource('[applet:] message');
-      // Regex requires at least one character - empty slug doesn't match
       expect(result.source).toBe('user');
       expect(result.cleanContent).toBe('[applet:] message');
     });
@@ -119,5 +103,36 @@ describe('parseMessageSource', () => {
       expect(result.source).toBe('user');
       expect(result.cleanContent).toBe('prefix [applet:test] message');
     });
+  });
+});
+
+describe('prefixMessageSource', () => {
+  it('returns content unchanged for user source', () => {
+    const result = prefixMessageSource('user', '', 'Hello world');
+    expect(result).toBe('Hello world');
+  });
+
+  it('prefixes applet messages', () => {
+    const result = prefixMessageSource('applet', 'file-browser', 'Show files');
+    expect(result).toBe('[applet:file-browser] Show files');
+  });
+
+  it('prefixes agent messages', () => {
+    const result = prefixMessageSource('agent', 'sess-123', 'Query data');
+    expect(result).toBe('[agent:sess-123] Query data');
+  });
+
+  it('prefixes scheduler messages', () => {
+    const result = prefixMessageSource('scheduler', 'daily-standup', 'Run task');
+    expect(result).toBe('[scheduler:daily-standup] Run task');
+  });
+
+  it('round-trips with parseMessageSource', () => {
+    const original = 'Some message';
+    const prefixed = prefixMessageSource('applet', 'my-app', original);
+    const parsed = parseMessageSource(prefixed);
+    expect(parsed.source).toBe('applet');
+    expect(parsed.identifier).toBe('my-app');
+    expect(parsed.cleanContent).toBe(original);
   });
 });

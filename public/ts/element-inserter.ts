@@ -37,6 +37,7 @@ export const EVENT_TO_OUTER: Record<string, string> = {
   // Caco synthetic types
   'caco.agent': 'agent-message',
   'caco.applet': 'applet-message',
+  'caco.scheduler': 'scheduler-message',
   'caco.embed': 'embed-message',
   'caco.info': 'assistant-activity',
 };

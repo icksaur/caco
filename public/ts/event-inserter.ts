@@ -270,6 +270,7 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   // Caco synthetic types
   'caco.agent': setPath('content'),
   'caco.applet': setPath('content'),
+  'caco.scheduler': setPath('content'),
   
   // Embed media - renders iframe from outputId
   'caco.embed': (element, data) => {

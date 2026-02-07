@@ -18,6 +18,7 @@ import { registerStatePushHandler } from '../applet-push.js';
 import sessionManager from '../session-manager.js';
 import { shouldFilter } from '../event-filter.js';
 import { transformForClient } from '../event-transformer.js';
+import { parseMessageSource, type MessageSource } from '../message-source.js';
 import { listEmbedOutputs, parseOutputMarkers } from '../storage.js';
 import { CacoEventQueue, isFlushTrigger, type CacoEvent } from '../caco-event-queue.js';
 import { normalizeToolComplete, extractToolResultText, type RawSDKEvent } from '../sdk-normalizer.js';
@@ -27,11 +28,8 @@ const allConnections = new Set<WebSocket>();
 const sessionSubscribers = new Map<string, Set<WebSocket>>();
 const clientSubscription = new Map<WebSocket, string>();
 
-/**
- * Message source identifies who sent a message.
- * Extensible: add new sources here (e.g., 'agent' for agent-to-agent).
- */
-export type MessageSource = 'user' | 'applet' | 'agent';
+// Re-export MessageSource from shared module for backward compatibility
+export type { MessageSource } from '../message-source.js';
 
 interface ClientMessage {
   type: 'setState' | 'getState' | 'sendMessage' | 'requestHistory' | 'ping' | 'subscribe';
@@ -251,6 +249,38 @@ export function hasAppletConnection(_sessionId: string): boolean {
 }
 
 /**
+ * Enrich user.message events with source metadata by parsing content prefix.
+ * For history replay: SDK stores [applet:slug], [agent:id], [scheduler:slug] prefixes.
+ * This parses them and adds source/identifier to event data, with clean content.
+ */
+function enrichUserMessageWithSource(event: SessionEvent): SessionEvent {
+  if (event.type !== 'user.message') return event;
+  
+  const data = event.data || {};
+  const content = typeof data.content === 'string' ? data.content : '';
+  
+  // If already has source (live streaming), return as-is
+  if (data.source && data.source !== 'user') return event;
+  
+  const parsed = parseMessageSource(content);
+  if (parsed.source === 'user') return event;
+  
+  // Enrich with parsed source
+  return {
+    ...event,
+    data: {
+      ...data,
+      content: parsed.cleanContent,
+      source: parsed.source,
+      // Add identifier to appropriate field based on source
+      ...(parsed.source === 'applet' && { appletSlug: parsed.identifier }),
+      ...(parsed.source === 'agent' && { fromSession: parsed.identifier }),
+      ...(parsed.source === 'scheduler' && { scheduleSlug: parsed.identifier }),
+    }
+  };
+}
+
+/**
  * Broadcast user message from HTTP POST handler
  * Called when server receives a message via REST API
  * Broadcasts to ALL clients - they filter by sessionId
@@ -261,7 +291,8 @@ export function broadcastUserMessageFromPost(
   hasImage: boolean,
   source: MessageSource = 'user',
   appletSlug?: string,
-  fromSession?: string
+  fromSession?: string,
+  scheduleSlug?: string
 ): void {
   // Create a user.message event
   const event: SessionEvent = {
@@ -271,6 +302,7 @@ export function broadcastUserMessageFromPost(
       source,
       appletSlug,
       fromSession,
+      scheduleSlug,
       hasImage
     }
   };
@@ -324,7 +356,9 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
       // Send SDK event
       if (!shouldFilter(evt)) {
         for (const transformed of transformForClient(evt)) {
-          send(ws, { type: 'event', sessionId, event: transformed });
+          // Parse user.message content for source prefix (from applet/agent/scheduler)
+          const enriched = enrichUserMessageWithSource(transformed);
+          send(ws, { type: 'event', sessionId, event: enriched });
         }
       }
       

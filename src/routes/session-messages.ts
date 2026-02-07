@@ -25,6 +25,7 @@ import { getQueue, isFlushTrigger } from '../caco-event-queue.js';
 import { setSessionIntent } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
+import { prefixMessageSource } from '../message-source.js';
 
 const router = Router();
 
@@ -36,7 +37,7 @@ const router = Router();
  */
 router.post('/sessions/:sessionId/messages', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { prompt, imageData, appletState, appletNavigation, source, appletSlug, fromSession, correlationId } = req.body as {
+  const { prompt, imageData, appletState, appletNavigation, source, appletSlug, fromSession, scheduleSlug, correlationId } = req.body as {
     prompt?: string;
     imageData?: string;
     appletState?: Record<string, unknown>;
@@ -44,6 +45,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     source?: MessageSource;
     appletSlug?: string;
     fromSession?: string;  // For agent-to-agent: originating session ID
+    scheduleSlug?: string; // For scheduler: schedule slug for prefix
     correlationId?: string; // For tracking related calls
   };
   
@@ -108,7 +110,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   
   // Broadcast user message to WS clients for unified rendering
   // Use source from request (defaults to 'user' for normal messages)
-  broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, source ?? 'user', appletSlug, fromSession);
+  broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, source ?? 'user', appletSlug, fromSession, scheduleSlug);
   
   // Record agent call for runaway guard
   if (correlationId) {
@@ -118,13 +120,15 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // Return immediately - dispatch happens in background
   res.json({ ok: true, sessionId });
   
-  // Prefix prompt with applet/agent marker for history persistence
-  // Format: [applet:slug] or [agent:fromSession] actual prompt
+  // Prefix prompt with source marker for history persistence and agent context
+  // Format: [applet:slug], [agent:sessionId], or [scheduler:slug]
   let promptToSend = prompt;
   if (source === 'applet' && appletSlug) {
-    promptToSend = `[applet:${appletSlug}] ${prompt}`;
+    promptToSend = prefixMessageSource('applet', appletSlug, prompt);
   } else if (source === 'agent' && fromSession) {
-    promptToSend = `[agent:${fromSession}] ${prompt}`;
+    promptToSend = prefixMessageSource('agent', fromSession, prompt);
+  } else if (source === 'scheduler' && scheduleSlug) {
+    promptToSend = prefixMessageSource('scheduler', scheduleSlug, prompt);
   }
   
   // Dispatch to SDK with WS broadcast callbacks

@@ -40,6 +40,7 @@
   --color-assistant-bg: transparent;
   --color-applet-bg: #9b7514;
   --color-agent-bg: #5c3d6e;
+  --color-scheduler-bg: #1a4a4a;
   --color-activity-bg: #2d2d2d;
   --color-selector-bg: #2d333b;
   --color-selector-hover: #3d434b;
@@ -736,6 +737,11 @@ main {
 
 .applet-message {
   background: var(--color-applet-bg);
+  padding: var(--space-lg);
+}
+
+.scheduler-message {
+  background: var(--color-scheduler-bg);
   padding: var(--space-lg);
 }
 

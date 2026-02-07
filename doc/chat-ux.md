@@ -13,7 +13,7 @@ Messages can originate from four sources, each with distinct visual styling and 
 | `user` | Chat input UI | Blue | Human user typing |
 | `applet` | Applet `sendAgentMessage()` | Orange | Applet-triggered automation |
 | `agent` | `send_agent_message` tool | Purple | Agent-to-agent communication |
-| `scheduler` | Scheduled job execution | (uses agent style) | Scheduled automation |
+| `scheduler` | Scheduled job execution | Teal | Scheduled automation |
 
 ### Visual Differentiation
 
@@ -21,6 +21,7 @@ CSS classes apply distinct backgrounds:
 - `.user-message` → `var(--color-user-bg)` (blue tint)
 - `.applet-message` → `var(--color-applet-bg)` (orange tint)  
 - `.agent-message` → `var(--color-agent-bg)` (purple tint)
+- `.scheduler-message` → `var(--color-scheduler-bg)` (teal tint)
 
 ### Current State: BROKEN ⚠️
 
@@ -71,11 +72,11 @@ if (event.type === 'user.message' && event.data?.source !== 'user') {
 
 #### 2. History Replay Parsing
 
-When replaying history, parse `[applet:slug]` and `[agent:sessionId]` prefixes:
+When replaying history, parse `[applet:slug]`, `[agent:sessionId]`, and `[scheduler:slug]` prefixes:
 
 ```typescript
 function parseMessageSource(content: string): {
-  source: 'user' | 'applet' | 'agent';
+  source: 'user' | 'applet' | 'agent' | 'scheduler';
   identifier?: string;
   cleanContent: string;
 }
@@ -98,6 +99,42 @@ Already implemented in `tests/unit/message-source.test.ts` - needs to be extract
 ```
 
 Agent sees this prefix and adjusts behavior (e.g., no "how can I help?" responses).
+
+### Implementation Plan
+
+**Phase 1: Groundwork (no behavior change)**
+
+1. **Extend MessageSource type** - Add `'scheduler'` to `MessageSource` union in:
+   - `src/routes/websocket.ts`
+   - `public/ts/websocket.ts`
+
+2. **Extract parseMessageSource()** - Create `src/message-source.ts`:
+   - Pure function with no I/O
+   - Handles all 4 source types: user, applet, agent, scheduler
+   - Returns `{ source, identifier?, cleanContent }`
+
+3. **Add CSS variables and classes**:
+   - `--color-scheduler-bg: #1a4a4a` (teal tint)
+   - `.scheduler-message` class with appropriate styling
+
+4. **Add scheduler prefix** - Update `src/routes/session-messages.ts`:
+   - When `source === 'scheduler'`, prefix prompt with `[scheduler:slug]`
+
+**Phase 2: Live streaming differentiation**
+
+5. **Element inserter mapping** - Update `public/ts/element-inserter.ts`:
+   - Map `caco.scheduler` event type to `.scheduler-message` class
+
+6. **Event handler differentiation** - Update user.message handler:
+   - Check `data.source` field
+   - Create appropriate outer div class based on source
+
+**Phase 3: History replay**
+
+7. **Parse prefixes on replay** - Update history streaming:
+   - Use `parseMessageSource()` on user message content
+   - Apply correct CSS class based on parsed source
+   - Display clean content (without prefix)
 
 ## Message Metadata Storage
 

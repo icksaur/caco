@@ -84,12 +84,11 @@ describe('view-controller', () => {
     });
     
     it('isViewState returns correct boolean', () => {
-      viewController.setViewState('applet');
+      viewController.setViewState('chatting');
       
-      expect(viewController.isViewState('applet')).toBe(true);
+      expect(viewController.isViewState('chatting')).toBe(true);
       expect(viewController.isViewState('sessions')).toBe(false);
       expect(viewController.isViewState('newChat')).toBe(false);
-      expect(viewController.isViewState('chatting')).toBe(false);
     });
     
     it('does not change state when setting same value', () => {

@@ -143,7 +143,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
       onEvent: (evt) => broadcastEvent(sessionId, evt)
     }
   ).catch(err => {
-    console.error(`[DISPATCH] Error:`, err);
+    console.error('[DISPATCH] Error:', err);
   });
 });
 

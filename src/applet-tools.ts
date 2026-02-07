@@ -352,7 +352,7 @@ export function createAppletTools(_programCwd: string) {
       return {
         textResultForLlm: active > 0 
           ? `Server restart scheduled. Waiting for ${active} active session(s) to complete. Server will restart when your session and all others are idle.`
-          : `Server restart initiated. This MUST be your final action.`,
+          : 'Server restart initiated. This MUST be your final action.',
         resultType: 'success' as const,
         toolTelemetry: {
           restartScheduled: true,

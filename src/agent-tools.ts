@@ -54,7 +54,7 @@ The target session receives your message with source: 'agent'. Your session ID i
         
         if (!correlationId) {
           return { 
-            textResultForLlm: `Cannot send agent message: no correlationId in dispatch context. This may be a system error - agent-to-agent calls require correlation tracking.`,
+            textResultForLlm: 'Cannot send agent message: no correlationId in dispatch context. This may be a system error - agent-to-agent calls require correlation tracking.',
             resultType: 'error' as const
           };
         }

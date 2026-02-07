@@ -18,7 +18,8 @@
   },
   "include": [
     "src/**/*.ts",
-    "server.ts"
+    "server.ts",
+    "tests/**/*.ts"
   ],
   "exclude": [
     "node_modules",

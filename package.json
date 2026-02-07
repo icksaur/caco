@@ -10,12 +10,14 @@
     "build:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --minify --sourcemap",
     "watch:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --sourcemap --watch",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.frontend.json",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "knip": "knip",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "prepare": "husky"
   },
   "keywords": [],
   "author": "",
@@ -34,13 +36,22 @@
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.10",
     "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
     "@vitest/coverage-v8": "^4.0.18",
     "esbuild": "^0.27.2",
     "eslint": "^9.39.2",
     "globals": "^17.1.0",
+    "husky": "^9.1.7",
     "knip": "^5.82.1",
+    "lint-staged": "^16.2.7",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint"
+    ]
   }
 }

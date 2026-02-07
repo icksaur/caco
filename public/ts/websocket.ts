@@ -57,7 +57,7 @@ export function connectWs(): void {
   
   // Already connected or connecting
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-    console.log(`[WS] Already connected/connecting`);
+    console.log('[WS] Already connected/connecting');
     return;
   }
   
@@ -115,7 +115,7 @@ function doConnect(myConnectionId: number): void {
   ws.onopen = () => {
     // Bail if stale
     if (myConnectionId !== connectionId) {
-      console.log(`[WS] onopen bailing, stale connection ID`);
+      console.log('[WS] onopen bailing, stale connection ID');
       ws.close();
       return;
     }
@@ -435,7 +435,7 @@ export function waitForConnect(): Promise<void> {
  */
 export function reconnectIfNeeded(): void {
   if (!socket || socket.readyState === WebSocket.CLOSED) {
-    console.log(`[WS] reconnectIfNeeded - reconnecting`);
+    console.log('[WS] reconnectIfNeeded - reconnecting');
     reconnectAttempts = 0;
     connectionId++;
     doConnect(connectionId);

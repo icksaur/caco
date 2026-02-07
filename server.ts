@@ -43,7 +43,7 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
       queue.queue(event);
       console.log(`[QUEUE] caco.embed queued for session ${sessionRef.id}, pending: ${queue.length}`);
     } else {
-      console.log(`[QUEUE] No sessionRef.id, event not queued`);
+      console.log('[QUEUE] No sessionRef.id, event not queued');
     }
   };
   
@@ -228,11 +228,15 @@ async function start(): Promise<void> {
 }
 
 // Graceful shutdown
-process.on('SIGINT', async () => {
+process.on('SIGINT', () => {
   console.log('\n✓ Shutting down gracefully...');
   stopScheduleManager();
-  await sessionState.shutdown();
-  process.exit(0);
+  sessionState.shutdown().then(() => {
+    process.exit(0);
+  }).catch((err) => {
+    console.error('Shutdown error:', err);
+    process.exit(1);
+  });
 });
 
 // Handle unhandled rejections (prevents crash from SDK async errors)

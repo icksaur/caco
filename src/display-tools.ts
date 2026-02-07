@@ -45,7 +45,7 @@ export function createDisplayTools(storeOutput: StoreOutputFn, emitCacoEvent: Em
     .join(', ');
 
   const embedMedia = defineTool('embed_media', {
-    description: `Embed media (YouTube, Vimeo, SoundCloud, Spotify) inline in chat.`,
+    description: 'Embed media (YouTube, Vimeo, SoundCloud, Spotify) inline in chat.',
 
     parameters: z.object({
       url: z.string().describe('URL of the media to embed (YouTube, SoundCloud, Vimeo, Spotify, Twitter/X)')

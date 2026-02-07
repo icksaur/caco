@@ -32,7 +32,7 @@ interface AppletInstance {
 }
 
 let currentApplet: AppletInstance | null = null;
-let currentStyleElement: HTMLStyleElement | null = null;
+const currentStyleElement: HTMLStyleElement | null = null;
 let pendingAppletState: Record<string, unknown> | null = null;
 
 /**
@@ -360,7 +360,7 @@ export async function loadAppletFromUrl(): Promise<boolean> {
       await loadAppletBySlug(slug);
       return true;
     } catch (err) {
-      console.error(`[APPLET] Failed to load from URL:`, err);
+      console.error('[APPLET] Failed to load from URL:', err);
       return false;
     }
   }

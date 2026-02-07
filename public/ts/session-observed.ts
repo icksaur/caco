@@ -17,9 +17,9 @@ export async function markSessionObserved(sessionId: string): Promise<void> {
     });
     
     if (!response.ok) {
-      console.error(`[OBSERVED] Failed to mark session observed:`, response.status);
+      console.error('[OBSERVED] Failed to mark session observed:', response.status);
     }
   } catch (error) {
-    console.error(`[OBSERVED] Error marking session observed:`, error);
+    console.error('[OBSERVED] Error marking session observed:', error);
   }
 }

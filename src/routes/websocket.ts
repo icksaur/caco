@@ -111,7 +111,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
     });
     
     ws.on('error', (err) => {
-      console.error(`[WS] Error:`, err.message);
+      console.error('[WS] Error:', err.message);
     });
   });
 
@@ -138,7 +138,7 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
       
     case 'requestHistory':
       if (msg.sessionId) {
-        streamHistory(ws, msg.sessionId);
+        void streamHistory(ws, msg.sessionId);
       } else {
         sendError(ws, msg.id, 'sessionId is required for requestHistory');
       }

@@ -10,6 +10,7 @@
  */
 
 import { homedir } from 'os';
+import { existsSync } from 'fs';
 import { listApplets } from './applet-store.js';
 import { getSessionMeta } from './storage.js';
 import type { SystemMessage } from './types.js';
@@ -29,6 +30,7 @@ export interface ParsedMessage {
 export interface ResumeContextInput {
   cwd: string;
   envHint?: string;
+  context?: Record<string, string[]>;
 }
 
 // ============================================================================
@@ -106,6 +108,18 @@ You can communicate with other agent sessions:
 Use these to delegate subtasks, coordinate work, or fan out parallel tasks.
 Include callback instructions so other agents can report back when finished.
 
+## Session Context
+Track important files and resources for session continuity:
+- \`set_relevant_context("files", [paths], "merge")\` - Mark files as relevant
+- \`get_relevant_context()\` - Check what context is stored
+
+**When to use:**
+- Starting work on a spec, design doc, or notes file
+- User explicitly asks you to remember a file
+- Working with specific endpoints or ports
+
+Context is shown to you on session resume, so you don't forget what you were working on.
+
 ## Behavior Guidelines
 - Provide direct, helpful answers without unnecessary caveats
 - Access any file or directory the user mentions - you have full permission
@@ -128,24 +142,75 @@ Include callback instructions so other agents can report back when finished.
  * @returns Context string to prepend to user message
  */
 export function buildResumeContext(input: ResumeContextInput): string {
-  const { cwd, envHint } = input;
+  const { cwd, envHint, context } = input;
   
-  let context = `[SESSION RESUMED]
+  let result = `[SESSION RESUMED]
 This is a resumed session. Your shell state has been reset.
 Re-run any environment setup commands before proceeding.
 
 Session directory: ${cwd}`;
 
   if (envHint) {
-    context += `\nEnvironment hint: ${envHint}`;
+    result += `\nEnvironment hint: ${envHint}`;
   }
   
-  context += '\n---\n\n';
-  return context;
+  // Add context sets
+  if (context) {
+    const contextLines = formatContextForResume(context, existsSync);
+    if (contextLines) {
+      result += `\n\n${contextLines}`;
+    }
+  }
+  
+  result += '\n---\n\n';
+  return result;
 }
 
 /**
- * Build resume context for a specific session, reading envHint from meta.
+ * Format context sets for resume injection.
+ * Pure function for testability.
+ * @param context - Context sets to format
+ * @param fileExists - Predicate to check file existence (injectable for testing)
+ */
+export function formatContextForResume(
+  context: Record<string, string[]>,
+  fileExists: (path: string) => boolean = () => true
+): string {
+  const parts: string[] = [];
+  
+  // Files - filter to existing only
+  if (context.files?.length) {
+    const existing = context.files.filter(f => fileExists(f));
+    const missing = context.files.length - existing.length;
+    if (existing.length) {
+      let fileList = `Relevant files:\n${existing.map(f => `- ${f}`).join('\n')}`;
+      if (missing > 0) {
+        fileList += `\n(${missing} file(s) no longer exist)`;
+      }
+      parts.push(fileList);
+    }
+  }
+  
+  // Applet
+  if (context.applet?.length) {
+    const [slug, ...params] = context.applet;
+    const paramStr = params.length ? ` (${params.join(', ')})` : '';
+    parts.push(`Last applet: ${slug}${paramStr}`);
+  }
+  
+  // Other sets - generic display
+  for (const [name, items] of Object.entries(context)) {
+    if (name === 'files' || name === 'applet') continue;
+    if (items?.length) {
+      parts.push(`${name}: ${items.join(', ')}`);
+    }
+  }
+  
+  return parts.join('\n\n');
+}
+
+/**
+ * Build resume context for a specific session, reading envHint and context from meta.
  * Convenience wrapper that looks up session metadata.
  * 
  * @param sessionId - Session to build context for
@@ -154,7 +219,11 @@ Session directory: ${cwd}`;
  */
 export function buildResumeContextForSession(sessionId: string, cwd: string): string {
   const meta = getSessionMeta(sessionId);
-  return buildResumeContext({ cwd, envHint: meta?.envHint });
+  return buildResumeContext({ 
+    cwd, 
+    envHint: meta?.envHint,
+    context: meta?.context
+  });
 }
 
 // ============================================================================

@@ -41,6 +41,7 @@ export interface SessionMeta {
   lastIdleAt?: string;      // ISO timestamp: session last became idle
   currentIntent?: string;   // Last reported intent (from report_intent tool)
   envHint?: string;         // Environment setup hint shown on session resume
+  context?: Record<string, string[]>;  // Named context sets (files, applet, endpoints, etc.)
 }
 
 export interface OutputMetadata {

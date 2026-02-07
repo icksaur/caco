@@ -15,7 +15,9 @@ import { sessionState } from './src/session-state.js';
 import sessionManager from './src/session-manager.js';
 import { createDisplayTools, type CacoEmbedEvent } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
-import { createAgentTools, type SessionIdRef } from './src/agent-tools.js';
+import { createAgentTools } from './src/agent-tools.js';
+import { createContextTools } from './src/context-tools.js';
+import type { SessionIdRef } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
 import { setupWebSocket } from './src/routes/websocket.js';
@@ -64,7 +66,10 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
     (id) => sessionManager.getDispatchCorrelationId(id)
   );
   
-  return [...displayTools, ...appletTools, ...agentTools];
+  // Context tools for session context persistence (files, applets, etc.)
+  const contextTools = createContextTools(sessionRef);
+  
+  return [...displayTools, ...appletTools, ...agentTools, ...contextTools];
 };
 
 // System message for sessions - built at startup from prompts module

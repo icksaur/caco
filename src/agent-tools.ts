@@ -11,10 +11,7 @@
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { SERVER_URL } from './config.js';
-
-export interface SessionIdRef {
-  id: string;
-}
+import type { SessionIdRef } from './types.js';
 
 /**
  * Function to get correlationId for current dispatch

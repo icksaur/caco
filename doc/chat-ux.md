@@ -23,17 +23,23 @@ CSS classes apply distinct backgrounds:
 - `.agent-message` → `var(--color-agent-bg)` (purple tint)
 - `.scheduler-message` → `var(--color-scheduler-bg)` (teal tint)
 
-### Current State: BROKEN ⚠️
+### Current State: FIXED ✅
 
-**Problem**: All sources render as `user.message` events with source metadata in `data.source`, but:
-
-1. **Live streaming**: Server broadcasts `user.message` with `source` field, but client doesn't differentiate
-2. **History replay**: SDK stores the prefixed prompt `[applet:slug] ...` but client shows raw text
-3. **Agent context**: Copilot SDK sees all messages as "user" - doesn't know scheduler/applet/agent context
+Message sources are now correctly differentiated:
+- **Live streaming**: Client transforms `user.message` with `source` to `caco.*` synthetic types
+- **History replay**: Server parses `[source:id]` prefix and enriches event with `source` metadata
+- **Agent context**: Copilot SDK sees prefixed prompts like `[scheduler:daily-standup]`
 
 ### Implementation Details
 
-**Current flow** (partially working):
+**Chat bubble rendering** requires entries in THREE files:
+1. `element-inserter.ts` → `EVENT_TO_OUTER` (outer div class, e.g., `scheduler-message`)
+2. `element-inserter.ts` → `EVENT_TO_INNER` (inner div class, e.g., `scheduler-text`)  
+3. `event-inserter.ts` → `EVENT_INSERTERS` (content rendering function)
+
+Missing any of these = broken rendering!
+
+**Current flow** (working):
 
 ```
 Applet → POST /api/sessions/:id/messages { source: 'applet', appletSlug: 'file-browser' }
@@ -44,7 +50,7 @@ SDK → Stores prefixed string in history (as user message)
          ↓
 WebSocket → Broadcasts: { type: 'user.message', data: { content, source: 'applet', appletSlug } }
          ↓
-Client → Receives event but renders all as user-message (missing differentiation)
+Client → Transforms to caco.applet, renders with applet-message class
 ```
 
 **Files involved**:

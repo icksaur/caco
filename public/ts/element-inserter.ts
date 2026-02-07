@@ -68,6 +68,7 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
   // Caco synthetic types
   'caco.agent': 'agent-text',
   'caco.applet': 'applet-text',
+  'caco.scheduler': 'scheduler-text',
   'caco.embed': 'embed-content',
   'caco.info': null,  // omit - internal signal
 };

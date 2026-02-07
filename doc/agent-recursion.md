@@ -402,11 +402,7 @@ Track metrics:
 
 ## Open Questions
 
-1. **How to pass correlationId through MCP tools?**
-   - Option A: Tool context/metadata (if SDK supports)
-   - Option B: Hidden parameter in tool result
-   - Option C: Server-side tracking by session relationship
-   - **Proposal:** Option C - when agent calls `create_agent_session`, server automatically associates correlation ID
+1. ~~How to pass correlationId through MCP tools?~~ **CURRENT GAP - See Implementation Status**
 
 2. **Should collapsed depth count the current session?**
    - Example: `[1, 2]` - is this depth 2 or depth 1?
@@ -419,3 +415,44 @@ Track metrics:
 
 4. **What if legitimate use needs >5 depth?**
    - **Proposal:** Make limits configurable, but document that >5 is a design smell
+
+---
+
+## Implementation Status
+
+### ✅ Implemented
+
+**Correlation tracking infrastructure:**
+- Server-side correlation metrics tracking (`src/correlation-metrics.ts`)
+- Runaway rules engine (`src/rules-engine.ts`)
+- Chain collapse algorithm (`src/chain-stack.ts`)
+- POST `/api/sessions/:id/messages` requires correlationId for agent calls (has `fromSession`)
+
+**correlationId is invisible to agents:**
+- Server generates `correlationId` for all user/applet/scheduler messages (new flows)
+- Agent tools inherit `correlationId` from dispatch context (no LLM round-trip)
+- `sessionManager.setDispatchContext(sessionId, correlationId)` called before dispatch
+- `send_agent_message` reads context: `sessionManager.getDispatchContext(sessionRef.id)`
+- Context cleared after dispatch completes
+
+### Flow
+
+```
+User message POST (no correlationId)
+  → Server generates: effectiveCorrelationId = randomUUID()
+  → sessionManager.recordAgentCall(effectiveCorrelationId, sessionId)
+  → dispatchMessage(..., correlationId: effectiveCorrelationId)
+    → sessionManager.setDispatchContext(sessionId, correlationId)
+    → SDK processes, agent calls send_agent_message tool
+      → Tool reads: sessionManager.getDispatchContext(sessionRef.id)
+      → Tool POSTs with correlationId (invisible to agent)
+    → on idle: sessionManager.clearDispatchContext(sessionId)
+```
+
+### Runaway Prevention
+
+- Agent-to-agent calls validated via `checkAgentCall(correlationId, sessionId)`
+- Rules: max chain depth, rate limits, self-call prevention
+- Same correlationId propagates through entire flow
+- All calls (including user-initiated) tracked in metrics
+

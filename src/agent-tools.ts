@@ -17,11 +17,18 @@ export interface SessionIdRef {
 }
 
 /**
+ * Function to get correlationId for current dispatch
+ * Injected to avoid coupling to sessionManager
+ */
+export type GetCorrelationId = (sessionId: string) => string | undefined;
+
+/**
  * Create agent tools with a session ID reference
  * The reference can be updated after session creation for new sessions.
  * @param sessionRef - Mutable reference to session ID
+ * @param getCorrelationId - Function to get correlationId for current dispatch
  */
-export function createAgentTools(sessionRef: SessionIdRef) {
+export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: GetCorrelationId) {
   
   const sendAgentMessage = defineTool('send_agent_message', {
     description: `Send a message to another agent session. Use this to delegate work to specialist sessions or coordinate with other agents.
@@ -42,13 +49,24 @@ The target session receives your message with source: 'agent'. Your session ID i
 
     handler: async ({ sessionId, message }) => {
       try {
+        // Get correlationId from dispatch context (inherited from current dispatch)
+        const correlationId = getCorrelationId(sessionRef.id);
+        
+        if (!correlationId) {
+          return { 
+            textResultForLlm: `Cannot send agent message: no correlationId in dispatch context. This may be a system error - agent-to-agent calls require correlation tracking.`,
+            resultType: 'error' as const
+          };
+        }
+        
         const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: message,
             source: 'agent',
-            fromSession: sessionRef.id
+            fromSession: sessionRef.id,
+            correlationId
           })
         });
         

@@ -9,7 +9,7 @@ import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta }
 import { unobservedTracker } from './unobserved-tracker.js';
 import { getScheduleForSession } from './schedule-store.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
-import { busyTracker } from './busy-tracker.js';
+import { dispatchState } from './dispatch-state.js';
 
 interface CopilotClientInstance {
   start(): Promise<void>;
@@ -314,8 +314,8 @@ class SessionManager {
       console.warn(`Warning: client.stop() failed: ${message}`);
     }
     
-    // Clear busy state and untrack
-    busyTracker.markIdle(sessionId);
+    // Clear dispatch state and untrack
+    dispatchState.end(sessionId);
     this.activeSessions.delete(sessionId);
     
     // Unregister from storage layer
@@ -525,21 +525,31 @@ class SessionManager {
    * Check if a session is currently processing a message
    */
   isBusy(sessionId: string): boolean {
-    return busyTracker.isBusy(sessionId);
+    return dispatchState.isBusy(sessionId);
   }
 
   /**
-   * Mark a session as busy (processing a message)
+   * Start a dispatch - marks session busy with correlation context
+   * Called before dispatching to SDK. Tools can inherit correlationId.
    */
-  markBusy(sessionId: string): void {
-    busyTracker.markBusy(sessionId);
+  startDispatch(sessionId: string, correlationId: string): void {
+    dispatchState.start(sessionId, correlationId);
   }
 
   /**
-   * Mark a session as idle (done processing)
+   * End a dispatch - clears busy state and correlation context
+   * Called when dispatch completes (idle, error, or timeout).
    */
-  markIdle(sessionId: string): void {
-    busyTracker.markIdle(sessionId);
+  endDispatch(sessionId: string): void {
+    dispatchState.end(sessionId);
+  }
+
+  /**
+   * Get correlationId for active dispatch (used by tools)
+   * Returns undefined if no dispatch is active.
+   */
+  getDispatchCorrelationId(sessionId: string): string | undefined {
+    return dispatchState.getCorrelationId(sessionId);
   }
 
   /**

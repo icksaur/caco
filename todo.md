@@ -4,24 +4,7 @@
 **after making changes do not commit, review code-quality.md and review the changes for quality issues**
 **after making changes do not commit until the user tests**
 
-Schedule and session UI improvements:
-use session-ux.md
-GOAL: Easy to quickly review busy or idle-but-unobserved sessions.
-Use case: user running multiple sessions with work, and wants to quickly respond to idle sessions or review busy ones.
-Ideas: Put unobserved idle session count on session list badge.  Change session list order to MRU, needs cwd per session line.  Session-list click removes unobserved state from session and decrements badge count.  Must persist on disk.  Perhaps fire event for multi-client to update list.
-Built-in schedule and job UI into session list (not sure how to show this, maybe longer scroll is sufficient).  We have untested applet but seems like this should be built-in to default UI.
-Put busy or unobserved jobs at top of session list. Busy jobs can have a description string built from the 
-Remove jobs applet?
-Schedule reply: message can be scheduled for some time in the future.  Adds a one-time scheduled job.  Schedule system currently does not support. Needs a method to signify user message was scheduled in history, perhaps a colored tag on user message.  Use case: external system is not ready for an hour, so schedule to check in an hour.
-consideratons:
-data flow for of "idle-but-unobserved" with clean code
-data flow for session state
-persistence of "unobserved" sessions, marking state when user views session in chat
-single-point-of entry for marking sessions as observed
-new session metadata using existing storage
-schedule list in session-view with at least "no jobs scheduled"
-session ui session description, plus second string with report_intent so users can see what "busy" sessions are doing
-stream content to sessions to update intent strings and state live in session-view
+image paste is broken.
 
 out-of-band agent input:
 Is there anything in the SDK or design that would allow us to inject content into a busy agent session?  Something that causes it to change course without interrupting the "premium request"

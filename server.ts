@@ -12,6 +12,7 @@ import { dirname, join } from 'path';
 import { homedir, hostname } from 'os';
 import { readFileSync } from 'fs';
 import { sessionState } from './src/session-state.js';
+import sessionManager from './src/session-manager.js';
 import { createDisplayTools, type CacoEmbedEvent } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools, type SessionIdRef } from './src/agent-tools.js';
@@ -57,7 +58,11 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
   
   // Agent tools need sessionRef for self-identification in callbacks
   // Uses mutable ref so tools work even when sessionId isn't known at creation time
-  const agentTools = createAgentTools(sessionRef);
+  // getDispatchCorrelationId injected to avoid coupling agent-tools to sessionManager
+  const agentTools = createAgentTools(
+    sessionRef, 
+    (id) => sessionManager.getDispatchCorrelationId(id)
+  );
   
   return [...displayTools, ...appletTools, ...agentTools];
 };

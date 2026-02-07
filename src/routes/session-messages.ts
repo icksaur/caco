@@ -9,6 +9,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import { join } from 'path';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
@@ -56,11 +57,15 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     return;
   }
   
-  // Agent calls must include correlationId
+  // Agent calls must include correlationId (passed by tool, invisible to agent)
   if (fromSession && !correlationId) {
     res.status(400).json({ error: 'correlationId required for agent-initiated calls' });
     return;
   }
+  
+  // Generate correlationId for non-agent messages (user/applet/scheduler)
+  // This allows agent tools to inherit it for agent-to-agent communication
+  const effectiveCorrelationId = correlationId || randomUUID();
   
   // Verify session exists (getSessionCwd returns null if not found)
   if (!sessionManager.getSessionCwd(sessionId)) {
@@ -112,10 +117,8 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // and broadcastEvent() enriches it with source metadata by parsing the prefix.
   // This ensures ONE code path for enrichment (both live and history).
   
-  // Record agent call for runaway guard
-  if (correlationId) {
-    sessionManager.recordAgentCall(correlationId, sessionId);
-  }
+  // Record call for correlation metrics (all flows, not just agent calls)
+  sessionManager.recordAgentCall(effectiveCorrelationId, sessionId);
   
   // Return immediately - dispatch happens in background
   res.json({ ok: true, sessionId });
@@ -135,7 +138,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   dispatchMessage(
     sessionId, 
     promptToSend, 
-    { tempFilePath, clientId },
+    { tempFilePath, clientId, correlationId: effectiveCorrelationId },
     {
       onEvent: (evt) => broadcastEvent(sessionId, evt)
     }
@@ -161,17 +164,17 @@ export interface DispatchCallbacks {
  * 
  * @param sessionId - Target session
  * @param prompt - Message to send
- * @param options - Optional: tempFilePath for image, clientId for session switching
+ * @param options - Optional: tempFilePath for image, clientId for session switching, correlationId for tracking
  * @param callbacks - Optional: onEvent callback for observers
  */
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePath?: string; clientId?: string },
+  options?: { tempFilePath?: string; clientId?: string; correlationId?: string },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePath } = options || {};
+  const { tempFilePath, correlationId } = options || {};
   const onEvent = callbacks?.onEvent || (() => {});
   
   // Track active dispatch for graceful restart
@@ -213,7 +216,9 @@ export async function dispatchMessage(
         timeoutHandle = undefined;
       }
       
-      sessionManager.markIdle(sessionId);
+      // End dispatch - clears busy state and correlation context atomically
+      sessionManager.endDispatch(sessionId);
+      
       broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
       if (tempFilePath) {
         unlink(tempFilePath).catch(() => {});
@@ -294,8 +299,11 @@ export async function dispatchMessage(
     
     // Send message
     try {
-      sessionManager.markBusy(sessionId);
+      // Start dispatch - marks busy and sets correlation context atomically
+      // correlationId is always present (generated server-side for non-agent messages)
+      sessionManager.startDispatch(sessionId, correlationId!);
       broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: true } });
+      
       sessionManager.sendStream(sessionId, prompt, messageOptions);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -315,7 +323,7 @@ export async function dispatchMessage(
     const message = error instanceof Error ? error.message : String(error);
     onEvent({ type: 'session.error', data: { message } });
     
-    sessionManager.markIdle(sessionId);
+    sessionManager.endDispatch(sessionId);
     broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
     if (tempFilePath) {
       await unlink(tempFilePath).catch(() => {});

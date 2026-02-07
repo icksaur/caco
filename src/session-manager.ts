@@ -10,7 +10,7 @@ import { unobservedTracker } from './unobserved-tracker.js';
 import { getScheduleForSession } from './schedule-store.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
-import { buildResumeContext as buildResumeContextMessage } from './resume-context.js';
+import { buildResumeContextForSession } from './prompts.js';
 
 interface CopilotClientInstance {
   start(): Promise<void>;
@@ -363,11 +363,10 @@ class SessionManager {
 
   /**
    * Build context message to prepend on first send after resume.
-   * Informs agent that shell state is reset and may need re-initialization.
+   * Delegates to prompts module.
    */
   private buildResumeContext(sessionId: string, cwd: string): string {
-    const meta = getSessionMeta(sessionId);
-    return buildResumeContextMessage({ cwd, envHint: meta?.envHint });
+    return buildResumeContextForSession(sessionId, cwd);
   }
 
   /**

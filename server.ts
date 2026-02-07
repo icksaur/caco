@@ -9,7 +9,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { homedir, hostname } from 'os';
+import { hostname } from 'os';
 import { readFileSync } from 'fs';
 import { sessionState } from './src/session-state.js';
 import sessionManager from './src/session-manager.js';
@@ -22,7 +22,7 @@ import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { getQueue } from './src/caco-event-queue.js';
-import { getAppletSlugsForPrompt } from './src/applet-store.js';
+import { buildSystemMessage } from './src/prompts.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
 import { PORT } from './src/config.js';
 
@@ -67,60 +67,8 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
   return [...displayTools, ...appletTools, ...agentTools];
 };
 
-// System message for sessions - built at startup with applet list
+// System message for sessions - built at startup from prompts module
 let SYSTEM_MESSAGE: SystemMessage;
-
-async function buildSystemMessage(): Promise<SystemMessage> {
-  const appletPrompt = await getAppletSlugsForPrompt();
-  
-  return {
-    mode: 'replace',
-    content: `You are an AI assistant in a browser-based chat interface powered by the Copilot SDK.
-
-## Environment
-- **Runtime**: Web browser UI connected to Copilot SDK (Node.js backend)
-- **Interface**: Rich HTML chat with markdown rendering, syntax highlighting, and media embeds
-- **Scope**: Full filesystem access - general-purpose assistant, not limited to any project
-- **Home directory**: ${process.env.HOME || process.env.USERPROFILE || homedir()}
-- **Current directory**: ${process.cwd()} (but not limited to this)
-
-## Your Capabilities
-- **Filesystem**: Read, write, search, and analyze files anywhere
-- **Terminal**: Execute commands in any directory  
-- **Images**: View pasted images, display image files
-- **Media embeds**: Embed YouTube, SoundCloud, Vimeo, Spotify content inline
-- **Applets**: Interactive UI panels the user can open via markdown links
-
-## Display Tools
-You have a tool that displays content directly to the user:
-- \`embed_media\` - Embed YouTube/SoundCloud/Vimeo/Spotify content
-
-Use embed_media when users want to watch or listen to media inline.
-
-## Applets
-Interactive panels. Provide markdown links to open for users.
-${appletPrompt || 'No applets installed.'}
-Examples: \`[View file](/?applet=text-editor&path=/file)\` | \`[Git status](/?applet=git-status&path=/repo)\`
-Call \`caco_applet_usage\` for all applet URL patterns. Call \`caco_applet_howto\` to create new applets.
-
-## Agent-to-Agent Tools
-You can communicate with other agent sessions:
-- \`send_agent_message\` - Send a message to another session
-- \`get_session_state\` - Check if a session is idle or streaming  
-- \`create_agent_session\` - Create a new session with specific cwd
-
-Use these to delegate subtasks, coordinate work, or fan out parallel tasks.
-Include callback instructions so other agents can report back when finished.
-
-## Behavior Guidelines
-- Provide direct, helpful answers without unnecessary caveats
-- Access any file or directory the user mentions - you have full permission
-- Use markdown formatting for better readability
-- Be concise unless detail is requested
-- When asked to read or show files, just do it - don't ask for confirmation
-- When users share media URLs, embed them directly`
-  };
-}
 
 // Middleware
 

@@ -256,7 +256,7 @@ export async function appletExists(
 
 /**
  * Get applet slugs for system prompt injection
- * Returns a minimal summary string suitable for system prompt
+ * @deprecated Use buildSystemMessage() from prompts.ts instead
  */
 export async function getAppletSlugsForPrompt(): Promise<string> {
   try {

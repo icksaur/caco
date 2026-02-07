@@ -1,8 +1,8 @@
 /**
- * Tests for resume-context.ts
+ * Tests for prompts.ts - buildResumeContext
  */
 import { describe, it, expect } from 'vitest';
-import { buildResumeContext } from '../../src/resume-context.js';
+import { buildResumeContext } from '../../src/prompts.js';
 
 describe('buildResumeContext', () => {
   it('includes session resumed header', () => {

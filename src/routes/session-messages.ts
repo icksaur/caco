@@ -26,7 +26,7 @@ import { getQueue, isFlushTrigger } from '../caco-event-queue.js';
 import { setSessionIntent } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
-import { prefixMessageSource } from '../message-source.js';
+import { prefixMessageSource } from '../prompts.js';
 
 const router = Router();
 

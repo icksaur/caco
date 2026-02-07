@@ -18,7 +18,7 @@ import { registerStatePushHandler } from '../applet-push.js';
 import sessionManager from '../session-manager.js';
 import { shouldFilter } from '../event-filter.js';
 import { transformForClient } from '../event-transformer.js';
-import { parseMessageSource, type MessageSource } from '../message-source.js';
+import { parseMessageSource, type MessageSource } from '../prompts.js';
 import { listEmbedOutputs, parseOutputMarkers } from '../storage.js';
 import { CacoEventQueue, isFlushTrigger, type CacoEvent } from '../caco-event-queue.js';
 import { normalizeToolComplete, extractToolResultText, type RawSDKEvent } from '../sdk-normalizer.js';
@@ -29,7 +29,7 @@ const sessionSubscribers = new Map<string, Set<WebSocket>>();
 const clientSubscription = new Map<WebSocket, string>();
 
 // Re-export MessageSource from shared module for backward compatibility
-export type { MessageSource } from '../message-source.js';
+export type { MessageSource } from '../prompts.js';
 
 interface ClientMessage {
   type: 'setState' | 'getState' | 'sendMessage' | 'requestHistory' | 'ping' | 'subscribe';

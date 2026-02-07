@@ -181,8 +181,7 @@ async function start(): Promise<void> {
   // Initialize session state
   await sessionState.init({
     systemMessage: SYSTEM_MESSAGE,
-    toolFactory,
-    excludedTools: ['view']
+    toolFactory
   });
   
   // Create HTTP server from Express app

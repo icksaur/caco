@@ -79,7 +79,7 @@ export type ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => unkn
 export interface SessionStateConfig {
   systemMessage: SystemMessage;
   toolFactory: ToolFactory;
-  excludedTools: string[];
+  excludedTools?: string[];
 }
 
 export interface SessionResponse {

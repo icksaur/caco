@@ -275,6 +275,7 @@ Security: All file endpoints are locked to workspace root.
 - `GET /api/schedule` - List all schedules
 - `GET /api/schedule/:slug` - Get specific schedule
 - `PUT /api/schedule/:slug` - Create or update schedule
+- `PATCH /api/schedule/:slug` - Partial update (toggle enabled)
 - `DELETE /api/schedule/:slug` - Delete schedule
 - `POST /api/schedule/:slug/run` - Manually trigger schedule
 
@@ -326,6 +327,17 @@ Body:
 ```
 
 Returns: `{ slug: "daily-backup", nextRun: "2026-01-28T00:00:00.000Z", created: true }`
+
+**PATCH /api/schedule/:slug** - Partial update (toggle enabled)
+
+Body:
+```json
+{
+  "enabled": true
+}
+```
+
+Returns: `{ slug: "daily-backup", enabled: true, nextRun: "2026-01-28T00:00:00.000Z" }`
 
 **DELETE /api/schedule/:slug** - Delete schedule
 

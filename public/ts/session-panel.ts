@@ -307,7 +307,7 @@ async function loadSchedules(): Promise<void> {
 async function toggleSchedule(slug: string, enabled: boolean): Promise<void> {
   try {
     const response = await fetch(`/api/schedule/${slug}`, {
-      method: 'PUT',
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled })
     });

@@ -7,7 +7,7 @@
  * - Executes tasks serially (no parallel runs)
  */
 
-import parser from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 import {
   listSchedules, 
   loadDefinition, 
@@ -230,7 +230,7 @@ export function calculateNextRun(definition: ScheduleDefinition, from?: Date): D
   
   if (definition.schedule.type === 'cron' && definition.schedule.expression) {
     try {
-      const interval = (parser as any).parseExpression(definition.schedule.expression, { currentDate: now });
+      const interval = CronExpressionParser.parse(definition.schedule.expression, { currentDate: now });
       return interval.next().toDate();
     } catch (error) {
       console.error(`[SCHEDULER] Invalid cron expression for ${definition.slug}:`, error);

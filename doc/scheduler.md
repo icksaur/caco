@@ -85,7 +85,8 @@
 **3. Schedule API (`src/routes/schedule.ts`)**
 - `GET /api/schedule` - List all schedules
 - `GET /api/schedule/:slug` - Get specific schedule
-- `PUT /api/schedule/:slug` - Create/update schedule
+- `PUT /api/schedule/:slug` - Create/update schedule (full replacement)
+- `PATCH /api/schedule/:slug` - Partial update (toggle enabled)
 - `DELETE /api/schedule/:slug` - Delete schedule
 - `POST /api/schedule/:slug/run` - Run immediately (manual trigger)
 
@@ -372,6 +373,27 @@ async function executeSchedule(slug: string): Promise<void> {
 ```json
 {
   "slug": "daily-standup",
+  "nextRun": "2026-01-30T09:00:00.000Z",
+  "created": true
+}
+```
+
+### PATCH /api/schedule/:slug
+
+Toggle enabled state or partial update.
+
+**Request:**
+```json
+{
+  "enabled": false
+}
+```
+
+**Response:**
+```json
+{
+  "slug": "daily-standup",
+  "enabled": false,
   "nextRun": "2026-01-30T09:00:00.000Z"
 }
 ```

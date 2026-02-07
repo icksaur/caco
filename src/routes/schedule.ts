@@ -173,6 +173,54 @@ router.put('/schedule/:slug', async (req: Request, res: Response) => {
 });
 
 /**
+ * PATCH /api/schedule/:slug
+ * Partial update (toggle enabled, update prompt)
+ */
+router.patch('/schedule/:slug', async (req: Request, res: Response) => {
+  try {
+    const slug = req.params.slug as string;
+    const { enabled } = req.body as { enabled?: boolean };
+    
+    const definition = await loadDefinition(slug);
+    if (!definition) {
+      res.status(404).json({ error: `Schedule not found: ${slug}` });
+      return;
+    }
+    
+    // Apply partial updates
+    if (enabled !== undefined) {
+      definition.enabled = enabled;
+    }
+    
+    definition.updatedAt = new Date().toISOString();
+    await saveDefinition(definition);
+    
+    // Update nextRun if re-enabled
+    if (enabled) {
+      const lastRun = await loadLastRun(slug);
+      if (lastRun) {
+        const nextRun = calculateNextRun(definition);
+        await saveLastRun(slug, {
+          ...lastRun,
+          nextRun: nextRun.toISOString()
+        });
+      }
+    }
+    
+    const lastRun = await loadLastRun(slug);
+    
+    res.json({
+      slug,
+      enabled: definition.enabled,
+      nextRun: lastRun?.nextRun || null
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
  * DELETE /api/schedule/:slug
  * Delete schedule
  */

@@ -239,14 +239,25 @@ Second line: session name/summary (truncated)
 
 ## Schedule Integration
 
-### Current State
+### Design Philosophy
 
-- Schedule system implemented (`schedule-manager.ts`, `schedule-store.ts`)
-- API endpoints exist (`/api/schedule/*`)
-- Jobs applet exists but untested
-- No built-in UI in session view
+Schedules are created/edited by the agent, not manually by users. The cron syntax is complex and would create UX friction. Users interact with schedules through:
+1. Natural language requests to the agent ("schedule daily at 9am")
+2. Simple enable/disable toggle in UI
+3. View-only display of next run time
+
+### Implementation Status
+
+- ✅ Schedule system implemented (`schedule-manager.ts`, `schedule-store.ts`)
+- ✅ API endpoints exist (`/api/schedule/*`)
+- ✅ PATCH endpoint for toggle enable/disable
+- ✅ Schedules section in session panel
+- ✅ Enable/disable toggle per schedule
+- ✅ Next run time display
 
 ### Session View Integration
+
+Schedules appear in a dedicated section at the top of the session panel:
 
 **Option A: Separate schedules section**
 ```
@@ -267,21 +278,25 @@ Scheduled sessions appear in session list with schedule icon.
 
 **Recommendation**: Option A. Schedules are configuration, not conversations. Keep separate but visible.
 
+### Schedule UX
+
+**Creating schedules**: Users ask the agent to create schedules via natural language. The agent uses the schedule API to configure cron/interval timing. Example:
+- "Run daily standup at 9am"
+- "Check for updates every 30 minutes"
+- "Send weekly summary on Fridays at 5pm"
+
+**Viewing schedules**: The schedules section shows each schedule with:
+- Schedule slug (name)
+- Next run time (relative: "5m", "2h", date if > 24h)
+- Toggle button (✓ enabled, ○ disabled)
+
+**Toggling schedules**: Click toggle button to enable/disable. Uses PATCH endpoint for partial update.
+
+**Editing schedules**: Not supported in UI. Ask the agent to modify schedule parameters.
+
 ### Empty State
 
-If no schedules:
-```
-SCHEDULES
-  No scheduled tasks. Add with /api/schedule API.
-```
-
-Or hide section entirely until first schedule created.
-
-### Schedule Item Actions
-
-- Click: Show schedule details (cron, last run, prompt preview)
-- Toggle: Enable/disable inline
-- Edit: Not in v1 (use API)
+If no schedules: "no scheduled sessions"
 
 ## Data Flow Summary
 

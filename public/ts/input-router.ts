@@ -6,42 +6,22 @@
  * The router dispatches only to the currently active applet.
  */
 
-import { getViewState } from './view-controller.js';
-import { getActiveAppletSlug } from './applet-runtime.js';
+import { getViewState, isAppletPanelVisible, toggleAppletExpanded } from './view-controller.js';
+import { toggleSessions, toggleApplet } from './router.js';
 
 export type KeyHandler = (e: KeyboardEvent) => void;
-
-/** Registered keyboard handlers by applet slug */
-const keyHandlers = new Map<string, KeyHandler>();
 
 /** Handler for chat view keyboard shortcuts */
 let chatKeyHandler: KeyHandler | null = null;
 
-/**
- * Register a keyboard handler for an applet
- * Only receives events when this applet is active
- * 
- * @param appletSlug - The applet's slug identifier
- * @param handler - Keyboard event handler function
- */
-export function registerKeyHandler(appletSlug: string, handler: KeyHandler): void {
-  keyHandlers.set(appletSlug, handler);
-}
-
-/**
- * Unregister a keyboard handler for an applet
- * Called when applet is destroyed/unloaded
- * 
- * @param appletSlug - The applet's slug identifier
- */
-export function unregisterKeyHandler(appletSlug: string): void {
-  keyHandlers.delete(appletSlug);
-}
+/** Leader key state for ESC sequences */
+let escapeTime: number | null = null;
+const LEADER_TIMEOUT = 500;
 
 /**
  * Register keyboard handler for chat view
  * Receives events when in 'chatting' or 'newChat' view
- * 
+ *
  * @param handler - Keyboard event handler function
  */
 export function registerChatKeyHandler(handler: KeyHandler): void {
@@ -55,7 +35,31 @@ export function registerChatKeyHandler(handler: KeyHandler): void {
 export function initInputRouter(): void {
   // Single global keyboard listener - routes to active handler
   document.addEventListener('keydown', (e: KeyboardEvent) => {
-    // Let native inputs handle their own events
+    // Leader key follow-ups (checked first, works from anywhere)
+    if (escapeTime && Date.now() - escapeTime < LEADER_TIMEOUT) {
+      escapeTime = null;
+      if (e.key === 'l') { toggleSessions(); e.preventDefault(); return; }
+      if (e.key === '.') { toggleApplet(); e.preventDefault(); return; }
+      if (e.key === ',') {
+        if (isAppletPanelVisible()) toggleAppletExpanded();
+        e.preventDefault();
+        return;
+      }
+      // Invalid follow-up key - fall through to normal handling
+    }
+    
+    // Escape - blur any input, start leader
+    if (e.key === 'Escape') {
+      const active = document.activeElement as HTMLElement;
+      if (active && active !== document.body) {
+        active.blur();
+      }
+      escapeTime = Date.now();
+      e.preventDefault();
+      return;
+    }
+    
+    // Let native inputs handle their own events (for non-ESC keys)
     const target = e.target as HTMLElement;
     const tag = target.tagName.toLowerCase();
     if (tag === 'input' || tag === 'textarea' || target.isContentEditable) {
@@ -79,19 +83,4 @@ export function initInputRouter(): void {
     }
   });
   
-}
-
-/**
- * Check if a handler is registered for an applet
- * Useful for debugging
- */
-export function hasKeyHandler(appletSlug: string): boolean {
-  return keyHandlers.has(appletSlug);
-}
-
-/**
- * Get list of registered applet slugs (for debugging)
- */
-export function getRegisteredApplets(): string[] {
-  return Array.from(keyHandlers.keys());
 }

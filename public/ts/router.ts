@@ -12,7 +12,7 @@
  * - Removing them does NOT destroy loaded content
  */
 
-import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, toggleAppletExpanded, type ViewState } from './view-controller.js';
+import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, type ViewState } from './view-controller.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
@@ -143,6 +143,15 @@ export function toggleSessions(): void {
   if (current === 'sessions') {
     // Restore previous main panel
     setViewState(previousMainPanel);
+    
+    // Focus chat input if applet is not expanded
+    // Use setTimeout to ensure focus happens after button click completes
+    if (!isAppletExpanded()) {
+      setTimeout(() => {
+        const chatInput = document.querySelector('.input-text') as HTMLTextAreaElement | null;
+        chatInput?.focus();
+      }, 0);
+    }
   } else {
     // Remember current state and show sessions
     previousMainPanel = current;

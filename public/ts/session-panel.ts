@@ -43,16 +43,7 @@ export function initSessionPanel(): void {
     });
     
     searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        if (searchQuery) {
-          // Clear search first
-          searchInput.value = '';
-          searchQuery = '';
-          renderFilteredSessions();
-          e.stopPropagation();
-        }
-        // Otherwise let Escape close the panel (handled by view-controller)
-      } else if (e.key === 'Enter') {
+      if (e.key === 'Enter') {
         actionBtnClick();
       }
     });

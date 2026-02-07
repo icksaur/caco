@@ -41,7 +41,7 @@ let pendingAppletState: Record<string, unknown> | null = null;
  */
 function expose(nameOrObj: string | Record<string, unknown>, fn?: unknown): void {
   if (typeof nameOrObj === 'string' && fn !== undefined) {
-    (window as Record<string, unknown>)[nameOrObj] = fn;
+    (window as unknown as Record<string, unknown>)[nameOrObj] = fn;
   } else if (typeof nameOrObj === 'object') {
     Object.assign(window, nameOrObj);
   }

@@ -38,7 +38,7 @@ type EventInserterFn = (element: InserterElement, data: Record<string, unknown>)
  * Get nested property by dot path (e.g., 'result.content')
  */
 function getByPath(obj: Record<string, unknown>, path: string): unknown {
-  return path.split('.').reduce(
+  return path.split('.').reduce<unknown>(
     (o, k) => (o as Record<string, unknown>)?.[k], 
     obj
   );

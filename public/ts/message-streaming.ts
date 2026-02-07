@@ -35,14 +35,6 @@ import {
   getInnerClass
 } from './element-inserter.js';
 
-// Declare renderMarkdown global
-declare global {
-  interface Window {
-    renderMarkdown?: () => void;
-    renderMarkdownElement?: (element: Element) => void;
-  }
-}
-
 // Re-export for external callers
 export { setLoadingHistory };
 // Re-export element-inserter functions for external callers

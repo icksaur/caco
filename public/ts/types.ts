@@ -94,3 +94,14 @@ export interface OutputData {
     thumbnailUrl?: string;
   };
 }
+
+/**
+ * Window extensions for Caco app
+ * Single source of truth - other files should not redeclare these
+ */
+declare global {
+  interface Window {
+    renderMarkdown?: () => Promise<void>;
+    renderMarkdownElement?: (element: Element) => void;
+  }
+}

@@ -136,14 +136,6 @@ async function renderMarkdown(): Promise<void> {
   }
 }
 
-// Extend Window interface
-declare global {
-  interface Window {
-    renderMarkdown: typeof renderMarkdown;
-    renderMarkdownElement: typeof renderMarkdownElement;
-  }
-}
-
 /**
  * Render markdown for a single element (for incremental streaming)
  * Unlike renderMarkdown(), this doesn't mark as processed and skips mermaid/hljs

@@ -11,12 +11,6 @@
  * A class wrapper would add ceremony without changing these constraints.
  */
 
-declare global {
-  interface Window {
-    renderMarkdownElement?: (element: Element) => void;
-  }
-}
-
 /** Streaming state per message */
 interface StreamingState {
   rawContent: string;

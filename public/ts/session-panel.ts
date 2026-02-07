@@ -333,7 +333,7 @@ export async function loadSessions(): Promise<void> {
     
     // Render each session with CWD below
     for (const session of allSessions) {
-      const item = createSessionItem(session, activeSessionId);
+      const item = createSessionItem(session, activeSessionId ?? undefined);
       container.appendChild(item);
     }
     
@@ -347,10 +347,10 @@ export async function loadSessions(): Promise<void> {
 /**
  * Create a session item element
  */
-function createSessionItem(session: SessionData, activeSessionId: string): HTMLElement {
+function createSessionItem(session: SessionData, activeSessionId?: string): HTMLElement {
   const item = document.createElement('div');
   item.className = 'session-item';
-  if (session.sessionId === activeSessionId) {
+  if (activeSessionId && session.sessionId === activeSessionId) {
     item.classList.add('active');
   }
   if (session.isBusy) {

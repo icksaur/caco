@@ -33,7 +33,7 @@ interface NavigateEvent extends Event {
   intercept(options: { handler: () => Promise<void> }): void;
 }
 
-interface Navigation extends EventTarget {
+interface Navigation {
   addEventListener(type: 'navigate', listener: (event: NavigateEvent) => void): void;
   navigate(url: string, options?: { state?: unknown; history?: 'auto' | 'push' | 'replace' }): { committed: Promise<void>; finished: Promise<void> };
 }
@@ -200,7 +200,12 @@ export function toggleApplet(): void {
   if (!hasAppletContent()) {
     // No applet loaded - open applet browser
     console.log('[ROUTER] No applet loaded, opening applet-browser');
-    navigation.navigate('?applet=applet-browser');
+    const nav = (window as unknown as { navigation?: Navigation }).navigation;
+    if (nav) {
+      nav.navigate('?applet=applet-browser');
+    } else {
+      window.location.search = '?applet=applet-browser';
+    }
     return;
   }
   

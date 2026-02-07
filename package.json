@@ -9,7 +9,7 @@
     "build": "npm run build:client && npm run typecheck && npm run lint && npm run knip && npm run test",
     "build:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --minify --sourcemap",
     "watch:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --sourcemap --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.frontend.json",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "knip": "knip",

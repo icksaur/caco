@@ -499,17 +499,8 @@ export async function deleteSession(sessionId: string, displayName?: string): Pr
     });
     
     if (response.ok) {
-      const data = await response.json();
-      
-      // If we deleted the active session, show new chat form
-      if (data.wasActive) {
-        const chat = document.getElementById('chat');
-        if (chat) chat.innerHTML = '';
-        showNewChat(getCurrentCwd());
-      }
-      
-      // If no sessions left, stay in session manager with just "new chat" button
-      // The loadSessions call will show empty list
+      // Refresh session list - stays in session view
+      // If we deleted the active session, user can pick another or start new
       loadSessions();
     } else {
       const err = await response.json();

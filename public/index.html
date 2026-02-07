@@ -25,6 +25,8 @@
     <span></span>
     <span></span>
     <span></span>
+    <span id="unobservedBadge" class="unobserved-count-badge hidden"></span>
+    <span id="menuBusyIndicator" class="menu-busy-indicator hidden"></span>
   </button>
 
   <!-- Applet toggle button (top-right, always visible except during sessions) -->
@@ -45,6 +47,13 @@
     <div class="session-content">
       <div id="usageInfo" class="usage-info"></div>
       <button type="button" class="new-chat-btn" onclick="newSessionClick()">+ New Chat</button>
+      
+      <!-- Schedules section -->
+      <div id="schedulesSection" class="schedules-section">
+        <div class="section-header">schedules</div>
+        <div id="schedulesList" class="schedules-list"></div>
+      </div>
+      
       <div id="sessionList"></div>
     </div>
   </div>

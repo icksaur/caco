@@ -26,9 +26,6 @@ public/bundle.js.map
 *.swp
 *.swo
 
-# VSCode
-.vscode/
-
 # Coverage
 coverage/
 

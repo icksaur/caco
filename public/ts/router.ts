@@ -21,6 +21,7 @@ import { waitForHistoryComplete } from './history.js';
 import { loadSessions, showSessionManager } from './session-panel.js';
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
+import { setFormEnabled } from './message-streaming.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -273,11 +274,15 @@ async function activateSession(sessionId: string): Promise<void> {
       return; // Don't change view, just show toast
     }
     
-    const data = await response.json();
+    const data = await response.json() as { sessionId: string; cwd?: string; isBusy?: boolean };
     
     // Update client state
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
     subscribeToSession(data.sessionId);
+    
+    // Sync form/cursor state with session's busy status
+    // isBusy = true means form disabled and cursor visible
+    setFormEnabled(!data.isBusy);
     
     // Load history
     requestHistory(data.sessionId);

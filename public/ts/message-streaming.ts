@@ -24,6 +24,7 @@ import { resetTextareaHeight } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
 import { insertEvent } from './event-inserter.js';
 import { removeImage } from './image-paste.js';
+import { markSessionObserved } from './session-observed.js';
 import { 
   ElementInserter,
   EVENT_TO_OUTER,
@@ -67,6 +68,14 @@ function handleEvent(event: SessionEvent): void {
   // Check BEFORE outer/inner logic since terminal events may not have display elements
   if (isTerminalEvent(eventType)) {
     setFormEnabled(true);
+    
+    // Mark session as observed - user has seen the completed response
+    if (eventType === 'session.idle') {
+      const sessionId = getActiveSessionId();
+      if (sessionId) {
+        markSessionObserved(sessionId);
+      }
+    }
   }
   
   // Special case: assistant.reasoning arrives after deltas, may be in a different outer div

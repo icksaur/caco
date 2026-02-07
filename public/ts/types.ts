@@ -19,17 +19,23 @@ export interface ModelInfo {
 
 export interface SessionData {
   sessionId: string;
-  name?: string;     // Custom name from Caco storage
-  summary?: string;  // SDK-generated summary
+  cwd?: string;         // Working directory
+  name?: string;        // Custom name from Caco storage
+  summary?: string;     // SDK-generated summary
   updatedAt?: string;
   isBusy?: boolean;
+  isUnobserved?: boolean;   // Has new activity since last viewed
+  currentIntent?: string;   // What session is currently working on
+  scheduleSlug?: string;    // If created by a schedule
+  scheduleNextRun?: string; // Next scheduled run time
 }
 
 export interface SessionsResponse {
   activeSessionId: string;
   currentCwd: string;
   grouped: Record<string, SessionData[]>;
-  models?: ModelInfo[];  // Models from SDK (if available)
+  models?: ModelInfo[];    // Models from SDK (if available)
+  unobservedCount?: number; // Total sessions with unobserved activity
 }
 
 export interface Preferences {

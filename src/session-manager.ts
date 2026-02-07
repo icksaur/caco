@@ -6,6 +6,8 @@ import { parse as parseYaml } from 'yaml';
 import type { SessionConfig, CreateConfig, ResumeConfig, SystemMessage } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
 import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta } from './storage.js';
+import { unobservedTracker } from './unobserved-tracker.js';
+import { getScheduleForSession } from './schedule-store.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { busyTracker } from './busy-tracker.js';
 
@@ -81,6 +83,10 @@ interface SessionListItem {
   summary: string | null; // SDK-generated summary
   updatedAt: string | Date | null;
   isBusy: boolean;
+  isUnobserved: boolean;  // Session completed work since last viewed
+  currentIntent: string | null; // Last reported intent
+  scheduleSlug: string | null;  // If created by a schedule
+  scheduleNextRun: string | null; // Next scheduled run time
 }
 
 interface GroupedSessions {
@@ -119,6 +125,10 @@ class SessionManager {
     if (this.initialized) return;
     
     this._discoverSessions();
+    
+    // Hydrate unobserved tracker with discovered session IDs
+    unobservedTracker.hydrate(Array.from(this.sessionCache.keys()));
+    
     await this._fetchModels();
     this.initialized = true;
     console.log(`✓ SessionManager initialized (${this.sessionCache.size} sessions, ${this.cachedModels.length} models)`);
@@ -432,7 +442,12 @@ class SessionManager {
       const isBusy = this.isBusy(sessionId);
       const meta = getSessionMeta(sessionId);
       const name = meta?.name || '';
-      result.push({ sessionId, cwd, name, summary, updatedAt, isBusy });
+      const isUnobserved = unobservedTracker.isUnobserved(sessionId);
+      const currentIntent = meta?.currentIntent || null;
+      // Schedule info is filled in by the route handler (async lookup)
+      const scheduleSlug = null;
+      const scheduleNextRun = null;
+      result.push({ sessionId, cwd, name, summary, updatedAt, isBusy, isUnobserved, currentIntent, scheduleSlug, scheduleNextRun });
     }
     return result;
   }

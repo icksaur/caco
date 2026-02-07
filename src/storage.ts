@@ -37,6 +37,9 @@ interface CacheEntry {
  */
 export interface SessionMeta {
   name: string;
+  lastObservedAt?: string;  // ISO timestamp: user last viewed this session
+  lastIdleAt?: string;      // ISO timestamp: session last became idle
+  currentIntent?: string;   // Last reported intent (from report_intent tool)
 }
 
 export interface OutputMetadata {
@@ -140,6 +143,52 @@ export function setSessionMeta(sessionId: string, meta: SessionMeta): void {
   const sessionDir = getSessionDir(sessionId);
   ensureDir(sessionDir);
   writeFileSync(join(sessionDir, 'meta.json'), JSON.stringify(meta, null, 2));
+}
+
+/**
+ * Mark session as observed (user viewed it)
+ * Updates lastObservedAt timestamp
+ */
+export function markSessionObserved(sessionId: string): void {
+  const meta = getSessionMeta(sessionId) ?? { name: '' };
+  meta.lastObservedAt = new Date().toISOString();
+  setSessionMeta(sessionId, meta);
+  console.log(`[STORAGE] markSessionObserved: ${sessionId.slice(0, 8)} lastObservedAt=${meta.lastObservedAt}`);
+}
+
+/**
+ * Mark session as idle (completed processing)
+ * Updates lastIdleAt timestamp
+ */
+export function markSessionIdle(sessionId: string): void {
+  const meta = getSessionMeta(sessionId) ?? { name: '' };
+  meta.lastIdleAt = new Date().toISOString();
+  setSessionMeta(sessionId, meta);
+  console.log(`[STORAGE] markSessionIdle: ${sessionId.slice(0, 8)} lastIdleAt=${meta.lastIdleAt}`);
+}
+
+/**
+ * Set session's current intent
+ */
+export function setSessionIntent(sessionId: string, intent: string): void {
+  const meta = getSessionMeta(sessionId) ?? { name: '' };
+  meta.currentIntent = intent;
+  setSessionMeta(sessionId, meta);
+}
+
+/**
+ * Check if session is unobserved (idle occurred after last observation)
+ */
+export function isSessionUnobserved(sessionId: string): boolean {
+  const meta = getSessionMeta(sessionId);
+  if (!meta?.lastIdleAt) return false; // Never went idle
+  if (!meta.lastObservedAt) return true; // Never observed
+  const result = new Date(meta.lastIdleAt) > new Date(meta.lastObservedAt);
+  // DEBUG: Log unobserved check
+  if (result) {
+    console.log(`[STORAGE] isSessionUnobserved: ${sessionId.slice(0, 8)} = true (idle=${meta.lastIdleAt}, obs=${meta.lastObservedAt})`);
+  }
+  return result;
 }
 
 /**

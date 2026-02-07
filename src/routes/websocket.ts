@@ -21,6 +21,7 @@ import { transformForClient } from '../event-transformer.js';
 import { listEmbedOutputs, parseOutputMarkers } from '../storage.js';
 import { CacoEventQueue, isFlushTrigger, type CacoEvent } from '../caco-event-queue.js';
 import { normalizeToolComplete, extractToolResultText, type RawSDKEvent } from '../sdk-normalizer.js';
+import { unobservedTracker } from '../unobserved-tracker.js';
 
 const allConnections = new Set<WebSocket>();
 const sessionSubscribers = new Map<string, Set<WebSocket>>();
@@ -76,6 +77,11 @@ interface ServerMessage {
 export function setupWebSocket(server: Server): WebSocketServer {
   // Register the push handler so applet-tools can push state without direct import
   registerStatePushHandler(pushStateToAppletInternal);
+  
+  // Wire up UnobservedTracker broadcast to use global WebSocket broadcast
+  unobservedTracker.setBroadcast((event) => {
+    broadcastGlobalEvent(event);
+  });
   
   const wss = new WebSocketServer({ 
     server, 

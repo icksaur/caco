@@ -149,3 +149,26 @@ export async function scheduleExists(slug: string): Promise<boolean> {
   const paths = getSchedulePaths(slug);
   return existsSync(paths.definition);
 }
+
+/**
+ * Get schedule info for a session (if session was created by a schedule)
+ * Returns the schedule slug and next run time, or null if not scheduled
+ */
+export async function getScheduleForSession(sessionId: string): Promise<{
+  slug: string;
+  nextRun: string | null;
+} | null> {
+  const slugs = await listSchedules();
+  
+  for (const slug of slugs) {
+    const lastRun = await loadLastRun(slug);
+    if (lastRun?.sessionId === sessionId) {
+      return {
+        slug,
+        nextRun: lastRun.nextRun || null
+      };
+    }
+  }
+  
+  return null;
+}

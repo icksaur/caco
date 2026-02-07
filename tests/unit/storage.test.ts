@@ -12,7 +12,11 @@ import {
   parseOutputMarkers,
   ensureSessionMeta,
   getSessionMeta,
-  setSessionMeta
+  setSessionMeta,
+  markSessionObserved,
+  markSessionIdle,
+  setSessionIntent,
+  isSessionUnobserved
 } from '../../src/storage.js';
 import { existsSync, rmSync, mkdirSync } from 'fs';
 import { join } from 'path';
@@ -166,5 +170,74 @@ describe('session metadata (ensureSessionMeta, getSessionMeta, setSessionMeta)',
     setSessionMeta(TEST_SESSION_ID, { name: '' });
     
     expect(getSessionMeta(TEST_SESSION_ID)?.name).toBe('');
+  });
+});
+
+describe('session observation tracking (markSessionObserved, markSessionIdle, isSessionUnobserved)', () => {
+  const TEST_SESSION_ID = 'test-observe-session';
+  const TEST_META_DIR = join(homedir(), '.caco', 'sessions', TEST_SESSION_ID);
+  
+  beforeEach(() => {
+    // Clean up test directory before each test
+    if (existsSync(TEST_META_DIR)) {
+      rmSync(TEST_META_DIR, { recursive: true, force: true });
+    }
+  });
+  
+  afterEach(() => {
+    // Clean up after test
+    if (existsSync(TEST_META_DIR)) {
+      rmSync(TEST_META_DIR, { recursive: true, force: true });
+    }
+  });
+  
+  it('new session is not unobserved (never went idle)', () => {
+    ensureSessionMeta(TEST_SESSION_ID);
+    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
+  });
+  
+  it('session becomes unobserved after idle', () => {
+    ensureSessionMeta(TEST_SESSION_ID);
+    markSessionIdle(TEST_SESSION_ID);
+    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(true);
+  });
+  
+  it('session becomes observed after markSessionObserved', () => {
+    ensureSessionMeta(TEST_SESSION_ID);
+    markSessionIdle(TEST_SESSION_ID);
+    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(true);
+    
+    markSessionObserved(TEST_SESSION_ID);
+    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
+  });
+  
+  it('session becomes unobserved again after new idle', async () => {
+    ensureSessionMeta(TEST_SESSION_ID);
+    markSessionIdle(TEST_SESSION_ID);
+    markSessionObserved(TEST_SESSION_ID);
+    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
+    
+    // Wait a tiny bit to ensure timestamp difference
+    await new Promise(r => setTimeout(r, 10));
+    
+    markSessionIdle(TEST_SESSION_ID);
+    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(true);
+  });
+  
+  it('setSessionIntent stores intent', () => {
+    ensureSessionMeta(TEST_SESSION_ID);
+    setSessionIntent(TEST_SESSION_ID, 'Analyzing code');
+    
+    const meta = getSessionMeta(TEST_SESSION_ID);
+    expect(meta?.currentIntent).toBe('Analyzing code');
+  });
+  
+  it('setSessionIntent preserves other meta fields', () => {
+    setSessionMeta(TEST_SESSION_ID, { name: 'My Session' });
+    setSessionIntent(TEST_SESSION_ID, 'Working on task');
+    
+    const meta = getSessionMeta(TEST_SESSION_ID);
+    expect(meta?.name).toBe('My Session');
+    expect(meta?.currentIntent).toBe('Working on task');
   });
 });

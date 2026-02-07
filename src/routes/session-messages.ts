@@ -22,6 +22,8 @@ import { extractToolTelemetry, type ToolExecutionCompleteEvent } from '../sdk-ev
 import { transformForClient, shouldEmitReload } from '../event-transformer.js';
 import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
 import { getQueue, isFlushTrigger } from '../caco-event-queue.js';
+import { setSessionIntent } from '../storage.js';
+import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
 
 const router = Router();
@@ -247,6 +249,19 @@ export async function dispatchMessage(
       // Server-side processing
       const eventData = event.data || {};
       
+      // Capture intent for session state display
+      if (event.type === 'assistant.intent' && eventData.intent) {
+        setSessionIntent(sessionId, String(eventData.intent));
+      }
+      // Also capture from report_intent tool
+      if (event.type === 'tool.execution_start') {
+        const toolName = eventData.toolName || eventData.name;
+        const args = eventData.arguments as Record<string, unknown> | undefined;
+        if (toolName === 'report_intent' && args?.intent) {
+          setSessionIntent(sessionId, String(args.intent));
+        }
+      }
+      
       if (event.type === 'assistant.usage') {
         const quotaSnapshots = eventData.quotaSnapshots as Record<string, {
           isUnlimitedEntitlement: boolean;
@@ -264,6 +279,10 @@ export async function dispatchMessage(
       }
       
       if (event.type === 'session.idle' || event.type === 'session.error') {
+        // Mark session as idle for unobserved tracking (via tracker for single source of truth)
+        if (event.type === 'session.idle') {
+          unobservedTracker.markIdle(sessionId);
+        }
         cleanupAndComplete(event.type);
         unsubscribe();
       }

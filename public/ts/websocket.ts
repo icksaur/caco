@@ -14,6 +14,7 @@
 
 import { showToast } from './toast.js';
 import { getActiveSessionId } from './app-state.js';
+import { markSessionObserved } from './session-observed.js';
 import type { SessionEvent } from './types.js';
 
 /**
@@ -254,8 +255,13 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       break;
     }
     
-    case 'historyComplete':
-      // History streaming complete
+    case 'historyComplete': {
+      // History streaming complete - mark session as observed
+      const sessionId = getActiveSessionId();
+      if (sessionId) {
+        markSessionObserved(sessionId);
+      }
+      // Notify subscribers
       for (const cb of historyCompleteCallbacks) {
         try {
           cb();
@@ -264,6 +270,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
         }
       }
       break;
+    }
     
 
       

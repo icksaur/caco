@@ -11,15 +11,62 @@ import { sessionClick } from './router.js';
 import { onGlobalEvent } from './websocket.js';
 
 /**
- * Initialize session panel - subscribe to global events
+ * Initialize session panel - subscribe to global events and fetch initial badge count
  */
 export function initSessionPanel(): void {
+  // Fetch initial unobserved count for badge (needed when loading session by URL)
+  fetchInitialBadgeCount();
+  
   onGlobalEvent((event) => {
     if (event.type === 'session.busy' && event.data) {
       const { sessionId, isBusy } = event.data as { sessionId: string; isBusy: boolean };
       updateSessionItemState(sessionId, isBusy);
+      
+      // Update menu button busy indicator
+      updateMenuBusyIndicator();
+    }
+    
+    // session.idle now includes unobservedCount from tracker (single source of truth)
+    if (event.type === 'session.idle' && event.data) {
+      const { sessionId, unobservedCount } = event.data as { sessionId: string; unobservedCount?: number };
+      
+      // Mark as unobserved in DOM if not the active session
+      if (sessionId !== getActiveSessionId()) {
+        markSessionAsUnobserved(sessionId);
+      }
+      
+      // Update badge from event data (no refetch needed)
+      if (typeof unobservedCount === 'number') {
+        updateUnobservedBadge(unobservedCount);
+      }
+    }
+    
+    // session.observed includes unobservedCount for direct badge update
+    if (event.type === 'session.observed' && event.data) {
+      const { sessionId, unobservedCount } = event.data as { sessionId: string; unobservedCount?: number };
+      updateSessionObservedState(sessionId);
+      
+      // Update badge from event data (no refetch needed)
+      if (typeof unobservedCount === 'number') {
+        updateUnobservedBadge(unobservedCount);
+      }
     }
   });
+}
+
+/**
+ * Fetch initial unobserved count for badge on page load
+ * This ensures the badge shows correctly when navigating directly to a session via URL
+ */
+async function fetchInitialBadgeCount(): Promise<void> {
+  try {
+    const response = await fetch('/api/sessions');
+    if (!response.ok) return;
+    const data = await response.json();
+    updateUnobservedBadge(data.unobservedCount ?? 0);
+  } catch {
+    // Ignore fetch errors - badge will update on next event
+  }
 }
 
 /**
@@ -62,12 +109,224 @@ function updateSessionItemState(sessionId: string, isBusy: boolean): void {
 }
 
 /**
+ * Update a single session item's observed state in the DOM (remove unobserved badge)
+ * @returns true if the session was unobserved and is now marked observed
+ */
+function updateSessionObservedState(sessionId: string): boolean {
+  const item = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
+  if (!item) return false;
+  
+  const wasUnobserved = item.classList.contains('unobserved');
+  
+  item.classList.remove('unobserved');
+  const badge = item.querySelector('.session-unobserved-badge');
+  if (badge) badge.remove();
+  
+  return wasUnobserved;
+}
+
+/**
+ * Mark a session item as unobserved in the DOM (add unobserved badge)
+ * @returns true if the session was newly marked as unobserved
+ */
+function markSessionAsUnobserved(sessionId: string): boolean {
+  const item = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
+  if (!item) return false;
+  
+  // Don't add if already marked
+  if (item.classList.contains('unobserved')) return false;
+  
+  console.log(`[SESSION-PANEL] Marking session as unobserved: ${sessionId.slice(0, 8)}`);
+  
+  item.classList.add('unobserved');
+  
+  // Add badge if not present
+  if (!item.querySelector('.session-unobserved-badge')) {
+    const badge = document.createElement('span');
+    badge.className = 'session-unobserved-badge';
+    badge.setAttribute('aria-label', 'New activity');
+    badge.title = 'Session has new activity since last viewed';
+    // Insert at beginning (before busy indicator if present)
+    item.insertBefore(badge, item.firstChild);
+  }
+  
+  return true;
+}
+
+/**
+ * Update the unobserved count badge on menu button
+ * When visible, hides the busy indicator (unobserved takes priority)
+ */
+function updateUnobservedBadge(count: number): void {
+  const badge = document.getElementById('unobservedBadge');
+  const busyIndicator = document.getElementById('menuBusyIndicator');
+  if (!badge) return;
+  
+  if (count > 0) {
+    badge.textContent = String(count);
+    badge.classList.remove('hidden');
+    // Hide busy indicator when unobserved badge is shown (priority)
+    busyIndicator?.classList.add('hidden');
+  } else {
+    badge.classList.add('hidden');
+    // Show busy indicator if there are busy sessions
+    updateMenuBusyIndicator();
+  }
+}
+
+/**
+ * Update the busy indicator on menu button
+ * Only visible when:
+ * 1. No unobserved sessions (unobserved badge takes priority)
+ * 2. There are busy sessions OTHER than the currently viewed session
+ * 
+ * Rationale: If user is viewing a busy session, they already see the streaming
+ * cursor in the chat - no need for redundant badge indicator.
+ */
+function updateMenuBusyIndicator(): void {
+  const busyIndicator = document.getElementById('menuBusyIndicator');
+  const unobservedBadge = document.getElementById('unobservedBadge');
+  if (!busyIndicator) return;
+  
+  // Don't show if unobserved badge is visible
+  if (unobservedBadge && !unobservedBadge.classList.contains('hidden')) {
+    busyIndicator.classList.add('hidden');
+    return;
+  }
+  
+  // Check if any session OTHER than the active one is busy
+  const activeSessionId = getActiveSessionId();
+  const busySessions = document.querySelectorAll('.session-item.busy');
+  let hasOtherBusySessions = false;
+  
+  for (const item of busySessions) {
+    const itemSessionId = (item as HTMLElement).dataset.sessionId;
+    if (itemSessionId !== activeSessionId) {
+      hasOtherBusySessions = true;
+      break;
+    }
+  }
+  
+  if (hasOtherBusySessions) {
+    busyIndicator.classList.remove('hidden');
+  } else {
+    busyIndicator.classList.add('hidden');
+  }
+}
+
+/**
  * Show session manager as the main view (landing page)
  */
 export function showSessionManager(): void {
   setViewState('sessions');
   loadSessions();
+  loadSchedules();
   loadUsage();
+}
+
+/**
+ * Load and render schedules
+ */
+async function loadSchedules(): Promise<void> {
+  const container = document.getElementById('schedulesList');
+  if (!container) return;
+  
+  try {
+    const response = await fetch('/api/schedule');
+    if (!response.ok) {
+      container.innerHTML = '<div class="schedules-empty">failed to load schedules</div>';
+      return;
+    }
+    
+    const data = await response.json();
+    const schedules = data.schedules || [];
+    
+    if (schedules.length === 0) {
+      container.innerHTML = '<div class="schedules-empty">no scheduled sessions</div>';
+      return;
+    }
+    
+    container.innerHTML = '';
+    
+    for (const schedule of schedules) {
+      const item = document.createElement('div');
+      item.className = `schedule-item${schedule.enabled ? '' : ' disabled'}`;
+      item.dataset.slug = schedule.slug;
+      
+      // Format next run time
+      let nextRunText = '';
+      if (schedule.nextRun) {
+        const nextRun = new Date(schedule.nextRun);
+        const now = new Date();
+        const diffMs = nextRun.getTime() - now.getTime();
+        
+        if (diffMs < 0) {
+          nextRunText = 'overdue';
+        } else if (diffMs < 60 * 60 * 1000) {
+          nextRunText = `${Math.round(diffMs / 60000)}m`;
+        } else if (diffMs < 24 * 60 * 60 * 1000) {
+          nextRunText = `${Math.round(diffMs / 3600000)}h`;
+        } else {
+          nextRunText = nextRun.toLocaleDateString();
+        }
+      }
+      
+      item.innerHTML = `
+        <span class="schedule-slug">${escapeHtml(schedule.slug)}</span>
+        ${nextRunText ? `<span class="schedule-next">next: ${nextRunText}</span>` : ''}
+        <button class="schedule-toggle" title="${schedule.enabled ? 'Disable' : 'Enable'}">
+          ${schedule.enabled ? '✓' : '○'}
+        </button>
+      `;
+      
+      // Toggle enabled state on button click
+      const toggleBtn = item.querySelector('.schedule-toggle');
+      toggleBtn?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await toggleSchedule(schedule.slug, !schedule.enabled);
+        loadSchedules(); // Reload to update UI
+      });
+      
+      // Show details on item click (future: could open a details view)
+      item.addEventListener('click', () => {
+        console.log('[SCHEDULE] Clicked:', schedule.slug);
+        // TODO: Show schedule details or go to session created by this schedule
+      });
+      
+      container.appendChild(item);
+    }
+  } catch (error) {
+    console.error('[SCHEDULE] Failed to load schedules:', error);
+    container.innerHTML = '<div class="schedules-empty">failed to load schedules</div>';
+  }
+}
+
+/**
+ * Toggle schedule enabled state
+ */
+async function toggleSchedule(slug: string, enabled: boolean): Promise<void> {
+  try {
+    const response = await fetch(`/api/schedule/${slug}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled })
+    });
+    
+    if (!response.ok) {
+      console.error('[SCHEDULE] Failed to toggle schedule:', response.status);
+    }
+  } catch (error) {
+    console.error('[SCHEDULE] Error toggling schedule:', error);
+  }
+}
+
+/**
+ * Escape HTML for safe insertion
+ */
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 /**
@@ -79,7 +338,20 @@ export async function loadSessions(): Promise<void> {
     if (!response.ok) return;
     
     const data: SessionsResponse = await response.json();
-    const { grouped, models } = data;
+    const { grouped, models, unobservedCount } = data;
+    
+    // Update badge count on menu button
+    updateUnobservedBadge(unobservedCount ?? 0);
+    
+    // DEBUG: Log session data to verify unobserved state is coming from server
+    console.log(`[SESSION-PANEL] Loaded sessions: ${Object.values(grouped).flat().length} total, ${unobservedCount} unobserved`);
+    for (const [cwd, sessions] of Object.entries(grouped)) {
+      for (const s of sessions) {
+        if (s.isUnobserved || s.isBusy) {
+          console.log(`[SESSION-PANEL] ${s.sessionId.slice(0, 8)}: isUnobserved=${s.isUnobserved}, isBusy=${s.isBusy}`);
+        }
+      }
+    }
     
     // Use client state as source of truth (not server response)
     const activeSessionId = getActiveSessionId();
@@ -95,37 +367,35 @@ export async function loadSessions(): Promise<void> {
     
     container.innerHTML = '';
     
-    // Sort cwds: current first, then alphabetically
-    const cwds = Object.keys(grouped).sort((a, b) => {
-      if (a === currentCwd) return -1;
-      if (b === currentCwd) return 1;
-      return a.localeCompare(b);
-    });
-    
-    for (const cwd of cwds) {
-      const sessions = grouped[cwd];
-      
-      // Handle unknown cwd sessions - just show a summary
-      if (cwd === '(unknown)' || !cwd) {
-        const summary = document.createElement('div');
-        summary.className = 'cwd-header omitted';
-        summary.textContent = `no cwd (${sessions.length} omitted)`;
-        container.appendChild(summary);
-        continue;
-      }
-      
-      // CWD header
-      const cwdHeader = document.createElement('div');
-      cwdHeader.className = 'cwd-header';
-      cwdHeader.textContent = cwd === currentCwd ? `${cwd} (current)` : cwd;
-      container.appendChild(cwdHeader);
-      
-      // Session items
+    // Flatten all sessions from grouped structure into single MRU list
+    // Preserve cwd from the grouping key, omit sessions without CWD
+    const allSessions: SessionData[] = [];
+    for (const [cwd, sessions] of Object.entries(grouped)) {
+      // Skip sessions without a valid CWD (incomplete or corrupted)
+      if (cwd === '(unknown)') continue;
       for (const session of sessions) {
-        const item = createSessionItem(session, activeSessionId);
-        container.appendChild(item);
+        allSessions.push({ ...session, cwd });
       }
     }
+    
+    // Sort by updatedAt descending (most recently updated first)
+    allSessions.sort((a, b) => {
+      if (a.updatedAt && b.updatedAt) {
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      }
+      if (a.updatedAt) return -1;
+      if (b.updatedAt) return 1;
+      return 0;
+    });
+    
+    // Render each session with CWD below
+    for (const session of allSessions) {
+      const item = createSessionItem(session, activeSessionId);
+      container.appendChild(item);
+    }
+    
+    // Update menu button busy indicator after all sessions rendered
+    updateMenuBusyIndicator();
   } catch (error) {
     console.error('Failed to load sessions:', error);
   }
@@ -143,7 +413,19 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
   if (session.isBusy) {
     item.classList.add('busy');
   }
+  if (session.isUnobserved) {
+    item.classList.add('unobserved');
+  }
   item.dataset.sessionId = session.sessionId;
+  
+  // Unobserved badge (new activity indicator)
+  if (session.isUnobserved) {
+    const badge = document.createElement('span');
+    badge.className = 'session-unobserved-badge';
+    badge.setAttribute('aria-label', 'New activity');
+    badge.title = 'Session has new activity since last viewed';
+    item.appendChild(badge);
+  }
   
   // Busy indicator (throbber)
   if (session.isBusy) {
@@ -167,6 +449,26 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
   summarySpan.textContent = displayName;
   content.appendChild(summarySpan);
   
+  // Schedule badge (if session was created by a schedule)
+  if (session.scheduleSlug) {
+    const scheduleBadge = document.createElement('span');
+    scheduleBadge.className = 'session-schedule-badge';
+    scheduleBadge.textContent = '⏰';
+    scheduleBadge.title = session.scheduleNextRun
+      ? `Schedule: ${session.scheduleSlug}\nNext run: ${new Date(session.scheduleNextRun).toLocaleString()}`
+      : `Schedule: ${session.scheduleSlug}`;
+    content.appendChild(scheduleBadge);
+  }
+  
+  // Intent for busy sessions (what the agent is working on)
+  if (session.isBusy && session.currentIntent) {
+    const intentSpan = document.createElement('span');
+    intentSpan.className = 'session-intent';
+    intentSpan.textContent = session.currentIntent;
+    intentSpan.title = session.currentIntent;
+    content.appendChild(intentSpan);
+  }
+  
   // Age (fixed on right)
   if (session.updatedAt) {
     const ageSpan = document.createElement('span');
@@ -176,6 +478,12 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
   }
   
   item.appendChild(content);
+  
+  // CWD path below (always present - sessions without CWD are filtered out)
+  const cwdSpan = document.createElement('div');
+  cwdSpan.className = 'session-cwd';
+  cwdSpan.textContent = session.cwd!;
+  item.appendChild(cwdSpan);
   
   // Edit button (rename session)
   if (!session.isBusy) {

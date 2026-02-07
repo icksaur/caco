@@ -39,108 +39,32 @@ Message sources are now correctly differentiated:
 
 Missing any of these = broken rendering!
 
-**Current flow** (working):
+**Current flow** (unified for live and history):
 
 ```
 Applet → POST /api/sessions/:id/messages { source: 'applet', appletSlug: 'file-browser' }
          ↓
 Server → Prefixes prompt: "[applet:file-browser] original prompt"
          ↓
-SDK → Stores prefixed string in history (as user message)
+SDK → Stores prefixed string, echoes user.message with prefixed content
          ↓
-WebSocket → Broadcasts: { type: 'user.message', data: { content, source: 'applet', appletSlug } }
+broadcastEvent() → enrichUserMessageWithSource() parses prefix, adds source metadata
+         ↓
+WebSocket → Broadcasts: { type: 'user.message', data: { content: 'original prompt', source: 'applet', appletSlug } }
          ↓
 Client → Transforms to caco.applet, renders with applet-message class
 ```
 
+**Key design principle**: ONE code path for enrichment. Both live streaming and history 
+replay use `enrichUserMessageWithSource()` to parse the prefix and add source metadata.
+
 **Files involved**:
-- `src/routes/session-messages.ts:122-127` - Prefixes prompt with `[applet:slug]` or `[agent:sessionId]`
-- `src/routes/websocket.ts:255-278` - `broadcastUserMessageFromPost()` creates `user.message` event
-- `public/ts/element-inserter.ts:38-39` - Maps `caco.agent`/`caco.applet` to outer div classes
-- `public/ts/event-inserter.ts:271-272` - Content inserters for `caco.agent`/`caco.applet`
-- `public/style.css:667-693` - `.message.applet`, `.message.agent` styles
-- `tests/unit/message-source.test.ts` - Parser for `[applet:slug]` prefix
-
-### Required Fixes
-
-#### 1. Live Streaming Differentiation
-
-Client should check `user.message` event's `data.source` and apply appropriate styling:
-
-```typescript
-// In message-streaming.ts or event handler
-if (event.type === 'user.message' && event.data?.source !== 'user') {
-  // Render as caco.applet or caco.agent based on source
-  const syntheticType = event.data.source === 'applet' ? 'caco.applet' : 'caco.agent';
-  // Use syntheticType for element creation
-}
-```
-
-#### 2. History Replay Parsing
-
-When replaying history, parse `[applet:slug]`, `[agent:sessionId]`, and `[scheduler:slug]` prefixes:
-
-```typescript
-function parseMessageSource(content: string): {
-  source: 'user' | 'applet' | 'agent' | 'scheduler';
-  identifier?: string;
-  cleanContent: string;
-}
-```
-
-Already implemented in `tests/unit/message-source.test.ts` - needs to be extracted and used.
-
-#### 3. SDK Context for Agent
-
-**Problem**: Copilot SDK treats all incoming messages as "user" input. Agent doesn't know it's processing a scheduled job vs a human request.
-
-**Options**:
-- **System message injection**: Prepend context to prompt ("This is a scheduled task, not a human request...")
-- **SDK metadata API**: If SDK supports message metadata/tags, use that
-- **Custom preamble**: Add source info to system message
-
-**Recommendation**: Prepend brief context to prompt:
-```
-[scheduler:daily-standup] Generate daily standup summary
-```
-
-Agent sees this prefix and adjusts behavior (e.g., no "how can I help?" responses).
-
-### Implementation Plan
-
-**Phase 1: Groundwork (no behavior change)**
-
-1. **Extend MessageSource type** - Add `'scheduler'` to `MessageSource` union in:
-   - `src/routes/websocket.ts`
-   - `public/ts/websocket.ts`
-
-2. **Extract parseMessageSource()** - Create `src/message-source.ts`:
-   - Pure function with no I/O
-   - Handles all 4 source types: user, applet, agent, scheduler
-   - Returns `{ source, identifier?, cleanContent }`
-
-3. **Add CSS variables and classes**:
-   - `--color-scheduler-bg: #1a4a4a` (teal tint)
-   - `.scheduler-message` class with appropriate styling
-
-4. **Add scheduler prefix** - Update `src/routes/session-messages.ts`:
-   - When `source === 'scheduler'`, prefix prompt with `[scheduler:slug]`
-
-**Phase 2: Live streaming differentiation**
-
-5. **Element inserter mapping** - Update `public/ts/element-inserter.ts`:
-   - Map `caco.scheduler` event type to `.scheduler-message` class
-
-6. **Event handler differentiation** - Update user.message handler:
-   - Check `data.source` field
-   - Create appropriate outer div class based on source
-
-**Phase 3: History replay**
-
-7. **Parse prefixes on replay** - Update history streaming:
-   - Use `parseMessageSource()` on user message content
-   - Apply correct CSS class based on parsed source
-   - Display clean content (without prefix)
+- `src/routes/session-messages.ts` - Prefixes prompt with `[applet:slug]`, `[agent:id]`, or `[scheduler:slug]`
+- `src/routes/websocket.ts` - `enrichUserMessageWithSource()` parses prefix, enriches all user.message events
+- `src/message-source.ts` - `parseMessageSource()` pure function for prefix parsing
+- `public/ts/message-streaming.ts` - Transforms `user.message` with source to `caco.*` synthetic types
+- `public/ts/element-inserter.ts` - Maps `caco.agent`/`caco.applet`/`caco.scheduler` to outer div classes
+- `public/ts/event-inserter.ts` - Content inserters for synthetic types
 
 ## Message Metadata Storage
 

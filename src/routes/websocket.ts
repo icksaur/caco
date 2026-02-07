@@ -281,36 +281,6 @@ function enrichUserMessageWithSource(event: SessionEvent): SessionEvent {
 }
 
 /**
- * Broadcast user message from HTTP POST handler
- * Called when server receives a message via REST API
- * Broadcasts to ALL clients - they filter by sessionId
- */
-export function broadcastUserMessageFromPost(
-  sessionId: string,
-  content: string,
-  hasImage: boolean,
-  source: MessageSource = 'user',
-  appletSlug?: string,
-  fromSession?: string,
-  scheduleSlug?: string
-): void {
-  // Create a user.message event
-  const event: SessionEvent = {
-    type: 'user.message',
-    data: {
-      content,
-      source,
-      appletSlug,
-      fromSession,
-      scheduleSlug,
-      hasImage
-    }
-  };
-  
-  broadcastEvent(sessionId, event);
-}
-
-/**
  * Stream session history to a client on demand
  * Converts SDK events to ChatMessage format and sends individually
  * All messages include sessionId for client filtering
@@ -427,6 +397,9 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
 /**
  * Broadcast an SDK event to subscribed clients only
  * Used for all session events - messages, activity, etc.
+ * 
+ * user.message events are enriched with source metadata by parsing the
+ * [applet:slug], [agent:id], or [scheduler:slug] prefix.
  */
 export function broadcastEvent(
   sessionId: string,
@@ -437,7 +410,10 @@ export function broadcastEvent(
     return;
   }
   
-  const msg: ServerMessage = { type: 'event', sessionId, event };
+  // Enrich user.message with source metadata (same as history replay)
+  const enriched = enrichUserMessageWithSource(event);
+  
+  const msg: ServerMessage = { type: 'event', sessionId, event: enriched };
   const data = JSON.stringify(msg);
   
   for (const ws of subscribers) {

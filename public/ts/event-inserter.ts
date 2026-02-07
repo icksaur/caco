@@ -213,7 +213,7 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     if (input) element.dataset.toolInput = input;
     
     // Set content
-    element.textContent = input ? `🔧 **${name}**\n\`${input}\`` : `🔧 **${name}**`;
+    element.textContent = input ? `🔧 ${name}\n\`${input}\`` : `🔧 ${name}`;
   },
   
   'tool.execution_complete': (element, data) => {
@@ -224,7 +224,7 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     
     // embed_media completion is handled by caco.embed event
     if (name === 'embed_media') {
-      element.textContent = '**embed_media**\n```\nEmbed rendered below\n```';
+      element.textContent = 'embed_media\n```\nEmbed rendered below\n```';
       if (typeof window !== 'undefined' && window.renderMarkdownElement) {
         window.renderMarkdownElement(element as unknown as Element);
       }
@@ -237,9 +237,9 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     const error = (data.error as string | undefined)?.trim() || '';
     const output = success ? result : error;
     
-    // Build: *name* + code block with input and output
+    // Build: *name* + blank line + code block (blank line prevents Setext heading from --- in output)
     const parts = [input, output].filter(Boolean);
-    const content = `*${name}*\n\`\`\`${name}\n${parts.join('\n')}\n\`\`\``;
+    const content = `*${name}*\n\n\`\`\`${name}\n${parts.join('\n')}\n\`\`\``;
     element.textContent = content;
     
     if (typeof window !== 'undefined' && window.renderMarkdownElement) {

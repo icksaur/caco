@@ -118,34 +118,39 @@ document.querySelectorAll('[data-action]').forEach(function(btn) {
   });
 });
 
-// Register keyboard handler with input router
-// Only receives events when this applet is active - no visibility check needed
-registerKeyHandler('calculator', function(e) {
-  if (e.key >= '0' && e.key <= '9') appendNum(e.key);
-  else if (e.key === '.') appendDecimal();
-  else if (e.key === '+') appendOp('+');
-  else if (e.key === '-') appendOp('-');
-  else if (e.key === '*') appendOp('*');
-  else if (e.key === '/') appendOp('/');
-  else if (e.key === 'Enter' || e.key === '=') calculate();
-  else if (e.key === 'Escape' || e.key === 'c') clearDisplay();
-});
+// Keyboard handler - commented out as registerKeyHandler is not available
+// TODO: Add keyboard support when API is available
+// registerKeyHandler('calculator', function(e) {
+//   if (e.key >= '0' && e.key <= '9') appendNum(e.key);
+//   else if (e.key === '.') appendDecimal();
+//   else if (e.key === '+') appendOp('+');
+//   else if (e.key === '-') appendOp('-');
+//   else if (e.key === '*') appendOp('*');
+//   else if (e.key === '/') appendOp('/');
+//   else if (e.key === 'Enter' || e.key === '=') calculate();
+//   else if (e.key === 'Escape' || e.key === 'c') clearDisplay();
+// });
 
 // Test button - fetch stock price and put in calculator
 var testBtn = document.getElementById('testBtn');
 testBtn.addEventListener('click', async function() {
-  var sessionId = window.getSessionId();
-  if (!sessionId) {
-    alert('Please start a chat session first');
-    return;
-  }
+  console.log('[CALC] Test button clicked!');
+  console.log('[CALC] window.appletAPI:', window.appletAPI);
+  console.log('[CALC] sendAgentMessage:', window.appletAPI?.sendAgentMessage);
   
-  // Use the sendAgentMessage API
-  await window.sendAgentMessage('Get MSFT stock price and set_applet_state({ currentValue: "<price>" })');
+  try {
+    console.log('[CALC] Sending agent message...');
+    // Use the sendAgentMessage API from appletAPI
+    await window.appletAPI.sendAgentMessage('Get the current MSFT stock price and then call set_applet_state({ currentValue: "<the_price_value>" }) to display it in the calculator');
+    console.log('[CALC] Agent message sent successfully!');
+  } catch (error) {
+    console.error('[CALC] Error sending agent message:', error);
+    alert('Error: ' + error.message);
+  }
 });
 
 // Listen for state updates pushed from agent
-onStateUpdate(function(state) {
+window.appletAPI.onStateUpdate(function(state) {
   console.log('[CALC] Received state from agent:', state);
   
   if (state.currentValue !== undefined) {

@@ -17,7 +17,7 @@ import { sessionState } from '../session-state.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
 import { updateUsage } from '../usage-state.js';
-import { broadcastUserMessageFromPost, broadcastEvent, broadcastGlobalEvent, type MessageSource, type SessionEvent } from './websocket.js';
+import { broadcastEvent, broadcastGlobalEvent, type MessageSource, type SessionEvent } from './websocket.js';
 import { extractToolTelemetry, type ToolExecutionCompleteEvent } from '../sdk-event-parser.js';
 import { transformForClient, shouldEmitReload } from '../event-transformer.js';
 import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
@@ -108,9 +108,9 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     await writeFile(tempFilePath, Buffer.from(parsed.base64Data, 'base64'));
   }
   
-  // Broadcast user message to WS clients for unified rendering
-  // Use source from request (defaults to 'user' for normal messages)
-  broadcastUserMessageFromPost(sessionId, prompt, !!tempFilePath, source ?? 'user', appletSlug, fromSession, scheduleSlug);
+  // NOTE: We don't broadcast user.message here. SDK echoes it back with prefixed content,
+  // and broadcastEvent() enriches it with source metadata by parsing the prefix.
+  // This ensures ONE code path for enrichment (both live and history).
   
   // Record agent call for runaway guard
   if (correlationId) {

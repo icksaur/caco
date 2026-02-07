@@ -11,62 +11,25 @@ import { sessionClick } from './router.js';
 import { onGlobalEvent } from './websocket.js';
 
 /**
- * Initialize session panel - subscribe to global events and fetch initial badge count
+ * Initialize session panel - subscribe to global events for session list changes
  */
 export function initSessionPanel(): void {
-  // Fetch initial unobserved count for badge (needed when loading session by URL)
-  fetchInitialBadgeCount();
-  
+  // Subscribe to unified session list change event
   onGlobalEvent((event) => {
+    // Unified event for any session list mutation (created, deleted, idle, observed, renamed)
+    if (event.type === 'session.listChanged') {
+      console.log('[SESSION-PANEL] Session list changed, refreshing...', event.data);
+      loadSessions();
+      return;
+    }
+    
+    // Keep session.busy for immediate visual feedback (cursor animation)
     if (event.type === 'session.busy' && event.data) {
       const { sessionId, isBusy } = event.data as { sessionId: string; isBusy: boolean };
       updateSessionItemState(sessionId, isBusy);
-      
-      // Update menu button busy indicator
       updateMenuBusyIndicator();
     }
-    
-    // session.idle now includes unobservedCount from tracker (single source of truth)
-    if (event.type === 'session.idle' && event.data) {
-      const { sessionId, unobservedCount } = event.data as { sessionId: string; unobservedCount?: number };
-      
-      // Mark as unobserved in DOM if not the active session
-      if (sessionId !== getActiveSessionId()) {
-        markSessionAsUnobserved(sessionId);
-      }
-      
-      // Update badge from event data (no refetch needed)
-      if (typeof unobservedCount === 'number') {
-        updateUnobservedBadge(unobservedCount);
-      }
-    }
-    
-    // session.observed includes unobservedCount for direct badge update
-    if (event.type === 'session.observed' && event.data) {
-      const { sessionId, unobservedCount } = event.data as { sessionId: string; unobservedCount?: number };
-      updateSessionObservedState(sessionId);
-      
-      // Update badge from event data (no refetch needed)
-      if (typeof unobservedCount === 'number') {
-        updateUnobservedBadge(unobservedCount);
-      }
-    }
   });
-}
-
-/**
- * Fetch initial unobserved count for badge on page load
- * This ensures the badge shows correctly when navigating directly to a session via URL
- */
-async function fetchInitialBadgeCount(): Promise<void> {
-  try {
-    const response = await fetch('/api/sessions');
-    if (!response.ok) return;
-    const data = await response.json();
-    updateUnobservedBadge(data.unobservedCount ?? 0);
-  } catch {
-    // Ignore fetch errors - badge will update on next event
-  }
 }
 
 /**
@@ -106,51 +69,6 @@ function updateSessionItemState(sessionId: string, isBusy: boolean): void {
       item.appendChild(deleteBtn);
     }
   }
-}
-
-/**
- * Update a single session item's observed state in the DOM (remove unobserved badge)
- * @returns true if the session was unobserved and is now marked observed
- */
-function updateSessionObservedState(sessionId: string): boolean {
-  const item = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
-  if (!item) return false;
-  
-  const wasUnobserved = item.classList.contains('unobserved');
-  
-  item.classList.remove('unobserved');
-  const badge = item.querySelector('.session-unobserved-badge');
-  if (badge) badge.remove();
-  
-  return wasUnobserved;
-}
-
-/**
- * Mark a session item as unobserved in the DOM (add unobserved badge)
- * @returns true if the session was newly marked as unobserved
- */
-function markSessionAsUnobserved(sessionId: string): boolean {
-  const item = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
-  if (!item) return false;
-  
-  // Don't add if already marked
-  if (item.classList.contains('unobserved')) return false;
-  
-  console.log(`[SESSION-PANEL] Marking session as unobserved: ${sessionId.slice(0, 8)}`);
-  
-  item.classList.add('unobserved');
-  
-  // Add badge if not present
-  if (!item.querySelector('.session-unobserved-badge')) {
-    const badge = document.createElement('span');
-    badge.className = 'session-unobserved-badge';
-    badge.setAttribute('aria-label', 'New activity');
-    badge.title = 'Session has new activity since last viewed';
-    // Insert at beginning (before busy indicator if present)
-    item.insertBefore(badge, item.firstChild);
-  }
-  
-  return true;
 }
 
 /**
@@ -274,10 +192,20 @@ async function loadSchedules(): Promise<void> {
       item.innerHTML = `
         <span class="schedule-slug">${escapeHtml(schedule.slug)}</span>
         ${nextRunText ? `<span class="schedule-next">next: ${nextRunText}</span>` : ''}
-        <button class="schedule-toggle" title="${schedule.enabled ? 'Disable' : 'Enable'}">
-          ${schedule.enabled ? '✓' : '○'}
-        </button>
+        <div class="schedule-actions">
+          <button class="schedule-run" title="Run now">▶</button>
+          <button class="schedule-toggle" title="${schedule.enabled ? 'Disable' : 'Enable'}">
+            ${schedule.enabled ? '✓' : '○'}
+          </button>
+        </div>
       `;
+      
+      // Run schedule immediately on run button click
+      const runBtn = item.querySelector('.schedule-run');
+      runBtn?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await runSchedule(schedule.slug);
+      });
       
       // Toggle enabled state on button click
       const toggleBtn = item.querySelector('.schedule-toggle');
@@ -285,12 +213,6 @@ async function loadSchedules(): Promise<void> {
         e.stopPropagation();
         await toggleSchedule(schedule.slug, !schedule.enabled);
         loadSchedules(); // Reload to update UI
-      });
-      
-      // Show details on item click (future: could open a details view)
-      item.addEventListener('click', () => {
-        console.log('[SCHEDULE] Clicked:', schedule.slug);
-        // TODO: Show schedule details or go to session created by this schedule
       });
       
       container.appendChild(item);
@@ -317,6 +239,27 @@ async function toggleSchedule(slug: string, enabled: boolean): Promise<void> {
     }
   } catch (error) {
     console.error('[SCHEDULE] Error toggling schedule:', error);
+  }
+}
+
+/**
+ * Run schedule immediately
+ */
+async function runSchedule(slug: string): Promise<void> {
+  try {
+    console.log('[SCHEDULE] Running:', slug);
+    const response = await fetch(`/api/schedule/${slug}/run`, {
+      method: 'POST'
+    });
+    
+    if (!response.ok) {
+      console.error('[SCHEDULE] Failed to run schedule:', response.status);
+    } else {
+      const result = await response.json();
+      console.log('[SCHEDULE] Run result:', result);
+    }
+  } catch (error) {
+    console.error('[SCHEDULE] Error running schedule:', error);
   }
 }
 
@@ -485,8 +428,11 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
   cwdSpan.textContent = session.cwd!;
   item.appendChild(cwdSpan);
   
-  // Edit button (rename session)
+  // Action buttons (edit, delete) in a container
   if (!session.isBusy) {
+    const actions = document.createElement('div');
+    actions.className = 'session-actions';
+    
     const editBtn = document.createElement('button');
     editBtn.className = 'session-edit';
     editBtn.textContent = '✏️';
@@ -495,11 +441,8 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
       e.stopPropagation();
       renameSession(session.sessionId, displayName);
     };
-    item.appendChild(editBtn);
-  }
-  
-  // Delete button (hidden when busy)
-  if (!session.isBusy) {
+    actions.appendChild(editBtn);
+    
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'session-delete';
     deleteBtn.textContent = '×';
@@ -507,7 +450,9 @@ function createSessionItem(session: SessionData, activeSessionId: string): HTMLE
       e.stopPropagation();
       deleteSession(session.sessionId, displayName);
     };
-    item.appendChild(deleteBtn);
+    actions.appendChild(deleteBtn);
+    
+    item.appendChild(actions);
   }
   
   return item;

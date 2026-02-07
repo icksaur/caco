@@ -58,7 +58,8 @@ Session display: Use `name || summary` - custom name takes precedence over SDK s
 ```json
 {
   "cwd": "string (optional, defaults to server cwd)",
-  "model": "string (optional)"
+  "model": "string (optional)",
+  "description": "string (optional, custom session name)"
 }
 ```
 Returns: `{ sessionId: "uuid", cwd: "string", model: "string" }`

@@ -561,8 +561,13 @@ main {
   right: -2px;
   width: 10px;
   height: 10px;
-  /* Solid red with blinking animation */
-  background: var(--color-unobserved);
+  /* 4-corner gradient matching streaming cursor */
+  background: 
+    radial-gradient(ellipse at 0% 0%, var(--host-color-tl, var(--color-accent)), transparent 60%),
+    radial-gradient(ellipse at 100% 0%, var(--host-color-tr, var(--color-accent)), transparent 60%),
+    radial-gradient(ellipse at 0% 100%, var(--host-color-bl, var(--color-accent)), transparent 60%),
+    radial-gradient(ellipse at 100% 100%, var(--host-color-br, var(--color-accent)), transparent 60%),
+    #444;
   border-radius: 2px;
   animation: blink 0.7s infinite;
 }
@@ -998,8 +1003,13 @@ main {
   width: 10px;
   height: 10px;
   margin-right: var(--space-sm);
-  /* Solid red with blinking animation */
-  background: var(--color-error);
+  /* 4-corner gradient matching streaming cursor */
+  background: 
+    radial-gradient(ellipse at 0% 0%, var(--host-color-tl, var(--color-accent)), transparent 60%),
+    radial-gradient(ellipse at 100% 0%, var(--host-color-tr, var(--color-accent)), transparent 60%),
+    radial-gradient(ellipse at 0% 100%, var(--host-color-bl, var(--color-accent)), transparent 60%),
+    radial-gradient(ellipse at 100% 100%, var(--host-color-br, var(--color-accent)), transparent 60%),
+    #444;
   border-radius: 2px;
   animation: blink 0.7s infinite;
 }
@@ -1018,8 +1028,56 @@ main {
   border-radius: 50%;
 }
 
-/* Session edit button */
-.session-edit {
+/* Item action buttons (edit, delete, run, toggle) */
+.item-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.item-action {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+}
+
+.item-action:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.item-action.delete {
+  color: var(--color-error);
+  font-size: 1.25rem;
+  opacity: 0.6;
+}
+
+.item-action.delete:hover {
+  background: rgba(244, 135, 113, 0.2);
+}
+
+.item-action.run {
+  color: var(--color-success);
+  font-size: 0.75rem;
+}
+
+/* Legacy support - session-edit, session-delete still work */
+.session-edit,
+.session-delete {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
@@ -1043,30 +1101,22 @@ main {
   background: rgba(255, 255, 255, 0.1);
 }
 
-/* Session delete button */
 .session-delete {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-md);
   color: var(--color-error);
   font-size: 1.25rem;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
   opacity: 0.6;
-  transition: opacity var(--transition-fast), background var(--transition-fast);
 }
 
 .session-delete:hover {
   opacity: 1;
   background: rgba(244, 135, 113, 0.2);
+}
+
+.session-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 /* Model cost badge */
@@ -1182,7 +1232,8 @@ main {
   white-space: nowrap;
 }
 
-.schedule-toggle {
+.schedule-toggle,
+.schedule-run {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
@@ -1201,9 +1252,22 @@ main {
   transition: opacity var(--transition-fast), background var(--transition-fast);
 }
 
-.schedule-toggle:hover {
+.schedule-toggle:hover,
+.schedule-run:hover {
   opacity: 1;
   background: rgba(255, 255, 255, 0.1);
+}
+
+.schedule-run {
+  color: var(--color-success);
+  font-size: 0.75rem;
+}
+
+.schedule-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 /* ========================================

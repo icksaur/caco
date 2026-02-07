@@ -288,7 +288,10 @@ Scheduled sessions appear in session list with schedule icon.
 **Viewing schedules**: The schedules section shows each schedule with:
 - Schedule slug (name)
 - Next run time (relative: "5m", "2h", date if > 24h)
+- Run button (▶) - triggers immediate execution
 - Toggle button (✓ enabled, ○ disabled)
+
+**Running schedules**: Click the run button (▶) to trigger immediate execution via `POST /api/schedule/:slug/run`. The schedule runs in its persistent session.
 
 **Toggling schedules**: Click toggle button to enable/disable. Uses PATCH endpoint for partial update.
 
@@ -647,6 +650,110 @@ export const unobservedTracker = new UnobservedTracker();
 | Breaking existing meta.json | New fields are optional, getSessionMeta handles gracefully |
 | Test coverage gaps | Add unit tests for new storage functions in Phase 1 |
 | WebSocket event not received | Client already handles disconnect/reconnect, reloads on reconnect |
+
+## Open Considerations
+
+### Session List Sync on Create/Delete ✅ Implemented
+
+**Solution**: Unified `session.listChanged` event for all session list mutations.
+
+**Server emits on**:
+- Session created (`POST /api/sessions`)
+- Session deleted (`DELETE /api/sessions/:id`)
+- Session renamed (`PATCH /api/sessions/:id`)
+- Session idle (from `UnobservedTracker.markIdle()`)
+- Session observed (from `UnobservedTracker.markObserved()`)
+
+**Event format**:
+```json
+{ "type": "session.listChanged", "data": { "reason": "created|deleted|renamed|idle|observed", "sessionId": "..." } }
+```
+
+**Client behavior**:
+- Single event handler calls `loadSessions()` for full re-fetch and re-render
+- No DOM micromanagement - always consistent with server state
+- ~10ms re-render for typical session list (< 50 items)
+
+### Scheduled Sessions with Missing Session
+
+**Question**: If a schedule references a sessionId that no longer exists (deleted by user, or expired), does it correctly create a new session?
+
+**Answer**: ✅ Yes, this is already handled.
+
+In `schedule-manager.ts`:
+1. Schedule tries to POST to existing `lastRun.sessionId`
+2. If 404 (session not found), calls `createAndExecute()`
+3. `createAndExecute()` creates new session with `description: slug`
+4. New sessionId is saved to `last-run.json`
+
+**Edge case**: If the session was deleted AND server restarted before the schedule runs, the 404 path correctly recovers. No manual intervention needed.
+
+**Missing**: When scheduler creates a new session, it broadcasts `session.listChanged` via the sessions route (already implemented).
+
+### Session Panel Refresh Strategy ✅ Implemented
+
+**Current approach** (simplified):
+- Single `session.listChanged` event for all mutations
+- Client handler: `loadSessions()` (full re-fetch and re-render)
+
+**Triggers that emit `session.listChanged`**:
+- Session created (by user, schedule, or agent)
+- Session deleted
+- Session renamed (PATCH metadata)
+- Session idle (UnobservedTracker)
+- Session observed (UnobservedTracker)
+
+**Exception**: `session.busy` is still handled separately for immediate visual feedback (cursor animation), but it also updates the list via the standard handler.
+
+**Benefits of unified approach**:
+- ~60 lines of code removed from session-panel.ts
+- No edge cases (missing elements, stale DOM)
+- Always consistent with server state
+- Network overhead is minimal (one small JSON per event)
+
+### Simplification: session.listChanged
+
+**Current approach** (complex, fragile):
+- `session.busy` → client micromanages DOM (add/remove throbber, classes)
+- `session.idle` → client adds unobserved badge, updates count
+- `session.observed` → client removes unobserved badge, updates count
+- Multiple DOM manipulation functions, edge cases, race conditions
+
+**Proposed approach** (simple, robust):
+- Single event: `session.listChanged`
+- Client handler: `loadSessions()` (full re-fetch and re-render)
+- Covers ALL mutations: busy, idle, observed, created, deleted, renamed
+
+**Trade-offs**:
+| Aspect | Micromanaged DOM | Full Refresh |
+|--------|-----------------|--------------|
+| Network | None per event | One GET per event |
+| DOM churn | Minimal | Full re-render |
+| Code complexity | High (many handlers) | Low (one handler) |
+| Edge cases | Many (missing elements) | None |
+| Consistency | Prone to drift | Always correct |
+
+**Recommendation**: Use `session.listChanged` for simplicity. The session list is small (<50 items typically), and a full re-render is cheap (~10ms). Network overhead is one small JSON response.
+
+**Exception**: Keep `session.busy` for real-time cursor animation (the colorful gradient needs immediate visual feedback). But don't micromanage - just trigger `loadSessions()`.
+
+**Implementation**:
+```typescript
+// Server emits on any session list change
+broadcastGlobalEvent({ type: 'session.listChanged', data: { reason: 'created' | 'deleted' | 'idle' | 'observed' } });
+
+// Client subscribes once
+onGlobalEvent((event) => {
+  if (event.type === 'session.listChanged') {
+    loadSessions();
+  }
+});
+```
+
+**Consolidation**:
+- Remove: `updateSessionItemState()`, `updateSessionObservedState()`, `markSessionAsUnobserved()`
+- Keep: `loadSessions()` (already handles all states correctly)
+- Keep: Badge update from `loadSessions()` response (already works)
 
 ## Data Flow Diagram
 

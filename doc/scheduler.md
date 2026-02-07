@@ -245,11 +245,15 @@ async function executeSchedule(slug: string): Promise<void> {
       }
       
       if (response.status === 404) {
-        // Session not found - create new one
+        // Session not found - create new one with slug as description
         const createResponse = await fetch('/api/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cwd: process.cwd(), model: definition.sessionConfig.model })
+          body: JSON.stringify({ 
+            cwd: process.cwd(), 
+            model: definition.sessionConfig.model,
+            description: slug
+          })
         });
         const { sessionId: newSessionId } = await createResponse.json();
         
@@ -275,11 +279,15 @@ async function executeSchedule(slug: string): Promise<void> {
         throw new Error(`HTTP ${response.status}`);
       }
     } else {
-      // No session yet - create one
+      // No session yet - create one with slug as description
       const createResponse = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cwd: process.cwd(), model: definition.sessionConfig.model })
+        body: JSON.stringify({ 
+          cwd: process.cwd(), 
+          model: definition.sessionConfig.model,
+          description: slug
+        })
       });
       const { sessionId } = await createResponse.json();
       

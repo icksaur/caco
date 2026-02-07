@@ -216,8 +216,8 @@ describe('UnobservedTracker', () => {
       unobservedTracker.markIdle('session1');
       
       expect(broadcastFn).toHaveBeenCalledWith({
-        type: 'session.idle',
-        data: { sessionId: 'session1', unobservedCount: 1 }
+        type: 'session.listChanged',
+        data: { reason: 'idle', sessionId: 'session1', unobservedCount: 1 }
       });
     });
 
@@ -231,8 +231,8 @@ describe('UnobservedTracker', () => {
       unobservedTracker.markObserved('session1');
       
       expect(broadcastFn).toHaveBeenCalledWith({
-        type: 'session.observed',
-        data: { sessionId: 'session1', unobservedCount: 0 }
+        type: 'session.listChanged',
+        data: { reason: 'observed', sessionId: 'session1', unobservedCount: 0 }
       });
     });
   });

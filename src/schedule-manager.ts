@@ -179,13 +179,14 @@ async function executeSchedule(slug: string): Promise<void> {
  * Create new session and execute
  */
 async function createAndExecute(slug: string, definition: ScheduleDefinition): Promise<void> {
-  // Create session
+  // Create session with slug as description
   const createResponse = await fetch(`${SERVER_URL}/api/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ 
       cwd: process.cwd(), 
-      model: definition.sessionConfig.model || 'claude-sonnet' 
+      model: definition.sessionConfig.model || 'claude-sonnet',
+      description: slug
     })
   });
   

@@ -27,7 +27,7 @@ import { getSessionMeta, setSessionMeta, type SessionMeta } from './storage.js';
  */
 type BroadcastCallback = (event: {
   type: string;
-  data: { sessionId: string; unobservedCount: number };
+  data: { reason: string; sessionId: string; unobservedCount: number };
 }) => void;
 
 class UnobservedTracker {
@@ -165,12 +165,15 @@ class UnobservedTracker {
 
   /**
    * Broadcast state change to all clients
+   * Uses unified session.listChanged event for simplicity
    */
   private broadcast(type: string, sessionId: string): void {
     if (this.broadcastFn) {
+      // Emit unified event for client to refresh session list
       this.broadcastFn({
-        type,
+        type: 'session.listChanged',
         data: {
+          reason: type.replace('session.', ''),  // 'idle' or 'observed'
           sessionId,
           unobservedCount: this.unobservedSet.size
         }

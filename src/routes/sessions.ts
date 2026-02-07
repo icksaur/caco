@@ -78,7 +78,7 @@ router.get('/sessions', async (_req: Request, res: Response) => {
 });
 
 router.post('/sessions', async (req: Request, res: Response) => {
-  const { cwd, model } = req.body as { cwd?: string; model?: string };
+  const { cwd, model, description } = req.body as { cwd?: string; model?: string; description?: string };
   const clientId = req.headers['x-client-id'] as string | undefined;
   
   const sessionCwd = cwd || process.cwd();
@@ -95,6 +95,17 @@ router.post('/sessions', async (req: Request, res: Response) => {
     // Create new session (forces new, ignoring any existing active session)
     const sessionId = await sessionState.ensureSession(model, true, sessionCwd, clientId);
     const actualCwd = sessionManager.getSessionCwd(sessionId);
+    
+    // Set description if provided
+    if (description) {
+      setSessionMeta(sessionId, { name: description });
+    }
+    
+    // Broadcast session list change for all clients to refresh
+    broadcastGlobalEvent({ 
+      type: 'session.listChanged', 
+      data: { reason: 'created', sessionId } 
+    });
     
     res.json({ 
       sessionId, 
@@ -160,6 +171,13 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
   
   try {
     const wasActive = await sessionState.deleteSession(sessionId, clientId);
+    
+    // Broadcast session list change for all clients to refresh
+    broadcastGlobalEvent({ 
+      type: 'session.listChanged', 
+      data: { reason: 'deleted', sessionId } 
+    });
+    
     res.json({ success: true, wasActive });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -183,6 +201,13 @@ router.patch('/sessions/:sessionId', (req: Request, res: Response) => {
   }
   
   setSessionMeta(sessionId, { name: name ?? '' });
+  
+  // Broadcast session list change for all clients to refresh
+  broadcastGlobalEvent({ 
+    type: 'session.listChanged', 
+    data: { reason: 'renamed', sessionId } 
+  });
+  
   res.json({ success: true });
 });
 

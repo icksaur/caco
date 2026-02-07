@@ -16,7 +16,8 @@ import { setupMultilineInput } from './multiline-input.js';
 import { connectWs, subscribeToSession, requestHistory, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
-import { initRouter, toggleSessions, toggleApplet, newSessionClick } from './router.js';
+import { initRouter, toggleSessions, toggleApplet } from './router.js';
+import { actionBtnClick } from './session-panel.js';
 import { setActiveSession } from './app-state.js';
 
 declare global {
@@ -24,7 +25,7 @@ declare global {
     removeImage: typeof removeImage;
     scrollToBottom: typeof scrollToBottom;
     toggleSessions: typeof toggleSessions;
-    newSessionClick: typeof newSessionClick;
+    actionBtnClick: typeof actionBtnClick;
     deleteSession: typeof deleteSession;
     selectModel: typeof selectModel;
     loadModels: typeof loadModels;
@@ -37,7 +38,7 @@ declare global {
 window.removeImage = removeImage;
 window.scrollToBottom = scrollToBottom;
 window.toggleSessions = toggleSessions;
-window.newSessionClick = newSessionClick;
+window.actionBtnClick = actionBtnClick;
 window.deleteSession = deleteSession;
 window.selectModel = selectModel;
 window.loadModels = loadModels;

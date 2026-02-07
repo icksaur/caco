@@ -7,12 +7,28 @@ import { formatAge } from './ui-utils.js';
 import { getActiveSessionId } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { setViewState } from './view-controller.js';
-import { sessionClick } from './router.js';
+import { sessionClick, newSessionClick } from './router.js';
 import { onGlobalEvent } from './websocket.js';
 
 // Module state for fuzzy search
 let allSessions: SessionData[] = [];
 let searchQuery = '';
+
+/**
+ * Perform action button click - new session or resume first match
+ * Single source of truth for action button behavior
+ */
+export function actionBtnClick(): void {
+  if (!searchQuery) {
+    newSessionClick();  // Empty search → new session
+  } else {
+    const firstSession = document.querySelector('.session-item') as HTMLElement;
+    if (firstSession?.dataset.sessionId) {
+      void sessionClick(firstSession.dataset.sessionId);  // Has matches → resume
+    }
+    // No matches → do nothing (button is disabled anyway)
+  }
+}
 
 /**
  * Initialize session panel - subscribe to global events for session list changes
@@ -37,11 +53,7 @@ export function initSessionPanel(): void {
         }
         // Otherwise let Escape close the panel (handled by view-controller)
       } else if (e.key === 'Enter') {
-        // Select first session in filtered list
-        const firstSession = document.querySelector('.session-item') as HTMLElement;
-        if (firstSession?.dataset.sessionId) {
-          void sessionClick(firstSession.dataset.sessionId);
-        }
+        actionBtnClick();
       }
     });
   }
@@ -383,6 +395,23 @@ export async function loadSessions(): Promise<void> {
  * Render sessions filtered by current search query
  */
 function renderFilteredSessions(): void {
+  // Compute filtered FIRST (needed for button state)
+  const filtered = searchQuery
+    ? allSessions.filter(s => matchesSearch(s, searchQuery))
+    : allSessions;
+  
+  // Update action button state (single source of truth)
+  const btn = document.getElementById('actionBtn') as HTMLButtonElement | null;
+  if (btn) {
+    if (!searchQuery) {
+      btn.textContent = '+ New session';
+      btn.disabled = false;
+    } else {
+      btn.textContent = 'Resume session';
+      btn.disabled = filtered.length === 0;
+    }
+  }
+  
   const container = document.getElementById('sessionList');
   if (!container) return;
   
@@ -395,11 +424,6 @@ function renderFilteredSessions(): void {
   heading.className = 'section-header';
   heading.textContent = 'sessions';
   container.appendChild(heading);
-  
-  // Filter sessions by search query
-  const filtered = searchQuery
-    ? allSessions.filter(s => matchesSearch(s, searchQuery))
-    : allSessions;
   
   // Show empty state if no matches
   if (filtered.length === 0) {

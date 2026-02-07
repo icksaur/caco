@@ -10,7 +10,7 @@ User experience for session management, listing, and scheduling.
 - **Overlay**: Full-screen overlay above chat content
 - **Structure**: Search + New Session row → Schedules section → Session list
 
-### Top Row: Search + New Session
+### Top Row: Search + Action Button
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -18,9 +18,23 @@ User experience for session management, listing, and scheduling.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Layout**: Search input (flex: 4) + New Session button (flex: 1) = 4:1 width ratio.
+**Layout**: Search input (flex: 4) + Action button (flex: 1) = 4:1 width ratio.
 
 **Keyboard-first navigation** - panel auto-focuses search input when opened.
+
+#### Action Button States
+
+Button label and behavior change based on search state:
+
+| Search State | Button Label | Button State | Enter/Click Action |
+|--------------|--------------|--------------|-------------------|
+| Empty (no query) | `+ New session` | Enabled | Opens new session UI |
+| Query with matches | `Resume session` | Enabled | Loads first matched session |
+| Query with no matches | `Resume session` | Disabled | No action |
+
+**Rationale**: On mobile, accidental "new session" creation is disruptive. When searching, the intent is to find an existing session, not create a new one. The button reflects the expected action.
+
+#### Search Input Behavior
 
 **Search input** filters sessions in real-time:
 - Matches against session name/summary AND cwd path
@@ -28,7 +42,7 @@ User experience for session management, listing, and scheduling.
 - Case-insensitive
 - Empty input shows all sessions
 - `Escape` clears search (or closes panel if search empty)
-- `Enter` selects first visible session
+- `Enter` performs action button behavior (new session OR resume first match)
 - `↑`/`↓` arrows navigate filtered results (future enhancement)
 
 **Rationale**: With many sessions, clicking through pages is slow. Typing a few characters of project name or task finds the session instantly.
@@ -224,3 +238,89 @@ When session is busy, show what it's doing:
 ```
 
 Capture from `report_intent` tool result, display in session list.
+
+---
+
+## Implementation Notes: Action Button
+
+### Design Decision: Single Button with State Updates
+
+**Chosen approach**: Single button element, update text/disabled/action based on search state.
+
+**Rationale** (per code-quality.md):
+- Less code than two buttons with show/hide logic
+- Single source of truth for button state
+- No CSS complexity for mutual exclusion
+- Action function already needs to branch anyway
+
+### Implementation
+
+**Key insight**: `renderFilteredSessions()` is already the single render point for all session panel state. Both `searchQuery` and `allSessions` changes flow through it. Adding button state there maintains single source of truth.
+
+**1. Button gets an ID** (`index.html`):
+```html
+<button type="button" id="actionBtn" class="new-session-btn" onclick="actionBtnClick()">+ New session</button>
+```
+
+**2. One shared action function** (`session-panel.ts`):
+```typescript
+function performAction(): void {
+  if (!searchQuery) {
+    newSessionClick();  // Empty search → new session
+  } else {
+    const firstSession = document.querySelector('.session-item') as HTMLElement;
+    if (firstSession?.dataset.sessionId) {
+      sessionClick(firstSession.dataset.sessionId);  // Has matches → resume
+    }
+    // No matches → do nothing (button is disabled anyway)
+  }
+}
+```
+
+**3. Update button at TOP of `renderFilteredSessions()`** (before any early returns):
+```typescript
+function renderFilteredSessions(): void {
+  // Compute filtered FIRST (needed for button state)
+  const filtered = searchQuery
+    ? allSessions.filter(s => matchesSearch(s, searchQuery))
+    : allSessions;
+  
+  // Update action button state (single source of truth)
+  const btn = document.getElementById('actionBtn') as HTMLButtonElement | null;
+  if (btn) {
+    if (!searchQuery) {
+      btn.textContent = '+ New session';
+      btn.disabled = false;
+    } else {
+      btn.textContent = 'Resume session';
+      btn.disabled = filtered.length === 0;
+    }
+  }
+  
+  // ... rest of render logic
+}
+```
+
+**4. Enter key calls same function**:
+```typescript
+} else if (e.key === 'Enter') {
+  performAction();
+}
+```
+
+### Complexity Assessment
+
+| Aspect | Notes |
+|--------|-------|
+| DOM changes | Add `id="actionBtn"`, rename `onclick` |
+| JS changes | ~15 lines: new function + button updates in existing render |
+| CSS changes | None (disabled styling already exists) |
+| Unknowns | None - all patterns already used in codebase |
+
+### Alternative Considered: Two Buttons
+
+Two buttons with `hidden` class toggling was rejected because:
+- Requires coordinating visibility of two elements
+- More HTML, more CSS selectors
+- Same branching logic needed anyway for Enter key
+- No benefit over single button approach

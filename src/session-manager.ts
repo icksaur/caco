@@ -10,6 +10,7 @@ import { unobservedTracker } from './unobserved-tracker.js';
 import { getScheduleForSession } from './schedule-store.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
+import { buildResumeContext as buildResumeContextMessage } from './resume-context.js';
 
 interface CopilotClientInstance {
   start(): Promise<void>;
@@ -69,6 +70,7 @@ interface ActiveSession {
   cwd: string;
   session: CopilotSessionInstance;
   client: CopilotClientInstance;
+  pendingResumeContext: boolean; // True if session was just resumed and needs context injection
 }
 
 interface CachedSession {
@@ -221,8 +223,8 @@ class SessionManager {
     // Update the ref so tool handlers can access the real session ID
     sessionRef.id = session.sessionId;
     
-    // Track active session
-    this.activeSessions.set(session.sessionId, { cwd, session, client });
+    // Track active session (no resume context needed for new sessions)
+    this.activeSessions.set(session.sessionId, { cwd, session, client, pendingResumeContext: false });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
     
     // Register with storage layer for output persistence
@@ -277,8 +279,8 @@ class SessionManager {
       excludedTools: config.excludedTools
     });
     
-    // Track active session
-    this.activeSessions.set(sessionId, { cwd, session, client });
+    // Track active session (needs resume context on first message)
+    this.activeSessions.set(sessionId, { cwd, session, client, pendingResumeContext: true });
     
     // Register with storage layer for output persistence
     registerSession(cwd, sessionId);
@@ -334,13 +336,19 @@ class SessionManager {
       throw new Error(`Session ${sessionId} is not active`);
     }
     
+    // Inject resume context on first message after resume
+    if (active.pendingResumeContext) {
+      message = this.buildResumeContext(sessionId, active.cwd) + message;
+      active.pendingResumeContext = false;
+    }
+    
     const { session } = active;
     const TIMEOUT_MS = 120000; // 2 minutes
     
     try {
       const response = await session.sendAndWait({
-        prompt: message,
-        ...options
+        ...options,
+        prompt: message,  // Must come AFTER spread to override any options.prompt
       }, TIMEOUT_MS);
       
       return response;
@@ -351,6 +359,15 @@ class SessionManager {
       }
       throw error;
     }
+  }
+
+  /**
+   * Build context message to prepend on first send after resume.
+   * Informs agent that shell state is reset and may need re-initialization.
+   */
+  private buildResumeContext(sessionId: string, cwd: string): string {
+    const meta = getSessionMeta(sessionId);
+    return buildResumeContextMessage({ cwd, envHint: meta?.envHint });
   }
 
   /**
@@ -587,10 +604,18 @@ class SessionManager {
       throw new Error(`Session ${sessionId} is not active`);
     }
     
+    // Inject resume context on first message after resume
+    if (active.pendingResumeContext) {
+      console.log(`[RESUME-CTX] Injecting resume context for session ${sessionId.slice(0, 8)}`);
+      message = this.buildResumeContext(sessionId, active.cwd) + message;
+      active.pendingResumeContext = false;
+      console.log(`[RESUME-CTX] Full message starts with: ${message.slice(0, 100)}...`);
+    }
+    
     const { session } = active;
     return session.send({
-      prompt: message,
-      ...options
+      ...options,
+      prompt: message,  // Must come AFTER spread to override any options.prompt
     });
   }
 

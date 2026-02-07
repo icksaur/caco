@@ -73,7 +73,8 @@ Returns: `{ success: true, sessionId: "uuid", cwd: "string" }`
 Body:
 ```json
 {
-  "name": "string (custom session name, empty to clear)"
+  "name": "string (custom session name, empty to clear)",
+  "envHint": "string (environment setup hint shown on resume)"
 }
 ```
 

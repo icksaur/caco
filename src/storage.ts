@@ -40,6 +40,7 @@ export interface SessionMeta {
   lastObservedAt?: string;  // ISO timestamp: user last viewed this session
   lastIdleAt?: string;      // ISO timestamp: session last became idle
   currentIntent?: string;   // Last reported intent (from report_intent tool)
+  envHint?: string;         // Environment setup hint shown on session resume
 }
 
 export interface OutputMetadata {

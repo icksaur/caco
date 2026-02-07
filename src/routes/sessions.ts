@@ -187,11 +187,11 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
 
 /**
  * PATCH /api/sessions/:sessionId
- * Update session metadata (custom name)
+ * Update session metadata (custom name, environment hint)
  */
 router.patch('/sessions/:sessionId', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { name } = req.body as { name?: string };
+  const { name, envHint } = req.body as { name?: string; envHint?: string };
   
   // Validate session exists
   const cwd = sessionManager.getSessionCwd(sessionId);
@@ -200,7 +200,14 @@ router.patch('/sessions/:sessionId', (req: Request, res: Response) => {
     return;
   }
   
-  setSessionMeta(sessionId, { name: name ?? '' });
+  // Merge with existing meta to preserve fields not being updated
+  const existing = getSessionMeta(sessionId) ?? { name: '' };
+  const updated = {
+    ...existing,
+    ...(name !== undefined && { name }),
+    ...(envHint !== undefined && { envHint }),
+  };
+  setSessionMeta(sessionId, updated);
   
   // Broadcast session list change for all clients to refresh
   broadcastGlobalEvent({ 

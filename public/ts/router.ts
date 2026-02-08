@@ -16,6 +16,7 @@ import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletP
 import { setActiveSession, getActiveSessionId, getCurrentCwd } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
+import { onButton } from './button-gestures.js';
 import { subscribeToSession, requestHistory } from './websocket.js';
 import { waitForHistoryComplete } from './history.js';
 import { showSessionManager } from './session-panel.js';
@@ -97,8 +98,7 @@ export function initRouter(): void {
   });
   
   // Set up expand button click handler
-  const expandBtn = document.getElementById('expandBtn');
-  expandBtn?.addEventListener('click', toggleAppletExpanded);
+  onButton('expandBtn', { onPress: toggleAppletExpanded });
 }
 
 /**

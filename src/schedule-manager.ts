@@ -13,8 +13,7 @@ import {
   loadDefinition, 
   loadLastRun, 
   saveLastRun,
-  type ScheduleDefinition,
-  type LastRunState
+  type ScheduleDefinition
 } from './schedule-store.js';
 import { SERVER_URL, SCHEDULE_CHECK_INTERVAL_MS, SCHEDULE_BUSY_DELAY_MS } from './config.js';
 

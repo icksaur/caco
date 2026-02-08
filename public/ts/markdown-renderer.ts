@@ -179,8 +179,8 @@ export function setupMarkdownRenderer(): void {
   
   // Render markdown when DOM is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', renderMarkdown);
+    document.addEventListener('DOMContentLoaded', () => void renderMarkdown());
   } else {
-    renderMarkdown();
+    void renderMarkdown();
   }
 }

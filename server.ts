@@ -192,7 +192,7 @@ process.on('SIGINT', () => {
 });
 
 // Handle unhandled rejections (prevents crash from SDK async errors)
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason, _promise) => {
   console.error('[UNHANDLED REJECTION]', reason);
   // Log but don't crash - SDK sometimes throws async errors we can't catch
 });

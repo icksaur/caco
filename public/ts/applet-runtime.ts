@@ -7,7 +7,7 @@
  * Navigation is handled by router.ts - this module just renders applets.
  */
 
-import { showAppletPanel, updateTitle } from './view-controller.js';
+import { showAppletPanel } from './view-controller.js';
 import { wsSetState, onStateUpdate, isWsConnected } from './websocket.js';
 import { getActiveSessionId } from './app-state.js';
 
@@ -32,7 +32,7 @@ interface AppletInstance {
 }
 
 let currentApplet: AppletInstance | null = null;
-const currentStyleElement: HTMLStyleElement | null = null;
+const _currentStyleElement: HTMLStyleElement | null = null;
 let pendingAppletState: Record<string, unknown> | null = null;
 
 /**
@@ -460,7 +460,7 @@ function showInstance(instance: AppletInstance): void {
 /**
  * Hide an applet instance (keep in stack, but not visible)
  */
-function hideInstance(instance: AppletInstance): void {
+function _hideInstance(instance: AppletInstance): void {
   instance.element.style.display = 'none';
 }
 

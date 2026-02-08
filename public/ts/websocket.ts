@@ -258,7 +258,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       // History streaming complete - mark session as observed
       const sessionId = getActiveSessionId();
       if (sessionId) {
-        markSessionObserved(sessionId);
+        void markSessionObserved(sessionId);
       }
       // Notify subscribers
       for (const cb of historyCompleteCallbacks) {

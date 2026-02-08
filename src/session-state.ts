@@ -7,7 +7,7 @@
 
 import sessionManager from './session-manager.js';
 import { loadPreferences, savePreferences, getDefaultPreferences, DEFAULT_MODEL } from './preferences.js';
-import type { UserPreferences, SystemMessage, SessionStateConfig } from './types.js';
+import type { UserPreferences, SessionStateConfig } from './types.js';
 
 /**
  * Manages the active session state for the server.

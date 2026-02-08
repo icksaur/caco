@@ -5,7 +5,7 @@
  */
 
 import { RateAggregator, type RateConfig } from './rate-aggregator.js';
-import { RunawayRulesEngine, type RunawayLimits } from './rules-engine.js';
+import { RunawayRulesEngine } from './rules-engine.js';
 import {
   AGENT_MAX_DEPTH,
   AGENT_MAX_AGE_SECONDS,

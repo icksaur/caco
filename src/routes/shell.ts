@@ -72,7 +72,7 @@ async function validateCwd(cwd: string): Promise<{ valid: true } | { valid: fals
       return { valid: false, error: 'Working directory is not a directory' };
     }
     return { valid: true };
-  } catch (error) {
+  } catch (_error) {
     return { valid: false, error: 'Working directory does not exist' };
   }
 }

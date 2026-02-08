@@ -18,7 +18,7 @@ import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent }
 import { initAppletButton } from './applet-button.js';
 import { subscribeToSession, requestHistory } from './websocket.js';
 import { waitForHistoryComplete } from './history.js';
-import { loadSessions, showSessionManager } from './session-panel.js';
+import { showSessionManager } from './session-panel.js';
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 import { setFormEnabled } from './message-streaming.js';
@@ -131,7 +131,7 @@ async function handleNavigation(url: URL): Promise<void> {
  */
 function handlePopState(): void {
   const url = new URL(window.location.href);
-  handleNavigation(url);
+  void handleNavigation(url);
 }
 
 /**

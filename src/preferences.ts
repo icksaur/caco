@@ -39,7 +39,7 @@ export async function loadPreferences(): Promise<UserPreferences> {
       return { ...defaultPreferences, ...JSON.parse(data) };
     }
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const _message = e instanceof Error ? e.message : String(e);
   }
   return { ...defaultPreferences };
 }
@@ -51,6 +51,6 @@ export async function savePreferences(prefs: UserPreferences): Promise<void> {
   try {
     await writeFile(PREFS_FILE, JSON.stringify(prefs, null, 2));
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const _message = e instanceof Error ? e.message : String(e);
   }
 }

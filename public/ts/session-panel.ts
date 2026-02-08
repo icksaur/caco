@@ -172,9 +172,9 @@ function updateMenuBusyIndicator(): void {
  */
 export function showSessionManager(): void {
   setViewState('sessions');
-  loadSessions();
-  loadSchedules();
-  loadUsage();
+  void loadSessions();
+  void loadSchedules();
+  void loadUsage();
   
   // Focus search input for keyboard-first navigation
   // Use setTimeout to ensure DOM is updated after view state change
@@ -246,17 +246,16 @@ async function loadSchedules(): Promise<void> {
       
       // Run schedule immediately on run button click
       const runBtn = item.querySelector('.schedule-run');
-      runBtn?.addEventListener('click', async (e) => {
+      runBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
-        await runSchedule(schedule.slug);
+        void runSchedule(schedule.slug);
       });
       
       // Toggle enabled state on button click
       const toggleBtn = item.querySelector('.schedule-toggle');
-      toggleBtn?.addEventListener('click', async (e) => {
+      toggleBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
-        await toggleSchedule(schedule.slug, !schedule.enabled);
-        loadSchedules(); // Reload to update UI
+        void toggleSchedule(schedule.slug, !schedule.enabled).then(() => loadSchedules());
       });
       
       container.appendChild(item);
@@ -576,7 +575,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     editBtn.title = 'Rename session';
     editBtn.onclick = (e) => {
       e.stopPropagation();
-      renameSession(session.sessionId, displayName);
+      void renameSession(session.sessionId, displayName);
     };
     actions.appendChild(editBtn);
     
@@ -585,7 +584,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     deleteBtn.textContent = '×';
     deleteBtn.onclick = (e) => {
       e.stopPropagation();
-      deleteSession(session.sessionId, displayName);
+      void deleteSession(session.sessionId, displayName);
     };
     actions.appendChild(deleteBtn);
     
@@ -610,7 +609,7 @@ async function renameSession(sessionId: string, currentName: string): Promise<vo
     });
     
     if (response.ok) {
-      loadSessions(); // Refresh list
+      void loadSessions(); // Refresh list
     } else {
       const data = await response.json();
       alert(`Failed to rename: ${data.error || 'Unknown error'}`);
@@ -638,7 +637,7 @@ export async function deleteSession(sessionId: string, displayName?: string): Pr
     if (response.ok) {
       // Refresh session list - stays in session view
       // If we deleted the active session, user can pick another or start new
-      loadSessions();
+      void loadSessions();
     } else {
       const err = await response.json();
       alert('Failed to delete session: ' + err.error);

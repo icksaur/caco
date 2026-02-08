@@ -19,7 +19,6 @@ import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type Navi
 import { parseImageDataUrl } from '../image-utils.js';
 import { updateUsage } from '../usage-state.js';
 import { broadcastEvent, broadcastGlobalEvent, type MessageSource, type SessionEvent } from './websocket.js';
-import { extractToolTelemetry, type ToolExecutionCompleteEvent } from '../sdk-event-parser.js';
 import { transformForClient, shouldEmitReload } from '../event-transformer.js';
 import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
 import { getQueue, isFlushTrigger } from '../caco-event-queue.js';

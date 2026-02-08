@@ -3,11 +3,10 @@ import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
-import type { SessionConfig, CreateConfig, ResumeConfig, SystemMessage } from './types.js';
+import type { CreateConfig, ResumeConfig, SystemMessage } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
 import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta } from './storage.js';
 import { unobservedTracker } from './unobserved-tracker.js';
-import { getScheduleForSession } from './schedule-store.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
 import { buildResumeContextForSession } from './prompts.js';
@@ -137,7 +136,7 @@ function syncModelCache(sessionId: string, model?: string): void {
 /**
  * Get model from cache (sync happens on create/resume).
  */
-function getSessionModel(sessionId: string): string | null {
+function _getSessionModel(sessionId: string): string | null {
   const meta = getSessionMeta(sessionId);
   return meta?.model ?? null;
 }

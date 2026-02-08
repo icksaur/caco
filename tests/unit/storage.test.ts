@@ -18,7 +18,7 @@ import {
   setSessionIntent,
   isSessionUnobserved
 } from '../../src/storage.js';
-import { existsSync, rmSync, mkdirSync } from 'fs';
+import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 

@@ -44,30 +44,7 @@ function getByPath(obj: Record<string, unknown>, path: string): unknown {
   );
 }
 
-/**
- * Extract outputId from tool result content.
- * Handles both JSON-wrapped and plain text [output:xxx] markers.
- */
-function extractOutputId(resultContent: string): string | null {
-  // Try JSON parse first (tool handler returns JSON with toolTelemetry)
-  try {
-    const parsed = JSON.parse(resultContent);
-    if (parsed.toolTelemetry?.outputId) {
-      return parsed.toolTelemetry.outputId;
-    }
-    // Also check textResultForLlm for marker
-    if (parsed.textResultForLlm) {
-      const match = parsed.textResultForLlm.match(/\[output:([^\]]+)\]/);
-      if (match) return match[1];
-    }
-  } catch {
-    // Not JSON, try regex on plain text
-  }
-  
-  // Fallback: regex on plain text
-  const match = resultContent.match(/\[output:([^\]]+)\]/);
-  return match ? match[1] : null;
-}
+
 
 /**
  * Fetch embed output and render into element.
@@ -290,7 +267,7 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     
     // Async fetch and render (only in browser)
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-      fetchAndRenderEmbed(element as unknown as HTMLElement, outputId);
+      void fetchAndRenderEmbed(element as unknown as HTMLElement, outputId);
     }
   },
 };

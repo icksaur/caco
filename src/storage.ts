@@ -16,7 +16,7 @@
  */
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { homedir } from 'os';
 import { OUTPUT_CACHE_TTL_MS } from './config.js';
 
@@ -351,7 +351,7 @@ export function listOutputs(sessionId: string): OutputMetadata[] {
         const metaPath = join(outputDir, file);
         const metadata: OutputMetadata = JSON.parse(readFileSync(metaPath, 'utf-8'));
         outputs.push(metadata);
-      } catch (e) {
+      } catch (_e) {
         // Skip malformed files
       }
     }
@@ -382,7 +382,7 @@ export function listEmbedOutputs(sessionId: string): Array<{ outputId: string; m
           const outputId = file.replace('.meta.json', '');
           embeds.push({ outputId, metadata });
         }
-      } catch (e) {
+      } catch (_e) {
         // Skip malformed files
       }
     }

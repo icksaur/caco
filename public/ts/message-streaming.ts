@@ -105,7 +105,7 @@ function handleEvent(event: SessionEvent): void {
     if (eventType === 'session.idle') {
       const sessionId = getActiveSessionId();
       if (sessionId) {
-        markSessionObserved(sessionId);
+        void markSessionObserved(sessionId);
       }
     }
   }
@@ -312,6 +312,6 @@ export function setupFormHandler(): void {
     resetTextareaHeight();
     removeImage();
     
-    streamResponse(message, model, imageData, isNewChat, cwd);
+    void streamResponse(message, model, imageData, isNewChat, cwd);
   });
 }

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { sendError, apiError, type ApiErrorResponse } from '../../src/api-error.js';
+import { sendError, apiError } from '../../src/api-error.js';
 
 describe('API Error Utilities', () => {
   const createMockResponse = () => {

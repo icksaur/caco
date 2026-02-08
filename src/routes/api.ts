@@ -151,17 +151,6 @@ router.post('/tmpfile', express.json({ limit: '10mb' }), async (req: Request, re
   }
 });
 
-function escapeHtml(text: string): string {
-  const map: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;'
-  };
-  return text.replace(/[&<>"']/g, m => map[m]);
-}
-
 router.get('/preferences', (_req: Request, res: Response) => {
   res.json(sessionState.preferences);
 });

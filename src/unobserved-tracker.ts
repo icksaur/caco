@@ -20,7 +20,7 @@
  *   - If client A observes, client B sees update via broadcast
  */
 
-import { getSessionMeta, setSessionMeta, type SessionMeta } from './storage.js';
+import { getSessionMeta, setSessionMeta } from './storage.js';
 
 /**
  * Callback for broadcasting state changes to all clients

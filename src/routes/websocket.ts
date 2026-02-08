@@ -86,7 +86,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
     path: '/ws' 
   });
 
-  wss.on('connection', (ws, req) => {
+  wss.on('connection', (ws, _req) => {
     // Track in global pool
     allConnections.add(ws);
     
@@ -94,7 +94,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
       try {
         const msg = JSON.parse(data.toString()) as ClientMessage;
         handleMessage(ws, msg);
-      } catch (err) {
+      } catch (_err) {
         sendError(ws, undefined, 'Invalid JSON message');
       }
     });

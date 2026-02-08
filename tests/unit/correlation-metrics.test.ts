@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from '../../src/correlation-metrics.js';
+import { CorrelationMetrics, type CorrelationRules } from '../../src/correlation-metrics.js';
 
 describe('CorrelationMetrics', () => {
   let metrics: CorrelationMetrics;

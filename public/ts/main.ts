@@ -46,25 +46,27 @@ window.stopStreaming = stopStreaming;
 window.toggleApplet = toggleApplet;
 window.hideToast = hideToast;
 
-document.addEventListener('DOMContentLoaded', async () => {
-  // Initialize view state from DOM
-  initViewState();
-  
-  // Initialize router (Navigation API handler)
-  initRouter();
-  
-  // Initialize input router (global keyboard event routing)
-  initInputRouter();
-  
-  // Initialize applet runtime (exposes setAppletState globally)
-  initAppletRuntime();
-  
-  // Initialize session panel (subscribe to WS session state events)
-  initSessionPanel();
-  
-  // Connect WebSocket once on page load
-  connectWs();
-  await waitForConnect();
+// Wrap async init in void to satisfy eslint no-misused-promises
+document.addEventListener('DOMContentLoaded', () => {
+  void (async () => {
+    // Initialize view state from DOM
+    initViewState();
+    
+    // Initialize router (Navigation API handler)
+    initRouter();
+    
+    // Initialize input router (global keyboard event routing)
+    initInputRouter();
+    
+    // Initialize applet runtime (exposes setAppletState globally)
+    initAppletRuntime();
+    
+    // Initialize session panel (subscribe to WS session state events)
+    initSessionPanel();
+    
+    // Connect WebSocket once on page load
+    connectWs();
+    await waitForConnect();
   
   // Reconnect WS when page becomes visible (e.g., returning from another tab)
   document.addEventListener('visibilitychange', () => {
@@ -145,4 +147,5 @@ document.addEventListener('DOMContentLoaded', async () => {
       await loadAppletFromUrl();
     }
   }
+  })();
 });

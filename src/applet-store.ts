@@ -178,7 +178,7 @@ export async function loadApplet(
     console.log(`[APPLET-STORE] Loaded applet "${slug}" from ${paths.root}`);
     
     return { meta, html, js, css };
-  } catch (error) {
+  } catch (_error) {
     console.log(`[APPLET-STORE] Applet "${slug}" not found`);
     return null;
   }

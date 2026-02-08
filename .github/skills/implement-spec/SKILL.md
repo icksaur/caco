@@ -3,8 +3,9 @@ name: implement-spec
 description: How to make code changes according to a spec's plan
 ---
 
-1. implement changes in phases using todo tool
-2. build and test
-3. repeat
-4. do not commit
-5. ask for external review
+1. If you have not, first read README.md and doc/code-quality.md
+2. implement changes in phases using todo tool
+3. build and test
+4. repeat
+5. do not commit
+6. ask for external review

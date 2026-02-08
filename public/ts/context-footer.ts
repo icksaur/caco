@@ -31,7 +31,8 @@ export function renderContextFooter(context: SessionContext): void {
   const files = context.files ?? [];
   console.log('[CONTEXT] files=', files);
   for (const path of files.slice(0, 5)) {
-    const name = path.split('/').pop() || path;
+    // Handle both Windows (\) and Unix (/) path separators
+    const name = path.split(/[\\/]/).pop() || path;
     const encodedPath = encodeURIComponent(path);
     links.push(`<a href="/?applet=text-editor&path=${encodedPath}" title="${path}">${name}</a>`);
   }

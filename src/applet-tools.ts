@@ -157,10 +157,16 @@ setAppletState({ selectedFile: '/path/to/file.txt' });
 \`\`\`
 
 ### Pattern 2: Active Request (agent responds NOW)
-\`sendAgentMessage(prompt)\` - Send message, agent responds immediately
+\`sendAgentMessage(prompt, options?)\` - Send message, agent responds immediately
 \`\`\`javascript
 await sendAgentMessage('Get MSFT stock price and set_applet_state with result');
 // Agent receives message, takes action, responds in chat
+
+// With image (direct submission - max 100KB):
+const canvas = document.getElementById('canvas');
+await sendAgentMessage('What is this drawing?', { 
+  imageData: canvas.toDataURL('image/png') 
+});
 \`\`\`
 
 **Use passive** when storing data for agent to read on demand.
@@ -168,10 +174,18 @@ await sendAgentMessage('Get MSFT stock price and set_applet_state with result');
 
 **File Operations:**
 
-\`saveTempFile(dataUrl, options?)\` - Save image to ~/.caco/tmp/ for agent viewing
+\`saveTempFile(dataUrl, options?)\` - Save data to ~/.caco/tmp/ for agent viewing
+
+> **For images:** Prefer \`sendAgentMessage\` with \`imageData\` option (direct submission).
+> The temp-file pattern still works but requires agent to call \`view\` tool.
+
 \`\`\`javascript
+// Preferred for images (direct):
+await sendAgentMessage('Analyze this', { imageData: canvas.toDataURL() });
+
+// Alternative (indirect, requires view tool):
 const { path } = await saveTempFile(canvas.toDataURL('image/png'));
-await sendAgentMessage(\`Analyze image at \${path}\`);  // Agent uses view tool
+await sendAgentMessage(\`Analyze image at \${path}\`);
 \`\`\`
 
 \`callMCPTool(toolName, params)\` - Call MCP tools for file operations

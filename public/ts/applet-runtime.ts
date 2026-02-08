@@ -208,23 +208,41 @@ function setAppletState(state: Record<string, unknown>): void {
 }
 
 /**
+ * Options for sendAgentMessage
+ */
+interface MessageOptions {
+  /** Applet slug for context (defaults to current applet) */
+  appletSlug?: string;
+  /** Base64 data URL for image submission (data:image/...;base64,...) */
+  imageData?: string;
+}
+
+/** Max image size - Express default JSON body limit */
+const MAX_IMAGE_SIZE = 100 * 1024;
+
+/**
  * Send a message to the agent from applet JS
  * Creates an "applet" bubble (orange) in the chat and triggers agent response
  * 
  * @param prompt - The message to send to the agent
- * @param appletSlug - Optional applet slug for context (defaults to current applet)
+ * @param options - Optional applet slug and image data
  * @returns Promise that resolves when message is sent (not when agent responds)
  */
-async function sendAgentMessage(prompt: string, appletSlug?: string): Promise<void> {
+async function sendAgentMessage(prompt: string, options?: MessageOptions): Promise<void> {
   const sessionId = getActiveSessionId();
   if (!sessionId) {
     throw new Error('No active session - cannot send agent message');
   }
   
-  // Default to current applet if not specified
-  const slug = appletSlug ?? currentApplet?.slug;
+  // Validate image size (100KB server limit)
+  if (options?.imageData && options.imageData.length > MAX_IMAGE_SIZE) {
+    throw new Error('Image too large (max 100KB)');
+  }
   
-  console.log(`[APPLET] Sending agent message: "${prompt.slice(0, 50)}..." (session: ${sessionId}, applet: ${slug})`);
+  // Default to current applet if not specified
+  const slug = options?.appletSlug ?? currentApplet?.slug;
+  
+  console.log(`[APPLET] Sending agent message: "${prompt.slice(0, 50)}..." (session: ${sessionId}, applet: ${slug}${options?.imageData ? ', with image' : ''})`);
   
   const response = await fetch(`/api/sessions/${sessionId}/messages`, {
     method: 'POST',
@@ -232,7 +250,8 @@ async function sendAgentMessage(prompt: string, appletSlug?: string): Promise<vo
     body: JSON.stringify({
       prompt,
       source: 'applet',
-      appletSlug: slug
+      appletSlug: slug,
+      imageData: options?.imageData
     })
   });
   

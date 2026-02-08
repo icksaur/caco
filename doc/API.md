@@ -623,16 +623,25 @@ navigateAppletUrlParam('file', '/new/path');
 
 ### Agent Communication
 
-#### sendAgentMessage(prompt, appletSlug?)
+#### sendAgentMessage(prompt, options?)
 
 Send a message to the agent from applet JS. Creates an "applet" bubble (orange) in the chat.
+
+**Options:**
+- `appletSlug` (string, optional) - Applet slug for context (defaults to current applet)
+- `imageData` (string, optional) - Base64 data URL for image submission (max 100KB)
 
 ```javascript
 // Send a message with current applet as context
 await sendAgentMessage('Set the calculator value to 42');
 
 // Send with explicit applet slug
-await sendAgentMessage('Load file /path/to/image.jpg', 'image-viewer');
+await sendAgentMessage('Load file /path/to/image.jpg', { appletSlug: 'image-viewer' });
+
+// Send with image data (direct submission - preferred for images)
+const canvas = document.getElementById('canvas');
+const imageData = canvas.toDataURL('image/png');
+await sendAgentMessage('What is this drawing?', { imageData });
 ```
 
 Returns a Promise that resolves when message is sent (not when agent responds).
@@ -650,12 +659,19 @@ const sessionId = getSessionId();
 
 #### saveTempFile(dataUrl, options?)
 
-Save image data to `~/.caco/tmp/` for agent viewing.
+Save data to `~/.caco/tmp/` for agent viewing.
+
+> **Note:** For images, prefer `sendAgentMessage` with `imageData` option for direct submission.
+> The temp-file pattern still works but requires agent to call the `view` tool.
 
 ```javascript
+// Deprecated for images - use imageData option instead
 const canvas = document.getElementById('myCanvas');
 const { path } = await saveTempFile(canvas.toDataURL('image/png'));
 await sendAgentMessage(`Analyze image at ${path}`);
+
+// Preferred for images
+await sendAgentMessage('Analyze this', { imageData: canvas.toDataURL() });
 ```
 
 Options:

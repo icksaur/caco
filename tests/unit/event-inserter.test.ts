@@ -117,6 +117,20 @@ describe('insertEvent', () => {
     });
   });
 
+  describe('thinking indicator', () => {
+    it('formats assistant.turn_start with thinking message', () => {
+      const el = mockElement();
+      insertEvent({ type: 'assistant.turn_start', data: { turnId: 'turn_123' } }, el);
+      expect(el.textContent).toBe('💭 Thinking...');
+    });
+
+    it('formats assistant.turn_start with empty data', () => {
+      const el = mockElement();
+      insertEvent({ type: 'assistant.turn_start', data: {} }, el);
+      expect(el.textContent).toBe('💭 Thinking...');
+    });
+  });
+
   describe('session events', () => {
     it('sets compaction start message', () => {
       const el = mockElement();

@@ -194,6 +194,11 @@ const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     element.textContent = `💡 ${data.intent || ''}`;
   },
   
+  // Thinking indicator (shown on turn_start, removed on content)
+  'assistant.turn_start': (element) => {
+    element.textContent = '💭 Thinking...';
+  },
+  
   // Tool events - richer format with data storage
   'tool.execution_start': (element, data) => {
     const name = (data.toolName || 'tool') as string;

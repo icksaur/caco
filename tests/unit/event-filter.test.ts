@@ -126,6 +126,17 @@ describe('shouldFilter', () => {
         data: { message: 'Something failed' } 
       })).toBe(false);
     });
+
+    it('assistant.turn_start passes through for thinking indicator', () => {
+      expect(shouldFilter({ 
+        type: 'assistant.turn_start', 
+        data: { turnId: 'turn_123' } 
+      })).toBe(false);
+    });
+
+    it('assistant.turn_start passes through even with empty data', () => {
+      expect(shouldFilter({ type: 'assistant.turn_start', data: {} })).toBe(false);
+    });
   });
 
   describe('returns false (keep event) - caco synthetic events', () => {

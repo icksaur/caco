@@ -44,6 +44,35 @@ const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, strin
 const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', undefined, EVENT_KEY_PROPERTY, PRE_COLLAPSED_EVENTS);
 
 /**
+ * Content events that should hide the thinking indicator.
+ * When any of these arrive, the "Thinking..." message is replaced by actual content.
+ */
+const CONTENT_EVENTS = new Set([
+  'assistant.intent',
+  'assistant.message',
+  'assistant.message_delta',
+  'assistant.reasoning',
+  'assistant.reasoning_delta',
+  'tool.execution_start',
+  'session.idle',
+  'session.error',
+]);
+
+/**
+ * Remove thinking indicator when content arrives
+ */
+function hideThinkingIndicator(): void {
+  const thinking = document.querySelector('.thinking-text');
+  if (thinking) {
+    // Remove the outer activity div if it only contains the thinking indicator
+    const outer = thinking.closest('.assistant-activity');
+    if (outer) {
+      outer.remove();
+    }
+  }
+}
+
+/**
  * Handle incoming SDK event (history or live)
  * Uses outer + inner inserters with event.type for routing
  */
@@ -57,6 +86,11 @@ function handleEvent(event: SessionEvent): void {
   // This allows applet/agent/scheduler messages to have distinct styling
   if (eventType === 'user.message' && data.source && data.source !== 'user') {
     eventType = `caco.${data.source}`;
+  }
+  
+  // Hide thinking indicator when content events arrive
+  if (CONTENT_EVENTS.has(eventType)) {
+    hideThinkingIndicator();
   }
   
   // DEBUG: Log all event types received

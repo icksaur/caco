@@ -22,6 +22,9 @@ export const EVENT_TO_OUTER: Record<string, string> = {
   'assistant.message': 'assistant-message',
   'assistant.message_delta': 'assistant-message',
   
+  // Thinking indicator (removed on first content)
+  'assistant.turn_start': 'assistant-activity',
+  
   // Activity (all activity goes in same box)
   'assistant.intent': 'assistant-activity',
   'assistant.reasoning': 'assistant-activity',
@@ -53,6 +56,9 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
   'assistant.message': 'assistant-text',
   'assistant.message_delta': 'assistant-text',
   
+  // Thinking indicator (ephemeral - removed on content)
+  'assistant.turn_start': 'thinking-text',
+  
   // Activity inner types
   'assistant.intent': 'intent-text',
   'assistant.reasoning': 'reasoning-text',
@@ -78,6 +84,8 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
  * Maps event type → property name to extract key value from event.data
  */
 export const EVENT_KEY_PROPERTY: Record<string, string> = {
+  // Thinking indicator uses turnId
+  'assistant.turn_start': 'turnId',
   // Tool events use toolCallId
   'tool.execution_start': 'toolCallId',
   'tool.execution_progress': 'toolCallId',

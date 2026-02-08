@@ -777,6 +777,17 @@ main {
   margin: 0;
 }
 
+/* Thinking indicator - subtle pulse animation */
+.thinking-text {
+  color: var(--color-text-muted);
+  animation: thinking-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 /* ========================================
    MARKDOWN CONTENT
    ======================================== */

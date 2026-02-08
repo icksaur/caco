@@ -19,6 +19,7 @@ export interface FilterableEvent {
 const PASSTHROUGH_TYPES = new Set([
   'session.idle',     // Signals streaming complete, re-enables form
   'session.error',    // Error messages
+  'assistant.turn_start', // Thinking indicator - shows "Thinking..." until content arrives
 ]);
 
 /**

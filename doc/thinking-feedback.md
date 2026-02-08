@@ -1,6 +1,6 @@
 # Thinking Feedback
 
-**Status: Ready** - Implementation plan finalized.
+**Status: Implemented** - Uses `assistant.turn_start` event.
 
 Visual feedback when agent is processing complex tasks.
 
@@ -295,11 +295,16 @@ const CONTENT_EVENTS = new Set([
 
 ## Decision
 
-✅ **Ready for implementation** - Use `assistant.turn_start` event.
+✅ **Implemented** - Uses `assistant.turn_start` event.
 
-### Implementation Steps
+### Implementation Summary
 
-1. Add `assistant.turn_start` to `PASSTHROUGH_TYPES` in `src/event-filter.ts`
-2. Add handler in `public/ts/event-inserter.ts` to show "💭 Thinking..."
-3. Track thinking element, remove on first content event
-4. Optional: Add subtle animation via CSS
+**Files modified:**
+
+1. `src/event-filter.ts` - Added `assistant.turn_start` to `PASSTHROUGH_TYPES`
+2. `public/ts/element-inserter.ts` - Added mappings for `assistant.turn_start` to outer/inner/key
+3. `public/ts/event-inserter.ts` - Added inserter: `💭 Thinking...`
+4. `public/ts/message-streaming.ts` - Added `hideThinkingIndicator()` called on content events
+5. `public/style.css` - Added `.thinking-text` with subtle pulse animation
+6. `tests/unit/event-filter.test.ts` - Added test for turn_start passthrough
+7. `tests/unit/event-inserter.test.ts` - Added tests for thinking indicator

@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import type { SessionConfig, CreateConfig, ResumeConfig, SystemMessage } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
-import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta } from './storage.js';
+import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta } from './storage.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { getScheduleForSession } from './schedule-store.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
@@ -81,6 +81,7 @@ interface CachedSession {
 interface SessionListItem {
   sessionId: string;
   cwd: string | null;
+  model: string | null;   // Last known model (from cache)
   name: string;           // Custom name from ~/.caco/sessions/<id>/meta.json
   summary: string | null; // SDK-generated summary
   updatedAt: string | Date | null;
@@ -94,6 +95,54 @@ interface SessionListItem {
 interface GroupedSessions {
   [cwd: string]: SessionListItem[];
 }
+
+// ============================================================================
+// Model Query Helpers
+// ============================================================================
+
+/**
+ * Parse model from SDK session events (authoritative source).
+ * Falls back gracefully if file missing or format changed.
+ */
+function parseModelFromSDK(sessionId: string): string | null {
+  try {
+    const eventsPath = join(homedir(), '.copilot', 'session-state', sessionId, 'events.jsonl');
+    if (!existsSync(eventsPath)) return null;
+    
+    const firstLine = readFileSync(eventsPath, 'utf8').split('\n')[0];
+    const event = JSON.parse(firstLine);
+    if (event.type === 'session.start' && event.data?.selectedModel) {
+      return event.data.selectedModel;
+    }
+    console.warn(`[MODEL] Unexpected event format for ${sessionId}`);
+  } catch (e) {
+    console.warn(`[MODEL] Could not parse SDK events for ${sessionId}: ${e instanceof Error ? e.message : e}`);
+  }
+  return null;
+}
+
+/**
+ * Sync model to cache. Called on create (with model) or resume (parses SDK).
+ */
+function syncModelCache(sessionId: string, model?: string): void {
+  const resolvedModel = model ?? parseModelFromSDK(sessionId);
+  if (resolvedModel) {
+    const meta = getSessionMeta(sessionId) ?? { name: '' };
+    if (meta.model !== resolvedModel) {
+      setSessionMeta(sessionId, { ...meta, model: resolvedModel });
+    }
+  }
+}
+
+/**
+ * Get model from cache (sync happens on create/resume).
+ */
+function getSessionModel(sessionId: string): string | null {
+  const meta = getSessionMeta(sessionId);
+  return meta?.model ?? null;
+}
+
+// ============================================================================
 
 /**
  * SessionManager - Singleton that owns all SDK interactions
@@ -231,6 +280,9 @@ class SessionManager {
     registerSession(cwd, session.sessionId);
     ensureSessionMeta(session.sessionId);
     
+    // Cache model in metadata
+    syncModelCache(session.sessionId, config.model);
+    
     console.log(`✓ Created session ${session.sessionId} for ${cwd} with model ${config.model}`);
     return session.sessionId;
   }
@@ -285,6 +337,9 @@ class SessionManager {
     // Register with storage layer for output persistence
     registerSession(cwd, sessionId);
     ensureSessionMeta(sessionId);
+    
+    // Sync model from SDK to cache (may have changed via copilot-cli)
+    syncModelCache(sessionId);
     
     console.log(`✓ Resumed session ${sessionId} for ${cwd}`);
     return sessionId;
@@ -458,12 +513,13 @@ class SessionManager {
       const isBusy = this.isBusy(sessionId);
       const meta = getSessionMeta(sessionId);
       const name = meta?.name || '';
+      const model = meta?.model || null;
       const isUnobserved = unobservedTracker.isUnobserved(sessionId);
       const currentIntent = meta?.currentIntent || null;
       // Schedule info is filled in by the route handler (async lookup)
       const scheduleSlug = null;
       const scheduleNextRun = null;
-      result.push({ sessionId, cwd, name, summary, updatedAt, isBusy, isUnobserved, currentIntent, scheduleSlug, scheduleNextRun });
+      result.push({ sessionId, cwd, model, name, summary, updatedAt, isBusy, isUnobserved, currentIntent, scheduleSlug, scheduleNextRun });
     }
     return result;
   }

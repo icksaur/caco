@@ -221,7 +221,7 @@ router.patch('/sessions/:sessionId', (req: Request, res: Response) => {
 /**
  * GET /api/sessions/:sessionId/state
  * Get session state (for agent-to-agent polling)
- * Returns: status (idle/inactive), cwd
+ * Returns: status (idle/inactive), cwd, model
  */
 router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
@@ -233,11 +233,14 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
   }
   
   const isActive = sessionManager.isActive(sessionId);
+  const meta = getSessionMeta(sessionId);
+  const model = meta?.model || null;
   
   res.json({
     sessionId,
     status: isActive ? 'idle' : 'inactive',
     cwd,
+    model,
     isActive
   });
 });

@@ -42,6 +42,7 @@ export interface SessionMeta {
   currentIntent?: string;   // Last reported intent (from report_intent tool)
   envHint?: string;         // Environment setup hint shown on session resume
   context?: Record<string, string[]>;  // Named context sets (files, applet, endpoints, etc.)
+  model?: string;           // Last known model ID (synced from SDK on create/resume)
 }
 
 export interface OutputMetadata {

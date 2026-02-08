@@ -42,19 +42,20 @@ export function mergeContextSet(
 export function createContextTools(sessionRef: SessionIdRef) {
 
   const setRelevantContext = defineTool('set_relevant_context', {
-    description: `Set context for this session. Context is shown on resume.
+    description: `Track files and resources for session continuity. **Use this frequently** - it's how you remember what you're working on across conversations.
 
-**Mode:**
-- "replace" (default): Replace the entire set
-- "merge": Union with existing (no duplicates)
+**When to use:**
+- When user shares or mentions a file (design doc, spec, config, notes)
+- When you read or edit a file that's central to the task
+- When working with specific endpoints, ports, or applets
+- Before finishing a task - save context for future sessions
 
-**Set names:** files, applet, endpoints, ports (custom names allowed)
+**Why it matters:** Sessions resume days or weeks later. Without context, you forget everything. This tool ensures seamless collaboration by preserving your working state.
 
-**Examples:**
-- set_relevant_context({ setName: "files", items: ["/path/spec.md"] })
-- set_relevant_context({ setName: "files", items: ["/path/other.md"], mode: "merge" })
+**Set names:** files (paths), applet (slug + params), endpoints (URLs), ports
+**Mode:** "replace" (default) or "merge" (union with existing)
 
-Max 10 items per set, 50 items total.`,
+Max 10 items per set, 50 total.`,
 
     parameters: z.object({
       setName: z.string().describe('Name of context set (files, applet, endpoints, ports)'),
@@ -103,7 +104,12 @@ Max 10 items per set, 50 items total.`,
   });
 
   const getRelevantContext = defineTool('get_relevant_context', {
-    description: `Get session context. Use on resume to remember what you were working on.
+    description: `Retrieve saved session context. Check what files/resources were being worked on.
+
+**When to use:**
+- At session start to recall previous work
+- When user asks "what were we working on?"
+- To verify context before making changes
 
 Call with no arguments for all context, or specify setName for a specific set.`,
 

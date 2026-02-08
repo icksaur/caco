@@ -132,8 +132,47 @@ The target session receives your message with source: 'agent'. Your session ID i
     }
   });
 
+  const listModels = defineTool('list_models', {
+    description: `List available models for creating agent sessions. Use this before create_agent_session to see model options.
+
+**Quick guide (no need to call this if you know what you need):**
+- \`claude-sonnet-4.5\` - General-purpose engineering: edit/compile/test/fix cycles
+- \`claude-opus-4.5\` - Reasoning, documents, analysis, complex planning
+- \`gpt-5-mini\` - Simple automation tasks (free but follows instructions reliably)`,
+
+    parameters: z.object({}),
+
+    handler: async () => {
+      try {
+        const response = await fetch(`${SERVER_URL}/api/models`);
+        if (!response.ok) {
+          return {
+            textResultForLlm: `Failed to list models: ${response.statusText}`,
+            resultType: 'error' as const
+          };
+        }
+        const models = await response.json();
+        return {
+          textResultForLlm: JSON.stringify(models, null, 2),
+          resultType: 'text' as const
+        };
+      } catch (err) {
+        return {
+          textResultForLlm: `Error listing models: ${err instanceof Error ? err.message : String(err)}`,
+          resultType: 'error' as const
+        };
+      }
+    }
+  });
+
   const createAgentSession = defineTool('create_agent_session', {
-    description: `Create a new agent session with a specific working directory. Use this to spawn specialist agents for subtasks.
+    description: `Create a new agent session with a specific working directory and model. Use this to spawn specialist agents for subtasks.
+
+**Model selection (required):**
+- \`claude-sonnet-4.5\` - General-purpose engineering: edit/compile/test/fix cycles
+- \`claude-opus-4.5\` - Reasoning, documents, analysis, complex planning
+- \`gpt-5-mini\` - Simple automation tasks (slower, but follows instructions reliably)
+- Use \`list_models\` to see all available models
 
 Returns the new session ID. Use send_agent_message to send work to it.
 
@@ -141,16 +180,17 @@ Returns the new session ID. Use send_agent_message to send work to it.
 
     parameters: z.object({
       cwd: z.string().describe('Working directory for the new session'),
+      model: z.string().describe('Model ID (e.g., claude-sonnet-4.5, claude-opus-4.5). Use list_models to see options.'),
       initialMessage: z.string().optional().describe('Optional first message to send immediately after creation')
     }),
 
-    handler: async ({ cwd, initialMessage }) => {
+    handler: async ({ cwd, model, initialMessage }) => {
       try {
-        // Create the session
+        // Create the session with model
         const createResponse = await fetch(`${SERVER_URL}/api/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cwd })
+          body: JSON.stringify({ cwd, model })
         });
         
         if (!createResponse.ok) {
@@ -201,5 +241,5 @@ Returns the new session ID. Use send_agent_message to send work to it.
     }
   });
 
-  return [sendAgentMessage, getSessionState, createAgentSession];
+  return [sendAgentMessage, getSessionState, listModels, createAgentSession];
 }

@@ -194,23 +194,51 @@ get_session_state(sessionId: string)
 
 Use this to poll spawned sessions for completion.
 
-### create_agent_session
+### list_models
 
-Create a new session with a specific working directory.
+Discover available models for spawning sessions.
 
 ```typescript
-create_agent_session(cwd: string, initialMessage?: string)
+list_models()
+// Returns: [{ id: string, name: string, description: string }]
+```
+
+**Current models:**
+| Model ID | Best For |
+|----------|----------|
+| `claude-sonnet-4.5` | General-purpose engineering: edit/compile/test/fix cycles |
+| `claude-opus-4.5` | Reasoning, documents, analysis, complex planning |
+| `gpt-5-mini` | Simple automation tasks (slower, but follows instructions reliably) |
+
+### create_agent_session
+
+Create a new session with a specific working directory and model.
+
+```typescript
+create_agent_session(cwd: string, model: string, initialMessage?: string)
 // Returns: new session ID
 ```
+
+**Parameters:**
+- `cwd` (required): Working directory for the new session
+- `model` (required): Model ID from `list_models`. Choose based on task:
+  - `claude-sonnet-4.5` for code changes, testing, iterative fixes
+  - `claude-opus-4.5` for analysis, specs, complex reasoning
+- `initialMessage` (optional): First message to send immediately
 
 If `initialMessage` is provided, it's sent immediately with `source: 'agent'`.
 
 **Example workflow**:
 ```
-1. create_agent_session('/path/to/project', 'Analyze this codebase and send_agent_message("abc123", "Results: ...")') 
+1. create_agent_session('/path/to/project', 'claude-sonnet-4.5', 'Fix the build errors and send_agent_message("abc123", "Results: ...")') 
 2. Poll with get_session_state until idle
 3. Or just wait for the callback message
 ```
+
+**Model selection guidance:**
+- Spawning for code edits? → `claude-sonnet-4.5`
+- Spawning for analysis or document generation? → `claude-opus-4.5`
+- Unsure? → `claude-sonnet-4.5` (faster, cheaper, good default)
 
 ## Implementation Plan
 

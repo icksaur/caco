@@ -10,6 +10,7 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
+import { clearContextFooter } from './context-footer.js';
 import { clearActiveSession, getCurrentCwd } from './app-state.js';
 import { getActiveAppletLabel } from './applet-runtime.js';
 import { getServerHostname } from './hostname-hash.js';
@@ -111,6 +112,8 @@ export function setViewState(state: ViewState): void {
       els.footer?.classList.remove('hidden');
       // Clear session so messages don't go to old session
       clearActiveSession();
+      // Clear context footer (no context for new chat)
+      clearContextFooter();
       // Show applet button
       els.appletBtn?.classList.remove('hidden');
       break;
@@ -118,6 +121,7 @@ export function setViewState(state: ViewState): void {
     case 'chatting':
       els.chat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
+      // Note: Do NOT clear context footer here - history load already handled it
       // Scroll to bottom after view is painted
       requestAnimationFrame(() => scrollToBottom());
       // Show applet button

@@ -45,6 +45,10 @@ describe('view-controller', () => {
       getServerHostname: vi.fn(() => 'test-host')
     }));
     
+    vi.doMock('../../public/ts/context-footer.js', () => ({
+      clearContextFooter: vi.fn()
+    }));
+    
     viewController = await import('../../public/ts/view-controller.js');
   });
   

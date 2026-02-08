@@ -71,11 +71,11 @@ async function fetchAndRenderEmbed(element: HTMLElement, outputId: string): Prom
     const frame = document.createElement('div');
     frame.className = 'embed-frame';
     
-    // Sanitize and inject HTML (allow iframes for trusted embeds)
+    // Sanitize and inject HTML (allow iframes for trusted embeds, strip IDs to prevent collisions)
     // Note: DOMPurify is available globally from script tag
-    const purify = (window as unknown as { DOMPurify?: { sanitize: (html: string, options?: { ADD_TAGS?: string[] }) => string } }).DOMPurify;
+    const purify = (window as unknown as { DOMPurify?: { sanitize: (html: string, options?: { ADD_TAGS?: string[], FORBID_ATTR?: string[] }) => string } }).DOMPurify;
     if (purify) {
-      frame.innerHTML = purify.sanitize(data, { ADD_TAGS: ['iframe'] });
+      frame.innerHTML = purify.sanitize(data, { ADD_TAGS: ['iframe'], FORBID_ATTR: ['id'] });
     } else {
       // Fallback: no sanitization (dev only)
       frame.innerHTML = data;

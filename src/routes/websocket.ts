@@ -19,7 +19,7 @@ import sessionManager from '../session-manager.js';
 import { shouldFilter } from '../event-filter.js';
 import { transformForClient } from '../event-transformer.js';
 import { parseMessageSource, type MessageSource } from '../prompts.js';
-import { listEmbedOutputs, parseOutputMarkers } from '../storage.js';
+import { listEmbedOutputs, parseOutputMarkers, getSessionMeta } from '../storage.js';
 import { CacoEventQueue, isFlushTrigger, type CacoEvent } from '../caco-event-queue.js';
 import { normalizeToolComplete, extractToolResultText, type RawSDKEvent } from '../sdk-normalizer.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
@@ -375,6 +375,19 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     // Log unmatched embeds (shouldn't happen normally)
     if (embedLookup.size > 0) {
       console.log(`[HISTORY] ${embedLookup.size} unmatched embeds (no tool.execution_complete found)`);
+    }
+    
+    // Emit caco.context if session has context (for UI footer)
+    const meta = getSessionMeta(sessionId);
+    if (meta?.context) {
+      send(ws, { 
+        type: 'event', 
+        sessionId, 
+        event: {
+          type: 'caco.context',
+          data: { reason: 'load', context: meta.context }
+        } as unknown as SessionEvent
+      });
     }
     
     send(ws, { type: 'historyComplete', sessionId });

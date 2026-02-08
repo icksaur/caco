@@ -207,7 +207,7 @@ list_models()
 | Model ID | Best For |
 |----------|----------|
 | `claude-sonnet-4.5` | General-purpose engineering: edit/compile/test/fix cycles |
-| `claude-opus-4.5` | Reasoning, documents, analysis, complex planning |
+| `claude-opus-4.6` | Reasoning, documents, analysis, complex planning |
 | `gpt-5-mini` | Simple automation tasks (slower, but follows instructions reliably) |
 
 ### create_agent_session

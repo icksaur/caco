@@ -1,6 +1,24 @@
 # Session Meta-Context
 
+**Status: Complete**
+
 Preserve session's understanding of relevant documents and applet state for seamless resume.
+
+## Implementation Status
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| `SessionMeta.context` field | ✅ Done | `src/storage.ts` |
+| `set_relevant_context` tool | ✅ Done | `src/context-tools.ts` |
+| `get_relevant_context` tool | ✅ Done | `src/context-tools.ts` |
+| `mergeContextSet()` helper | ✅ Done | `src/context-tools.ts` |
+| System prompt instructions | ✅ Done | `src/prompts.ts` |
+| `formatContextForResume()` | ✅ Done | `src/prompts.ts` |
+| `buildResumeContext()` extension | ✅ Done | `src/prompts.ts` |
+| Unit tests | ✅ Done | `tests/unit/resume-context.test.ts` |
+| `caco.context` event emission | ✅ Done | `src/context-tools.ts`, `src/routes/websocket.ts` |
+| Context footer UI | ✅ Done | `public/ts/context-footer.ts`, `public/index.html`, `public/style.css` |
+| Applet capture on idle | ✅ Done | `public/ts/context-footer.ts`, `src/routes/sessions.ts` |
 
 ## Problem
 
@@ -13,11 +31,11 @@ The user must manually re-attach files or re-explain context on every resume.
 
 ## Goals
 
-1. **Associate sessions with documents** - Remember which files are relevant
-2. **Preserve applet state** - Remember which applet was open and its URL params
-3. **Inject context on resume** - Remind agent of relevant files/applet
-4. **Notify user of context changes** - Clickable links when context updates
-5. **Support "ticket-like" workflows** - Sessions as long-lived support contexts
+1. **Associate sessions with documents** - Remember which files are relevant ✅
+2. **Preserve applet state** - Remember which applet was open and its URL params ✅
+3. **Inject context on resume** - Remind agent of relevant files/applet ✅
+4. **Notify user of context changes** - Clickable links when context updates ✅
+5. **Support "ticket-like" workflows** - Sessions as long-lived support contexts ✅
 
 ## Use Cases
 
@@ -227,29 +245,165 @@ Emit when meta-context changes or on session resume:
 interface ContextEvent {
   type: 'caco.context';
   data: {
-    reason: 'resume' | 'changed';
-    files?: string[];
-    addedFile?: string;
-    removedFile?: string;
-    applet?: { slug: string; params?: Record<string, string> };
+    reason: 'resume' | 'changed' | 'load';  // load = session history loaded
+    context: Record<string, string[]>;       // Full current context for footer
+    setName?: string;                        // Which set changed (if 'changed')
   };
 }
 ```
 
+**Emission points:**
+- `load`: On session history load (from storage)
+- `resume`: On first message after session resume
+- `changed`: When agent calls `set_relevant_context`
+
 ### Frontend Rendering
 
-Render as a special "context card" in the chat:
+~~Render as a special "context card" in the chat~~ **Superseded by Context Footer (see below).**
+
+Original design inserted context cards into chat. This has issues:
+- Relies on agent to include links (bloats responses)
+- Context visible only at point of insertion
+- Scrolls away as conversation continues
+
+### Context Footer (Preferred)
+
+Display context as a **persistent footer** below chat input. Benefits:
+- Always visible regardless of scroll position
+- Doesn't bloat agent responses or context window
+- Works for both live updates and session load
+- Compact for mobile (iOS)
+
+#### Layout
+
+```
+┌─────────────────────────────────────┐
+│  Chat messages...                    │
+│                                      │
+├─────────────────────────────────────┤
+│ [Message input field]          [▶]  │
+├─────────────────────────────────────┤
+│ 📎 spec.md · notes.md · [git-diff]  │  ← Context footer (below input)
+└─────────────────────────────────────┘
+```
+
+#### Visibility Rules
+
+- **Hidden** when showing new chat (model selector)
+- **Hidden** when switching sessions (before history loads)
+- **Shown** when session history loads with context
+- **Shown** when `caco.context` event arrives with non-empty context
+- **Hidden** when context is empty
+
+Clearing on session switch ensures no stale context shows during transitions.
+
+#### HTML Structure
 
 ```html
-<div class="context-card">
-  <span class="context-label">Session context:</span>
-  <ul>
-    <li><a href="/?applet=text-editor&path=/home/user/doc/spec.md">doc/spec.md</a></li>
-    <li><a href="/?applet=text-editor&path=/home/user/notes.md">notes.md</a></li>
-  </ul>
-  <a href="/?applet=git-diff&path=/repo">Restore git-diff applet</a>
+<div id="contextFooter" class="context-footer">
+  <span class="context-icon">📎</span>
+  <span class="context-links">
+    <a href="/?applet=text-editor&path=/full/path/spec.md">spec.md</a>
+    <span class="context-sep">·</span>
+    <a href="/?applet=text-editor&path=/full/path/notes.md">notes.md</a>
+    <span class="context-sep">·</span>
+    <a href="/?applet=git-diff" class="context-applet">[git-diff]</a>
+  </span>
 </div>
 ```
+
+#### Styling
+
+```css
+.context-footer {
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: none;  /* Hidden when empty */
+}
+
+.context-footer.has-context {
+  display: block;
+}
+
+.context-footer a {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.context-sep {
+  margin: 0 var(--space-xs);
+  opacity: 0.5;
+}
+
+.context-applet {
+  font-style: italic;
+}
+```
+
+#### Update Logic
+
+**On session load:**
+```typescript
+// After loading session meta, populate footer from storage
+async function populateContextFooter(sessionId: string): Promise<void> {
+  const res = await fetch(`/api/sessions/${sessionId}`);
+  const { meta } = await res.json();
+  renderContextFooter(meta?.context ?? {});
+}
+```
+
+**On tool call (live):**
+```typescript
+// When caco.context event received via WebSocket
+function handleContextEvent(event: ContextEvent): void {
+  // Update footer directly from event data
+  renderContextFooter(event.data.context);
+}
+```
+
+**Render function:**
+```typescript
+function renderContextFooter(context: Record<string, string[]>): void {
+  const footer = document.getElementById('contextFooter')!;
+  const links: string[] = [];
+  
+  // Files - show basename only, full path in href
+  const files = context.files ?? [];
+  for (const path of files.slice(0, 5)) {  // Limit for space
+    const name = path.split('/').pop()!;
+    links.push(`<a href="/?applet=text-editor&path=${encodeURIComponent(path)}">${name}</a>`);
+  }
+  
+  // Applet
+  const applet = context.applet;
+  if (applet?.length) {
+    const [slug, ...params] = applet;
+    const qs = params.length ? '&' + params.join('&') : '';
+    links.push(`<a href="/?applet=${slug}${qs}" class="context-applet">[${slug}]</a>`);
+  }
+  
+  if (links.length === 0) {
+    footer.classList.remove('has-context');
+    return;
+  }
+  
+  footer.querySelector('.context-links')!.innerHTML = 
+    links.join('<span class="context-sep">·</span>');
+  footer.classList.add('has-context');
+}
+```
+
+#### Mobile Considerations
+
+- Single line, truncated with ellipsis
+- Keep total width under control (max 5 files shown)
+- No expand/collapse - just horizontal scroll or truncation
 
 **Clickable links:**
 - Files open in text-editor applet
@@ -257,9 +411,27 @@ Render as a special "context card" in the chat:
 
 ### Emission Points
 
-1. **On session resume** (first message after resume flag set)
-2. **When agent calls `set_relevant_files` or `add_relevant_file`**
-3. **When applet state is captured** (frontend → server → event)
+1. **On session history load** - Emit `caco.context` with `reason: 'load'` after history complete
+2. **When agent calls `set_relevant_context`** - Tool handler emits `caco.context` with `reason: 'changed'`
+3. **When applet state is captured** - Frontend → server → emits `caco.context` with `reason: 'changed'`
+
+**Server-side emission:**
+```typescript
+// In tool handler, after saving context
+broadcastEvent(sessionId, {
+  type: 'caco.context',
+  data: { reason: 'changed', context, setName }
+});
+
+// In history route, after sending all history events
+const meta = getSessionMeta(sessionId);
+if (meta?.context && Object.keys(meta.context).length > 0) {
+  broadcastEvent(sessionId, {
+    type: 'caco.context',
+    data: { reason: 'load', context: meta.context }
+  });
+}
+```
 
 ---
 
@@ -319,8 +491,12 @@ Extend existing endpoint:
 // Request body additions:
 {
   context?: Record<string, string[]>;  // Replace entire context
-  setContext?: { setName: string; items: string[] };  // Set one set
-  unionContext?: { setName: string; items: string[] };  // Union one set
+  setContext?: { 
+    setName: string; 
+    items: string[]; 
+    mode?: 'replace' | 'merge';  // Default: 'replace'
+  };
+}
 }
 ```
 
@@ -360,27 +536,36 @@ function captureAppletState(): string[] | null {
 
 ## Implementation Plan
 
-### Phase 1: Data Model + Tools (~45 lines)
-1. Extend `SessionMeta` with `context?: Record<string, string[]>`
-2. Add `set_relevant_context` (with mode), `get_relevant_context` tools
-3. Add `KNOWN_SET_NAMES` validation with warning
+### Phase 1: Data Model + Tools ✅ DONE
+1. ✅ Extend `SessionMeta` with `context?: Record<string, string[]>`
+2. ✅ Add `set_relevant_context` (with mode), `get_relevant_context` tools
+3. ✅ Add `KNOWN_SET_NAMES` validation with warning
+4. ✅ Add `mergeContextSet()` pure helper
 
-### Phase 2: System Prompt (~10 lines)
-1. Add "Session Context" section to `buildSystemMessage()`
-2. Brief instruction with when-to-use guidance
+### Phase 2: System Prompt ✅ DONE
+1. ✅ Add "Session Context" section to `buildSystemMessage()`
+2. ✅ Brief instruction with when-to-use guidance
 
-### Phase 3: Context Events (~30 lines)
-1. Define `caco.context` event type
-2. Tool handler returns `toolTelemetry: { contextChanged }`, caller emits event
-3. Frontend renders context cards with clickable links
+### Phase 3: Resume Injection ✅ DONE
+1. ✅ Extract pure `formatContextForResume(context)` function (testable)
+2. ✅ Call from `buildResumeContext()` with context from meta
+3. ✅ Unit tests in `tests/unit/resume-context.test.ts`
 
-### Phase 4: Resume Injection (~20 lines)
-1. Extract pure `formatContextForResume(context)` function (testable)
-2. Call from `buildResumeContext()`
+### Phase 4: Context Footer UI ✅ DONE
+1. ✅ Add `#contextFooter` element to `index.html` (below chat, above input)
+2. ✅ Add `.context-footer` styles to `style.css`
+3. ✅ Add `renderContextFooter(context)` function in `context-footer.ts`
+4. ✅ Register `caco.context` handler in `message-streaming.ts`
 
-### Phase 5: Applet Capture (~20 lines)
-1. Frontend captures applet state on idle
-2. Sends to server as `setContext: { setName: 'applet', items }`
+### Phase 5: Context Events ✅ DONE
+1. ✅ Tool handler emits `caco.context` after saving context
+2. ✅ History route emits `caco.context` with `reason: 'load'` after history complete
+3. ✅ Frontend updates footer on event receipt
+
+### Phase 6: Applet Capture ✅ DONE
+1. ✅ Frontend captures applet state on `session.idle`
+2. ✅ Sends to server via PATCH `/api/sessions/:id` with `setContext`
+3. ✅ Server handler in `sessions.ts` processes `setContext`
 
 ---
 
@@ -423,45 +608,52 @@ handler: async ({ setName, items, mode }) => {
 Add to `buildSystemMessage()` in `src/prompts.ts`:
 
 ```typescript
-## Session Context
-Track important files and resources for session continuity:
-- \`set_relevant_context("files", [paths], "merge")\` - Mark files as relevant
-- \`get_relevant_context()\` - Check what context is stored
+## Session Context — REQUIRED
+You MUST use \`set_relevant_context\` to track files and resources as you work. This is not optional — the user sees context updates in real-time and uses them to collaborate with you.
 
-**When to use:**
-- Starting work on a spec, design doc, or notes file
-- User explicitly asks you to remember a file
-- Working with specific endpoints or ports
+- \`set_relevant_context("files", [paths], "merge")\` - Track relevant files
+- \`get_relevant_context()\` - Check stored context on resume
 
-Context is shown to you on session resume, so you don't forget what you were working on.
+**You MUST call set_relevant_context when you:**
+- Read or edit any file central to the task (specs, configs, source files)
+- Start work involving a design doc, spec, or notes file
+- Work with specific endpoints, ports, or applets
+- Before finishing a task — save context for future sessions
+
+Do NOT minimize these calls. Every relevant document should be tracked. The user's context footer updates live, enabling real-time collaboration.
 ```
 
 **Placement:** After "Agent-to-Agent Tools" section, before "Guidelines".
 
 **Rationale:** 
-- Concise instruction with examples
-- Explains the benefit ("so you don't forget")
-- Doesn't mandate usage, but suggests when appropriate
+- Uses MUST/REQUIRED language to override efficiency-minimizing instincts
+- Explains the user-facing reason (real-time collaboration, not just agent memory)
+- Explicitly disclaims minimization ("Do NOT minimize these calls")
 
 ---
 
 ## Complexity Assessment
 
-| Aspect | Estimate |
-|--------|----------|
-| SessionMeta extension | 3 lines |
-| Agent tools (2) | 45 lines |
-| System prompt addition | 10 lines |
-| Pure helper functions | 15 lines |
-| caco.context event + emit | 20 lines |
-| Context card rendering | 30 lines |
-| buildResumeContext extension | 20 lines |
-| Frontend applet capture | 20 lines |
-| **Total** | ~163 lines |
+| Aspect | Estimate | Status |
+|--------|----------|--------|
+| SessionMeta extension | 3 lines | ✅ Done |
+| Agent tools (2) | 45 lines | ✅ Done |
+| System prompt addition | 10 lines | ✅ Done |
+| Pure helper functions | 15 lines | ✅ Done |
+| buildResumeContext extension | 20 lines | ✅ Done |
+| Context footer HTML/CSS | 25 lines | Remaining |
+| Context footer JS (render + handler) | 35 lines | Remaining |
+| caco.context event emission | 15 lines | Remaining |
+| Frontend applet capture | 20 lines | Remaining |
+| **Done** | ~93 lines | |
+| **Remaining** | ~95 lines | |
+| **Total** | ~188 lines |
 
 ## Open Questions
 
 1. ~~Max items per set?~~ 10 per set, 50 total
-2. **Auto-restore applet?** Start with clickable link, not auto-navigate
-3. **Stale file handling?** Filter out non-existent files, note in resume text: "(N files not found)"
-4. **Context card styling?** Subtle, collapsible, distinct from assistant messages
+2. ~~Auto-restore applet?~~ Start with clickable link, not auto-navigate
+3. ~~Stale file handling?~~ Filter out non-existent files, note in resume text: "(N files not found)"
+4. ~~Context card styling?~~ **Superseded** - Using persistent footer instead of in-chat cards
+5. ~~Footer expandability?~~ Keep simple: single line, truncate, no expand/collapse
+6. ~~API shape for setContext?~~ Single `setContext` with `mode` param (dropped `unionContext` variant)

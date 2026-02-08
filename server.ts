@@ -20,7 +20,7 @@ import { createContextTools } from './src/context-tools.js';
 import type { SessionIdRef } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
-import { setupWebSocket } from './src/routes/websocket.js';
+import { setupWebSocket, broadcastEvent } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { getQueue } from './src/caco-event-queue.js';
@@ -67,7 +67,8 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
   );
   
   // Context tools for session context persistence (files, applets, etc.)
-  const contextTools = createContextTools(sessionRef);
+  // Pass broadcast callback so context changes notify connected clients
+  const contextTools = createContextTools(sessionRef, broadcastEvent);
   
   return [...displayTools, ...appletTools, ...agentTools, ...contextTools];
 };

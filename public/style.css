@@ -251,7 +251,8 @@ footer {
   padding: var(--space-lg) 0;
   border-top: 1px solid var(--color-border);
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
 }
 
 footer form {
@@ -1744,4 +1745,52 @@ main {
   .new-chat {
     padding-left: var(--space-lg);
   }
+}
+
+/* ========================================
+   CONTEXT FOOTER
+   ======================================== */
+.context-footer {
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: none;  /* Hidden when empty */
+}
+
+.context-footer.has-context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.context-footer .context-icon {
+  flex-shrink: 0;
+}
+
+.context-footer .context-links {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.context-footer a {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.context-footer a:hover {
+  text-decoration: underline;
+}
+
+.context-footer .context-sep {
+  margin: 0 var(--space-xs);
+  opacity: 0.5;
+}
+
+.context-footer .context-applet {
+  font-style: italic;
 }

@@ -35,11 +35,19 @@ export function mergeContextSet(
   return [...new Set([...existing, ...items])].slice(0, MAX_ITEMS_PER_SET);
 }
 
+/** Callback type for broadcasting events */
+export type BroadcastFn = (sessionId: string, event: { type: string; data?: Record<string, unknown> }) => void;
+
 /**
  * Create context tools with a session ID reference.
  * The reference can be updated after session creation.
+ * @param sessionRef - Mutable session ID reference
+ * @param broadcast - Optional callback to broadcast context change events
  */
-export function createContextTools(sessionRef: SessionIdRef) {
+export function createContextTools(
+  sessionRef: SessionIdRef,
+  broadcast?: BroadcastFn
+) {
 
   const setRelevantContext = defineTool('set_relevant_context', {
     description: `Track files and resources for session continuity. **Use this frequently** - it's how you remember what you're working on across conversations.
@@ -90,6 +98,14 @@ Max 10 items per set, 50 total.`,
       }
 
       setSessionMeta(sessionRef.id, { ...meta, context });
+
+      // Broadcast context change to connected clients
+      if (broadcast) {
+        broadcast(sessionRef.id, {
+          type: 'caco.context',
+          data: { reason: 'changed', context, setName }
+        });
+      }
 
       const action = mode === 'merge' ? 'Merged' : 'Set';
       const count = context[setName]?.length ?? 0;

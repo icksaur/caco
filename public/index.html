@@ -113,12 +113,16 @@
               <button type="button" class="stop-btn" onclick="stopStreaming()">Stop</button>
             </div>
           </form>
+          <div id="contextFooter" class="context-footer nohighlight" data-context-footer="true">
+            <span class="context-icon">📎</span>
+            <span class="context-links"></span>
+          </div>
         </footer>
       </div>
 
       <!-- Applet panel (right on desktop, toggled on mobile) -->
       <div id="appletPanel" class="applet-panel hidden">
-        <div id="appletView">
+        <div id="appletView" data-applet-view="true">
           <!-- .applet-instance divs are created dynamically by applet-runtime -->
         </div>
       </div>

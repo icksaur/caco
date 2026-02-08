@@ -16,7 +16,8 @@ import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
 import { getSessionMeta, setSessionMeta } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
-import { broadcastGlobalEvent } from './websocket.js';
+import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
+import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
 
 const router = Router();
 
@@ -187,11 +188,15 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
 
 /**
  * PATCH /api/sessions/:sessionId
- * Update session metadata (custom name, environment hint)
+ * Update session metadata (custom name, environment hint, context)
  */
 router.patch('/sessions/:sessionId', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { name, envHint } = req.body as { name?: string; envHint?: string };
+  const { name, envHint, setContext } = req.body as { 
+    name?: string; 
+    envHint?: string;
+    setContext?: { setName: string; items: string[]; mode?: 'replace' | 'merge' };
+  };
   
   // Validate session exists
   const cwd = sessionManager.getSessionCwd(sessionId);
@@ -207,13 +212,36 @@ router.patch('/sessions/:sessionId', (req: Request, res: Response) => {
     ...(name !== undefined && { name }),
     ...(envHint !== undefined && { envHint }),
   };
+  
+  // Handle setContext if provided
+  if (setContext) {
+    const { setName, items, mode = 'replace' } = setContext;
+    
+    // Warn for unknown set names (but allow them)
+    if (!KNOWN_SET_NAMES.has(setName)) {
+      console.warn(`[CONTEXT] Unknown set name: ${setName}`);
+    }
+    
+    const context: Record<string, string[]> = updated.context ?? {};
+    const merged = mergeContextSet(context[setName] ?? [], items, mode);
+    updated.context = { ...context, [setName]: merged };
+    
+    // Broadcast context change to clients
+    broadcastEvent(sessionId, {
+      type: 'caco.context',
+      data: { reason: 'changed', context: updated.context, setName }
+    });
+  }
+  
   setSessionMeta(sessionId, updated);
   
-  // Broadcast session list change for all clients to refresh
-  broadcastGlobalEvent({ 
-    type: 'session.listChanged', 
-    data: { reason: 'renamed', sessionId } 
-  });
+  // Broadcast session list change if name changed (for clients to refresh)
+  if (name !== undefined) {
+    broadcastGlobalEvent({ 
+      type: 'session.listChanged', 
+      data: { reason: 'renamed', sessionId } 
+    });
+  }
   
   res.json({ success: true });
 });

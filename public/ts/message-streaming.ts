@@ -25,6 +25,7 @@ import { isTerminalEvent } from './terminal-events.js';
 import { insertEvent } from './event-inserter.js';
 import { removeImage } from './image-paste.js';
 import { markSessionObserved } from './session-observed.js';
+import { handleContextEvent, sendAppletContext } from './context-footer.js';
 import { 
   ElementInserter,
   EVENT_TO_OUTER,
@@ -96,16 +97,31 @@ function handleEvent(event: SessionEvent): void {
   // DEBUG: Log all event types received
   console.log(`[EVENT] ${eventType}`, data);
   
+  // Handle context footer updates (no UI element, just footer update)
+  if (eventType === 'caco.context') {
+    handleContextEvent(data as { context: Record<string, string[]> });
+    return;
+  }
+  
   // Re-enable form on terminal events (streaming complete)
   // Check BEFORE outer/inner logic since terminal events may not have display elements
   if (isTerminalEvent(eventType)) {
     setFormEnabled(true);
     
+    // Remove streaming cursor from any content elements
+    const cursors = chat.querySelectorAll('.streaming-cursor');
+    console.log(`[CURSOR] Removing ${cursors.length} streaming cursors`);
+    for (const el of cursors) {
+      el.classList.remove('streaming-cursor');
+    }
+    
     // Mark session as observed - user has seen the completed response
+    // Also capture applet context (fire-and-forget)
     if (eventType === 'session.idle') {
       const sessionId = getActiveSessionId();
       if (sessionId) {
         void markSessionObserved(sessionId);
+        void sendAppletContext(sessionId);
       }
     }
   }

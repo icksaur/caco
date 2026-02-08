@@ -18,9 +18,16 @@ declare const DOMPurify: {
 
 declare const hljs: {
   highlightAll(): void;
+  highlightElement(element: HTMLElement): void;
 } | undefined;
 
+/**
+ * DOMPurify configuration for sanitizing markdown content
+ * These lists prevent XSS attacks and ID collisions with app UI elements
+ */
 const FORBIDDEN_ATTRS = [
+  // Prevent ID collisions with app UI elements (chat content shouldn't have IDs)
+  'id',
   // JavaScript event handlers
   'onclick', 'ondblclick', 'onmousedown', 'onmouseup', 'onmouseover',
   'onmousemove', 'onmouseout', 'onmouseenter', 'onmouseleave',
@@ -130,9 +137,15 @@ async function renderMarkdown(): Promise<void> {
     el.dataset.markdownProcessed = 'true';
   }
   
-  // Apply syntax highlighting to all code blocks
+  // Apply syntax highlighting to code blocks inside chat only
+  // (avoid corrupting other page elements like context footer)
   if (typeof hljs !== 'undefined') {
-    hljs.highlightAll();
+    const chat = document.getElementById('chat');
+    if (chat) {
+      for (const block of chat.querySelectorAll('pre code')) {
+        hljs.highlightElement(block as HTMLElement);
+      }
+    }
   }
 }
 

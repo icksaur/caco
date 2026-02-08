@@ -522,9 +522,10 @@ function renderAppletToInstance(
  * @param content - The applet HTML/CSS/JS content
  */
 export function pushApplet(slug: string, label: string, content: AppletContent): void {
-  const appletView = document.getElementById('appletView');
+  // Use data attribute selector to avoid ID collision with rendered chat content
+  const appletView = document.querySelector('[data-applet-view="true"]') as HTMLElement | null;
   if (!appletView) {
-    console.error('[APPLET] #appletView container not found');
+    console.error('[APPLET] appletView container not found');
     return;
   }
   

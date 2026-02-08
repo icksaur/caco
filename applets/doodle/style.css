@@ -1,0 +1,122 @@
+.doodle-title {
+  text-align: center;
+  margin: 20px 0 10px 0;
+  font-size: 24px;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.doodle-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 20px 20px 20px;
+  max-width: 900px;
+  margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  flex-wrap: wrap;
+}
+
+.color-palette {
+  display: grid;
+  grid-template-columns: repeat(8, 24px);
+  gap: 4px;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+
+.color-swatch.active {
+  border: 2px solid #007acc;
+}
+
+.pencil-sizes {
+  display: flex;
+  gap: 8px;
+}
+
+.size-btn {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  background: transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.size-btn.active {
+  background: #007acc;
+  color: white;
+  border-color: #007acc;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.action-btn {
+  padding: 6px 12px;
+  background: #f44336;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.canvas-wrapper {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#doodle-canvas {
+  display: block;
+  cursor: crosshair;
+  width: 100%;
+  height: auto;
+}
+
+.prompt-section {
+  display: flex;
+  gap: 10px;
+}
+
+#prompt-input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+#prompt-input:focus {
+  outline: none;
+  border-color: #007acc;
+}
+
+.send-btn {
+  padding: 8px 16px;
+  background: #007acc;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}

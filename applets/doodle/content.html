@@ -1,0 +1,43 @@
+<h1 class="doodle-title">Doodle</h1>
+
+<div class="doodle-container">
+  <div class="toolbar">
+    <div class="color-palette">
+      <div class="color-swatch" data-color="#000000" style="background: #000000;" title="Black"></div>
+      <div class="color-swatch" data-color="#FFFFFF" style="background: #FFFFFF; border: 1px solid #ccc;" title="White"></div>
+      <div class="color-swatch" data-color="#FF0000" style="background: #FF0000;" title="Red"></div>
+      <div class="color-swatch" data-color="#00FF00" style="background: #00FF00;" title="Green"></div>
+      <div class="color-swatch" data-color="#0000FF" style="background: #0000FF;" title="Blue"></div>
+      <div class="color-swatch" data-color="#FFFF00" style="background: #FFFF00;" title="Yellow"></div>
+      <div class="color-swatch" data-color="#FF00FF" style="background: #FF00FF;" title="Magenta"></div>
+      <div class="color-swatch" data-color="#00FFFF" style="background: #00FFFF;" title="Cyan"></div>
+      <div class="color-swatch" data-color="#800000" style="background: #800000;" title="Maroon"></div>
+      <div class="color-swatch" data-color="#008000" style="background: #008000;" title="Dark Green"></div>
+      <div class="color-swatch" data-color="#000080" style="background: #000080;" title="Navy"></div>
+      <div class="color-swatch" data-color="#808000" style="background: #808000;" title="Olive"></div>
+      <div class="color-swatch" data-color="#800080" style="background: #800080;" title="Purple"></div>
+      <div class="color-swatch" data-color="#008080" style="background: #008080;" title="Teal"></div>
+      <div class="color-swatch" data-color="#808080" style="background: #808080;" title="Gray"></div>
+      <div class="color-swatch" data-color="#C0C0C0" style="background: #C0C0C0;" title="Silver"></div>
+    </div>
+    
+    <div class="pencil-sizes">
+      <button class="size-btn active" data-size="1">1px</button>
+      <button class="size-btn" data-size="3">3px</button>
+      <button class="size-btn" data-size="5">5px</button>
+    </div>
+    
+    <div class="actions">
+      <button id="clear-btn" class="action-btn">Clear</button>
+    </div>
+  </div>
+  
+  <div class="canvas-wrapper">
+    <canvas id="doodle-canvas" width="800" height="600"></canvas>
+  </div>
+  
+  <div class="prompt-section">
+    <input type="text" id="prompt-input" placeholder="Enter a prompt for the AI..." />
+    <button id="send-btn" class="send-btn">Send to Session</button>
+  </div>
+</div>

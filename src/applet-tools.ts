@@ -131,6 +131,9 @@ document.getElementById('my-btn').addEventListener('click', () => {
 
 ## JavaScript APIs
 
+> All functions are accessed via the \`appletAPI\` global object.
+> Exception: \`expose\` and \`setAppletState\` also work as bare globals for convenience.
+
 **Function Exposure (for onclick handlers):**
 \`expose(name, fn)\` or \`expose({ fn1, fn2 })\` - Expose functions to global scope
 \`\`\`javascript
@@ -142,29 +145,29 @@ expose({ handleClick, handleSubmit, handleCancel });
 \`\`\`
 
 **Navigation:**
-- \`loadApplet(slug)\` - Navigate to another applet
-- \`listApplets()\` - Get array of saved applets (async)
-- \`getAppletSlug()\` - Get current applet slug from URL
+- \`appletAPI.loadApplet(slug)\` - Navigate to another applet
+- \`appletAPI.listApplets()\` - Get array of saved applets (async)
+- \`appletAPI.getAppletSlug()\` - Get current applet slug from URL
 - \`appletContainer\` - Reference to container element
 
 **Agent Communication (two patterns):**
 
 ### Pattern 1: Passive State (agent polls)
-\`setAppletState(obj)\` - Store state for agent to query later
+\`appletAPI.setAppletState(obj)\` - Store state for agent to query later
 \`\`\`javascript
-setAppletState({ selectedFile: '/path/to/file.txt' });
+appletAPI.setAppletState({ selectedFile: '/path/to/file.txt' });
 // Agent can read this anytime via get_applet_state tool
 \`\`\`
 
 ### Pattern 2: Active Request (agent responds NOW)
-\`sendAgentMessage(prompt, options?)\` - Send message, agent responds immediately
+\`appletAPI.sendAgentMessage(prompt, options?)\` - Send message, agent responds immediately
 \`\`\`javascript
-await sendAgentMessage('Get MSFT stock price and set_applet_state with result');
+await appletAPI.sendAgentMessage('Get MSFT stock price and set_applet_state with result');
 // Agent receives message, takes action, responds in chat
 
 // With image (direct submission - max 100KB):
 const canvas = document.getElementById('canvas');
-await sendAgentMessage('What is this drawing?', { 
+await appletAPI.sendAgentMessage('What is this drawing?', { 
   imageData: canvas.toDataURL('image/png') 
 });
 \`\`\`
@@ -174,33 +177,33 @@ await sendAgentMessage('What is this drawing?', {
 
 **File Operations:**
 
-\`saveTempFile(dataUrl, options?)\` - Save data to ~/.caco/tmp/ for agent viewing
+\`appletAPI.saveTempFile(dataUrl, options?)\` - Save data to ~/.caco/tmp/ for agent viewing
 
 > **For images:** Prefer \`sendAgentMessage\` with \`imageData\` option (direct submission).
 > The temp-file pattern still works but requires agent to call \`view\` tool.
 
 \`\`\`javascript
 // Preferred for images (direct):
-await sendAgentMessage('Analyze this', { imageData: canvas.toDataURL() });
+await appletAPI.sendAgentMessage('Analyze this', { imageData: canvas.toDataURL() });
 
 // Alternative (indirect, requires view tool):
-const { path } = await saveTempFile(canvas.toDataURL('image/png'));
-await sendAgentMessage(\`Analyze image at \${path}\`);
+const { path } = await appletAPI.saveTempFile(canvas.toDataURL('image/png'));
+await appletAPI.sendAgentMessage(\`Analyze image at \${path}\`);
 \`\`\`
 
-\`callMCPTool(toolName, params)\` - Call MCP tools for file operations
+\`appletAPI.callMCPTool(toolName, params)\` - Call MCP tools for file operations
 \`\`\`javascript
 // Read a file
-const result = await callMCPTool('read_file', { path: '/path/to/file.txt' });
+const result = await appletAPI.callMCPTool('read_file', { path: '/path/to/file.txt' });
 
 // Write a file
-await callMCPTool('write_file', { 
+await appletAPI.callMCPTool('write_file', { 
   path: '/path/to/output.txt', 
   content: 'Hello world' 
 });
 
 // List directory
-const files = await callMCPTool('list_directory', { path: '/home/user' });
+const files = await appletAPI.callMCPTool('list_directory', { path: '/home/user' });
 \`\`\`
 
 **Shell Commands:**
@@ -223,7 +226,7 @@ Returns: \`{ stdout, stderr, code }\` - exit code 0 = success
 
 **URL Parameters:**
 
-\`onUrlParamsChange(callback)\` - React to URL param changes (RECOMMENDED)
+\`appletAPI.onUrlParamsChange(callback)\` - React to URL param changes (RECOMMENDED)
 \`\`\`javascript
 // Handles initial load AND navigation (back/forward, chat links)
 appletAPI.onUrlParamsChange(function(params) {
@@ -231,26 +234,26 @@ appletAPI.onUrlParamsChange(function(params) {
 });
 \`\`\`
 
-\`getAppletUrlParams()\` - Get URL query params (excluding 'applet')
+\`appletAPI.getAppletUrlParams()\` - Get URL query params (excluding 'applet')
 \`\`\`javascript
 // URL: /?applet=my-applet&file=/path/to/file&mode=edit
 const params = appletAPI.getAppletUrlParams();
 // { file: '/path/to/file', mode: 'edit' }
 \`\`\`
 
-\`updateAppletUrlParam(key, value)\` - Update param without navigation (replaceState)
+\`appletAPI.updateAppletUrlParam(key, value)\` - Update param without navigation (replaceState)
 \`\`\`javascript
 appletAPI.updateAppletUrlParam('file', '/new/path');  // No page reload
 \`\`\`
 
-\`navigateAppletUrlParam(key, value)\` - Update param with history entry (pushState)
+\`appletAPI.navigateAppletUrlParam(key, value)\` - Update param with history entry (pushState)
 \`\`\`javascript
 appletAPI.navigateAppletUrlParam('file', '/new/path');  // Creates back button entry
 \`\`\`
 
 **Agent-Pushed State:**
 
-\`onStateUpdate(callback)\` - Receive state pushed from agent via WebSocket
+\`appletAPI.onStateUpdate(callback)\` - Receive state pushed from agent via WebSocket
 \`\`\`javascript
 appletAPI.onStateUpdate((state) => {
   console.log('Agent pushed:', state);
@@ -260,7 +263,7 @@ appletAPI.onStateUpdate((state) => {
 
 **Session Info:**
 
-\`getSessionId()\` - Get active chat session ID
+\`appletAPI.getSessionId()\` - Get active chat session ID
 \`\`\`javascript
 const sessionId = appletAPI.getSessionId();
 // Use for session-specific operations

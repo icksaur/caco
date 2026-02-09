@@ -50,6 +50,8 @@ npm run dev        # Start with auto-reload
 
 Open `http://localhost:3000`
 
+**Keyboard:** `Esc l` session list, `Esc .` toggle applet, `Esc ,` expand/collapse applet
+
 ## Development
 
 ```bash

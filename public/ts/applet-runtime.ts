@@ -472,7 +472,8 @@ function _hideInstance(instance: AppletInstance): void {
 function renderAppletToInstance(
   container: HTMLElement, 
   content: AppletContent,
-  slug: string
+  slug: string,
+  label: string
 ): HTMLStyleElement | null {
   let styleElement: HTMLStyleElement | null = null;
   
@@ -485,9 +486,15 @@ function renderAppletToInstance(
     document.head.appendChild(styleElement);
   }
   
+  // Add label in the clearance zone (above applet content)
+  const labelEl = document.createElement('div');
+  labelEl.className = 'applet-label';
+  labelEl.textContent = label;
+  container.appendChild(labelEl);
+
   // Inject HTML
-  container.innerHTML = content.html;
-  
+  container.insertAdjacentHTML('beforeend', content.html);
+
   // Execute JavaScript after HTML is in DOM
   if (content.js) {
     try {
@@ -550,7 +557,7 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   appletView.appendChild(instanceDiv);
   
   // Render content into instance
-  const styleElement = renderAppletToInstance(instanceDiv, content, slug);
+  const styleElement = renderAppletToInstance(instanceDiv, content, slug, label);
   
   // Store as current
   currentApplet = {

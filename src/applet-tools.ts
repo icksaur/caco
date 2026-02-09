@@ -83,7 +83,8 @@ Applets are interactive HTML/JS/CSS components stored on disk and loaded via URL
 
 ## content.html
 
-HTML fragment (no doctype, html, head, body tags):
+HTML fragment (no doctype, html, head, body tags).
+Do NOT include a title/heading — the runtime displays the applet name automatically.
 \`\`\`html
 <div class="calculator">
   <input type="text" id="display" readonly>

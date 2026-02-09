@@ -17,6 +17,18 @@ The applet view is a panel for custom DOM interfaces created by agents or loaded
 - **Behavior**: Applet replaces chat view when open
 - **Navigation**: Back gesture or button returns to chat
 
+### Button Clearance
+
+Fixed navigation buttons (menu top-left, applet top-right) float at z-index 200 over the applet panel. The `.applet-instance` container has `padding-top: 48px` to prevent content from being obscured.
+
+The clearance zone displays the applet's **friendly name** (label, not slug) centered in muted text. This is injected automatically by `pushApplet()` as a `.applet-label` element — applets don't need to account for it.
+
+| Layer | Element | Z-Index |
+|-------|---------|---------|
+| Applet content | `.applet-instance` | 0 (scrollable) |
+| Applet label | `.applet-label` | auto (absolute, pointer-events: none) |
+| Nav buttons | `.menu-btn`, `.applet-btn` | 200 (fixed) |
+
 ## Visibility Control
 
 ### UI Controls

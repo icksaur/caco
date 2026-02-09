@@ -1355,6 +1355,24 @@ main {
   flex: 1;
   overflow: auto;
   padding: var(--space-lg);
+  padding-top: 48px; /* Clear fixed nav buttons */
+  position: relative;
+}
+
+/* Applet name centered in the button clearance zone */
+.applet-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-lg);
+  color: var(--color-text-muted);
+  pointer-events: none;
+  user-select: none;
 }
 
 .applet-content {

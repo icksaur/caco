@@ -10,7 +10,8 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `GET /api/sessions` - List all sessions with available models
 - `POST /api/sessions` - Create new session
 - `POST /api/sessions/:id/resume` - Resume an existing session
-- `PATCH /api/sessions/:id` - Update session metadata (custom name)
+- `POST /api/sessions/:id/observe` - Mark session as observed
+- `PATCH /api/sessions/:id` - Update session metadata (name, env hint, context)
 - `DELETE /api/sessions/:id` - Delete a session
 - `GET /api/sessions/:id/state` - Get session state (for agent-to-agent polling)
 - `POST /api/sessions/:id/messages` - Send message to session
@@ -36,17 +37,23 @@ Returns:
 {
   "activeSessionId": "uuid | null",
   "currentCwd": "/path/to/cwd",
-  "grouped": { 
+  "unobservedCount": 2,
+  "grouped": {
     "/path": [
-      { 
-        "sessionId": "uuid", 
-        "cwd": "/path", 
+      {
+        "sessionId": "uuid",
+        "cwd": "/path",
+        "model": "claude-sonnet-4.5",
         "name": "Custom Name",
         "summary": "SDK-generated summary",
         "updatedAt": "2026-01-27T12:00:00.000Z",
-        "isBusy": false
+        "isBusy": false,
+        "isUnobserved": true,
+        "currentIntent": "Reading file...",
+        "scheduleSlug": "daily-backup",
+        "scheduleNextRun": "2026-01-28T00:00:00.000Z"
       }
-    ] 
+    ]
   },
   "models": [{ "id": "model-id", "name": "Model Name", "cost": 1 }]
 }
@@ -66,7 +73,13 @@ Returns: `{ sessionId: "uuid", cwd: "string", model: "string" }`
 
 **POST /api/sessions/:id/resume** - Resume session
 
-Returns: `{ success: true, sessionId: "uuid", cwd: "string" }`
+Returns: `{ success: true, sessionId: "uuid", cwd: "string", isBusy: false }`
+
+**POST /api/sessions/:id/observe** - Mark session as observed
+
+Called by client when `session.idle` arrives while viewing that session.
+
+Returns: `{ success: true, wasUnobserved: true, unobservedCount: 1 }`
 
 **PATCH /api/sessions/:id** - Update session metadata
 
@@ -74,7 +87,12 @@ Body:
 ```json
 {
   "name": "string (custom session name, empty to clear)",
-  "envHint": "string (environment setup hint shown on resume)"
+  "envHint": "string (environment setup hint shown on resume)",
+  "setContext": {
+    "setName": "files | applet | endpoints | ports",
+    "items": ["path/to/file.ts", "other/file.ts"],
+    "mode": "replace | merge (default: replace)"
+  }
 }
 ```
 
@@ -92,6 +110,7 @@ Returns:
   "sessionId": "uuid",
   "status": "idle | inactive",
   "cwd": "/path/to/workspace",
+  "model": "claude-sonnet-4.5",
   "isActive": true
 }
 ```
@@ -103,9 +122,10 @@ Returns:
   "imageData": "data:image/...;base64,... (optional)",
   "appletState": "object (optional, batched state from applet)",
   "appletNavigation": "object (optional, navigation context)",
-  "source": "'user' | 'applet' | 'agent' (optional, defaults to 'user')",
+  "source": "'user' | 'applet' | 'agent' | 'scheduler' (optional, defaults to 'user')",
   "appletSlug": "string (optional, applet context for agent)",
   "fromSession": "string (optional, for agent-to-agent calls)",
+  "scheduleSlug": "string (optional, for scheduler-originated messages)",
   "correlationId": "string (required for agent calls)"
 }
 ```
@@ -139,7 +159,7 @@ Returns:
 ```json
 {
   "models": [
-    { "id": "gpt-4", "name": "GPT-4", "multiplier": 1 }
+    { "id": "claude-sonnet-4.5", "name": "Claude Sonnet 4.5", "multiplier": 1 }
   ]
 }
 ```
@@ -150,14 +170,15 @@ Returns:
 ```json
 {
   "usage": {
-    "totalTokens": 12345,
-    "promptTokens": 8000,
-    "completionTokens": 4345
+    "remainingPercentage": 85,
+    "resetDate": "2026-02-01T00:00:00.000Z",
+    "isUnlimited": false,
+    "updatedAt": "2026-01-27T12:00:00.000Z"
   }
 }
 ```
 
-Note: History is streamed via WebSocket on connect, not HTTP.
+Returns `null` if no usage data has been received yet.
 
 ## Display Outputs
 
@@ -219,15 +240,30 @@ Returns:
       "slug": "calculator",
       "name": "Calculator",
       "description": "iOS-style calculator",
+      "params": { "expression": "Math expression to evaluate" },
       "updatedAt": "2026-01-27T...",
       "paths": {
-        "html": ".Caco/applets/calculator/content.html",
-        "js": ".Caco/applets/calculator/script.js",
-        "css": ".Caco/applets/calculator/style.css",
-        "meta": ".Caco/applets/calculator/meta.json"
+        "html": "~/.caco/applets/calculator/content.html",
+        "js": "~/.caco/applets/calculator/script.js",
+        "css": "~/.caco/applets/calculator/style.css",
+        "meta": "~/.caco/applets/calculator/meta.json"
       }
     }
   ]
+}
+```
+
+**POST /api/applets/:slug/load** - Load applet content
+
+Returns:
+```json
+{
+  "ok": true,
+  "slug": "calculator",
+  "title": "Calculator",
+  "html": "<div>...</div>",
+  "js": "// script content or null",
+  "css": "/* styles or null */"
 }
 ```
 
@@ -253,24 +289,17 @@ Returns:
 ```
 
 **GET /api/file** query params:
-- `path` - Relative path to file
+- `path` - Absolute or relative path to file
 
 Returns raw content with appropriate Content-Type header.
+
+Note: Allows any filesystem path (absolute or relative to cwd). This is personal software — the agent already has full filesystem access via Copilot tools.
 
 **PUT /api/files/\*** - Write file content
 - URL path contains file path: `PUT /api/files/src/app.ts`
 - Body: raw file content (text/plain)
 - Creates parent directories automatically
 - Returns: `{ ok: true, path, size }`
-
-Example:
-```bash
-curl -X PUT http://localhost:3000/api/files/src/hello.txt \
-  -H "Content-Type: text/plain" \
-  -d "Hello, world!"
-```
-
-Security: All file endpoints are locked to workspace root.
 
 ## Scheduled Tasks
 
@@ -466,19 +495,24 @@ Custom tools available to the Copilot agent via SDK.
 
 Defined in `src/applet-tools.ts`:
 
-- `applet_howto` - Get documentation for creating applets
+- `caco_applet_howto` - Get documentation for creating applets
+- `caco_applet_usage` - Get applet URL patterns for linking users to applets
 - `get_applet_state` - Query state pushed by applet JS
 - `set_applet_state` - Push state to running applet via WebSocket
 - `reload_page` - Trigger browser page refresh
 - `restart_server` - Schedule server restart after delay
 
-**applet_howto** - no parameters
+**caco_applet_howto** - no parameters
 
 Returns comprehensive documentation on:
-- File structure (`.Caco/applets/<slug>/`)
+- File structure (`~/.caco/applets/<slug>/`)
 - Required files (meta.json, content.html) and optional (script.js, style.css)
-- JavaScript APIs available (setAppletState, loadApplet, listApplets)
+- JavaScript APIs available (setAppletState, sendAgentMessage, listApplets)
 - How to share applets via URL (`?applet=slug`)
+
+**caco_applet_usage** - no parameters
+
+Returns markdown link examples for showing files, diffs, git status, images, etc. via installed applets. Lists applet URL patterns and parameter schemas.
 
 **get_applet_state** parameters:
 - `key` (string, optional) - Get specific key instead of full state
@@ -496,7 +530,7 @@ Pushes state via WebSocket to running applet. Applet receives via `onStateUpdate
 Sends reload signal to browser.
 
 **restart_server** parameters:
-- `delay` (number, optional) - Seconds to wait before restart (1-30, default: 3)
+- `delay` (number, optional) - Seconds to wait before restarting (1-30, default: 3)
 
 Schedules graceful restart, waiting for active sessions to complete.
 
@@ -504,9 +538,59 @@ Schedules graceful restart, waiting for active sessions to complete.
 
 Defined in `src/display-tools.ts`:
 
-- `embed_media` - Embed YouTube/Vimeo/SoundCloud/Spotify/Twitter. Takes `url` (string, required).
+- `embed_media` - Embed YouTube/Vimeo/SoundCloud/Spotify. Takes `url` (string, required).
 
 Note: Embedding happens client-side. The tool returns confirmation that the embed was queued, but cannot confirm successful rendering.
+
+### Context Tools
+
+Defined in `src/context-tools.ts`:
+
+- `set_relevant_context` - Track files and resources for session continuity
+- `get_relevant_context` - Retrieve saved session context
+
+**set_relevant_context** parameters:
+- `setName` (string, required) - Name of context set (`files`, `applet`, `endpoints`, `ports`)
+- `items` (string[], required) - Items for this set (max 10 per set, 50 total)
+- `mode` (string, optional) - `replace` (default) or `merge` with existing
+
+Persists context to session metadata. Broadcasts `caco.context` event to connected clients.
+
+**get_relevant_context** parameters:
+- `setName` (string, optional) - Specific set to retrieve, or omit for all
+
+Returns stored context for the session.
+
+### Agent-to-Agent Tools
+
+Defined in `src/agent-tools.ts`:
+
+- `send_agent_message` - Send a message to another agent session
+- `get_session_state` - Check current state of an agent session
+- `list_models` - List available models for creating sessions
+- `create_agent_session` - Create a new agent session
+
+**send_agent_message** parameters:
+- `sessionId` (string, required) - Target session ID
+- `message` (string, required) - Message/prompt to send
+
+Sends message with `source: 'agent'` and includes originating session ID for callbacks. Requires correlationId from dispatch context.
+
+**get_session_state** parameters:
+- `sessionId` (string, required) - Target session ID to check
+
+Returns session status (`idle`/`inactive`), cwd, model, isActive.
+
+**list_models** - no parameters
+
+Returns available models from SDK.
+
+**create_agent_session** parameters:
+- `cwd` (string, required) - Working directory for the new session
+- `model` (string, required) - Model ID (e.g., `claude-sonnet-4.5`)
+- `initialMessage` (string, optional) - First message to send immediately
+
+Creates a new session and optionally sends an initial message. Returns the new session ID.
 
 ## JavaScript APIs (Applet Runtime)
 
@@ -534,7 +618,7 @@ expose('myFunc', myFunc);           // window.expose
 Push state to server for agent to query via `get_applet_state` tool.
 
 ```javascript
-setAppletState({ 
+setAppletState({
   inputValue: document.getElementById('input').value,
   selectedOption: currentSelection
 });
@@ -555,20 +639,12 @@ onStateUpdate((state) => {
 
 ### Navigation
 
-#### loadApplet(slug)
-
-Load and display a saved applet.
-
-```javascript
-await loadApplet('calculator');
-```
-
 #### listApplets()
 
 Get list of saved applets.
 
 ```javascript
-const applets = await listApplets();
+const applets = await appletAPI.listApplets();
 // Returns: [{ slug, name, description, updatedAt }, ...]
 ```
 
@@ -577,7 +653,7 @@ const applets = await listApplets();
 Get current applet slug from URL.
 
 ```javascript
-const slug = getAppletSlug();
+const slug = appletAPI.getAppletSlug();
 // Returns: string | null ('calculator' if URL is /?applet=calculator)
 ```
 
@@ -588,8 +664,7 @@ Register callback for URL param changes. **Recommended** for applets that use UR
 Handles both initial load and navigation (back/forward, chat links to same applet with different params).
 
 ```javascript
-// Single handler for initial load + all param changes
-window.appletAPI.onUrlParamsChange(function(params) {
+appletAPI.onUrlParamsChange(function(params) {
   loadContent(params.path || '');
 });
 ```
@@ -599,7 +674,7 @@ window.appletAPI.onUrlParamsChange(function(params) {
 Get URL query params (excluding 'applet' slug).
 
 ```javascript
-const params = getAppletUrlParams();
+const params = appletAPI.getAppletUrlParams();
 // { file: '/path/to/file.jpg', mode: 'edit' }
 ```
 
@@ -608,7 +683,7 @@ const params = getAppletUrlParams();
 Update URL query param (uses replaceState, no history entry).
 
 ```javascript
-updateAppletUrlParam('page', '2');
+appletAPI.updateAppletUrlParam('page', '2');
 // URL becomes /?applet=my-app&page=2 (no back button entry)
 ```
 
@@ -617,7 +692,7 @@ updateAppletUrlParam('page', '2');
 Update URL query param with history entry (uses pushState).
 
 ```javascript
-navigateAppletUrlParam('file', '/new/path');
+appletAPI.navigateAppletUrlParam('file', '/new/path');
 // URL changes, creates back button entry
 ```
 
@@ -632,16 +707,12 @@ Send a message to the agent from applet JS. Creates an "applet" bubble (orange) 
 - `imageData` (string, optional) - Base64 data URL for image submission (max 100KB)
 
 ```javascript
-// Send a message with current applet as context
-await sendAgentMessage('Set the calculator value to 42');
+await appletAPI.sendAgentMessage('Set the calculator value to 42');
 
-// Send with explicit applet slug
-await sendAgentMessage('Load file /path/to/image.jpg', { appletSlug: 'image-viewer' });
+await appletAPI.sendAgentMessage('Load file', { appletSlug: 'image-viewer' });
 
-// Send with image data (direct submission - preferred for images)
-const canvas = document.getElementById('canvas');
 const imageData = canvas.toDataURL('image/png');
-await sendAgentMessage('What is this drawing?', { imageData });
+await appletAPI.sendAgentMessage('What is this?', { imageData });
 ```
 
 Returns a Promise that resolves when message is sent (not when agent responds).
@@ -651,7 +722,7 @@ Returns a Promise that resolves when message is sent (not when agent responds).
 Get the active chat session ID.
 
 ```javascript
-const sessionId = getSessionId();
+const sessionId = appletAPI.getSessionId();
 // Returns: string | null
 ```
 
@@ -662,16 +733,11 @@ const sessionId = getSessionId();
 Save data to `~/.caco/tmp/` for agent viewing.
 
 > **Note:** For images, prefer `sendAgentMessage` with `imageData` option for direct submission.
-> The temp-file pattern still works but requires agent to call the `view` tool.
 
 ```javascript
-// Deprecated for images - use imageData option instead
 const canvas = document.getElementById('myCanvas');
-const { path } = await saveTempFile(canvas.toDataURL('image/png'));
-await sendAgentMessage(`Analyze image at ${path}`);
-
-// Preferred for images
-await sendAgentMessage('Analyze this', { imageData: canvas.toDataURL() });
+const { path } = await appletAPI.saveTempFile(canvas.toDataURL('image/png'));
+await appletAPI.sendAgentMessage(`Analyze image at ${path}`);
 ```
 
 Options:
@@ -683,17 +749,14 @@ Options:
 Call MCP tools directly from applet JavaScript.
 
 ```javascript
-// Read a file
-const result = await callMCPTool('read_file', { path: '/path/to/file.txt' });
+const result = await appletAPI.callMCPTool('read_file', { path: '/path/to/file.txt' });
 
-// Write a file
-await callMCPTool('write_file', { 
-  path: '/path/to/output.txt', 
-  content: 'Hello world' 
+await appletAPI.callMCPTool('write_file', {
+  path: '/path/to/output.txt',
+  content: 'Hello world'
 });
 
-// List directory
-const files = await callMCPTool('list_directory', { path: '/home/user' });
+const files = await appletAPI.callMCPTool('list_directory', { path: '/home/user' });
 ```
 
 ### Function Exposure
@@ -703,9 +766,8 @@ const files = await callMCPTool('list_directory', { path: '/home/user' });
 Expose functions to global scope for onclick handlers.
 
 ```javascript
-// Scripts are wrapped in IIFE, so functions aren't automatically global
 function handleClick() { /* ... */ }
-expose('handleClick', handleClick);  // Now onclick="handleClick()" works
+expose('handleClick', handleClick);
 
 // Or expose multiple at once:
 expose({ handleClick, handleSubmit, handleCancel });
@@ -729,9 +791,7 @@ Applet JS runs in global scope with full DOM access:
 ```javascript
 document.getElementById('myElement')
 document.querySelector('.my-class')
-document.querySelectorAll('button')
 
-// Fetch API for HTTP requests
 const response = await fetch('/api/applets');
 const data = await response.json();
 ```
@@ -746,8 +806,7 @@ const result = await fetch('/api/shell', {
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     command: 'git',
-    args: ['status', '--porcelain=v2'],
-    cwd: '/path/to/repo'
+    args: ['status', '--porcelain=v2']
   })
 });
 const { stdout, stderr, code } = await result.json();
@@ -755,69 +814,78 @@ const { stdout, stderr, code } = await result.json();
 
 ---
 
-## WebSocket Events (Response Streaming)
+## WebSocket Protocol
 
-WebSocket connection at `/ws?sessionId=xxx&clientId=yyy`.
+WebSocket connection at `/ws`.
 
 ### Connection
 
-Connect with session ID and optional client ID:
+Connect to WebSocket (no query params needed):
 ```javascript
-const ws = new WebSocket(`ws://localhost:3000/ws?sessionId=${sessionId}&clientId=${clientId}`);
+const ws = new WebSocket('ws://localhost:3000/ws');
 ```
 
-On connect, server streams conversation history automatically.
+After connecting, subscribe to a session and request history:
+```javascript
+ws.send(JSON.stringify({ type: 'subscribe', sessionId }));
+ws.send(JSON.stringify({ type: 'requestHistory', sessionId }));
+```
 
 ### Server → Client Messages
 
+All messages are JSON with a `type` field:
+
 | Type | Description |
 |------|-------------|
-| `message` | Chat message (user, assistant, or streaming update) |
-| `activity` | Tool calls, intents, errors |
-| `stateUpdate` | Applet state pushed from agent |
-| `historyComplete` | History streaming finished |
-| `reload` | Browser should refresh |
+| `event` | Session-scoped SDK event (wraps all streaming data) |
+| `globalEvent` | Broadcast to all clients (session list changes, unobserved count) |
+| `stateUpdate` | Applet state pushed from agent or another tab |
+| `historyComplete` | History streaming finished for requested session |
+| `state` | Response to `getState` request |
 | `pong` | Response to ping |
+| `error` | Error message |
 
-**ChatMessage structure:**
+**Event wrapper** (session-scoped):
 ```json
 {
-  "type": "message",
-  "data": {
-    "id": "uuid",
-    "role": "user | assistant",
-    "content": "message text",
-    "status": "streaming | complete",
-    "deltaContent": "incremental text (streaming only)",
-    "source": "user | applet | agent",
-    "appletSlug": "calculator",
-    "fromSession": "uuid (agent-to-agent)",
-    "outputs": ["output-id-1"]
+  "type": "event",
+  "sessionId": "uuid",
+  "event": {
+    "type": "assistant.message.delta",
+    "data": { "content": "incremental text" }
   }
 }
 ```
 
-**Activity structure:**
+Common SDK event types inside `event.type`:
+- `user.message` - User message (enriched with `source`, `appletSlug`, `fromSession`)
+- `assistant.message`, `assistant.message.delta` - Assistant response
+- `assistant.turn_start` - Start of assistant turn
+- `tool.execution_start`, `tool.execution_complete` - Tool activity
+- `session.idle` - Session finished processing
+- `session.error` - Session error
+- `session.compaction_start`, `session.compaction_complete` - Conversation compaction
+- `caco.embed` - Media embed queued for rendering
+- `caco.context` - Session context changed
+- `caco.reload` - Browser should refresh
+
+**GlobalEvent wrapper**:
 ```json
 {
-  "type": "activity",
-  "data": {
-    "type": "tool_start | tool_complete | intent | error",
-    "toolName": "embed_media",
-    "toolInput": { "url": "..." },
-    "toolOutput": "...",
-    "intentText": "Thinking about..."
+  "type": "globalEvent",
+  "event": {
+    "type": "session.listChanged",
+    "data": { "reason": "created", "sessionId": "uuid" }
   }
 }
 ```
 
-**StateUpdate structure:**
+**StateUpdate**:
 ```json
 {
   "type": "stateUpdate",
-  "data": {
-    "key": "value"
-  }
+  "sessionId": "uuid",
+  "data": { "key": "value" }
 }
 ```
 
@@ -825,11 +893,29 @@ On connect, server streams conversation history automatically.
 
 | Type | Description |
 |------|-------------|
+| `subscribe` | Subscribe to session events (with `sessionId`) |
+| `requestHistory` | Request history replay for session (with `sessionId`) |
 | `setState` | Push applet state to server |
-| `getState` | Request current state |
+| `getState` | Request current applet state |
 | `ping` | Keep-alive |
 
-**setState:**
+**subscribe**:
+```json
+{
+  "type": "subscribe",
+  "sessionId": "uuid"
+}
+```
+
+**requestHistory**:
+```json
+{
+  "type": "requestHistory",
+  "sessionId": "uuid"
+}
+```
+
+**setState**:
 ```json
 {
   "type": "setState",
@@ -837,12 +923,7 @@ On connect, server streams conversation history automatically.
 }
 ```
 
-**getState:**
-```json
-{
-  "type": "getState"
-}
-```
+Note: `sendMessage` via WebSocket is deprecated. Use `POST /api/sessions/:id/messages` instead.
 
 ---
 
@@ -860,10 +941,10 @@ Example: `http://localhost:3000/?applet=calculator`
 
 ### Applet Storage Structure
 
-Location: `.Caco/applets/<slug>/`
+Location: `~/.caco/applets/<slug>/`
 
 ```
-.Caco/
+~/.caco/
 └── applets/
     └── calculator/
         ├── meta.json      # { slug, name, description, createdAt, updatedAt }
@@ -872,4 +953,4 @@ Location: `.Caco/applets/<slug>/`
         └── style.css      # CSS styles
 ```
 
-The `.Caco/` directory has its own git repository, separate from the main project.
+The `~/.caco/` directory has its own git repository, separate from the main project.

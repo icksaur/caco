@@ -36,12 +36,10 @@ The backend doesn't track which session the user is looking at. That's a client 
 - `sessionManager.activeSessions` = sessions with SDK client loaded in memory
 - Multiple sessions can be "active" simultaneously
 - POST to any session will load its SDK client if needed (via `resume()`)
-- Does NOT stop other sessions when activating a new one
 
 **What "active" means in client:**
 - Which session the user is viewing
 - Client filters WS messages by active session ID
-- Client tracks this locally
 
 ### Session Activation on POST
 
@@ -54,156 +52,46 @@ When POST arrives for a session:
 
 Key: `resume()` loads a session **without stopping others**.
 
-### Client Session Filtering
-
-Client ignores WS packets for sessions other than current active session.
-Future: may aggregate notifications from spawned sessions.
-
-```typescript
-// Client WS handler
-onMessage((msg) => {
-  if (msg.sessionId !== activeSessionId) {
-    return; // Ignore - not our session
-  }
-  // ... handle message
-});
-```
-
 ## API Design
 
 ### POST /api/sessions/:sessionId/messages
 
-Send a message to an existing session.
-
-```
-POST /api/sessions/abc123/messages
-Content-Type: application/json
-
-{
-  "message": "Please analyze the file at src/main.ts",
-  "source": "agent",
-  "fromSession": "xyz789"  // optional: originating session for traceability
-}
-```
-
-**Behavior:**
-- Message saved to session history with `source: 'agent'`
-- SDK dispatches to model (session becomes active)
-- Returns immediately (async dispatch)
-
-**Response:**
-```json
-{
-  "messageId": "msg_123",
-  "status": "dispatched"
-}
-```
-
-### POST /api/sessions (create new session)
-
-Already exists. Agent can create new session with specific cwd/model, then POST message to it.
+Send a message to an existing session. Message saved with `source: 'agent'`, SDK dispatches to model. Returns immediately (async dispatch).
 
 ### GET /api/sessions/:sessionId/state
 
-Check session state.
-
-```json
-{
-  "sessionId": "abc123",
-  "status": "idle" | "streaming" | "error",
-  "lastMessage": {
-    "role": "assistant",
-    "content": "...",
-    "timestamp": "..."
-  },
-  "cwd": "/path/to/project"
-}
-```
+Returns session status (`idle` | `streaming` | `error`), last message, and cwd.
 
 ## Message Sources
-
-Extend `MessageSource` type:
 
 ```typescript
 type MessageSource = 'user' | 'applet' | 'agent';
 ```
 
-UI styling:
-- `user` - Standard user bubble (blue)
-- `applet` - Applet-branded bubble (shows which applet)
-- `agent` - Purple bubble (shows originating session?)
+UI styling: `user` blue, `applet` orange, `agent` purple.
 
 ## Safety Considerations
 
-### Self-POST Prevention
+- **Self-POST prevention**: Block by session ID (Option A — simpler than cwd matching)
+- **Rate limiting**: Prevent runaway loops
+- **Depth limiting**: Track spawn depth (see [agent-recursion.md](agent-recursion.md))
 
-Prevent infinite loops where agent POSTs to its own session.
+## MCP Tools
 
-**Option A: Block by session ID**
-```typescript
-if (fromSession === targetSession) {
-  return res.status(400).json({ error: 'Cannot POST to own session' });
-}
-```
-
-**Option B: Block by cwd**
-```typescript
-if (fromCwd === targetCwd) {
-  return res.status(400).json({ error: 'Cannot POST to session with same cwd' });
-}
-```
-
-Option A is simpler and more reliable.
-
-### Rate Limiting
-
-Consider rate limiting agent-to-agent POSTs to prevent runaway loops.
-
-### Depth Limiting
-
-Track "spawn depth" to prevent infinite delegation chains.
-
-## MCP Tool Wrapper
-
-Three tools are provided for agent-to-agent communication. All tools are session-aware - they know their own session ID and include it in requests so receiving sessions can call back.
+All tools are session-aware — they know their own session ID and include it in requests.
 
 ### send_agent_message
 
-Send a message to another agent session. The target session receives the message with `source: 'agent'` and the originating session ID.
-
-```typescript
-send_agent_message(sessionId: string, message: string)
-```
-
-**Callback pattern**: Include instructions in your message so the target can report back:
-
-```
-"Analyze the API in /src/api. When finished, call send_agent_message('${mySessionId}', 'Analysis results: ...')"
-```
-
-The tool description includes your session ID so the model knows what to tell the target.
+Send a message to another agent session. Target receives with `source: 'agent'` and originating session ID.
 
 ### get_session_state
 
-Check if a session is idle, streaming, or doesn't exist.
-
-```typescript
-get_session_state(sessionId: string)
-// Returns: { sessionId, status: 'idle' | 'streaming', cwd, isActive }
-```
-
-Use this to poll spawned sessions for completion.
+Check if a session is idle, streaming, or doesn't exist. Use to poll spawned sessions for completion.
 
 ### list_models
 
 Discover available models for spawning sessions.
 
-```typescript
-list_models()
-// Returns: [{ id: string, name: string, description: string }]
-```
-
-**Current models:**
 | Model ID | Best For |
 |----------|----------|
 | `claude-sonnet-4.5` | General-purpose engineering: edit/compile/test/fix cycles |
@@ -212,69 +100,16 @@ list_models()
 
 ### create_agent_session
 
-Create a new session with a specific working directory and model.
-
-```typescript
-create_agent_session(cwd: string, model: string, initialMessage?: string)
-// Returns: new session ID
-```
-
-**Parameters:**
-- `cwd` (required): Working directory for the new session
-- `model` (required): Model ID from `list_models`. Choose based on task:
-  - `claude-sonnet-4.5` for code changes, testing, iterative fixes
-  - `claude-opus-4.5` for analysis, specs, complex reasoning
-- `initialMessage` (optional): First message to send immediately
-
-If `initialMessage` is provided, it's sent immediately with `source: 'agent'`.
-
-**Example workflow**:
-```
-1. create_agent_session('/path/to/project', 'claude-sonnet-4.5', 'Fix the build errors and send_agent_message("abc123", "Results: ...")') 
-2. Poll with get_session_state until idle
-3. Or just wait for the callback message
-```
+Create a new session with a specific working directory and model. Optional `initialMessage` sent immediately with `source: 'agent'`.
 
 **Model selection guidance:**
 - Spawning for code edits? → `claude-sonnet-4.5`
 - Spawning for analysis or document generation? → `claude-opus-4.5`
 - Unsure? → `claude-sonnet-4.5` (faster, cheaper, good default)
 
-## Implementation Plan
-
-1. ✅ Add `source: 'agent'` support to message schema
-2. ✅ Implement POST /api/sessions/:sessionId/messages
-3. ✅ Implement GET /api/sessions/:sessionId/state
-4. ✅ Add self-POST prevention
-5. ✅ Create MCP tool wrappers (`src/agent-tools.ts`)
-6. ✅ Add agent bubble styling in UI (purple)
-
 ## Open Questions
 
-- [ ] Should agent messages show originating session ID in UI?
-- [ ] How to handle errors from spawned sessions (notify originator?)
-- [ ] Should there be a "wait for completion" variant that blocks?
-- [ ] Session cleanup - who cleans up spawned sessions?
-
-## Known Bugs (Fixed)
-
-### Bug 1: send_agent_message mentioned session IDs to agent context (FIXED)
-
-The tool responses mentioned "your session ID" but agents don't need this info. The `fromSession` is auto-filled internally and the receiving session can access it from context.
-
-**Fix**: Removed all session ID mentions from tool descriptions and responses. Callback pattern now uses `requestingSession` placeholder.
-
-### Bug 2: Agent messages didn't render correctly in history reload (FIXED)
-
-Agent messages appeared purple during streaming but not when reloading from history. This was because:
-
-1. `stream.ts` didn't prefix agent messages with `[agent:fromSession]` like it did `[applet:slug]`
-2. `applet-ws.ts` history parsing only handled `[applet:...]`, not `[agent:...]`
-3. `ChatMessage` interface didn't include `fromSession` field
-4. `broadcastUserMessageFromPost` didn't pass `fromSession`
-
-**Fix**: 
-- Added `[agent:fromSession]` prefix in stream.ts for agent source messages
-- Parse `[agent:...]` in history alongside `[applet:...]`
-- Added `fromSession` field to ChatMessage interface (both server and client)
-- Pass `fromSession` through broadcastUserMessageFromPost
+- Should agent messages show originating session ID in UI?
+- How to handle errors from spawned sessions (notify originator?)
+- Should there be a "wait for completion" variant that blocks?
+- Session cleanup — who cleans up spawned sessions?

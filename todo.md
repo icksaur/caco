@@ -2,7 +2,10 @@
 
 API.md review - make sure it's up to date
 
-Secrets and personal information review (any package for this?)
+review unit tests for low-value or brittle tests
+
+Secrets and personal information/local paths, privacy review (any package for this?)  My name is in the commits and I guess that's fine.
+
 
 # every so often
 

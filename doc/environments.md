@@ -28,13 +28,7 @@ Environment hint: source .venv/bin/activate && module load gcc/7.5
 <user's actual message>
 ```
 
-The agent then:
-1. Sees it's resuming
-2. Has explicit setup instructions
-3. Runs setup commands via bash tool
-4. Confirms environment before proceeding
-
-### Why This Works
+The agent sees it's resuming, has explicit setup instructions, runs setup commands, and confirms before proceeding.
 
 | Limitation | Solution |
 |------------|----------|
@@ -42,47 +36,9 @@ The agent then:
 | Can't modify system message on resume | Use message prefix |
 | copilot-cli forgets shell context | Explicit reinit instructions |
 
-### Implementation
-
-Changes to `src/session-manager.ts`:
-
-1. Track resume state in `ActiveSession`:
-   ```typescript
-   interface ActiveSession {
-     // ... existing fields
-     pendingResumeContext: boolean;
-   }
-   ```
-
-2. Set flag in `resume()` → `true`, in `create()` → `false`
-
-3. Inject context in `send()` and `sendStream()`:
-   ```typescript
-   if (active.pendingResumeContext) {
-     message = buildResumeContext(sessionId, cwd) + message;
-     active.pendingResumeContext = false;
-   }
-   ```
-
 ### Per-Session Environment Hints
 
-Stored in `~/.caco/sessions/<id>/meta.json` as `envHint` field.
-
-Set via:
-- `PATCH /api/sessions/:id` with `{ "envHint": "..." }`
-- Manual JSON edit
-
----
-
-## Status
-
-- [x] Document problem and solution
-- [x] Implement `pendingResumeContext` flag
-- [x] Implement `buildResumeContext()` function  
-- [x] Add `envHint` to SessionMeta and PATCH API
-- [x] Test resume flow
-
----
+Stored in `~/.caco/sessions/<id>/meta.json` as `envHint` field. Set via `PATCH /api/sessions/:id` with `{ "envHint": "..." }`.
 
 ## Research
 

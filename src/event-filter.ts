@@ -20,6 +20,8 @@ const PASSTHROUGH_TYPES = new Set([
   'session.idle',     // Signals streaming complete, re-enables form
   'session.error',    // Error messages
   'assistant.turn_start', // Thinking indicator - shows "Thinking..." until content arrives
+  'session.compaction_start',    // Shows "Compacting conversation..." in activity box
+  'session.compaction_complete', // Shows "Conversation compacted" in activity box
 ]);
 
 /**

@@ -137,6 +137,14 @@ describe('shouldFilter', () => {
     it('assistant.turn_start passes through even with empty data', () => {
       expect(shouldFilter({ type: 'assistant.turn_start', data: {} })).toBe(false);
     });
+
+    it('session.compaction_start passes through with empty data', () => {
+      expect(shouldFilter({ type: 'session.compaction_start', data: {} })).toBe(false);
+    });
+
+    it('session.compaction_complete passes through with empty data', () => {
+      expect(shouldFilter({ type: 'session.compaction_complete', data: {} })).toBe(false);
+    });
   });
 
   describe('returns false (keep event) - caco synthetic events', () => {

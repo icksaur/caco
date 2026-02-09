@@ -1,8 +1,6 @@
 # TODO
 
-Update index.md
-
-Dead doc review.
+Dead/useless doc review and organization if needed into right directo
 
 Secrets and personal information review (any package for this?)
 

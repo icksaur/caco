@@ -3,8 +3,11 @@
  * 
  * File-based storage for persisted applets.
  * 
- * Storage structure:
- *   ~/.caco/applets/<slug>/
+ * Two applet directories:
+ *   ~/.caco/applets/<slug>/        # User applets (read/write, takes priority)
+ *   <project>/applets/<slug>/      # Bundled applets (read-only fallback)
+ * 
+ * File structure per applet:
  *     ├── meta.json       # { name, description, created, updated }
  *     ├── content.html    # HTML content
  *     ├── script.js       # JavaScript (optional)
@@ -14,13 +17,22 @@
  * - Separate files for easy agent inspection with standard file tools
  * - Agent can read/edit files directly before calling load_applet
  * - No index.json - we scan directories to list applets
+ * - User dir wins on slug collision (user can override bundled applets)
+ * - Writes always go to user dir (~/.caco/applets)
+ * - Deletes only affect user dir (can't delete bundled applets)
  */
 
 import { mkdir, readFile, writeFile, readdir, rm, stat } from 'fs/promises';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 
-const APPLET_DIR = join(homedir(), '.caco', 'applets');
+/** User applets — read/write */
+const USER_APPLET_DIR = join(homedir(), '.caco', 'applets');
+
+/** Bundled applets — read-only fallback */
+const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const BUNDLED_APPLET_DIR = join(PROJECT_ROOT, 'applets');
 
 export interface AppletMeta {
   slug: string;
@@ -55,17 +67,17 @@ export interface AppletFilePaths {
 }
 
 /**
- * Get the applets directory (global ~/.caco/applets)
+ * Get the user applets directory (~/.caco/applets) — write target
  */
-function getAppletsDir(): string {
-  return APPLET_DIR;
+function getUserAppletsDir(): string {
+  return USER_APPLET_DIR;
 }
 
 /**
- * Get file paths for an applet
+ * Build file paths for an applet in a given base directory
  */
-export function getAppletPaths(slug: string): AppletFilePaths {
-  const root = join(getAppletsDir(), slug);
+function buildPaths(baseDir: string, slug: string): AppletFilePaths {
+  const root = join(baseDir, slug);
   return {
     root,
     meta: join(root, 'meta.json'),
@@ -73,6 +85,33 @@ export function getAppletPaths(slug: string): AppletFilePaths {
     js: join(root, 'script.js'),
     css: join(root, 'style.css')
   };
+}
+
+/**
+ * Get file paths for an applet (user dir — for writes)
+ */
+export function getAppletPaths(slug: string): AppletFilePaths {
+  return buildPaths(getUserAppletsDir(), slug);
+}
+
+/**
+ * Resolve where an applet lives: user dir first, then bundled.
+ * Returns null if not found in either location.
+ */
+async function resolveAppletDir(slug: string): Promise<AppletFilePaths | null> {
+  const userPaths = buildPaths(USER_APPLET_DIR, slug);
+  try {
+    await stat(userPaths.meta);
+    return userPaths;
+  } catch { /* not in user dir */ }
+
+  const bundledPaths = buildPaths(BUNDLED_APPLET_DIR, slug);
+  try {
+    await stat(bundledPaths.meta);
+    return bundledPaths;
+  } catch { /* not in bundled dir either */ }
+
+  return null;
 }
 
 /**
@@ -149,7 +188,11 @@ export async function loadApplet(
 ): Promise<StoredApplet | null> {
   validateSlug(slug);
   
-  const paths = getAppletPaths(slug);
+  const paths = await resolveAppletDir(slug);
+  if (!paths) {
+    console.log(`[APPLET-STORE] Applet "${slug}" not found`);
+    return null;
+  }
   
   try {
     // Read meta (required)
@@ -185,38 +228,37 @@ export async function loadApplet(
 }
 
 /**
- * List all saved applets
+ * List all saved applets from both user and bundled directories.
+ * User dir wins on slug collision.
  */
 export async function listApplets(): Promise<Array<AppletMeta & { paths: AppletFilePaths }>> {
-  const appletsDir = getAppletsDir();
-  
-  try {
-    const entries = await readdir(appletsDir, { withFileTypes: true });
-    const applets: Array<AppletMeta & { paths: AppletFilePaths }> = [];
-    
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
-      
-      const paths = getAppletPaths(entry.name);
-      
-      try {
-        const metaContent = await readFile(paths.meta, 'utf-8');
-        const meta: AppletMeta = JSON.parse(metaContent);
-        applets.push({ ...meta, paths });
-      } catch {
-        // Skip directories without valid meta.json
+  const applets = new Map<string, AppletMeta & { paths: AppletFilePaths }>();
+
+  // Scan bundled first, then user — user overwrites on collision
+  for (const dir of [BUNDLED_APPLET_DIR, USER_APPLET_DIR]) {
+    try {
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
+
+        const paths = buildPaths(dir, entry.name);
+        try {
+          const metaContent = await readFile(paths.meta, 'utf-8');
+          const meta: AppletMeta = JSON.parse(metaContent);
+          applets.set(entry.name, { ...meta, paths });
+        } catch {
+          // Skip directories without valid meta.json
+        }
       }
+    } catch {
+      // Directory doesn't exist — skip
     }
-    
-    // Sort by updated time, newest first
-    applets.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    
-    return applets;
-  } catch {
-    // Directory doesn't exist yet
-    return [];
   }
+    
+  const result = [...applets.values()];
+  result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  return result;
 }
 
 /**
@@ -246,9 +288,7 @@ export async function appletExists(
 ): Promise<boolean> {
   try {
     validateSlug(slug);
-    const paths = getAppletPaths(slug);
-    await stat(paths.meta);
-    return true;
+    return (await resolveAppletDir(slug)) !== null;
   } catch {
     return false;
   }

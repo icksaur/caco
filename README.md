@@ -1,21 +1,21 @@
 # Caco
 
-A self-extensible chat front-end for the [GitHub Copilot CLI SDK](https://github.com/github/copilot-sdk).
+![Caco](caco.png)
+
+A dangerous solution to any problem.
 
 ## What is this?
 
-A local web interface for Copilot that the agent can extend at runtime.
+A self-extensible chat front-end for the [GitHub Copilot CLI SDK](https://github.com/github/copilot-sdk).
 
 **Key capabilities:**
-- Chat interface with streaming responses
-- Session management (multiple simultaneous conversations)
-- Image attachments (paste in chat input)
-- Media embedding
 - Agent-generated custom "applets"
 - Applet-to-agent collaboration
 - Agent-to-agent collaboration
 - Session scheduling
 - Self modification and self introspection
+- Document-centric meta-context
+- Almost everything else Copilot-CLI can do
 
 ## Basic Architecture
 
@@ -50,18 +50,13 @@ npm run dev        # Start with auto-reload
 
 Open `http://localhost:3000`
 
-**Keyboard:** `Esc l` session list, `Esc .` toggle applet, `Esc ,` expand/collapse applet
-
 ## Development
 
 ```bash
 npm run build      # Build + typecheck + lint + test
 npm run dev        # Development server (nodemon)
 npm test           # Run tests
-npm run scan:pii   # Scan for personal info and secrets in source files
 ```
-
-**Pre-commit hook:** ESLint via lint-staged (runs automatically on `git commit`)
 
 ## Project Structure
 

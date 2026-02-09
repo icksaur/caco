@@ -14,9 +14,9 @@ describe('parseSessionStartEvent', () => {
     it('extracts cwd with Windows path', () => {
       const json = JSON.stringify({
         type: 'session.start',
-        data: { context: { cwd: 'C:\\Users\\carl\\project' } }
+        data: { context: { cwd: 'C:\\Users\\user\\project' } }
       });
-      expect(parseSessionStartEvent(json)).toEqual({ cwd: 'C:\\Users\\carl\\project' });
+      expect(parseSessionStartEvent(json)).toEqual({ cwd: 'C:\\Users\\user\\project' });
     });
 
     it('handles nested context correctly', () => {

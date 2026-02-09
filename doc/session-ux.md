@@ -59,13 +59,13 @@ Button label and behavior change based on search state:
 ```
 ┌────────────────────────────────────────────────────┐
 │ ▌ Analyzing code...                    2m ago     │
-│   /home/carl/project-a                            │
+│   /home/user/project-a                            │
 ├────────────────────────────────────────────────────┤
 │ ● Refactored auth module               5m ago     │
-│   /home/carl/project-b                            │
+│   /home/user/project-b                            │
 ├────────────────────────────────────────────────────┤
 │   Fixed login bug                      1h ago     │
-│   /home/carl/project-a                            │
+│   /home/user/project-a                            │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -143,9 +143,9 @@ Schedules appear below New Chat, above session list. Both sections have headings
 ├─────────────────────────────────────────────────┤
 │ sessions                                        │
 │  ● Refactored auth module              5m ago  │
-│    /home/carl/project-b                        │
+│    /home/user/project-b                        │
 │    Fixed login bug                     1h ago  │
-│    /home/carl/project-a                        │
+│    /home/user/project-a                        │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -221,7 +221,7 @@ When session is busy, show what it's doing:
 ```
 ┌────────────────────────────────────────────────────┐
 │ ▌ Analyzing git commits for standup    5m ago    │
-│    /home/carl/project                             │
+│    /home/user/project                             │
 └────────────────────────────────────────────────────┘
 ```
 

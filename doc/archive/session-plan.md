@@ -87,7 +87,7 @@ Since SDK has no summary update API:
 1. **workspace.yaml** - Stored in `~/.copilot/session-state/{id}/workspace.yaml`
    ```yaml
    id: 03b80308-877b-4808-b000-98930a1505a2
-   cwd: /home/carl/copilot-web
+   cwd: /home/user/copilot-web
    summary_count: 0
    created_at: 2026-01-25T22:38:26.437Z
    updated_at: 2026-01-25T22:38:40.669Z

@@ -25,7 +25,7 @@ describe('buildResumeContext', () => {
 
   it('builds complete message for user with env hint', () => {
     const result = buildResumeContext({ 
-      cwd: '/home/carl/caco',
+      cwd: '/home/user/project',
       envHint: 'module load gcc/7.5'
     });
     
@@ -33,7 +33,7 @@ describe('buildResumeContext', () => {
 This is a resumed session. Your shell state has been reset.
 Re-run any environment setup commands before proceeding.
 
-Session directory: /home/carl/caco
+Session directory: /home/user/project
 Environment hint: module load gcc/7.5
 ---
 

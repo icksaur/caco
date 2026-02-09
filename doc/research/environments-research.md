@@ -330,8 +330,8 @@ summary: What model are you?
     "startTime": "2026-02-07T07:58:24.161Z",
     "selectedModel": "claude-sonnet-4.5",
     "context": {
-      "cwd": "/home/carl/caco",
-      "gitRoot": "/home/carl/caco",
+      "cwd": "/home/user/project",
+      "gitRoot": "/home/user/project",
       "branch": "master"
     }
   }

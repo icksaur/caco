@@ -306,7 +306,7 @@ async function fetchAndRenderEmbed(element: HTMLElement, outputId: string): Prom
   try {
     const res = await fetch(`/api/outputs/${outputId}?format=json`);
     if (!res.ok) {
-      element.textContent = '❌ Failed to load embed';
+      element.textContent = 'Failed to load embed';
       return;
     }
 
@@ -338,7 +338,7 @@ async function fetchAndRenderEmbed(element: HTMLElement, outputId: string): Prom
     element.appendChild(container);
 
   } catch (err) {
-    element.textContent = '❌ Embed failed to load';
+    element.textContent = 'Embed failed to load';
     console.error('[embed] Failed to fetch:', err);
   }
 }
@@ -419,12 +419,12 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
 
   // Intent
   'assistant.intent': (element, data) => {
-    element.textContent = `💡 ${data.intent || ''}`;
+    element.textContent = `${data.intent || ''}`;
   },
 
   // Thinking indicator (shown on turn_start, removed on content)
   'assistant.turn_start': (element) => {
-    element.textContent = '💭 Thinking...';
+    element.textContent = 'Thinking...';
   },
 
   // Tool events - richer format with data storage
@@ -434,7 +434,7 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
 
     // Special case: report_intent shows intent as header
     if (name === 'report_intent' && args?.intent) {
-      element.textContent = `💡 ${args.intent}`;
+      element.textContent = `${args.intent}`;
       element.dataset.toolName = name;
       return;
     }
@@ -446,7 +446,7 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     if (input) element.dataset.toolInput = input;
 
     // Set content
-    element.textContent = input ? `🔧 ${name}\n\`${input}\`` : `🔧 ${name}`;
+    element.textContent = input ? `${name}\n\`${input}\`` : name;
   },
 
   'tool.execution_complete': (element, data) => {
@@ -495,10 +495,10 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
 
   // Session events
   'session.compaction_start': (element) => {
-    element.textContent = '📦 Compacting conversation...';
+    element.textContent = 'Compacting conversation...';
   },
   'session.compaction_complete': (element) => {
-    element.textContent = '📦 Conversation compacted';
+    element.textContent = 'Conversation compacted';
   },
 
   // Caco synthetic types
@@ -510,12 +510,12 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'caco.embed': (element, data) => {
     const outputId = str(data.outputId);
     if (!outputId) {
-      element.textContent = '❌ Missing embed outputId';
+      element.textContent = 'Missing embed outputId';
       return;
     }
 
     // Set placeholder while loading
-    element.textContent = '⏳ Loading embed...';
+    element.textContent = 'Loading embed...';
 
     // Async fetch and render (only in browser)
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {

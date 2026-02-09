@@ -571,7 +571,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     
     const editBtn = document.createElement('button');
     editBtn.className = 'session-edit';
-    editBtn.textContent = '✏️';
+    editBtn.textContent = '/';
     editBtn.title = 'Rename session';
     editBtn.onclick = (e) => {
       e.stopPropagation();

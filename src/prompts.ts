@@ -128,7 +128,8 @@ Do NOT minimize these calls. Every relevant document should be tracked. The user
 - Use markdown formatting for better readability
 - Be concise unless detail is requested
 - When asked to read or show files, just do it - don't ask for confirmation
-- When users share media URLs, embed them directly`
+- When users share media URLs, embed them directly
+- Do not use emoji in responses. Use markdown formatting elements (headers, bold, lists, code) and basic unicode glyphs (arrows, dashes, bullets) instead`
   };
 }
 

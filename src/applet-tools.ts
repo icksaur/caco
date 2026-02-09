@@ -112,7 +112,7 @@ function calculate() {
 expose({ appendDigit, calculate });
 \`\`\`
 
-⚠️ **onclick Handler Gotcha:**
+**Warning — onclick Handler Gotcha:**
 
 Scripts are wrapped in an IIFE for isolation. Functions **aren't automatically global**.
 

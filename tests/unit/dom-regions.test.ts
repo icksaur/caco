@@ -253,7 +253,7 @@ describe('insertEvent', () => {
       const { insertEvent } = await import('../../public/ts/dom-regions.js');
       const el = mockElement();
       insertEvent({ type: 'tool.execution_start', data: { toolName: 'report_intent' } }, el);
-      expect(el.textContent).toBe('🔧 report_intent');
+      expect(el.textContent).toBe('report_intent');
       expect(el.dataset.toolName).toBe('report_intent');
       expect(el.dataset.toolInput).toBeUndefined();
     });
@@ -265,7 +265,7 @@ describe('insertEvent', () => {
         toolName: 'bash',
         arguments: { command: 'ls -la' }
       } }, el);
-      expect(el.textContent).toBe('🔧 bash\n`ls -la`');
+      expect(el.textContent).toBe('bash\n`ls -la`');
       expect(el.dataset.toolName).toBe('bash');
       expect(el.dataset.toolInput).toBe('ls -la');
     });
@@ -302,12 +302,12 @@ describe('insertEvent', () => {
 
     it('report_intent keeps intent display on complete (no change)', async () => {
       const { insertEvent } = await import('../../public/ts/dom-regions.js');
-      const el = mockElement('💡 Testing intent', { toolName: 'report_intent' });
+      const el = mockElement('Testing intent', { toolName: 'report_intent' });
       insertEvent({ type: 'tool.execution_complete', data: { 
         success: true,
         result: {}
       } }, el);
-      expect(el.textContent).toBe('💡 Testing intent');
+      expect(el.textContent).toBe('Testing intent');
     });
   });
 
@@ -316,7 +316,7 @@ describe('insertEvent', () => {
       const { insertEvent } = await import('../../public/ts/dom-regions.js');
       const el = mockElement();
       insertEvent({ type: 'assistant.intent', data: { intent: 'Testing the system' } }, el);
-      expect(el.textContent).toBe('💡 Testing the system');
+      expect(el.textContent).toBe('Testing the system');
     });
   });
 
@@ -325,14 +325,14 @@ describe('insertEvent', () => {
       const { insertEvent } = await import('../../public/ts/dom-regions.js');
       const el = mockElement();
       insertEvent({ type: 'assistant.turn_start', data: { turnId: 'turn_123' } }, el);
-      expect(el.textContent).toBe('💭 Thinking...');
+      expect(el.textContent).toBe('Thinking...');
     });
 
     it('formats assistant.turn_start with empty data', async () => {
       const { insertEvent } = await import('../../public/ts/dom-regions.js');
       const el = mockElement();
       insertEvent({ type: 'assistant.turn_start', data: {} }, el);
-      expect(el.textContent).toBe('💭 Thinking...');
+      expect(el.textContent).toBe('Thinking...');
     });
   });
 
@@ -341,14 +341,14 @@ describe('insertEvent', () => {
       const { insertEvent } = await import('../../public/ts/dom-regions.js');
       const el = mockElement();
       insertEvent({ type: 'session.compaction_start', data: {} }, el);
-      expect(el.textContent).toBe('📦 Compacting conversation...');
+      expect(el.textContent).toBe('Compacting conversation...');
     });
 
     it('sets compaction complete message', async () => {
       const { insertEvent } = await import('../../public/ts/dom-regions.js');
       const el = mockElement();
       insertEvent({ type: 'session.compaction_complete', data: {} }, el);
-      expect(el.textContent).toBe('📦 Conversation compacted');
+      expect(el.textContent).toBe('Conversation compacted');
     });
   });
 

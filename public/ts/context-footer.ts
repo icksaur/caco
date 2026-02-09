@@ -5,6 +5,8 @@
  * Updated via WebSocket events or on session load.
  */
 
+import { regions } from './dom-regions.js';
+
 export interface SessionContext {
   files?: string[];
   applet?: string[];
@@ -16,20 +18,16 @@ export interface SessionContext {
  * Hides footer when context is empty.
  */
 export function renderContextFooter(context: SessionContext): void {
-  // Use data attribute to find the REAL footer, not duplicates in chat content
-  const footer = document.querySelector('[data-context-footer="true"]') as HTMLElement | null;
-  console.log('[CONTEXT] renderContextFooter', context, 'footer=', footer);
-  if (!footer) return;
+  // Use regions.footer — scoped, cannot collide with chat content duplicates
+  const footer = regions.footer.el;
   
   const linksContainer = footer.querySelector('.context-links');
-  console.log('[CONTEXT] linksContainer=', linksContainer);
   if (!linksContainer) return;
   
   const links: string[] = [];
   
   // Files - show basename only, full path in href (max 5)
   const files = context.files ?? [];
-  console.log('[CONTEXT] files=', files);
   for (const path of files.slice(0, 5)) {
     // Handle both Windows (\) and Unix (/) path separators
     const name = path.split(/[\\/]/).pop() || path;
@@ -50,30 +48,22 @@ export function renderContextFooter(context: SessionContext): void {
     links.push(`<a href="/?applet=${slug}${qs}" class="context-applet">[${slug}]</a>`);
   }
   
-  console.log('[CONTEXT] links=', links);
-  
   // Hide if empty
   if (links.length === 0) {
     footer.classList.remove('has-context');
     linksContainer.innerHTML = '';
-    console.log('[CONTEXT] Empty, hiding footer');
     return;
   }
   
   // Render links with separators
   linksContainer.innerHTML = links.join('<span class="context-sep">·</span>');
   footer.classList.add('has-context');
-  const rect = footer.getBoundingClientRect();
-  console.log('[CONTEXT] Rendered', links.length, 'links');
-  console.log('[CONTEXT] Footer rect:', rect.width, 'x', rect.height, 'at', rect.top, rect.left);
 }
 
 /**
  * Clear the context footer.
  */
 export function clearContextFooter(): void {
-  console.log('[CONTEXT] clearContextFooter called');
-  console.trace('[CONTEXT] Stack trace');
   renderContextFooter({});
 }
 
@@ -81,7 +71,6 @@ export function clearContextFooter(): void {
  * Handle caco.context WebSocket event.
  */
 export function handleContextEvent(data: { context: SessionContext }): void {
-  console.log('[CONTEXT] handleContextEvent', data);
   renderContextFooter(data.context ?? {});
 }
 

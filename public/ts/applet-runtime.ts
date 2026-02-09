@@ -10,6 +10,7 @@
 import { showAppletPanel } from './view-controller.js';
 import { wsSetState, onStateUpdate, isWsConnected } from './websocket.js';
 import { getActiveSessionId } from './app-state.js';
+import { regions } from './dom-regions.js';
 
 interface TempFileResult {
   path: string;
@@ -522,12 +523,8 @@ function renderAppletToInstance(
  * @param content - The applet HTML/CSS/JS content
  */
 export function pushApplet(slug: string, label: string, content: AppletContent): void {
-  // Use data attribute selector to avoid ID collision with rendered chat content
-  const appletView = document.querySelector('[data-applet-view="true"]') as HTMLElement | null;
-  if (!appletView) {
-    console.error('[APPLET] appletView container not found');
-    return;
-  }
+  // Use regions.applet — scoped, cannot collide with chat content duplicates
+  const appletView = regions.applet.el;
   
   console.log(`[APPLET] Loading: ${label} (${slug})`);
   

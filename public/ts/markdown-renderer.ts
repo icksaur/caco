@@ -2,8 +2,11 @@
  * Markdown rendering with Mermaid diagrams and syntax highlighting
  */
 
+import { regions } from './dom-regions.js';
+
 declare const mermaid: {
   initialize(config: object): void;
+  parse(code: string): Promise<unknown>;
   render(id: string, code: string): Promise<{ svg: string }>;
 };
 
@@ -74,7 +77,7 @@ function configureMarked(): void {
       code(code: string, language: string): string {
         if (language === 'mermaid') {
           const id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
-          return `<div class="mermaid-diagram" id="${id}">${code}</div>`;
+          return `<div class="mermaid-diagram" data-mermaid-id="${id}">${code}</div>`;
         }
         const langClass = language ? `language-${language}` : '';
         return `<pre><code class="hljs ${langClass}">${code}</code></pre>`;
@@ -84,10 +87,40 @@ function configureMarked(): void {
 }
 
 /**
+ * Render mermaid diagrams found within a container element.
+ * Async — replaces diagram source text with rendered SVG.
+ */
+async function renderMermaidIn(container: Element): Promise<void> {
+  const mermaidDivs = container.querySelectorAll<HTMLElement>('.mermaid-diagram');
+  for (const div of mermaidDivs) {
+    const code = div.textContent ?? '';
+    const mermaidId = div.dataset.mermaidId || 'mermaid-fallback';
+
+    // Validate first — parse() throws on bad syntax without injecting
+    // error SVGs into document.body (unlike render()).
+    try {
+      await mermaid.parse(code);
+    } catch {
+      div.innerHTML = '<pre class="mermaid-error">Invalid diagram syntax</pre>';
+      continue;
+    }
+
+    try {
+      const { svg } = await mermaid.render(mermaidId + '-svg', code);
+      div.innerHTML = svg;
+    } catch (error) {
+      console.error('Mermaid rendering error:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      div.innerHTML = `<pre class="mermaid-error">Error rendering diagram: ${message}</pre>`;
+    }
+  }
+}
+
+/**
  * Render markdown in all marked elements
  */
 async function renderMarkdown(): Promise<void> {
-  const markdownElements = document.querySelectorAll('[data-markdown]');
+  const markdownElements = regions.chat.queryAll('[data-markdown]');
   
   for (const element of markdownElements) {
     const el = element as HTMLElement;
@@ -120,17 +153,7 @@ async function renderMarkdown(): Promise<void> {
       contentDiv.innerHTML = html;
       
       // Render any Mermaid diagrams
-      const mermaidDivs = contentDiv.querySelectorAll('.mermaid-diagram');
-      for (const div of mermaidDivs) {
-        try {
-          const { svg } = await mermaid.render(div.id + '-svg', div.textContent ?? '');
-          div.innerHTML = svg;
-        } catch (error) {
-          console.error('Mermaid rendering error:', error);
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          div.innerHTML = `<pre class="mermaid-error">Error rendering diagram: ${message}</pre>`;
-        }
-      }
+      await renderMermaidIn(contentDiv);
     }
     
     // Mark parent as processed
@@ -140,11 +163,8 @@ async function renderMarkdown(): Promise<void> {
   // Apply syntax highlighting to code blocks inside chat only
   // (avoid corrupting other page elements like context footer)
   if (typeof hljs !== 'undefined') {
-    const chat = document.getElementById('chat');
-    if (chat) {
-      for (const block of chat.querySelectorAll('pre code')) {
-        hljs.highlightElement(block as HTMLElement);
-      }
+    for (const block of regions.chat.queryAll('pre code')) {
+      hljs.highlightElement(block as HTMLElement);
     }
   }
 }
@@ -176,6 +196,14 @@ export function renderMarkdownElement(element: Element): void {
   element.classList.add('markdown-content');
   if (hadCursor) {
     element.classList.add('streaming-cursor');
+  }
+
+  // Render mermaid only when all code fences are closed.
+  // Odd fence count = mid-block (incomplete diagram text) → skip.
+  // Even fence count = all blocks closed → safe to render.
+  const fenceCount = (markdownText.match(/^```/gm) || []).length;
+  if (fenceCount % 2 === 0) {
+    void renderMermaidIn(element);
   }
 }
 

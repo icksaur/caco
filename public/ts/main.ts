@@ -9,6 +9,7 @@ import { deleteSession, initSessionPanel } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
+import { initRegions, regions } from './dom-regions.js';
 import { initViewState, setViewState } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { initInputRouter } from './input-router.js';
@@ -49,6 +50,9 @@ window.hideToast = hideToast;
 // Wrap async init in void to satisfy eslint no-misused-promises
 document.addEventListener('DOMContentLoaded', () => {
   void (async () => {
+    // Initialize DOM region registry (must be first — other modules access regions)
+    initRegions();
+    
     // Initialize view state from DOM
     initViewState();
     
@@ -126,8 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await waitForHistoryComplete();
     
     // Show chat view
-    const chat = document.getElementById('chat');
-    if (chat && chat.children.length > 0) {
+    if (regions.chat.el.children.length > 0) {
       setViewState('chatting');
     } else {
       setViewState('newChat');

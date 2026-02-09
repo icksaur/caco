@@ -23,6 +23,7 @@ import { showSessionManager } from './session-panel.js';
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 import { setFormEnabled } from './message-streaming.js';
+import { regions } from './dom-regions.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -164,8 +165,7 @@ export function toggleSessions(): void {
  * Switches to session, loads history, updates URL
  */
 export async function sessionClick(sessionId: string): Promise<void> {
-  const chat = document.getElementById('chat');
-  const hasHistory = chat && chat.children.length > 0;
+  const hasHistory = regions.chat.el.children.length > 0;
   
   // If already on this session AND we have history, just hide sessions overlay
   if (sessionId === getActiveSessionId() && hasHistory) {
@@ -182,9 +182,7 @@ export async function sessionClick(sessionId: string): Promise<void> {
  * Handle new session click from session list
  */
 export function newSessionClick(): void {
-  // Clear chat div
-  const chat = document.getElementById('chat');
-  if (chat) chat.innerHTML = '';
+  regions.chat.clear();
   
   setViewState('newChat');
   loadModels();
@@ -270,9 +268,7 @@ export async function loadApplet(slug: string): Promise<void> {
  * Activate a session - clear chat, set state, load history
  */
 async function activateSession(sessionId: string): Promise<void> {
-  // Clear chat div
-  const chat = document.getElementById('chat');
-  if (chat) chat.innerHTML = '';
+  regions.chat.clear();
   
   // Resume session on server
   try {

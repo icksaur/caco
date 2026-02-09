@@ -22,64 +22,23 @@ import { showToast, hideToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 import { resetTextareaHeight } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
-import { insertEvent } from './event-inserter.js';
 import { removeImage } from './image-paste.js';
 import { markSessionObserved } from './session-observed.js';
 import { handleContextEvent, sendAppletContext } from './context-footer.js';
-import { 
-  ElementInserter,
-  EVENT_TO_OUTER,
-  EVENT_TO_INNER,
-  EVENT_KEY_PROPERTY,
-  PRE_COLLAPSED_EVENTS,
-  getOuterClass,
-  getInnerClass
-} from './element-inserter.js';
+import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
 
 // Re-export for external callers
 export { setLoadingHistory };
-// Re-export element-inserter functions for external callers
-export { getOuterClass, getInnerClass };
 
-const outerInserter = new ElementInserter(EVENT_TO_OUTER as Record<string, string | null>, 'outer');
-const innerInserter = new ElementInserter(EVENT_TO_INNER, 'inner', undefined, EVENT_KEY_PROPERTY, PRE_COLLAPSED_EVENTS);
-
-/**
- * Content events that should hide the thinking indicator.
- * When any of these arrive, the "Thinking..." message is replaced by actual content.
- */
-const CONTENT_EVENTS = new Set([
-  'assistant.intent',
-  'assistant.message',
-  'assistant.message_delta',
-  'assistant.reasoning',
-  'assistant.reasoning_delta',
-  'tool.execution_start',
-  'session.idle',
-  'session.error',
-]);
-
-/**
- * Remove thinking indicator when content arrives
- */
-function hideThinkingIndicator(): void {
-  const thinking = document.querySelector('.thinking-text');
-  if (thinking) {
-    // Remove the outer activity div if it only contains the thinking indicator
-    const outer = thinking.closest('.assistant-activity');
-    if (outer) {
-      outer.remove();
-    }
-  }
-}
+let chatRegion: ChatRegion;
 
 /**
  * Handle incoming SDK event (history or live)
- * Uses outer + inner inserters with event.type for routing
+ * Pure event router — no DOM queries or mutations on #chat children.
+ * ChatRegion owns all #chat mutations; cross-region effects (scroll) stay here.
  */
 function handleEvent(event: SessionEvent): void {
   hideToast();
-  const chat = document.getElementById('chat')!;
   let eventType = event.type;
   const data = event.data || {};
   
@@ -91,7 +50,7 @@ function handleEvent(event: SessionEvent): void {
   
   // Hide thinking indicator when content events arrive
   if (CONTENT_EVENTS.has(eventType)) {
-    hideThinkingIndicator();
+    chatRegion.removeThinking();
   }
   
   // DEBUG: Log all event types received
@@ -107,13 +66,7 @@ function handleEvent(event: SessionEvent): void {
   // Check BEFORE outer/inner logic since terminal events may not have display elements
   if (isTerminalEvent(eventType)) {
     setFormEnabled(true);
-    
-    // Remove streaming cursor from any content elements
-    const cursors = chat.querySelectorAll('.streaming-cursor');
-    console.log(`[CURSOR] Removing ${cursors.length} streaming cursors`);
-    for (const el of cursors) {
-      el.classList.remove('streaming-cursor');
-    }
+    chatRegion.removeStreamingCursors();
     
     // Mark session as observed - user has seen the completed response
     // Also capture applet context (fire-and-forget)
@@ -126,42 +79,16 @@ function handleEvent(event: SessionEvent): void {
     }
   }
   
-  // Special case: assistant.reasoning arrives after deltas, may be in a different outer div
-  // Search entire chat for existing reasoning element by reasoningId
-  if (eventType === 'assistant.reasoning' && data.reasoningId) {
-    const existing = chat.querySelector(`[data-key="${data.reasoningId}"]`) as HTMLElement | null;
-    if (existing) {
-      // Found the delta-streamed element - update and collapse it
-      insertEvent(event, existing);
-      // Add header AFTER insertEvent (which replaces content via renderMarkdown)
-      const header = document.createElement('p');
-      header.className = 'reasoning-header';
-      header.textContent = 'reasoning';
-      existing.insertBefore(header, existing.firstChild);
-      existing.classList.add('collapsed');
+  // Reasoning finalization (special case)
+  if (eventType === 'assistant.reasoning') {
+    if (chatRegion.finalizeReasoning(event)) {
       scrollToBottom();
       return;
     }
-    // Not found (no deltas were streamed) - fall through to normal flow
   }
   
-  // Get outer div
-  const outer = outerInserter.getElement(eventType, chat);
-  if (!outer) return;
-  
-  // Get inner div (null = omit this event type)
-  // Pass data for keyed lookup (tool calls, reasoning, messages)
-  const inner = innerInserter.getElement(eventType, outer, data);
-  if (!inner) return;
-  
-  // Insert event content into element (handles data storage and markdown rendering)
-  insertEvent(event, inner);
-  
-  // Post-collapse: reasoning collapses after streaming is complete
-  if (eventType === 'assistant.reasoning') {
-    inner.classList.add('collapsed');
-  }
-  
+  // Render event (create/find elements + set content)
+  chatRegion.renderEvent(event);
   scrollToBottom();
 }
 
@@ -216,8 +143,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     
     if (newChat || !sessionId) {
       // Clear chat history for new session
-      const chat = document.getElementById('chat');
-      if (chat) chat.innerHTML = '';
+      regions.chat.clear();
       
       const res = await fetch('/api/sessions', {
         method: 'POST',
@@ -275,30 +201,9 @@ export async function streamResponse(prompt: string, model: string, imageData: s
  * Set up form submission handler
  */
 export function setupFormHandler(): void {
+  chatRegion = new ChatRegion(regions.chat);
+  chatRegion.setupClickHandler();
   registerWsHandlers();
-  
-  // Toggle collapsed inner items within activity boxes
-  // Each tool-text, reasoning-text etc. is individually collapsible
-  const chatDiv = document.getElementById('chat');
-  if (chatDiv) {
-    chatDiv.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      const activity = target.closest('.assistant-activity');
-      if (!activity) return;
-      
-      // Find the direct child of activity that was clicked
-      // This is the inner item (tool-text, reasoning-text, etc.)
-      let innerItem = target;
-      while (innerItem.parentElement && innerItem.parentElement !== activity) {
-        innerItem = innerItem.parentElement;
-      }
-      
-      // Toggle collapse on the inner item
-      if (innerItem && innerItem.parentElement === activity) {
-        innerItem.classList.toggle('collapsed');
-      }
-    });
-  }
   
   const form = document.getElementById('chatForm') as HTMLFormElement;
   if (!form) return;

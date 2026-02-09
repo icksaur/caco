@@ -8,6 +8,7 @@ import { initFromPreferences } from './app-state.js';
 import { setLoadingHistory } from './message-streaming.js';
 import { onHistoryComplete } from './websocket.js';
 import { clearContextFooter } from './context-footer.js';
+import { regions } from './dom-regions.js';
 
 /**
  * Wait for history to stream via WebSocket
@@ -19,18 +20,14 @@ export function waitForHistoryComplete(): Promise<void> {
   setLoadingHistory(true);
   
   // Clear existing chat and context footer before loading new history
-  const chat = document.getElementById('chat');
-  if (chat) {
-    chat.innerHTML = '';
-  }
+  regions.chat.clear();
   clearContextFooter();
   
   return new Promise<void>((resolve) => {
     const unsubscribe = onHistoryComplete(() => {
       unsubscribe();
       // If no messages loaded, show model selector
-      const chat = document.getElementById('chat');
-      if (!chat || chat.children.length === 0) {
+      if (regions.chat.el.children.length === 0) {
         loadModels();
       }
       resolve();

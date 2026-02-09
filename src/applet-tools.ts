@@ -14,7 +14,7 @@ import { listApplets, type AppletMeta } from './applet-store.js';
  * Format applet metadata for agent consumption.
  * Returns a concise usage block with URL pattern and parameter info.
  */
-function formatAppletUsage(applet: AppletMeta & { paths: unknown }): string {
+export function formatAppletUsage(applet: AppletMeta & { paths: unknown }): string {
   const params = Object.entries(applet.params || {});
   const required = params.filter(([, v]) => v.required).map(([k, v]) => `${k} - ${v.description || ''}`);
   const optional = params.filter(([, v]) => !v.required).map(([k, v]) => `${k} - ${v.description || ''}`);

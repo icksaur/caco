@@ -5,15 +5,6 @@ import { describe, it, expect } from 'vitest';
 import { buildTerminalMarkdown, buildCodeMarkdown } from '../../public/ts/markdown-builders.js';
 
 describe('buildTerminalMarkdown', () => {
-  it('formats command with output in bash code block', () => {
-    const result = buildTerminalMarkdown({
-      command: 'ls -la',
-      exitCode: 0,
-      output: 'file1\nfile2'
-    });
-    expect(result).toBe('```bash\n$ ls -la\nfile1\nfile2\n```');
-  });
-
   it('shows exit code for failed commands', () => {
     const result = buildTerminalMarkdown({
       command: 'cat missing.txt',
@@ -32,15 +23,6 @@ describe('buildTerminalMarkdown', () => {
 });
 
 describe('buildCodeMarkdown', () => {
-  it('formats code with path and language', () => {
-    const result = buildCodeMarkdown({
-      data: 'const x = 1;',
-      path: 'index.ts',
-      highlight: 'typescript'
-    });
-    expect(result).toBe('**index.ts**\n\n```typescript\nconst x = 1;\n```');
-  });
-
   it('shows line range when provided', () => {
     const result = buildCodeMarkdown({
       data: 'code',

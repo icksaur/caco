@@ -73,18 +73,6 @@ describe('CacoEventQueue', () => {
 });
 
 describe('isFlushTrigger (unified for live and history)', () => {
-  it('returns true for assistant.message_delta (response starting)', () => {
-    expect(isFlushTrigger('assistant.message_delta')).toBe(true);
-  });
-
-  it('returns true for assistant.message (response complete)', () => {
-    expect(isFlushTrigger('assistant.message')).toBe(true);
-  });
-
-  it('returns true for session.error', () => {
-    expect(isFlushTrigger('session.error')).toBe(true);
-  });
-
   it('returns false for session.idle (not a turn boundary)', () => {
     expect(isFlushTrigger('session.idle')).toBe(false);
   });

@@ -95,17 +95,6 @@ describe('Shell route logic', () => {
     });
   });
 
-  describe('execFile security', () => {
-    it('uses args array not string concatenation', () => {
-      // This is a documentation test - the implementation uses execFile
-      // which passes args as array, not as shell string
-      const args = ['status', '; rm -rf /'];
-      
-      // With execFile, this is passed as literal arg to git
-      // git receives: ['status', '; rm -rf /']
-      // It does NOT spawn a shell to interpret the semicolon
-      expect(args).toEqual(['status', '; rm -rf /']);
-    });
-  });
+
 });
 

@@ -6,34 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-
-// Create isolated instance for testing (not the singleton)
-class DispatchState {
-  private dispatches = new Map<string, { correlationId: string; startedAt: number }>();
-
-  start(sessionId: string, correlationId: string): void {
-    this.dispatches.set(sessionId, {
-      correlationId,
-      startedAt: Date.now()
-    });
-  }
-
-  end(sessionId: string): void {
-    this.dispatches.delete(sessionId);
-  }
-
-  isBusy(sessionId: string): boolean {
-    return this.dispatches.has(sessionId);
-  }
-
-  getCorrelationId(sessionId: string): string | undefined {
-    return this.dispatches.get(sessionId)?.correlationId;
-  }
-
-  getDispatch(sessionId: string) {
-    return this.dispatches.get(sessionId);
-  }
-}
+import { DispatchState } from '../../src/dispatch-state.js';
 
 describe('DispatchState', () => {
   let state: DispatchState;

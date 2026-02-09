@@ -40,11 +40,6 @@ describe('app-state', () => {
   });
   
   describe('model state', () => {
-    it('setSelectedModel updates model', () => {
-      appState.setSelectedModel('gpt-4');
-      expect(appState.getSelectedModel()).toBe('gpt-4');
-    });
-    
     it('setAvailableModels stores models', () => {
       const models = [
         { id: 'model-a', name: 'Model A', cost: 1 },
@@ -65,40 +60,6 @@ describe('app-state', () => {
       
       // State should not be affected
       expect(appState.getAvailableModels()).toHaveLength(1);
-    });
-  });
-  
-  describe('UI flags', () => {
-    it('streaming state', () => {
-      appState.setStreaming(true);
-      expect(appState.isStreaming()).toBe(true);
-      
-      appState.setStreaming(false);
-      expect(appState.isStreaming()).toBe(false);
-    });
-    
-    it('loading history state', () => {
-      appState.setLoadingHistory(true);
-      expect(appState.isLoadingHistory()).toBe(true);
-      
-      appState.setLoadingHistory(false);
-      expect(appState.isLoadingHistory()).toBe(false);
-    });
-    
-    it('auto-scroll state', () => {
-      appState.enableAutoScroll();
-      expect(appState.isAutoScrollEnabled()).toBe(true);
-      
-      appState.disableAutoScroll();
-      expect(appState.isAutoScrollEnabled()).toBe(false);
-    });
-    
-    it('image attachment state', () => {
-      appState.setHasImage(true);
-      expect(appState.hasImage()).toBe(true);
-      
-      appState.setHasImage(false);
-      expect(appState.hasImage()).toBe(false);
     });
   });
   

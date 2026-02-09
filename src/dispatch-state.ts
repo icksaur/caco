@@ -16,7 +16,7 @@ export interface ActiveDispatch {
   startedAt: number;
 }
 
-class DispatchState {
+export class DispatchState {
   private dispatches = new Map<string, ActiveDispatch>();
 
   /**

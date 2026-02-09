@@ -90,7 +90,3 @@ tests/              # Vitest unit tests
 - [doc/index.md](doc/index.md) - Documentation index
 - [doc/doc-guidelines.md](doc/doc-guidelines.md) - Documentation standards
 - [doc/API.md](doc/API.md) - Complete API reference
-
-## License
-
-MIT

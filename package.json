@@ -23,7 +23,6 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
   "type": "module",
   "dependencies": {
     "@github/copilot-sdk": "^0.1.17",

@@ -56,7 +56,10 @@ Open `http://localhost:3000`
 npm run build      # Build + typecheck + lint + test
 npm run dev        # Development server (nodemon)
 npm test           # Run tests
+npm run scan:pii   # Scan for personal info and secrets in source files
 ```
+
+**Pre-commit hook:** ESLint via lint-staged (runs automatically on `git commit`)
 
 ## Project Structure
 

@@ -99,7 +99,7 @@ Conversation history stored in plaintext at `~/.copilot/session-state/`. Accessi
 ## Red Lines
 
 - **NEVER** change binding from `127.0.0.1` to `0.0.0.0`
-- **NEVER** expose port 3000 through firewall/router/NAT
+- **NEVER** expose the server port through firewall/router/NAT
 - **NEVER** deploy to cloud/VPS without authentication
 - **NEVER** disable HTML escaping or DOMPurify
 - **NEVER** add `eval()` or dynamic code execution

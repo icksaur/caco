@@ -17,7 +17,7 @@ Agent       → streaming  → server → WS streams   → renderMessage() → D
 ## Endpoint
 
 ```
-ws://localhost:3000/ws/session?id=<sessionId>
+ws://localhost:53000/ws/session?id=<sessionId>
 ```
 
 ## Message Protocol

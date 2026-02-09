@@ -26,7 +26,7 @@ import { startScheduleManager, stopScheduleManager } from './src/schedule-manage
 import { getQueue } from './src/caco-event-queue.js';
 import { buildSystemMessage } from './src/prompts.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
-import { PORT } from './src/config.js';
+import { PORT, HOST } from './src/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -156,13 +156,13 @@ async function start(): Promise<void> {
     try {
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
-        server.listen(PORT, '0.0.0.0', () => {
+        server.listen(PORT, HOST, () => {
           server.removeListener('error', reject);
           resolve();
         });
       });
       
-      console.log(`✓ Server running at http://0.0.0.0:${PORT}`);
+      console.log(`✓ Server running at http://${HOST}:${PORT}`);
       console.log(`  Local: http://localhost:${PORT}`);
       console.log('  Press Ctrl+C to stop');
       return; // Success

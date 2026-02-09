@@ -20,7 +20,7 @@ A self-extensible chat front-end for the [GitHub Copilot CLI SDK](https://github
 ## Basic Architecture
 
 ```
-Browser (localhost:3000)
+Browser (localhost:53000)
     ↓ WebSocket + fetch
 Express Server
     ↓ JSON-RPC
@@ -48,7 +48,7 @@ npm install
 npm run dev        # Start with auto-reload
 ```
 
-Open `http://localhost:3000`
+Open `http://localhost:53000`
 
 ## Development
 

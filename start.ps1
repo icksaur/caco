@@ -1,11 +1,13 @@
 # Start the Copilot web server in background
 Set-Location $PSScriptRoot
 
-# Port configuration: CACO_PORT → PORT → 3000
+# Port configuration: CACO_PORT → PORT → 53000
 if ($env:CACO_PORT) { $Port = $env:CACO_PORT }
 elseif ($env:PORT) { $Port = $env:PORT }
-else { $Port = 3000 }
+else { $Port = 53000 }
 $env:PORT = $Port
+# Host configuration: CACO_HOST → 127.0.0.1 (localhost only)
+if (-not $env:CACO_HOST) { $env:CACO_HOST = '127.0.0.1' }
 
 & .\stop.ps1 2>$null
 

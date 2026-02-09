@@ -2,12 +2,15 @@
  * Server Configuration
  */
 
-const DEFAULT_PORT = 3000;
+const DEFAULT_PORT = 53000;
+const DEFAULT_HOST = '127.0.0.1';
 
 export const PORT = parseInt(
   process.env.CACO_PORT || process.env.PORT || String(DEFAULT_PORT),
   10
 );
+
+export const HOST = process.env.CACO_HOST || DEFAULT_HOST;
 
 export const SERVER_URL = process.env.CACO_SERVER_URL || `http://localhost:${PORT}`;
 

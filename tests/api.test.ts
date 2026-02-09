@@ -4,13 +4,13 @@
  * Run: node --test --experimental-strip-types tests/api.test.ts
  * 
  * Tests verify route statefulness and behavior during decoupling work.
- * Requires server running on localhost:3000
+ * Requires server running on localhost:53000
  */
 
 import { describe, test, before } from 'node:test';
 import assert from 'node:assert';
 
-const BASE = 'http://localhost:3000/api';
+const BASE = 'http://localhost:53000/api';
 
 // Helper to check if server is running
 async function serverRunning(): Promise<boolean> {

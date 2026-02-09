@@ -3,8 +3,10 @@
 
 cd "$(dirname "$0")"
 
-# Port configuration: CACO_PORT → PORT → 3000
-export PORT=${CACO_PORT:-${PORT:-3000}}
+# Port configuration: CACO_PORT → PORT → 53000
+export PORT=${CACO_PORT:-${PORT:-53000}}
+# Host configuration: CACO_HOST → 127.0.0.1 (localhost only)
+export CACO_HOST=${CACO_HOST:-127.0.0.1}
 
 # Kill any existing server first
 ./stop.sh 2>/dev/null

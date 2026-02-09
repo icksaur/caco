@@ -822,7 +822,7 @@ WebSocket connection at `/ws`.
 
 Connect to WebSocket (no query params needed):
 ```javascript
-const ws = new WebSocket('ws://localhost:3000/ws');
+const ws = new WebSocket('ws://localhost:53000/ws');
 ```
 
 After connecting, subscribe to a session and request history:
@@ -933,7 +933,7 @@ Note: `sendMessage` via WebSocket is deprecated. Use `POST /api/sessions/:id/mes
 |-----------|-------------|
 | `?applet=slug` | Load applet on page load |
 
-Example: `http://localhost:3000/?applet=calculator`
+Example: `http://localhost:53000/?applet=calculator`
 
 ---
 

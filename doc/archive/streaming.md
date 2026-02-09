@@ -361,7 +361,7 @@ async sendStream(sessionId, message, options = {}) {
 
 ### Step 3: Create /api/stream endpoint
 - Implement SSE streaming
-- Test with curl: `curl -N http://localhost:3000/api/stream?prompt=hello`
+- Test with curl: `curl -N http://localhost:53000/api/stream?prompt=hello`
 
 ### Step 4: Replace form submission
 - Switch from HTMX to JS event handling

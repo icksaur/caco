@@ -1355,7 +1355,7 @@ main {
   flex: 1;
   overflow: auto;
   padding: var(--space-lg);
-  padding-top: 48px; /* Clear fixed nav buttons */
+  padding-top: 52px; /* Clear fixed nav buttons */
   position: relative;
 }
 
@@ -1365,7 +1365,7 @@ main {
   top: 0;
   left: 0;
   right: 0;
-  height: 48px;
+  height: 52px;
   display: flex;
   align-items: center;
   justify-content: center;

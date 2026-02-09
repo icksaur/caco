@@ -4,11 +4,46 @@
 
 import { regions } from './dom-regions.js';
 
-declare const mermaid: {
+interface MermaidAPI {
   initialize(config: object): void;
   parse(code: string): Promise<unknown>;
   render(id: string, code: string): Promise<{ svg: string }>;
-};
+}
+
+/** Lazy-loaded mermaid instance (2.9M — loaded only when a diagram is encountered) */
+let _mermaid: MermaidAPI | null = null;
+let _mermaidLoading: Promise<MermaidAPI> | null = null;
+
+async function getMermaid(): Promise<MermaidAPI> {
+  if (_mermaid) return _mermaid;
+  if (_mermaidLoading) return _mermaidLoading;
+
+  _mermaidLoading = new Promise<MermaidAPI>((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'mermaid.min.js';
+    script.onload = () => {
+      const m = (window as unknown as { mermaid: MermaidAPI }).mermaid;
+      m.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        themeVariables: {
+          primaryColor: '#0969da',
+          primaryTextColor: '#d4d4d4',
+          primaryBorderColor: '#30363d',
+          lineColor: '#6e7681',
+          secondaryColor: '#1f6feb',
+          tertiaryColor: '#2d333b'
+        }
+      });
+      _mermaid = m;
+      resolve(m);
+    };
+    script.onerror = () => reject(new Error('Failed to load mermaid.min.js'));
+    document.head.appendChild(script);
+  });
+
+  return _mermaidLoading;
+}
 
 declare const marked: {
   use(options: { renderer: object }): void;
@@ -51,24 +86,6 @@ const FORBIDDEN_TAGS = [
 ];
 
 /**
- * Initialize Mermaid with dark theme
- */
-function initMermaid(): void {
-  mermaid.initialize({ 
-    startOnLoad: false,
-    theme: 'dark',
-    themeVariables: {
-      primaryColor: '#0969da',
-      primaryTextColor: '#d4d4d4',
-      primaryBorderColor: '#30363d',
-      lineColor: '#6e7681',
-      secondaryColor: '#1f6feb',
-      tertiaryColor: '#2d333b'
-    }
-  });
-}
-
-/**
  * Configure marked to handle mermaid code blocks
  */
 function configureMarked(): void {
@@ -92,6 +109,20 @@ function configureMarked(): void {
  */
 async function renderMermaidIn(container: Element): Promise<void> {
   const mermaidDivs = container.querySelectorAll<HTMLElement>('.mermaid-diagram');
+  if (mermaidDivs.length === 0) return;
+
+  // Lazy-load mermaid only when a diagram is actually encountered
+  let m: MermaidAPI;
+  try {
+    m = await getMermaid();
+  } catch (err) {
+    console.error('Mermaid load failed:', err);
+    for (const div of mermaidDivs) {
+      div.innerHTML = '<pre class="mermaid-error">Mermaid failed to load</pre>';
+    }
+    return;
+  }
+
   for (const div of mermaidDivs) {
     const code = div.textContent ?? '';
     const mermaidId = div.dataset.mermaidId || 'mermaid-fallback';
@@ -99,14 +130,14 @@ async function renderMermaidIn(container: Element): Promise<void> {
     // Validate first — parse() throws on bad syntax without injecting
     // error SVGs into document.body (unlike render()).
     try {
-      await mermaid.parse(code);
+      await m.parse(code);
     } catch {
       div.innerHTML = '<pre class="mermaid-error">Invalid diagram syntax</pre>';
       continue;
     }
 
     try {
-      const { svg } = await mermaid.render(mermaidId + '-svg', code);
+      const { svg } = await m.render(mermaidId + '-svg', code);
       div.innerHTML = svg;
     } catch (error) {
       console.error('Mermaid rendering error:', error);
@@ -211,7 +242,6 @@ export function renderMarkdownElement(element: Element): void {
  * Set up markdown rendering
  */
 export function setupMarkdownRenderer(): void {
-  initMermaid();
   configureMarked();
   
   // Export to window for other modules

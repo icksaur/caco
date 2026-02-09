@@ -17,6 +17,8 @@ function createMockElement(): HTMLElement {
   const element = {
     textContent: '',
     innerHTML: '',
+    style: {} as CSSStyleDeclaration,
+    offsetHeight: 0,
     querySelector: (selector: string) => {
       if (selector === '.streaming-tail') {
         return children.find(c => c.className === 'streaming-tail') ?? null;

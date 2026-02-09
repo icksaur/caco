@@ -1,12 +1,8 @@
 # TODO
 
-Fix debounced rendering bouncing up and down:
-Use chat-ux.md for scratch space detailing problem, analysis and solution.
-when deltas come in we append to bottom, scrolling chat.  When delta comes, we show it in new div changing content height.  When delta is enough to add to some markdown, it disappears, changing chat height moving content back down.  This repeats making blocks of markdown shake up and down as chat changes vertical length.
-Ideas: keep the enough delta div to store one line of delta, so that when clearing it so there's a place for buffering to prevent jitter.  When idle or delta is complete, remove the line.
-Other ideas?
-
 We have a few .min.js from the net.  Should these come from packages?  We could be at risk or miss out on improvements.  Or the license is not ok for putting in my repo and publishing, etc.  Please ananlyze the risks.
+
+Front-end bundle/payload sizes.  Can we improve?  Mermaidjs is huge?
 
 Remove all emoji from backend and frontend.  Leave in applets.  Prompt change that user prefers no emoji, markdown elements are ok, and basic unicode glyphs.
 

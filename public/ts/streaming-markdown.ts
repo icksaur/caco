@@ -17,6 +17,7 @@ interface StreamingState {
   lastRenderedLength: number;
   timer: ReturnType<typeof setTimeout> | null;
   element: HTMLElement;
+  maxHeight: number;
 }
 
 /** Render after this many new chars */
@@ -34,6 +35,15 @@ const sessions = new Map<string, StreamingState>();
  */
 function render(state: StreamingState): void {
   const { element, rawContent } = state;
+  
+  // Lock height before re-render to prevent jitter.
+  // Content height oscillates between raw tail text and rendered markdown;
+  // min-height ensures the element never shrinks mid-stream.
+  const h = element.offsetHeight;
+  if (h > state.maxHeight) {
+    state.maxHeight = h;
+    element.style.minHeight = `${h}px`;
+  }
   
   // Remove tail before setting textContent
   element.querySelector('.streaming-tail')?.remove();
@@ -100,7 +110,8 @@ export function handleDelta(
       rawContent: '',
       lastRenderedLength: 0,
       timer: null,
-      element
+      element,
+      maxHeight: 0
     };
     sessions.set(messageId, state);
   }
@@ -132,7 +143,8 @@ export function finalize(
   }
   sessions.delete(messageId);
   
-  // Remove tail, set final content, render
+  // Release height lock and render final content
+  element.style.minHeight = '';
   element.querySelector('.streaming-tail')?.remove();
   element.textContent = finalContent;
   window.renderMarkdownElement?.(element);

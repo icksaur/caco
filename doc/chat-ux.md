@@ -223,6 +223,66 @@ This would:
 
 ## Streaming Display
 
+### Jitter Issue Analysis
+
+**Problem:** During streaming, the chat view bounces up and down as content height changes rapidly.
+
+**Root cause sequence:**
+1. Delta arrives → appended to raw content buffer
+2. `showTail()` adds unrendered text to `.streaming-tail` span → height increases
+3. When threshold reached → `render()` calls `renderMarkdownElement()` 
+4. Markdown rendering changes structure (e.g., raw text becomes `<p>`, `<pre>`, etc.)
+5. Height calculation changes → scroll position jumps
+6. Process repeats with each batch of deltas
+
+**Visual effect:** Text appears to shake/jitter because:
+- Tail text takes up N pixels
+- Rendered markdown occupies different height (often smaller due to compact formatting)
+- The difference causes content to shift up/down
+
+**Current mitigations (insufficient):**
+- `MIN_CHARS_BEFORE_RENDER = 50` - batches deltas
+- `BATCH_DELAY_MS = 50` - debounces rapid renders
+- `RENDER_INTERVAL_MS = 200` - fallback render timeout
+
+### Proposed Solution: Height-Stabilized Tail
+
+**Goal:** Keep content height stable during streaming by reserving space.
+
+**Approach:**
+1. Use `min-height` on the streaming element that grows but never shrinks during streaming
+2. Track max height seen during streaming
+3. Only release min-height constraint on finalize
+
+**Implementation:**
+```typescript
+function showTail(state: StreamingState): void {
+  const { element, rawContent, lastRenderedLength } = state;
+  
+  // Capture current height before any changes
+  const currentHeight = element.offsetHeight;
+  if (currentHeight > state.maxHeight) {
+    state.maxHeight = currentHeight;
+    element.style.minHeight = `${currentHeight}px`;
+  }
+  
+  // ... rest of tail logic
+}
+
+function finalize(...): void {
+  // ... cleanup
+  element.style.minHeight = '';  // Release height constraint
+}
+```
+
+**Alternative: CSS-only approach**
+Use `contain: size` or `contain: layout` on streaming elements. However this may cause overflow issues.
+
+**Alternative: Placeholder buffer**
+Keep a 1-line invisible buffer after content that absorbs height changes. Complex to implement correctly.
+
+**Recommendation:** Height-stabilized tail is simplest and most reliable.
+
 ### Incremental Markdown Rendering
 
 - **Raw deltas**: Accumulated in memory buffer

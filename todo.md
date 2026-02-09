@@ -1,6 +1,6 @@
 # TODO
 
-Dead/useless doc review and organization if needed into right directo
+API.md review - make sure it's up to date
 
 Secrets and personal information review (any package for this?)
 

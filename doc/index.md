@@ -30,7 +30,6 @@ See [doc-guidelines.md](doc-guidelines.md) for documentation standards.
 - [security.md](security.md) - Security analysis and threat model
 - [agent-recursion.md](agent-recursion.md) - Runaway guard for agent loops
 - [agent-to-agent.md](agent-to-agent.md) - Inter-session agent communication
-- [out-of-band-input.md](out-of-band-input.md) - Injecting input into busy agent sessions
 - [environments.md](environments.md) - Shell/environment context on session resume
 
 ## SDK Reference
@@ -41,23 +40,24 @@ See [doc-guidelines.md](doc-guidelines.md) for documentation standards.
 
 ## Features
 - [scheduler.md](scheduler.md) - Scheduled agent session design
-- [vision.md](vision.md) - Vision features (screenshots, camera, images)
 - [applet-vision.md](applet-vision.md) - Applet-generated images and agent visual analysis
-- [applet-agent-comm.md](applet-agent-comm.md) - Applet-agent communication patterns
 - [applet-usability.md](applet-usability.md) - Agent discovery and use of applets
 - [embed_media.md](embed_media.md) - oEmbed tool for media embedding
 - [git-applet.md](git-applet.md) - Git status/diff applet design
 
 ## Implementation Notes (working docs)
-- [session-plan.md](session-plan.md) - Session manager implementation status
-- [dom-modification.md](dom-modification.md) - DOM modification audit and regressions
 - [caco-os.md](caco-os.md) - UI layout and navigation design
-- [streaming.md](streaming.md) - Streaming implementation plan
 - [unified-stream.md](unified-stream.md) - WebSocket streaming design
 
 ## Research
 - [research/environments-research.md](research/environments-research.md) - Environment control research
+- [research/applet-agent-comm.md](research/applet-agent-comm.md) - Applet-agent communication patterns
+- [research/out-of-band-input.md](research/out-of-band-input.md) - Injecting input into busy agent sessions
+- [research/vision.md](research/vision.md) - Vision features exploration
 
 ## Archive
-- [applet-archive.md](applet-archive.md) - Original applet design (superseded)
+- [archive/applet-archive.md](archive/applet-archive.md) - Original applet design (superseded)
+- [archive/dom-modification.md](archive/dom-modification.md) - DOM modification audit (superseded by dom-regions)
+- [archive/session-plan.md](archive/session-plan.md) - Session manager implementation tracker (complete)
+- [archive/streaming.md](archive/streaming.md) - Original HTMX/SSE streaming plan (superseded by WebSocket)
 - [mcp-wrapper.md](mcp-wrapper.md) - MCP wrapper implementation summary

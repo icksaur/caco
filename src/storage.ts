@@ -9,7 +9,8 @@
  *   ├── sessions/<sessionId>/
  *   │   ├── meta.json               # Session metadata (custom name)
  *   │   └── outputs/                # Display tool outputs
- *   └── applets/<slug>/             # Saved applets
+ *   ├── applets/<slug>/             # Saved applets
+ *   └── mcp-auth.json               # Global MCP OAuth tokens
  * 
  * Note: SDK stores session data in ~/.copilot/session-state/{id}/workspace.yaml
  * We store Caco-specific metadata separately to avoid coupling with SDK internals.
@@ -43,6 +44,28 @@ export interface SessionMeta {
   envHint?: string;         // Environment setup hint shown on session resume
   context?: Record<string, string[]>;  // Named context sets (files, applet, endpoints, etc.)
   model?: string;           // Last known model ID (synced from SDK on create/resume)
+}
+
+/**
+ * MCP server OAuth state stored in ~/.caco/mcp-auth.json
+ * Global across all sessions - authenticate once, use everywhere
+ */
+export interface MCPAuthState {
+  url: string;                      // MCP server URL
+  authorizationEndpoint: string;    // OAuth authorize URL
+  tokenEndpoint: string;            // OAuth token URL
+  scopes?: string[];                // OAuth scopes
+  clientId?: string | null;         // OAuth Application ID (required for auth)
+  token?: string;                   // Access token (if authenticated)
+  refreshToken?: string;            // Refresh token (optional)
+  expiresAt?: number;               // Unix timestamp ms
+  needsAuth: boolean;               // True if auth required/expired
+  needsClientId: boolean;           // True if clientId missing
+  error?: string;                   // Last error message
+}
+
+export interface MCPAuthStore {
+  servers: Record<string, MCPAuthState>;
 }
 
 export interface OutputMetadata {
@@ -580,4 +603,61 @@ export function listActivities(sessionId: string): StoredActivity[] {
   return activities.sort((a, b) => 
     a.metadata.createdAt.localeCompare(b.metadata.createdAt)
   );
+}
+
+// ============================================================================
+// MCP OAuth Storage
+// ============================================================================
+
+const MCP_AUTH_FILE = join(STORAGE_ROOT, 'mcp-auth.json');
+
+/**
+ * Get all MCP auth state from ~/.caco/mcp-auth.json
+ */
+export function getMcpAuth(): MCPAuthStore {
+  if (!existsSync(MCP_AUTH_FILE)) {
+    return { servers: {} };
+  }
+  
+  try {
+    const content = readFileSync(MCP_AUTH_FILE, 'utf-8');
+    return JSON.parse(content) as MCPAuthStore;
+  } catch (error) {
+    console.error('Failed to read mcp-auth.json:', error);
+    return { servers: {} };
+  }
+}
+
+/**
+ * Save MCP auth state to ~/.caco/mcp-auth.json
+ */
+export function setMcpAuth(store: MCPAuthStore): void {
+  ensureDir(STORAGE_ROOT);
+  writeFileSync(MCP_AUTH_FILE, JSON.stringify(store, null, 2), 'utf-8');
+}
+
+/**
+ * Get auth state for a specific MCP server
+ */
+export function getMcpServerAuth(serverId: string): MCPAuthState | undefined {
+  const store = getMcpAuth();
+  return store.servers[serverId];
+}
+
+/**
+ * Update auth state for a specific MCP server
+ */
+export function setMcpServerAuth(serverId: string, state: MCPAuthState): void {
+  const store = getMcpAuth();
+  store.servers[serverId] = state;
+  setMcpAuth(store);
+}
+
+/**
+ * Remove a server from MCP auth store
+ */
+export function removeMcpServerAuth(serverId: string): void {
+  const store = getMcpAuth();
+  delete store.servers[serverId];
+  setMcpAuth(store);
 }

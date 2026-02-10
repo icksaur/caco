@@ -17,9 +17,10 @@ import { createDisplayTools, type CacoEmbedEvent } from './src/display-tools.js'
 import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools } from './src/agent-tools.js';
 import { createContextTools } from './src/context-tools.js';
+import { createMcpAuthTools } from './src/mcp-auth-tools.js';
 import type { SessionIdRef } from './src/types.js';
 import { storeOutput } from './src/storage.js';
-import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
+import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
 import { setupWebSocket, broadcastEvent } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
@@ -70,7 +71,10 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
   // Pass broadcast callback so context changes notify connected clients
   const contextTools = createContextTools(sessionRef, broadcastEvent);
   
-  return [...displayTools, ...appletTools, ...agentTools, ...contextTools];
+  // MCP auth tools for registering OAuth-protected servers
+  const mcpAuthTools = createMcpAuthTools();
+  
+  return [...displayTools, ...appletTools, ...agentTools, ...contextTools, ...mcpAuthTools];
 };
 
 // System message for sessions - built at startup from prompts module
@@ -119,6 +123,7 @@ app.use('/api', sessionRoutes);
 app.use('/api', apiRoutes);
 app.use('/api', sessionMessageRoutes);
 app.use('/api/mcp', mcpRoutes);
+app.use('/api/mcp/auth', mcpAuthRoutes);
 app.use('/api', scheduleRoutes);
 app.use('/api', shellRoutes);
 

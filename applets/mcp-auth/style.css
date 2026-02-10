@@ -1,0 +1,167 @@
+.mcp-auth-container {
+  padding: 16px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.mcp-auth-title {
+  margin: 0 0 4px 0;
+  font-size: 1.25em;
+  font-weight: 600;
+}
+
+.mcp-auth-subtitle {
+  margin: 0 0 16px 0;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.loading {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 24px;
+}
+
+.server-card {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.server-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.server-id {
+  font-weight: 600;
+  font-size: 1em;
+}
+
+.server-url {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.server-expiry {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.server-error {
+  font-size: 0.85em;
+  color: var(--error);
+  margin-top: 4px;
+}
+
+.server-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: 0.85em;
+  font-weight: 500;
+}
+
+.badge-ok {
+  color: var(--success);
+}
+
+.badge-warn {
+  color: var(--warning);
+}
+
+.badge-error {
+  color: var(--error);
+}
+
+.auth-btn {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85em;
+}
+
+.auth-btn:hover {
+  background: var(--bg-secondary);
+}
+
+.auth-btn.primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.auth-btn.primary:hover {
+  opacity: 0.9;
+}
+
+/* Client ID input form */
+.client-id-form {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.client-id-input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85em;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.client-id-input::placeholder {
+  color: var(--text-muted);
+}
+
+.client-id-hint {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Empty and error states */
+.empty-state,
+.error-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-muted);
+}
+
+.empty-icon {
+  font-size: 2em;
+  margin-bottom: 8px;
+}
+
+.empty-hint {
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+
+.error-message {
+  color: var(--error);
+  margin-bottom: 12px;
+}

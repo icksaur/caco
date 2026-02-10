@@ -1,0 +1,17 @@
+<div class="mcp-auth-container">
+    
+  <div id="server-list" class="server-list">
+    <div class="loading">Loading servers...</div>
+  </div>
+  
+  <div id="empty-state" class="empty-state" style="display:none">
+    <div class="empty-icon">🔌</div>
+    <p>No MCP servers registered.</p>
+    <p class="empty-hint">They appear here automatically when an MCP tool returns 401 Unauthorized.</p>
+  </div>
+  
+  <div id="error-state" class="error-state" style="display:none">
+    <p class="error-message"></p>
+    <button onclick="fetchServers()">Retry</button>
+  </div>
+</div>

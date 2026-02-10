@@ -1,0 +1,18 @@
+{
+  "slug": "mcp-auth",
+  "name": "MCP Authentication",
+  "description": "Authenticate MCP servers requiring OAuth",
+  "params": {},
+  "createdAt": "2026-02-10T00:00:00.000Z",
+  "updatedAt": "2026-02-10T00:00:00.000Z",
+  "agentUsage": {
+    "purpose": "User authenticates MCP servers here after agent encounters 401"
+  },
+  "stateSchema": {
+    "get": {
+      "serverCount": "number",
+      "pendingAuthCount": "number"
+    },
+    "set": null
+  }
+}

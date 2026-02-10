@@ -98,3 +98,51 @@
 ## Logging
 - Configurable log levels (none, error, warning, info, debug, all)
 - CLI server logging control
+
+## MCP Diagnostics
+
+### CLI Diagnostics (copilot-cli)
+- `/mcp` command lists configured MCP servers and their status
+- Shows server connection state (connected, error, disabled)
+- Lists available tools per server
+- **Limitation**: Not available in browser/SDK contexts
+
+### SDK Diagnostic Capabilities
+- Connection state events for monitoring server health
+- Error events when MCP servers fail to connect
+- No built-in API to enumerate MCP tools or server status from SDK
+- Tool availability only discoverable when tool calls fail
+
+### Browser Context Limitations
+When running Caco in a browser context:
+- Cannot run interactive OAuth/browser authentication flows
+- MCP servers requiring Azure AD authentication cannot complete auth
+- No `/mcp` diagnostic command available
+- Server failures may be silent until tool invocation fails
+
+## Authentication Challenges
+
+### Azure AD / Interactive Auth Issues
+MCP tools requiring Azure AD (AAD) authentication present challenges:
+- AAD typically requires interactive browser popup for OAuth
+- In headless/browser-agent contexts, popups cannot be intercepted
+- Pre-authenticated tokens must be provided via environment variables or headers
+
+### Workarounds
+1. **Pre-authenticate externally**: Obtain tokens via CLI before running browser session
+2. **Use environment variables**: Configure `AZURE_ACCESS_TOKEN` or similar for MCP servers
+3. **Custom headers**: Remote MCP servers can receive `Authorization: Bearer <token>` headers
+4. **Service principal auth**: Use client credentials flow instead of interactive auth
+
+### Known SDK Issues
+- **github/copilot-sdk#163**: MCP server environment variables not being read properly
+- **github/copilot-sdk#350**: Question about using built-in tools from SDK
+- **modelcontextprotocol/python-sdk#2024**: Proposes multi-protocol authentication with discovery and OAuth fallback
+
+## Future: Multi-Protocol Authentication
+The MCP ecosystem is working toward unified authentication discovery:
+- Spec-aligned authentication method discovery
+- OAuth fallback mechanisms
+- Protocol-level auth negotiation
+
+See: [MCP Python SDK #2024](https://github.com/modelcontextprotocol/python-sdk/issues/2024)

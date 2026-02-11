@@ -116,10 +116,23 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // and broadcastEvent() enriches it with source metadata by parsing the prefix.
   // This ensures ONE code path for enrichment (both live and history).
   
+  // Ensure session is active BEFORE returning success
+  // This surfaces resume failures as HTTP errors instead of swallowing them
+  if (!sessionManager.isActive(sessionId)) {
+    try {
+      await sessionManager.resume(sessionId, sessionState.getSessionConfig());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[DISPATCH] Resume failed for ${sessionId}:`, message);
+      res.status(500).json({ error: `Failed to resume session: ${message}` });
+      return;
+    }
+  }
+  
   // Record call for correlation metrics (all flows, not just agent calls)
   sessionManager.recordAgentCall(effectiveCorrelationId, sessionId);
   
-  // Return immediately - dispatch happens in background
+  // Return success - session is now active, dispatch happens in background
   res.json({ ok: true, sessionId });
   
   // Prefix prompt with source marker for history persistence and agent context
@@ -180,7 +193,8 @@ export async function dispatchMessage(
   dispatchStarted();
   
   try {
-    // Ensure session is active
+    // Ensure session is active (defensive - route handler should have done this)
+    // Kept as fallback for direct dispatchMessage() calls
     if (!sessionManager.isActive(sessionId)) {
       await sessionManager.resume(sessionId, sessionState.getSessionConfig());
     }

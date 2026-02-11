@@ -15,7 +15,7 @@ One global router:
 
 | Shortcut | Action |
 |----------|--------|
-| `Escape` | Blur active input, start leader timer |
+| `Escape` | start leader timer |
 | `Escape` `l` | Toggle session panel |
 | `Escape` `.` | Toggle applet panel |
 | `Escape` `,` | Expand applet panel |

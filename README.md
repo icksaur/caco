@@ -56,7 +56,7 @@ Use the session UI via the session button.  Scheduled sessions appear here.  You
 
 Chat sessions started in the browser UI have a prompt explaining features to the agent.  Ask the agent about any features.
 
-Long-press/click-and-hold on the applet button to load the applet browser, listing all applets.
+Long-press/click-and-hold on the applet button to load the applet browser.
 
 ## Shortcuts
 

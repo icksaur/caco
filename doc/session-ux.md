@@ -93,6 +93,16 @@ Button label and behavior change based on search state:
 | Busy | Blinking colorful cursor (4-corner gradient) + accent left border |
 | Unobserved | Red dot + red left border |
 | Active (current) | Blue border |
+| Loading | Throbber appears on click, clears when resume response arrives |
+
+### Loading Feedback
+
+When user clicks a session item, **immediate visual feedback** is required:
+
+1. **On click**: Show throbber (busy indicator) on the left of the session item
+2. **On POST response**: Remove throbber (regardless of success/failure)
+
+This provides instant feedback while the resume POST is pending (can take 1+ seconds). The loading state is distinct from "busy" state - busy indicates the SDK is streaming, loading indicates the resume request is in flight.
 
 ### Actions
 

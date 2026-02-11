@@ -901,8 +901,9 @@ main {
 .model-item {
   display: flex;
   align-items: center;
+  gap: var(--space-sm);
   background: var(--color-selector-bg);
-  padding: 4px;
+  padding: 4px 8px;
   margin: 4px 0;
   border-radius: var(--radius-lg);
   cursor: pointer;
@@ -920,107 +921,14 @@ main {
   border-left: 3px solid var(--color-success-bright);
 }
 
-/* Session item content wrapper (summary + age) */
-.session-item-content {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  min-width: 0; /* Allow flex child to shrink below content size */
-  cursor: pointer;
-}
-
-.session-summary {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.session-age {
+/* Session state indicator (leftmost - busy throbber or unobserved dot) */
+.session-indicator {
   flex-shrink: 0;
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  white-space: nowrap;
+  width: 12px;
+  height: 12px;
 }
 
-.session-cwd {
-  font-size: var(--text-xs);
-  color: var(--color-text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding-left: var(--space-lg);
-  margin-top: calc(-1 * var(--space-xs));
-}
-
-.session-intent {
-  flex-shrink: 1;
-  font-size: var(--text-sm);
-  color: var(--color-accent);
-  font-style: italic;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
-}
-
-.session-schedule-badge {
-  flex-shrink: 0;
-  font-size: var(--text-sm);
-  cursor: help;
-}
-
-.model-name {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Session loading state */
-.session-item.loading {
-  opacity: 0.7;
-  pointer-events: none;
-  position: relative;
-}
-
-.session-item.loading::before {
-  content: '';
-  position: absolute;
-  right: var(--space-lg);
-  top: 50%;
-  transform: translateY(-50%);
-  width: 20px;
-  height: 20px;
-  background: var(--color-selector-bg);
-  border: 2px solid var(--color-text-muted);
-  border-top-color: var(--color-success-bright);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  z-index: 1;
-}
-
-@keyframes spin {
-  to { transform: translateY(-50%) rotate(360deg); }
-}
-
-@keyframes spin-in-place {
-  to { transform: rotate(360deg); }
-}
-
-/* Session busy state (non-idle, processing) */
-.session-item.busy {
-  border-left: 3px solid var(--color-error);
-}
-
-.session-busy-indicator {
-  flex-shrink: 0;
-  width: 10px;
-  height: 10px;
-  margin-right: var(--space-sm);
-  /* 4-corner gradient matching streaming cursor */
+.session-indicator.busy {
   background: 
     radial-gradient(ellipse at 0% 0%, var(--host-color-tl, var(--color-accent)), transparent 60%),
     radial-gradient(ellipse at 100% 0%, var(--host-color-tr, var(--color-accent)), transparent 60%),
@@ -1031,21 +939,105 @@ main {
   animation: blink 0.7s infinite;
 }
 
-/* Session unobserved state (new activity since last viewed) */
-.session-item.unobserved {
-  border-left: 3px solid var(--color-unobserved);
-}
-
-.session-unobserved-badge {
-  flex-shrink: 0;
-  width: 10px;
-  height: 10px;
-  margin-right: var(--space-sm);
+.session-indicator.unobserved {
   background: var(--color-unobserved);
   border-radius: 50%;
 }
 
-/* Item action buttons (edit, delete, run, toggle) */
+/* Loading state - override any leaky applet .loading styles */
+.session-item.loading {
+  text-align: inherit;
+  color: inherit;
+  padding: 4px 8px;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.session-item.loading .session-indicator {
+  border: 2px solid var(--color-text-muted);
+  border-top-color: var(--color-success-bright);
+  border-radius: 50%;
+  animation: spin-in-place 0.8s linear infinite;
+  background: none;
+}
+
+/* Session title (truncated) */
+.session-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* CWD path (abbreviated, dim) */
+.session-cwd {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Age */
+.session-age {
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* Action buttons (edit, delete) */
+.session-edit,
+.session-delete {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.session-edit:hover,
+.session-delete:hover {
+  background: var(--color-selector-hover);
+  color: var(--color-text);
+}
+
+.session-delete:hover {
+  color: var(--color-error);
+}
+
+/* Busy state styling */
+.session-item.busy {
+  border-left: 3px solid var(--color-error);
+}
+
+/* Unobserved state styling */
+.session-item.unobserved {
+  border-left: 3px solid var(--color-unobserved);
+}
+
+.model-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes spin-in-place {
+  to { transform: rotate(360deg); }
+}
+
+/* Item action buttons (for schedules, etc.) */
 .item-actions {
   flex-shrink: 0;
   display: flex;

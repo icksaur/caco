@@ -19,7 +19,7 @@ import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
 import { subscribeToSession, requestHistory } from './websocket.js';
 import { waitForHistoryComplete } from './history.js';
-import { showSessionManager } from './session-panel.js';
+import { showSessionManager, setSessionLoading } from './session-panel.js';
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 import { setFormEnabled } from './message-streaming.js';
@@ -268,6 +268,9 @@ export async function loadApplet(slug: string): Promise<void> {
  * Activate a session - clear chat, set state, load history
  */
 async function activateSession(sessionId: string): Promise<void> {
+  // Show loading indicator on session item immediately (before any DOM changes)
+  setSessionLoading(sessionId, true);
+  
   regions.chat.clear();
   
   // Resume session on server
@@ -275,6 +278,9 @@ async function activateSession(sessionId: string): Promise<void> {
     const response = await fetch(`/api/sessions/${sessionId}/resume`, {
       method: 'POST'
     });
+    
+    // Clear loading state once we have a response
+    setSessionLoading(sessionId, false);
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
@@ -310,6 +316,9 @@ async function activateSession(sessionId: string): Promise<void> {
     
     setViewState('chatting');
   } catch (error) {
+    // Clear loading state on error
+    setSessionLoading(sessionId, false);
+    
     const errorMsg = error instanceof Error ? error.message : 'Network error';
     console.error('[ROUTER] Error activating session:', error);
     showToast(errorMsg);

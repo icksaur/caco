@@ -68,38 +68,59 @@ export function initSessionPanel(): void {
 }
 
 /**
+ * Show/hide loading indicator on session item while resume is pending
+ * Uses a pseudo-element on .session-indicator for the spinner
+ */
+export function setSessionLoading(sessionId: string, loading: boolean): void {
+  const item = document.querySelector(`.session-item[data-session-id="${sessionId}"]`) as HTMLElement;
+  if (!item) return;
+  
+  if (loading) {
+    item.classList.add('loading');
+  } else {
+    item.classList.remove('loading');
+  }
+}
+
+/**
  * Update a single session item's busy state in the DOM
  */
 function updateSessionItemState(sessionId: string, isBusy: boolean): void {
   const item = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
   if (!item) return;
   
+  const indicator = item.querySelector('.session-indicator');
+  
   if (isBusy) {
     item.classList.add('busy');
-    // Add throbber if not present
-    if (!item.querySelector('.session-busy-indicator')) {
-      const throbber = document.createElement('span');
-      throbber.className = 'session-busy-indicator';
-      throbber.setAttribute('aria-label', 'Session is processing');
-      item.insertBefore(throbber, item.firstChild);
-    }
-    // Remove delete button
-    const deleteBtn = item.querySelector('.session-delete');
-    if (deleteBtn) deleteBtn.remove();
+    indicator?.classList.add('busy');
+    indicator?.classList.remove('unobserved');
+    // Remove action buttons when busy
+    item.querySelector('.session-edit')?.remove();
+    item.querySelector('.session-delete')?.remove();
   } else {
     item.classList.remove('busy');
-    // Remove throbber
-    const throbber = item.querySelector('.session-busy-indicator');
-    if (throbber) throbber.remove();
-    // Add delete button if not present
+    indicator?.classList.remove('busy');
+    // Add action buttons if not present
     if (!item.querySelector('.session-delete')) {
+      const editBtn = document.createElement('button');
+      editBtn.className = 'session-edit';
+      editBtn.textContent = '/';
+      editBtn.title = 'Rename session';
+      editBtn.onclick = (e) => {
+        e.stopPropagation();
+        const title = item.querySelector('.session-title')?.textContent || 'Untitled';
+        void renameSession(sessionId, title);
+      };
+      item.appendChild(editBtn);
+      
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'session-delete';
       deleteBtn.textContent = '×';
       deleteBtn.onclick = (e) => {
         e.stopPropagation();
-        const summary = item.querySelector('.session-summary')?.textContent || undefined;
-        void deleteSession(sessionId, summary);
+        const title = item.querySelector('.session-title')?.textContent || 'Untitled';
+        void deleteSession(sessionId, title);
       };
       item.appendChild(deleteBtn);
     }
@@ -482,6 +503,7 @@ function matchesSearch(session: SessionData, query: string): boolean {
 
 /**
  * Create a session item element
+ * Layout: [ indicator | title... | cwd | age | actions ]
  */
 function createSessionItem(session: SessionData, activeSessionId?: string): HTMLElement {
   const item = document.createElement('div');
@@ -496,79 +518,47 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     item.classList.add('unobserved');
   }
   item.dataset.sessionId = session.sessionId;
+  item.onclick = () => sessionClick(session.sessionId);
   
-  // Unobserved badge (new activity indicator)
-  if (session.isUnobserved) {
-    const badge = document.createElement('span');
-    badge.className = 'session-unobserved-badge';
-    badge.setAttribute('aria-label', 'New activity');
-    badge.title = 'Session has new activity since last viewed';
-    item.appendChild(badge);
-  }
-  
-  // Busy indicator (throbber)
+  // State indicator (leftmost) - busy throbber or unobserved dot
+  const indicator = document.createElement('span');
+  indicator.className = 'session-indicator';
   if (session.isBusy) {
-    const throbber = document.createElement('span');
-    throbber.className = 'session-busy-indicator';
-    throbber.setAttribute('aria-label', 'Session is processing');
-    item.appendChild(throbber);
+    indicator.classList.add('busy');
+  } else if (session.isUnobserved) {
+    indicator.classList.add('unobserved');
   }
+  item.appendChild(indicator);
   
-  // Content wrapper (summary + age) - clickable area
-  const content = document.createElement('div');
-  content.className = 'session-item-content';
-  content.onclick = () => sessionClick(session.sessionId);
-  
-  // Display name: custom name or SDK summary
+  // Title (truncated with ellipsis)
   const displayName = session.name || session.summary || 'No summary';
+  const titleSpan = document.createElement('span');
+  titleSpan.className = 'session-title';
+  titleSpan.textContent = displayName;
+  titleSpan.title = displayName;
+  item.appendChild(titleSpan);
   
-  // Summary text (truncated with ellipsis)
-  const summarySpan = document.createElement('span');
-  summarySpan.className = 'session-summary';
-  summarySpan.textContent = displayName;
-  content.appendChild(summarySpan);
-  
-  // Schedule badge (if session was created by a schedule)
-  if (session.scheduleSlug) {
-    const scheduleBadge = document.createElement('span');
-    scheduleBadge.className = 'session-schedule-badge';
-    scheduleBadge.textContent = '⏰';
-    scheduleBadge.title = session.scheduleNextRun
-      ? `Schedule: ${session.scheduleSlug}\nNext run: ${new Date(session.scheduleNextRun).toLocaleString()}`
-      : `Schedule: ${session.scheduleSlug}`;
-    content.appendChild(scheduleBadge);
+  // CWD path (abbreviated)
+  if (session.cwd) {
+    const cwdSpan = document.createElement('span');
+    cwdSpan.className = 'session-cwd';
+    // Show last path segment for brevity
+    const cwdParts = session.cwd.split('/');
+    cwdSpan.textContent = cwdParts[cwdParts.length - 1] || session.cwd;
+    cwdSpan.title = session.cwd;
+    item.appendChild(cwdSpan);
   }
   
-  // Intent for busy sessions (what the agent is working on)
-  if (session.isBusy && session.currentIntent) {
-    const intentSpan = document.createElement('span');
-    intentSpan.className = 'session-intent';
-    intentSpan.textContent = session.currentIntent;
-    intentSpan.title = session.currentIntent;
-    content.appendChild(intentSpan);
-  }
-  
-  // Age (fixed on right)
+  // Age
   if (session.updatedAt) {
     const ageSpan = document.createElement('span');
     ageSpan.className = 'session-age';
     ageSpan.textContent = formatAge(session.updatedAt);
-    content.appendChild(ageSpan);
+    item.appendChild(ageSpan);
   }
   
-  item.appendChild(content);
-  
-  // CWD path below (always present - sessions without CWD are filtered out)
-  const cwdSpan = document.createElement('div');
-  cwdSpan.className = 'session-cwd';
-  cwdSpan.textContent = session.cwd!;
-  item.appendChild(cwdSpan);
-  
-  // Action buttons (edit, delete) in a container
+  // Action buttons (edit, delete) - not shown when busy
   if (!session.isBusy) {
-    const actions = document.createElement('div');
-    actions.className = 'session-actions';
-    
     const editBtn = document.createElement('button');
     editBtn.className = 'session-edit';
     editBtn.textContent = '/';
@@ -577,7 +567,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
       e.stopPropagation();
       void renameSession(session.sessionId, displayName);
     };
-    actions.appendChild(editBtn);
+    item.appendChild(editBtn);
     
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'session-delete';
@@ -586,9 +576,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
       e.stopPropagation();
       void deleteSession(session.sessionId, displayName);
     };
-    actions.appendChild(deleteBtn);
-    
-    item.appendChild(actions);
+    item.appendChild(deleteBtn);
   }
   
   return item;

@@ -104,6 +104,27 @@ Button label and behavior change based on search state:
 | Delete session | Click delete (×), confirm | Remove session (blocked if busy) |
 | Close panel | Click hamburger or outside | Return to previous view |
 
+### Missing CWD Handling
+
+When a session's original working directory no longer exists (deleted, renamed, unmounted):
+
+| Scenario | Behavior |
+|----------|----------|
+| Resume session (any trigger) | Session loads using server's current CWD as fallback |
+| Delete session | Deletion succeeds (CWD not required) |
+| Toast notification | Shows: "Original directory is gone, using: /path/to/fallback" |
+
+**Design rationale**: 
+
+The CWD is a **context hint**, not a hard requirement. Sessions contain valuable conversation history that shouldn't become inaccessible because a directory was renamed or deleted. The server's working directory provides a valid CWD for SDK operations.
+
+**What CWD is actually used for**:
+- SDK client initialization (requires a valid directory, not necessarily the original)
+- UI context (shows user what folder the session was about)
+- Display output storage scoping
+
+**User experience**: After loading with fallback CWD, file references from the original session may point to nonexistent paths. The original CWD is still shown in the session list as historical context.
+
 ## Unobserved State
 
 ### Definition

@@ -50,6 +50,23 @@ npm run dev        # Start with auto-reload
 
 Open `http://localhost:53000`
 
+## Usage
+
+Use the session UI via the session button.  Scheduled sessions appear here.  You can create new sessions, resume, rename, or delete sessions in the view.  The search is fuzzy-find and enter will resume a session.
+
+Chat sessions started in the browser UI have a prompt explaining features to the agent.  Ask the agent about any features.
+
+Long-press/click-and-hold on the applet button to load the applet browser, listing all applets.
+
+## Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Escape` | start leader timer |
+| `Escape` `l` | Toggle session panel |
+| `Escape` `.` | Toggle applet panel |
+| `Escape` `,` | Expand applet panel |
+
 ## Development
 
 ```bash

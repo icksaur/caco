@@ -1,14 +1,14 @@
 /**
  * Toast notification system
  * 
- * Floating notifications above chat input for errors that shouldn't
- * interrupt the chat flow (e.g., session creation failures).
+ * Floating notifications above chat input for errors or info
+ * that shouldn't interrupt the chat flow.
  * 
  * Features:
  * - Floats above input, doesn't displace chat messages
- * - Auto-hides when WebSocket stream messages arrive
- * - Can be dismissed manually
- * - Supports different types: error (default), success, info
+ * - Can be dismissed manually (click X)
+ * - Optional auto-hide with configurable duration
+ * - Supports types: error (default), success, info
  */
 
 let toastTimeout: number | null = null;

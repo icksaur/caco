@@ -18,7 +18,7 @@ import { getActiveSessionId, setActiveSession, setLoadingHistory } from './app-s
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { isViewState, setViewState } from './view-controller.js';
 import { onEvent, subscribeToSession, type SessionEvent } from './websocket.js';
-import { showToast, hideToast } from './toast.js';
+import { showToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 import { resetTextareaHeight } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
@@ -38,7 +38,6 @@ let chatRegion: ChatRegion;
  * ChatRegion owns all #chat mutations; cross-region effects (scroll) stay here.
  */
 function handleEvent(event: SessionEvent): void {
-  hideToast();
   let eventType = event.type;
   const data = event.data || {};
   

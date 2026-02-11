@@ -284,7 +284,17 @@ async function activateSession(sessionId: string): Promise<void> {
       return; // Don't change view, just show toast
     }
     
-    const data = await response.json() as { sessionId: string; cwd?: string; isBusy?: boolean };
+    const data = await response.json() as { 
+      sessionId: string; 
+      cwd?: string; 
+      isBusy?: boolean; 
+      cwdFallback?: string;
+    };
+    
+    // Warn user if session's original CWD is gone
+    if (data.cwdFallback) {
+      showToast(`Original directory is gone, using: ${data.cwdFallback}`, { type: 'info', autoHideMs: 5000 });
+    }
     
     // Update client state
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());

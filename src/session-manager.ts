@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
-import type { CreateConfig, ResumeConfig, SystemMessage } from './types.js';
+import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
 import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta } from './storage.js';
 import { unobservedTracker } from './unobserved-tracker.js';
@@ -289,29 +289,35 @@ class SessionManager {
   /**
    * Resume an existing session
    * @param config - Required config with toolFactory (prevents resuming without tools)
-   * @throws Error if session doesn't exist or cwd is gone
+   * @returns ResumeResult with sessionId and optional fallback CWD used
+   * @throws Error if session doesn't exist
    */
-  async resume(sessionId: string, config: ResumeConfig): Promise<string> {
+  async resume(sessionId: string, config: ResumeConfig): Promise<ResumeResult> {
     // Get cwd from cache
     const cached = this.sessionCache.get(sessionId);
     if (!cached) {
       throw new Error(`Session ${sessionId} not found`);
     }
     
-    const cwd = cached.cwd;
-    if (!cwd) {
+    const originalCwd = cached.cwd;
+    if (!originalCwd) {
       throw new Error(`Session ${sessionId} has no cwd recorded`);
     }
     
-    // Validate cwd exists - fail clearly if not
-    if (!existsSync(cwd)) {
-      throw new Error(`Session directory no longer exists: ${cwd}`);
+    // Use original CWD if it exists, otherwise fall back to process.cwd()
+    // CWD is mainly a context hint - sessions can resume even if original dir is gone
+    let cwd = originalCwd;
+    let usedFallbackCwd: string | undefined;
+    if (!existsSync(originalCwd)) {
+      cwd = process.cwd();
+      usedFallbackCwd = cwd;
+      console.log(`[RESUME] Original CWD gone (${originalCwd}), using fallback: ${cwd}`);
     }
     
     // Already active?
     if (this.activeSessions.has(sessionId)) {
       console.log(`Session ${sessionId} already active`);
-      return sessionId;
+      return { sessionId, usedFallbackCwd };
     }
     
     // Create client with cwd
@@ -340,8 +346,8 @@ class SessionManager {
     // Sync model from SDK to cache (may have changed via copilot-cli)
     syncModelCache(sessionId);
     
-    console.log(`✓ Resumed session ${sessionId} for ${cwd}`);
-    return sessionId;
+    console.log(`✓ Resumed session ${sessionId} for ${cwd}${usedFallbackCwd ? ' (fallback)' : ''}`);
+    return { sessionId, usedFallbackCwd };
   }
 
   /**
@@ -480,9 +486,10 @@ class SessionManager {
       await this.stop(sessionId);
     }
     
-    // Get any client to delete (cwd doesn't matter for delete)
+    // Get CWD for client - use process.cwd() if cached CWD is gone
     const cached = this.sessionCache.get(sessionId);
-    const cwd = cached?.cwd || process.cwd();
+    const cachedCwd = cached?.cwd;
+    const cwd = (cachedCwd && existsSync(cachedCwd)) ? cachedCwd : process.cwd();
     
     const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
     await client.start();

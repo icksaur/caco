@@ -124,13 +124,20 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
   const clientId = req.headers['x-client-id'] as string | undefined;
   
   try {
-    const newSessionId = await sessionState.switchSession(sessionId, clientId);
+    const result = await sessionState.switchSession(sessionId, clientId);
     const cwd = sessionState.preferences.lastCwd;
-    const isBusy = sessionManager.isBusy(newSessionId);
+    const isBusy = sessionManager.isBusy(result.sessionId);
     
     // NOTE: We do NOT mark observed here - that happens when user sees session.idle
     
-    res.json({ success: true, sessionId: newSessionId, cwd, isBusy });
+    res.json({ 
+      success: true, 
+      sessionId: result.sessionId, 
+      cwd, 
+      isBusy,
+      // If CWD was missing, tell frontend what fallback was used
+      cwdFallback: result.usedFallbackCwd
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(400).json({ error: message });

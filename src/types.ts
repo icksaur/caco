@@ -70,6 +70,12 @@ export interface ResumeConfig {
   excludedTools?: string[];
 }
 
+export interface ResumeResult {
+  sessionId: string;
+  /** If set, the original CWD was missing and this fallback was used */
+  usedFallbackCwd?: string;
+}
+
 export interface SessionIdRef {
   id: string;
 }

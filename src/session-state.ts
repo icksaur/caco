@@ -7,7 +7,7 @@
 
 import sessionManager from './session-manager.js';
 import { loadPreferences, savePreferences, getDefaultPreferences, DEFAULT_MODEL } from './preferences.js';
-import type { UserPreferences, SessionStateConfig } from './types.js';
+import type { UserPreferences, SessionStateConfig, ResumeResult } from './types.js';
 
 /**
  * Manages the active session state for the server.
@@ -215,13 +215,13 @@ class SessionState {
     const pendingId = this.getPendingResumeId(clientId);
     if (pendingId) {
       try {
-        const resumedId = await sessionManager.resume(pendingId, sessionConfig);
-        this.setActiveSessionId(resumedId, clientId);
-        this._preferences.lastSessionId = resumedId;
+        const result = await sessionManager.resume(pendingId, sessionConfig);
+        this.setActiveSessionId(result.sessionId, clientId);
+        this._preferences.lastSessionId = result.sessionId;
         await savePreferences(this._preferences);
-        console.log(`✓ Resumed pending session ${resumedId}`);
+        console.log(`✓ Resumed pending session ${result.sessionId}`);
         this.setPendingResumeId(null, clientId); // Clear pending
-        return resumedId;
+        return result.sessionId;
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         console.warn(`Could not resume pending session: ${message}`);
@@ -254,8 +254,9 @@ class SessionState {
    * Switch to a different session
    * @param sessionId - Session to switch to
    * @param clientId - Client identifier for multi-client support
+   * @returns ResumeResult with sessionId and optional fallback CWD used
    */
-  async switchSession(sessionId: string, clientId?: string): Promise<string> {
+  async switchSession(sessionId: string, clientId?: string): Promise<ResumeResult> {
     if (!this._config) {
       throw new Error('SessionState not initialized');
     }
@@ -267,16 +268,16 @@ class SessionState {
     this.setPendingResumeId(null, clientId);
     
     // Resume new session (loads SDK client if needed, doesn't stop others)
-    const resumedId = await sessionManager.resume(sessionId, {
+    const result = await sessionManager.resume(sessionId, {
       toolFactory: this._config.toolFactory,
       excludedTools: this._config.excludedTools
     });
     
-    this.setActiveSessionId(resumedId, clientId);
-    this._preferences.lastSessionId = resumedId;
+    this.setActiveSessionId(result.sessionId, clientId);
+    this._preferences.lastSessionId = result.sessionId;
     await savePreferences(this._preferences);
     
-    return resumedId;
+    return result;
   }
 
   /**

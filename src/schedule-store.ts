@@ -9,8 +9,12 @@ import { mkdir, readFile, writeFile, readdir, rm } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import { existsSync } from 'fs';
+import { CronExpressionParser } from 'cron-parser';
 
 const SCHEDULE_DIR = join(homedir(), '.caco', 'schedule');
+
+// Minimum interval between schedule runs (1 hour)
+export const MIN_INTERVAL_MINUTES = 60;
 
 export interface ScheduleDefinition {
   slug: string;
@@ -170,5 +174,30 @@ export async function getScheduleForSession(sessionId: string): Promise<{
     }
   }
   
+  return null;
+}
+
+/**
+ * Validate that a schedule doesn't run more frequently than the minimum interval.
+ * Returns error message if invalid, null if valid.
+ */
+export function validateScheduleInterval(schedule: { type: 'cron' | 'interval'; expression?: string; intervalMinutes?: number }): string | null {
+  if (schedule.type === 'interval') {
+    if (schedule.intervalMinutes && schedule.intervalMinutes < MIN_INTERVAL_MINUTES) {
+      return `Minimum interval is ${MIN_INTERVAL_MINUTES} minutes (1 hour)`;
+    }
+  } else if (schedule.type === 'cron' && schedule.expression) {
+    try {
+      const interval = CronExpressionParser.parse(schedule.expression);
+      const first = interval.next().toDate();
+      const second = interval.next().toDate();
+      const diffMinutes = (second.getTime() - first.getTime()) / (60 * 1000);
+      if (diffMinutes < MIN_INTERVAL_MINUTES) {
+        return `Cron expression runs every ${Math.round(diffMinutes)} minutes. Minimum interval is ${MIN_INTERVAL_MINUTES} minutes (1 hour)`;
+      }
+    } catch {
+      return 'Invalid cron expression';
+    }
+  }
   return null;
 }

@@ -13,6 +13,7 @@ import {
   saveLastRun,
   deleteSchedule,
   scheduleExists,
+  validateScheduleInterval,
   type ScheduleDefinition
 } from '../schedule-store.js';
 import { calculateNextRun, triggerSchedule } from '../schedule-manager.js';
@@ -116,6 +117,13 @@ router.put('/schedule/:slug', async (req: Request, res: Response) => {
     if (!schedule || (schedule.type === 'cron' && !schedule.expression) || 
         (schedule.type === 'interval' && !schedule.intervalMinutes)) {
       res.status(400).json({ error: 'schedule with type and expression/intervalMinutes is required' });
+      return;
+    }
+    
+    // Enforce minimum 1 hour interval
+    const intervalError = validateScheduleInterval(schedule);
+    if (intervalError) {
+      res.status(400).json({ error: intervalError });
       return;
     }
     

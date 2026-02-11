@@ -13,6 +13,7 @@ import {
   loadDefinition, 
   loadLastRun, 
   saveLastRun,
+  validateScheduleInterval,
   type ScheduleDefinition
 } from './schedule-store.js';
 import { SERVER_URL, SCHEDULE_CHECK_INTERVAL_MS, SCHEDULE_BUSY_DELAY_MS } from './config.js';
@@ -70,6 +71,12 @@ async function checkSchedules(): Promise<void> {
     for (const slug of slugs) {
       const definition = await loadDefinition(slug);
       if (!definition || !definition.enabled) {
+        continue;
+      }
+      
+      // Validate minimum interval (catches manually-added fast schedules)
+      if (validateScheduleInterval(definition.schedule)) {
+        console.warn(`[SCHEDULER] Skipping ${slug}: ${validateScheduleInterval(definition.schedule)}`);
         continue;
       }
       

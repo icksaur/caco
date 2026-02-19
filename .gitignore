@@ -35,3 +35,6 @@ public/build/
 # Runtime files
 server.pid
 server.err
+
+# Working documents
+plan.md

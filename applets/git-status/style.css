@@ -64,6 +64,16 @@
   white-space: nowrap;
 }
 
+.repo-path-link {
+  color: #808080;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.repo-path-link:hover {
+  color: #6a9fd4;
+}
+
 /* Header actions (push, pull, refresh) */
 .header-actions {
   display: flex;

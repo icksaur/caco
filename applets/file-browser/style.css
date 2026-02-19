@@ -14,6 +14,23 @@
   flex-wrap: wrap;
 }
 
+.context-links {
+  padding: 0 0 8px 0;
+}
+
+.context-link {
+  font-size: 12px;
+  color: #6a9fd4;
+  text-decoration: none;
+  padding: 2px 8px;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+
+.context-link:hover {
+  background: #1e3a5f;
+}
+
 .breadcrumb-item {
   color: #6a9fd4;
   cursor: pointer;

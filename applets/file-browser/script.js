@@ -24,6 +24,7 @@ async function loadDirectory(path, navigate) {
     }
     
     renderBreadcrumb(data.path);
+    renderContextLinks(data.path);
     renderFiles(data.files);
     
     setAppletState({
@@ -55,6 +56,22 @@ function renderBreadcrumb(absPath) {
       loadDirectory(this.getAttribute('data-path'), true);
     });
   });
+}
+
+async function renderContextLinks(absPath) {
+  var el = document.getElementById('contextLinks');
+  el.innerHTML = '';
+  
+  try {
+    var resp = await fetch('/api/files?path=' + encodeURIComponent(absPath + '/.git'));
+    if (resp.ok) {
+      var link = document.createElement('a');
+      link.className = 'context-link';
+      link.href = '?applet=git-status&path=' + encodeURIComponent(absPath);
+      link.textContent = 'git-status';
+      el.appendChild(link);
+    }
+  } catch (_) {}
 }
 
 function joinPath(base, name) {

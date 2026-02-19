@@ -589,7 +589,10 @@ window.appletAPI.onUrlParamsChange((params) => {
       branchName.textContent = '—';
     } else {
       document.getElementById('noPathMessage').classList.add('hidden');
-      if (repoPathLabel) repoPathLabel.textContent = repoPath;
+      if (repoPathLabel) {
+        repoPathLabel.textContent = repoPath;
+        repoPathLabel.href = '?applet=file-browser&path=' + encodeURIComponent(repoPath);
+      }
       refresh();
     }
   }

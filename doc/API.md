@@ -274,13 +274,12 @@ Returns:
 - `PUT /api/files/*` - Write file content (path in URL)
 
 **GET /api/files** query params:
-- `path` - Relative path from workspace root
+- `path` - Absolute or relative path (defaults to server cwd)
 
 Returns:
 ```json
 {
-  "path": "src",
-  "cwd": "/path/to/workspace",
+  "path": "/home/carl/caco/src",
   "files": [
     { "name": "app.ts", "type": "file", "size": 1234 },
     { "name": "lib", "type": "directory", "size": 0 }
@@ -293,10 +292,11 @@ Returns:
 
 Returns raw content with appropriate Content-Type header.
 
-Note: Allows any filesystem path (absolute or relative to cwd). This is personal software — the agent already has full filesystem access via Copilot tools.
+Note: All file endpoints allow any filesystem path (absolute or relative to cwd). This is personal software -- the agent already has full filesystem access via Copilot tools.
 
 **PUT /api/files/\*** - Write file content
 - URL path contains file path: `PUT /api/files/src/app.ts`
+- Absolute paths also accepted: `PUT /api/files//home/user/file.txt`
 - Body: raw file content (text/plain)
 - Creates parent directories automatically
 - Returns: `{ ok: true, path, size }`

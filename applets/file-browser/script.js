@@ -1,5 +1,4 @@
 var currentPath = '';
-var baseCwd = '';
 
 async function loadDirectory(path, navigate) {
   currentPath = path || '';
@@ -23,15 +22,14 @@ async function loadDirectory(path, navigate) {
       return;
     }
     
-    baseCwd = data.cwd;
-    document.getElementById('cwdLabel').textContent = baseCwd;
+    // API returns absolute path in data.path
+    currentPath = data.path;
     
     renderBreadcrumb(data.path);
     renderFiles(data.files);
     
     setAppletState({
       currentPath: currentPath,
-      cwd: baseCwd,
       fileCount: data.files.length
     });
   } catch (err) {
@@ -39,15 +37,15 @@ async function loadDirectory(path, navigate) {
   }
 }
 
-function renderBreadcrumb(path) {
+function renderBreadcrumb(absPath) {
   var bc = document.getElementById('breadcrumb');
-  var parts = path === '.' ? [] : path.split('/').filter(Boolean);
+  var parts = absPath.split('/').filter(Boolean);
   
-  var html = '<span class="breadcrumb-item" data-path="">📁 root</span>';
+  var html = '<span class="breadcrumb-item" data-path="/">/ root</span>';
   var accumulated = '';
   
   for (var i = 0; i < parts.length; i++) {
-    accumulated += (accumulated ? '/' : '') + parts[i];
+    accumulated += '/' + parts[i];
     html += '<span class="breadcrumb-sep">/</span>';
     html += '<span class="breadcrumb-item" data-path="' + accumulated + '">' + parts[i] + '</span>';
   }
@@ -74,7 +72,7 @@ function renderFiles(files) {
     var f = files[i];
     var icon = f.type === 'directory' ? '📁' : getFileIcon(f.name);
     var size = f.type === 'file' ? formatSize(f.size) : '';
-    var filePath = (currentPath ? currentPath + '/' : '') + f.name;
+    var filePath = currentPath + '/' + f.name;
     
     if (f.type === 'directory') {
       // Directories reload current applet - use div with click handler
@@ -116,7 +114,7 @@ function renderFiles(files) {
   fileList.querySelectorAll('.file-item[data-type="directory"]').forEach(function(item) {
     item.addEventListener('click', function() {
       var name = this.getAttribute('data-name');
-      var newPath = currentPath ? currentPath + '/' + name : name;
+      var newPath = currentPath + '/' + name;
       loadDirectory(newPath, true);
     });
   });

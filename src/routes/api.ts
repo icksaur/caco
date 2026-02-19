@@ -24,7 +24,6 @@ import { setAppletUserState, getAppletUserState, clearAppletUserState } from '..
 import { listApplets, loadApplet } from '../applet-store.js';
 import { getUsage } from '../usage-state.js';
 import { MODEL_CACHE_TTL_MS, MAX_FILE_SIZE_BYTES } from '../config.js';
-import { validatePath } from '../path-utils.js';
 import { apiError } from '../api-error.js';
 
 const router = Router();
@@ -298,25 +297,27 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
 /**
  * GET /api/files - List files in a directory
  * Query params:
- *   path: relative path from programCwd (default: "")
+ *   path: absolute path or relative path from programCwd (default: programCwd)
  * Returns: { path, files: [{ name, type, size }] }
- * Locked to programCwd - cannot escape
+ * 
+ * Note: This is personal software - allows any filesystem path.
+ * The agent already has full filesystem access via Copilot tools.
  */
 router.get('/files', async (req: Request, res: Response) => {
-  const requestedPath = (req.query.path as string) || '.';
+  const requestedPath = (req.query.path as string) || '';
   
   try {
-    const validation = validatePath(programCwd, requestedPath);
-    if (!validation.valid) {
-      return apiError.forbidden(res, validation.error);
-    }
+    // Allow absolute paths directly, resolve relative paths from cwd
+    const resolvedDir = requestedPath.startsWith('/')
+      ? resolve(requestedPath)
+      : resolve(programCwd, requestedPath || '.');
     
-    const entries = await readdir(validation.resolved, { withFileTypes: true });
+    const entries = await readdir(resolvedDir, { withFileTypes: true });
     const files = await Promise.all(
       entries
         .filter(e => !e.name.startsWith('.')) // Hide hidden files
         .map(async (entry) => {
-          const entryPath = join(validation.resolved, entry.name);
+          const entryPath = join(resolvedDir, entry.name);
           const stats = await stat(entryPath).catch(() => null);
           return {
             name: entry.name,
@@ -333,11 +334,13 @@ router.get('/files', async (req: Request, res: Response) => {
     });
     
     res.json({ 
-      path: validation.relative,
-      cwd: programCwd,
+      path: resolvedDir,
       files 
     });
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return apiError.notFound(res, 'Directory not found');
+    }
     console.error('[API] Failed to list files:', error);
     return apiError.internal(res, 'Failed to list directory');
   }
@@ -433,8 +436,11 @@ router.get('/file', async (req: Request, res: Response) => {
 /**
  * PUT /api/files/*path - Write file content
  * Path: file path relative to workspace (e.g., PUT /api/files/src/app.ts)
+ *       or absolute path (e.g., PUT /api/files//home/user/file.txt)
  * Body: raw file content (text/plain)
- * Locked to programCwd - cannot escape
+ * 
+ * Note: This is personal software - allows any filesystem path.
+ * The agent already has full filesystem access via Copilot tools.
  */
 router.put('/files/*path', express.text({ type: '*/*', limit: '10mb' }), async (req: Request, res: Response) => {
   // Extract path from URL (everything after /files/)
@@ -451,17 +457,17 @@ router.put('/files/*path', express.text({ type: '*/*', limit: '10mb' }), async (
   }
   
   try {
-    const validation = validatePath(programCwd, requestedPath);
-    if (!validation.valid) {
-      return apiError.forbidden(res, validation.error);
-    }
+    // Allow absolute paths directly, resolve relative paths from cwd
+    const resolvedPath = requestedPath.startsWith('/')
+      ? resolve(requestedPath)
+      : resolve(programCwd, requestedPath);
     
     // Ensure parent directory exists
-    const parentDir = dirname(validation.resolved);
+    const parentDir = dirname(resolvedPath);
     await mkdir(parentDir, { recursive: true });
     
-    await writeFile(validation.resolved, content, 'utf-8');
-    res.json({ ok: true, path: validation.relative, size: content.length });
+    await writeFile(resolvedPath, content, 'utf-8');
+    res.json({ ok: true, path: resolvedPath, size: content.length });
   } catch (error) {
     console.error('[API] Failed to write file:', error);
     return apiError.internal(res, 'Failed to write file');

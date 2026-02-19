@@ -3,13 +3,6 @@ var currentPath = '';
 async function loadDirectory(path, navigate) {
   currentPath = path || '';
   
-  // Update URL to reflect current path
-  // navigate=true creates history entry (for back button)
-  // navigate=false uses replaceState (for initial load)
-  if (navigate) {
-    window.appletAPI.navigateAppletUrlParam('path', currentPath);
-  }
-  
   var fileList = document.getElementById('fileList');
   fileList.innerHTML = '<div class="loading">Loading...</div>';
   
@@ -24,6 +17,11 @@ async function loadDirectory(path, navigate) {
     
     // API returns absolute path in data.path
     currentPath = data.path;
+    
+    // Update URL after API resolves to canonical absolute path
+    if (navigate) {
+      window.appletAPI.navigateAppletUrlParam('path', currentPath);
+    }
     
     renderBreadcrumb(data.path);
     renderFiles(data.files);
@@ -59,6 +57,10 @@ function renderBreadcrumb(absPath) {
   });
 }
 
+function joinPath(base, name) {
+  return base === '/' ? '/' + name : base + '/' + name;
+}
+
 function renderFiles(files) {
   var fileList = document.getElementById('fileList');
   
@@ -72,7 +74,7 @@ function renderFiles(files) {
     var f = files[i];
     var icon = f.type === 'directory' ? '📁' : getFileIcon(f.name);
     var size = f.type === 'file' ? formatSize(f.size) : '';
-    var filePath = currentPath + '/' + f.name;
+    var filePath = joinPath(currentPath, f.name);
     
     if (f.type === 'directory') {
       // Directories reload current applet - use div with click handler
@@ -114,7 +116,7 @@ function renderFiles(files) {
   fileList.querySelectorAll('.file-item[data-type="directory"]').forEach(function(item) {
     item.addEventListener('click', function() {
       var name = this.getAttribute('data-name');
-      var newPath = currentPath + '/' + name;
+      var newPath = joinPath(currentPath, name);
       loadDirectory(newPath, true);
     });
   });

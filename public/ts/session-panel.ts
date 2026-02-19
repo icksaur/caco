@@ -538,13 +538,14 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   titleSpan.title = displayName;
   item.appendChild(titleSpan);
   
-  // CWD path (abbreviated)
+  // CWD path (abbreviated) with model name prefix
   if (session.cwd) {
     const cwdSpan = document.createElement('span');
     cwdSpan.className = 'session-cwd';
-    // Show last path segment for brevity
     const cwdParts = session.cwd.split('/');
-    cwdSpan.textContent = cwdParts[cwdParts.length - 1] || session.cwd;
+    const dirName = (cwdParts[cwdParts.length - 1] || session.cwd) + '/';
+    const shortModel = session.model?.split('/').pop() ?? '';
+    cwdSpan.textContent = shortModel ? `${shortModel} ${dirName}` : dirName;
     cwdSpan.title = session.cwd;
     item.appendChild(cwdSpan);
   }

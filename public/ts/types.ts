@@ -20,6 +20,7 @@ export interface ModelInfo {
 export interface SessionData {
   sessionId: string;
   cwd?: string;         // Working directory
+  model?: string;       // Model ID (e.g. "claude-sonnet-4")
   name?: string;        // Custom name from Caco storage
   summary?: string;     // SDK-generated summary
   updatedAt?: string;

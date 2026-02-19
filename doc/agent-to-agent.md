@@ -100,12 +100,29 @@ Discover available models for spawning sessions.
 
 ### create_agent_session
 
-Create a new session with a specific working directory and model. Optional `initialMessage` sent immediately with `source: 'agent'`.
+Create a new session with a specific working directory and model. Provide `initialMessage` to create and prompt in one step.
 
 **Model selection guidance:**
 - Spawning for code edits? → `claude-sonnet-4.5`
 - Spawning for analysis or document generation? → `claude-opus-4.5`
 - Unsure? → `claude-sonnet-4.5` (faster, cheaper, good default)
+
+### list_agent_sessions (not yet implemented)
+
+List sessions visible to the agent. Returns session ID, name, model, cwd, status, and age. Enables finding sessions by name (e.g. "code review") without knowing the ID.
+
+**Parameters:**
+- `status` (optional) - Filter by status: `idle`, `streaming`, `all` (default: `all`)
+- `query` (optional) - Fuzzy match against session name, cwd, and model
+
+**Returns:** Array of `{ sessionId, name, model, cwd, status, updatedAt }`
+
+**Rationale:** Currently an agent can create and message sessions but cannot discover existing ones. The only way to find a session is to already have its ID. This makes it impossible to:
+- Resume or check on a session the user renamed (e.g. "code review")
+- Find sessions spawned by other agents
+- Discover what's running before spawning duplicates
+
+The backend already has `GET /api/sessions` which returns grouped sessions with all needed fields. This tool wraps that endpoint, flattens the grouped structure, and returns a simple list.
 
 ## Open Questions
 

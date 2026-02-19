@@ -50,6 +50,7 @@ See [doc-guidelines.md](doc-guidelines.md) for documentation standards.
 - [unified-stream.md](unified-stream.md) - WebSocket streaming design
 
 ## Research
+- [ide.md](ide.md) - Copilot CLI ↔ VS Code integration via `/ide` (lock files, Unix sockets)
 - [research/environments-research.md](research/environments-research.md) - Environment control research
 - [research/applet-agent-comm.md](research/applet-agent-comm.md) - Applet-agent communication patterns
 - [research/out-of-band-input.md](research/out-of-band-input.md) - Injecting input into busy agent sessions

@@ -168,15 +168,13 @@ The target session receives your message with source: 'agent'. Your session ID i
   const createAgentSession = defineTool('create_agent_session', {
     description: `Create a new agent session with a specific working directory and model. Use this to spawn specialist agents for subtasks.
 
+Provide \`initialMessage\` to create and prompt in one step. Tell the target to "send_agent_message(requestingSession, 'Results: ...')" so it can report back when finished.
+
 **Model selection (required):**
 - \`claude-sonnet-4.5\` - General-purpose engineering: edit/compile/test/fix cycles
 - \`claude-opus-4.5\` - Reasoning, documents, analysis, complex planning
 - \`gpt-5-mini\` - Simple automation tasks (slower, but follows instructions reliably)
-- Use \`list_models\` to see all available models
-
-Returns the new session ID. Use send_agent_message to send work to it.
-
-**Tip**: After creating, immediately send a message that includes callback instructions so the new session can report back when finished.`,
+- Use \`list_models\` to see all available models`,
 
     parameters: z.object({
       cwd: z.string().describe('Working directory for the new session'),

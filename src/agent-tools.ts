@@ -77,7 +77,7 @@ The target session receives your message with source: 'agent'. Your session ID i
 
         await response.json();
         return { 
-          textResultForLlm: `Message sent to session ${sessionId}. Target will process asynchronously. Include callback instructions like: "send_agent_message(requestingSession, 'results')" so target can reply.`,
+          textResultForLlm: `Message sent to session ${sessionId}. The target session will work independently and reply via send_agent_message when done. Do not poll or wait.`,
           resultType: 'text' as const
         };
       } catch (err) {
@@ -203,13 +203,15 @@ Provide \`initialMessage\` to create and prompt in one step. Tell the target to 
         
         // If initial message provided, send it
         if (initialMessage) {
+          const correlationId = getCorrelationId(sessionRef.id);
           const msgResponse = await fetch(`${SERVER_URL}/api/sessions/${newSessionId}/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               prompt: initialMessage,
               source: 'agent',
-              fromSession: sessionRef.id
+              fromSession: sessionRef.id,
+              correlationId
             })
           });
           
@@ -221,7 +223,7 @@ Provide \`initialMessage\` to create and prompt in one step. Tell the target to 
           }
           
           return { 
-            textResultForLlm: `Created session ${newSessionId} in ${cwd} and sent initial message. Include callback instructions like "send_agent_message(requestingSession, 'results')" so the new session can reply.`,
+            textResultForLlm: `Created session ${newSessionId} in ${cwd} and sent initial message. The target session will work independently and reply via send_agent_message when done. Do not poll or wait.`,
             resultType: 'text' as const
           };
         }

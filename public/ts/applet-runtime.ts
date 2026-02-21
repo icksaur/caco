@@ -556,17 +556,17 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   instanceDiv.dataset.slug = slug;
   appletView.appendChild(instanceDiv);
   
-  // Render content into instance
-  const styleElement = renderAppletToInstance(instanceDiv, content, slug, label);
-  
-  // Store as current
+  // Set currentApplet BEFORE rendering so onUrlParamsChange can store its handler
   currentApplet = {
     slug,
     label,
     element: instanceDiv,
-    styleElement,
+    styleElement: null,
     popstateHandler: null
   };
+  
+  // Render content into instance (runs applet JS which may call onUrlParamsChange)
+  currentApplet.styleElement = renderAppletToInstance(instanceDiv, content, slug, label);
   
   showAppletPanel();
   

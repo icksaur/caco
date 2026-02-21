@@ -7,6 +7,7 @@
 
 import sessionManager from './session-manager.js';
 import { loadPreferences, savePreferences, getDefaultPreferences, DEFAULT_MODEL } from './preferences.js';
+import { resolveSystemMessage } from './prompts.js';
 import type { UserPreferences, SessionStateConfig, ResumeResult } from './types.js';
 
 /**
@@ -236,7 +237,7 @@ class SessionState {
     
     const newSessionId = await sessionManager.create(sessionCwd, {
       model: finalModel,
-      systemMessage: this._config.systemMessage,
+      systemMessage: resolveSystemMessage(this._config.systemMessage, sessionCwd),
       toolFactory: this._config.toolFactory,
       excludedTools: this._config.excludedTools
     });

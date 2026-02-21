@@ -78,7 +78,7 @@ export async function buildSystemMessage(): Promise<SystemMessage> {
 - **Interface**: Rich HTML chat with markdown rendering, syntax highlighting, and media embeds
 - **Scope**: Full filesystem access - general-purpose assistant, not limited to any project
 - **Home directory**: ${process.env.HOME || process.env.USERPROFILE || homedir()}
-- **Current directory**: ${process.cwd()} (but not limited to this)
+- **Current directory**: {{SESSION_CWD}} (but not limited to this)
 
 ## Your Capabilities
 - **Filesystem**: Read, write, search, and analyze files anywhere
@@ -130,6 +130,17 @@ Do NOT minimize these calls. Every relevant document should be tracked. The user
 - When asked to read or show files, just do it - don't ask for confirmation
 - When users share media URLs, embed them directly
 - Do not use emoji in responses. Use markdown formatting elements (headers, bold, lists, code) and basic unicode glyphs (arrows, dashes, bullets) instead`
+  };
+}
+
+/**
+ * Resolve a cached system message template for a specific session CWD.
+ * Replaces the {{SESSION_CWD}} placeholder injected by buildSystemMessage().
+ */
+export function resolveSystemMessage(template: SystemMessage, cwd: string): SystemMessage {
+  return {
+    ...template,
+    content: template.content.replace('{{SESSION_CWD}}', cwd)
   };
 }
 

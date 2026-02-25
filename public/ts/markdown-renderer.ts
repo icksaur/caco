@@ -3,6 +3,7 @@
  */
 
 import { regions } from './dom-regions.js';
+import { escapeHtml } from './ui-utils.js';
 
 interface MermaidAPI {
   initialize(config: object): void;
@@ -81,7 +82,7 @@ const FORBIDDEN_ATTRS = [
 ];
 
 const FORBIDDEN_TAGS = [
-  'script', 'iframe', 'object', 'embed', 'form', 
+  'script', 'style', 'iframe', 'object', 'embed', 'form',
   'input', 'button', 'textarea', 'select', 'option'
 ];
 
@@ -92,12 +93,13 @@ function configureMarked(): void {
   marked.use({
     renderer: {
       code(code: string, language: string): string {
+        const safe = escapeHtml(code);
         if (language === 'mermaid') {
           const id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
-          return `<div class="mermaid-diagram" data-mermaid-id="${id}">${code}</div>`;
+          return `<div class="mermaid-diagram" data-mermaid-id="${id}">${safe}</div>`;
         }
         const langClass = language ? `language-${language}` : '';
-        return `<pre><code class="hljs ${langClass}">${code}</code></pre>`;
+        return `<pre><code class="hljs ${langClass}">${safe}</code></pre>`;
       }
     }
   });

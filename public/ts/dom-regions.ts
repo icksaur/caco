@@ -439,13 +439,19 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
       return;
     }
 
-    const input = str(args?.command || args?.description);
+    const input = str(args?.command || args?.description || args?.path);
 
-    // Store for later use by tool.execution_complete
     element.dataset.toolName = name;
     if (input) element.dataset.toolInput = input;
 
-    // Set content
+    // For file tools, show just the basename after the tool name
+    const path = str(args?.path);
+    if (path) {
+      const basename = path.split(/[\\/]/).pop() || path;
+      element.textContent = `${name}  ${basename}`;
+      return;
+    }
+
     element.textContent = input ? `${name}\n\`${input}\`` : name;
   },
 

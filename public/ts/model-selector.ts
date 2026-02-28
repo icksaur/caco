@@ -84,6 +84,12 @@ export function loadModels(): void {
     } else if (model.cost < 1) {
       costSpan.textContent = `${model.cost}x`;
       costSpan.classList.add('cheap');
+    } else if (model.cost > 10) {
+      costSpan.textContent = `${model.cost}x`;
+      costSpan.classList.add('ultra');
+    } else if (model.cost > 5) {
+      costSpan.textContent = `${model.cost}x`;
+      costSpan.classList.add('premium');
     } else if (model.cost > 1) {
       costSpan.textContent = `${model.cost}x`;
       costSpan.classList.add('expensive');

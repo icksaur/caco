@@ -1142,6 +1142,8 @@ main {
 .model-cost.free { color: var(--color-success-bright); }
 .model-cost.cheap { color: #8bc34a; }
 .model-cost.expensive { color: #ff9800; }
+.model-cost.premium { color: #f44336; }
+.model-cost.ultra { color: #ab47bc; }
 
 /* CWD group headers */
 .cwd-header {

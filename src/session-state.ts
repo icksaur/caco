@@ -276,6 +276,10 @@ class SessionState {
     
     this.setActiveSessionId(result.sessionId, clientId);
     this._preferences.lastSessionId = result.sessionId;
+    const resumedCwd = sessionManager.getSessionCwd(result.sessionId);
+    if (resumedCwd) {
+      this._preferences.lastCwd = resumedCwd;
+    }
     await savePreferences(this._preferences);
     
     return result;

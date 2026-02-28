@@ -125,7 +125,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
   
   try {
     const result = await sessionState.switchSession(sessionId, clientId);
-    const cwd = sessionState.preferences.lastCwd;
+    const cwd = sessionManager.getSessionCwd(result.sessionId) || sessionState.preferences.lastCwd;
     const isBusy = sessionManager.isBusy(result.sessionId);
     
     // NOTE: We do NOT mark observed here - that happens when user sees session.idle

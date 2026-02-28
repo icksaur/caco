@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseMessageSource, prefixMessageSource } from '../../src/prompts.js';
+import { parseMessageSource, prefixMessageSource } from '../../src/message-source.js';
 
 describe('parseMessageSource', () => {
   describe('user messages', () => {

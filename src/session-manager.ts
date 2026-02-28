@@ -160,8 +160,14 @@ class SessionManager {
   // sessionId → { cwd, summary } (cached from disk)
   private sessionCache = new Map<string, CachedSession>();
   
+  // sessionId → Promise (serializes concurrent resume attempts for the same session)
+  private resumeInProgress = new Map<string, Promise<ResumeResult>>();
+  
   // Path to session state directory
   private stateDir = join(homedir(), '.copilot', 'session-state');
+  
+  // Maximum concurrent active SDK sessions (evict LRU inactive sessions)
+  private static readonly MAX_ACTIVE_SESSIONS = 5;
   
   // Cached model list from SDK
   private cachedModels: SDKModelInfo[] = [];
@@ -288,11 +294,37 @@ class SessionManager {
 
   /**
    * Resume an existing session
+   * 
+   * Uses a per-session mutex to prevent concurrent resume attempts from
+   * creating duplicate SDK clients. If a resume is already in progress
+   * for the same sessionId, callers wait for that result instead.
+   * 
    * @param config - Required config with toolFactory (prevents resuming without tools)
    * @returns ResumeResult with sessionId and optional fallback CWD used
    * @throws Error if session doesn't exist
    */
   async resume(sessionId: string, config: ResumeConfig): Promise<ResumeResult> {
+    // If a resume is already in progress for this session, wait for it
+    const existing = this.resumeInProgress.get(sessionId);
+    if (existing) {
+      console.log(`[RESUME] Waiting for in-progress resume of ${sessionId}`);
+      return existing;
+    }
+    
+    const promise = this._doResume(sessionId, config);
+    this.resumeInProgress.set(sessionId, promise);
+    
+    try {
+      return await promise;
+    } finally {
+      this.resumeInProgress.delete(sessionId);
+    }
+  }
+  
+  /**
+   * Internal resume implementation (called by resume() after mutex check)
+   */
+  private async _doResume(sessionId: string, config: ResumeConfig): Promise<ResumeResult> {
     // Get cwd from cache
     const cached = this.sessionCache.get(sessionId);
     if (!cached) {
@@ -339,6 +371,9 @@ class SessionManager {
     // Track active session (needs resume context on first message)
     this.activeSessions.set(sessionId, { cwd, session, client, pendingResumeContext: true });
     
+    // Evict oldest inactive sessions if over the limit
+    this._evictInactiveSessions();
+    
     // Register with storage layer for output persistence
     registerSession(cwd, sessionId);
     ensureSessionMeta(sessionId);
@@ -384,6 +419,34 @@ class SessionManager {
     unregisterSession(cwd);
     
     console.log(`✓ Stopped session ${sessionId}`);
+  }
+
+  /**
+   * Evict oldest inactive sessions when over MAX_ACTIVE_SESSIONS.
+   * Only evicts sessions that are not currently busy (not dispatching).
+   * Called after resume() adds a new active session.
+   */
+  private _evictInactiveSessions(): void {
+    if (this.activeSessions.size <= SessionManager.MAX_ACTIVE_SESSIONS) return;
+    
+    // Find inactive (not busy) sessions to evict
+    const candidates: string[] = [];
+    for (const [id] of this.activeSessions) {
+      if (!dispatchState.isBusy(id)) {
+        candidates.push(id);
+      }
+    }
+    
+    // Evict oldest candidates (Map preserves insertion order, oldest first)
+    // Keep at least MAX_ACTIVE_SESSIONS total
+    const toEvict = this.activeSessions.size - SessionManager.MAX_ACTIVE_SESSIONS;
+    for (let i = 0; i < Math.min(toEvict, candidates.length); i++) {
+      const id = candidates[i];
+      console.log(`[EVICT] Stopping inactive session ${id} (${this.activeSessions.size} active, max ${SessionManager.MAX_ACTIVE_SESSIONS})`);
+      this.stop(id).catch(err => {
+        console.warn(`[EVICT] Failed to stop session ${id}:`, err instanceof Error ? err.message : err);
+      });
+    }
   }
 
   /**

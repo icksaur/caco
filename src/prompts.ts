@@ -4,9 +4,9 @@
  * This module handles all context injection into agent conversations:
  * - System message (session creation)
  * - Resume context (first message after resume)
- * - Message source prefixes (applet/agent/scheduler identification)
  * 
- * All prompt-related logic is centralized here for discoverability and maintainability.
+ * Message source prefixes live in message-source.ts (re-exported here
+ * for backward compatibility).
  */
 
 import { homedir } from 'os';
@@ -15,17 +15,13 @@ import { listApplets } from './applet-store.js';
 import { getSessionMeta } from './storage.js';
 import type { SystemMessage } from './types.js';
 
+// Re-export message source types and functions for backward compatibility
+export { parseMessageSource, prefixMessageSource } from './message-source.js';
+export type { MessageSource, ParsedMessage } from './message-source.js';
+
 // ============================================================================
 // Types
 // ============================================================================
-
-export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler';
-
-export interface ParsedMessage {
-  source: MessageSource;
-  identifier?: string;  // applet slug, session id, or schedule slug
-  cleanContent: string;
-}
 
 export interface ResumeContextInput {
   cwd: string;
@@ -238,76 +234,6 @@ export function buildResumeContextForSession(sessionId: string, cwd: string): st
     envHint: meta?.envHint,
     context: meta?.context
   });
-}
-
-// ============================================================================
-// Message Source Prefixes
-// ============================================================================
-
-/**
- * Parse message source markers from content.
- * Pure function - no I/O, no side effects.
- * 
- * Messages can have source prefixes:
- * - [applet:slug] - from applet iframes
- * - [agent:sessionId] - from agent-to-agent tools
- * - [scheduler:slug] - from scheduled jobs
- * 
- * @param content - Raw message content, possibly with source prefix
- * @returns Parsed source, identifier, and clean content without prefix
- */
-export function parseMessageSource(content: string): ParsedMessage {
-  // Parse applet marker: [applet:slug]
-  const appletMatch = content.match(/^\[applet:([^\]]+)\]\s*/);
-  if (appletMatch) {
-    return {
-      source: 'applet',
-      identifier: appletMatch[1],
-      cleanContent: content.slice(appletMatch[0].length)
-    };
-  }
-  
-  // Parse agent marker: [agent:sessionId]
-  const agentMatch = content.match(/^\[agent:([^\]]+)\]\s*/);
-  if (agentMatch) {
-    return {
-      source: 'agent',
-      identifier: agentMatch[1],
-      cleanContent: content.slice(agentMatch[0].length)
-    };
-  }
-  
-  // Parse scheduler marker: [scheduler:slug]
-  const schedulerMatch = content.match(/^\[scheduler:([^\]]+)\]\s*/);
-  if (schedulerMatch) {
-    return {
-      source: 'scheduler',
-      identifier: schedulerMatch[1],
-      cleanContent: content.slice(schedulerMatch[0].length)
-    };
-  }
-  
-  return { source: 'user', cleanContent: content };
-}
-
-/**
- * Create a source prefix for a message.
- * Inverse of parseMessageSource.
- * 
- * @param source - The message source type
- * @param identifier - The identifier (slug or session id)
- * @param content - The message content
- * @returns Prefixed content string
- */
-export function prefixMessageSource(
-  source: MessageSource, 
-  identifier: string, 
-  content: string
-): string {
-  if (source === 'user') {
-    return content;
-  }
-  return `[${source}:${identifier}] ${content}`;
 }
 
 // ============================================================================

@@ -103,16 +103,16 @@ app.use((_req, res, next) => {
 // Routes
 
 // Serve chat interface with injected server hostname (BEFORE static files)
+// Read and transform once at startup — hostname doesn't change at runtime
 const indexHtmlPath = join(__dirname, 'public', 'index.html');
 const serverHostname = hostname();
+const cachedIndexHtml = readFileSync(indexHtmlPath, 'utf-8').replace(
+  '</head>',
+  `<script>window.SERVER_HOSTNAME = ${JSON.stringify(serverHostname)};</script></head>`
+);
 
 app.get('/', (_req, res) => {
-  const html = readFileSync(indexHtmlPath, 'utf-8');
-  const injectedHtml = html.replace(
-    '</head>',
-    `<script>window.SERVER_HOSTNAME = ${JSON.stringify(serverHostname)};</script></head>`
-  );
-  res.type('html').send(injectedHtml);
+  res.type('html').send(cachedIndexHtml);
 });
 
 // Static files (after index.html route so injection works)

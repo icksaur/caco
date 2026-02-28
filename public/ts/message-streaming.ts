@@ -17,7 +17,7 @@ import { scrollToBottom } from './ui-utils.js';
 import { getActiveSessionId, setActiveSession, setLoadingHistory, isLoadingHistory } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { isViewState, setViewState, setFormEnabled } from './view-controller.js';
-import { onEvent, onReconnect, subscribeToSession, type SessionEvent } from './websocket.js';
+import { onEvent, onReconnect, subscribeToSession, requestHistory, type SessionEvent } from './websocket.js';
 import { showToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 import { resetTextareaHeight } from './multiline-input.js';
@@ -26,6 +26,7 @@ import { removeImage } from './image-paste.js';
 import { markSessionObserved } from './session-observed.js';
 import { handleContextEvent, sendAppletContext } from './context-footer.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
+import { isHistoryPending } from './history.js';
 
 // Re-export for external callers
 export { setLoadingHistory };
@@ -105,7 +106,14 @@ function registerWsHandlers(): void {
     const sessionId = getActiveSessionId();
     if (!sessionId || !isViewState('chatting')) return;
     
-    syncFormWithServer(sessionId);
+    // Re-request history if a request was in-flight when the WS dropped
+    // (otherwise the historyComplete event is lost and the UI hangs)
+    if (isHistoryPending()) {
+      console.log('[WS] Re-requesting history after reconnect');
+      requestHistory(sessionId);
+    }
+    
+    void syncFormWithServer(sessionId);
   });
 }
 

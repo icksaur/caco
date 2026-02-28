@@ -11,6 +11,18 @@ import { onHistoryComplete } from './websocket.js';
 import { clearContextFooter } from './context-footer.js';
 import { regions } from './dom-regions.js';
 
+const HISTORY_TIMEOUT_MS = 15000;
+
+let historyPending = false;
+
+/**
+ * Whether a history request is in-flight (waiting for historyComplete).
+ * Used by reconnect logic to re-issue lost requests.
+ */
+export function isHistoryPending(): boolean {
+  return historyPending;
+}
+
 /**
  * Wait for history to stream via WebSocket
  * Sets loadingHistory=true and clears chat.
@@ -18,17 +30,27 @@ import { regions } from './dom-regions.js';
  * During history loading, terminal events (session.idle) are guarded
  * from changing form state (see message-streaming.ts). The authoritative
  * busy state comes from the historyComplete message's isBusy flag.
+ * 
+ * Times out after 15 seconds to prevent permanent UI hang if the
+ * WebSocket drops during history streaming.
  */
 export function waitForHistoryComplete(): Promise<void> {
   setLoadingHistory(true);
+  historyPending = true;
   
   // Clear existing chat and context footer before loading new history
   regions.chat.clear();
   clearContextFooter();
   
   return new Promise<void>((resolve) => {
-    const unsubscribe = onHistoryComplete((data) => {
+    let settled = false;
+    
+    const finish = (data?: { isBusy?: boolean }) => {
+      if (settled) return;
+      settled = true;
+      historyPending = false;
       unsubscribe();
+      clearTimeout(timer);
       setLoadingHistory(false);
       
       // Sync form/cursor state with session's actual busy status.
@@ -42,7 +64,14 @@ export function waitForHistoryComplete(): Promise<void> {
         loadModels();
       }
       resolve();
-    });
+    };
+    
+    const unsubscribe = onHistoryComplete(finish);
+    
+    const timer = setTimeout(() => {
+      console.warn('[HISTORY] Timed out waiting for historyComplete');
+      finish();
+    }, HISTORY_TIMEOUT_MS);
   });
 }
 

@@ -270,9 +270,7 @@ async function activateSession(sessionId: string): Promise<void> {
   // Show loading indicator on session item immediately (before any DOM changes)
   setSessionLoading(sessionId, true);
   
-  regions.chat.clear();
-  
-  // Resume session on server
+  // Resume session on server (don't clear chat yet -- if this fails, keep old chat visible)
   try {
     const response = await fetch(`/api/sessions/${sessionId}/resume`, {
       method: 'POST'
@@ -286,7 +284,7 @@ async function activateSession(sessionId: string): Promise<void> {
       const errorMsg = errorData.error || `Failed to resume session (${response.status})`;
       console.error('[ROUTER] Failed to resume session:', sessionId, errorMsg);
       showToast(errorMsg);
-      return; // Don't change view, just show toast
+      return; // Don't change view or clear chat, just show toast
     }
     
     const data = await response.json() as { 
@@ -309,7 +307,7 @@ async function activateSession(sessionId: string): Promise<void> {
     // isBusy = true means form disabled and cursor visible
     setFormEnabled(!data.isBusy);
     
-    // Load history
+    // Load history (chat is cleared inside waitForHistoryComplete before streaming)
     requestHistory(data.sessionId);
     await waitForHistoryComplete();
     
@@ -321,7 +319,7 @@ async function activateSession(sessionId: string): Promise<void> {
     const errorMsg = error instanceof Error ? error.message : 'Network error';
     console.error('[ROUTER] Error activating session:', error);
     showToast(errorMsg);
-    // Don't change view, just show toast
+    // Don't change view or clear chat, just show toast
   }
 }
 

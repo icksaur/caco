@@ -26,7 +26,7 @@ import { setSessionIntent, getSessionMeta, setSessionMeta } from '../storage.js'
 import { mergeContextSet } from '../context-tools.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
-import { prefixMessageSource } from '../prompts.js';
+import { prefixMessageSource } from '../message-source.js';
 
 const router = Router();
 
@@ -193,6 +193,9 @@ export async function dispatchMessage(
   // Track active dispatch for graceful restart
   dispatchStarted();
   
+  // Guard against double cleanup (inner cleanupAndComplete vs outer catch)
+  let dispatchCompleted = false;
+  
   try {
     // Ensure session is active (defensive - route handler should have done this)
     // Kept as fallback for direct dispatchMessage() calls
@@ -218,7 +221,6 @@ export async function dispatchMessage(
     
     // Subscribe to SDK events and forward them
     type SDKEventCallback = (event: SessionEvent) => void;
-    let dispatchCompleted = false;
     let timeoutHandle: NodeJS.Timeout | undefined;
     
     const cleanupAndComplete = (reason: string) => {
@@ -342,15 +344,18 @@ export async function dispatchMessage(
     }
     
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    onEvent({ type: 'session.error', data: { message } });
-    
-    sessionManager.endDispatch(sessionId);
-    broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
-    if (tempFilePath) {
-      await unlink(tempFilePath).catch(() => {});
+    if (!dispatchCompleted) {
+      dispatchCompleted = true;
+      const message = error instanceof Error ? error.message : String(error);
+      onEvent({ type: 'session.error', data: { message } });
+      
+      sessionManager.endDispatch(sessionId);
+      broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
+      if (tempFilePath) {
+        await unlink(tempFilePath).catch(() => {});
+      }
+      dispatchComplete();
     }
-    dispatchComplete();
   }
 }
 

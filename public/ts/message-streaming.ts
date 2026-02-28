@@ -26,7 +26,7 @@ import { removeImage } from './image-paste.js';
 import { markSessionObserved } from './session-observed.js';
 import { handleContextEvent, renderStatus } from './context-footer.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
-import { isHistoryPending } from './history.js';
+import { isHistoryPending, waitForHistoryComplete } from './history.js';
 
 // Re-export for external callers
 export { setLoadingHistory };
@@ -105,29 +105,39 @@ function registerWsHandlers(): void {
     if (!sessionId || !isViewState('chatting')) return;
     
     // Re-request history if a request was in-flight when the WS dropped
-    // (otherwise the historyComplete event is lost and the UI hangs)
     if (isHistoryPending()) {
       console.log('[WS] Re-requesting history after reconnect');
       requestHistory(sessionId);
+      return;
     }
     
-    void syncFormWithServer(sessionId);
+    // If we were streaming live and the WS dropped (e.g., server restart),
+    // the partial DOM content is stale. Reload full history from disk
+    // so the user sees the completed (or partial) response.
+    void reloadAfterReconnect(sessionId);
   });
 }
 
 /**
- * Check session's busy state on the server and sync form/cursor.
- * Called on WebSocket reconnect to recover from missed terminal events
- * (e.g., server restarted while streaming).
+ * Reload session history after a WS reconnect.
+ * Syncs form state and replays history to recover from missed events.
  */
-async function syncFormWithServer(sessionId: string): Promise<void> {
+async function reloadAfterReconnect(sessionId: string): Promise<void> {
   try {
     const res = await fetch(`/api/sessions/${sessionId}/state`);
     if (!res.ok) return;
     const data = await res.json() as { isBusy?: boolean };
-    setFormEnabled(!data.isBusy);
+    
+    subscribeToSession(sessionId);
+    requestHistory(sessionId);
+    await waitForHistoryComplete();
+    
+    // If session is still busy, keep form disabled (live events will resume)
+    if (data.isBusy) {
+      setFormEnabled(false);
+    }
   } catch {
-    // Network error during reconnect — leave form state as-is
+    // Network error — leave UI as-is
   }
 }
 

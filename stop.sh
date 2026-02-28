@@ -1,27 +1,32 @@
 #!/bin/bash
-# Stop the Copilot web server
+# Stop the Caco server
 
 cd "$(dirname "$0")"
 
-# Port configuration: CACO_PORT → PORT → 3000
-PORT=${CACO_PORT:-${PORT:-3000}}
-
-if [ -f server.pid ]; then
-  PID=$(cat server.pid)
-  if kill -0 $PID 2>/dev/null; then
-    kill $PID
-    echo "✓ Server stopped (PID: $PID)"
-  else
-    echo "Server not running (stale PID: $PID)"
-  fi
-  rm -f server.pid
+# Read port from server.port file, fall back to env, then default
+if [ -f server.port ]; then
+  PORT=$(cat server.port)
+elif [ -n "$CACO_PORT" ]; then
+  PORT=$CACO_PORT
 else
-  # Try to find and kill by port
-  PID=$(lsof -ti:$PORT 2>/dev/null)
-  if [ -n "$PID" ]; then
-    kill $PID
-    echo "✓ Killed process on port $PORT (PID: $PID)"
-  else
-    echo "No server running"
-  fi
+  PORT=${PORT:-53000}
 fi
+
+# Find and kill any node process listening on the port
+PIDS=$(ss -tlnp 2>/dev/null | grep ":$PORT " | grep -oP 'pid=\K[0-9]+' | sort -u)
+
+if [ -z "$PIDS" ]; then
+  # Fallback: try lsof
+  PIDS=$(lsof -ti:$PORT 2>/dev/null)
+fi
+
+if [ -n "$PIDS" ]; then
+  for PID in $PIDS; do
+    kill $PID 2>/dev/null
+  done
+  echo "✓ Server stopped (port $PORT)"
+else
+  echo "No server running on port $PORT"
+fi
+
+rm -f server.pid server.port

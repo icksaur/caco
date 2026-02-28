@@ -34,6 +34,7 @@ public/build/
 
 # Runtime files
 server.pid
+server.port
 server.err
 
 # Working documents

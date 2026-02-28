@@ -477,9 +477,15 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     const error = (typeof rawError === 'string' ? rawError : JSON.stringify(rawError) ?? '').trim();
     const output = success ? result : error;
 
-    // Build: *name* + blank line + code block (blank line prevents Setext heading from --- in output)
+    // Build header: name + filename if available
+    const storedPath = element.dataset.toolInput || '';
+    const basename = storedPath.includes('/') || storedPath.includes('\\')
+      ? storedPath.split(/[\\/]/).pop() || ''
+      : '';
+    const header = basename ? `*${name}  ${basename}*` : `*${name}*`;
+    
     const parts = [input, output].filter(Boolean);
-    const content = `*${name}*\n\n\`\`\`${name}\n${parts.join('\n')}\n\`\`\``;
+    const content = `${header}\n\n\`\`\`${name}\n${parts.join('\n')}\n\`\`\``;
     element.textContent = content;
 
     if (typeof window !== 'undefined' && window.renderMarkdownElement) {

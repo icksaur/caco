@@ -62,6 +62,12 @@ function handleEvent(event: SessionEvent): void {
     return;
   }
   
+  // Handle page reload signal from reload_page tool
+  if (eventType === 'caco.reload') {
+    location.reload();
+    return;
+  }
+  
   // Re-enable form on terminal events (streaming complete)
   // Check BEFORE outer/inner logic since terminal events may not have display elements
   if (isTerminalEvent(eventType)) {

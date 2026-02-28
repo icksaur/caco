@@ -17,6 +17,7 @@ import { createDisplayTools, type CacoEmbedEvent } from './src/display-tools.js'
 import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools } from './src/agent-tools.js';
 import { createMcpAuthTools } from './src/mcp-auth-tools.js';
+import { createDevDocsTool } from './src/dev-docs-tool.js';
 import type { SessionIdRef } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
@@ -69,7 +70,10 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
   // MCP auth tools for registering OAuth-protected servers
   const mcpAuthTools = createMcpAuthTools();
   
-  return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools];
+  // Dev docs tool for self-modification discovery
+  const devDocs = createDevDocsTool(programCwd);
+  
+  return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs];
 };
 
 // System message for sessions - built at startup from prompts module

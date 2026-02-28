@@ -17,7 +17,7 @@ import { scrollToBottom } from './ui-utils.js';
 import { getActiveSessionId, setActiveSession, setLoadingHistory, isLoadingHistory } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { isViewState, setViewState, setFormEnabled } from './view-controller.js';
-import { onEvent, subscribeToSession, type SessionEvent } from './websocket.js';
+import { onEvent, onReconnect, subscribeToSession, type SessionEvent } from './websocket.js';
 import { showToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 import { resetTextareaHeight } from './multiline-input.js';
@@ -100,6 +100,29 @@ function handleEvent(event: SessionEvent): void {
 
 function registerWsHandlers(): void {
   onEvent(handleEvent);
+  
+  onReconnect(() => {
+    const sessionId = getActiveSessionId();
+    if (!sessionId || !isViewState('chatting')) return;
+    
+    syncFormWithServer(sessionId);
+  });
+}
+
+/**
+ * Check session's busy state on the server and sync form/cursor.
+ * Called on WebSocket reconnect to recover from missed terminal events
+ * (e.g., server restarted while streaming).
+ */
+async function syncFormWithServer(sessionId: string): Promise<void> {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/state`);
+    if (!res.ok) return;
+    const data = await res.json() as { isBusy?: boolean };
+    setFormEnabled(!data.isBusy);
+  } catch {
+    // Network error during reconnect — leave form state as-is
+  }
 }
 
 /**

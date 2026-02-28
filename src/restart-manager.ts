@@ -131,12 +131,22 @@ function checkAndRestart(): void {
     spawnServer();
   }
   
-  // Exit gracefully (or call test handler)
-  log('Exiting for restart...');
+  // Defer exit to let event loop flush WebSocket buffers.
+  // Without this, session.idle may not reach the client before
+  // process.exit() tears down all connections.
+  const doExit = () => {
+    log('Exiting for restart...');
+    if (exitHandler) {
+      exitHandler();
+    } else {
+      process.exit(0);
+    }
+  };
+  
   if (exitHandler) {
-    exitHandler();
+    doExit(); // Tests run synchronously
   } else {
-    process.exit(0);
+    setTimeout(doExit, 250);
   }
 }
 

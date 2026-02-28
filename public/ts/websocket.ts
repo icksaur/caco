@@ -35,11 +35,13 @@ type StateCallback = (state: Record<string, unknown>) => void;
 type EventCallback = (event: SessionEvent) => void;
 type HistoryCompleteCallback = (data?: { isBusy?: boolean }) => void;
 type ConnectCallback = () => void;
+type ReconnectCallback = () => void;
 type GlobalEventCallback = (event: SessionEvent) => void;
 const stateCallbacks: Set<StateCallback> = new Set();
 const eventCallbacks: Set<EventCallback> = new Set();
 const historyCompleteCallbacks: Set<HistoryCompleteCallback> = new Set();
 const connectCallbacks: Set<ConnectCallback> = new Set();
+const reconnectCallbacks: Set<ReconnectCallback> = new Set();
 const globalEventCallbacks: Set<GlobalEventCallback> = new Set();
 
 const pendingRequests = new Map<string, {
@@ -126,6 +128,10 @@ function doConnect(myConnectionId: number): void {
     
     if (wasReconnect) {
       showToast('✔ Connected', { type: 'success', autoHideMs: 2000 });
+      
+      for (const cb of reconnectCallbacks) {
+        try { cb(); } catch (err) { console.error('[WS] Reconnect callback error:', err); }
+      }
     }
     
     // Re-subscribe to active session after reconnect
@@ -400,6 +406,15 @@ export function onEvent(callback: EventCallback): () => void {
 export function onHistoryComplete(callback: HistoryCompleteCallback): () => void {
   historyCompleteCallbacks.add(callback);
   return () => historyCompleteCallbacks.delete(callback);
+}
+
+/**
+ * Subscribe to reconnect event (fires only on reconnect, not initial connect)
+ * Returns unsubscribe function
+ */
+export function onReconnect(callback: ReconnectCallback): () => void {
+  reconnectCallbacks.add(callback);
+  return () => reconnectCallbacks.delete(callback);
 }
 
 /**

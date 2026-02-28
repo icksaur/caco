@@ -268,15 +268,17 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
   }
   
   const isActive = sessionManager.isActive(sessionId);
+  const isBusy = sessionManager.isBusy(sessionId);
   const meta = getSessionMeta(sessionId);
   const model = meta?.model || null;
   
   res.json({
     sessionId,
-    status: isActive ? 'idle' : 'inactive',
+    status: isBusy ? 'busy' : (isActive ? 'idle' : 'inactive'),
     cwd,
     model,
-    isActive
+    isActive,
+    isBusy
   });
 });
 

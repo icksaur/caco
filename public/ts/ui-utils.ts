@@ -27,10 +27,29 @@ export function escapeHtml(text: string): string {
 }
 
 /**
- * Format relative time
- * @param dateStr - ISO date string
- * @param compact - If true, use compact format (e.g., '5m ago' instead of '5 min')
+ * Format file paths as display names (just the filename).
+ * Returns array of {name, path} for rendering.
  */
+export function formatContextFiles(files: string[], limit = 3): { name: string; path: string }[] {
+  return files.slice(0, limit).map(path => ({
+    name: path.split(/[\\/]/).pop() || path,
+    path
+  }));
+}
+
+/**
+ * Format model + CWD as display parts.
+ * Shared between context footer and session items.
+ */
+export function formatStatusParts(modelName: string, cwd: string): { model?: string; dirName?: string; fullCwd?: string } {
+  const result: { model?: string; dirName?: string; fullCwd?: string } = {};
+  if (modelName) result.model = modelName;
+  if (cwd) {
+    result.dirName = (cwd.split(/[\\/]/).pop() || cwd) + '/';
+    result.fullCwd = cwd;
+  }
+  return result;
+}
 export function formatAge(dateStr: string | undefined, compact = false): string {
   if (!dateStr) return '';
   

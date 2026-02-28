@@ -27,6 +27,7 @@ export interface SessionData {
   isBusy?: boolean;
   isUnobserved?: boolean;   // Has new activity since last viewed
   currentIntent?: string;   // What session is currently working on
+  contextFiles?: string[];  // Recently edited files from session context
   scheduleSlug?: string;    // If created by a schedule
   scheduleNextRun?: string; // Next scheduled run time
 }

@@ -7,6 +7,7 @@
  */
 
 import { regions } from './dom-regions.js';
+import { formatContextFiles, formatStatusParts } from './ui-utils.js';
 
 export interface SessionContext {
   files?: string[];
@@ -22,14 +23,11 @@ export function renderContextFooter(context: SessionContext): void {
   const linksContainer = footer.querySelector('.context-links');
   if (!linksContainer) return;
   
-  const links: string[] = [];
-  
-  const files = context.files ?? [];
-  for (const path of files.slice(0, 3)) {
-    const name = path.split(/[\\/]/).pop() || path;
+  const files = formatContextFiles(context.files ?? []);
+  const links = files.map(({ name, path }) => {
     const encodedPath = encodeURIComponent(path);
-    links.push(`<a href="/?applet=text-editor&path=${encodedPath}" title="${path}">${name}</a>`);
-  }
+    return `<a href="/?applet=text-editor&path=${encodedPath}" title="${path}">${name}</a>`;
+  });
   
   linksContainer.innerHTML = links.length
     ? links.join('<span class="context-sep">·</span>')
@@ -46,16 +44,16 @@ export function renderStatus(modelName: string, cwd: string): void {
   const statusEl = footer.querySelector('.context-status') as HTMLElement | null;
   if (!statusEl) return;
   
+  const { model, dirName, fullCwd } = formatStatusParts(modelName, cwd);
   const parts: string[] = [];
   
-  if (modelName) {
-    parts.push(`<span class="context-model">${modelName}</span>`);
+  if (model) {
+    parts.push(`<span class="context-model">${model}</span>`);
   }
   
-  if (cwd) {
-    const dirName = (cwd.split(/[\\/]/).pop() || cwd) + '/';
-    const encodedCwd = encodeURIComponent(cwd);
-    parts.push(`<a href="/?applet=file-browser&path=${encodedCwd}" title="${cwd}">${dirName}</a>`);
+  if (dirName && fullCwd) {
+    const encodedCwd = encodeURIComponent(fullCwd);
+    parts.push(`<a href="/?applet=file-browser&path=${encodedCwd}" title="${fullCwd}">${dirName}</a>`);
   }
   
   statusEl.innerHTML = parts.join('<span class="context-sep">·</span>');

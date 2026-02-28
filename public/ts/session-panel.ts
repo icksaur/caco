@@ -3,8 +3,8 @@
  */
 
 import type { SessionsResponse, SessionData } from './types.js';
-import { formatAge } from './ui-utils.js';
-import { getActiveSessionId } from './app-state.js';
+import { formatAge, formatContextFiles, formatStatusParts } from './ui-utils.js';
+import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { setViewState } from './view-controller.js';
 import { sessionClick, newSessionClick } from './router.js';
@@ -520,7 +520,10 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   item.dataset.sessionId = session.sessionId;
   item.onclick = () => sessionClick(session.sessionId);
   
-  // State indicator (leftmost) - busy throbber or unobserved dot
+  // Row 1: indicator + title + age + action buttons
+  const row1 = document.createElement('div');
+  row1.className = 'session-row session-row-main';
+  
   const indicator = document.createElement('span');
   indicator.className = 'session-indicator';
   if (session.isBusy) {
@@ -528,37 +531,22 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   } else if (session.isUnobserved) {
     indicator.classList.add('unobserved');
   }
-  item.appendChild(indicator);
+  row1.appendChild(indicator);
   
-  // Title (truncated with ellipsis)
   const displayName = session.name || session.summary || 'No summary';
   const titleSpan = document.createElement('span');
   titleSpan.className = 'session-title';
   titleSpan.textContent = displayName;
   titleSpan.title = displayName;
-  item.appendChild(titleSpan);
+  row1.appendChild(titleSpan);
   
-  // CWD path (abbreviated) with model name prefix
-  if (session.cwd) {
-    const cwdSpan = document.createElement('span');
-    cwdSpan.className = 'session-cwd';
-    const cwdParts = session.cwd.split('/');
-    const dirName = (cwdParts[cwdParts.length - 1] || session.cwd) + '/';
-    const shortModel = session.model?.split('/').pop() ?? '';
-    cwdSpan.textContent = shortModel ? `${shortModel} ${dirName}` : dirName;
-    cwdSpan.title = session.cwd;
-    item.appendChild(cwdSpan);
-  }
-  
-  // Age
   if (session.updatedAt) {
     const ageSpan = document.createElement('span');
     ageSpan.className = 'session-age';
     ageSpan.textContent = formatAge(session.updatedAt);
-    item.appendChild(ageSpan);
+    row1.appendChild(ageSpan);
   }
   
-  // Action buttons (edit, delete) - not shown when busy
   if (!session.isBusy) {
     const editBtn = document.createElement('button');
     editBtn.className = 'session-edit';
@@ -568,7 +556,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
       e.stopPropagation();
       void renameSession(session.sessionId, displayName);
     };
-    item.appendChild(editBtn);
+    row1.appendChild(editBtn);
     
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'session-delete';
@@ -577,7 +565,39 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
       e.stopPropagation();
       void deleteSession(session.sessionId, displayName);
     };
-    item.appendChild(deleteBtn);
+    row1.appendChild(deleteBtn);
+  }
+  
+  item.appendChild(row1);
+  
+  // Row 2: meta-context (files · model · cwd)
+  const metaParts: string[] = [];
+  const sep = '<span class="context-sep">·</span>';
+  
+  const files = formatContextFiles(session.contextFiles ?? []);
+  if (files.length) {
+    const fileSpans = files.map(({ name, path }) =>
+      `<span class="session-meta-file" title="${escapeHtml(path)}">${escapeHtml(name)}</span>`
+    );
+    metaParts.push(fileSpans.join(sep));
+  }
+  
+  const models = getAvailableModels();
+  const modelName = models.find(m => m.id === session.model)?.name || '';
+  const { model, dirName, fullCwd } = formatStatusParts(modelName, session.cwd || '');
+  
+  if (model) {
+    metaParts.push(`<span class="context-model">${escapeHtml(model)}</span>`);
+  }
+  if (dirName) {
+    metaParts.push(`<span title="${escapeHtml(fullCwd || '')}">${escapeHtml(dirName)}</span>`);
+  }
+  
+  if (metaParts.length) {
+    const row2 = document.createElement('div');
+    row2.className = 'session-row session-row-meta';
+    row2.innerHTML = metaParts.join(sep);
+    item.appendChild(row2);
   }
   
   return item;

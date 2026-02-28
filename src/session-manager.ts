@@ -85,6 +85,7 @@ interface SessionListItem {
   isBusy: boolean;
   isUnobserved: boolean;  // Session completed work since last viewed
   currentIntent: string | null; // Last reported intent
+  contextFiles: string[] | null; // Recently edited files from session context
   scheduleSlug: string | null;  // If created by a schedule
   scheduleNextRun: string | null; // Next scheduled run time
 }
@@ -569,10 +570,10 @@ class SessionManager {
       const model = meta?.model || null;
       const isUnobserved = unobservedTracker.isUnobserved(sessionId);
       const currentIntent = meta?.currentIntent || null;
-      // Schedule info is filled in by the route handler (async lookup)
+      const contextFiles = meta?.context?.files?.slice(0, 3) || null;
       const scheduleSlug = null;
       const scheduleNextRun = null;
-      result.push({ sessionId, cwd, model, name, summary, updatedAt, isBusy, isUnobserved, currentIntent, scheduleSlug, scheduleNextRun });
+      result.push({ sessionId, cwd, model, name, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, scheduleSlug, scheduleNextRun });
     }
     return result;
   }

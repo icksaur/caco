@@ -14,7 +14,7 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { getActiveSessionId, setActiveSession, setLoadingHistory, isLoadingHistory } from './app-state.js';
+import { getActiveSessionId, setActiveSession, setLoadingHistory, isLoadingHistory, getSelectedModel, getAvailableModels } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { isViewState, setViewState, setFormEnabled } from './view-controller.js';
 import { onEvent, onReconnect, subscribeToSession, requestHistory, type SessionEvent } from './websocket.js';
@@ -24,7 +24,7 @@ import { resetTextareaHeight } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
 import { removeImage } from './image-paste.js';
 import { markSessionObserved } from './session-observed.js';
-import { handleContextEvent, sendAppletContext } from './context-footer.js';
+import { handleContextEvent, renderStatus } from './context-footer.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
 import { isHistoryPending } from './history.js';
 
@@ -75,12 +75,10 @@ function handleEvent(event: SessionEvent): void {
       setFormEnabled(true);
       
       // Mark session as observed - user has seen the completed response
-      // Also capture applet context (fire-and-forget)
       if (eventType === 'session.idle') {
         const sessionId = getActiveSessionId();
         if (sessionId) {
           void markSessionObserved(sessionId);
-          void sendAppletContext(sessionId);
         }
       }
     }
@@ -178,6 +176,12 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       setActiveSession(sessionId, data.cwd);
       subscribeToSession(sessionId);
       setViewState('chatting');
+      
+      // Show model + cwd in footer status bar
+      const modelId = getSelectedModel();
+      const models = getAvailableModels();
+      const modelMatch = models.find(m => m.id === modelId);
+      renderStatus(modelMatch?.name || modelId?.split('/').pop() || '', data.cwd || '');
     }
     
     const res = await fetch(`/api/sessions/${sessionId}/messages`, {

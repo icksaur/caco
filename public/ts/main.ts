@@ -19,7 +19,8 @@ import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
 import { initRouter, toggleSessions, toggleApplet } from './router.js';
 import { actionBtnClick } from './session-panel.js';
-import { setActiveSession } from './app-state.js';
+import { setActiveSession, getSelectedModel, getAvailableModels } from './app-state.js';
+import { renderStatus } from './context-footer.js';
 
 declare global {
   interface Window {
@@ -124,10 +125,17 @@ document.addEventListener('DOMContentLoaded', () => {
   
   if (targetSessionId) {
     // Session specified - set active and request history
-    setActiveSession(targetSessionId, prefs?.lastCwd || '');
+    const cwd = prefs?.lastCwd || '';
+    setActiveSession(targetSessionId, cwd);
     subscribeToSession(targetSessionId);
     requestHistory(targetSessionId);
     await waitForHistoryComplete();
+    
+    // Show model + cwd in footer
+    const modelId = getSelectedModel();
+    const models = getAvailableModels();
+    const model = models.find(m => m.id === modelId);
+    renderStatus(model?.name || modelId?.split('/').pop() || '', cwd);
     
     // Show chat view
     if (regions.chat.el.children.length > 0) {

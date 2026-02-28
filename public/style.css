@@ -1777,12 +1777,19 @@ main {
 }
 
 .context-footer.has-context {
-  display: block;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-sm);
 }
 
 .context-footer .context-links {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.context-footer .context-status {
+  flex-shrink: 0;
 }
 
 .context-footer a {
@@ -1799,6 +1806,6 @@ main {
   opacity: 0.5;
 }
 
-.context-footer .context-applet {
-  font-style: italic;
+.context-footer .context-model {
+  opacity: 0.7;
 }

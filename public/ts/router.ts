@@ -13,7 +13,7 @@
  */
 
 import { setFormEnabled, setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, type ViewState } from './view-controller.js';
-import { setActiveSession, getActiveSessionId, getCurrentCwd } from './app-state.js';
+import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
@@ -23,6 +23,7 @@ import { showSessionManager, setSessionLoading } from './session-panel.js';
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 import { regions } from './dom-regions.js';
+import { renderStatus, clearStatus } from './context-footer.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -182,6 +183,7 @@ export async function sessionClick(sessionId: string): Promise<void> {
  */
 export function newSessionClick(): void {
   regions.chat.clear();
+  clearStatus();
   
   setViewState('newChat');
   loadModels();
@@ -303,6 +305,9 @@ async function activateSession(sessionId: string): Promise<void> {
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
     subscribeToSession(data.sessionId);
     
+    // Show model + cwd in footer status bar
+    updateStatusBar(data.cwd || getCurrentCwd());
+    
     // Sync form/cursor state with session's busy status
     // isBusy = true means form disabled and cursor visible
     setFormEnabled(!data.isBusy);
@@ -357,6 +362,18 @@ function updateUrl(params: { session?: string | null; applet?: string | null }, 
   } else {
     history.replaceState(null, '', url.toString());
   }
+}
+
+/**
+ * Update the footer status bar with model name and cwd.
+ * Looks up friendly model name from available models.
+ */
+function updateStatusBar(cwd: string): void {
+  const modelId = getSelectedModel();
+  const models = getAvailableModels();
+  const model = models.find(m => m.id === modelId);
+  const modelName = model?.name || modelId?.split('/').pop() || '';
+  renderStatus(modelName, cwd);
 }
 
 /**

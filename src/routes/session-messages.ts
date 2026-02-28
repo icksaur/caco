@@ -23,7 +23,6 @@ import { transformForClient, shouldEmitReload } from '../event-transformer.js';
 import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
 import { getQueue, isFlushTrigger } from '../caco-event-queue.js';
 import { setSessionIntent, getSessionMeta, setSessionMeta } from '../storage.js';
-import { mergeContextSet } from '../context-tools.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
 import { prefixMessageSource } from '../message-source.js';
@@ -286,10 +285,9 @@ export async function dispatchMessage(
           setSessionIntent(sessionId, String(args.intent));
         }
         
-        // Auto-populate context footer from file-touching tools
+        // Auto-populate context footer from file-modifying tools only
         if (args?.path && typeof args.path === 'string') {
-          const fileTool = toolName === 'create' || toolName === 'edit' || toolName === 'view';
-          if (fileTool) {
+          if (toolName === 'create' || toolName === 'edit') {
             autoAddFileContext(sessionId, args.path);
           }
         }
@@ -381,9 +379,11 @@ router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) =
 
 export default router;
 
+const MAX_CONTEXT_FILES = 3;
+
 /**
- * Auto-add file paths to session context when agent uses file tools.
- * Keeps context footer populated without agent cooperation.
+ * Auto-add file paths to session context when agent uses edit/create tools.
+ * Keeps the last 3 files in the context footer. Newest at end, oldest evicted.
  */
 function autoAddFileContext(
   sessionId: string,
@@ -393,11 +393,18 @@ function autoAddFileContext(
   if (!meta) return;
   
   const context = { ...(meta.context ?? {}) };
-  const existing = context.files ?? [];
+  let files = context.files ?? [];
   
-  if (existing.includes(path)) return;
+  // Move to end if already present, otherwise append
+  files = files.filter(f => f !== path);
+  files.push(path);
   
-  context.files = mergeContextSet(existing, [path], 'merge');
+  // Keep only the last N files
+  if (files.length > MAX_CONTEXT_FILES) {
+    files = files.slice(-MAX_CONTEXT_FILES);
+  }
+  
+  context.files = files;
   setSessionMeta(sessionId, { ...meta, context });
   
   broadcastEvent(sessionId, {

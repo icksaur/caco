@@ -1,7 +1,8 @@
 /**
  * Context Footer
  * 
- * Displays session context (files, applet) as a persistent footer below chat.
+ * Left side: recently edited files as clickable links.
+ * Right side: model name + clickable cwd (added via renderStatus).
  * Updated via WebSocket events or on session load.
  */
 
@@ -9,16 +10,13 @@ import { regions } from './dom-regions.js';
 
 export interface SessionContext {
   files?: string[];
-  applet?: string[];
   [key: string]: string[] | undefined;
 }
 
 /**
- * Render context footer with file links and applet.
- * Hides footer when context is empty.
+ * Render file links in the context footer.
  */
 export function renderContextFooter(context: SessionContext): void {
-  // Use regions.footer — scoped, cannot collide with chat content duplicates
   const footer = regions.footer.el;
   
   const linksContainer = footer.querySelector('.context-links');
@@ -26,42 +24,67 @@ export function renderContextFooter(context: SessionContext): void {
   
   const links: string[] = [];
   
-  // Files - show basename only, full path in href (max 5)
   const files = context.files ?? [];
-  for (const path of files.slice(0, 5)) {
-    // Handle both Windows (\) and Unix (/) path separators
+  for (const path of files.slice(0, 3)) {
     const name = path.split(/[\\/]/).pop() || path;
     const encodedPath = encodeURIComponent(path);
     links.push(`<a href="/?applet=text-editor&path=${encodedPath}" title="${path}">${name}</a>`);
   }
   
-  // Show count if more than 5 files
-  if (files.length > 5) {
-    links.push(`<span class="context-more">+${files.length - 5} more</span>`);
-  }
+  linksContainer.innerHTML = links.length
+    ? links.join('<span class="context-sep">·</span>')
+    : '';
   
-  // Applet - show slug with params
-  const applet = context.applet;
-  if (applet?.length) {
-    const [slug, ...params] = applet;
-    const qs = params.length ? '&' + params.join('&') : '';
-    links.push(`<a href="/?applet=${slug}${qs}" class="context-applet">[${slug}]</a>`);
-  }
-  
-  // Hide if empty
-  if (links.length === 0) {
-    footer.classList.remove('has-context');
-    linksContainer.innerHTML = '';
-    return;
-  }
-  
-  // Render links with separators
-  linksContainer.innerHTML = links.join('<span class="context-sep">·</span>');
-  footer.classList.add('has-context');
+  updateFooterVisibility();
 }
 
 /**
- * Clear the context footer.
+ * Render status (model name + cwd) in the right side of the footer.
+ */
+export function renderStatus(modelName: string, cwd: string): void {
+  const footer = regions.footer.el;
+  const statusEl = footer.querySelector('.context-status') as HTMLElement | null;
+  if (!statusEl) return;
+  
+  const parts: string[] = [];
+  
+  if (modelName) {
+    parts.push(`<span class="context-model">${modelName}</span>`);
+  }
+  
+  if (cwd) {
+    const dirName = (cwd.split(/[\\/]/).pop() || cwd) + '/';
+    const encodedCwd = encodeURIComponent(cwd);
+    parts.push(`<a href="/?applet=file-browser&path=${encodedCwd}" title="${cwd}">${dirName}</a>`);
+  }
+  
+  statusEl.innerHTML = parts.join('<span class="context-sep">·</span>');
+  updateFooterVisibility();
+}
+
+/**
+ * Clear status from the footer.
+ */
+export function clearStatus(): void {
+  const footer = regions.footer.el;
+  const statusEl = footer.querySelector('.context-status');
+  if (statusEl) statusEl.innerHTML = '';
+  updateFooterVisibility();
+}
+
+/**
+ * Show footer if either side has content, hide if both empty.
+ */
+function updateFooterVisibility(): void {
+  const footer = regions.footer.el;
+  const links = footer.querySelector('.context-links');
+  const status = footer.querySelector('.context-status');
+  const hasContent = (links?.innerHTML || '') !== '' || (status?.innerHTML || '') !== '';
+  footer.classList.toggle('has-context', hasContent);
+}
+
+/**
+ * Clear the context footer (files only — status is independent).
  */
 export function clearContextFooter(): void {
   renderContextFooter({});
@@ -72,43 +95,4 @@ export function clearContextFooter(): void {
  */
 export function handleContextEvent(data: { context: SessionContext }): void {
   renderContextFooter(data.context ?? {});
-}
-
-/**
- * Capture current applet state from URL params.
- * Returns null if no applet is active.
- */
-export function captureAppletState(): string[] | null {
-  const params = new URLSearchParams(location.search);
-  const slug = params.get('applet');
-  if (!slug) return null;
-  
-  // First item is slug, rest are key=value params
-  const items = [slug];
-  params.forEach((v, k) => {
-    if (k !== 'applet') items.push(`${k}=${v}`);
-  });
-  return items;
-}
-
-/**
- * Send captured applet context to server.
- * Fire-and-forget - accepts eventual consistency.
- */
-export async function sendAppletContext(sessionId: string): Promise<void> {
-  const items = captureAppletState();
-  if (!items) return;
-  
-  try {
-    await fetch(`/api/sessions/${sessionId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        setContext: { setName: 'applet', items }
-      })
-    });
-  } catch (error) {
-    // Silent failure - applet context is advisory
-    console.debug('[CONTEXT] Failed to save applet context:', error);
-  }
 }

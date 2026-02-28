@@ -1,33 +1,17 @@
 /**
- * Prompt Building - Consolidated module for all prompt construction.
- * 
- * This module handles all context injection into agent conversations:
- * - System message (session creation)
- * - Resume context (first message after resume)
+ * Prompt Building - System message construction.
  * 
  * Message source prefixes live in message-source.ts (re-exported here
  * for backward compatibility).
  */
 
 import { homedir } from 'os';
-import { existsSync } from 'fs';
 import { listApplets } from './applet-store.js';
-import { getSessionMeta } from './storage.js';
 import type { SystemMessage } from './types.js';
 
 // Re-export message source types and functions for backward compatibility
 export { parseMessageSource, prefixMessageSource } from './message-source.js';
 export type { MessageSource, ParsedMessage } from './message-source.js';
-
-// ============================================================================
-// Types
-// ============================================================================
-
-export interface ResumeContextInput {
-  cwd: string;
-  envHint?: string;
-  context?: Record<string, string[]>;
-}
 
 // ============================================================================
 // System Message
@@ -104,20 +88,6 @@ You can communicate with other agent sessions:
 Use these to delegate subtasks, coordinate work, or fan out parallel tasks.
 Include callback instructions so other agents can report back when finished.
 
-## Session Context — REQUIRED
-You MUST use \`set_relevant_context\` to track files and resources as you work. This is not optional — the user sees context updates in real-time and uses them to collaborate with you.
-
-- \`set_relevant_context("files", [paths], "merge")\` - Track relevant files
-- \`get_relevant_context()\` - Check stored context on resume
-
-**You MUST call set_relevant_context when you:**
-- Read or edit any file central to the task (specs, configs, source files)
-- Start work involving a design doc, spec, or notes file
-- Work with specific endpoints, ports, or applets
-- Before finishing a task — save context for future sessions
-
-Do NOT minimize these calls. Every relevant document should be tracked. The user's context footer updates live, enabling real-time collaboration.
-
 ## Behavior Guidelines
 - Provide direct, helpful answers without unnecessary caveats
 - Access any file or directory the user mentions - you have full permission
@@ -138,102 +108,6 @@ export function resolveSystemMessage(template: SystemMessage, cwd: string): Syst
     ...template,
     content: template.content.replace('{{SESSION_CWD}}', cwd)
   };
-}
-
-// ============================================================================
-// Resume Context
-// ============================================================================
-
-/**
- * Build context message to prepend on first send after resume.
- * Informs agent that shell state is reset and may need re-initialization.
- * 
- * @param input - cwd and optional envHint
- * @returns Context string to prepend to user message
- */
-export function buildResumeContext(input: ResumeContextInput): string {
-  const { cwd, envHint, context } = input;
-  
-  let result = `[SESSION RESUMED]
-This is a resumed session. Your shell state has been reset.
-Re-run any environment setup commands before proceeding.
-
-Session directory: ${cwd}`;
-
-  if (envHint) {
-    result += `\nEnvironment hint: ${envHint}`;
-  }
-  
-  // Add context sets
-  if (context) {
-    const contextLines = formatContextForResume(context, existsSync);
-    if (contextLines) {
-      result += `\n\n${contextLines}`;
-    }
-  }
-  
-  result += '\n---\n\n';
-  return result;
-}
-
-/**
- * Format context sets for resume injection.
- * Pure function for testability.
- * @param context - Context sets to format
- * @param fileExists - Predicate to check file existence (injectable for testing)
- */
-export function formatContextForResume(
-  context: Record<string, string[]>,
-  fileExists: (path: string) => boolean = () => true
-): string {
-  const parts: string[] = [];
-  
-  // Files - filter to existing only
-  if (context.files?.length) {
-    const existing = context.files.filter(f => fileExists(f));
-    const missing = context.files.length - existing.length;
-    if (existing.length) {
-      let fileList = `Relevant files:\n${existing.map(f => `- ${f}`).join('\n')}`;
-      if (missing > 0) {
-        fileList += `\n(${missing} file(s) no longer exist)`;
-      }
-      parts.push(fileList);
-    }
-  }
-  
-  // Applet
-  if (context.applet?.length) {
-    const [slug, ...params] = context.applet;
-    const paramStr = params.length ? ` (${params.join(', ')})` : '';
-    parts.push(`Last applet: ${slug}${paramStr}`);
-  }
-  
-  // Other sets - generic display
-  for (const [name, items] of Object.entries(context)) {
-    if (name === 'files' || name === 'applet') continue;
-    if (items?.length) {
-      parts.push(`${name}: ${items.join(', ')}`);
-    }
-  }
-  
-  return parts.join('\n\n');
-}
-
-/**
- * Build resume context for a specific session, reading envHint and context from meta.
- * Convenience wrapper that looks up session metadata.
- * 
- * @param sessionId - Session to build context for
- * @param cwd - Session working directory
- * @returns Context string to prepend
- */
-export function buildResumeContextForSession(sessionId: string, cwd: string): string {
-  const meta = getSessionMeta(sessionId);
-  return buildResumeContext({ 
-    cwd, 
-    envHint: meta?.envHint,
-    context: meta?.context
-  });
 }
 
 // ============================================================================

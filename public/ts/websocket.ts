@@ -28,8 +28,12 @@ export type { SessionEvent };
 let socket: WebSocket | null = null;
 let connectionId = 0;  // Incremented on each new connection
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
-const RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_ATTEMPTS = 20;
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 15000;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+const HEARTBEAT_INTERVAL_MS = 30000;
+const HEARTBEAT_TIMEOUT_MS = 5000;
 
 type StateCallback = (state: Record<string, unknown>) => void;
 type EventCallback = (event: SessionEvent) => void;
@@ -90,6 +94,30 @@ export function requestHistory(sessionId: string): void {
   send({ type: 'requestHistory', sessionId });
 }
 
+function startHeartbeat(myConnectionId: number): void {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (myConnectionId !== connectionId) { stopHeartbeat(); return; }
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    
+    const timeout = setTimeout(() => {
+      if (myConnectionId !== connectionId) return;
+      console.warn('[WS] Heartbeat timeout — closing stale connection');
+      socket?.close();
+    }, HEARTBEAT_TIMEOUT_MS);
+    
+    const origHandler = handlePong;
+    handlePong = () => { clearTimeout(timeout); handlePong = origHandler; };
+    send({ type: 'ping' });
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+}
+
+let handlePong: () => void = () => {};
+
 /**
  * Internal connect logic.
  * @param myConnectionId - The connection ID when this was called.
@@ -125,6 +153,8 @@ function doConnect(myConnectionId: number): void {
     // Show connected toast on reconnect (not initial connect)
     const wasReconnect = reconnectAttempts > 0;
     reconnectAttempts = 0;
+    
+    startHeartbeat(myConnectionId);
     
     if (wasReconnect) {
       showToast('✔ Connected', { type: 'success', autoHideMs: 2000 });
@@ -166,6 +196,8 @@ function doConnect(myConnectionId: number): void {
   ws.onclose = () => {
     console.log(`[WS] Disconnected (connectionId: ${myConnectionId}, current: ${connectionId})`);
     
+    stopHeartbeat();
+    
     // Bail if stale - another connection is active
     if (myConnectionId !== connectionId) {
       return;
@@ -173,12 +205,14 @@ function doConnect(myConnectionId: number): void {
     
     socket = null;
     
-    // Auto-reconnect with backoff
+    // Auto-reconnect with exponential backoff (capped)
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       reconnectAttempts++;
-      const delay = RECONNECT_DELAY_MS * reconnectAttempts;
-      console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
-      setTimeout(() => doConnect(myConnectionId), delay);
+      const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts - 1), RECONNECT_MAX_MS);
+      console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+      setTimeout(() => doConnect(connectionId), delay);
+    } else {
+      console.warn('[WS] Max reconnect attempts reached. Use reconnectIfNeeded() to retry.');
     }
   };
   
@@ -282,7 +316,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
 
       
     case 'pong':
-      // Heartbeat response - no action needed
+      handlePong();
       break;
       
     default:
@@ -377,6 +411,7 @@ export function getConnectionId(): number {
  * Disconnect WebSocket
  */
 export function disconnectWs(): void {
+  stopHeartbeat();
   if (socket) {
     socket.close();
     socket = null;
@@ -459,7 +494,7 @@ export function waitForConnect(): Promise<void> {
  * Reconnect to WebSocket (e.g., on visibility change)
  */
 export function reconnectIfNeeded(): void {
-  if (!socket || socket.readyState === WebSocket.CLOSED) {
+  if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
     console.log('[WS] reconnectIfNeeded - reconnecting');
     reconnectAttempts = 0;
     connectionId++;

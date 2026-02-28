@@ -3,7 +3,7 @@
  */
 
 import type { SessionsResponse, SessionData } from './types.js';
-import { formatAge, formatContextFiles, formatStatusParts } from './ui-utils.js';
+import { formatAge, formatStatusParts } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { setViewState } from './view-controller.js';
@@ -570,33 +570,20 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   
   item.appendChild(row1);
   
-  // Row 2: meta-context (files · model · cwd)
-  const metaParts: string[] = [];
+  // Row 2: model·cwd
   const sep = '<span class="context-sep">·</span>';
-  
-  const files = formatContextFiles(session.contextFiles ?? []);
-  if (files.length) {
-    const fileSpans = files.map(({ name, path }) =>
-      `<span class="session-meta-file" title="${escapeHtml(path)}">${escapeHtml(name)}</span>`
-    );
-    metaParts.push(fileSpans.join(sep));
-  }
   
   const models = getAvailableModels();
   const modelName = models.find(m => m.id === session.model)?.name || '';
   const { model, dirName, fullCwd } = formatStatusParts(modelName, session.cwd || '');
   
-  if (model) {
-    metaParts.push(`<span class="context-model">${escapeHtml(model)}</span>`);
-  }
-  if (dirName) {
-    metaParts.push(`<span title="${escapeHtml(fullCwd || '')}">${escapeHtml(dirName)}</span>`);
-  }
-  
-  if (metaParts.length) {
+  if (model || dirName) {
     const row2 = document.createElement('div');
     row2.className = 'session-row session-row-meta';
-    row2.innerHTML = metaParts.join(sep);
+    const statusParts: string[] = [];
+    if (model) statusParts.push(`<span class="context-model">${escapeHtml(model)}</span>`);
+    if (dirName) statusParts.push(`<span title="${escapeHtml(fullCwd || '')}">${escapeHtml(dirName)}</span>`);
+    row2.innerHTML = statusParts.join(sep);
     item.appendChild(row2);
   }
   

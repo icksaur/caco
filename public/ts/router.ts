@@ -17,7 +17,7 @@ import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, 
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
-import { subscribeToSession, requestHistory } from './websocket.js';
+import { subscribeToSession, requestHistory, reconnectIfNeeded, waitForConnect } from './websocket.js';
 import { waitForHistoryComplete, isHistoryStale } from './history.js';
 import { showSessionManager, setSessionLoading } from './session-panel.js';
 import { showToast } from './toast.js';
@@ -305,6 +305,11 @@ async function activateSession(sessionId: string): Promise<void> {
     
     // Update client state
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
+    
+    // Ensure WS is alive before subscribing/requesting history
+    reconnectIfNeeded();
+    await waitForConnect();
+    
     subscribeToSession(data.sessionId);
     
     // Show model + cwd in footer status bar

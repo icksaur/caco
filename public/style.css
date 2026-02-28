@@ -976,12 +976,24 @@ main {
 }
 
 .session-row-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-sm);
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   padding-left: calc(12px + var(--space-sm));
+}
+
+.session-meta-links {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-meta-status {
+  flex-shrink: 0;
 }
 
 .session-row-meta .context-sep {

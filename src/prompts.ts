@@ -79,14 +79,15 @@ ${appletPrompt}
 Examples: \`[View file](/?applet=text-editor&path=/file)\` | \`[Git status](/?applet=git-status&path=/repo)\`
 Call \`caco_applet_usage\` for all applet URL patterns. Call \`caco_applet_howto\` to create new applets.
 
-## Agent-to-Agent Tools
-You can communicate with other agent sessions:
-- \`send_agent_message\` - Send a message to another session
-- \`get_session_state\` - Check if a session is idle or streaming  
-- \`create_agent_session\` - Create a new session with specific cwd
+## Caco Session Tools
+Create and message independent Caco sessions that appear in the user's session list:
+- \`create_caco_session\` - Create a persistent session in a specific directory
+- \`send_caco_message\` - Send a message to an existing session
+- \`get_session_state\` - Check if a session is idle or busy
 
-Use these to delegate subtasks, coordinate work, or fan out parallel tasks.
-Include callback instructions so other agents can report back when finished.
+Use these for work the user will review separately — different projects, triaged tasks, long-running jobs. Sessions work autonomously; do not poll or wait for responses.
+
+For quick sub-tasks that report back to you, use the built-in \`task\` tool instead.
 
 ## Behavior Guidelines
 - Provide direct, helpful answers without unnecessary caveats

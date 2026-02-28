@@ -1,11 +1,12 @@
 /**
- * Agent-to-Agent Tools
+ * Caco Session Tools
  * 
- * MCP tools for agent-to-agent communication. Allows one agent session
- * to send messages to other sessions, create new sessions, and check status.
+ * Tools for creating and messaging independent Caco sessions.
+ * These create full persistent sessions visible in the user's session list,
+ * suitable for dispatching long-running work to different projects or
+ * triaging tasks that the user will review separately.
  * 
- * The receiving session sees messages with source: 'agent' and can
- * call back to the originating session when finished using the same tools.
+ * For quick sub-tasks that report back inline, use the built-in `task` tool instead.
  */
 
 import { defineTool } from '@github/copilot-sdk';
@@ -13,31 +14,19 @@ import { z } from 'zod';
 import { SERVER_URL } from './config.js';
 import type { SessionIdRef } from './types.js';
 
-/**
- * Function to get correlationId for current dispatch
- * Injected to avoid coupling to sessionManager
- */
 export type GetCorrelationId = (sessionId: string) => string | undefined;
 
-/**
- * Create agent tools with a session ID reference
- * The reference can be updated after session creation for new sessions.
- * @param sessionRef - Mutable reference to session ID
- * @param getCorrelationId - Function to get correlationId for current dispatch
- */
 export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: GetCorrelationId) {
   
-  const sendAgentMessage = defineTool('send_agent_message', {
-    description: `Send a message to another agent session. Use this to delegate work to specialist sessions or coordinate with other agents.
+  const sendCacoMessage = defineTool('send_caco_message', {
+    description: `Send a message to another Caco session. The target session works independently — do NOT poll or wait for a response.
 
-The target session receives your message with source: 'agent'. Your session ID is automatically included so the target can call back.
+Use this to dispatch work to an existing session, such as:
+- Sending follow-up instructions to a session you created
+- Coordinating across projects (e.g., "update the API client after the schema change")
+- Notifying a session of state changes
 
-**Callback pattern**: Tell the target to "send_agent_message(requestingSession, 'Results: ...')" when finished.
-
-**Example uses**:
-- Delegate: "Analyze the API in /src/api and send_agent_message(requestingSession, 'Analysis: ...') when done"
-- Fan-out: Send same analysis task to multiple specialist sessions
-- Coordinate: Notify other sessions of state changes`,
+The target session receives your message and works on it autonomously. The user can watch its progress in the Caco session list.`,
 
     parameters: z.object({
       sessionId: z.string().describe('Target session ID to send the message to'),
@@ -46,12 +35,11 @@ The target session receives your message with source: 'agent'. Your session ID i
 
     handler: async ({ sessionId, message }) => {
       try {
-        // Get correlationId from dispatch context (inherited from current dispatch)
         const correlationId = getCorrelationId(sessionRef.id);
         
         if (!correlationId) {
           return { 
-            textResultForLlm: 'Cannot send agent message: no correlationId in dispatch context. This may be a system error - agent-to-agent calls require correlation tracking.',
+            textResultForLlm: 'Cannot send message: no correlationId in dispatch context.',
             resultType: 'error' as const
           };
         }
@@ -77,7 +65,7 @@ The target session receives your message with source: 'agent'. Your session ID i
 
         await response.json();
         return { 
-          textResultForLlm: `Message sent to session ${sessionId}. The target session will work independently and reply via send_agent_message when done. Do not poll or wait.`,
+          textResultForLlm: `Message sent to session ${sessionId}. It will work independently — the user can watch its progress in the session list.`,
           resultType: 'text' as const
         };
       } catch (err) {
@@ -90,10 +78,7 @@ The target session receives your message with source: 'agent'. Your session ID i
   });
 
   const getSessionState = defineTool('get_session_state', {
-    description: `Check the current state of an agent session. Use this to:
-- Poll if a session you sent work to is still processing or idle
-- Verify a session exists before sending messages
-- Get the working directory of a session`,
+    description: 'Check the current state of a Caco session (idle, busy, or inactive). Use to verify a session exists before sending messages.',
 
     parameters: z.object({
       sessionId: z.string().describe('Target session ID to check')
@@ -101,14 +86,12 @@ The target session receives your message with source: 'agent'. Your session ID i
 
     handler: async ({ sessionId }) => {
       try {
-        const targetId = sessionId;
-        
-        const response = await fetch(`${SERVER_URL}/api/sessions/${targetId}/state`);
+        const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/state`);
         
         if (!response.ok) {
           if (response.status === 404) {
             return { 
-              textResultForLlm: `Session ${targetId} not found`,
+              textResultForLlm: `Session ${sessionId} not found`,
               resultType: 'error' as const
             };
           }
@@ -133,7 +116,7 @@ The target session receives your message with source: 'agent'. Your session ID i
   });
 
   const listModels = defineTool('list_models', {
-    description: `List available models for creating agent sessions. Use this before create_agent_session to see model options.
+    description: `List available models for creating Caco sessions. Use before create_caco_session to see model options.
 
 **Quick guide (no need to call this if you know what you need):**
 - \`claude-sonnet-4.5\` - General-purpose engineering: edit/compile/test/fix cycles
@@ -165,16 +148,17 @@ The target session receives your message with source: 'agent'. Your session ID i
     }
   });
 
-  const createAgentSession = defineTool('create_agent_session', {
-    description: `Create a new agent session with a specific working directory and model. Use this to spawn specialist agents for subtasks.
+  const createCacoSession = defineTool('create_caco_session', {
+    description: `Create a new persistent Caco session. The session appears in the user's session list and can be watched or resumed later.
 
-Provide \`initialMessage\` to create and prompt in one step. Tell the target to "send_agent_message(requestingSession, 'Results: ...')" so it can report back when finished.
+**When to use (instead of the \`task\` tool):**
+- Dispatching work to a **different project/directory** that the user will review separately
+- Creating a **long-running session** the user wants to watch in real-time
+- Triaging work into **independent sessions** (e.g., "fix the tests" + "update the docs")
 
-**Model selection (required):**
-- \`claude-sonnet-4.5\` - General-purpose engineering: edit/compile/test/fix cycles
-- \`claude-opus-4.5\` - Reasoning, documents, analysis, complex planning
-- \`gpt-5-mini\` - Simple automation tasks (slower, but follows instructions reliably)
-- Use \`list_models\` to see all available models`,
+For quick sub-tasks that report results back to you, use the built-in \`task\` tool instead.
+
+Provide \`initialMessage\` to create and prompt in one step. The session works autonomously — do not poll or wait.`,
 
     parameters: z.object({
       cwd: z.string().describe('Working directory for the new session'),
@@ -184,7 +168,6 @@ Provide \`initialMessage\` to create and prompt in one step. Tell the target to 
 
     handler: async ({ cwd, model, initialMessage }) => {
       try {
-        // Create the session with model
         const createResponse = await fetch(`${SERVER_URL}/api/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -201,7 +184,6 @@ Provide \`initialMessage\` to create and prompt in one step. Tell the target to 
         
         const { sessionId: newSessionId } = await createResponse.json();
         
-        // If initial message provided, send it
         if (initialMessage) {
           const correlationId = getCorrelationId(sessionRef.id);
           const msgResponse = await fetch(`${SERVER_URL}/api/sessions/${newSessionId}/messages`, {
@@ -223,13 +205,13 @@ Provide \`initialMessage\` to create and prompt in one step. Tell the target to 
           }
           
           return { 
-            textResultForLlm: `Created session ${newSessionId} in ${cwd} and sent initial message. The target session will work independently and reply via send_agent_message when done. Do not poll or wait.`,
+            textResultForLlm: `Created Caco session ${newSessionId} in ${cwd}. It will work independently — the user can watch its progress in the session list.`,
             resultType: 'text' as const
           };
         }
         
         return { 
-          textResultForLlm: `Created session ${newSessionId} in ${cwd}. Use send_agent_message('${newSessionId}', '...') to send work to it.`,
+          textResultForLlm: `Created Caco session ${newSessionId} in ${cwd}. Use send_caco_message('${newSessionId}', '...') to send work to it.`,
           resultType: 'text' as const
         };
       } catch (err) {
@@ -241,5 +223,5 @@ Provide \`initialMessage\` to create and prompt in one step. Tell the target to 
     }
   });
 
-  return [sendAgentMessage, getSessionState, listModels, createAgentSession];
+  return [sendCacoMessage, getSessionState, listModels, createCacoSession];
 }

@@ -22,7 +22,8 @@ import { broadcastEvent, broadcastGlobalEvent, type MessageSource, type SessionE
 import { transformForClient, shouldEmitReload } from '../event-transformer.js';
 import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
 import { getQueue, isFlushTrigger } from '../caco-event-queue.js';
-import { setSessionIntent } from '../storage.js';
+import { setSessionIntent, getSessionMeta, setSessionMeta } from '../storage.js';
+import { mergeContextSet } from '../context-tools.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
 import { prefixMessageSource } from '../prompts.js';
@@ -282,6 +283,14 @@ export async function dispatchMessage(
         if (toolName === 'report_intent' && args?.intent) {
           setSessionIntent(sessionId, String(args.intent));
         }
+        
+        // Auto-populate context footer from file-touching tools
+        if (args?.path && typeof args.path === 'string') {
+          const fileTool = toolName === 'create' || toolName === 'edit' || toolName === 'view';
+          if (fileTool) {
+            autoAddFileContext(sessionId, args.path);
+          }
+        }
       }
       
       if (event.type === 'assistant.usage') {
@@ -366,4 +375,29 @@ router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) =
 });
 
 export default router;
+
+/**
+ * Auto-add file paths to session context when agent uses file tools.
+ * Keeps context footer populated without agent cooperation.
+ */
+function autoAddFileContext(
+  sessionId: string,
+  path: string
+): void {
+  const meta = getSessionMeta(sessionId);
+  if (!meta) return;
+  
+  const context = { ...(meta.context ?? {}) };
+  const existing = context.files ?? [];
+  
+  if (existing.includes(path)) return;
+  
+  context.files = mergeContextSet(existing, [path], 'merge');
+  setSessionMeta(sessionId, { ...meta, context });
+  
+  broadcastEvent(sessionId, {
+    type: 'caco.context',
+    data: { reason: 'changed', context, setName: 'files' }
+  } as unknown as SessionEvent);
+}
 

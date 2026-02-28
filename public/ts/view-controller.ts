@@ -14,6 +14,7 @@ import { clearContextFooter } from './context-footer.js';
 import { clearActiveSession, getCurrentCwd } from './app-state.js';
 import { getActiveAppletLabel } from './applet-runtime.js';
 import { getServerHostname } from './hostname-hash.js';
+import { resetTextareaHeight } from './multiline-input.js';
 
 /** Valid main panel states */
 export type ViewState = 'sessions' | 'newChat' | 'chatting';
@@ -77,6 +78,26 @@ export function getViewState(): ViewState {
 }
 
 /**
+ * Enable/disable form during streaming
+ * Just toggles a class - CSS handles visual state
+ */
+export function setFormEnabled(enabled: boolean): void {
+  const form = document.getElementById('chatForm');
+  const cursor = document.getElementById('workingCursor');
+  if (!form) return;
+  
+  if (enabled) {
+    form.classList.remove('streaming');
+    cursor?.classList.add('hidden');
+    const input = form.querySelector('textarea') as HTMLTextAreaElement;
+    input?.focus();
+  } else {
+    form.classList.add('streaming');
+    cursor?.classList.remove('hidden');
+  }
+}
+
+/**
  * Set the main panel view state
  * 
  * This atomically updates main panel DOM elements.
@@ -110,11 +131,10 @@ export function setViewState(state: ViewState): void {
     case 'newChat':
       els.newChat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
-      // Clear session so messages don't go to old session
       clearActiveSession();
-      // Clear context footer (no context for new chat)
       clearContextFooter();
-      // Show applet button
+      setFormEnabled(true);
+      resetTextareaHeight();
       els.appletBtn?.classList.remove('hidden');
       break;
       

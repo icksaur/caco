@@ -18,7 +18,7 @@ import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent }
 import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
 import { subscribeToSession, requestHistory } from './websocket.js';
-import { waitForHistoryComplete } from './history.js';
+import { waitForHistoryComplete, isHistoryStale } from './history.js';
 import { showSessionManager, setSessionLoading } from './session-panel.js';
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
@@ -167,15 +167,17 @@ export function toggleSessions(): void {
 export async function sessionClick(sessionId: string): Promise<void> {
   const hasHistory = regions.chat.el.children.length > 0;
   
-  // If already on this session AND we have history, just hide sessions overlay
-  if (sessionId === getActiveSessionId() && hasHistory) {
+  // If already on this session AND we have history AND WS hasn't reconnected,
+  // just hide sessions overlay. If WS reconnected, reload history because
+  // the DOM may be stale (events missed during disconnect).
+  if (sessionId === getActiveSessionId() && hasHistory && !isHistoryStale()) {
     setViewState('chatting');
     updateUrl({ session: sessionId });
     return;
   }
   
   await activateSession(sessionId);
-  updateUrl({ session: sessionId }, true); // push=true creates history entry
+  updateUrl({ session: sessionId }, true);
 }
 
 /**

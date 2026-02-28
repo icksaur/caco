@@ -7,13 +7,14 @@ import { applyModelPreference, loadModels } from './model-selector.js';
 import { initFromPreferences } from './app-state.js';
 import { setLoadingHistory } from './message-streaming.js';
 import { setFormEnabled } from './view-controller.js';
-import { onHistoryComplete } from './websocket.js';
+import { onHistoryComplete, getConnectionId } from './websocket.js';
 import { clearContextFooter } from './context-footer.js';
 import { regions } from './dom-regions.js';
 
 const HISTORY_TIMEOUT_MS = 15000;
 
 let historyPending = false;
+let lastHistoryConnectionId = -1;
 
 /**
  * Whether a history request is in-flight (waiting for historyComplete).
@@ -21,6 +22,14 @@ let historyPending = false;
  */
 export function isHistoryPending(): boolean {
   return historyPending;
+}
+
+/**
+ * Whether the WS connection has changed since the last history load.
+ * If true, the chat DOM may be stale (events missed during disconnect).
+ */
+export function isHistoryStale(): boolean {
+  return getConnectionId() !== lastHistoryConnectionId;
 }
 
 /**
@@ -49,6 +58,7 @@ export function waitForHistoryComplete(): Promise<void> {
       if (settled) return;
       settled = true;
       historyPending = false;
+      lastHistoryConnectionId = getConnectionId();
       unsubscribe();
       clearTimeout(timer);
       setLoadingHistory(false);

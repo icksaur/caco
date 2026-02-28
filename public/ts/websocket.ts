@@ -366,6 +366,14 @@ export function isWsConnected(): boolean {
 }
 
 /**
+ * Get the current connection generation.
+ * Increments on every new connection — callers can compare to detect reconnects.
+ */
+export function getConnectionId(): number {
+  return connectionId;
+}
+
+/**
  * Disconnect WebSocket
  */
 export function disconnectWs(): void {

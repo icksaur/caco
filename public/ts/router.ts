@@ -12,7 +12,7 @@
  * - Removing them does NOT destroy loaded content
  */
 
-import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, type ViewState } from './view-controller.js';
+import { setFormEnabled, setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, type ViewState } from './view-controller.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
@@ -22,7 +22,6 @@ import { waitForHistoryComplete } from './history.js';
 import { showSessionManager, setSessionLoading } from './session-panel.js';
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
-import { setFormEnabled } from './message-streaming.js';
 import { regions } from './dom-regions.js';
 
 // Navigation API types (not yet in TypeScript lib)

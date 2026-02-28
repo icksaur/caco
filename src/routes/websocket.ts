@@ -138,6 +138,7 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
       
     case 'requestHistory':
       if (msg.sessionId) {
+        console.log(`[WS] requestHistory received for ${msg.sessionId.slice(0, 8)}`);
         void streamHistory(ws, msg.sessionId);
       } else {
         sendError(ws, msg.id, 'sessionId is required for requestHistory');
@@ -286,14 +287,24 @@ function enrichUserMessageWithSource(event: SessionEvent): SessionEvent {
  * All messages include sessionId for client filtering
  */
 async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
+  const shortId = sessionId.slice(0, 8);
+  console.log(`[HISTORY] streamHistory called for ${shortId}, ws.readyState=${ws.readyState}`);
+  
   if (!sessionId || sessionId === 'default') {
-    // No session, just send historyComplete
-    send(ws, { type: 'historyComplete', sessionId });
+    console.log('[HISTORY] No valid session, sending historyComplete');
+    send(ws, { type: 'historyComplete', sessionId, data: { isBusy: false } });
     return;
   }
   
   try {
+    console.log(`[HISTORY] Fetching events from SDK for ${shortId}...`);
     const events = await sessionManager.getHistory(sessionId);
+    console.log(`[HISTORY] Got ${events.length} events for ${shortId}, ws.readyState=${ws.readyState}`);
+    
+    if (ws.readyState !== WebSocket.OPEN) {
+      console.warn(`[HISTORY] WebSocket closed before streaming for ${shortId}, aborting`);
+      return;
+    }
     
     // Build lookup: outputId → embed metadata
     // Used to queue caco.embed after tool.execution_complete that created it
@@ -308,6 +319,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     
     // Queue for scheduling caco events - same pattern as live streaming
     const queue = new CacoEventQueue();
+    let sentCount = 0;
     
     // Forward all SDK events
     // Queue caco.embed after tool.execution_complete, flush before assistant.message
@@ -319,6 +331,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
           console.log(`[HISTORY] Flushing ${queued.length} embeds before ${evt.type}`);
           for (const cacoEvent of queued) {
             send(ws, { type: 'event', sessionId, event: cacoEvent as unknown as SessionEvent });
+            sentCount++;
           }
         }
       }
@@ -329,6 +342,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
           // Parse user.message content for source prefix (from applet/agent/scheduler)
           const enriched = enrichUserMessageWithSource(transformed);
           send(ws, { type: 'event', sessionId, event: enriched });
+          sentCount++;
         }
       }
       
@@ -390,11 +404,14 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
       });
     }
     
-    send(ws, { type: 'historyComplete', sessionId });
+    console.log(`[HISTORY] Streamed ${sentCount} events (from ${events.length} raw) for ${shortId}`);
+    const isBusy = sessionManager.isBusy(sessionId);
+    send(ws, { type: 'historyComplete', sessionId, data: { isBusy } });
+    console.log(`[HISTORY] historyComplete sent for ${shortId}, isBusy=${isBusy}, ws.readyState=${ws.readyState}`);
     
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[WS] Error streaming history for ${sessionId}:`, error);
+    console.error(`[HISTORY] Error streaming history for ${shortId}:`, message);
     
     // Check if SDK session expired
     if (message.includes('Session not found') || message.includes('session.getMessages failed')) {
@@ -403,7 +420,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
       send(ws, { type: 'error', error: 'Session expired - please start a new session' });
     }
     
-    send(ws, { type: 'historyComplete', sessionId });
+    send(ws, { type: 'historyComplete', sessionId, data: { isBusy: sessionManager.isBusy(sessionId) } });
   }
 }
 

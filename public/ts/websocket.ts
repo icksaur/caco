@@ -33,7 +33,7 @@ const RECONNECT_DELAY_MS = 1000;
 
 type StateCallback = (state: Record<string, unknown>) => void;
 type EventCallback = (event: SessionEvent) => void;
-type HistoryCompleteCallback = () => void;
+type HistoryCompleteCallback = (data?: { isBusy?: boolean }) => void;
 type ConnectCallback = () => void;
 type GlobalEventCallback = (event: SessionEvent) => void;
 const stateCallbacks: Set<StateCallback> = new Set();
@@ -260,10 +260,12 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       if (sessionId) {
         void markSessionObserved(sessionId);
       }
+      // Pass isBusy data from server to subscribers
+      const historyData = msg.data as { isBusy?: boolean } | undefined;
       // Notify subscribers
       for (const cb of historyCompleteCallbacks) {
         try {
-          cb();
+          cb(historyData);
         } catch (err) {
           console.error('[WS] HistoryComplete callback error:', err);
         }

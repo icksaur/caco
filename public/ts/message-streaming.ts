@@ -14,9 +14,9 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { getActiveSessionId, setActiveSession, setLoadingHistory } from './app-state.js';
+import { getActiveSessionId, setActiveSession, setLoadingHistory, isLoadingHistory } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
-import { isViewState, setViewState } from './view-controller.js';
+import { isViewState, setViewState, setFormEnabled } from './view-controller.js';
 import { onEvent, subscribeToSession, type SessionEvent } from './websocket.js';
 import { showToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
@@ -64,16 +64,23 @@ function handleEvent(event: SessionEvent): void {
   // Re-enable form on terminal events (streaming complete)
   // Check BEFORE outer/inner logic since terminal events may not have display elements
   if (isTerminalEvent(eventType)) {
-    setFormEnabled(true);
     chatRegion.removeStreamingCursors();
     
-    // Mark session as observed - user has seen the completed response
-    // Also capture applet context (fire-and-forget)
-    if (eventType === 'session.idle') {
-      const sessionId = getActiveSessionId();
-      if (sessionId) {
-        void markSessionObserved(sessionId);
-        void sendAppletContext(sessionId);
+    // Only change form state for LIVE events, not history replay.
+    // History contains past session.idle events that would incorrectly
+    // re-enable the form for a currently-busy session. The authoritative
+    // busy state comes from historyComplete's isBusy flag instead.
+    if (!isLoadingHistory()) {
+      setFormEnabled(true);
+      
+      // Mark session as observed - user has seen the completed response
+      // Also capture applet context (fire-and-forget)
+      if (eventType === 'session.idle') {
+        const sessionId = getActiveSessionId();
+        if (sessionId) {
+          void markSessionObserved(sessionId);
+          void sendAppletContext(sessionId);
+        }
       }
     }
   }
@@ -93,26 +100,6 @@ function handleEvent(event: SessionEvent): void {
 
 function registerWsHandlers(): void {
   onEvent(handleEvent);
-}
-
-/**
- * Enable/disable form during streaming
- * Just toggles a class - CSS handles visual state
- */
-export function setFormEnabled(enabled: boolean): void {
-  const form = document.getElementById('chatForm');
-  const cursor = document.getElementById('workingCursor');
-  if (!form) return;
-  
-  if (enabled) {
-    form.classList.remove('streaming');
-    cursor?.classList.add('hidden');
-    const input = form.querySelector('textarea') as HTMLTextAreaElement;
-    input?.focus();
-  } else {
-    form.classList.add('streaming');
-    cursor?.classList.remove('hidden');
-  }
 }
 
 /**

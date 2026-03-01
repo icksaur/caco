@@ -9,6 +9,8 @@ import { onGlobalEvent, wsSendRaw } from './websocket.js';
 import { sessionClick } from './router.js';
 import { showToast } from './toast.js';
 import { registerCommand, type Command } from './command-registry.js';
+import { registerPoundProvider } from './multiline-input.js';
+import type { PopupItem } from './input-popup.js';
 import type { SessionEvent } from './types.js';
 
 export interface ClientExtensionAPI {
@@ -30,6 +32,7 @@ export interface ClientExtensionAPI {
   setState<T>(key: string, value: T): void;
   toast(message: string): void;
   registerCommand(name: string, opts: { description?: string; handler: () => void }): () => void;
+  registerPoundItems(provider: () => Array<{ label: string; description?: string; value: string }>): () => void;
 }
 
 function renderInto(wrapper: HTMLElement, content: HTMLElement | string): void {
@@ -141,6 +144,16 @@ export function createExtensionAPI(slug: string): ClientExtensionAPI {
       };
       registerCommand(cmd);
       return () => {};
+    },
+    registerPoundItems(provider) {
+      return registerPoundProvider(() =>
+        provider().map((item): PopupItem => ({
+          id: `${slug}:${item.label}`,
+          label: item.label,
+          description: item.description,
+          value: item.value,
+        }))
+      );
     },
   };
 }

@@ -4,6 +4,7 @@ export interface PopupItem {
   id: string;
   label: string;
   description?: string;
+  value?: string;
 }
 
 interface InputPopupConfig {

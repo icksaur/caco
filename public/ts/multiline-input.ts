@@ -25,6 +25,8 @@ let cachedFiles: string[] = [];
 let cacheTimestamp = 0;
 let cacheCwd = '';
 
+const poundProviders: Array<() => PopupItem[]> = [];
+
 async function fetchProjectFiles(cwd: string): Promise<string[]> {
   if (cachedFiles.length && cwd === cacheCwd && Date.now() - cacheTimestamp < FILE_CACHE_TTL_MS) {
     return cachedFiles;
@@ -147,8 +149,9 @@ function handlePound(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
         const currentCursor = textarea.selectionStart;
         const before = textarea.value.slice(0, poundAnchorPos);
         const after = textarea.value.slice(currentCursor);
-        textarea.value = before + '`' + item.label + '`' + after;
-        const newCursor = poundAnchorPos + item.label.length + 2;
+        const insertion = item.value ?? ('`' + item.label + '`');
+        textarea.value = before + insertion + after;
+        const newCursor = poundAnchorPos + insertion.length;
         textarea.setSelectionRange(newCursor, newCursor);
         poundAnchorPos = -1;
         autoResize(textarea);
@@ -165,8 +168,9 @@ function handlePound(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
   if (!poundPopup.isVisible()) {
     const cwd = getCurrentCwd();
     void fetchProjectFiles(cwd).then(files => {
-      const items: PopupItem[] = files.map(f => ({ id: f, label: f }));
-      poundPopup!.show(items);
+      const fileItems: PopupItem[] = files.map(f => ({ id: f, label: f }));
+      const extItems = poundProviders.flatMap(p => { try { return p(); } catch { return []; } });
+      poundPopup!.show([...extItems, ...fileItems]);
       if (trigger.query) poundPopup!.filter(trigger.query);
     });
   } else {
@@ -187,4 +191,12 @@ export function resetTextareaHeight(): void {
     textarea.style.height = 'auto';
     textarea.style.overflowY = 'hidden';
   }
+}
+
+export function registerPoundProvider(provider: () => PopupItem[]): () => void {
+  poundProviders.push(provider);
+  return () => {
+    const idx = poundProviders.indexOf(provider);
+    if (idx >= 0) poundProviders.splice(idx, 1);
+  };
 }

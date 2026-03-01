@@ -175,7 +175,7 @@ describe('EVENT_TO_INNER', () => {
     expect(EVENT_TO_INNER['user.message']).toBe('user-text');
     expect(EVENT_TO_INNER['assistant.message']).toBe('assistant-text');
     expect(EVENT_TO_INNER['assistant.turn_start']).toBe('thinking-text');
-    expect(EVENT_TO_INNER['session.error']).toBeNull();
+    expect(EVENT_TO_INNER['session.error']).toBe('error-text');
     expect(EVENT_TO_INNER['caco.info']).toBeNull();
   });
 });

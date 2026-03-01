@@ -4,23 +4,21 @@
 
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom } from './ui-utils.js';
-import { loadPreferences, waitForHistoryComplete } from './history.js';
+import { loadPreferences } from './history.js';
 import { deleteSession, initSessionPanel } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
-import { initRegions, regions } from './dom-regions.js';
+import { initRegions } from './dom-regions.js';
 import { initViewState, setViewState } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { initInputRouter } from './input-router.js';
 import { setupMultilineInput } from './multiline-input.js';
-import { connectWs, subscribeToSession, requestHistory, waitForConnect, reconnectIfNeeded } from './websocket.js';
+import { connectWs, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
 import { initRouter, toggleSessions, toggleApplet } from './router.js';
 import { actionBtnClick } from './session-panel.js';
-import { setActiveSession, getSelectedModel, getAvailableModels } from './app-state.js';
-import { renderStatus } from './context-footer.js';
 import { registerCommand } from './command-registry.js';
 import { loadClientExtensions, reloadExtension } from './extension-loader.js';
 import { onGlobalEvent } from './websocket.js';
@@ -186,25 +184,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const targetSessionId = sessionParam || prefs?.lastSessionId;
   
   if (targetSessionId) {
-    // Session specified - set active and request history
-    const cwd = prefs?.lastCwd || '';
-    setActiveSession(targetSessionId, cwd);
-    subscribeToSession(targetSessionId);
-    requestHistory(targetSessionId);
-    await waitForHistoryComplete();
-    
-    // Show model + cwd in footer
-    const modelId = getSelectedModel();
-    const models = getAvailableModels();
-    const model = models.find(m => m.id === modelId);
-    renderStatus(model?.name || modelId?.split('/').pop() || '', cwd);
-    
-    // Show chat view
-    if (regions.chat.el.children.length > 0) {
-      setViewState('chatting');
-    } else {
-      setViewState('newChat');
-    }
+    const { activateSession } = await import('./router.js');
+    await activateSession(targetSessionId);
     
     // Load applet if requested (orthogonal to main panel)
     if (hasAppletParam) {

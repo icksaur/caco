@@ -4,12 +4,12 @@
 
 import type { Preferences } from './types.js';
 import { applyModelPreference, loadModels } from './model-selector.js';
-import { initFromPreferences } from './app-state.js';
+import { initFromPreferences, getActiveSessionId } from './app-state.js';
 import { setLoadingHistory } from './message-streaming.js';
-import { setFormEnabled } from './view-controller.js';
 import { onHistoryComplete, getConnectionId } from './websocket.js';
 import { clearContextFooter } from './context-footer.js';
 import { regions } from './dom-regions.js';
+import { sessionTracker } from './session-state-tracker.js';
 
 const HISTORY_TIMEOUT_MS = 15000;
 
@@ -63,11 +63,13 @@ export function waitForHistoryComplete(): Promise<void> {
       clearTimeout(timer);
       setLoadingHistory(false);
       
-      // Sync form/cursor state with session's actual busy status.
-      // This is the authoritative state after history replay — overrides
-      // any stale state from history terminal events or prior setFormEnabled calls.
+      // Update tracker with authoritative busy state from server.
+      // The tracker's onChange subscriber handles setFormEnabled.
       const isBusy = data?.isBusy ?? false;
-      setFormEnabled(!isBusy);
+      const activeId = getActiveSessionId();
+      if (activeId) {
+        sessionTracker.setBusy(activeId, isBusy);
+      }
       
       // If no messages loaded, show model selector
       if (regions.chat.el.children.length === 0) {

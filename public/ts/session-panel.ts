@@ -9,6 +9,7 @@ import { setAvailableModels } from './model-selector.js';
 import { setViewState } from './view-controller.js';
 import { sessionClick, newSessionClick } from './router.js';
 import { onGlobalEvent } from './websocket.js';
+import { sessionTracker } from './session-state-tracker.js';
 
 // Module state for fuzzy search
 let allSessions: SessionData[] = [];
@@ -51,19 +52,23 @@ export function initSessionPanel(): void {
 
   // Subscribe to unified session list change event
   onGlobalEvent((event) => {
-    // Unified event for any session list mutation (created, deleted, idle, observed, renamed)
     if (event.type === 'session.listChanged') {
       console.log('[SESSION-PANEL] Session list changed, refreshing...', event.data);
       void loadSessions();
       return;
     }
     
-    // Keep session.busy for immediate visual feedback (cursor animation)
+    // Feed busy state into tracker (tracker notifies subscribers)
     if (event.type === 'session.busy' && event.data) {
       const { sessionId, isBusy } = event.data as { sessionId: string; isBusy: boolean };
-      updateSessionItemState(sessionId, isBusy);
-      updateMenuBusyIndicator();
+      sessionTracker.setBusy(sessionId, isBusy);
     }
+  });
+  
+  // Tracker drives DOM updates for session items and menu badges
+  sessionTracker.onChange((sessionId, state) => {
+    updateSessionItemState(sessionId, state.busy);
+    updateMenuIndicators();
   });
 }
 
@@ -128,63 +133,32 @@ function updateSessionItemState(sessionId: string, isBusy: boolean): void {
 }
 
 /**
- * Update the unobserved count badge on menu button
- * When visible, hides the busy indicator (unobserved takes priority)
+ * Update all menu indicators (unobserved badge + busy indicator).
+ * Uses tracker as source of truth instead of querying DOM.
  */
-function updateUnobservedBadge(count: number): void {
+function updateMenuIndicators(): void {
   const badge = document.getElementById('unobservedBadge');
   const busyIndicator = document.getElementById('menuBusyIndicator');
-  if (!badge) return;
   
-  if (count > 0) {
-    badge.textContent = String(count);
-    badge.classList.remove('hidden');
-    // Hide busy indicator when unobserved badge is shown (priority)
-    busyIndicator?.classList.add('hidden');
-  } else {
-    badge.classList.add('hidden');
-    // Show busy indicator if there are busy sessions
-    updateMenuBusyIndicator();
-  }
-}
-
-/**
- * Update the busy indicator on menu button
- * Only visible when:
- * 1. No unobserved sessions (unobserved badge takes priority)
- * 2. There are busy sessions OTHER than the currently viewed session
- * 
- * Rationale: If user is viewing a busy session, they already see the streaming
- * cursor in the chat - no need for redundant badge indicator.
- */
-function updateMenuBusyIndicator(): void {
-  const busyIndicator = document.getElementById('menuBusyIndicator');
-  const unobservedBadge = document.getElementById('unobservedBadge');
-  if (!busyIndicator) return;
+  const unobservedCount = sessionTracker.getUnobservedCount();
+  const busyCount = sessionTracker.getBusyCount(getActiveSessionId() ?? undefined);
   
-  // Don't show if unobserved badge is visible
-  if (unobservedBadge && !unobservedBadge.classList.contains('hidden')) {
-    busyIndicator.classList.add('hidden');
-    return;
-  }
-  
-  // Check if any session OTHER than the active one is busy
-  const activeSessionId = getActiveSessionId();
-  const busySessions = document.querySelectorAll('.session-item.busy');
-  let hasOtherBusySessions = false;
-  
-  for (const item of busySessions) {
-    const itemSessionId = (item as HTMLElement).dataset.sessionId;
-    if (itemSessionId !== activeSessionId) {
-      hasOtherBusySessions = true;
-      break;
+  if (badge) {
+    if (unobservedCount > 0) {
+      badge.textContent = String(unobservedCount);
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
     }
   }
   
-  if (hasOtherBusySessions) {
-    busyIndicator.classList.remove('hidden');
-  } else {
-    busyIndicator.classList.add('hidden');
+  if (busyIndicator) {
+    // Show busy indicator only when no unobserved badge and other sessions are busy
+    if (unobservedCount === 0 && busyCount > 0) {
+      busyIndicator.classList.remove('hidden');
+    } else {
+      busyIndicator.classList.add('hidden');
+    }
   }
 }
 
@@ -345,20 +319,22 @@ export async function loadSessions(): Promise<void> {
     if (!response.ok) return;
     
     const data: SessionsResponse = await response.json();
-    const { grouped, models, unobservedCount } = data;
+    const { grouped, models } = data;
     
-    // Update badge count on menu button
-    updateUnobservedBadge(unobservedCount ?? 0);
-    
-    // DEBUG: Log session data to verify unobserved state is coming from server
-    console.log(`[SESSION-PANEL] Loaded sessions: ${Object.values(grouped).flat().length} total, ${unobservedCount} unobserved`);
-    for (const [_cwd, sessions] of Object.entries(grouped)) {
-      for (const s of sessions) {
-        if (s.isUnobserved || s.isBusy) {
-          console.log(`[SESSION-PANEL] ${s.sessionId.slice(0, 8)}: isUnobserved=${s.isUnobserved}, isBusy=${s.isBusy}`);
-        }
+    // Flatten sessions for tracker sync
+    const flatSessions: SessionData[] = [];
+    for (const [cwd, sessions] of Object.entries(grouped)) {
+      if (cwd === '(unknown)') continue;
+      for (const session of sessions) {
+        flatSessions.push({ ...session, cwd });
       }
     }
+    
+    // Sync tracker with server state (drives menu indicators via onChange)
+    sessionTracker.syncFromList(flatSessions);
+    updateMenuIndicators();
+    
+    console.log(`[SESSION-PANEL] Loaded sessions: ${flatSessions.length} total, ${sessionTracker.getUnobservedCount()} unobserved`);
     
     // Store available models from SDK
     if (models && models.length > 0) {
@@ -370,17 +346,8 @@ export async function loadSessions(): Promise<void> {
     
     container.innerHTML = '';
     
-    // Flatten all sessions from grouped structure into single MRU list
-    // Preserve cwd from the grouping key, omit sessions without CWD
-    // Store in module state for fuzzy filtering
-    allSessions = [];
-    for (const [cwd, sessions] of Object.entries(grouped)) {
-      // Skip sessions without a valid CWD (incomplete or corrupted)
-      if (cwd === '(unknown)') continue;
-      for (const session of sessions) {
-        allSessions.push({ ...session, cwd });
-      }
-    }
+    // Use already-flattened list for rendering
+    allSessions = flatSessions;
     
     // Sort by updatedAt descending (most recently updated first)
     allSessions.sort((a, b) => {
@@ -392,11 +359,7 @@ export async function loadSessions(): Promise<void> {
       return 0;
     });
     
-    // Render sessions (respecting current search filter)
     renderFilteredSessions();
-    
-    // Update menu button busy indicator after all sessions rendered
-    updateMenuBusyIndicator();
   } catch (error) {
     console.error('Failed to load sessions:', error);
   }
@@ -472,10 +435,14 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   if (activeSessionId && session.sessionId === activeSessionId) {
     item.classList.add('active');
   }
-  if (session.isBusy) {
+  const tracked = sessionTracker.get(session.sessionId);
+  const isBusy = tracked?.busy ?? session.isBusy ?? false;
+  const isUnobserved = tracked?.unobserved ?? session.isUnobserved ?? false;
+  
+  if (isBusy) {
     item.classList.add('busy');
   }
-  if (session.isUnobserved) {
+  if (isUnobserved) {
     item.classList.add('unobserved');
   }
   item.dataset.sessionId = session.sessionId;
@@ -487,9 +454,9 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   
   const indicator = document.createElement('span');
   indicator.className = 'session-indicator';
-  if (session.isBusy) {
+  if (isBusy) {
     indicator.classList.add('busy');
-  } else if (session.isUnobserved) {
+  } else if (isUnobserved) {
     indicator.classList.add('unobserved');
   }
   row1.appendChild(indicator);
@@ -508,7 +475,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     row1.appendChild(ageSpan);
   }
   
-  if (!session.isBusy) {
+  if (!isBusy) {
     const editBtn = document.createElement('button');
     editBtn.className = 'session-edit';
     editBtn.textContent = '/';

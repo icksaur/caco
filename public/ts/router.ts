@@ -12,7 +12,7 @@
  * - Removing them does NOT destroy loaded content
  */
 
-import { setFormEnabled, setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, type ViewState } from './view-controller.js';
+import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, type ViewState } from './view-controller.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
@@ -24,6 +24,7 @@ import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 import { regions } from './dom-regions.js';
 import { renderStatus, clearStatus } from './context-footer.js';
+import { sessionTracker } from './session-state-tracker.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -270,7 +271,7 @@ export async function loadApplet(slug: string): Promise<void> {
 /**
  * Activate a session - clear chat, set state, load history
  */
-async function activateSession(sessionId: string): Promise<void> {
+export async function activateSession(sessionId: string): Promise<void> {
   // Show loading indicator on session item immediately (before any DOM changes)
   setSessionLoading(sessionId, true);
   
@@ -313,16 +314,17 @@ async function activateSession(sessionId: string): Promise<void> {
     
     subscribeToSession(data.sessionId);
     
-    // Show session's actual model + cwd in footer (not the selector preference)
     updateStatusBar(data.cwd || getCurrentCwd(), data.model || undefined);
     
-    // Sync form/cursor state with session's busy status
-    // isBusy = true means form disabled and cursor visible
-    setFormEnabled(!data.isBusy);
-    
-    // Load history (chat is cleared inside waitForHistoryComplete before streaming)
+    // Request history first (sets loadingHistory=true), then seed tracker.
+    // Order matters: tracker onChange checks isLoadingHistory() to avoid
+    // setting form state during history replay.
     requestHistory(data.sessionId);
     await waitForHistoryComplete();
+    
+    // After history loads, tracker gets authoritative busy state from historyComplete.
+    // This setBusy is a fallback for cases where historyComplete didn't include isBusy.
+    sessionTracker.setBusy(data.sessionId, sessionTracker.isBusy(data.sessionId));
     
     setViewState('chatting');
   } catch (error) {

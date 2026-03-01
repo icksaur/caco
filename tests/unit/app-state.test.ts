@@ -92,22 +92,21 @@ describe('app-state', () => {
   describe('getState', () => {
     it('returns snapshot of all state', () => {
       appState.setActiveSession('snapshot-test', '/snapshot');
-      appState.setStreaming(true);
+      appState.setLoadingHistory(true);
       
       const snapshot = appState.getState();
       
       expect(snapshot.activeSessionId).toBe('snapshot-test');
       expect(snapshot.currentCwd).toBe('/snapshot');
-      expect(snapshot.isStreaming).toBe(true);
+      expect(snapshot.loadingHistory).toBe(true);
     });
     
     it('returns copy, not reference', () => {
       const snapshot1 = appState.getState();
-      appState.setStreaming(!snapshot1.isStreaming);
+      appState.setLoadingHistory(!snapshot1.loadingHistory);
       const snapshot2 = appState.getState();
       
-      // Original snapshot should not be mutated
-      expect(snapshot1.isStreaming).not.toBe(snapshot2.isStreaming);
+      expect(snapshot1.loadingHistory).not.toBe(snapshot2.loadingHistory);
     });
   });
 });

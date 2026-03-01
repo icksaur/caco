@@ -27,6 +27,7 @@ import { markSessionObserved } from './session-observed.js';
 import { handleContextEvent, renderStatus } from './context-footer.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
 import { isHistoryPending, waitForHistoryComplete } from './history.js';
+import { sessionTracker } from './session-state-tracker.js';
 
 // Re-export for external callers
 export { setLoadingHistory };
@@ -41,6 +42,9 @@ function startNoEventsWatchdog(): void {
   noEventsTimer = setTimeout(() => {
     noEventsTimer = null;
     console.warn('[SEND] No events received after 60s — dispatch may have failed');
+    
+    const activeId = getActiveSessionId();
+    if (activeId) sessionTracker.setBusy(activeId, false);
     setFormEnabled(true);
     
     const input = document.querySelector('#chatForm textarea') as HTMLTextAreaElement;
@@ -98,34 +102,26 @@ function handleEvent(event: SessionEvent): void {
     return;
   }
   
-  // Drop stale session.error events (e.g., timeout watchdog firing after idle).
-  // If we're not loading history and the form is already enabled, we're not
-  // streaming — so this error is from a previous or stale dispatch.
+  // Drop stale session.error events — if tracker says active session isn't busy,
+  // this error is from a previous or stale dispatch
   if (eventType === 'session.error' && !isLoadingHistory()) {
-    const form = document.querySelector('#chatForm textarea') as HTMLElement | null;
-    const formEnabled = form && !form.closest('fieldset[disabled]') && !(form as HTMLTextAreaElement).disabled;
-    if (formEnabled) {
-      console.warn('[EVENT] Dropping stale session.error (form already enabled):', data);
+    const activeId = getActiveSessionId();
+    if (activeId && !sessionTracker.isBusy(activeId)) {
+      console.warn('[EVENT] Dropping stale session.error (session not busy):', data);
       return;
     }
   }
   
-  // Re-enable form on terminal events (streaming complete)
-  // Check BEFORE outer/inner logic since terminal events may not have display elements
+  // Terminal events: update tracker (which drives form state via subscriber)
   if (isTerminalEvent(eventType)) {
     chatRegion.removeStreamingCursors();
     
-    // Only change form state for LIVE events, not history replay.
-    // History contains past session.idle events that would incorrectly
-    // re-enable the form for a currently-busy session. The authoritative
-    // busy state comes from historyComplete's isBusy flag instead.
     if (!isLoadingHistory()) {
-      setFormEnabled(true);
-      
-      // Mark session as observed - user has seen the completed response
-      if (eventType === 'session.idle') {
-        const sessionId = getActiveSessionId();
-        if (sessionId) {
+      const sessionId = getActiveSessionId();
+      if (sessionId) {
+        sessionTracker.setBusy(sessionId, false);
+        
+        if (eventType === 'session.idle') {
           void markSessionObserved(sessionId);
         }
       }
@@ -148,42 +144,36 @@ function handleEvent(event: SessionEvent): void {
 function registerWsHandlers(): void {
   onEvent(handleEvent);
   
+  // Tracker drives form state for active session
+  sessionTracker.onChange((sessionId, state) => {
+    if (sessionId === getActiveSessionId() && !isLoadingHistory()) {
+      setFormEnabled(!state.busy);
+    }
+  });
+  
   onReconnect(() => {
     const sessionId = getActiveSessionId();
     if (!sessionId || !isViewState('chatting')) return;
     
-    // Re-request history if a request was in-flight when the WS dropped
     if (isHistoryPending()) {
       console.log('[WS] Re-requesting history after reconnect');
       requestHistory(sessionId);
       return;
     }
     
-    // If we were streaming live and the WS dropped (e.g., server restart),
-    // the partial DOM content is stale. Reload full history from disk
-    // so the user sees the completed (or partial) response.
     void reloadAfterReconnect(sessionId);
   });
 }
 
 /**
  * Reload session history after a WS reconnect.
- * Syncs form state and replays history to recover from missed events.
+ * History replay sets tracker busy state via historyComplete's isBusy flag.
  */
 async function reloadAfterReconnect(sessionId: string): Promise<void> {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/state`);
-    if (!res.ok) return;
-    const data = await res.json() as { isBusy?: boolean };
-    
     subscribeToSession(sessionId);
     requestHistory(sessionId);
     await waitForHistoryComplete();
-    
-    // If session is still busy, keep form disabled (live events will resume)
-    if (data.isBusy) {
-      setFormEnabled(false);
-    }
   } catch {
     // Network error — leave UI as-is
   }
@@ -195,6 +185,7 @@ async function reloadAfterReconnect(sessionId: string): Promise<void> {
 export function stopStreaming(): void {
   const sessionId = getActiveSessionId();
   if (sessionId) {
+    sessionTracker.setBusy(sessionId, false);
     fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' })
       .catch(err => console.error('Failed to cancel:', err));
   }
@@ -227,8 +218,12 @@ const SESSION_CREATE_TIMEOUT_MS = 30000;
  * Stream response via REST API + WebSocket
  */
 export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
-  setFormEnabled(false);
   lastSentPrompt = prompt;
+  
+  // Mark busy optimistically — tracker subscriber disables form
+  const currentId = getActiveSessionId();
+  if (currentId) sessionTracker.setBusy(currentId, true);
+  setFormEnabled(false);
   
   try {
     const appletState = getAndClearPendingAppletState();
@@ -287,6 +282,9 @@ export async function streamResponse(prompt: string, model: string, imageData: s
   } catch (error) {
     console.error('[SEND] Error:', error);
     clearNoEventsWatchdog();
+    
+    const activeId = getActiveSessionId();
+    if (activeId) sessionTracker.setBusy(activeId, false);
     setFormEnabled(true);
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

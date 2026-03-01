@@ -22,7 +22,6 @@ export interface AppState {
   availableModels: ModelInfo[];
   
   // === UI Flags
-  isStreaming: boolean;
   loadingHistory: boolean;
   autoScrollEnabled: boolean;
   hasImage: boolean;
@@ -35,7 +34,6 @@ const state: AppState = {
   currentCwd: '',
   selectedModel: DEFAULT_MODEL,
   availableModels: [],
-  isStreaming: false,
   loadingHistory: false,
   autoScrollEnabled: true,
   hasImage: false
@@ -64,11 +62,6 @@ export function getSelectedModel(): string {
 /** Get available models */
 export function getAvailableModels(): readonly ModelInfo[] {
   return state.availableModels;
-}
-
-/** Check if streaming */
-export function isStreaming(): boolean {
-  return state.isStreaming;
 }
 
 /** Check if loading history */
@@ -123,13 +116,6 @@ export function setSelectedModel(modelId: string): void {
  */
 export function setAvailableModels(models: ModelInfo[]): void {
   state.availableModels = [...models]; // Defensive copy
-}
-
-/**
- * Set streaming state
- */
-export function setStreaming(streaming: boolean): void {
-  state.isStreaming = streaming;
 }
 
 /**

@@ -87,8 +87,10 @@ export function setupWebSocket(server: Server): WebSocketServer {
   });
 
   wss.on('connection', (ws, _req) => {
-    // Track in global pool
     allConnections.add(ws);
+    (ws as any).isAlive = true;
+    
+    ws.on('pong', () => { (ws as any).isAlive = true; });
     
     ws.on('message', (data) => {
       try {
@@ -102,7 +104,6 @@ export function setupWebSocket(server: Server): WebSocketServer {
     ws.on('close', () => {
       allConnections.delete(ws);
       
-      // Clean up subscription
       const oldSessionId = clientSubscription.get(ws);
       if (oldSessionId) {
         sessionSubscribers.get(oldSessionId)?.delete(ws);
@@ -113,6 +114,25 @@ export function setupWebSocket(server: Server): WebSocketServer {
     ws.on('error', (err) => {
       console.error('[WS] Error:', err.message);
     });
+  });
+
+  // Server-side heartbeat: detect and clean up broken connections
+  // Uses protocol-level ping/pong per ws library best practices.
+  // Also keeps connection alive through NAT/proxy idle timeouts.
+  const heartbeatInterval = setInterval(() => {
+    for (const ws of wss.clients) {
+      if ((ws as any).isAlive === false) {
+        console.log('[WS] Terminating unresponsive connection');
+        ws.terminate();
+        continue;
+      }
+      (ws as any).isAlive = false;
+      ws.ping();
+    }
+  }, 30000);
+
+  wss.on('close', () => {
+    clearInterval(heartbeatInterval);
   });
 
   return wss;

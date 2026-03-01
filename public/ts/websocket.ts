@@ -198,21 +198,24 @@ function doConnect(myConnectionId: number): void {
     
     stopHeartbeat();
     
-    // Bail if stale - another connection is active
     if (myConnectionId !== connectionId) {
       return;
     }
     
     socket = null;
     
-    // Auto-reconnect with exponential backoff (capped)
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       reconnectAttempts++;
       const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts - 1), RECONNECT_MAX_MS);
       console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+      
+      if (reconnectAttempts === 1) {
+        showToast('Reconnecting…', { type: 'info', autoHideMs: 5000 });
+      }
+      
       setTimeout(() => doConnect(connectionId), delay);
     } else {
-      console.warn('[WS] Max reconnect attempts reached. Use reconnectIfNeeded() to retry.');
+      showToast('Connection lost. Refresh the page.', { type: 'error' });
     }
   };
   

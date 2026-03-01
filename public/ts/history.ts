@@ -6,6 +6,7 @@ import type { Preferences } from './types.js';
 import { applyModelPreference, loadModels } from './model-selector.js';
 import { initFromPreferences, getActiveSessionId } from './app-state.js';
 import { setLoadingHistory } from './message-streaming.js';
+import { setFormEnabled } from './view-controller.js';
 import { onHistoryComplete, getConnectionId } from './websocket.js';
 import { clearContextFooter } from './context-footer.js';
 import { regions } from './dom-regions.js';
@@ -63,13 +64,15 @@ export function waitForHistoryComplete(): Promise<void> {
       clearTimeout(timer);
       setLoadingHistory(false);
       
-      // Update tracker with authoritative busy state from server.
-      // The tracker's onChange subscriber handles setFormEnabled.
+      // Set form state from authoritative server busy status.
+      // Always call setFormEnabled here — we can't rely on tracker change
+      // detection because the value may already be false (no-op in tracker).
       const isBusy = data?.isBusy ?? false;
       const activeId = getActiveSessionId();
       if (activeId) {
         sessionTracker.setBusy(activeId, isBusy);
       }
+      setFormEnabled(!isBusy);
       
       // If no messages loaded, show model selector
       if (regions.chat.el.children.length === 0) {

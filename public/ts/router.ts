@@ -19,12 +19,11 @@ import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
 import { subscribeToSession, requestHistory, reconnectIfNeeded, waitForConnect } from './websocket.js';
 import { waitForHistoryComplete, isHistoryStale } from './history.js';
-import { showSessionManager, setSessionLoading } from './session-panel.js';
+import { showSessionManager, setSessionLoading, updateMenuIndicators } from './session-panel.js';
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 import { regions } from './dom-regions.js';
 import { renderStatus, clearStatus } from './context-footer.js';
-import { sessionTracker } from './session-state-tracker.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -305,8 +304,9 @@ export async function activateSession(sessionId: string): Promise<void> {
       showToast(`Original directory is gone, using: ${data.cwdFallback}`, { type: 'info', autoHideMs: 5000 });
     }
     
-    // Update client state
+    // Update client state — active session changed, refresh menu indicators
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
+    updateMenuIndicators();
     
     // Ensure WS is alive before subscribing/requesting history
     reconnectIfNeeded();
@@ -321,10 +321,6 @@ export async function activateSession(sessionId: string): Promise<void> {
     // setting form state during history replay.
     requestHistory(data.sessionId);
     await waitForHistoryComplete();
-    
-    // After history loads, tracker gets authoritative busy state from historyComplete.
-    // This setBusy is a fallback for cases where historyComplete didn't include isBusy.
-    sessionTracker.setBusy(data.sessionId, sessionTracker.isBusy(data.sessionId));
     
     setViewState('chatting');
   } catch (error) {

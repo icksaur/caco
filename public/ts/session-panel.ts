@@ -136,7 +136,7 @@ function updateSessionItemState(sessionId: string, isBusy: boolean): void {
  * Update all menu indicators (unobserved badge + busy indicator).
  * Uses tracker as source of truth instead of querying DOM.
  */
-function updateMenuIndicators(): void {
+export function updateMenuIndicators(): void {
   const badge = document.getElementById('unobservedBadge');
   const busyIndicator = document.getElementById('menuBusyIndicator');
   

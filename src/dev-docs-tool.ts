@@ -69,6 +69,15 @@ Copilot SDK → Copilot CLI → AI Models
 - \`src/applet-tools.ts\` — Applet CRUD, reload_page, restart_server
 - \`src/display-tools.ts\` — embed_media
 - \`src/mcp-auth-tools.ts\` — register_mcp_server
+- \`src/extensions-tool.ts\` — caco_extensions (extension discovery + API guide)
+
+**Extension system:**
+- \`src/extension-store.ts\` — Discovery: scans ~/.caco/extensions/ + .caco/extensions/
+- \`src/extension-runtime.ts\` — Server extension loading via jiti, ServerExtensionAPI
+- \`public/ts/extension-api.ts\` — ClientExtensionAPI (UI slots, commands, shortcuts, #pound items)
+- \`public/ts/extension-loader.ts\` — Dynamic import + hot-reload of client extensions
+- Call \`caco_extensions\` tool for full API reference and extension authoring guide
+- Spec: \`doc/extensibility.md\`
 
 ## Making Changes
 

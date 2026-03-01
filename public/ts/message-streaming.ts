@@ -32,6 +32,33 @@ import { isHistoryPending, waitForHistoryComplete } from './history.js';
 export { setLoadingHistory };
 
 let chatRegion: ChatRegion;
+let noEventsTimer: ReturnType<typeof setTimeout> | null = null;
+let lastSentPrompt = '';
+const NO_EVENTS_TIMEOUT_MS = 60000;
+
+function startNoEventsWatchdog(): void {
+  clearNoEventsWatchdog();
+  noEventsTimer = setTimeout(() => {
+    noEventsTimer = null;
+    console.warn('[SEND] No events received after 60s — dispatch may have failed');
+    setFormEnabled(true);
+    
+    const input = document.querySelector('#chatForm textarea') as HTMLTextAreaElement;
+    if (input && lastSentPrompt) {
+      input.value = lastSentPrompt;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    
+    showToast('No response received — try again.');
+  }, NO_EVENTS_TIMEOUT_MS);
+}
+
+function clearNoEventsWatchdog(): void {
+  if (noEventsTimer) {
+    clearTimeout(noEventsTimer);
+    noEventsTimer = null;
+  }
+}
 
 /**
  * Handle incoming SDK event (history or live)
@@ -42,8 +69,11 @@ function handleEvent(event: SessionEvent): void {
   let eventType = event.type;
   const data = event.data || {};
   
-  // Transform user.message with non-user source to synthetic type
-  // This allows applet/agent/scheduler messages to have distinct styling
+  // Any live event means the dispatch is working — cancel the no-events watchdog
+  if (!isLoadingHistory()) {
+    clearNoEventsWatchdog();
+  }
+  
   if (eventType === 'user.message' && data.source && data.source !== 'user') {
     eventType = `caco.${data.source}`;
   }
@@ -173,10 +203,32 @@ export function stopStreaming(): void {
 }
 
 /**
+ * Fetch with timeout. Rejects with a descriptive error if the request
+ * doesn't complete within the given time.
+ */
+function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+
+    fetch(url, { ...options, signal: controller.signal })
+      .then(resolve, reject)
+      .finally(() => clearTimeout(timer));
+  });
+}
+
+const SEND_TIMEOUT_MS = 30000;
+const SESSION_CREATE_TIMEOUT_MS = 30000;
+
+/**
  * Stream response via REST API + WebSocket
  */
 export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
   setFormEnabled(false);
+  lastSentPrompt = prompt;
   
   try {
     const appletState = getAndClearPendingAppletState();
@@ -185,14 +237,14 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     let sessionId = getActiveSessionId();
     
     if (newChat || !sessionId) {
-      // Clear chat history for new session
       regions.chat.clear();
       
-      const res = await fetch('/api/sessions', {
+      console.log('[SEND] Creating new session...');
+      const res = await fetchWithTimeout('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cwd, model })
-      });
+      }, SESSION_CREATE_TIMEOUT_MS);
       
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Session creation failed' }));
@@ -201,18 +253,19 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       
       const data = await res.json();
       sessionId = data.sessionId;
+      console.log('[SEND] Session created:', sessionId);
       setActiveSession(sessionId, data.cwd);
       subscribeToSession(sessionId);
       setViewState('chatting');
       
-      // Show model + cwd in footer status bar
       const modelId = getSelectedModel();
       const models = getAvailableModels();
       const modelMatch = models.find(m => m.id === modelId);
       renderStatus(modelMatch?.name || modelId?.split('/').pop() || '', data.cwd || '');
     }
     
-    const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+    console.log('[SEND] Posting message to', sessionId);
+    const res = await fetchWithTimeout(`/api/sessions/${sessionId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
@@ -221,15 +274,19 @@ export async function streamResponse(prompt: string, model: string, imageData: s
         ...(appletState && { appletState }),
         appletNavigation
       })
-    });
+    }, SEND_TIMEOUT_MS);
     
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: 'Request failed' }));
       throw new Error(error.error || `HTTP ${res.status}`);
     }
     
+    console.log('[SEND] Message accepted by server');
+    startNoEventsWatchdog();
+    
   } catch (error) {
-    console.error('Send message error:', error);
+    console.error('[SEND] Error:', error);
+    clearNoEventsWatchdog();
     setFormEnabled(true);
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

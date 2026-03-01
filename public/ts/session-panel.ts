@@ -3,7 +3,7 @@
  */
 
 import type { SessionsResponse, SessionData } from './types.js';
-import { formatAge, formatStatusParts } from './ui-utils.js';
+import { formatAge, formatStatusParts, fuzzyScore } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { setViewState } from './view-controller.js';
@@ -452,45 +452,6 @@ function renderFilteredSessions(): void {
   }
 }
 
-/**
- * Fuzzy match: each character in query must appear in target in order.
- * Returns score (higher = better match), or -1 if no match.
- * 
- * Scoring:
- * - +10 for consecutive character matches
- * - +5 for matching at word boundary (after -, _, /, space, or start)
- * - +1 for any match
- */
-function fuzzyScore(target: string, query: string): number {
-  if (query.length === 0) return 0;
-  if (target.length === 0) return -1;
-  
-  let score = 0;
-  let queryIdx = 0;
-  let prevMatchIdx = -2; // -2 so first match isn't "consecutive"
-  
-  for (let i = 0; i < target.length && queryIdx < query.length; i++) {
-    if (target[i] === query[queryIdx]) {
-      score += 1; // Base score for match
-      
-      // Bonus for consecutive matches
-      if (i === prevMatchIdx + 1) {
-        score += 10;
-      }
-      
-      // Bonus for word boundary (start, or after separator)
-      if (i === 0 || '-_/ '.includes(target[i - 1])) {
-        score += 5;
-      }
-      
-      prevMatchIdx = i;
-      queryIdx++;
-    }
-  }
-  
-  // All query characters must be found
-  return queryIdx === query.length ? score : -1;
-}
 
 /**
  * Check if a session matches the search query (fuzzy match)

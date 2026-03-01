@@ -301,6 +301,48 @@ Note: All file endpoints allow any filesystem path (absolute or relative to cwd)
 - Creates parent directories automatically
 - Returns: `{ ok: true, path, size }`
 
+## Project Files & Prompts
+
+- `GET /api/project-files` - Recursive file listing with fuzzy search
+- `GET /api/prompts` - List available prompt templates
+- `GET /api/prompts/:name` - Get prompt template content
+
+**GET /api/project-files** query params:
+- `cwd` - Root directory to scan (defaults to server cwd)
+- `q` - Fuzzy search query (optional)
+
+Excludes hidden files, binary files, and common build directories (node_modules, .git, dist, etc.). Respects `.gitignore` if present. Capped at 10,000 files. Results cached for 30s.
+
+Returns:
+```json
+{
+  "files": ["src/app.ts", "src/routes/api.ts", "package.json"]
+}
+```
+
+**GET /api/prompts** - List prompt templates
+
+Scans `~/.caco/prompts/*.md` (global) and `.caco/prompts/*.md` (project-local). Project-local overrides global on name collision.
+
+Returns:
+```json
+{
+  "prompts": [
+    { "name": "review", "description": "Review the current code changes" }
+  ]
+}
+```
+
+**GET /api/prompts/:name** - Get prompt content
+
+Returns:
+```json
+{
+  "name": "review",
+  "content": "# Code Review\n\nPlease review..."
+}
+```
+
 ## Scheduled Tasks
 
 - `GET /api/schedule` - List all schedules

@@ -640,6 +640,10 @@ class SessionManager {
     return this.sessionCache.get(sessionId)?.cwd || null;
   }
 
+  getSessionModel(sessionId: string): string | null {
+    return _getSessionModel(sessionId);
+  }
+
   /**
    * Check if a session is active
    */

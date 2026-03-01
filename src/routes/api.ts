@@ -13,10 +13,11 @@
 import { Router, Request, Response } from 'express';
 import express from 'express';
 import { CopilotClient } from '@github/copilot-sdk';
-import { readdir, readFile, stat, writeFile, mkdir } from 'fs/promises';
-import { join, dirname, resolve } from 'path';
+import { readdir, readFile, stat, writeFile, mkdir, access } from 'fs/promises';
+import { join, dirname, resolve, extname, relative } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
+import ignore from 'ignore';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
@@ -25,6 +26,7 @@ import { listApplets, loadApplet } from '../applet-store.js';
 import { getUsage } from '../usage-state.js';
 import { MODEL_CACHE_TTL_MS, MAX_FILE_SIZE_BYTES } from '../config.js';
 import { apiError } from '../api-error.js';
+import { fuzzyScore } from '../utils/fuzzy-score.js';
 
 const router = Router();
 
@@ -471,6 +473,168 @@ router.put('/files/*path', express.text({ type: '*/*', limit: '10mb' }), async (
   } catch (error) {
     console.error('[API] Failed to write file:', error);
     return apiError.internal(res, 'Failed to write file');
+  }
+});
+
+// --- Project Files API ---
+
+const EXCLUDED_DIRS = new Set([
+  'node_modules', '.git', '.hg', '.svn', '__pycache__', '.cache',
+  'dist', 'build', 'coverage', '.next', '.nuxt', 'target', 'vendor',
+  '.tox', '.venv', 'env', '.mypy_cache', '.pytest_cache'
+]);
+
+const BINARY_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.ico', '.bmp', '.webp',
+  '.woff', '.woff2', '.ttf', '.eot',
+  '.zip', '.tar', '.gz', '.bz2',
+  '.exe', '.dll', '.so', '.dylib',
+  '.bin', '.dat', '.db', '.sqlite', '.o', '.a', '.pyc'
+]);
+
+const FILE_LIST_TTL_MS = 30_000;
+const FILE_LIST_CAP = 10_000;
+const fileListCache = new Map<string, { files: string[]; timestamp: number }>();
+
+async function walkProjectFiles(rootDir: string): Promise<string[]> {
+  const cached = fileListCache.get(rootDir);
+  if (cached && Date.now() - cached.timestamp < FILE_LIST_TTL_MS) {
+    return cached.files;
+  }
+
+  let ig: ReturnType<typeof ignore> | null = null;
+  try {
+    const gitignoreContent = await readFile(join(rootDir, '.gitignore'), 'utf-8');
+    ig = ignore().add(gitignoreContent);
+  } catch { /* no .gitignore */ }
+
+  const files: string[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    if (files.length >= FILE_LIST_CAP) return;
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch { return; }
+
+    for (const entry of entries) {
+      if (files.length >= FILE_LIST_CAP) return;
+      if (entry.name.startsWith('.')) continue;
+
+      const fullPath = join(dir, entry.name);
+      const relPath = relative(rootDir, fullPath);
+
+      if (entry.isDirectory()) {
+        if (EXCLUDED_DIRS.has(entry.name)) continue;
+        if (ig?.ignores(relPath + '/')) continue;
+        await walk(fullPath);
+      } else {
+        if (BINARY_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
+        if (ig?.ignores(relPath)) continue;
+        files.push(relPath);
+      }
+    }
+  }
+
+  await walk(rootDir);
+  files.sort((a, b) => a.localeCompare(b));
+
+  fileListCache.set(rootDir, { files, timestamp: Date.now() });
+  return files;
+}
+
+router.get('/project-files', async (req: Request, res: Response) => {
+  const cwd = (req.query.cwd as string) || programCwd;
+  const q = (req.query.q as string) || '';
+
+  try {
+    const resolvedCwd = resolve(cwd);
+    await access(resolvedCwd);
+    const files = await walkProjectFiles(resolvedCwd);
+
+    if (!q) {
+      return res.json({ files });
+    }
+
+    const scored = files
+      .map(f => ({ path: f, score: fuzzyScore(q, f) }))
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(s => s.path);
+
+    res.json({ files: scored });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return apiError.notFound(res, 'Directory not found');
+    }
+    console.error('[API] Failed to list project files:', error);
+    return apiError.internal(res, 'Failed to list project files');
+  }
+});
+
+// --- Prompts API ---
+
+async function scanPromptDir(dir: string): Promise<Map<string, { name: string; description: string; path: string }>> {
+  const prompts = new Map<string, { name: string; description: string; path: string }>();
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch { return prompts; }
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+    const name = entry.name.slice(0, -3);
+    const filePath = join(dir, entry.name);
+    try {
+      const content = await readFile(filePath, 'utf-8');
+      const firstLine = content.split('\n').find(l => l.trim()) || '';
+      prompts.set(name, {
+        name,
+        description: firstLine.trim().slice(0, 80),
+        path: filePath
+      });
+    } catch { /* skip unreadable */ }
+  }
+  return prompts;
+}
+
+router.get('/prompts', async (_req: Request, res: Response) => {
+  try {
+    const globalDir = join(homedir(), '.caco', 'prompts');
+    const localDir = join(programCwd, '.caco', 'prompts');
+
+    const globalPrompts = await scanPromptDir(globalDir);
+    const localPrompts = await scanPromptDir(localDir);
+
+    // Local overrides global on name collision
+    const merged = new Map([...globalPrompts, ...localPrompts]);
+    const prompts = [...merged.values()].map(({ name, description }) => ({ name, description }));
+
+    res.json({ prompts });
+  } catch (error) {
+    console.error('[API] Failed to list prompts:', error);
+    return apiError.internal(res, 'Failed to list prompts');
+  }
+});
+
+router.get('/prompts/:name', async (req: Request, res: Response) => {
+  const { name } = req.params;
+
+  try {
+    const localPath = join(programCwd, '.caco', 'prompts', `${name}.md`);
+    const globalPath = join(homedir(), '.caco', 'prompts', `${name}.md`);
+
+    for (const filePath of [localPath, globalPath]) {
+      try {
+        const content = await readFile(filePath, 'utf-8');
+        return res.json({ name, content });
+      } catch { /* try next */ }
+    }
+
+    return apiError.notFound(res, `Prompt '${name}' not found`);
+  } catch (error) {
+    console.error('[API] Failed to read prompt:', error);
+    return apiError.internal(res, 'Failed to read prompt');
   }
 });
 

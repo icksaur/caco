@@ -295,6 +295,7 @@ async function activateSession(sessionId: string): Promise<void> {
       sessionId: string; 
       cwd?: string; 
       isBusy?: boolean; 
+      model?: string;
       cwdFallback?: string;
     };
     
@@ -312,8 +313,8 @@ async function activateSession(sessionId: string): Promise<void> {
     
     subscribeToSession(data.sessionId);
     
-    // Show model + cwd in footer status bar
-    updateStatusBar(data.cwd || getCurrentCwd());
+    // Show session's actual model + cwd in footer (not the selector preference)
+    updateStatusBar(data.cwd || getCurrentCwd(), data.model || undefined);
     
     // Sync form/cursor state with session's busy status
     // isBusy = true means form disabled and cursor visible
@@ -375,11 +376,18 @@ function updateUrl(params: { session?: string | null; applet?: string | null }, 
  * Update the footer status bar with model name and cwd.
  * Looks up friendly model name from available models.
  */
-function updateStatusBar(cwd: string): void {
-  const modelId = getSelectedModel();
-  const models = getAvailableModels();
-  const model = models.find(m => m.id === modelId);
-  const modelName = model?.name || modelId?.split('/').pop() || '';
+function updateStatusBar(cwd: string, serverModel?: string): void {
+  let modelName: string;
+  if (serverModel) {
+    const models = getAvailableModels();
+    const match = models.find(m => m.id === serverModel);
+    modelName = match?.name || serverModel.split('/').pop() || '';
+  } else {
+    const modelId = getSelectedModel();
+    const models = getAvailableModels();
+    const model = models.find(m => m.id === modelId);
+    modelName = model?.name || modelId?.split('/').pop() || '';
+  }
   renderStatus(modelName, cwd);
 }
 

@@ -21,6 +21,7 @@ import { initRouter, toggleSessions, toggleApplet } from './router.js';
 import { actionBtnClick } from './session-panel.js';
 import { setActiveSession, getSelectedModel, getAvailableModels } from './app-state.js';
 import { renderStatus } from './context-footer.js';
+import { registerCommand } from './command-registry.js';
 
 declare global {
   interface Window {
@@ -94,6 +95,33 @@ document.addEventListener('DOMContentLoaded', () => {
   setupFormHandler();
   setupMarkdownRenderer();
   setupMultilineInput();
+  
+  // Load prompt templates as slash commands
+  try {
+    const promptResp = await fetch('/api/prompts');
+    if (promptResp.ok) {
+      const { prompts } = await promptResp.json();
+      for (const p of prompts) {
+        registerCommand({
+          name: p.name,
+          description: p.description,
+          source: 'template',
+          handler: async () => {
+            const resp = await fetch(`/api/prompts/${encodeURIComponent(p.name)}`);
+            if (!resp.ok) return;
+            const { content } = await resp.json();
+            const textarea = document.querySelector('#chatForm textarea[name="message"]') as HTMLTextAreaElement;
+            if (textarea) {
+              textarea.value = content;
+              textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+          }
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load prompt templates:', e);
+  }
   
   // Initialize hostname-based favicon and button colors
   initHostnameHash();

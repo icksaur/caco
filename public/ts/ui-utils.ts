@@ -80,3 +80,31 @@ export function formatAge(dateStr: string | undefined, compact = false): string 
   if (minutes >= 1) return `${minutes} min`;
   return 'just now';
 }
+
+export function fuzzyScore(target: string, query: string): number {
+  if (query.length === 0) return 0;
+  if (target.length === 0) return -1;
+  
+  let score = 0;
+  let queryIdx = 0;
+  let prevMatchIdx = -2;
+  
+  for (let i = 0; i < target.length && queryIdx < query.length; i++) {
+    if (target[i] === query[queryIdx]) {
+      score += 1;
+      
+      if (i === prevMatchIdx + 1) {
+        score += 10;
+      }
+      
+      if (i === 0 || '-_/ '.includes(target[i - 1])) {
+        score += 5;
+      }
+      
+      prevMatchIdx = i;
+      queryIdx++;
+    }
+  }
+  
+  return queryIdx === query.length ? score : -1;
+}

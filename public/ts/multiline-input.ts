@@ -144,10 +144,11 @@ function handlePound(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
       anchor,
       onSelect: (item) => {
         poundPopup!.hide();
+        const currentCursor = textarea.selectionStart;
         const before = textarea.value.slice(0, poundAnchorPos);
-        const after = textarea.value.slice(cursorPos);
-        textarea.value = before + item.label + after;
-        const newCursor = poundAnchorPos + item.label.length;
+        const after = textarea.value.slice(currentCursor);
+        textarea.value = before + '`' + item.label + '`' + after;
+        const newCursor = poundAnchorPos + item.label.length + 2;
         textarea.setSelectionRange(newCursor, newCursor);
         poundAnchorPos = -1;
         autoResize(textarea);

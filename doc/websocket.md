@@ -27,9 +27,17 @@ ws://localhost:53000/ws/session?id=<sessionId>
 | Type | Payload | Purpose |
 |------|---------|---------|
 | `setState` | `{ data }` | Push applet state |
-| `ping` | `{}` | Heartbeat |
+| `ping` | `{}` | Application-level heartbeat (client → server) |
 
 Chat messages are sent via HTTP POST, not WebSocket.
+
+### Heartbeat / Keep-alive
+
+Two-sided heartbeat keeps connections alive and detects broken ones:
+
+**Server → Client** (protocol-level): Server sends WebSocket `ping` frames every 30s to all connections. If no `pong` response by the next interval, the connection is terminated. Browser WebSocket API responds to protocol pings automatically. This also keeps connections alive through NAT/proxy idle timeouts.
+
+**Client → Server** (application-level): Client sends `{ type: 'ping' }` JSON every 30s. If no `{ type: 'pong' }` within 5s, client force-closes the socket and reconnects. This detects server-gone scenarios since browsers can't send protocol-level pings.
 
 ### Server → Client
 

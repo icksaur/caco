@@ -141,7 +141,7 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
   'tool.execution_progress': 'tool-text',
   'tool.execution_partial_result': 'tool-text',
   'tool.execution_complete': 'tool-text',
-  'session.error': null,         // omit
+  'session.error': 'error-text',
   'session.compaction_start': 'compact-text',
   'session.compaction_complete': 'compact-text',
 
@@ -506,6 +506,10 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   },
 
   // Session events
+  'session.error': (element, data) => {
+    const message = str(data.message, 'Unknown error');
+    element.textContent = `Error: ${message}`;
+  },
   'session.compaction_start': (element) => {
     element.textContent = 'Compacting conversation...';
   },

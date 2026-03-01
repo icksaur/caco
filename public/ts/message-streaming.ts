@@ -68,6 +68,18 @@ function handleEvent(event: SessionEvent): void {
     return;
   }
   
+  // Drop stale session.error events (e.g., timeout watchdog firing after idle).
+  // If we're not loading history and the form is already enabled, we're not
+  // streaming — so this error is from a previous or stale dispatch.
+  if (eventType === 'session.error' && !isLoadingHistory()) {
+    const form = document.querySelector('#chatForm textarea') as HTMLElement | null;
+    const formEnabled = form && !form.closest('fieldset[disabled]') && !(form as HTMLTextAreaElement).disabled;
+    if (formEnabled) {
+      console.warn('[EVENT] Dropping stale session.error (form already enabled):', data);
+      return;
+    }
+  }
+  
   // Re-enable form on terminal events (streaming complete)
   // Check BEFORE outer/inner logic since terminal events may not have display elements
   if (isTerminalEvent(eventType)) {

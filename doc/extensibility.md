@@ -257,8 +257,8 @@ interface ServerExtensionAPI {
   // Session lifecycle hooks
   on(event: string, handler: (...args: unknown[]) => void): () => void;
 
-  // System prompt injection
-  addSystemPromptSection(id: string, content: string): void;
+  // Extension metadata (exposed to agent via caco_extensions introspection tool)
+  setDescription(description: string): void;
 
   // Storage (persisted per-extension in ~/.caco/extensions/<slug>/state.json)
   getState<T>(key: string): T | undefined;
@@ -274,6 +274,41 @@ interface ServerExtensionAPI {
 **Hot reload**: Harder for server-side. Options:
 1. **Full restart** (current approach — `restart_server` tool).
 2. **Module invalidation** — unload old module, re-require. Feasible if extensions are stateless or manage their own cleanup.
+
+### Agent Introspection: `caco_extensions` Tool
+
+The agent discovers extensions via a tool, not system prompt injection. This follows the same pattern as `caco_applet_usage` and `caco_dev_docs`.
+
+**Tool**: `caco_extensions` — returns a summary of all loaded extensions.
+
+```json
+{
+  "extensions": [
+    {
+      "slug": "deploy",
+      "description": "One-click deploy to staging/prod",
+      "tools": ["deploy_trigger", "deploy_status"],
+      "commands": ["/deploy"],
+      "hasCSS": true,
+      "hasClient": true,
+      "hasServer": true
+    }
+  ]
+}
+```
+
+**System message** gets one static line (in `buildSystemMessage()`):
+```
+Extensions may be loaded. Call caco_extensions to discover capabilities.
+```
+
+**Why tool-based instead of prompt injection**:
+- System message is set at session creation (SDK limitation) — can't be updated when extensions hot-reload
+- Tool responses are always current and reliable
+- Agent pulls when relevant, doesn't burn tokens on every message
+- Works across session resume
+
+Extensions call `api.setDescription(text)` to register their description. The `caco_extensions` tool aggregates slug, description, registered tools, and commands from the extension store.
 
 ### Tier 4: Custom WebSocket Events
 
@@ -332,7 +367,7 @@ Session panel:
 | Custom slash commands | 2 (Client) | `registerCommand('deploy', ...)` |
 | Deploy button in footer | 2+3 (Client+Server) | Footer widget + server route + agent tool |
 | Custom session badges (cost, token count) | 2 (Client) | `sessionItem.addBadge` |
-| Project-specific system prompts | 3 (Server) | `addSystemPromptSection` |
+| Project-specific agent tools | 3 (Server) | `registerTool` + `caco_extensions` introspection |
 | Git auto-checkpoint | 3 (Server) | Hook `session.idle` → `git stash` |
 | CI/CD integration | 3 (Server) | Custom tool + WS status broadcasts |
 | Custom session list ordering | 2 (Client) | Override session rendering (advanced) |
@@ -382,7 +417,7 @@ Session panel:
   - Tool registration (merged into SDK tool factory)
   - WS broadcast helpers
   - Custom client message handlers (`ext.*` namespace)
-  - System prompt section injection
+  - Extension metadata registration (description, exposed via `caco_extensions` tool)
   - Per-extension persistent state (`~/.caco/extensions/<slug>/state.json`)
 - Route mounting and tool merging
 
@@ -613,7 +648,9 @@ They coexist. An extension might wrap an MCP server with custom UI, or provide t
 
 ### Extensions vs Skills
 
-Skills (`.github/copilot-instructions.md`, `.github/skills/`) are prompt-injection mechanisms — they add text to the system message. Extensions can also inject system prompt sections via `ServerExtensionAPI.addSystemPromptSection()`.
+Skills (`.github/copilot-instructions.md`, `.github/skills/`) are prompt-injection mechanisms — they add text to the system message. Extensions expose their capabilities via the `caco_extensions` introspection tool instead.
 
-The difference: skills are declarative (markdown files), extensions are programmatic (can conditionally inject, modify at runtime). Skills are simpler for the common case.
+Why a tool instead of system prompt injection: The Copilot SDK sets the system message at session creation — it can't be reliably updated later. Tool responses are always reliable and always current. The agent calls `caco_extensions` on demand to discover what's loaded, what tools are available, and what each extension does. This avoids burning tokens on every message and eliminates stale-cache problems.
+
+Skills remain the right choice for static prompt text (project conventions, coding guidelines). Extensions are for dynamic capabilities (tools, UI, WS events) that the agent discovers via introspection.
 

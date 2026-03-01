@@ -23,6 +23,8 @@ import { listEmbedOutputs, parseOutputMarkers, getSessionMeta } from '../storage
 import { CacoEventQueue, isFlushTrigger, type CacoEvent } from '../caco-event-queue.js';
 import { normalizeToolComplete, extractToolResultText, type RawSDKEvent } from '../sdk-normalizer.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
+import { getClientMessageHandler } from '../extension-runtime.js';
+import { watchExtensions } from '../extension-store.js';
 
 const allConnections = new Set<WebSocket>();
 const sessionSubscribers = new Map<string, Set<WebSocket>>();
@@ -135,6 +137,14 @@ export function setupWebSocket(server: Server): WebSocketServer {
     clearInterval(heartbeatInterval);
   });
 
+  watchExtensions((slug, type) => {
+    if (type === 'css') {
+      broadcastGlobalEvent({ type: 'extension.cssChanged', data: { slug } } as SessionEvent);
+    } else if (type === 'client') {
+      broadcastGlobalEvent({ type: 'extension.reload', data: { slug } } as SessionEvent);
+    }
+  });
+
   return wss;
 }
 
@@ -142,6 +152,15 @@ export function setupWebSocket(server: Server): WebSocketServer {
  * Handle incoming message from client
  */
 function handleMessage(ws: WebSocket, msg: ClientMessage): void {
+  if (msg.type.startsWith('ext.')) {
+    const handler = getClientMessageHandler(msg.type);
+    if (handler) {
+      try { handler(ws, (msg as unknown as Record<string, unknown>).data); }
+      catch (err) { console.error('[EXT] WS handler error:', err); }
+    }
+    return;
+  }
+
   switch (msg.type) {
     case 'setState':
       if (msg.data) {

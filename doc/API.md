@@ -306,6 +306,9 @@ Note: All file endpoints allow any filesystem path (absolute or relative to cwd)
 - `GET /api/project-files` - Recursive file listing with fuzzy search
 - `GET /api/prompts` - List available prompt templates
 - `GET /api/prompts/:name` - Get prompt template content
+- `GET /api/extensions` - List installed extensions
+- `GET /api/extensions/:slug/style.css` - Serve extension CSS
+- `GET /api/extensions/:slug/client.js` - Compile and serve extension client JS
 
 **GET /api/project-files** query params:
 - `cwd` - Root directory to scan (defaults to server cwd)
@@ -342,6 +345,27 @@ Returns:
   "content": "# Code Review\n\nPlease review..."
 }
 ```
+
+**GET /api/extensions** - List installed extensions
+
+Scans `~/.caco/extensions/*/manifest.json` (user-global) and `.caco/extensions/*/manifest.json` (project-local). Project-local overrides user-global on slug collision.
+
+Returns:
+```json
+{
+  "extensions": [
+    { "slug": "theme-dark", "name": "Dark Theme", "description": "...", "provides": ["css"], "dir": "/home/user/.caco/extensions/theme-dark" }
+  ]
+}
+```
+
+**GET /api/extensions/:slug/style.css** - Extension CSS
+
+Returns the `style.css` file from the extension directory. 404 if extension doesn't exist, doesn't provide `"css"`, or file is missing.
+
+**GET /api/extensions/:slug/client.js** - Extension client JS
+
+Compiles `client.ts` from the extension directory via esbuild (ESM, bundled). Cached by mtime. 404 if extension doesn't exist, doesn't provide `"client"`, or compilation fails.
 
 ## Scheduled Tasks
 

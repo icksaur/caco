@@ -66,6 +66,7 @@ export async function buildSystemMessage(): Promise<SystemMessage> {
 - **Images**: View pasted images, display image files
 - **Media embeds**: Embed YouTube, SoundCloud, Vimeo, Spotify content inline
 - **Applets**: Interactive UI panels the user can open via markdown links
+- **Extensions**: User-installed plugins. Call \`caco_extensions\` to discover loaded extensions
 
 ## Display Tools
 You have a tool that displays content directly to the user:

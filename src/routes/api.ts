@@ -23,6 +23,7 @@ import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
 import { setAppletUserState, getAppletUserState, clearAppletUserState } from '../applet-state.js';
 import { listApplets, loadApplet } from '../applet-store.js';
+import { listExtensions, getExtension } from '../extension-store.js';
 import { getUsage } from '../usage-state.js';
 import { MODEL_CACHE_TTL_MS, MAX_FILE_SIZE_BYTES } from '../config.js';
 import { apiError } from '../api-error.js';
@@ -637,5 +638,55 @@ router.get('/prompts/:name', async (req: Request, res: Response) => {
     return apiError.internal(res, 'Failed to read prompt');
   }
 });
+
+router.get('/extensions', async (_req: Request, res: Response) => {
+  try {
+    const extensions = await listExtensions();
+    res.json({ extensions });
+  } catch (error) {
+    console.error('[API] Failed to list extensions:', error);
+    res.status(500).json({ error: 'Failed to list extensions' });
+  }
+});
+
+router.get('/extensions/:slug/style.css', async (req: Request, res: Response) => {
+  const ext = await getExtension(req.params.slug as string);
+  if (!ext || !ext.provides.includes('css')) return apiError.notFound(res, 'Extension CSS not found');
+  try {
+    const css = await readFile(join(ext.dir, 'style.css'), 'utf-8');
+    res.type('text/css').send(css);
+  } catch {
+    return apiError.notFound(res, 'style.css not found');
+  }
+});
+
+router.get('/extensions/:slug/client.js', async (req: Request, res: Response) => {
+  const ext = await getExtension(req.params.slug as string);
+  if (!ext || !ext.provides.includes('client')) return apiError.notFound(res, 'Extension client not found');
+  const clientPath = join(ext.dir, 'client.ts');
+  try {
+    const s = await stat(clientPath);
+    const cached = clientJsCache.get(ext.slug);
+    if (cached && cached.mtime === s.mtimeMs) {
+      return res.type('application/javascript').send(cached.js);
+    }
+    const esbuild = await import('esbuild');
+    const result = await esbuild.build({
+      entryPoints: [clientPath],
+      bundle: true,
+      format: 'esm',
+      write: false,
+      target: 'es2020',
+    });
+    const js = result.outputFiles?.[0]?.text;
+    if (!js) return apiError.internal(res, 'esbuild produced no output');
+    clientJsCache.set(ext.slug, { js, mtime: s.mtimeMs });
+    res.type('application/javascript').send(js);
+  } catch {
+    return apiError.notFound(res, 'client.ts not found or failed to compile');
+  }
+});
+
+const clientJsCache = new Map<string, { js: string; mtime: number }>();
 
 export default router;

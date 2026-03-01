@@ -18,6 +18,7 @@ import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools } from './src/agent-tools.js';
 import { createMcpAuthTools } from './src/mcp-auth-tools.js';
 import { createDevDocsTool } from './src/dev-docs-tool.js';
+import { createExtensionsTool } from './src/extensions-tool.js';
 import type { SessionIdRef } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
@@ -26,6 +27,7 @@ import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { getQueue } from './src/caco-event-queue.js';
 import { buildSystemMessage } from './src/prompts.js';
+import { loadServerExtensions } from './src/extension-runtime.js';
 import type { SystemMessage, ToolFactory } from './src/types.js';
 import { PORT, HOST } from './src/config.js';
 
@@ -37,6 +39,8 @@ const app = express();
 // Tool factory - creates display tools + applet tools with session cwd baked in
 // Program CWD for applet storage (fixed at startup)
 const programCwd = process.cwd();
+
+let extensionTools: ReturnType<typeof createDevDocsTool> = [];
 
 const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
   // Queue function for caco.* events - tools queue, events flush on session.idle
@@ -73,7 +77,9 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
   // Dev docs tool for self-modification discovery
   const devDocs = createDevDocsTool(programCwd);
   
-  return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs];
+  const extIntrospection = createExtensionsTool();
+  
+  return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools];
 };
 
 // System message for sessions - built at startup from prompts module
@@ -135,6 +141,8 @@ async function start(): Promise<void> {
   // Build system message with applet discovery
   SYSTEM_MESSAGE = await buildSystemMessage();
   console.log('✓ System message built with applet discovery');
+  
+  extensionTools = await loadServerExtensions(app);
   
   // Initialize session state
   await sessionState.init({

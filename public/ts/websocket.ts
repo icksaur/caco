@@ -504,3 +504,7 @@ export function reconnectIfNeeded(): void {
     doConnect(connectionId);
   }
 }
+
+export function wsSendRaw(msg: object): void {
+  send(msg);
+}

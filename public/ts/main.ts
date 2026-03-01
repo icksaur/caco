@@ -22,6 +22,8 @@ import { actionBtnClick } from './session-panel.js';
 import { setActiveSession, getSelectedModel, getAvailableModels } from './app-state.js';
 import { renderStatus } from './context-footer.js';
 import { registerCommand } from './command-registry.js';
+import { loadClientExtensions, reloadExtension } from './extension-loader.js';
+import { onGlobalEvent } from './websocket.js';
 
 declare global {
   interface Window {
@@ -122,6 +124,38 @@ document.addEventListener('DOMContentLoaded', () => {
   } catch (e) {
     console.warn('Failed to load prompt templates:', e);
   }
+  
+  // Load extensions (CSS injection + client extensions)
+  try {
+    const extResp = await fetch('/api/extensions');
+    if (extResp.ok) {
+      const { extensions } = await extResp.json();
+      for (const ext of extensions) {
+        if (ext.provides.includes('css')) {
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = `/api/extensions/${ext.slug}/style.css`;
+          link.dataset.extensionSlug = ext.slug;
+          document.head.appendChild(link);
+        }
+      }
+    }
+    await loadClientExtensions();
+  } catch (e) {
+    console.warn('Failed to load extensions:', e);
+  }
+  
+  // Extension hot-reload handlers
+  onGlobalEvent((event) => {
+    if (event.type === 'extension.cssChanged') {
+      const slug = (event.data as { slug: string })?.slug;
+      const link = document.querySelector(`link[data-extension-slug="${slug}"]`) as HTMLLinkElement;
+      if (link) link.href = `/api/extensions/${slug}/style.css?t=${Date.now()}`;
+    } else if (event.type === 'extension.reload') {
+      const slug = (event.data as { slug: string })?.slug;
+      if (slug) void reloadExtension(slug);
+    }
+  });
   
   // Initialize hostname-based favicon and button colors
   initHostnameHash();

@@ -34,3 +34,7 @@ export function buildMessagePrefix(source: MessageSource, id: string): string { 
 - **Dynamic system message**: Rebuild on applet changes
 - **Per-session overrides**: Custom system message per session
 - **copilot-instructions.md**: Auto-inject project instructions
+
+## Decision: Extensions Use Tools, Not Prompt Injection
+
+Extensions expose capabilities via the `caco_extensions` introspection tool rather than injecting into the system message. The SDK sets the system message at session creation — it can't be reliably updated later. Tool responses are always current. See `doc/extensibility.md` § Agent Introspection.

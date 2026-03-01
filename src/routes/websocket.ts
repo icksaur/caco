@@ -118,9 +118,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
     });
   });
 
-  // Server-side heartbeat: detect and clean up broken connections
-  // Uses protocol-level ping/pong per ws library best practices.
-  // Also keeps connection alive through NAT/proxy idle timeouts.
+  // Server-side heartbeat: detect broken connections + send app-level ping.
+  // Protocol-level ws.ping() detects dead TCP; app-level serverPing lets
+  // the browser client log and monitor connection health.
   const heartbeatInterval = setInterval(() => {
     for (const ws of wss.clients) {
       if ((ws as any).isAlive === false) {
@@ -130,6 +130,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
       }
       (ws as any).isAlive = false;
       ws.ping();
+      try {
+        ws.send(JSON.stringify({ type: 'serverPing', ts: Date.now() }));
+      } catch { /* connection may be closing */ }
     }
   }, 30000);
 

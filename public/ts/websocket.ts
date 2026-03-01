@@ -34,6 +34,8 @@ const RECONNECT_MAX_MS = 15000;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 const HEARTBEAT_INTERVAL_MS = 30000;
 const HEARTBEAT_TIMEOUT_MS = 5000;
+const SERVER_PING_WARN_MS = 45000;
+let lastServerPingTs = 0;
 
 type StateCallback = (state: Record<string, unknown>) => void;
 type EventCallback = (event: SessionEvent) => void;
@@ -96,9 +98,15 @@ export function requestHistory(sessionId: string): void {
 
 function startHeartbeat(myConnectionId: number): void {
   stopHeartbeat();
+  lastServerPingTs = Date.now();
   heartbeatTimer = setInterval(() => {
     if (myConnectionId !== connectionId) { stopHeartbeat(); return; }
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    
+    const sincePing = Date.now() - lastServerPingTs;
+    if (sincePing > SERVER_PING_WARN_MS) {
+      console.warn(`[WS] No server ping for ${Math.round(sincePing / 1000)}s — connection may be stale`);
+    }
     
     const timeout = setTimeout(() => {
       if (myConnectionId !== connectionId) return;
@@ -108,6 +116,7 @@ function startHeartbeat(myConnectionId: number): void {
     
     const origHandler = handlePong;
     handlePong = () => { clearTimeout(timeout); handlePong = origHandler; };
+    console.log('[WS] → ping');
     send({ type: 'ping' });
   }, HEARTBEAT_INTERVAL_MS);
 }
@@ -319,8 +328,17 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
 
       
     case 'pong':
+      console.log('[WS] ← pong');
       handlePong();
       break;
+    
+    case 'serverPing': {
+      lastServerPingTs = Date.now();
+      const serverTs = (msg as unknown as { ts?: number }).ts;
+      const latency = serverTs ? Date.now() - serverTs : '?';
+      console.log(`[WS] ← serverPing (latency: ${latency}ms)`);
+      break;
+    }
       
     default:
       // Unknown message type - ignore

@@ -247,10 +247,14 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       renderStatus(modelMatch?.name || modelId?.split('/').pop() || '', data.cwd || '');
     }
     
-    console.log('[SEND] Posting message to', sessionId);
+    const requestId = `req-${Date.now().toString(36)}`;
+    console.log(`[SEND] Posting message to ${sessionId} (${requestId})`);
     const res = await fetchWithTimeout(`/api/sessions/${sessionId}/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Request-Id': requestId
+      },
       body: JSON.stringify({ 
         prompt, 
         imageData,
@@ -264,7 +268,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       throw new Error(error.error || `HTTP ${res.status}`);
     }
     
-    console.log('[SEND] Message accepted by server');
+    console.log(`[SEND] Message accepted (${requestId})`);
     startNoEventsWatchdog();
     
   } catch (error) {

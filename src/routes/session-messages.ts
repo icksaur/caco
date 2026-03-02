@@ -37,6 +37,7 @@ const router = Router();
  */
 router.post('/sessions/:sessionId/messages', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
+  const requestId = (req.headers['x-request-id'] as string) || `srv-${Date.now().toString(36)}`;
   const { prompt, imageData, appletState, appletNavigation, source, appletSlug, fromSession, scheduleSlug, correlationId } = req.body as {
     prompt?: string;
     imageData?: string;
@@ -120,6 +121,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // This surfaces resume failures as HTTP errors instead of swallowing them
   if (!sessionManager.isActive(sessionId)) {
     try {
+      console.log(`[DISPATCH:${requestId}] Resuming session ${sessionId}`);
       await sessionManager.resume(sessionId, sessionState.getSessionConfig());
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -133,6 +135,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   sessionManager.recordAgentCall(effectiveCorrelationId, sessionId);
   
   // Return success - session is now active, dispatch happens in background
+  console.log(`[DISPATCH:${requestId}] Accepted for session ${sessionId}`);
   res.json({ ok: true, sessionId });
   
   // Prefix prompt with source marker for history persistence and agent context
@@ -150,7 +153,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   dispatchMessage(
     sessionId, 
     promptToSend, 
-    { tempFilePath, clientId, correlationId: effectiveCorrelationId },
+    { tempFilePath, clientId, correlationId: effectiveCorrelationId, requestId },
     {
       onEvent: (evt) => broadcastEvent(sessionId, evt)
     }
@@ -182,11 +185,12 @@ export interface DispatchCallbacks {
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePath?: string; clientId?: string; correlationId?: string },
+  options?: { tempFilePath?: string; clientId?: string; correlationId?: string; requestId?: string },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePath, correlationId } = options || {};
+  const { tempFilePath, correlationId, requestId } = options || {};
+  const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
   
   // Track active dispatch for graceful restart
@@ -239,16 +243,14 @@ export async function dispatchMessage(
         unlink(tempFilePath).catch(() => {});
       }
       dispatchComplete();
-      console.log(`[DISPATCH] Completed: ${reason}`);
+      console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
     };
     
-    // Watchdog timer — resets on each event. Only fires if the stream
-    // goes silent for DISPATCH_TIMEOUT_MS (no events received at all).
     const resetWatchdog = () => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
       timeoutHandle = setTimeout(() => {
         if (!dispatchCompleted) {
-          console.warn(`[DISPATCH] No events for ${DISPATCH_TIMEOUT_MS / 1000}s, timing out session ${sessionId}`);
+          console.warn(`[DISPATCH:${rid}] No events for ${DISPATCH_TIMEOUT_MS / 1000}s, timing out session ${sessionId}`);
           onEvent({ type: 'session.error', data: { message: `No response for ${DISPATCH_TIMEOUT_MS / 1000 / 60} minutes` } });
           cleanupAndComplete('timeout');
           unsubscribe();
@@ -328,14 +330,14 @@ export async function dispatchMessage(
     
     // Send message
     try {
-      // Start dispatch - marks busy and sets correlation context atomically
-      // correlationId is always present (generated server-side for non-agent messages)
       sessionManager.startDispatch(sessionId, correlationId!);
       broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: true } });
       
+      console.log(`[DISPATCH:${rid}] Sending to SDK for session ${sessionId}`);
       sessionManager.sendStream(sessionId, prompt, messageOptions);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      console.error(`[DISPATCH:${rid}] Send error:`, message);
       
       if (message.includes('Session not found') || message.includes('session.send failed')) {
         onEvent({ type: 'session.error', data: { message: 'Session expired - please start a new session' } });
@@ -352,6 +354,7 @@ export async function dispatchMessage(
     if (!dispatchCompleted) {
       dispatchCompleted = true;
       const message = error instanceof Error ? error.message : String(error);
+      console.error(`[DISPATCH:${rid}] Outer error:`, message);
       onEvent({ type: 'session.error', data: { message } });
       
       sessionManager.endDispatch(sessionId);

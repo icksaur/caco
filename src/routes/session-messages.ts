@@ -242,17 +242,24 @@ export async function dispatchMessage(
       console.log(`[DISPATCH] Completed: ${reason}`);
     };
     
-    // Timeout watchdog - force cleanup if stream hangs
-    timeoutHandle = setTimeout(() => {
-      if (!dispatchCompleted) {
-        console.warn(`[DISPATCH] Timeout after ${DISPATCH_TIMEOUT_MS / 1000}s for session ${sessionId}`);
-        onEvent({ type: 'session.error', data: { message: `Request timed out after ${DISPATCH_TIMEOUT_MS / 1000 / 60} minutes` } });
-        cleanupAndComplete('timeout');
-        unsubscribe();
-      }
-    }, DISPATCH_TIMEOUT_MS);
+    // Watchdog timer — resets on each event. Only fires if the stream
+    // goes silent for DISPATCH_TIMEOUT_MS (no events received at all).
+    const resetWatchdog = () => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      timeoutHandle = setTimeout(() => {
+        if (!dispatchCompleted) {
+          console.warn(`[DISPATCH] No events for ${DISPATCH_TIMEOUT_MS / 1000}s, timing out session ${sessionId}`);
+          onEvent({ type: 'session.error', data: { message: `No response for ${DISPATCH_TIMEOUT_MS / 1000 / 60} minutes` } });
+          cleanupAndComplete('timeout');
+          unsubscribe();
+        }
+      }, DISPATCH_TIMEOUT_MS);
+    };
+    resetWatchdog();
     
     const unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on((event: SessionEvent) => {
+      // Reset watchdog on every event — session is alive
+      resetWatchdog();
       // Flush queued caco events before trigger events (so embeds appear at natural break)
       if (isFlushTrigger(event.type)) {
         const queue = getQueue(sessionId);

@@ -131,15 +131,10 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     }
   }
   
-  // Record call for correlation metrics (all flows, not just agent calls)
   sessionManager.recordAgentCall(effectiveCorrelationId, sessionId);
   
-  // Return success - session is now active, dispatch happens in background
-  console.log(`[DISPATCH:${requestId}] Accepted for session ${sessionId}`);
-  res.json({ ok: true, sessionId });
-  
-  // Prefix prompt with source marker for history persistence and agent context
-  // Format: [applet:slug], [agent:sessionId], or [scheduler:slug]
+  // Dispatch to SDK — waits for send to succeed before returning HTTP 200.
+  // The streaming response continues in the background after the POST returns.
   let promptToSend = prompt;
   if (source === 'applet' && appletSlug) {
     promptToSend = prefixMessageSource('applet', appletSlug, prompt);
@@ -149,17 +144,23 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     promptToSend = prefixMessageSource('scheduler', scheduleSlug, prompt);
   }
   
-  // Dispatch to SDK with WS broadcast callbacks
-  dispatchMessage(
-    sessionId, 
-    promptToSend, 
-    { tempFilePath, clientId, correlationId: effectiveCorrelationId, requestId },
-    {
-      onEvent: (evt) => broadcastEvent(sessionId, evt)
-    }
-  ).catch(err => {
-    console.error('[DISPATCH] Error:', err);
-  });
+  try {
+    await dispatchMessage(
+      sessionId, 
+      promptToSend, 
+      { tempFilePath, clientId, correlationId: effectiveCorrelationId, requestId },
+      {
+        onEvent: (evt) => broadcastEvent(sessionId, evt)
+      }
+    );
+    
+    console.log(`[DISPATCH:${requestId}] Accepted for session ${sessionId}`);
+    res.json({ ok: true, sessionId });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[DISPATCH:${requestId}] Failed for session ${sessionId}:`, message);
+    res.status(500).json({ error: `Dispatch failed: ${message}` });
+  }
 });
 
 /**
@@ -172,15 +173,11 @@ export interface DispatchCallbacks {
 }
 
 /**
- * Dispatch a message to a session and forward SDK events
+ * Dispatch a message to a session and forward SDK events.
  * 
- * Core dispatch function - just forwards SDK events as-is.
- * Server-side processing (usage tracking, cleanup) happens here.
- * 
- * @param sessionId - Target session
- * @param prompt - Message to send
- * @param options - Optional: tempFilePath for image, clientId for session switching, correlationId for tracking
- * @param callbacks - Optional: onEvent callback for observers
+ * Resolves after the message is successfully sent to the SDK.
+ * Event streaming continues in the background after resolution.
+ * Rejects if the send fails (session expired, SDK error).
  */
 export async function dispatchMessage(
   sessionId: string,
@@ -328,12 +325,13 @@ export async function dispatchMessage(
       }
     });
     
-    // Send message
+    // Send message — this is the critical step. If it fails, the caller
+    // gets an error. If it succeeds, streaming continues in the background.
+    sessionManager.startDispatch(sessionId, correlationId!);
+    broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: true } });
+    
+    console.log(`[DISPATCH:${rid}] Sending to SDK for session ${sessionId}`);
     try {
-      sessionManager.startDispatch(sessionId, correlationId!);
-      broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: true } });
-      
-      console.log(`[DISPATCH:${rid}] Sending to SDK for session ${sessionId}`);
       sessionManager.sendStream(sessionId, prompt, messageOptions);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -348,7 +346,10 @@ export async function dispatchMessage(
       
       cleanupAndComplete('send error');
       unsubscribe();
+      throw err;
     }
+    
+    // Send succeeded — function resolves. Event streaming continues in background.
     
   } catch (error) {
     if (!dispatchCompleted) {

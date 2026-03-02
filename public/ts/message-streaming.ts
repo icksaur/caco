@@ -193,23 +193,7 @@ export function stopStreaming(): void {
   setFormEnabled(true);
 }
 
-/**
- * Fetch with timeout. Rejects with a descriptive error if the request
- * doesn't complete within the given time.
- */
-function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
-  return new Promise((resolve, reject) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      controller.abort();
-      reject(new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`));
-    }, timeoutMs);
-
-    fetch(url, { ...options, signal: controller.signal })
-      .then(resolve, reject)
-      .finally(() => clearTimeout(timer));
-  });
-}
+import { fetchWithTimeout } from './fetch-timeout.js';
 
 const SEND_TIMEOUT_MS = 30000;
 const SESSION_CREATE_TIMEOUT_MS = 30000;
@@ -220,10 +204,14 @@ const SESSION_CREATE_TIMEOUT_MS = 30000;
 export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
   lastSentPrompt = prompt;
   
-  // Mark busy optimistically — tracker subscriber disables form
+  // Mark busy optimistically — tracker subscriber disables form.
+  // For new chats (no active session yet), disable form directly.
   const currentId = getActiveSessionId();
-  if (currentId) sessionTracker.setBusy(currentId, true);
-  setFormEnabled(false);
+  if (currentId) {
+    sessionTracker.setBusy(currentId, true);
+  } else {
+    setFormEnabled(false);
+  }
   
   try {
     const appletState = getAndClearPendingAppletState();

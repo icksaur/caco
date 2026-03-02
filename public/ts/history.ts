@@ -16,6 +16,7 @@ const HISTORY_TIMEOUT_MS = 15000;
 
 let historyPending = false;
 let lastHistoryConnectionId = -1;
+let historyGeneration = 0;
 
 /**
  * Whether a history request is in-flight (waiting for historyComplete).
@@ -48,7 +49,10 @@ export function waitForHistoryComplete(): Promise<void> {
   setLoadingHistory(true);
   historyPending = true;
   
-  // Clear existing chat and context footer before loading new history
+  // Increment generation — if another request starts before this one
+  // completes, the stale completion is ignored
+  const myGeneration = ++historyGeneration;
+  
   regions.chat.clear();
   clearContextFooter();
   
@@ -58,15 +62,20 @@ export function waitForHistoryComplete(): Promise<void> {
     const finish = (data?: { isBusy?: boolean }) => {
       if (settled) return;
       settled = true;
-      historyPending = false;
-      lastHistoryConnectionId = getConnectionId();
       unsubscribe();
       clearTimeout(timer);
+      
+      // If a newer request started, discard this completion
+      if (myGeneration !== historyGeneration) {
+        console.log('[HISTORY] Discarding stale historyComplete (superseded)');
+        resolve();
+        return;
+      }
+      
+      historyPending = false;
+      lastHistoryConnectionId = getConnectionId();
       setLoadingHistory(false);
       
-      // Set form state from authoritative server busy status.
-      // Always call setFormEnabled here — we can't rely on tracker change
-      // detection because the value may already be false (no-op in tracker).
       const isBusy = data?.isBusy ?? false;
       const activeId = getActiveSessionId();
       if (activeId) {
@@ -74,7 +83,6 @@ export function waitForHistoryComplete(): Promise<void> {
       }
       setFormEnabled(!isBusy);
       
-      // If no messages loaded, show model selector
       if (regions.chat.el.children.length === 0) {
         loadModels();
       }

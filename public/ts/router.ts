@@ -24,6 +24,9 @@ import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 import { regions } from './dom-regions.js';
 import { renderStatus, clearStatus } from './context-footer.js';
+import { fetchWithTimeout } from './fetch-timeout.js';
+
+const RESUME_TIMEOUT_MS = 30000;
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -276,9 +279,9 @@ export async function activateSession(sessionId: string): Promise<void> {
   
   // Resume session on server (don't clear chat yet -- if this fails, keep old chat visible)
   try {
-    const response = await fetch(`/api/sessions/${sessionId}/resume`, {
+    const response = await fetchWithTimeout(`/api/sessions/${sessionId}/resume`, {
       method: 'POST'
-    });
+    }, RESUME_TIMEOUT_MS);
     
     // Clear loading state once we have a response
     setSessionLoading(sessionId, false);

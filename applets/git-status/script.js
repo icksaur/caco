@@ -693,10 +693,5 @@ window.appletAPI.onSessionEvent((event) => {
 window.appletAPI.onSessionChange((_sessionId, cwd) => {
   if (!cwd) return;
   repoPath = cwd;
-  if (repoPathLabel) {
-    repoPathLabel.textContent = repoPath;
-    repoPathLabel.href = '?applet=file-browser&path=' + encodeURIComponent(repoPath);
-  }
-  document.getElementById('noPathMessage').classList.add('hidden');
-  refresh();
+  window.appletAPI.updateAppletUrlParam('path', cwd);
 });

@@ -544,9 +544,17 @@ function colorizeStatLine(line) {
       .replace(/(\d+ insertion[s]?\(\+\))/, '<span class="stat-add">$1</span>')
       .replace(/(\d+ deletion[s]?\(-\))/, '<span class="stat-del">$1</span>');
   }
-  // File line: " src/foo.ts | 12 +++---"  — color the +/- bar
-  return line.replace(/(\++)/g, '<span class="stat-add">$1</span>')
-             .replace(/(-+)/g, '<span class="stat-del">$1</span>');
+  // File line: " src/foo.ts | 12 +++---"
+  // Split at the bar chart (sequence of + and - at end of line after |)
+  const barMatch = line.match(/^(.+\| +\d+ )([+-]+)$/);
+  if (barMatch) {
+    const prefix = barMatch[1];
+    const bar = barMatch[2];
+    const colored = bar.replace(/(\++)/g, '<span class="stat-add">$1</span>')
+                       .replace(/(-+)/g, '<span class="stat-del">$1</span>');
+    return prefix + colored;
+  }
+  return line;
 }
 
 async function refresh() {

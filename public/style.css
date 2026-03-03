@@ -780,6 +780,14 @@ main {
   padding: var(--space-sm);
 }
 
+.assistant-activity .truncated-text {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  opacity: 0.6;
+  padding: var(--space-xs) 0;
+}
+
 /* Compact tool output - reduce padding/margins from markdown defaults */
 .assistant-activity .markdown-content p {
   margin: 0;

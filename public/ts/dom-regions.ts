@@ -117,6 +117,7 @@ export const EVENT_TO_OUTER: Record<string, string> = {
   'caco.scheduler': 'scheduler-message',
   'caco.embed': 'embed-message',
   'caco.info': 'assistant-activity',
+  'caco.truncated': 'assistant-activity',
 };
 
 /**
@@ -151,6 +152,7 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
   'caco.scheduler': 'scheduler-text',
   'caco.embed': 'embed-content',
   'caco.info': null,  // omit - internal signal
+  'caco.truncated': 'truncated-text',
 };
 
 /**
@@ -521,6 +523,11 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'caco.agent': setPath('content'),
   'caco.applet': setPath('content'),
   'caco.scheduler': setPath('content'),
+
+  'caco.truncated': (element, data) => {
+    const skipped = (data.skipped as number) || 0;
+    element.textContent = `${skipped} earlier events not shown`;
+  },
 
   // Embed media - renders iframe from outputId
   'caco.embed': (element, data) => {

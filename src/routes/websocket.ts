@@ -364,9 +364,31 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     const queue = new CacoEventQueue();
     let sentCount = 0;
     
-    // Forward all SDK events
-    // Queue caco.embed after tool.execution_complete, flush before assistant.message
-    for (const evt of events) {
+    // Truncate: only stream the last N turns (user.message boundaries)
+    const MAX_HISTORY_TURNS = 10;
+    let startIndex = 0;
+    let turnsFound = 0;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === 'user.message') {
+        turnsFound++;
+        if (turnsFound >= MAX_HISTORY_TURNS) {
+          startIndex = i;
+          break;
+        }
+      }
+    }
+    
+    if (startIndex > 0) {
+      console.log(`[HISTORY] Truncating: showing ${events.length - startIndex} of ${events.length} events (last ${MAX_HISTORY_TURNS} turns)`);
+      send(ws, { type: 'event', sessionId, event: {
+        type: 'caco.truncated',
+        data: { skipped: startIndex, total: events.length }
+      } as unknown as SessionEvent });
+      sentCount++;
+    }
+    
+    for (let i = startIndex; i < events.length; i++) {
+      const evt = events[i];
       // Flush queued embeds before trigger events (same as live stream)
       if (isFlushTrigger(evt.type)) {
         const queued = queue.flush();

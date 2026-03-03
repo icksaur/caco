@@ -271,16 +271,19 @@ export async function loadApplet(slug: string): Promise<void> {
  * Activate a session - clear chat, set state, load history
  */
 export async function activateSession(sessionId: string): Promise<void> {
-  // Show loading indicator on session item immediately (before any DOM changes)
   setSessionLoading(sessionId, true);
   
-  // Resume session on server (don't clear chat yet -- if this fails, keep old chat visible)
   try {
+    // Ensure WS is alive FIRST — before resume or history.
+    // Do this before any historyLoader calls to avoid the reconnect handler
+    // racing with our own load() call.
+    reconnectIfNeeded();
+    await waitForConnect();
+    
     const response = await fetchWithTimeout(`/api/sessions/${sessionId}/resume`, {
       method: 'POST'
     }, RESUME_TIMEOUT_MS);
     
-    // Clear loading state once we have a response
     setSessionLoading(sessionId, false);
     
     if (!response.ok) {
@@ -288,7 +291,7 @@ export async function activateSession(sessionId: string): Promise<void> {
       const errorMsg = errorData.error || `Failed to resume session (${response.status})`;
       console.error('[ROUTER] Failed to resume session:', sessionId, errorMsg);
       showToast(errorMsg);
-      return; // Don't change view or clear chat, just show toast
+      return;
     }
     
     const data = await response.json() as { 
@@ -299,34 +302,24 @@ export async function activateSession(sessionId: string): Promise<void> {
       cwdFallback?: string;
     };
     
-    // Warn user if session's original CWD is gone
     if (data.cwdFallback) {
       showToast(`Original directory is gone, using: ${data.cwdFallback}`, { type: 'info', autoHideMs: 5000 });
     }
     
-    // Update client state — active session changed, refresh menu indicators
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
     updateMenuIndicators();
     notifySessionChange(data.sessionId, data.cwd || getCurrentCwd());
-    
-    // Ensure WS is alive before loading history
-    reconnectIfNeeded();
-    await waitForConnect();
-    
     updateStatusBar(data.cwd || getCurrentCwd(), data.model || undefined);
     
-    // Load history — single call handles subscribe, request, wait, and state
     await historyLoader.load(data.sessionId);
     
     setViewState('chatting');
   } catch (error) {
-    // Clear loading state on error
     setSessionLoading(sessionId, false);
     
     const errorMsg = error instanceof Error ? error.message : 'Network error';
     console.error('[ROUTER] Error activating session:', error);
     showToast(errorMsg);
-    // Don't change view or clear chat, just show toast
   }
 }
 

@@ -157,7 +157,9 @@ function registerWsHandlers(): void {
     const sessionId = getActiveSessionId();
     if (!sessionId || !isViewState('chatting')) return;
     
-    // Reload history — historyLoader handles cancellation of any in-flight request
+    // Don't reload if activateSession is already loading history
+    if (historyLoader.loading) return;
+    
     void historyLoader.load(sessionId);
   });
 }

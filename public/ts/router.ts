@@ -17,14 +17,14 @@ import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, 
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
-import { subscribeToSession, requestHistory, reconnectIfNeeded, waitForConnect } from './websocket.js';
-import { waitForHistoryComplete, isHistoryStale } from './history.js';
+import { reconnectIfNeeded, waitForConnect } from './websocket.js';
 import { showSessionManager, setSessionLoading, updateMenuIndicators } from './session-panel.js';
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 import { regions } from './dom-regions.js';
 import { renderStatus, clearStatus } from './context-footer.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
+import { historyLoader } from './history-loader.js';
 
 const RESUME_TIMEOUT_MS = 30000;
 
@@ -168,12 +168,8 @@ export function toggleSessions(): void {
  * Switches to session, loads history, updates URL
  */
 export async function sessionClick(sessionId: string): Promise<void> {
-  const hasHistory = regions.chat.el.children.length > 0;
-  
-  // If already on this session AND we have history AND WS hasn't reconnected,
-  // just hide sessions overlay. If WS reconnected, reload history because
-  // the DOM may be stale (events missed during disconnect).
-  if (sessionId === getActiveSessionId() && hasHistory && !isHistoryStale()) {
+  // If already on this session with fresh history, just show chat
+  if (sessionId === getActiveSessionId() && !historyLoader.isStale(sessionId)) {
     setViewState('chatting');
     updateUrl({ session: sessionId });
     return;
@@ -311,19 +307,14 @@ export async function activateSession(sessionId: string): Promise<void> {
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
     updateMenuIndicators();
     
-    // Ensure WS is alive before subscribing/requesting history
+    // Ensure WS is alive before loading history
     reconnectIfNeeded();
     await waitForConnect();
     
-    subscribeToSession(data.sessionId);
-    
     updateStatusBar(data.cwd || getCurrentCwd(), data.model || undefined);
     
-    // Request history first (sets loadingHistory=true), then seed tracker.
-    // Order matters: tracker onChange checks isLoadingHistory() to avoid
-    // setting form state during history replay.
-    requestHistory(data.sessionId);
-    await waitForHistoryComplete();
+    // Load history — single call handles subscribe, request, wait, and state
+    await historyLoader.load(data.sessionId);
     
     setViewState('chatting');
   } catch (error) {

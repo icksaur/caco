@@ -14,10 +14,10 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { getActiveSessionId, setActiveSession, setLoadingHistory, isLoadingHistory, getSelectedModel, getAvailableModels } from './app-state.js';
+import { getActiveSessionId, setActiveSession, isLoadingHistory, getSelectedModel, getAvailableModels } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
 import { isViewState, setViewState, setFormEnabled } from './view-controller.js';
-import { onEvent, onReconnect, subscribeToSession, requestHistory, type SessionEvent } from './websocket.js';
+import { onEvent, onReconnect, subscribeToSession, type SessionEvent } from './websocket.js';
 import { showToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 import { resetTextareaHeight } from './multiline-input.js';
@@ -26,11 +26,9 @@ import { removeImage } from './image-paste.js';
 import { markSessionObserved } from './session-observed.js';
 import { handleContextEvent, renderStatus } from './context-footer.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
-import { isHistoryPending, waitForHistoryComplete } from './history.js';
 import { sessionTracker } from './session-state-tracker.js';
-
-// Re-export for external callers
-export { setLoadingHistory };
+import { historyLoader } from './history-loader.js';
+import { fetchWithTimeout } from './fetch-timeout.js';
 
 let chatRegion: ChatRegion;
 let noEventsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -155,28 +153,9 @@ function registerWsHandlers(): void {
     const sessionId = getActiveSessionId();
     if (!sessionId || !isViewState('chatting')) return;
     
-    if (isHistoryPending()) {
-      console.log('[WS] Re-requesting history after reconnect');
-      requestHistory(sessionId);
-      return;
-    }
-    
-    void reloadAfterReconnect(sessionId);
+    // Reload history — historyLoader handles cancellation of any in-flight request
+    void historyLoader.load(sessionId);
   });
-}
-
-/**
- * Reload session history after a WS reconnect.
- * History replay sets tracker busy state via historyComplete's isBusy flag.
- */
-async function reloadAfterReconnect(sessionId: string): Promise<void> {
-  try {
-    subscribeToSession(sessionId);
-    requestHistory(sessionId);
-    await waitForHistoryComplete();
-  } catch {
-    // Network error — leave UI as-is
-  }
 }
 
 /**
@@ -192,8 +171,6 @@ export function stopStreaming(): void {
   
   setFormEnabled(true);
 }
-
-import { fetchWithTimeout } from './fetch-timeout.js';
 
 const SEND_TIMEOUT_MS = 30000;
 const SESSION_CREATE_TIMEOUT_MS = 30000;

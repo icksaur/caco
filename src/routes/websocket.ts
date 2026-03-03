@@ -29,7 +29,6 @@ import { watchExtensions } from '../extension-store.js';
 const allConnections = new Set<WebSocket>();
 const sessionSubscribers = new Map<string, Set<WebSocket>>();
 const clientSubscription = new Map<WebSocket, string>();
-const pendingHistory = new Set<string>();  // ws+sessionId keys for dedup
 
 // Re-export MessageSource from shared module for backward compatibility
 export type { MessageSource } from '../message-source.js';
@@ -181,14 +180,8 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
       
     case 'requestHistory':
       if (msg.sessionId) {
-        const histKey = `${msg.sessionId}`;
-        if (pendingHistory.has(histKey)) {
-          console.log(`[WS] requestHistory deduped for ${msg.sessionId.slice(0, 8)} (already in-flight)`);
-        } else {
-          console.log(`[WS] requestHistory received for ${msg.sessionId.slice(0, 8)}`);
-          pendingHistory.add(histKey);
-          void streamHistory(ws, msg.sessionId).finally(() => pendingHistory.delete(histKey));
-        }
+        console.log(`[WS] requestHistory received for ${msg.sessionId.slice(0, 8)}`);
+        void streamHistory(ws, msg.sessionId);
       } else {
         sendError(ws, msg.id, 'sessionId is required for requestHistory');
       }

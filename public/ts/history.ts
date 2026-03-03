@@ -12,7 +12,7 @@ import { clearContextFooter } from './context-footer.js';
 import { regions } from './dom-regions.js';
 import { sessionTracker } from './session-state-tracker.js';
 
-const HISTORY_TIMEOUT_MS = 15000;
+const HISTORY_TIMEOUT_MS = 30000;
 
 let historyPending = false;
 let lastHistoryConnectionId = -1;

@@ -331,7 +331,7 @@
 /* Clean message */
 .clean-message {
   padding: 24px 16px;
-  text-align: center;
+  text-align: left;
   color: #6a9955;
   font-size: 14px;
 }
@@ -433,4 +433,10 @@
 }
 .stat-line {
   display: block;
+}
+.stat-add {
+  color: #6a9955;
+}
+.stat-del {
+  color: #f48771;
 }

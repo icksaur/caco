@@ -509,8 +509,8 @@ async function showLastCommit() {
       const statResult = await runGit(['diff', '--stat', 'HEAD~1..HEAD']);
       if (statResult.code === 0 && statResult.stdout.trim()) {
         const lines = statResult.stdout.trim().split('\n');
-        const statLines = lines.map(l => `<span class="stat-line">${escapeHtml(l)}</span>`).join('\n');
-        statHtml = `<pre class="commit-stat">${statLines}</pre>`;
+        const coloredLines = lines.map(l => colorizeStatLine(escapeHtml(l)));
+        statHtml = `<pre class="commit-stat">${coloredLines.join('\n')}</pre>`;
       }
     }
     
@@ -535,6 +535,18 @@ async function showLastCommit() {
 
 function escapeHtml(text) {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function colorizeStatLine(line) {
+  // Summary line: " 5 files changed, 20 insertions(+), 3 deletions(-)"
+  if (line.includes('changed')) {
+    return line
+      .replace(/(\d+ insertion[s]?\(\+\))/, '<span class="stat-add">$1</span>')
+      .replace(/(\d+ deletion[s]?\(-\))/, '<span class="stat-del">$1</span>');
+  }
+  // File line: " src/foo.ts | 12 +++---"  — color the +/- bar
+  return line.replace(/(\++)/g, '<span class="stat-add">$1</span>')
+             .replace(/(-+)/g, '<span class="stat-del">$1</span>');
 }
 
 async function refresh() {

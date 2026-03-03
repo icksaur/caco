@@ -550,8 +550,9 @@ function colorizeStatLine(line) {
   if (barMatch) {
     const prefix = barMatch[1];
     const bar = barMatch[2];
-    const colored = bar.replace(/(\++)/g, '<span class="stat-add">$1</span>')
-                       .replace(/(-+)/g, '<span class="stat-del">$1</span>');
+    const colored = bar.replace(/(\++)|(-+)/g, (m, plus) =>
+      plus ? `<span class="stat-add">${m}</span>` : `<span class="stat-del">${m}</span>`
+    );
     return prefix + colored;
   }
   return line;

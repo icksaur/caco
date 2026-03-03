@@ -3,14 +3,16 @@
  * 
  * URL params:
  *   ?path=/path/to/repo - Repository path (required)
- *   ?file=relative/path - File path relative to repo (required)
+ *   ?file=relative/path - File path relative to repo (for single-file diff)
  *   ?staged=1 - Show staged diff (default: unstaged)
+ *   ?ref=HEAD~1..HEAD - Show diff for a ref range (overrides file/staged)
  */
 
 // Params from URL
 let repoPath = '';
 let filePath = '';
 let isStaged = false;
+let refRange = '';
 
 // DOM elements
 const backBtn = document.getElementById('backBtn');
@@ -100,17 +102,23 @@ async function refresh() {
   hideError();
   
   try {
-    const args = ['diff'];
-    if (isStaged) {
-      args.push('--cached');
+    let args;
+    
+    if (refRange) {
+      args = ['diff', refRange];
+    } else {
+      args = ['diff'];
+      if (isStaged) args.push('--cached');
+      args.push('--', filePath);
     }
-    args.push('--', filePath);
     
     const result = await runGit(args);
     
     if (result.code !== 0) {
       if (result.stderr.includes('not a git repository')) {
         showError('Not a git repository');
+      } else if (result.stderr.includes('bad revision')) {
+        showError('Revision not found — this may be the initial commit');
       } else {
         showError(result.stderr || 'Git error');
       }
@@ -147,21 +155,30 @@ window.appletAPI.onUrlParamsChange((params) => {
   const newPath = params.path || '';
   const newFile = params.file || '';
   const newStaged = params.staged === '1' || params.staged === 'true';
+  const newRef = params.ref || '';
   
-  // Check if anything changed
-  if (newPath !== repoPath || newFile !== filePath || newStaged !== isStaged) {
+  if (newPath !== repoPath || newFile !== filePath || newStaged !== isStaged || newRef !== refRange) {
     repoPath = newPath;
     filePath = newFile;
     isStaged = newStaged;
+    refRange = newRef;
     
-    if (!repoPath || !filePath) {
+    if (!repoPath) {
       noParamsMessage.classList.remove('hidden');
       fileName.textContent = '—';
-    } else {
+    } else if (refRange) {
+      noParamsMessage.classList.add('hidden');
+      fileName.textContent = refRange;
+      diffType.textContent = '(commit range)';
+      refresh();
+    } else if (filePath) {
       noParamsMessage.classList.add('hidden');
       fileName.textContent = filePath;
       diffType.textContent = isStaged ? '(staged)' : '(unstaged)';
       refresh();
+    } else {
+      noParamsMessage.classList.remove('hidden');
+      fileName.textContent = '—';
     }
   }
 });

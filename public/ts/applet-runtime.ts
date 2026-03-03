@@ -8,9 +8,10 @@
  */
 
 import { showAppletPanel } from './view-controller.js';
-import { wsSetState, onStateUpdate, isWsConnected } from './websocket.js';
-import { getActiveSessionId } from './app-state.js';
+import { wsSetState, onStateUpdate, onEvent, isWsConnected } from './websocket.js';
+import { getActiveSessionId, getCurrentCwd, isLoadingHistory } from './app-state.js';
 import { regions } from './dom-regions.js';
+import type { SessionEvent } from './types.js';
 
 interface TempFileResult {
   path: string;
@@ -27,14 +28,65 @@ export interface AppletContent {
 interface AppletInstance {
   slug: string;
   label: string;
-  element: HTMLElement;        // The .applet-instance div
+  element: HTMLElement;
   styleElement: HTMLStyleElement | null;
-  popstateHandler: (() => void) | null;  // URL param change listener
+  popstateHandler: (() => void) | null;
+  cleanupFns: Array<() => void>;
 }
 
 let currentApplet: AppletInstance | null = null;
-const _currentStyleElement: HTMLStyleElement | null = null;
 let pendingAppletState: Record<string, unknown> | null = null;
+
+type SessionChangeCallback = (sessionId: string, cwd: string) => void;
+const sessionChangeCallbacks = new Set<SessionChangeCallback>();
+
+/**
+ * Notify applets that the active session changed.
+ * Called from router.ts after setActiveSession.
+ */
+export function notifySessionChange(sessionId: string, cwd: string): void {
+  for (const cb of sessionChangeCallbacks) {
+    try { cb(sessionId, cwd); } catch (e) { console.error('[APPLET] sessionChange callback error:', e); }
+  }
+}
+
+/**
+ * Subscribe to session events (live only, not history replay).
+ * Auto-registers cleanup when the applet is destroyed.
+ */
+function appletOnSessionEvent(cb: (event: SessionEvent) => void): () => void {
+  const wrapper = (event: SessionEvent) => {
+    if (!isLoadingHistory()) cb(event);
+  };
+  const unsub = onEvent(wrapper);
+  currentApplet?.cleanupFns.push(unsub);
+  return unsub;
+}
+
+/**
+ * Subscribe to session changes. Fires immediately with current session.
+ * Auto-registers cleanup when the applet is destroyed.
+ */
+function appletOnSessionChange(cb: SessionChangeCallback): () => void {
+  sessionChangeCallbacks.add(cb);
+  const unsub = () => sessionChangeCallbacks.delete(cb);
+  currentApplet?.cleanupFns.push(unsub);
+  
+  const id = getActiveSessionId();
+  const cwd = getCurrentCwd();
+  if (id) cb(id, cwd);
+  
+  return unsub;
+}
+
+/**
+ * Wrapped onStateUpdate that auto-registers cleanup.
+ */
+function appletOnStateUpdate(cb: (state: Record<string, unknown>) => void): () => void {
+  const unsub = onStateUpdate(cb);
+  currentApplet?.cleanupFns.push(unsub);
+  return unsub;
+}
 
 /**
  * Helper function for applet JS to expose functions globally.
@@ -60,7 +112,9 @@ interface AppletAPI {
   updateAppletUrlParam: typeof updateAppletUrlParam;
   navigateAppletUrlParam: typeof navigateAppletUrlParam;
   onUrlParamsChange: typeof onUrlParamsChange;
-  onStateUpdate: typeof onStateUpdate;
+  onStateUpdate: typeof appletOnStateUpdate;
+  onSessionEvent: typeof appletOnSessionEvent;
+  onSessionChange: typeof appletOnSessionChange;
   getSessionId: typeof getActiveSessionId;
   sendAgentMessage: typeof sendAgentMessage;
   saveTempFile: typeof saveTempFile;
@@ -91,7 +145,9 @@ export function initAppletRuntime(): void {
     updateAppletUrlParam,
     navigateAppletUrlParam,
     onUrlParamsChange,
-    onStateUpdate,
+    onStateUpdate: appletOnStateUpdate,
+    onSessionEvent: appletOnSessionEvent,
+    onSessionChange: appletOnSessionChange,
     getSessionId: getActiveSessionId,
     sendAgentMessage,
     saveTempFile,
@@ -439,12 +495,12 @@ export function getNavigationContext(): NavigationContext {
  * Destroy an applet instance (remove from DOM, cleanup styles/scripts/listeners)
  */
 function destroyInstance(instance: AppletInstance): void {
+  instance.cleanupFns.forEach(fn => { try { fn(); } catch { /* ignore */ } });
+  instance.cleanupFns.length = 0;
   instance.element.remove();
   instance.styleElement?.remove();
-  // Remove scripts tagged with this instance's slug
   document.querySelectorAll(`script[data-applet-slug="${instance.slug}"]`)
     .forEach(el => el.remove());
-  // Remove popstate handler if any
   if (instance.popstateHandler) {
     window.removeEventListener('popstate', instance.popstateHandler);
     instance.popstateHandler = null;
@@ -562,7 +618,8 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
     label,
     element: instanceDiv,
     styleElement: null,
-    popstateHandler: null
+    popstateHandler: null,
+    cleanupFns: []
   };
   
   // Render content into instance (runs applet JS which may call onUrlParamsChange)

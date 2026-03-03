@@ -395,3 +395,27 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.last-commit {
+  padding: 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.commit-hash {
+  color: #f0c674;
+  font-family: monospace;
+}
+.commit-subject {
+  color: #c5c8c6;
+}
+.commit-meta {
+  color: #969896;
+  font-size: 12px;
+}
+.commit-diff-link {
+  color: #81a2be;
+  text-decoration: none;
+}
+.commit-diff-link:hover {
+  text-decoration: underline;
+}

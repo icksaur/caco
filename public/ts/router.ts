@@ -14,7 +14,7 @@
 
 import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, type ViewState } from './view-controller.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels } from './app-state.js';
-import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
+import { getActiveAppletSlug, hasAppletContent, pushApplet, notifySessionChange, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
 import { reconnectIfNeeded, waitForConnect } from './websocket.js';
@@ -307,6 +307,7 @@ export async function activateSession(sessionId: string): Promise<void> {
     // Update client state — active session changed, refresh menu indicators
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
     updateMenuIndicators();
+    notifySessionChange(data.sessionId, data.cwd || getCurrentCwd());
     
     // Ensure WS is alive before loading history
     reconnectIfNeeded();

@@ -492,6 +492,30 @@ function hideError() {
 /**
  * Refresh git status
  */
+async function showLastCommit() {
+  try {
+    const countResult = await runGit(['rev-list', '--count', 'HEAD']);
+    const commitCount = parseInt(countResult.stdout.trim(), 10);
+    if (commitCount < 2) return;
+    
+    const logResult = await runGit(['log', '-1', '--format=%h%n%s%n%an%n%ar']);
+    if (logResult.code !== 0) return;
+    
+    const [hash, subject, author, age] = logResult.stdout.trim().split('\n');
+    const diffUrl = `/?applet=git-diff&path=${encodeURIComponent(repoPath)}&ref=HEAD~1..HEAD`;
+    
+    cleanMessage.innerHTML = 
+      `<div class="last-commit">` +
+      `<span class="commit-hash">${hash}</span> ` +
+      `<span class="commit-subject">${subject}</span><br>` +
+      `<span class="commit-meta">${author} · ${age}</span> · ` +
+      `<a href="${diffUrl}" class="commit-diff-link">View diff</a>` +
+      `</div>`;
+  } catch {
+    // Silently fail — clean message is already visible
+  }
+}
+
 async function refresh() {
   refreshBtn.classList.add('spinning');
   hideError();
@@ -544,10 +568,11 @@ async function refresh() {
     updateSectionButtons();
     updateCommitButtonState();
     
-    // Show clean message if nothing changed
+    // Show clean message or last commit if nothing changed
     const totalChanges = staged.length + unstaged.length + untracked.length;
     if (totalChanges === 0) {
       cleanMessage.classList.remove('hidden');
+      await showLastCommit();
     } else {
       cleanMessage.classList.add('hidden');
     }
@@ -595,5 +620,51 @@ window.appletAPI.onUrlParamsChange((params) => {
       }
       refresh();
     }
+  }
+});
+
+// Auto-refresh on file changes (throttle: at most once per 2s)
+let lastRefreshTime = 0;
+let autoRefreshTimer = null;
+
+function scheduleRefresh() {
+  if (!repoPath) return;
+  const now = Date.now();
+  const elapsed = now - lastRefreshTime;
+  if (autoRefreshTimer) clearTimeout(autoRefreshTimer);
+  if (elapsed >= 2000) {
+    lastRefreshTime = now;
+    refresh();
+  } else {
+    autoRefreshTimer = setTimeout(() => {
+      lastRefreshTime = Date.now();
+      refresh();
+    }, 2000 - elapsed);
+  }
+}
+
+window.appletAPI.onSessionEvent((event) => {
+  if (event.type === 'tool.execution_complete') {
+    const name = event.data?.toolName || event.data?.name;
+    if (name === 'edit' || name === 'create' || name === 'bash') {
+      scheduleRefresh();
+    }
+  }
+  if (event.type === 'session.idle') {
+    if (autoRefreshTimer) clearTimeout(autoRefreshTimer);
+    lastRefreshTime = Date.now();
+    refresh();
+  }
+});
+
+window.appletAPI.onSessionChange((_sessionId, cwd) => {
+  if (cwd && cwd !== repoPath) {
+    repoPath = cwd;
+    if (repoPathLabel) {
+      repoPathLabel.textContent = repoPath;
+      repoPathLabel.href = '?applet=file-browser&path=' + encodeURIComponent(repoPath);
+    }
+    document.getElementById('noPathMessage').classList.add('hidden');
+    refresh();
   }
 });

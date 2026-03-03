@@ -14,7 +14,7 @@
 
 import { Router, Request, Response } from 'express';
 import { randomBytes, createHash } from 'crypto';
-import { getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth, type MCPAuthState } from '../storage.js';
+import { getMcpAuth, getMcpServerAuth, setMcpServerAuth, type MCPAuthState } from '../storage.js';
 import { SERVER_URL } from '../config.js';
 
 const router = Router();

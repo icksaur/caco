@@ -49,8 +49,8 @@ After calling this, tell the user: "Please authenticate [server name] by opening
             return {
               textResultForLlm: `Server "${serverId}" is already registered but needs configuration. ` +
                 (existing.needsClientId 
-                  ? `It requires a client_id (OAuth Application ID). Ask the user for their Azure App Registration's Application ID, then call register_mcp_server again with the clientId parameter.`
-                  : `Tell the user to authenticate by opening /?applet=mcp-auth`),
+                  ? 'It requires a client_id (OAuth Application ID). Ask the user for their Azure App Registration\'s Application ID, then call register_mcp_server again with the clientId parameter.'
+                  : 'Tell the user to authenticate by opening /?applet=mcp-auth'),
               resultType: 'text' as const
             };
           }
@@ -83,7 +83,7 @@ After calling this, tell the user: "Please authenticate [server name] by opening
           
           return {
             textResultForLlm: `Server "${serverId}" registered but OAuth discovery failed: ${errorMessage}. ` +
-              `The server may require manual configuration. Ask the user to provide the OAuth authorization endpoint, token endpoint, and client_id.`,
+              'The server may require manual configuration. Ask the user to provide the OAuth authorization endpoint, token endpoint, and client_id.',
             resultType: 'text' as const
           };
         }
@@ -110,16 +110,16 @@ After calling this, tell the user: "Please authenticate [server name] by opening
         if (!resolvedClientId) {
           return {
             textResultForLlm: `Server "${serverId}" registered but requires a client_id (OAuth Application ID). ` +
-              `Ask the user: "What is the OAuth client_id (Application ID) for this server? ` +
-              `For Azure AD, this is found in Azure Portal > App Registrations > Your App > Application (client) ID."`,
+              'Ask the user: "What is the OAuth client_id (Application ID) for this server? ' +
+              'For Azure AD, this is found in Azure Portal > App Registrations > Your App > Application (client) ID."',
             resultType: 'text' as const
           };
         }
         
         return {
           textResultForLlm: `Server "${serverId}" registered for OAuth. ` +
-            `Tell the user to authenticate by opening /?applet=mcp-auth ` +
-            `or clicking this link: [MCP Authentication](/?applet=mcp-auth)`,
+            'Tell the user to authenticate by opening /?applet=mcp-auth ' +
+            'or clicking this link: [MCP Authentication](/?applet=mcp-auth)',
           resultType: 'text' as const
         };
         

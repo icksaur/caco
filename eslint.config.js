@@ -148,7 +148,7 @@ export default [
   },
   {
     // Plain JavaScript files
-    files: ['**/*.js'],
+    files: ['**/*.js', '**/*.mjs'],
     ignores: ['eslint.config.js'],
     languageOptions: {
       ecmaVersion: 2022,

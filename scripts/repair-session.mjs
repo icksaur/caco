@@ -36,11 +36,11 @@ function getCwd(sessionId) {
 function tryResumeViaSDK(sessionId) {
   try {
     const result = execSync(
-      `node -e "const{CopilotClient}=require('@github/copilot-sdk');` +
-      `(async()=>{const c=new CopilotClient({cwd:process.cwd()});await c.start();` +
+      'node -e "const{CopilotClient}=require(\'@github/copilot-sdk\');' +
+      '(async()=>{const c=new CopilotClient({cwd:process.cwd()});await c.start();' +
       `try{await c.resumeSession('${sessionId}',{streaming:true});` +
-      `console.log('OK')}catch(e){console.log('FAIL:'+e.message)}` +
-      `finally{await c.stop()}})()"`,
+      'console.log(\'OK\')}catch(e){console.log(\'FAIL:\'+e.message)}' +
+      'finally{await c.stop()}})()"',
       { encoding: 'utf-8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }
     ).trim();
     return result.startsWith('OK');
@@ -100,7 +100,7 @@ function repairSession(sessionId, dryRun = false) {
     // JSON parses clean — but SDK parser may still reject it.
     // Try removing lines that the SDK might choke on (very long lines, 
     // lines with unusual unicode, tool.execution_complete with large content).
-    console.log(`  No JSON errors found. Trying SDK-level validation...`);
+    console.log('  No JSON errors found. Trying SDK-level validation...');
     return repairSDKLevel(sessionId, lines, dryRun);
   }
 
@@ -141,14 +141,14 @@ function repairSDKLevel(sessionId, lines, dryRun) {
   }
 
   if (candidates.length === 0) {
-    console.log(`  No candidate lines to remove`);
+    console.log('  No candidate lines to remove');
     return false;
   }
 
   console.log(`  ${candidates.length} tool.execution_complete events to check`);
   
   if (dryRun) {
-    console.log(`  Run without --scan to attempt repair`);
+    console.log('  Run without --scan to attempt repair');
     return true;
   }
 
@@ -174,7 +174,7 @@ function repairSDKLevel(sessionId, lines, dryRun) {
     copyFileSync(backupPath, testPath);
   }
 
-  console.log(`  Could not identify the corrupt line via SDK validation`);
+  console.log('  Could not identify the corrupt line via SDK validation');
   return false;
 }
 
@@ -206,7 +206,7 @@ function scanAll() {
 
   if (found === 0) {
     console.log(`Scanned ${sessions.length} sessions — no JSON corruption found`);
-    console.log(`(SDK-level corruption requires --fix-all or specifying a session ID)`);
+    console.log('(SDK-level corruption requires --fix-all or specifying a session ID)');
   } else {
     console.log(`\n${found} corrupt session(s) found. Run with --fix-all to repair.`);
   }

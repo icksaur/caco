@@ -19,7 +19,7 @@ import { getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth } from '../.
 
 // Import after mocking to get mocked versions
 const mockedGetMcpAuth = vi.mocked(getMcpAuth);
-const mockedSetMcpAuth = vi.mocked(setMcpAuth);
+const _mockedSetMcpAuth = vi.mocked(setMcpAuth);
 const mockedGetMcpServerAuth = vi.mocked(getMcpServerAuth);
 const mockedSetMcpServerAuth = vi.mocked(setMcpServerAuth);
 
@@ -274,7 +274,7 @@ describe('MCP Auth Routes', () => {
   describe('callback validation', () => {
     it('detects OAuth error response', () => {
       const error = 'access_denied';
-      const errorDescription = 'User cancelled the request';
+      const _errorDescription = 'User cancelled the request';
       
       const hasError = !!error;
       expect(hasError).toBe(true);

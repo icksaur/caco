@@ -29,6 +29,7 @@ import { watchExtensions } from '../extension-store.js';
 const allConnections = new Set<WebSocket>();
 const sessionSubscribers = new Map<string, Set<WebSocket>>();
 const clientSubscription = new Map<WebSocket, string>();
+const wsAlive = new WeakMap<WebSocket, boolean>();
 
 // Re-export MessageSource from shared module for backward compatibility
 export type { MessageSource } from '../message-source.js';
@@ -90,9 +91,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
   wss.on('connection', (ws, _req) => {
     allConnections.add(ws);
-    (ws as any).isAlive = true;
+    wsAlive.set(ws, true);
     
-    ws.on('pong', () => { (ws as any).isAlive = true; });
+    ws.on('pong', () => { wsAlive.set(ws, true); });
     
     ws.on('message', (data) => {
       try {
@@ -123,12 +124,12 @@ export function setupWebSocket(server: Server): WebSocketServer {
   // the browser client log and monitor connection health.
   const heartbeatInterval = setInterval(() => {
     for (const ws of wss.clients) {
-      if ((ws as any).isAlive === false) {
+      if (wsAlive.get(ws) === false) {
         console.log('[WS] Terminating unresponsive connection');
         ws.terminate();
         continue;
       }
-      (ws as any).isAlive = false;
+      wsAlive.set(ws, false);
       ws.ping();
       try {
         ws.send(JSON.stringify({ type: 'serverPing', ts: Date.now() }));

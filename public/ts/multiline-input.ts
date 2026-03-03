@@ -12,7 +12,8 @@
 import { InputPopup, type PopupItem } from './input-popup.js';
 import { getCommands, findCommand } from './command-registry.js';
 import { getCurrentCwd } from './app-state.js';
-import { fuzzyScore } from './ui-utils.js';
+import { isViewState } from './view-controller.js';
+import { getNewChatCwd } from './model-selector.js';
 
 const MAX_HEIGHT = 180;
 const FILE_CACHE_TTL_MS = 30_000;
@@ -166,7 +167,7 @@ function handlePound(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
   poundAnchorPos = trigger.start;
 
   if (!poundPopup.isVisible()) {
-    const cwd = getCurrentCwd();
+    const cwd = isViewState('newChat') ? getNewChatCwd() : getCurrentCwd();
     void fetchProjectFiles(cwd).then(files => {
       const fileItems: PopupItem[] = files.map(f => ({ id: f, label: f }));
       const extItems = poundProviders.flatMap(p => { try { return p(); } catch { return []; } });

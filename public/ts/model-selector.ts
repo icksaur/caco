@@ -4,6 +4,7 @@
 
 import type { ModelInfo, Preferences } from './types.js';
 import { getSelectedModel, setSelectedModel as stateSetSelectedModel, getAvailableModels, setAvailableModels as stateSetAvailableModels } from './app-state.js';
+import { renderStatus } from './context-footer.js';
 
 /**
  * Fallback model list (used if SDK doesn't return models)
@@ -100,6 +101,40 @@ export function loadModels(): void {
     
     container.appendChild(item);
   }
+  
+  // Update footer with model + CWD as user types
+  setupCwdFooterSync();
+}
+
+let cwdSyncInstalled = false;
+
+function setupCwdFooterSync(): void {
+  if (cwdSyncInstalled) return;
+  const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
+  if (!cwdInput) return;
+  
+  cwdSyncInstalled = true;
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+  
+  cwdInput.addEventListener('input', () => {
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      const cwd = cwdInput.value.trim();
+      const modelId = getSelectedModel();
+      const models = getAvailableModels();
+      const model = models.find(m => m.id === modelId);
+      renderStatus(model?.name || modelId?.split('/').pop() || '', cwd);
+    }, 300);
+  });
+  
+  // Render initial state
+  const cwd = cwdInput.value.trim();
+  if (cwd) {
+    const modelId = getSelectedModel();
+    const models = getAvailableModels();
+    const model = models.find(m => m.id === modelId);
+    renderStatus(model?.name || modelId?.split('/').pop() || '', cwd);
+  }
 }
 
 /**
@@ -135,6 +170,13 @@ export function selectModel(modelId: string): void {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ lastModel: modelId })
   }).catch(err => console.error('Failed to save model preference:', err));
+  
+  // Update footer status with new model name
+  const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
+  const cwd = cwdInput?.value.trim() || '';
+  if (cwd && modelInfo) {
+    renderStatus(modelInfo.name, cwd);
+  }
 }
 
 /**

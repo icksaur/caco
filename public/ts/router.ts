@@ -22,7 +22,7 @@ import { showSessionManager, setSessionLoading, updateMenuIndicators } from './s
 import { showToast } from './toast.js';
 import { loadModels } from './model-selector.js';
 import { regions } from './dom-regions.js';
-import { renderStatus, clearStatus } from './context-footer.js';
+import { renderStatus, clearStatus, clearContextFooter } from './context-footer.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
 import { historyLoader } from './history-loader.js';
 
@@ -185,10 +185,11 @@ export async function sessionClick(sessionId: string): Promise<void> {
 export function newSessionClick(): void {
   regions.chat.clear();
   clearStatus();
+  clearContextFooter();
   
   setViewState('newChat');
   loadModels();
-  updateUrl({ session: null }); // Remove session from URL
+  updateUrl({ session: null });
 }
 
 /**

@@ -33,6 +33,7 @@ import { fetchWithTimeout } from './fetch-timeout.js';
 let chatRegion: ChatRegion;
 let noEventsTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSentPrompt = '';
+let lastSentSessionId = '';
 const NO_EVENTS_TIMEOUT_MS = 60000;
 
 function startNoEventsWatchdog(): void {
@@ -45,10 +46,13 @@ function startNoEventsWatchdog(): void {
     if (activeId) sessionTracker.setBusy(activeId, false);
     setFormEnabled(true);
     
-    const input = document.querySelector('#chatForm textarea') as HTMLTextAreaElement;
-    if (input && lastSentPrompt) {
-      input.value = lastSentPrompt;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+    // Only restore the message if the user is still on the same session
+    if (lastSentPrompt && lastSentSessionId === activeId) {
+      const input = document.querySelector('#chatForm textarea') as HTMLTextAreaElement;
+      if (input) {
+        input.value = lastSentPrompt;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
     }
     
     showToast('No response received — try again.');
@@ -180,6 +184,7 @@ const SESSION_CREATE_TIMEOUT_MS = 30000;
  */
 export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
   lastSentPrompt = prompt;
+  lastSentSessionId = getActiveSessionId() || '';
   
   // Mark busy optimistically — tracker subscriber disables form.
   // For new chats (no active session yet), disable form directly.
@@ -213,6 +218,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       
       const data = await res.json();
       sessionId = data.sessionId;
+      lastSentSessionId = sessionId || '';
       console.log('[SEND] Session created:', sessionId);
       setActiveSession(sessionId, data.cwd);
       subscribeToSession(sessionId);

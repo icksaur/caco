@@ -419,3 +419,18 @@
 .commit-diff-link:hover {
   text-decoration: underline;
 }
+.commit-stat {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #969896;
+  white-space: pre;
+  overflow-x: auto;
+}
+.stat-line {
+  display: block;
+}

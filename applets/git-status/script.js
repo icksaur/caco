@@ -496,24 +496,45 @@ async function showLastCommit() {
   try {
     const countResult = await runGit(['rev-list', '--count', 'HEAD']);
     const commitCount = parseInt(countResult.stdout.trim(), 10);
-    if (commitCount < 2) return;
+    if (commitCount < 1) return;
     
     const logResult = await runGit(['log', '-1', '--format=%h%n%s%n%an%n%ar']);
     if (logResult.code !== 0) return;
     
     const [hash, subject, author, age] = logResult.stdout.trim().split('\n');
-    const diffUrl = `/?applet=git-diff&path=${encodeURIComponent(repoPath)}&ref=HEAD~1..HEAD`;
+    
+    // Get file stats for the last commit
+    let statHtml = '';
+    if (commitCount >= 2) {
+      const statResult = await runGit(['diff', '--stat', 'HEAD~1..HEAD']);
+      if (statResult.code === 0 && statResult.stdout.trim()) {
+        const lines = statResult.stdout.trim().split('\n');
+        const statLines = lines.map(l => `<span class="stat-line">${escapeHtml(l)}</span>`).join('\n');
+        statHtml = `<pre class="commit-stat">${statLines}</pre>`;
+      }
+    }
+    
+    const diffUrl = commitCount >= 2
+      ? `/?applet=git-diff&path=${encodeURIComponent(repoPath)}&ref=HEAD~1..HEAD`
+      : '';
+    const diffLink = diffUrl
+      ? ` · <a href="${diffUrl}" class="commit-diff-link">View diff</a>`
+      : '';
     
     cleanMessage.innerHTML = 
       `<div class="last-commit">` +
       `<span class="commit-hash">${hash}</span> ` +
-      `<span class="commit-subject">${subject}</span><br>` +
-      `<span class="commit-meta">${author} · ${age}</span> · ` +
-      `<a href="${diffUrl}" class="commit-diff-link">View diff</a>` +
+      `<span class="commit-subject">${escapeHtml(subject)}</span><br>` +
+      `<span class="commit-meta">${escapeHtml(author)} · ${age}</span>${diffLink}` +
+      `${statHtml}` +
       `</div>`;
   } catch {
     // Silently fail — clean message is already visible
   }
+}
+
+function escapeHtml(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 async function refresh() {
@@ -658,13 +679,12 @@ window.appletAPI.onSessionEvent((event) => {
 });
 
 window.appletAPI.onSessionChange((_sessionId, cwd) => {
-  if (cwd && cwd !== repoPath) {
-    repoPath = cwd;
-    if (repoPathLabel) {
-      repoPathLabel.textContent = repoPath;
-      repoPathLabel.href = '?applet=file-browser&path=' + encodeURIComponent(repoPath);
-    }
-    document.getElementById('noPathMessage').classList.add('hidden');
-    refresh();
+  if (!cwd) return;
+  repoPath = cwd;
+  if (repoPathLabel) {
+    repoPathLabel.textContent = repoPath;
+    repoPathLabel.href = '?applet=file-browser&path=' + encodeURIComponent(repoPath);
   }
+  document.getElementById('noPathMessage').classList.add('hidden');
+  refresh();
 });

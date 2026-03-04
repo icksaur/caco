@@ -1,4 +1,4 @@
-import { CopilotClient } from '@github/copilot-sdk';
+import { CopilotClient, approveAll } from '@github/copilot-sdk';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -270,8 +270,9 @@ class SessionManager {
       streaming: true,
       systemMessage: config.systemMessage,
       tools,
-      excludedTools: config.excludedTools
-    });
+      excludedTools: config.excludedTools,
+      onPermissionRequest: approveAll
+    } as CreateSessionConfig);
     
     // Update the ref so tool handlers can access the real session ID
     sessionRef.id = session.sessionId;
@@ -364,8 +365,9 @@ class SessionManager {
     const session = await client.resumeSession(sessionId, {
       streaming: true,
       tools,
-      excludedTools: config.excludedTools
-    });
+      excludedTools: config.excludedTools,
+      onPermissionRequest: approveAll
+    } as ResumeSessionConfig);
     
     // Track active session (needs resume context on first message)
     this.activeSessions.set(sessionId, { cwd, session, client });

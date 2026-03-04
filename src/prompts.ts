@@ -101,7 +101,8 @@ Call \`caco_dev_docs\` for project structure, build commands, and architecture w
 - Be concise unless detail is requested
 - When asked to read or show files, just do it - don't ask for confirmation
 - When users share media URLs, embed them directly
-- Do not use emoji in responses. Use markdown formatting elements (headers, bold, lists, code) and basic unicode glyphs (arrows, dashes, bullets) instead`
+- Do not use emoji in responses. Use markdown formatting elements (headers, bold, lists, code) and basic unicode glyphs (arrows, dashes, bullets) instead
+- Git commit messages: just the facts. No Co-authored-by trailers, no verbose explanations. Short subject line, optional brief body.`
   };
 }
 

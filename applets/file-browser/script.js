@@ -36,14 +36,27 @@ async function loadDirectory(path, navigate) {
   }
 }
 
+// Normalize path separators: convert backslashes to forward slashes for consistent handling.
+// The API accepts both, so we can work with forward slashes everywhere in the client.
+function normalizePath(p) {
+  return p.replace(/\\/g, '/');
+}
+
 function renderBreadcrumb(absPath) {
   var bc = document.getElementById('breadcrumb');
+  absPath = normalizePath(absPath);
   var parts = absPath.split('/').filter(Boolean);
   
-  var html = '<span class="breadcrumb-item" data-path="/">/ root</span>';
-  var accumulated = '';
+  // Detect Windows drive letter (e.g. "C:")
+  var isWindows = parts.length > 0 && /^[A-Za-z]:$/.test(parts[0]);
+  var rootPath = isWindows ? parts[0] + '/' : '/';
+  var rootLabel = isWindows ? parts[0] + '/' : '/ root';
+  var startIndex = isWindows ? 1 : 0;
   
-  for (var i = 0; i < parts.length; i++) {
+  var html = '<span class="breadcrumb-item" data-path="' + rootPath + '">' + rootLabel + '</span>';
+  var accumulated = isWindows ? parts[0] : '';
+  
+  for (var i = startIndex; i < parts.length; i++) {
     accumulated += '/' + parts[i];
     html += '<span class="breadcrumb-sep">/</span>';
     html += '<span class="breadcrumb-item" data-path="' + accumulated + '">' + parts[i] + '</span>';
@@ -61,6 +74,7 @@ function renderBreadcrumb(absPath) {
 async function renderContextLinks(absPath) {
   var el = document.getElementById('contextLinks');
   el.innerHTML = '';
+  absPath = normalizePath(absPath);
   
   try {
     var resp = await fetch('/api/files?path=' + encodeURIComponent(absPath + '/.git'));
@@ -75,7 +89,9 @@ async function renderContextLinks(absPath) {
 }
 
 function joinPath(base, name) {
-  return base === '/' ? '/' + name : base + '/' + name;
+  base = normalizePath(base);
+  if (base === '/' || base.match(/^[A-Za-z]:\/$/)) return base + name;
+  return base + '/' + name;
 }
 
 function renderFiles(files) {

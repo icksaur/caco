@@ -14,7 +14,7 @@ import { Router, Request, Response } from 'express';
 import express from 'express';
 import { CopilotClient } from '@github/copilot-sdk';
 import { readdir, readFile, stat, writeFile, mkdir, access } from 'fs/promises';
-import { join, dirname, resolve, extname, relative } from 'path';
+import { join, dirname, resolve, extname, relative, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import ignore from 'ignore';
@@ -311,7 +311,7 @@ router.get('/files', async (req: Request, res: Response) => {
   
   try {
     // Allow absolute paths directly, resolve relative paths from cwd
-    const resolvedDir = requestedPath.startsWith('/')
+    const resolvedDir = isAbsolute(requestedPath)
       ? resolve(requestedPath)
       : resolve(programCwd, requestedPath || '.');
     
@@ -367,7 +367,7 @@ router.get('/file', async (req: Request, res: Response) => {
   
   try {
     // Allow absolute paths directly, resolve relative paths from cwd
-    const resolvedPath = requestedPath.startsWith('/') 
+    const resolvedPath = isAbsolute(requestedPath) 
       ? requestedPath 
       : resolve(programCwd, requestedPath);
     
@@ -461,7 +461,7 @@ router.put('/files/*path', express.text({ type: '*/*', limit: '10mb' }), async (
   
   try {
     // Allow absolute paths directly, resolve relative paths from cwd
-    const resolvedPath = requestedPath.startsWith('/')
+    const resolvedPath = isAbsolute(requestedPath)
       ? resolve(requestedPath)
       : resolve(programCwd, requestedPath);
     

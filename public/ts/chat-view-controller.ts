@@ -58,8 +58,9 @@ class ChatViewController {
    * loaded and fresh.
    */
   async activateSession(sessionId: string): Promise<void> {
-    // Short-circuit: same session with fresh history → just show chat
-    if (sessionId === getActiveSessionId() && !historyLoader.isStale(sessionId)) {
+    // Short-circuit: same session, fresh history, AND chat has content
+    const chatHasContent = regions.chat.el.children.length > 0;
+    if (sessionId === getActiveSessionId() && !historyLoader.isStale(sessionId) && chatHasContent) {
       this._viewState = 'chatting';
       setViewState('chatting');
       return;

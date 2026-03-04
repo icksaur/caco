@@ -10,7 +10,7 @@
  */
 
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels } from './app-state.js';
-import { setFormEnabled as vcSetFormEnabled, setViewState, type ViewState } from './view-controller.js';
+import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, type ViewState } from './view-controller.js';
 import { renderStatus, clearStatus, clearContextFooter } from './context-footer.js';
 import { loadModels, getNewChatCwd } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
@@ -24,19 +24,17 @@ import { regions } from './dom-regions.js';
 const RESUME_TIMEOUT_MS = 30000;
 
 class ChatViewController {
-  private _viewState: ViewState = 'sessions';
   private lastPrompt = '';
   private lastPromptSessionId = '';
 
   getViewState(): ViewState {
-    return this._viewState;
+    return vcGetViewState();
   }
 
   /**
    * Show the session list panel.
    */
   showSessions(): void {
-    this._viewState = 'sessions';
     setViewState('sessions');
   }
 
@@ -47,7 +45,6 @@ class ChatViewController {
     regions.chat.clear();
     clearStatus();
     clearContextFooter();
-    this._viewState = 'newChat';
     setViewState('newChat');
     loadModels();
   }
@@ -56,16 +53,28 @@ class ChatViewController {
    * Whether the chat is currently showing this session with content.
    */
   private isShowingSession(sessionId: string): boolean {
-    return this._viewState === 'chatting'
-      && sessionId === getActiveSessionId()
-      && regions.chat.el.children.length > 0
-      && !historyLoader.isStale(sessionId);
+    const viewState = vcGetViewState();
+    const activeId = getActiveSessionId();
+    const hasContent = regions.chat.el.children.length > 0;
+    const stale = historyLoader.isStale(sessionId);
+    
+    const result = viewState === 'chatting'
+      && sessionId === activeId
+      && hasContent
+      && !stale;
+    
+    if (result) {
+      console.log(`[CHAT] isShowingSession SHORT-CIRCUIT: view=${viewState} active=${activeId?.slice(0,8)} content=${hasContent} stale=${stale}`);
+    }
+    
+    return result;
   }
 
   /**
    * Activate an existing session. Resume on server, load history, show chat.
    */
   async activateSession(sessionId: string): Promise<void> {
+    console.log(`[CHAT] activateSession(${sessionId.slice(0, 8)}) viewState=${vcGetViewState()} activeId=${getActiveSessionId()?.slice(0,8)}`);
     if (this.isShowingSession(sessionId)) return;
 
     setSessionLoading(sessionId, true);
@@ -126,7 +135,6 @@ class ChatViewController {
     updateMenuIndicators();
     notifySessionChange(sessionId, cwd);
     this.updateStatus(cwd, model);
-    this._viewState = 'chatting';
     setViewState('chatting');
   }
 
@@ -139,7 +147,6 @@ class ChatViewController {
     subscribeToSession(sessionId);
     updateMenuIndicators();
     this.updateStatus(cwd);
-    this._viewState = 'chatting';
     setViewState('chatting');
   }
 
@@ -157,7 +164,7 @@ class ChatViewController {
    * In chatting view: reads from app-state (active session's CWD).
    */
   getCwd(): string {
-    if (this._viewState === 'newChat') {
+    if (vcGetViewState() === 'newChat') {
       return getNewChatCwd();
     }
     return getCurrentCwd();

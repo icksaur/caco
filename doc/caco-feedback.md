@@ -61,8 +61,8 @@ git-status, file-browser, etc. could poll their data source on a timer (e.g. eve
 When the server sees a `tool.execution_start` for `edit` or `create`, broadcast a `caco.fileChanged` event on the WebSocket with the affected path. Applets that care about that path can refresh.
 
 ```
-tool.execution_start { toolName: "edit", args: { path: "/home/carl/caco/src/routes/api.ts" } }
-  → broadcast caco.fileChanged { path: "/home/carl/caco/src/routes/api.ts" }
+tool.execution_start { toolName: "edit", args: { path: "/home/user/caco/src/routes/api.ts" } }
+  → broadcast caco.fileChanged { path: "/home/user/caco/src/routes/api.ts" }
     → text-editor (if viewing that file) refreshes
     → git-status (if viewing that repo) refreshes
 ```

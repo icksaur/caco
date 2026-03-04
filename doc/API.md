@@ -279,7 +279,7 @@ Returns:
 Returns:
 ```json
 {
-  "path": "/home/carl/caco/src",
+  "path": "/home/user/caco/src",
   "files": [
     { "name": "app.ts", "type": "file", "size": 1234 },
     { "name": "lib", "type": "directory", "size": 0 }

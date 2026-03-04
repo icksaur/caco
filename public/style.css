@@ -819,6 +819,13 @@ main {
   margin: 0;
 }
 
+.reasoning-text {
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
 /* Thinking indicator - subtle pulse animation */
 .thinking-text {
   color: var(--color-text-muted);

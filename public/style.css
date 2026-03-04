@@ -826,6 +826,10 @@ main {
   color: var(--color-text-muted);
 }
 
+.reasoning-text.collapsed {
+  white-space: normal;
+}
+
 /* Thinking indicator - subtle pulse animation */
 .thinking-text {
   color: var(--color-text-muted);

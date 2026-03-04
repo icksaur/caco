@@ -8,10 +8,14 @@ vi.mock('../../public/ts/app-state.js', () => ({
   getAvailableModels: vi.fn(() => [{ id: 'claude-sonnet-4', name: 'Claude Sonnet 4', cost: 1 }]),
 }));
 
-vi.mock('../../public/ts/view-controller.js', () => ({
-  setFormEnabled: vi.fn(),
-  setViewState: vi.fn(),
-}));
+vi.mock('../../public/ts/view-controller.js', () => {
+  let _mockState = 'sessions';
+  return {
+    setFormEnabled: vi.fn(),
+    setViewState: vi.fn((s: string) => { _mockState = s; }),
+    getViewState: vi.fn(() => _mockState),
+  };
+});
 
 vi.mock('../../public/ts/context-footer.js', () => ({
   renderStatus: vi.fn(),
@@ -63,7 +67,7 @@ vi.mock('../../public/ts/dom-regions.js', () => ({
 }));
 
 import { ChatViewController } from '../../public/ts/chat-view-controller.js';
-import { setViewState } from '../../public/ts/view-controller.js';
+import { setViewState, getViewState } from '../../public/ts/view-controller.js';
 import { clearStatus, clearContextFooter, renderStatus } from '../../public/ts/context-footer.js';
 import { loadModels } from '../../public/ts/model-selector.js';
 import { regions } from '../../public/ts/dom-regions.js';
@@ -77,6 +81,11 @@ describe('ChatViewController', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Re-wire view state tracking (clearAllMocks preserves implementations
+    // from the factory, but we need a fresh closure for each test)
+    let mockState: string = 'sessions';
+    vi.mocked(setViewState).mockImplementation((s: string) => { mockState = s; });
+    vi.mocked(getViewState).mockImplementation(() => mockState as 'sessions' | 'newChat' | 'chatting');
     cvc = new ChatViewController();
   });
 
@@ -156,6 +165,8 @@ describe('ChatViewController', () => {
     it('does NOT short-circuit when chat is empty', async () => {
       vi.mocked(getActiveSessionId).mockReturnValue('same-id');
       vi.mocked(historyLoader.isStale).mockReturnValue(false);
+      // Set view to chatting so only chat-empty condition prevents short-circuit
+      vi.mocked(setViewState)('chatting');
       const mockResponse = {
         ok: true,
         json: vi.fn().mockResolvedValue({ sessionId: 'same-id', cwd: '/test' })

@@ -53,64 +53,81 @@ class ChatViewController {
   }
 
   /**
-   * Activate an existing session. Handles resume, history load, and view
-   * transition atomically. Includes short-circuit when session is already
-   * loaded and fresh.
+   * Whether the chat is currently showing this session with content.
+   */
+  private isShowingSession(sessionId: string): boolean {
+    return this._viewState === 'chatting'
+      && sessionId === getActiveSessionId()
+      && regions.chat.el.children.length > 0
+      && !historyLoader.isStale(sessionId);
+  }
+
+  /**
+   * Activate an existing session. Resume on server, load history, show chat.
    */
   async activateSession(sessionId: string): Promise<void> {
-    // Short-circuit: same session, fresh history, AND chat has content
-    const chatHasContent = regions.chat.el.children.length > 0;
-    if (sessionId === getActiveSessionId() && !historyLoader.isStale(sessionId) && chatHasContent) {
-      this._viewState = 'chatting';
-      setViewState('chatting');
-      return;
-    }
+    if (this.isShowingSession(sessionId)) return;
 
     setSessionLoading(sessionId, true);
 
     try {
-      reconnectIfNeeded();
-      await waitForConnect();
-
-      const response = await fetchWithTimeout(`/api/sessions/${sessionId}/resume`, {
-        method: 'POST'
-      }, RESUME_TIMEOUT_MS);
-
-      setSessionLoading(sessionId, false);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-        showToast(errorData.error || `Failed to resume session (${response.status})`);
-        return;
-      }
-
-      const data = await response.json() as {
-        sessionId: string;
-        cwd?: string;
-        isBusy?: boolean;
-        model?: string;
-        cwdFallback?: string;
-      };
-
-      if (data.cwdFallback) {
-        showToast(`Original directory is gone, using: ${data.cwdFallback}`, { type: 'info', autoHideMs: 5000 });
-      }
-
-      setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
-      updateMenuIndicators();
-      notifySessionChange(data.sessionId, data.cwd || getCurrentCwd());
-      this.updateStatus(data.cwd || getCurrentCwd(), data.model);
-
-      await historyLoader.load(data.sessionId);
-
-      this._viewState = 'chatting';
-      setViewState('chatting');
+      const data = await this.resumeAndLoad(sessionId);
+      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model);
     } catch (error) {
-      setSessionLoading(sessionId, false);
       const msg = error instanceof Error ? error.message : 'Network error';
-      console.error('[CHAT] Error activating session:', error);
+      console.error('[CHAT] Error activating session:', msg);
       showToast(msg);
+    } finally {
+      setSessionLoading(sessionId, false);
     }
+  }
+
+  /**
+   * Resume session on server and load history. Single async operation.
+   * Throws on failure — caller handles UI recovery.
+   */
+  private async resumeAndLoad(sessionId: string): Promise<{
+    cwd?: string; model?: string; cwdFallback?: string;
+  }> {
+    reconnectIfNeeded();
+    await waitForConnect();
+
+    const response = await fetchWithTimeout(`/api/sessions/${sessionId}/resume`, {
+      method: 'POST'
+    }, RESUME_TIMEOUT_MS);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+      throw new Error(errorData.error || `Failed to resume session (${response.status})`);
+    }
+
+    const data = await response.json() as {
+      sessionId: string;
+      cwd?: string;
+      isBusy?: boolean;
+      model?: string;
+      cwdFallback?: string;
+    };
+
+    if (data.cwdFallback) {
+      showToast(`Original directory is gone, using: ${data.cwdFallback}`, { type: 'info', autoHideMs: 5000 });
+    }
+
+    setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
+    await historyLoader.load(data.sessionId);
+
+    return data;
+  }
+
+  /**
+   * Transition to chatting view after successful load.
+   */
+  private showChat(sessionId: string, cwd: string, model?: string): void {
+    updateMenuIndicators();
+    notifySessionChange(sessionId, cwd);
+    this.updateStatus(cwd, model);
+    this._viewState = 'chatting';
+    setViewState('chatting');
   }
 
   /**

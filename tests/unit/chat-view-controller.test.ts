@@ -129,26 +129,33 @@ describe('ChatViewController', () => {
       expect(cvc.getViewState()).toBe('newChat');
     });
 
-    it('short-circuits when session is fresh and chat has content', async () => {
+    it('short-circuits when already showing this session', async () => {
+      // Simulate: already chatting with content
       vi.mocked(getActiveSessionId).mockReturnValue('same-id');
       vi.mocked(historyLoader.isStale).mockReturnValue(false);
-      // Mock chat having content
       (regions.chat.el as unknown as { children: { length: number } }).children = { length: 5 };
-
+      
+      // Set viewState to chatting (simulate prior activation)
+      const mockResponse = {
+        ok: true,
+        json: vi.fn().mockResolvedValue({ sessionId: 'same-id', cwd: '/test' })
+      };
+      vi.mocked(fetchWithTimeout).mockResolvedValue(mockResponse as unknown as Response);
+      await cvc.activateSession('same-id');
+      vi.clearAllMocks();
+      
+      // Now try again — should short-circuit
       await cvc.activateSession('same-id');
 
       expect(fetchWithTimeout).not.toHaveBeenCalled();
       expect(historyLoader.load).not.toHaveBeenCalled();
-      expect(setViewState).toHaveBeenCalledWith('chatting');
       
-      // Reset mock
       (regions.chat.el as unknown as { children: { length: number } }).children = { length: 0 };
     });
 
     it('does NOT short-circuit when chat is empty', async () => {
       vi.mocked(getActiveSessionId).mockReturnValue('same-id');
       vi.mocked(historyLoader.isStale).mockReturnValue(false);
-      // Chat is empty — must reload
       const mockResponse = {
         ok: true,
         json: vi.fn().mockResolvedValue({ sessionId: 'same-id', cwd: '/test' })

@@ -184,8 +184,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const targetSessionId = sessionParam || prefs?.lastSessionId;
   
   if (targetSessionId) {
-    const { activateSession } = await import('./router.js');
-    await activateSession(targetSessionId);
+    const { chatView } = await import('./chat-view-controller.js');
+    await chatView.activateSession(targetSessionId);
     
     // Load applet if requested (orthogonal to main panel)
     if (hasAppletParam) {

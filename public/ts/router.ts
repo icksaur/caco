@@ -12,21 +12,13 @@
  * - Removing them does NOT destroy loaded content
  */
 
-import { setViewState, getViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, type ViewState } from './view-controller.js';
-import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels } from './app-state.js';
-import { getActiveAppletSlug, hasAppletContent, pushApplet, notifySessionChange, type AppletContent } from './applet-runtime.js';
+import { getViewState, setViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, type ViewState } from './view-controller.js';
+import { getActiveSessionId } from './app-state.js';
+import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
-import { reconnectIfNeeded, waitForConnect } from './websocket.js';
-import { showSessionManager, setSessionLoading, updateMenuIndicators } from './session-panel.js';
-import { showToast } from './toast.js';
-import { loadModels } from './model-selector.js';
-import { regions } from './dom-regions.js';
-import { renderStatus, clearStatus, clearContextFooter } from './context-footer.js';
-import { fetchWithTimeout } from './fetch-timeout.js';
-import { historyLoader } from './history-loader.js';
-
-const RESUME_TIMEOUT_MS = 30000;
+import { showSessionManager } from './session-panel.js';
+import { chatView } from './chat-view-controller.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -115,7 +107,7 @@ async function handleNavigation(url: URL): Promise<void> {
   
   // Handle session param
   if (sessionId && sessionId !== getActiveSessionId()) {
-    await activateSession(sessionId);
+    await chatView.activateSession(sessionId);
   }
   
   // Handle applet param
@@ -168,14 +160,7 @@ export function toggleSessions(): void {
  * Switches to session, loads history, updates URL
  */
 export async function sessionClick(sessionId: string): Promise<void> {
-  // If already on this session with fresh history, just show chat
-  if (sessionId === getActiveSessionId() && !historyLoader.isStale(sessionId)) {
-    setViewState('chatting');
-    updateUrl({ session: sessionId });
-    return;
-  }
-  
-  await activateSession(sessionId);
+  await chatView.activateSession(sessionId);
   updateUrl({ session: sessionId }, true);
 }
 
@@ -183,12 +168,7 @@ export async function sessionClick(sessionId: string): Promise<void> {
  * Handle new session click from session list
  */
 export function newSessionClick(): void {
-  regions.chat.clear();
-  clearStatus();
-  clearContextFooter();
-  
-  setViewState('newChat');
-  loadModels();
+  chatView.showNewChat();
   updateUrl({ session: null });
 }
 
@@ -268,62 +248,6 @@ export async function loadApplet(slug: string): Promise<void> {
 }
 
 /**
- * Activate a session - clear chat, set state, load history
- */
-export async function activateSession(sessionId: string): Promise<void> {
-  setSessionLoading(sessionId, true);
-  
-  try {
-    // Ensure WS is alive FIRST — before resume or history.
-    // Do this before any historyLoader calls to avoid the reconnect handler
-    // racing with our own load() call.
-    reconnectIfNeeded();
-    await waitForConnect();
-    
-    const response = await fetchWithTimeout(`/api/sessions/${sessionId}/resume`, {
-      method: 'POST'
-    }, RESUME_TIMEOUT_MS);
-    
-    setSessionLoading(sessionId, false);
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-      const errorMsg = errorData.error || `Failed to resume session (${response.status})`;
-      console.error('[ROUTER] Failed to resume session:', sessionId, errorMsg);
-      showToast(errorMsg);
-      return;
-    }
-    
-    const data = await response.json() as { 
-      sessionId: string; 
-      cwd?: string; 
-      isBusy?: boolean; 
-      model?: string;
-      cwdFallback?: string;
-    };
-    
-    if (data.cwdFallback) {
-      showToast(`Original directory is gone, using: ${data.cwdFallback}`, { type: 'info', autoHideMs: 5000 });
-    }
-    
-    setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
-    updateMenuIndicators();
-    notifySessionChange(data.sessionId, data.cwd || getCurrentCwd());
-    updateStatusBar(data.cwd || getCurrentCwd(), data.model || undefined);
-    
-    await historyLoader.load(data.sessionId);
-    
-    setViewState('chatting');
-  } catch (error) {
-    setSessionLoading(sessionId, false);
-    
-    const errorMsg = error instanceof Error ? error.message : 'Network error';
-    console.error('[ROUTER] Error activating session:', error);
-    showToast(errorMsg);
-  }
-}
-
-/**
  * Update URL with new params
  * Uses Navigation API if available for proper back button support
  * @param push - If true, creates history entry (back button works). If false, replaces current entry.
@@ -363,21 +287,6 @@ function updateUrl(params: { session?: string | null; applet?: string | null }, 
  * Update the footer status bar with model name and cwd.
  * Looks up friendly model name from available models.
  */
-function updateStatusBar(cwd: string, serverModel?: string): void {
-  let modelName: string;
-  if (serverModel) {
-    const models = getAvailableModels();
-    const match = models.find(m => m.id === serverModel);
-    modelName = match?.name || serverModel.split('/').pop() || '';
-  } else {
-    const modelId = getSelectedModel();
-    const models = getAvailableModels();
-    const model = models.find(m => m.id === modelId);
-    modelName = model?.name || modelId?.split('/').pop() || '';
-  }
-  renderStatus(modelName, cwd);
-}
-
 /**
  * Get current URL params
  */

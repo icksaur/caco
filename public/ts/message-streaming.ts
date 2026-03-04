@@ -14,26 +14,24 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { getActiveSessionId, setActiveSession, isLoadingHistory, getSelectedModel, getAvailableModels } from './app-state.js';
+import { getActiveSessionId, isLoadingHistory } from './app-state.js';
 import { getNewChatCwd, showNewChatError } from './model-selector.js';
-import { isViewState, setViewState, setFormEnabled } from './view-controller.js';
-import { onEvent, onReconnect, subscribeToSession, type SessionEvent } from './websocket.js';
+import { isViewState } from './view-controller.js';
+import { onEvent, onReconnect, type SessionEvent } from './websocket.js';
 import { showToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
 import { resetTextareaHeight } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
 import { removeImage } from './image-paste.js';
 import { markSessionObserved } from './session-observed.js';
-import { handleContextEvent, renderStatus } from './context-footer.js';
+import { handleContextEvent } from './context-footer.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
 import { sessionTracker } from './session-state-tracker.js';
-import { historyLoader } from './history-loader.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
+import { chatView } from './chat-view-controller.js';
 
 let chatRegion: ChatRegion;
 let noEventsTimer: ReturnType<typeof setTimeout> | null = null;
-let lastSentPrompt = '';
-let lastSentSessionId = '';
 const NO_EVENTS_TIMEOUT_MS = 60000;
 
 function startNoEventsWatchdog(): void {
@@ -44,16 +42,8 @@ function startNoEventsWatchdog(): void {
     
     const activeId = getActiveSessionId();
     if (activeId) sessionTracker.setBusy(activeId, false);
-    setFormEnabled(true);
-    
-    // Only restore the message if the user is still on the same session
-    if (lastSentPrompt && lastSentSessionId === activeId) {
-      const input = document.querySelector('#chatForm textarea') as HTMLTextAreaElement;
-      if (input) {
-        input.value = lastSentPrompt;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    }
+    chatView.setFormEnabled(true);
+    chatView.restorePromptIfSameSession();
     
     showToast('No response received — try again.');
   }, NO_EVENTS_TIMEOUT_MS);
@@ -149,18 +139,16 @@ function registerWsHandlers(): void {
   // Tracker drives form state for active session
   sessionTracker.onChange((sessionId, state) => {
     if (sessionId === getActiveSessionId() && !isLoadingHistory()) {
-      setFormEnabled(!state.busy);
+      chatView.setFormEnabled(!state.busy);
     }
   });
   
   onReconnect(() => {
     const sessionId = getActiveSessionId();
     if (!sessionId || !isViewState('chatting')) return;
+    if (chatView.getViewState() !== 'chatting') return;
     
-    // Don't reload if activateSession is already loading history
-    if (historyLoader.loading) return;
-    
-    void historyLoader.load(sessionId);
+    void chatView.reloadHistory(sessionId);
   });
 }
 
@@ -175,7 +163,7 @@ export function stopStreaming(): void {
       .catch(err => console.error('Failed to cancel:', err));
   }
   
-  setFormEnabled(true);
+  chatView.setFormEnabled(true);
 }
 
 const SEND_TIMEOUT_MS = 30000;
@@ -185,16 +173,13 @@ const SESSION_CREATE_TIMEOUT_MS = 30000;
  * Stream response via REST API + WebSocket
  */
 export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
-  lastSentPrompt = prompt;
-  lastSentSessionId = getActiveSessionId() || '';
-  
-  // Mark busy optimistically — tracker subscriber disables form.
-  // For new chats (no active session yet), disable form directly.
   const currentId = getActiveSessionId();
+  chatView.savePrompt(prompt, currentId || '');
+  
   if (currentId) {
     sessionTracker.setBusy(currentId, true);
   } else {
-    setFormEnabled(false);
+    chatView.setFormEnabled(false);
   }
   
   try {
@@ -220,16 +205,9 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       
       const data = await res.json();
       sessionId = data.sessionId;
-      lastSentSessionId = sessionId || '';
+      chatView.savePrompt(prompt, sessionId || '');
       console.log('[SEND] Session created:', sessionId);
-      setActiveSession(sessionId, data.cwd);
-      subscribeToSession(sessionId);
-      setViewState('chatting');
-      
-      const modelId = getSelectedModel();
-      const models = getAvailableModels();
-      const modelMatch = models.find(m => m.id === modelId);
-      renderStatus(modelMatch?.name || modelId?.split('/').pop() || '', data.cwd || '');
+      chatView.onNewSessionCreated(sessionId || '', data.cwd);
     }
     
     const requestId = `req-${Date.now().toString(36)}`;
@@ -262,15 +240,10 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     
     const activeId = getActiveSessionId();
     if (activeId) sessionTracker.setBusy(activeId, false);
-    setFormEnabled(true);
+    chatView.setFormEnabled(true);
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    
-    const input = document.querySelector('#chatForm textarea') as HTMLTextAreaElement;
-    if (input) {
-      input.value = prompt;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
+    chatView.restorePromptIfSameSession();
     
     showToast(errorMessage);
   }
@@ -308,7 +281,7 @@ export function setupFormHandler(): void {
     
     if (!message) return;
     
-    setFormEnabled(false);
+    chatView.setFormEnabled(false);
     
     input.value = '';
     resetTextareaHeight();

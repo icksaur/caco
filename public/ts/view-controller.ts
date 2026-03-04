@@ -10,8 +10,7 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { clearContextFooter } from './context-footer.js';
-import { clearActiveSession, getCurrentCwd } from './app-state.js';
+import { getCurrentCwd } from './app-state.js';
 import { getActiveAppletLabel } from './applet-runtime.js';
 import { getServerHostname } from './hostname-hash.js';
 import { resetTextareaHeight } from './multiline-input.js';
@@ -131,8 +130,6 @@ export function setViewState(state: ViewState): void {
     case 'newChat':
       els.newChat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
-      clearActiveSession();
-      clearContextFooter();
       setFormEnabled(true);
       resetTextareaHeight();
       els.appletBtn?.classList.remove('hidden');

@@ -1657,7 +1657,6 @@ main {
    ======================================== */
 .image-preview {
   display: none;
-  position: relative;
   margin-bottom: var(--space-sm);
   padding: var(--space-sm);
   background: #2d2d30;
@@ -1667,27 +1666,39 @@ main {
 
 .image-preview.visible {
   display: flex;
-  align-items: center;
   gap: var(--space-sm);
 }
 
-.image-preview img {
+.image-thumb {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.image-thumb img {
   max-width: 80px;
   max-height: 80px;
   border-radius: var(--radius-md);
+  display: block;
 }
 
-.image-preview .remove-btn {
+.image-remove-btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
   background: #5e1f1f;
   border: none;
   color: white;
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-md);
+  border-radius: 50%;
   cursor: pointer;
-  font-size: 0.875rem;
+  font-size: 14px;
+  line-height: 18px;
+  padding: 0;
+  text-align: center;
 }
 
-.image-preview .remove-btn:hover { background: #7e2f2f; }
+.image-remove-btn:hover { background: #7e2f2f; }
 
 .paste-hint {
   font-size: 0.875rem;

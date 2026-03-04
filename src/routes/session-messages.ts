@@ -104,13 +104,19 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     setAppletNavigation(appletNavigation);
   }
   
-  let tempFilePath: string | undefined;
+  const tempFilePaths: string[] = [];
   
-  // Pre-process image if present
-  const parsed = parseImageDataUrl(imageData);
-  if (parsed) {
-    tempFilePath = join(tmpdir(), `copilot-image-${Date.now()}.${parsed.extension}`);
-    await writeFile(tempFilePath, Buffer.from(parsed.base64Data, 'base64'));
+  // Pre-process images (multiple supported, newline-separated)
+  if (imageData) {
+    const imageStrings = imageData.split('\n').filter(Boolean);
+    for (const imgStr of imageStrings) {
+      const parsed = parseImageDataUrl(imgStr);
+      if (parsed) {
+        const path = join(tmpdir(), `copilot-image-${Date.now()}-${tempFilePaths.length}.${parsed.extension}`);
+        await writeFile(path, Buffer.from(parsed.base64Data, 'base64'));
+        tempFilePaths.push(path);
+      }
+    }
   }
   
   // NOTE: We don't broadcast user.message here. SDK echoes it back with prefixed content,
@@ -148,7 +154,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     await dispatchMessage(
       sessionId, 
       promptToSend, 
-      { tempFilePath, clientId, correlationId: effectiveCorrelationId, requestId },
+      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId },
       {
         onEvent: (evt) => broadcastEvent(sessionId, evt)
       }
@@ -182,11 +188,11 @@ export interface DispatchCallbacks {
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePath?: string; clientId?: string; correlationId?: string; requestId?: string },
+  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePath, correlationId, requestId } = options || {};
+  const { tempFilePaths, correlationId, requestId } = options || {};
   const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
   
@@ -215,8 +221,8 @@ export async function dispatchMessage(
       attachments?: Array<{ type: string; path: string }> 
     } = { prompt };
     
-    if (tempFilePath) {
-      messageOptions.attachments = [{ type: 'file', path: tempFilePath }];
+    if (tempFilePaths && tempFilePaths.length > 0) {
+      messageOptions.attachments = tempFilePaths.map(p => ({ type: 'file', path: p }));
     }
     
     // Subscribe to SDK events and forward them
@@ -236,8 +242,8 @@ export async function dispatchMessage(
       sessionManager.endDispatch(sessionId);
       
       broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
-      if (tempFilePath) {
-        unlink(tempFilePath).catch(() => {});
+      if (tempFilePaths) {
+        for (const p of tempFilePaths) unlink(p).catch(() => {});
       }
       dispatchComplete();
       console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
@@ -360,8 +366,8 @@ export async function dispatchMessage(
       
       sessionManager.endDispatch(sessionId);
       broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
-      if (tempFilePath) {
-        await unlink(tempFilePath).catch(() => {});
+      if (tempFilePaths) {
+        for (const p of tempFilePaths) await unlink(p).catch(() => {});
       }
       dispatchComplete();
     }

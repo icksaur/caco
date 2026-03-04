@@ -4,6 +4,7 @@
   height: 100%;
   padding: 12px;
   max-width: 900px;
+  margin: 0 auto;
 }
 
 .editor-header {

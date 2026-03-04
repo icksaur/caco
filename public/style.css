@@ -763,6 +763,9 @@ main {
 .agent-message {
   background: var(--color-agent-bg);
   padding: var(--space-lg);
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: var(--text-sm);
 }
 
 .applet-message {

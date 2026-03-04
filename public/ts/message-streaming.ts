@@ -182,6 +182,8 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     chatView.setFormEnabled(false);
   }
   
+  scrollToBottom();
+  
   try {
     const appletState = getAndClearPendingAppletState();
     const appletNavigation = getNavigationContext();

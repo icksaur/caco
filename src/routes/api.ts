@@ -21,7 +21,7 @@ import ignore from 'ignore';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput } from '../storage.js';
-import { setAppletUserState, getAppletUserState, clearAppletUserState } from '../applet-state.js';
+import { setAppletUserState, getAppletUserState, clearAppletUserState, getActiveAppletSlug, setActiveAppletSlug } from '../applet-state.js';
 import { listApplets, loadApplet } from '../applet-store.js';
 import { listExtensions, getExtension } from '../extension-store.js';
 import { getUsage } from '../usage-state.js';
@@ -279,8 +279,12 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
       return;
     }
     
-    // Clear user state since applet is changing
-    clearAppletUserState();
+    // Only clear user state if switching to a different applet
+    const currentSlug = getActiveAppletSlug();
+    if (slug !== currentSlug) {
+      clearAppletUserState();
+    }
+    setActiveAppletSlug(slug);
     
     // Return content for client-side execution
     res.json({

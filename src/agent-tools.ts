@@ -163,15 +163,16 @@ Provide \`initialMessage\` to create and prompt in one step. The session works a
     parameters: z.object({
       cwd: z.string().describe('Working directory for the new session'),
       model: z.string().describe('Model ID (e.g., claude-sonnet-4.5, claude-opus-4.5). Use list_models to see options.'),
-      initialMessage: z.string().optional().describe('Optional first message to send immediately after creation')
+      initialMessage: z.string().optional().describe('Optional first message to send immediately after creation'),
+      description: z.string().optional().describe('Short description for the session list (e.g., "Fix auth tests", "Update API docs")')
     }),
 
-    handler: async ({ cwd, model, initialMessage }) => {
+    handler: async ({ cwd, model, initialMessage, description }) => {
       try {
         const createResponse = await fetch(`${SERVER_URL}/api/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cwd, model, parentSessionId: sessionRef.id })
+          body: JSON.stringify({ cwd, model, parentSessionId: sessionRef.id, description })
         });
         
         if (!createResponse.ok) {

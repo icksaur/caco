@@ -11,6 +11,7 @@ import { showAppletPanel } from './view-controller.js';
 import { wsSetState, onStateUpdate, onEvent, isWsConnected } from './websocket.js';
 import { getActiveSessionId, getCurrentCwd, isLoadingHistory } from './app-state.js';
 import { regions } from './dom-regions.js';
+import { setNewChatCwd } from './model-selector.js';
 import type { SessionEvent } from './types.js';
 
 interface TempFileResult {
@@ -255,6 +256,11 @@ function setAppletState(state: Record<string, unknown>): void {
   // Merge with existing pending state (newer values overwrite)
   pendingAppletState = { ...pendingAppletState, ...state };
   
+  // Sync currentPath to new-chat CWD input
+  if (typeof state.currentPath === 'string') {
+    setNewChatCwd(state.currentPath);
+  }
+  
   // If WebSocket connected, push immediately
   if (isWsConnected()) {
     wsSetState(state);
@@ -396,7 +402,8 @@ async function loadAppletBySlug(slug: string, params?: Record<string, string>): 
     // POST to load endpoint (updates server state + returns content)
     const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urlParams: getAppletUrlParams() })
     });
     
     if (!response.ok) {

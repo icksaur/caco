@@ -6,7 +6,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { getAppletUserState, getAppletNavigation, triggerReload } from './applet-state.js';
+import { getAppletUserState, getAppletNavigation, getActiveAppletSlug, triggerReload } from './applet-state.js';
 import { pushStateToApplet } from './applet-push.js';
 import { listApplets, type AppletMeta } from './applet-store.js';
 
@@ -305,8 +305,10 @@ export function createAppletTools(_programCwd: string) {
     handler: async ({ key }) => {
       const state = getAppletUserState();
       const navigation = getAppletNavigation();
+      const activeSlug = getActiveAppletSlug();
       
       const meta = {
+        activeApplet: activeSlug,
         stack: navigation.stack,
         urlParams: navigation.urlParams
       };
@@ -324,7 +326,7 @@ export function createAppletTools(_programCwd: string) {
       return {
         textResultForLlm: Object.keys(state).length > 0
           ? `Applet state: ${JSON.stringify(state, null, 2)}\n\nNavigation: ${JSON.stringify(meta)}`
-          : `Applet state is empty. The applet may not have called setAppletState() yet.\n\nNavigation: ${JSON.stringify(meta)}`,
+          : `No applet state set.${activeSlug ? ` Active applet: ${activeSlug}` : ' No applet open.'}\n\nNavigation: ${JSON.stringify(meta)}`,
         resultType: 'success' as const
       };
     }

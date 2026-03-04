@@ -80,6 +80,8 @@ ${appletPrompt}
 Examples: \`[View file](/?applet=text-editor&path=/file)\` | \`[Git status](/?applet=git-status&path=/repo)\`
 Call \`caco_applet_usage\` for all applet URL patterns. Call \`caco_applet_howto\` to create new applets.
 
+**Context awareness**: The user may be viewing an applet while chatting. Call \`get_applet_state\` on your first turn to understand what they're looking at — it returns the active applet slug, URL params, and any state the applet has pushed.
+
 ## Caco Session Tools
 Create and message independent Caco sessions that appear in the user's session list:
 - \`create_caco_session\` - Create a persistent session in a specific directory

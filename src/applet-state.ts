@@ -4,11 +4,8 @@
  * Minimal state for applet interactions:
  * - User state pushed from applet JS (for agent to query)
  * - Navigation context (stack + URL params)
+ * - Active applet slug tracking
  * - Reload signal
- * 
- * Removed (agent writes files directly):
- * - Applet content storage (set_applet_content tool)
- * - Active slug tracking
  */
 
 export interface NavigationContext {
@@ -18,6 +15,7 @@ export interface NavigationContext {
 
 let appletUserState: Record<string, unknown> = {};
 let appletNavigation: NavigationContext = { stack: [], urlParams: {} };
+let activeSlug: string | null = null;
 let pendingReload = false;
 
 /**
@@ -53,6 +51,20 @@ export function setAppletNavigation(nav: NavigationContext): void {
  */
 export function getAppletNavigation(): NavigationContext {
   return appletNavigation;
+}
+
+/**
+ * Get the currently active applet slug
+ */
+export function getActiveAppletSlug(): string | null {
+  return activeSlug;
+}
+
+/**
+ * Set the currently active applet slug (called on applet load)
+ */
+export function setActiveAppletSlug(slug: string | null): void {
+  activeSlug = slug;
 }
 
 /**

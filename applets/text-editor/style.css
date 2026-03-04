@@ -3,6 +3,7 @@
   flex-direction: column;
   height: 100%;
   padding: 12px;
+  max-width: 900px;
 }
 
 .editor-header {
@@ -16,7 +17,7 @@
 .file-path {
   flex: 1;
   font-family: monospace;
-  font-size: 13px;
+  font-size: 11pt;
   color: #888;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -29,7 +30,7 @@
   border: none;
   border-radius: 6px;
   color: #fff;
-  font-size: 14px;
+  font-size: 11pt;
   cursor: pointer;
 }
 
@@ -72,7 +73,7 @@
 
 .highlight-layer code {
   font-family: 'SF Mono', Monaco, 'Courier New', monospace;
-  font-size: 13px;
+  font-size: 11pt;
   line-height: 1.5;
   tab-size: 2;
   white-space: pre-wrap;
@@ -91,7 +92,7 @@
   color: transparent;
   caret-color: #fff;
   font-family: 'SF Mono', Monaco, 'Courier New', monospace;
-  font-size: 13px;
+  font-size: 11pt;
   line-height: 1.5;
   padding: 12px;
   resize: none;
@@ -116,7 +117,7 @@
 
 .status {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: 10pt;
   color: #666;
   flex-shrink: 0;
 }

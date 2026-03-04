@@ -10,6 +10,24 @@ import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
 
+/**
+ * Load MCP server config from ~/.copilot/mcp-config.json
+ */
+function loadMcpServers(): Record<string, unknown> | undefined {
+  try {
+    const configPath = join(homedir(), '.copilot', 'mcp-config.json');
+    if (!existsSync(configPath)) return undefined;
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    if (config.mcpServers && Object.keys(config.mcpServers).length > 0) {
+      console.log(`[MCP] Loaded ${Object.keys(config.mcpServers).length} servers from mcp-config.json`);
+      return config.mcpServers;
+    }
+  } catch (e) {
+    console.error('[MCP] Failed to load mcp-config.json:', e);
+  }
+  return undefined;
+}
+
 interface CopilotClientInstance {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -271,7 +289,9 @@ class SessionManager {
       systemMessage: config.systemMessage,
       tools,
       excludedTools: config.excludedTools,
-      onPermissionRequest: approveAll
+      onPermissionRequest: approveAll,
+      configDir: join(homedir(), '.copilot'),
+      mcpServers: loadMcpServers()
     } as CreateSessionConfig);
     
     // Update the ref so tool handlers can access the real session ID
@@ -366,7 +386,9 @@ class SessionManager {
       streaming: true,
       tools,
       excludedTools: config.excludedTools,
-      onPermissionRequest: approveAll
+      onPermissionRequest: approveAll,
+      configDir: join(homedir(), '.copilot'),
+      mcpServers: loadMcpServers()
     } as ResumeSessionConfig);
     
     // Track active session (needs resume context on first message)

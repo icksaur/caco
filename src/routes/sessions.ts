@@ -79,7 +79,7 @@ router.get('/sessions', async (_req: Request, res: Response) => {
 });
 
 router.post('/sessions', async (req: Request, res: Response) => {
-  const { cwd, model, description } = req.body as { cwd?: string; model?: string; description?: string };
+  const { cwd, model, description, parentSessionId } = req.body as { cwd?: string; model?: string; description?: string; parentSessionId?: string };
   const clientId = req.headers['x-client-id'] as string | undefined;
   
   const sessionCwd = cwd || process.cwd();
@@ -97,9 +97,12 @@ router.post('/sessions', async (req: Request, res: Response) => {
     const sessionId = await sessionState.ensureSession(model, true, sessionCwd, clientId);
     const actualCwd = sessionManager.getSessionCwd(sessionId);
     
-    // Set description if provided
-    if (description) {
-      setSessionMeta(sessionId, { name: description });
+    // Set description and/or parent if provided
+    if (description || parentSessionId) {
+      const meta = getSessionMeta(sessionId) ?? { name: '' };
+      if (description) meta.name = description;
+      if (parentSessionId) meta.parentSessionId = parentSessionId;
+      setSessionMeta(sessionId, meta);
     }
     
     // Broadcast session list change for all clients to refresh

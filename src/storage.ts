@@ -38,6 +38,7 @@ interface CacheEntry {
  */
 export interface SessionMeta {
   name: string;
+  parentSessionId?: string; // Set when created by another session via create_caco_session
   lastObservedAt?: string;  // ISO timestamp: user last viewed this session
   lastIdleAt?: string;      // ISO timestamp: session last became idle
   currentIntent?: string;   // Last reported intent (from report_intent tool)

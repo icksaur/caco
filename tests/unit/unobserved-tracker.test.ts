@@ -208,6 +208,55 @@ describe('UnobservedTracker', () => {
     });
   });
 
+  describe('sub-sessions', () => {
+    it('markIdle skips sessions with parentSessionId', () => {
+      mockMeta.set('child1', { name: '', parentSessionId: 'parent1' });
+
+      const result = unobservedTracker.markIdle('child1');
+
+      expect(result).toBe(false);
+      expect(unobservedTracker.isUnobserved('child1')).toBe(false);
+      expect(unobservedTracker.getCount()).toBe(0);
+    });
+
+    it('markIdle still persists lastIdleAt for sub-sessions', () => {
+      mockMeta.set('child1', { name: '', parentSessionId: 'parent1' });
+
+      unobservedTracker.markIdle('child1');
+
+      const meta = mockMeta.get('child1');
+      expect(meta?.lastIdleAt).toBeDefined();
+    });
+
+    it('hydrate skips sessions with parentSessionId', () => {
+      mockMeta.set('child1', {
+        name: '',
+        parentSessionId: 'parent1',
+        lastIdleAt: '2026-02-06T12:00:00Z'
+      });
+      mockMeta.set('normal1', {
+        name: '',
+        lastIdleAt: '2026-02-06T12:00:00Z'
+      });
+
+      unobservedTracker.hydrate(['child1', 'normal1']);
+
+      expect(unobservedTracker.isUnobserved('child1')).toBe(false);
+      expect(unobservedTracker.isUnobserved('normal1')).toBe(true);
+      expect(unobservedTracker.getCount()).toBe(1);
+    });
+
+    it('does not broadcast for sub-session markIdle', () => {
+      const broadcastFn = vi.fn();
+      unobservedTracker.setBroadcast(broadcastFn);
+      mockMeta.set('child1', { name: '', parentSessionId: 'parent1' });
+
+      unobservedTracker.markIdle('child1');
+
+      expect(broadcastFn).not.toHaveBeenCalled();
+    });
+  });
+
   describe('broadcast', () => {
     it('calls broadcast function with sessionId and count', () => {
       const broadcastFn = vi.fn();

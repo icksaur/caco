@@ -171,7 +171,7 @@ Provide \`initialMessage\` to create and prompt in one step. The session works a
         const createResponse = await fetch(`${SERVER_URL}/api/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cwd, model })
+          body: JSON.stringify({ cwd, model, parentSessionId: sessionRef.id })
         });
         
         if (!createResponse.ok) {

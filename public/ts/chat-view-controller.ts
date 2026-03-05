@@ -154,9 +154,16 @@ class ChatViewController {
 
   /**
    * Reload history for the active session (e.g., after WS reconnect).
-   * Does NOT re-resume — just reloads the chat display.
+   * Resumes the session first in case the SDK session expired during disconnect.
    */
   async reloadHistory(sessionId: string): Promise<void> {
+    try {
+      await fetchWithTimeout(`/api/sessions/${sessionId}/resume`, {
+        method: 'POST'
+      }, RESUME_TIMEOUT_MS);
+    } catch {
+      // Resume failed — history load may still work from disk
+    }
     await historyLoader.load(sessionId);
   }
 

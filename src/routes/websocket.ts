@@ -478,14 +478,33 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[HISTORY] Error streaming history for ${shortId}:`, message);
     
-    // Check if SDK session expired
+    // SDK session expired — try to resume and reload from disk
     if (message.includes('Session not found') || message.includes('session.getMessages failed')) {
-      console.log(`[WS] Session ${sessionId} expired on SDK side, cleaning up`);
+      console.log(`[HISTORY] Session ${sessionId} expired, cleaning up and reading from disk`);
       await sessionManager.stop(sessionId).catch(() => {});
-      send(ws, { type: 'error', error: 'Session expired - please start a new session' });
+      
+      // Fall back to disk-based history (session is stopped, getHistory reads from disk)
+      try {
+        const diskEvents = await sessionManager.getHistory(sessionId);
+        if (diskEvents.length > 0) {
+          let sentCount = 0;
+          for (const evt of diskEvents) {
+            if (!shouldFilter(evt)) {
+              for (const transformed of transformForClient(evt)) {
+                const enriched = enrichUserMessageWithSource(transformed);
+                send(ws, { type: 'event', sessionId, event: enriched });
+                sentCount++;
+              }
+            }
+          }
+          console.log(`[HISTORY] Recovered ${sentCount} events from disk for ${shortId}`);
+        }
+      } catch {
+        // Disk read also failed — nothing to show
+      }
     }
     
-    send(ws, { type: 'historyComplete', sessionId, data: { isBusy: sessionManager.isBusy(sessionId) } });
+    send(ws, { type: 'historyComplete', sessionId, data: { isBusy: false } });
   }
 }
 

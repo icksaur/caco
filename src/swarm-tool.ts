@@ -20,10 +20,14 @@ let swarmActive = false;
 function validateSwarmModel(model: string, count: number): string | null {
   const lower = model.toLowerCase();
   if (count <= 2) return null;
-  if (count <= 4 && lower.includes('opus')) {
-    return `${model} not allowed for ${count} sessions (max 2 for opus). Use sonnet or cheaper.`;
+  if (count <= 4) {
+    if (lower.includes('opus')) {
+      return `${model} not allowed for ${count} sessions (max 2 for opus). Use sonnet or cheaper.`;
+    }
+    return null;
   }
-  if (count <= 6 && (lower.includes('opus') || lower.includes('sonnet'))) {
+  // count 5-6
+  if (lower.includes('opus') || lower.includes('sonnet')) {
     return `${model} not allowed for ${count} sessions (max 4 for sonnet). Use gpt-4.1 or cheaper.`;
   }
   return null;

@@ -24,7 +24,6 @@ import { resetTextareaHeight } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
 import { removeImage } from './image-paste.js';
 import { markSessionObserved } from './session-observed.js';
-import { handleContextEvent, updateContextUsage } from './context-footer.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
 import { sessionTracker } from './session-state-tracker.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
@@ -84,16 +83,18 @@ function handleEvent(event: SessionEvent): void {
   
   // Handle context footer updates (no UI element, just footer update)
   if (eventType === 'caco.context') {
-    handleContextEvent(data as { context: Record<string, string[]> });
+    const activeId = getActiveSessionId();
+    if (activeId) {
+      chatView.updateContextFiles(activeId, (data as { context: Record<string, string[]> }).context ?? {});
+    }
     return;
   }
   
-  // Handle context window usage — update footer percentage
   if (eventType === 'session.usage_info') {
-    updateContextUsage(
-      data as { tokenLimit?: number; currentTokens?: number },
-      getActiveSessionId() || undefined
-    );
+    const activeId = getActiveSessionId();
+    if (activeId) {
+      chatView.updateUsage(activeId, data as { tokenLimit?: number; currentTokens?: number });
+    }
     return;
   }
   

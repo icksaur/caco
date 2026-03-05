@@ -11,7 +11,7 @@
 
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, type ViewState } from './view-controller.js';
-import { renderStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage } from './context-footer.js';
+import { renderStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage } from './context-footer.js';
 import { loadModels, getNewChatCwd } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
 import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websocket.js';
@@ -26,9 +26,18 @@ const RESUME_TIMEOUT_MS = 30000;
 class ChatViewController {
   private lastPrompt = '';
   private lastPromptSessionId = '';
+  private footerSessionId: string | null = null;
 
   getViewState(): ViewState {
     return vcGetViewState();
+  }
+
+  /**
+   * The session that currently owns the footer. Footer updates for
+   * other sessions are silently dropped.
+   */
+  getFooterSessionId(): string | null {
+    return this.footerSessionId;
   }
 
   /**
@@ -42,6 +51,7 @@ class ChatViewController {
    * Show the new-chat view. Clears chat, footer, shows model selector.
    */
   showNewChat(): void {
+    this.footerSessionId = null;
     regions.chat.clear();
     clearStatus();
     clearContextFooter();
@@ -133,6 +143,7 @@ class ChatViewController {
    * Transition to chatting view after successful load.
    */
   private showChat(sessionId: string, cwd: string, model?: string, hasGit = false): void {
+    this.footerSessionId = sessionId;
     updateMenuIndicators();
     notifySessionChange(sessionId, cwd);
     this.updateStatus(cwd, model, hasGit);
@@ -197,6 +208,25 @@ class ChatViewController {
   clearFooter(): void {
     clearStatus();
     clearContextFooter();
+    clearContextUsage();
+  }
+
+  /**
+   * Update context files in footer. Only applies if sessionId matches
+   * the current footer owner.
+   */
+  updateContextFiles(sessionId: string, context: Record<string, string[] | undefined>): void {
+    if (this.footerSessionId !== sessionId) return;
+    renderContextFooter(context);
+  }
+
+  /**
+   * Update context usage (token count) in footer. Only applies if
+   * sessionId matches the current footer owner.
+   */
+  updateUsage(sessionId: string, data: { tokenLimit?: number; currentTokens?: number }): void {
+    if (this.footerSessionId !== sessionId) return;
+    updateContextUsage(data, sessionId);
   }
 
   /**

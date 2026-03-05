@@ -40,7 +40,7 @@ class HistoryLoader {
     
     setLoadingHistory(true);
     regions.chat.clear();
-    clearContextFooter();
+    clearContextFooter(); // Direct call OK — historyLoader is composed by chatView, footerSessionId already set
     subscribeToSession(sessionId);
     requestHistory(sessionId);
     

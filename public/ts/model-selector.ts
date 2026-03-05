@@ -188,7 +188,7 @@ export function selectModel(modelId: string): void {
   // Update footer status with new model name
   const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
   const cwd = cwdInput?.value.trim() || '';
-  if (cwd && modelInfo) {
+  if (cwd && modelInfo && getViewState() === 'newChat') {
     renderStatus(modelInfo.name, cwd);
   }
 }

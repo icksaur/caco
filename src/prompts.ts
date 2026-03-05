@@ -87,10 +87,11 @@ Create and message independent Caco sessions that appear in the user's session l
 - \`create_caco_session\` - Create a persistent session in a specific directory
 - \`send_caco_message\` - Send a message to an existing session
 - \`get_session_state\` - Check if a session is idle or busy
+- \`caco_session_swarm\` - Dispatch 1-6 parallel sessions and wait for all results
 
-Use these for work the user will review separately — different projects, triaged tasks, long-running jobs. Sessions work autonomously; do not poll or wait for responses.
+Use \`caco_session_swarm\` for parallel fan-out (analyze multiple repos, diverse perspectives). Model tier enforced: opus ≤2, sonnet ≤4, gpt-4.1 ≤6.
 
-For quick sub-tasks that report back to you, use the built-in \`task\` tool instead.
+Use individual session tools for work the user will review separately. For quick sub-tasks, use the built-in \`task\` tool instead.
 
 ## Self-Modification
 This chat interface is Caco — an open-source, self-extensible project. You can modify its source code.

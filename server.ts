@@ -19,6 +19,7 @@ import { createAgentTools } from './src/agent-tools.js';
 import { createMcpAuthTools } from './src/mcp-auth-tools.js';
 import { createDevDocsTool } from './src/dev-docs-tool.js';
 import { createExtensionsTool } from './src/extensions-tool.js';
+import { createSwarmTool } from './src/swarm-tool.js';
 import type { SessionIdRef } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
@@ -79,7 +80,12 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
   
   const extIntrospection = createExtensionsTool();
   
-  return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools];
+  const swarmTools = createSwarmTool(
+    sessionRef,
+    (id) => sessionManager.getDispatchCorrelationId(id)
+  );
+  
+  return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools];
 };
 
 // System message for sessions - built at startup from prompts module

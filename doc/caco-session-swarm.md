@@ -74,17 +74,46 @@ function validateSwarmModel(model: string, count: number): string | null {
 6. Return aggregated results to calling agent
 ```
 
-### Polling with Progress Updates
+### Concurrency Lock
 
-The tool blocks until all sessions complete. To prevent the SDK from appearing hung, emit progress updates via `toolTelemetry`:
+Only one swarm can run at a time. A module-level flag prevents concurrent swarms:
 
 ```typescript
-// During polling loop:
+let swarmActive = false;
+
+// In handler:
+if (swarmActive) {
+  return { textResultForLlm: 'A swarm is already running. Wait for it to complete.', resultType: 'error' };
+}
+swarmActive = true;
+try { ... } finally { swarmActive = false; }
+```
+
+### Sub-Session Integration
+
+Swarm sessions are created with `parentSessionId` set to the calling session. This:
+- Suppresses unobserved badge notifications (confirmed: `unobserved-tracker.ts:58` skips sub-sessions)
+- Shows parent relationship in session metadata
+- Session descriptions: `swarm 1/4: <prompt preview>`
+
+### Polling with Timeout
+
+```typescript
+const PER_SESSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 min per session
+const POLL_INTERVAL_MS = 5000;
+
 let completed = 0;
 while (completed < prompts.length) {
-  await sleep(5000);
+  await sleep(POLL_INTERVAL_MS);
   for (const s of sessions) {
     if (s.done) continue;
+    const elapsed = Date.now() - s.startedAt;
+    if (elapsed > PER_SESSION_TIMEOUT_MS) {
+      s.done = true;
+      s.result = '(timed out after 10 minutes)';
+      completed++;
+      continue;
+    }
     const state = await fetchState(s.id);
     if (state.status === 'idle' || state.status === 'inactive') {
       s.done = true;
@@ -92,9 +121,6 @@ while (completed < prompts.length) {
       completed++;
     }
   }
-  // The SDK sees the tool is still running — no timeout since the
-  // handler is actively awaiting. Progress is visible in the Caco UI
-  // via the session panel (busy indicators on each swarm session).
 }
 ```
 
@@ -102,7 +128,7 @@ while (completed < prompts.length) {
 
 Verified: the SDK has **no tool execution timeout**. `handleToolCallRequest` calls `await handler(args)` with no deadline. The JSON-RPC transport also has no request timeout. The tool can run for hours.
 
-The only timeout risk is the Caco dispatch watchdog (5 min idle), but the swarm tool emits progress events implicitly — the calling session stays busy because the tool handler hasn't returned yet. The watchdog resets on each SDK event, and the calling session continues to emit `tool.execution_start` during the tool call.
+The calling session stays busy because the tool handler hasn't returned. The Caco dispatch watchdog resets on SDK events — and during a tool call, the SDK keeps emitting `tool.execution_start` which the watchdog counts as activity. No timeout risk on either side.
 
 ### Result Aggregation
 

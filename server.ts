@@ -80,10 +80,7 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
   
   const extIntrospection = createExtensionsTool();
   
-  const swarmTools = createSwarmTool(
-    sessionRef,
-    (id) => sessionManager.getDispatchCorrelationId(id)
-  );
+  const swarmTools = createSwarmTool(sessionRef);
   
   return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools];
 };

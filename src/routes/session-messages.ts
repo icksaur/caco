@@ -137,7 +137,10 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     }
   }
   
-  sessionManager.recordAgentCall(effectiveCorrelationId, sessionId);
+  // Only record agent-to-agent calls in correlation chain (not user/applet/scheduler messages)
+  if (correlationId) {
+    sessionManager.recordAgentCall(effectiveCorrelationId, sessionId);
+  }
   
   // Dispatch to SDK — waits for send to succeed before returning HTTP 200.
   // The streaming response continues in the background after the POST returns.

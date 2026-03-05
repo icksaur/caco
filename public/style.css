@@ -1879,17 +1879,21 @@ main {
 .context-footer.has-context {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-sm);
 }
 
 .context-footer .context-links {
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: baseline;
 }
 
 .context-footer .context-status {
   flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
 }
 
 .context-footer a {

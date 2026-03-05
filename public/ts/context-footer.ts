@@ -97,20 +97,53 @@ export function handleContextEvent(data: { context: SessionContext }): void {
 
 const PIE_GLYPHS = ['○', '◔', '◑', '◕', '●'];
 
+// Cache usage per session so it restores on switch
+const usageCache = new Map<string, { tokenLimit: number; currentTokens: number }>();
+
 /**
  * Update context window usage display in footer.
- * Shows a pie chart glyph + percentage in yellow, with tooltip showing details.
+ * Caches per session so it restores when switching back.
  */
-export function updateContextUsage(data: { tokenLimit?: number; currentTokens?: number }): void {
+export function updateContextUsage(data: { tokenLimit?: number; currentTokens?: number }, sessionId?: string): void {
+  if (!data.tokenLimit || !data.currentTokens) return;
+  
+  if (sessionId) {
+    usageCache.set(sessionId, { tokenLimit: data.tokenLimit, currentTokens: data.currentTokens });
+  }
+  
+  renderUsage(data.tokenLimit, data.currentTokens);
+}
+
+/**
+ * Restore cached usage for a session, or clear if none cached.
+ */
+export function restoreContextUsage(sessionId: string): void {
+  const cached = usageCache.get(sessionId);
+  if (cached) {
+    renderUsage(cached.tokenLimit, cached.currentTokens);
+  } else {
+    clearContextUsage();
+  }
+}
+
+/**
+ * Clear the usage display from the footer.
+ */
+export function clearContextUsage(): void {
+  const footer = regions.footer.el;
+  const usageEl = footer.querySelector('.context-usage');
+  if (usageEl) usageEl.textContent = '';
+  updateFooterVisibility();
+}
+
+function renderUsage(tokenLimit: number, currentTokens: number): void {
   const footer = regions.footer.el;
   let usageEl = footer.querySelector('.context-usage') as HTMLElement | null;
   
-  if (!data.tokenLimit || !data.currentTokens) return;
-  
-  const pct = Math.round((data.currentTokens / data.tokenLimit) * 100);
+  const pct = Math.round((currentTokens / tokenLimit) * 100);
   const glyphIdx = Math.min(Math.floor(pct / 25), 4);
   const glyph = PIE_GLYPHS[glyphIdx];
-  const tooltip = `${data.currentTokens.toLocaleString()} / ${data.tokenLimit.toLocaleString()} tokens (${pct}%)`;
+  const tooltip = `${currentTokens.toLocaleString()} / ${tokenLimit.toLocaleString()} tokens (${pct}%)`;
   
   if (!usageEl) {
     usageEl = document.createElement('span');

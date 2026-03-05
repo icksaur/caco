@@ -90,7 +90,10 @@ function handleEvent(event: SessionEvent): void {
   
   // Handle context window usage — update footer percentage
   if (eventType === 'session.usage_info') {
-    updateContextUsage(data as { tokenLimit?: number; currentTokens?: number });
+    updateContextUsage(
+      data as { tokenLimit?: number; currentTokens?: number },
+      getActiveSessionId() || undefined
+    );
     return;
   }
   

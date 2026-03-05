@@ -11,7 +11,7 @@
 
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, type ViewState } from './view-controller.js';
-import { renderStatus, clearStatus, clearContextFooter } from './context-footer.js';
+import { renderStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage } from './context-footer.js';
 import { loadModels, getNewChatCwd } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
 import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websocket.js';
@@ -45,6 +45,7 @@ class ChatViewController {
     regions.chat.clear();
     clearStatus();
     clearContextFooter();
+    clearContextUsage();
     setViewState('newChat');
     loadModels();
   }
@@ -135,6 +136,7 @@ class ChatViewController {
     updateMenuIndicators();
     notifySessionChange(sessionId, cwd);
     this.updateStatus(cwd, model);
+    restoreContextUsage(sessionId);
     setViewState('chatting');
   }
 

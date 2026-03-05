@@ -1909,3 +1909,9 @@ main {
 .context-footer .context-model {
   opacity: 0.7;
 }
+
+.context-footer .context-usage {
+  color: #e5c07b;
+  cursor: default;
+  margin-right: var(--space-xs);
+}

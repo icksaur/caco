@@ -94,3 +94,34 @@ export function clearContextFooter(): void {
 export function handleContextEvent(data: { context: SessionContext }): void {
   renderContextFooter(data.context ?? {});
 }
+
+const PIE_GLYPHS = ['○', '◔', '◑', '◕', '●'];
+
+/**
+ * Update context window usage display in footer.
+ * Shows a pie chart glyph + percentage in yellow, with tooltip showing details.
+ */
+export function updateContextUsage(data: { tokenLimit?: number; currentTokens?: number }): void {
+  const footer = regions.footer.el;
+  let usageEl = footer.querySelector('.context-usage') as HTMLElement | null;
+  
+  if (!data.tokenLimit || !data.currentTokens) return;
+  
+  const pct = Math.round((data.currentTokens / data.tokenLimit) * 100);
+  const glyphIdx = Math.min(Math.floor(pct / 25), 4);
+  const glyph = PIE_GLYPHS[glyphIdx];
+  const tooltip = `${data.currentTokens.toLocaleString()} / ${data.tokenLimit.toLocaleString()} tokens (${pct}%)`;
+  
+  if (!usageEl) {
+    usageEl = document.createElement('span');
+    usageEl.className = 'context-usage';
+    const statusEl = footer.querySelector('.context-status');
+    if (statusEl) {
+      statusEl.insertAdjacentElement('beforebegin', usageEl);
+    }
+  }
+  
+  usageEl.textContent = `${glyph} ${pct}%`;
+  usageEl.title = tooltip;
+  updateFooterVisibility();
+}

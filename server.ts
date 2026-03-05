@@ -196,12 +196,14 @@ async function start(): Promise<void> {
 process.on('SIGINT', () => {
   console.log('\n✓ Shutting down gracefully...');
   stopScheduleManager();
-  sessionState.shutdown().then(() => {
-    process.exit(0);
-  }).catch((err) => {
-    console.error('Shutdown error:', err);
-    process.exit(1);
-  });
+  sessionState.shutdown()
+    .then(() => sessionManager.shutdown())
+    .then(() => {
+      process.exit(0);
+    }).catch((err) => {
+      console.error('Shutdown error:', err);
+      process.exit(1);
+    });
 });
 
 // Handle unhandled rejections (prevents crash from SDK async errors)

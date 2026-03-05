@@ -85,7 +85,6 @@ interface SessionEvent {
 interface ActiveSession {
   cwd: string;
   session: CopilotSessionInstance;
-  client: CopilotClientInstance;
 }
 
 interface CachedSession {
@@ -171,25 +170,58 @@ class SessionManager {
   private correlations = new Map<string, CorrelationMetrics>();
   private correlationRules: CorrelationRules = DEFAULT_RULES;
   
-  // sessionId → { cwd, session, client }
+  // sessionId → { cwd, session }
   private activeSessions = new Map<string, ActiveSession>();
   
   // sessionId → { cwd, summary } (cached from disk)
   private sessionCache = new Map<string, CachedSession>();
   
-  // sessionId → Promise (serializes concurrent resume attempts for the same session)
+  // sessionId → Promise (serializes concurrent resume attempts)
   private resumeInProgress = new Map<string, Promise<ResumeResult>>();
   
-  // Path to session state directory
+  // Shared SDK client — all sessions use one CLI backend process
+  private sharedClient: CopilotClientInstance | null = null;
+  private clientStarting: Promise<CopilotClientInstance> | null = null;
+  
   private stateDir = join(homedir(), '.copilot', 'session-state');
-  
-  // Maximum concurrent active SDK sessions (evict LRU inactive sessions)
   private static readonly MAX_ACTIVE_SESSIONS = 5;
-  
-  // Cached model list from SDK
   private cachedModels: SDKModelInfo[] = [];
-  
   private initialized = false;
+
+  /**
+   * Get or create the shared SDK client. Mutex prevents concurrent starts.
+   * If the CLI process died, callers should set sharedClient = null and retry.
+   */
+  private async ensureClient(): Promise<CopilotClientInstance> {
+    if (this.sharedClient) return this.sharedClient;
+    if (this.clientStarting) return this.clientStarting;
+    
+    this.clientStarting = (async () => {
+      const client = new CopilotClient({ cwd: process.cwd() }) as unknown as CopilotClientInstance;
+      await client.start();
+      this.sharedClient = client;
+      console.log('[SDK] Shared client started');
+      return client;
+    })();
+    
+    try {
+      return await this.clientStarting;
+    } finally {
+      this.clientStarting = null;
+    }
+  }
+
+  /**
+   * Handle SDK connection errors by resetting the shared client.
+   * Callers should re-throw the original error after calling this.
+   */
+  private handleClientError(error: unknown): void {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('connection') || msg.includes('EPIPE') || msg.includes('killed') || msg.includes('spawn')) {
+      console.warn('[SDK] Shared client appears dead, will recreate on next use');
+      this.sharedClient = null;
+    }
+  }
 
   /**
    * Initialize: scan disk, build session cache, and fetch model list
@@ -212,15 +244,13 @@ class SessionManager {
    */
   private async _fetchModels(): Promise<void> {
     try {
-      const client = new CopilotClient({ cwd: process.cwd() }) as unknown as CopilotClientInstance;
-      await client.start();
+      const client = await this.ensureClient();
       this.cachedModels = await client.listModels();
-      await client.stop();
       console.log(`✓ Fetched ${this.cachedModels.length} models from SDK`);
     } catch (e) {
+      this.handleClientError(e);
       const message = e instanceof Error ? e.message : String(e);
       console.warn(`Could not fetch models from SDK: ${message}`);
-      // Fall back to empty - client will use hardcoded list
       this.cachedModels = [];
     }
   }
@@ -273,32 +303,32 @@ class SessionManager {
     
     console.log(`[MODEL] SessionManager.create() with model: ${config.model}`);
     
-    // Create client with cwd
-    const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
-    await client.start();
+    const client = await this.ensureClient();
     
-    // For new sessions, create a mutable ref with placeholder
-    // The ref will be updated after session creation so tools can access real ID
     const sessionRef = { id: 'PENDING' };
     const tools = config.toolFactory(cwd, sessionRef);
     
-    // Create session with streaming enabled
-    const session = await client.createSession({
-      model: config.model,
-      streaming: true,
-      systemMessage: config.systemMessage,
-      tools,
-      excludedTools: config.excludedTools,
-      onPermissionRequest: approveAll,
-      configDir: join(homedir(), '.copilot'),
-      mcpServers: loadMcpServers()
-    } as CreateSessionConfig);
+    let session: CopilotSessionInstance;
+    try {
+      session = await client.createSession({
+        model: config.model,
+        streaming: true,
+        systemMessage: config.systemMessage,
+        tools,
+        excludedTools: config.excludedTools,
+        onPermissionRequest: approveAll,
+        configDir: join(homedir(), '.copilot'),
+        mcpServers: loadMcpServers(),
+        workingDirectory: cwd
+      } as CreateSessionConfig);
+    } catch (e) {
+      this.handleClientError(e);
+      throw e;
+    }
     
-    // Update the ref so tool handlers can access the real session ID
     sessionRef.id = session.sessionId;
     
-    // Track active session (no resume context needed for new sessions)
-    this.activeSessions.set(session.sessionId, { cwd, session, client });
+    this.activeSessions.set(session.sessionId, { cwd, session });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
     
     // Register with storage layer for output persistence
@@ -372,27 +402,28 @@ class SessionManager {
       return { sessionId, usedFallbackCwd };
     }
     
-    // Create client with cwd
-    const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
-    await client.start();
+    const client = await this.ensureClient();
     
-    // Create tools using factory (cwd and sessionRef for agent tools)
-    // For resume, we know the sessionId upfront
     const sessionRef = { id: sessionId };
     const tools = config.toolFactory(cwd, sessionRef);
     
-    // Resume session with tools
-    const session = await client.resumeSession(sessionId, {
-      streaming: true,
-      tools,
-      excludedTools: config.excludedTools,
-      onPermissionRequest: approveAll,
-      configDir: join(homedir(), '.copilot'),
-      mcpServers: loadMcpServers()
-    } as ResumeSessionConfig);
+    let session: CopilotSessionInstance;
+    try {
+      session = await client.resumeSession(sessionId, {
+        streaming: true,
+        tools,
+        excludedTools: config.excludedTools,
+        onPermissionRequest: approveAll,
+        configDir: join(homedir(), '.copilot'),
+        mcpServers: loadMcpServers(),
+        workingDirectory: cwd
+      } as ResumeSessionConfig);
+    } catch (e) {
+      this.handleClientError(e);
+      throw e;
+    }
     
-    // Track active session (needs resume context on first message)
-    this.activeSessions.set(sessionId, { cwd, session, client });
+    this.activeSessions.set(sessionId, { cwd, session });
     
     // Evict oldest inactive sessions if over the limit
     this._evictInactiveSessions();
@@ -418,7 +449,7 @@ class SessionManager {
       return;
     }
     
-    const { cwd, session, client } = active;
+    const { cwd, session } = active;
     
     try {
       await session.destroy();
@@ -427,12 +458,10 @@ class SessionManager {
       console.warn(`Warning: session.destroy() failed: ${message}`);
     }
     
-    try {
-      await client.stop();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.warn(`Warning: client.stop() failed: ${message}`);
-    }
+    // Note: we do NOT stop the shared client here — other sessions use it.
+    // session.destroy() removes the session from the SDK but leaves a small
+    // entry in client.sessions Map. This is acceptable; client.stop() on
+    // shutdown clears everything.
     
     // Clear dispatch state and untrack
     dispatchState.end(sessionId);
@@ -553,24 +582,17 @@ class SessionManager {
    * Delete a session from disk
    */
   async delete(sessionId: string): Promise<void> {
-    // Stop if active
     if (this.activeSessions.has(sessionId)) {
       await this.stop(sessionId);
     }
     
-    // Get CWD for client - use process.cwd() if cached CWD is gone
-    const cached = this.sessionCache.get(sessionId);
-    const cachedCwd = cached?.cwd;
-    const cwd = (cachedCwd && existsSync(cachedCwd)) ? cachedCwd : process.cwd();
-    
-    const client = new CopilotClient({ cwd }) as unknown as CopilotClientInstance;
-    await client.start();
-    
     try {
+      const client = await this.ensureClient();
       await client.deleteSession(sessionId);
       console.log(`✓ Deleted session ${sessionId}`);
-    } finally {
-      await client.stop();
+    } catch (e) {
+      this.handleClientError(e);
+      throw e;
     }
     
     this.sessionCache.delete(sessionId);
@@ -793,6 +815,21 @@ class SessionManager {
    */
   getCorrelationMetrics(correlationId: string) {
     return this.correlations.get(correlationId)?.getMetrics();
+  }
+
+  /**
+   * Shut down the shared SDK client. Call after all sessions are destroyed.
+   */
+  async shutdown(): Promise<void> {
+    if (this.sharedClient) {
+      try {
+        await this.sharedClient.stop();
+      } catch (e) {
+        console.warn('[SDK] Error stopping shared client:', e instanceof Error ? e.message : e);
+      }
+      this.sharedClient = null;
+      console.log('[SDK] Shared client stopped');
+    }
   }
 }
 

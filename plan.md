@@ -11,6 +11,131 @@ legend:
 
 ---
 
+## caco_session_swarm tool (doc/caco-session-swarm.md)
+
+### Step 1: Create `src/swarm-tool.ts`
+
+[ ] Create a new file `src/swarm-tool.ts` with these exports:
+
+```typescript
+import { defineTool } from '@github/copilot-sdk';
+import { z } from 'zod';
+import { SERVER_URL } from './config.js';
+import type { SessionIdRef } from './types.js';
+```
+
+**`validateSwarmModel(model, count)`** — returns error string or null:
+- count <= 2: any model allowed
+- count <= 4: reject if model contains 'opus' (case-insensitive)
+- count <= 6: reject if model contains 'opus' or 'sonnet' (case-insensitive)
+
+**Module-level lock:**
+```typescript
+let swarmActive = false;
+```
+
+**`createSwarmTool(sessionRef: SessionIdRef, getCorrelationId: GetCorrelationId)`** — returns array with one tool:
+
+Tool name: `caco_session_swarm`
+
+Parameters:
+```typescript
+z.object({
+  cwd: z.string().describe('Working directory for all sessions'),
+  model: z.string().describe('Model ID for all sessions'),
+  prompts: z.array(z.string()).min(1).max(6).describe('Prompt for each session (1-6)')
+})
+```
+
+Handler logic (all HTTP calls use `fetch` against `SERVER_URL`):
+
+1. Check `swarmActive` — if true, return error: `'A swarm is already running.'`
+2. Set `swarmActive = true` in a try/finally block
+3. Call `validateSwarmModel(model, prompts.length)` — if error, return it
+4. For each prompt (index `i`):
+   a. `POST ${SERVER_URL}/api/sessions` with body:
+      ```json
+      {
+        "cwd": cwd,
+        "model": model,
+        "parentSessionId": sessionRef.id,
+        "description": `swarm ${i+1}/${prompts.length}: ${prompt.slice(0, 50)}`
+      }
+      ```
+   b. Record `{ sessionId, startedAt: Date.now(), done: false, result: null }`
+   c. If creation fails, record `{ done: true, result: '(failed to create: <error>)' }`
+5. For each successfully created session, send the prompt:
+   a. Get `correlationId` from `getCorrelationId(sessionRef.id)`
+   b. `POST ${SERVER_URL}/api/sessions/${sessionId}/messages` with body:
+      ```json
+      {
+        "prompt": prompt,
+        "source": "agent",
+        "fromSession": sessionRef.id,
+        "correlationId": correlationId
+      }
+      ```
+   c. If send fails, mark `done: true, result: '(failed to send: <error>)'`
+6. Poll loop (5s interval, 10 min per-session timeout):
+   ```
+   while not all done:
+     sleep 5000ms
+     for each session not done:
+       if elapsed > 10 min: mark done with '(timed out)'
+       else: GET ${SERVER_URL}/api/sessions/${sessionId}/state
+         if status is 'idle' or 'inactive':
+           GET history via sessionManager or fetch last assistant message
+           mark done with result text
+   ```
+   To get the last assistant message, use `GET ${SERVER_URL}/api/sessions/${sessionId}/state` — the session is idle, so fetch its history and find the last `assistant.message` event's content. Alternatively, read from disk via `sessionManager.getHistory(sessionId)` if we import it. **Use the HTTP endpoint approach** to keep the tool decoupled:
+   - There's no HTTP endpoint for "last message" currently. Instead, read history from `sessionManager.getHistory(sessionId)` (import sessionManager). Find the last event with `type === 'assistant.message'` and extract `data.content`.
+7. Build result string:
+   ```typescript
+   const sections = sessions.map((s, i) => 
+     `## Session ${i + 1} (${s.sessionId.slice(0,8)})\n\n${s.result || '(no response)'}`
+   );
+   return {
+     textResultForLlm: sections.join('\n\n---\n\n'),
+     toolTelemetry: {
+       sessionsCreated: sessions.filter(s => s.sessionId).length,
+       sessionsCompleted: sessions.filter(s => s.done && !s.result?.startsWith('(')).length,
+       totalTimeMs: Date.now() - startTime
+     }
+   };
+   ```
+8. Finally block: `swarmActive = false`
+
+**Type for GetCorrelationId:** Import from `./agent-tools.js`:
+```typescript
+import type { GetCorrelationId } from './agent-tools.js';
+```
+
+### Step 2: Wire into server.ts tool factory
+
+[ ] `server.ts`:
+- Add import: `import { createSwarmTool } from './src/swarm-tool.js';`
+- In `toolFactory`, after `agentTools`:
+  ```typescript
+  const swarmTools = createSwarmTool(sessionRef, (id) => sessionManager.getDispatchCorrelationId(id));
+  ```
+- Add `...swarmTools` to the return array
+
+### Step 3: Add to system message
+
+[ ] `src/prompts.ts` — in the "Caco Session Tools" section, add a line:
+```
+- \`caco_session_swarm\` - Dispatch 1-6 parallel sessions and wait for all results
+```
+Add a brief note: `For parallel fan-out (e.g., analyze multiple repos, get diverse perspectives). Model tier enforced: opus ≤2, sonnet ≤4, gpt-4.1 ≤6.`
+
+### Step 4: Test
+
+[ ] All existing tests pass (no new test file needed for v1 — tool is integration-heavy)
+[ ] Typecheck clean
+[ ] Lint clean
+[ ] Build client (bundle unchanged — this is server-only)
+[ ] Manual test: create a swarm with 2 sonnet sessions, verify both complete and results aggregate
+
 ## Shared SDK Client (doc/shared-sdk-client.md)
 
 Branch: `shared-client` off `master`

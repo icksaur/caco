@@ -134,6 +134,7 @@ class ChatViewController {
     }
 
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
+    this.footerSessionId = data.sessionId;
     await historyLoader.load(data.sessionId);
 
     return data;

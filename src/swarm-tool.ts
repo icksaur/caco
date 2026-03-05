@@ -104,6 +104,7 @@ Each session runs independently with its own prompt. Results are collected and r
         const sessions: SwarmSession[] = [];
 
         // Create all sessions
+        console.log(`[SWARM] Creating ${prompts.length} sessions with model ${model}`);
         for (let i = 0; i < prompts.length; i++) {
           const desc = `swarm ${i + 1}/${prompts.length}: ${prompts[i].slice(0, 50)}`;
           try {
@@ -135,6 +136,7 @@ Each session runs independently with its own prompt. Results are collected and r
           const s = sessions[i];
           if (!s.sessionId || s.done) continue;
           try {
+            console.log(`[SWARM] Sending prompt ${i + 1}/${sessions.length} to ${s.sessionId.slice(0, 8)}`);
             const res = await fetch(`${SERVER_URL}/api/sessions/${s.sessionId}/messages`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -147,6 +149,7 @@ Each session runs independently with its own prompt. Results are collected and r
             });
             if (!res.ok) {
               const err = await res.json().catch(() => ({ error: res.statusText }));
+              console.error(`[SWARM] Failed to send to ${s.sessionId.slice(0, 8)}: ${err.error}`);
               s.done = true;
               s.result = `(failed to send: ${err.error})`;
             }

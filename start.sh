@@ -3,6 +3,12 @@
 
 cd "$(dirname "$0")"
 
+# Prevent agents from killing their own server
+if [ -n "$CACO_SESSION" ]; then
+  echo "ERROR: Don't run start.sh from inside Caco — use the restart_server tool"
+  exit 1
+fi
+
 # Port configuration: CACO_PORT → PORT → 53000
 export PORT=${CACO_PORT:-${PORT:-53000}}
 # Host configuration: CACO_HOST → 127.0.0.1 (localhost only)

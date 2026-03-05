@@ -3,6 +3,12 @@
 
 cd "$(dirname "$0")"
 
+# Prevent agents from killing their own server
+if [ -n "$CACO_SESSION" ]; then
+  echo "ERROR: Don't run stop.sh from inside Caco — use the restart_server tool"
+  exit 1
+fi
+
 # Read port from server.port file, fall back to env, then default
 if [ -f server.port ]; then
   PORT=$(cat server.port)

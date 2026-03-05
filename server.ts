@@ -37,6 +37,9 @@ const __dirname = dirname(__filename);
 
 const app = express();
 
+// Mark child processes as running inside Caco (stop.sh checks this)
+process.env.CACO_SESSION = '1';
+
 // Tool factory - creates display tools + applet tools with session cwd baked in
 // Program CWD for applet storage (fixed at startup)
 const programCwd = process.cwd();

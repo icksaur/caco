@@ -279,7 +279,10 @@ class SessionManager {
         const eventsPath = join(sessionDir, 'events.jsonl');
         const firstLine = readFileSync(eventsPath, 'utf8').split('\n')[0];
         record.cwd = parseSessionStartEvent(firstLine).cwd;
-      } catch { /* missing or invalid */ }
+      } catch {
+        // No events.jsonl means session was never initialized — skip it
+        continue;
+      }
       
       // Get summary from workspace.yaml
       try {

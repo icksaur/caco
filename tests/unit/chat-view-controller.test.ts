@@ -21,6 +21,10 @@ vi.mock('../../public/ts/context-footer.js', () => ({
   renderStatus: vi.fn(),
   clearStatus: vi.fn(),
   clearContextFooter: vi.fn(),
+  clearContextUsage: vi.fn(),
+  restoreContextUsage: vi.fn(),
+  renderContextFooter: vi.fn(),
+  updateContextUsage: vi.fn(),
 }));
 
 vi.mock('../../public/ts/model-selector.js', () => ({
@@ -218,12 +222,17 @@ describe('ChatViewController', () => {
   describe('updateStatus', () => {
     it('resolves model name and calls renderStatus', () => {
       cvc.updateStatus('/path', 'claude-sonnet-4');
-      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path');
+      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', false);
     });
 
     it('falls back to model ID suffix when model not found', () => {
       cvc.updateStatus('/path', 'unknown-model');
-      expect(renderStatus).toHaveBeenCalledWith('unknown-model', '/path');
+      expect(renderStatus).toHaveBeenCalledWith('unknown-model', '/path', false);
+    });
+
+    it('passes hasGit flag through', () => {
+      cvc.updateStatus('/path', 'claude-sonnet-4', true);
+      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', true);
     });
   });
 });

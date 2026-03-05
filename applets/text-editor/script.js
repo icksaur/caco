@@ -45,20 +45,25 @@ function escapeHtml(text) {
 
 function updateHighlight() {
   var text = editor.value;
-  // Always add trailing newline so cursor at end has space
   if (!text.endsWith('\n')) text += '\n';
+  
+  // Preserve scroll position across innerHTML replacement
+  var scrollTop = highlightLayer.scrollTop;
+  var scrollLeft = highlightLayer.scrollLeft;
   
   if (typeof hljs !== 'undefined' && currentLanguage !== 'plaintext') {
     try {
       var result = hljs.highlight(text, { language: currentLanguage, ignoreIllegals: true });
       highlightCode.innerHTML = result.value;
     } catch (e) {
-      // Language not supported, fall back to plain text
       highlightCode.innerHTML = escapeHtml(text);
     }
   } else {
     highlightCode.innerHTML = escapeHtml(text);
   }
+  
+  highlightLayer.scrollTop = scrollTop;
+  highlightLayer.scrollLeft = scrollLeft;
 }
 
 // Sync scroll between textarea and highlight layer

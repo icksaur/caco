@@ -98,6 +98,9 @@
   padding: 12px;
   resize: none;
   tab-size: 2;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
   z-index: 1;
 }
 

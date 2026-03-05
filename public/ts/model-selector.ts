@@ -5,6 +5,7 @@
 import type { ModelInfo, Preferences } from './types.js';
 import { getSelectedModel, setSelectedModel as stateSetSelectedModel, getAvailableModels, setAvailableModels as stateSetAvailableModels } from './app-state.js';
 import { renderStatus } from './context-footer.js';
+import { getViewState } from './view-controller.js';
 
 /**
  * Fallback model list (used if SDK doesn't return models)
@@ -130,6 +131,7 @@ function setupCwdFooterSync(): void {
   cwdInput.addEventListener('input', () => {
     if (debounce) clearTimeout(debounce);
     debounce = setTimeout(() => {
+      if (getViewState() !== 'newChat') return;
       const cwd = cwdInput.value.trim();
       const modelId = getSelectedModel();
       const models = getAvailableModels();
@@ -138,13 +140,14 @@ function setupCwdFooterSync(): void {
     }, 300);
   });
   
-  // Render initial state
-  const cwd = cwdInput.value.trim();
-  if (cwd) {
-    const modelId = getSelectedModel();
-    const models = getAvailableModels();
-    const model = models.find(m => m.id === modelId);
-    renderStatus(model?.name || modelId?.split('/').pop() || '', cwd);
+  if (getViewState() === 'newChat') {
+    const cwd = cwdInput.value.trim();
+    if (cwd) {
+      const modelId = getSelectedModel();
+      const models = getAvailableModels();
+      const model = models.find(m => m.id === modelId);
+      renderStatus(model?.name || modelId?.split('/').pop() || '', cwd);
+    }
   }
 }
 

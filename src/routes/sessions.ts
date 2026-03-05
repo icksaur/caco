@@ -11,6 +11,7 @@
 
 import { Router, Request, Response } from 'express';
 import { existsSync, statSync } from 'fs';
+import { join } from 'path';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
@@ -132,7 +133,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
     const isBusy = sessionManager.isBusy(result.sessionId);
     const model = sessionManager.getSessionModel(result.sessionId);
     
-    // NOTE: We do NOT mark observed here - that happens when user sees session.idle
+    const hasGit = !!(cwd && existsSync(join(cwd, '.git')));
     
     res.json({ 
       success: true, 
@@ -140,7 +141,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       cwd, 
       isBusy,
       model,
-      // If CWD was missing, tell frontend what fallback was used
+      hasGit,
       cwdFallback: result.usedFallbackCwd
     });
   } catch (error) {

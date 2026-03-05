@@ -82,7 +82,7 @@ class ChatViewController {
 
     try {
       const data = await this.resumeAndLoad(sessionId);
-      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model);
+      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Network error';
       console.error('[CHAT] Error activating session:', msg);
@@ -97,7 +97,7 @@ class ChatViewController {
    * Throws on failure — caller handles UI recovery.
    */
   private async resumeAndLoad(sessionId: string): Promise<{
-    cwd?: string; model?: string; cwdFallback?: string;
+    cwd?: string; model?: string; cwdFallback?: string; hasGit?: boolean;
   }> {
     reconnectIfNeeded();
     await waitForConnect();
@@ -132,10 +132,10 @@ class ChatViewController {
   /**
    * Transition to chatting view after successful load.
    */
-  private showChat(sessionId: string, cwd: string, model?: string): void {
+  private showChat(sessionId: string, cwd: string, model?: string, hasGit = false): void {
     updateMenuIndicators();
     notifySessionChange(sessionId, cwd);
-    this.updateStatus(cwd, model);
+    this.updateStatus(cwd, model, hasGit);
     restoreContextUsage(sessionId);
     setViewState('chatting');
   }
@@ -183,12 +183,12 @@ class ChatViewController {
    * Update the footer status bar with model name and CWD.
    * Resolves model ID to friendly name from available models.
    */
-  updateStatus(cwd: string, modelId?: string): void {
+  updateStatus(cwd: string, modelId?: string, hasGit = false): void {
     const id = modelId || getSelectedModel();
     const models = getAvailableModels();
     const model = models.find(m => m.id === id);
     const name = model?.name || id?.split('/').pop() || '';
-    renderStatus(name, cwd);
+    renderStatus(name, cwd, hasGit);
   }
 
   /**

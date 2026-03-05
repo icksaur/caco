@@ -39,7 +39,7 @@ export function renderContextFooter(context: SessionContext): void {
 /**
  * Render status (model name + cwd) in the right side of the footer.
  */
-export function renderStatus(modelName: string, cwd: string): void {
+export function renderStatus(modelName: string, cwd: string, hasGit = false): void {
   const footer = regions.footer.el;
   const statusEl = footer.querySelector('.context-status') as HTMLElement | null;
   if (!statusEl) return;
@@ -53,7 +53,8 @@ export function renderStatus(modelName: string, cwd: string): void {
   
   if (dirName && fullCwd) {
     const encodedCwd = encodeURIComponent(fullCwd);
-    parts.push(`<a href="/?applet=file-browser&path=${encodedCwd}" title="${fullCwd}">${dirName}</a>`);
+    const applet = hasGit ? 'git-status' : 'file-browser';
+    parts.push(`<a href="/?applet=${applet}&path=${encodedCwd}" title="${fullCwd}">${dirName}</a>`);
   }
   
   statusEl.innerHTML = parts.join('<span class="context-sep">·</span>');

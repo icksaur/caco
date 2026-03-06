@@ -68,7 +68,7 @@ export function renderStatus(modelName: string, cwd: string, hasGit = false, ses
     parts.push(`<img class="context-icon" src="/api/sessions/${sessionId}/icon" alt="">`);
   }
   
-  statusEl.innerHTML = descLine + parts.join('<span class="context-sep">·</span>');
+  statusEl.innerHTML = parts.join('<span class="context-sep">·</span>') + descLine;
   updateFooterVisibility();
 }
 

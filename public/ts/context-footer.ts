@@ -7,7 +7,7 @@
  */
 
 import { regions } from './dom-regions.js';
-import { formatContextFiles, formatStatusParts } from './ui-utils.js';
+import { formatContextFiles, formatStatusParts, escapeHtml } from './ui-utils.js';
 
 export interface SessionContext {
   files?: string[];
@@ -39,12 +39,19 @@ export function renderContextFooter(context: SessionContext): void {
 /**
  * Render status (model name + cwd) in the right side of the footer.
  */
-export function renderStatus(modelName: string, cwd: string, hasGit = false): void {
+export function renderStatus(modelName: string, cwd: string, hasGit = false, sessionName?: string, sessionId?: string, hasIcon?: boolean): void {
   const footer = regions.footer.el;
   const statusEl = footer.querySelector('.context-status') as HTMLElement | null;
   if (!statusEl) return;
   
   const { model, dirName, fullCwd } = formatStatusParts(modelName, cwd);
+  
+  // Build description line (above model·cwd)
+  let descLine = '';
+  if (sessionName) {
+    descLine = `<div class="context-description">${escapeHtml(sessionName)}</div>`;
+  }
+  
   const parts: string[] = [];
   
   if (model) {
@@ -57,7 +64,11 @@ export function renderStatus(modelName: string, cwd: string, hasGit = false): vo
     parts.push(`<a href="/?applet=${applet}&path=${encodedCwd}" title="${fullCwd}">${dirName}</a>`);
   }
   
-  statusEl.innerHTML = parts.join('<span class="context-sep">·</span>');
+  if (hasIcon && sessionId) {
+    parts.push(`<img class="context-icon" src="/api/sessions/${sessionId}/icon" alt="">`);
+  }
+  
+  statusEl.innerHTML = descLine + parts.join('<span class="context-sep">·</span>');
   updateFooterVisibility();
 }
 

@@ -461,6 +461,14 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   }
   row1.appendChild(indicator);
   
+  if (session.hasIcon) {
+    const icon = document.createElement('img');
+    icon.className = 'session-icon';
+    icon.src = `/api/sessions/${session.sessionId}/icon`;
+    icon.alt = '';
+    row1.appendChild(icon);
+  }
+  
   const displayName = session.name || session.summary || 'No summary';
   const titleSpan = document.createElement('span');
   titleSpan.className = 'session-title';

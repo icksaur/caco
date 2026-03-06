@@ -31,7 +31,7 @@ ${metadata.length === 0 ? 'None.' : metadata.map(m =>
 
 ## Creating an Extension
 
-Extensions live in \`~/.caco/extensions/<slug>/\` (user-global) or \`.caco/extensions/<slug>/\` (project-local).
+Extensions live in \`~/.caco/extensions/<slug>/\` (user-global) or \`.caco/extensions/<slug>/\` (server-local).
 
 Required file: \`manifest.json\`
 \`\`\`json
@@ -103,7 +103,7 @@ export default function(api: ServerExtensionAPI) {
 **ServerExtensionAPI**: router, registerTool, broadcast, broadcastToSession, onClientMessage, setDescription, getState, setState
 
 ## Discovery
-- Project-local (\`.caco/extensions/\`) overrides user-global (\`~/.caco/extensions/\`) on slug collision
+- Server-local (\`.caco/extensions/\`) overrides user-global (\`~/.caco/extensions/\`) on slug collision
 - Hot-reload: CSS and client changes broadcast automatically, server changes require restart
 - Full spec: \`doc/extensibility.md\``;
 

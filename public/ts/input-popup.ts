@@ -25,6 +25,24 @@ export class InputPopup {
     this.el = document.createElement('div');
     this.el.className = 'input-popup';
     this.el.style.display = 'none';
+    this.el.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const target = (e.target as HTMLElement).closest('.input-popup-item') as HTMLElement;
+      if (!target?.dataset.idx) return;
+      const idx = Number(target.dataset.idx);
+      if (this.filtered[idx]) this.config.onSelect(this.filtered[idx]);
+    });
+    this.el.addEventListener('mouseover', (e) => {
+      const target = (e.target as HTMLElement).closest('.input-popup-item') as HTMLElement;
+      if (!target?.dataset.idx) return;
+      const idx = Number(target.dataset.idx);
+      if (idx !== this.selectedIdx) {
+        this.selectedIdx = idx;
+        this.el.querySelectorAll('.input-popup-item').forEach((el, i) => {
+          el.classList.toggle('selected', i === idx);
+        });
+      }
+    });
     document.body.appendChild(this.el);
   }
 
@@ -51,8 +69,13 @@ export class InputPopup {
     if (!query) {
       this.filtered = this.items;
     } else {
+      const q = query.toLowerCase();
       this.filtered = this.items
-        .map(item => ({ item, score: fuzzyScore(item.label.toLowerCase(), query.toLowerCase()) }))
+        .map(item => {
+          const labelScore = fuzzyScore(item.label.toLowerCase(), q);
+          const descScore = item.description ? fuzzyScore(item.description.toLowerCase(), q) : 0;
+          return { item, score: Math.max(labelScore, descScore) };
+        })
         .filter(s => s.score > 0)
         .sort((a, b) => b.score - a.score)
         .map(s => s.item);
@@ -108,6 +131,7 @@ export class InputPopup {
       const item = this.filtered[i];
       const div = document.createElement('div');
       div.className = 'input-popup-item' + (i === this.selectedIdx ? ' selected' : '');
+      div.dataset.idx = String(i);
       div.textContent = item.label;
       if (item.description) {
         const desc = document.createElement('span');
@@ -115,14 +139,6 @@ export class InputPopup {
         desc.textContent = item.description;
         div.appendChild(desc);
       }
-      div.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        this.config.onSelect(item);
-      });
-      div.addEventListener('mouseenter', () => {
-        this.selectedIdx = i;
-        this.render();
-      });
       this.el.appendChild(div);
     }
   }

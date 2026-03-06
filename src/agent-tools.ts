@@ -119,9 +119,9 @@ The target session receives your message and works on it autonomously. The user 
     description: `List available models for creating Caco sessions. Use before create_caco_session to see model options.
 
 **Quick guide (no need to call this if you know what you need):**
-- \`claude-sonnet-4.5\` - General-purpose engineering: edit/compile/test/fix cycles
-- \`claude-opus-4.5\` - Reasoning, documents, analysis, complex planning
-- \`gpt-5-mini\` - Simple automation tasks (free but follows instructions reliably)`,
+- \`claude-opus-4.6-1m\` - Reasoning, documents, analysis, complex planning
+- \`claude-sonnet-4.6\` - General-purpose engineering: edit/compile/test/fix cycles
+- \`gpt-4.1\` - Simple automation tasks (fast and cheap)`,
 
     parameters: z.object({}),
 
@@ -162,7 +162,7 @@ Provide \`initialMessage\` to create and prompt in one step. The session works a
 
     parameters: z.object({
       cwd: z.string().describe('Working directory for the new session'),
-      model: z.string().describe('Model ID (e.g., claude-sonnet-4.5, claude-opus-4.5). Use list_models to see options.'),
+      model: z.string().describe('Model ID (e.g., claude-sonnet-4.6, claude-opus-4.6-1m). Use list_models to see options.'),
       initialMessage: z.string().optional().describe('Optional first message to send immediately after creation'),
       description: z.string().optional().describe('Short description for the session list (e.g., "Fix auth tests", "Update API docs")')
     }),

@@ -28,6 +28,7 @@ export interface SessionData {
   isUnobserved?: boolean;   // Has new activity since last viewed
   currentIntent?: string;   // What session is currently working on
   contextFiles?: string[];  // Recently edited files from session context
+  hasIcon?: boolean;        // Has icon.gif or icon.png in session dir
   scheduleSlug?: string;    // If created by a schedule
   scheduleNextRun?: string; // Next scheduled run time
 }

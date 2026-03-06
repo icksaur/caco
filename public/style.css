@@ -1002,6 +1002,13 @@ main {
   border-radius: 50%;
 }
 
+.session-icon {
+  flex-shrink: 0;
+  height: 14px;
+  width: 14px;
+  margin-right: 2px;
+}
+
 /* Loading state - override any leaky applet .loading styles */
 .session-item.loading {
   text-align: inherit;
@@ -1879,7 +1886,7 @@ main {
 .context-footer.has-context {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: flex-end;
   gap: var(--space-sm);
 }
 
@@ -1890,6 +1897,13 @@ main {
 
 .context-footer .context-status {
   flex-shrink: 0;
+  text-align: right;
+}
+
+.context-footer .context-description {
+  color: #b0b0b0;
+  font-size: var(--text-sm);
+  margin-bottom: 1px;
 }
 
 .context-footer a {
@@ -1914,4 +1928,10 @@ main {
   color: #e5c07b;
   cursor: default;
   margin-right: var(--space-xs);
+}
+
+.context-footer .context-icon {
+  height: 1em;
+  width: 1em;
+  vertical-align: middle;
 }

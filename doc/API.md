@@ -325,7 +325,7 @@ Returns:
 
 **GET /api/prompts** - List prompt templates
 
-Scans `~/.caco/prompts/*.md` (global) and `.caco/prompts/*.md` (project-local). Project-local overrides global on name collision.
+Scans `~/.caco/prompts/*.md` (global) and `.caco/prompts/*.md` (server-local). Server-local overrides global on name collision.
 
 Returns:
 ```json
@@ -348,7 +348,7 @@ Returns:
 
 **GET /api/extensions** - List installed extensions
 
-Scans `~/.caco/extensions/*/manifest.json` (user-global) and `.caco/extensions/*/manifest.json` (project-local). Project-local overrides user-global on slug collision.
+Scans `~/.caco/extensions/*/manifest.json` (user-global) and `.caco/extensions/*/manifest.json` (server-local). Server-local overrides user-global on slug collision.
 
 Returns:
 ```json

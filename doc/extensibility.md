@@ -70,7 +70,7 @@ What Caco already has that's extension-like:
     └── client.ts           # Client-side: WS event reactions, UI mutations
 ```
 
-**Project-local extensions** in `.caco/extensions/` override user-global ones (same as applets).
+**Server-local extensions** in `.caco/extensions/` override user-global ones (same as applets).
 
 ### Manifest
 
@@ -554,8 +554,8 @@ On startup (and on `fs.watch` trigger for hot-reload):
 
 ```
 1. Scan ~/.caco/extensions/*/manifest.json
-2. Scan .caco/extensions/*/manifest.json (project-local)
-3. Project-local wins on slug collision (same as applets)
+2. Scan .caco/extensions/*/manifest.json (server-local)
+3. Server-local wins on slug collision (same as applets)
 4. Sort by slug alphabetically
 5. For each extension:
    a. If provides "css" → register style.css for injection

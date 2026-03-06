@@ -127,6 +127,18 @@ function getSessionDir(sessionId: string): string {
 }
 
 /**
+ * Get session icon path (prefer .gif over .png). Returns null if none exists.
+ */
+export function getSessionIconPath(sessionId: string): string | null {
+  const dir = getSessionDir(sessionId);
+  const gif = join(dir, 'icon.gif');
+  if (existsSync(gif)) return gif;
+  const png = join(dir, 'icon.png');
+  if (existsSync(png)) return png;
+  return null;
+}
+
+/**
  * Get storage path for a session's outputs
  */
 function getSessionOutputDir(sessionId: string): string {

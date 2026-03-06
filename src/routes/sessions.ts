@@ -10,12 +10,12 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { existsSync, statSync } from 'fs';
-import { join } from 'path';
+import { existsSync, statSync, createReadStream } from 'fs';
+import { join, dirname, basename } from 'path';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta } from '../storage.js';
+import { getSessionMeta, setSessionMeta, getSessionIconPath } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -134,6 +134,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
     const model = sessionManager.getSessionModel(result.sessionId);
     
     const hasGit = !!(cwd && existsSync(join(cwd, '.git')));
+    const meta = getSessionMeta(result.sessionId);
     
     res.json({ 
       success: true, 
@@ -142,6 +143,8 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       isBusy,
       model,
       hasGit,
+      name: meta?.name || null,
+      hasIcon: getSessionIconPath(result.sessionId) !== null,
       cwdFallback: result.usedFallbackCwd
     });
   } catch (error) {
@@ -286,6 +289,23 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
     isActive,
     isBusy
   });
+});
+
+/**
+ * GET /api/sessions/:sessionId/icon
+ * Serve session icon (icon.gif preferred, falls back to icon.png)
+ */
+router.get('/sessions/:sessionId/icon', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const iconPath = getSessionIconPath(sessionId);
+  if (!iconPath) {
+    res.status(404).end();
+    return;
+  }
+  const ext = iconPath.endsWith('.gif') ? 'image/gif' : 'image/png';
+  res.setHeader('Content-Type', ext);
+  res.setHeader('Cache-Control', 'public, max-age=60');
+  createReadStream(iconPath).pipe(res);
 });
 
 export default router;

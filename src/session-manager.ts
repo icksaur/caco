@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
-import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta } from './storage.js';
+import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath } from './storage.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
@@ -103,6 +103,7 @@ interface SessionListItem {
   isUnobserved: boolean;  // Session completed work since last viewed
   currentIntent: string | null; // Last reported intent
   contextFiles: string[] | null; // Recently edited files from session context
+  hasIcon: boolean;       // Has icon.gif or icon.png in session dir
   scheduleSlug: string | null;  // If created by a schedule
   scheduleNextRun: string | null; // Next scheduled run time
 }
@@ -622,7 +623,8 @@ class SessionManager {
       const contextFiles = meta?.context?.files?.slice(0, 3) || null;
       const scheduleSlug = null;
       const scheduleNextRun = null;
-      result.push({ sessionId, cwd, model, name, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, scheduleSlug, scheduleNextRun });
+      const hasIcon = getSessionIconPath(sessionId) !== null;
+      result.push({ sessionId, cwd, model, name, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, hasIcon, scheduleSlug, scheduleNextRun });
     }
     return result;
   }

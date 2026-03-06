@@ -2,13 +2,13 @@
  * Extension Store
  *
  * File-based discovery for extensions in two directories:
- *   .caco/extensions/<slug>/   (project-local, higher priority)
+ *   .caco/extensions/<slug>/   (server-local, higher priority)
  *   ~/.caco/extensions/<slug>/ (user-global, lower priority)
  *
  * Each extension has a manifest.json:
  *   { name, description?, provides: ("css"|"client"|"server")[] }
  *
- * Project-local overrides user-global on slug collision.
+ * Server-local overrides user-global on slug collision.
  */
 
 import { readFile, readdir, stat } from 'fs/promises';
@@ -32,7 +32,7 @@ export interface ExtensionInfo {
 
 const USER_EXT_DIR = join(homedir(), '.caco', 'extensions');
 
-function getProjectExtDir(): string {
+function getServerExtDir(): string {
   return join(process.cwd(), '.caco', 'extensions');
 }
 
@@ -74,7 +74,7 @@ async function scanDir(dir: string): Promise<ExtensionInfo[]> {
 export async function listExtensions(): Promise<ExtensionInfo[]> {
   const [userExts, projectExts] = await Promise.all([
     scanDir(USER_EXT_DIR),
-    scanDir(getProjectExtDir()),
+    scanDir(getServerExtDir()),
   ]);
 
   const bySlug = new Map<string, ExtensionInfo>();
@@ -95,7 +95,7 @@ type ChangeHandler = (slug: string, type: ChangeType) => void;
 export function watchExtensions(onChange: ChangeHandler): void {
   const watchers: FSWatcher[] = [];
 
-  for (const dir of [USER_EXT_DIR, getProjectExtDir()]) {
+  for (const dir of [USER_EXT_DIR, getServerExtDir()]) {
     try {
       const watcher = watch(dir, { recursive: true }, (_event, filename) => {
         if (!filename) return;

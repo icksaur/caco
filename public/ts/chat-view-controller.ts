@@ -92,7 +92,7 @@ class ChatViewController {
 
     try {
       const data = await this.resumeAndLoad(sessionId);
-      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit);
+      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.sessionId, data.hasIcon);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Network error';
       console.error('[CHAT] Error activating session:', msg);
@@ -126,6 +126,9 @@ class ChatViewController {
       cwd?: string;
       isBusy?: boolean;
       model?: string;
+      name?: string;
+      hasGit?: boolean;
+      hasIcon?: boolean;
       cwdFallback?: string;
     };
 
@@ -143,11 +146,11 @@ class ChatViewController {
   /**
    * Transition to chatting view after successful load.
    */
-  private showChat(sessionId: string, cwd: string, model?: string, hasGit = false): void {
+  private showChat(sessionId: string, cwd: string, model?: string, hasGit = false, name?: string, _sessionId?: string, hasIcon?: boolean): void {
     this.footerSessionId = sessionId;
     updateMenuIndicators();
     notifySessionChange(sessionId, cwd);
-    this.updateStatus(cwd, model, hasGit);
+    this.updateStatus(cwd, model, hasGit, name, sessionId, hasIcon);
     restoreContextUsage(sessionId);
     setViewState('chatting');
   }
@@ -195,12 +198,12 @@ class ChatViewController {
    * Update the footer status bar with model name and CWD.
    * Resolves model ID to friendly name from available models.
    */
-  updateStatus(cwd: string, modelId?: string, hasGit = false): void {
+  updateStatus(cwd: string, modelId?: string, hasGit = false, name?: string, sessionId?: string, hasIcon?: boolean): void {
     const id = modelId || getSelectedModel();
     const models = getAvailableModels();
     const model = models.find(m => m.id === id);
-    const name = model?.name || id?.split('/').pop() || '';
-    renderStatus(name, cwd, hasGit);
+    const modelName = model?.name || id?.split('/').pop() || '';
+    renderStatus(modelName, cwd, hasGit, name, sessionId, hasIcon);
   }
 
   /**

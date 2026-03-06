@@ -19,6 +19,8 @@ export class InputPopup {
   private items: PopupItem[] = [];
   private filtered: PopupItem[] = [];
   private selectedIdx = 0;
+  private globalClickHandler: ((e: MouseEvent) => void) | null = null;
+  private globalKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(config: InputPopupConfig) {
     this.config = config;
@@ -53,12 +55,14 @@ export class InputPopup {
     this.render();
     this.position();
     this.el.style.display = '';
+    this.addGlobalListeners();
   }
 
   hide(): void {
     this.el.style.display = 'none';
     this.filtered = [];
     this.items = [];
+    this.removeGlobalListeners();
   }
 
   isVisible(): boolean {
@@ -110,6 +114,36 @@ export class InputPopup {
         return true;
       default:
         return false;
+    }
+  }
+
+  private addGlobalListeners(): void {
+    this.removeGlobalListeners();
+    this.globalClickHandler = (e: MouseEvent) => {
+      if (!this.el.contains(e.target as Node)) {
+        this.config.onDismiss();
+      }
+    };
+    this.globalKeyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.config.onDismiss();
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('mousedown', this.globalClickHandler!);
+      document.addEventListener('keydown', this.globalKeyHandler!);
+    }, 0);
+  }
+
+  private removeGlobalListeners(): void {
+    if (this.globalClickHandler) {
+      document.removeEventListener('mousedown', this.globalClickHandler);
+      this.globalClickHandler = null;
+    }
+    if (this.globalKeyHandler) {
+      document.removeEventListener('keydown', this.globalKeyHandler);
+      this.globalKeyHandler = null;
     }
   }
 

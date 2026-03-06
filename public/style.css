@@ -1884,9 +1884,13 @@ main {
 }
 
 .context-footer.has-context {
+  display: block;
+}
+
+.context-footer .context-main-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: baseline;
   gap: var(--space-sm);
 }
 
@@ -1901,9 +1905,15 @@ main {
 }
 
 .context-footer .context-description {
-  color: #b0b0b0;
+  color: #808080;
   font-size: var(--text-sm);
-  margin-bottom: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-footer .context-description:empty {
+  display: none;
 }
 
 .context-footer a {

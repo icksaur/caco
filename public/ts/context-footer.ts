@@ -45,13 +45,6 @@ export function renderStatus(modelName: string, cwd: string, hasGit = false, ses
   if (!statusEl) return;
   
   const { model, dirName, fullCwd } = formatStatusParts(modelName, cwd);
-  
-  // Build description line (above model·cwd)
-  let descLine = '';
-  if (sessionName) {
-    descLine = `<div class="context-description">${escapeHtml(sessionName)}</div>`;
-  }
-  
   const parts: string[] = [];
   
   if (model) {
@@ -68,7 +61,13 @@ export function renderStatus(modelName: string, cwd: string, hasGit = false, ses
     parts.push(`<img class="context-icon" src="/api/sessions/${sessionId}/icon" alt="">`);
   }
   
-  statusEl.innerHTML = parts.join('<span class="context-sep">·</span>') + descLine;
+  statusEl.innerHTML = parts.join('<span class="context-sep">·</span>');
+  
+  const descEl = footer.querySelector('.context-description') as HTMLElement | null;
+  if (descEl) {
+    descEl.innerHTML = sessionName ? escapeHtml(sessionName) : '';
+  }
+  
   updateFooterVisibility();
 }
 
@@ -78,7 +77,9 @@ export function renderStatus(modelName: string, cwd: string, hasGit = false, ses
 export function clearStatus(): void {
   const footer = regions.footer.el;
   const statusEl = footer.querySelector('.context-status');
+  const descEl = footer.querySelector('.context-description');
   if (statusEl) statusEl.innerHTML = '';
+  if (descEl) descEl.innerHTML = '';
   updateFooterVisibility();
 }
 

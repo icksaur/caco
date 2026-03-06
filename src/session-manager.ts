@@ -68,6 +68,7 @@ interface CopilotSessionInstance {
   sendAndWait(options: SendOptions, timeout?: number): Promise<unknown>;
   getMessages(): Promise<SessionEvent[]>;
   destroy(): Promise<void>;
+  setModel(model: string): Promise<void>;
 }
 
 interface SendOptions {
@@ -693,6 +694,20 @@ class SessionManager {
 
   getSessionModel(sessionId: string): string | null {
     return _getSessionModel(sessionId);
+  }
+
+  /**
+   * Change the model for an active session.
+   * Takes effect on the next message. Conversation history preserved.
+   */
+  async setSessionModel(sessionId: string, model: string): Promise<void> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error(`Session ${sessionId} is not active`);
+    }
+    await active.session.setModel(model);
+    syncModelCache(sessionId, model);
+    console.log(`[MODEL] Changed session ${sessionId.slice(0, 8)} to ${model}`);
   }
 
   /**

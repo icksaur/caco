@@ -11,7 +11,7 @@
 
 import { Router, Request, Response } from 'express';
 import { existsSync, statSync, createReadStream } from 'fs';
-import { join, dirname, basename } from 'path';
+import { join } from 'path';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
@@ -206,11 +206,12 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
  * PATCH /api/sessions/:sessionId
  * Update session metadata (custom name, environment hint, context)
  */
-router.patch('/sessions/:sessionId', (req: Request, res: Response) => {
+router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { name, envHint, setContext } = req.body as { 
+  const { name, envHint, model, setContext } = req.body as { 
     name?: string; 
     envHint?: string;
+    model?: string;
     setContext?: { setName: string; items: string[]; mode?: 'replace' | 'merge' };
   };
   
@@ -228,6 +229,17 @@ router.patch('/sessions/:sessionId', (req: Request, res: Response) => {
     ...(name !== undefined && { name }),
     ...(envHint !== undefined && { envHint }),
   };
+  
+  // Handle model change via SDK
+  if (model) {
+    try {
+      await sessionManager.setSessionModel(sessionId, model);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(400).json({ error: `Failed to change model: ${msg}` });
+      return;
+    }
+  }
   
   // Handle setContext if provided
   if (setContext) {

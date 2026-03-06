@@ -108,6 +108,7 @@ class ChatViewController {
    */
   private async resumeAndLoad(sessionId: string): Promise<{
     cwd?: string; model?: string; cwdFallback?: string; hasGit?: boolean;
+    name?: string; sessionId?: string; hasIcon?: boolean;
   }> {
     reconnectIfNeeded();
     await waitForConnect();

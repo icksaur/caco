@@ -90,13 +90,14 @@ export function setupMultilineInput(): void {
   });
 }
 
+let pickerPopup: InputPopup | null = null;
+
 function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
   const val = textarea.value;
 
   if (!val.startsWith('/')) {
-    if (slashPopup?.isVisible()) {
-      slashPopup.hide();
-    }
+    if (slashPopup?.isVisible()) slashPopup.hide();
+    if (pickerPopup?.isVisible()) pickerPopup.hide();
     return;
   }
 
@@ -109,7 +110,24 @@ function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         autoResize(textarea);
         const cmd = findCommand(item.id);
-        if (cmd) void Promise.resolve(cmd.handler(''));
+        if (!cmd) return;
+        
+        if (cmd.picker) {
+          void Promise.resolve(cmd.picker()).then(items => {
+            if (pickerPopup) pickerPopup.hide();
+            pickerPopup = new InputPopup({
+              anchor,
+              onSelect: (picked) => {
+                pickerPopup!.hide();
+                void Promise.resolve(cmd.handler(picked.id));
+              },
+              onDismiss: () => pickerPopup!.hide()
+            });
+            pickerPopup.show(items);
+          });
+        } else {
+          void Promise.resolve(cmd.handler(''));
+        }
       },
       onDismiss: () => slashPopup!.hide()
     });

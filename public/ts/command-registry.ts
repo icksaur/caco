@@ -1,11 +1,15 @@
 import { newSessionClick } from './router.js';
 import { showSessionManager } from './session-panel.js';
+import { getActiveSessionId, getAvailableModels } from './app-state.js';
+import { chatView } from './chat-view-controller.js';
+import type { PopupItem } from './input-popup.js';
 
 export interface Command {
   name: string;
   description: string;
-  source: 'built-in' | 'template';
+  source: 'built-in' | 'template' | 'extension';
   handler: (args: string) => void | Promise<void>;
+  picker?: () => PopupItem[] | Promise<PopupItem[]>;
 }
 
 const commands = new Map<string, Command>();
@@ -51,5 +55,28 @@ registerCommand({
     const lines = getCommands().map(c => `/${c.name} — ${c.description}`);
     textarea.value = lines.join('\n');
     textarea.dispatchEvent(new Event('input'));
+  }
+});
+
+registerCommand({
+  name: 'model',
+  description: 'Change session model',
+  source: 'built-in',
+  picker: () => {
+    const models = getAvailableModels();
+    return models.map(m => {
+      const cost = m.cost === 0 ? 'free' : `${m.cost}x`;
+      return { id: m.id, label: m.name, description: cost };
+    });
+  },
+  handler: async (modelId) => {
+    const sessionId = getActiveSessionId();
+    if (!sessionId) return;
+    await fetch(`/api/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: modelId })
+    });
+    chatView.updateStatus(chatView.getCwd(), modelId);
   }
 });

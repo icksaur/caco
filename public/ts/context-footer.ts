@@ -151,21 +151,13 @@ export function clearContextUsage(): void {
 
 function renderUsage(tokenLimit: number, currentTokens: number): void {
   const footer = regions.footer.el;
-  let usageEl = footer.querySelector('.context-usage') as HTMLElement | null;
+  const usageEl = footer.querySelector('.context-usage') as HTMLElement | null;
+  if (!usageEl) return;
   
   const pct = Math.round((currentTokens / tokenLimit) * 100);
   const glyphIdx = Math.min(Math.floor(pct / 25), 4);
   const glyph = PIE_GLYPHS[glyphIdx];
   const tooltip = `${currentTokens.toLocaleString()} / ${tokenLimit.toLocaleString()} tokens (${pct}%)`;
-  
-  if (!usageEl) {
-    usageEl = document.createElement('span');
-    usageEl.className = 'context-usage';
-    const statusEl = footer.querySelector('.context-status');
-    if (statusEl) {
-      statusEl.insertAdjacentElement('beforebegin', usageEl);
-    }
-  }
   
   usageEl.textContent = `${glyph} ${pct}%`;
   usageEl.title = tooltip;

@@ -1889,7 +1889,6 @@ main {
 
 .context-footer .context-main-row {
   display: flex;
-  justify-content: space-between;
   align-items: baseline;
   gap: var(--space-sm);
 }
@@ -1897,6 +1896,13 @@ main {
 .context-footer .context-links {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.context-footer .context-usage {
+  color: #e5c07b;
+  cursor: default;
+  flex: 1;
+  text-align: center;
 }
 
 .context-footer .context-status {
@@ -1910,6 +1916,7 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: right;
 }
 
 .context-footer .context-description:empty {
@@ -1934,11 +1941,6 @@ main {
   opacity: 0.7;
 }
 
-.context-footer .context-usage {
-  color: #e5c07b;
-  cursor: default;
-  margin-right: var(--space-xs);
-}
 
 .context-footer .context-icon {
   height: 1em;

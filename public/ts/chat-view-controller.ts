@@ -18,6 +18,7 @@ import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websock
 import { setSessionLoading, updateMenuIndicators } from './session-panel.js';
 import { notifySessionChange } from './applet-runtime.js';
 import { showToast } from './toast.js';
+import { adHocBar } from './adhoc-bar.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
 import { regions } from './dom-regions.js';
 
@@ -58,6 +59,7 @@ class ChatViewController {
     clearStatus();
     clearContextFooter();
     clearContextUsage();
+    adHocBar.deactivate();
     setViewState('newChat');
     loadModels();
     
@@ -96,7 +98,10 @@ class ChatViewController {
    */
   async activateSession(sessionId: string): Promise<void> {
     console.log(`[CHAT] activateSession(${sessionId.slice(0, 8)}) viewState=${vcGetViewState()} activeId=${getActiveSessionId()?.slice(0,8)}`);
-    if (this.isShowingSession(sessionId)) return;
+    if (this.isShowingSession(sessionId)) {
+      adHocBar.activateSession(sessionId);
+      return;
+    }
 
     setSessionLoading(sessionId, true);
 
@@ -163,6 +168,7 @@ class ChatViewController {
     notifySessionChange(sessionId, cwd);
     this.updateStatus(cwd, model, hasGit, name, sessionId, hasIcon);
     restoreContextUsage(sessionId);
+    adHocBar.activateSession(sessionId);
     setViewState('chatting');
   }
 
@@ -175,6 +181,7 @@ class ChatViewController {
     subscribeToSession(sessionId);
     updateMenuIndicators();
     this.updateStatus(cwd);
+    adHocBar.activateSession(sessionId);
     setViewState('chatting');
   }
 

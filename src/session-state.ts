@@ -6,7 +6,7 @@
  */
 
 import sessionManager from './session-manager.js';
-import { loadPreferences, savePreferences, getDefaultPreferences, DEFAULT_MODEL } from './preferences.js';
+import { loadPreferences, savePreferences, getDefaultPreferences, DEFAULT_MODEL, resolveModelAlias } from './preferences.js';
 import { resolveSystemMessage } from './prompts.js';
 import type { UserPreferences, SessionStateConfig, ResumeResult } from './types.js';
 
@@ -231,7 +231,7 @@ class SessionState {
     }
     
     // Create new session with specified model
-    const finalModel = model || DEFAULT_MODEL;
+    const finalModel = resolveModelAlias(model || DEFAULT_MODEL);
     console.log(`[MODEL] Creating SDK session with model: ${finalModel} (from param: ${model || '(undefined)'})`);
     console.log(`[CWD] Creating session with cwd: ${sessionCwd}`);
     

@@ -26,6 +26,7 @@ import { removeImage } from './image-paste.js';
 import { markSessionObserved } from './session-observed.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
 import { sessionTracker } from './session-state-tracker.js';
+import { adHocBar } from './adhoc-bar.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
 import { chatView } from './chat-view-controller.js';
 
@@ -125,6 +126,7 @@ function handleEvent(event: SessionEvent): void {
         
         if (eventType === 'session.idle') {
           void markSessionObserved(sessionId);
+          adHocBar.clearSession(sessionId);
         }
       }
     }

@@ -114,6 +114,7 @@ Each session runs independently with its own prompt. Results are collected and r
                 cwd,
                 model,
                 parentSessionId: sessionRef.id,
+                isSwarmSession: true,
                 description: desc
               })
             });

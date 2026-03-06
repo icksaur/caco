@@ -16,6 +16,17 @@ const PREFS_FILE = path.join(homedir(), '.copilot', 'web-preferences.json');
 // Single source of truth for default model
 export const DEFAULT_MODEL = 'claude-sonnet-4';
 
+// Model aliases: map old/short names to current canonical IDs
+const MODEL_ALIASES: Record<string, string> = {
+  'claude-opus-4.5': 'claude-opus-4.6-1m',
+  'claude-sonnet-4.5': 'claude-sonnet-4.6',
+};
+
+/** Resolve model aliases to canonical IDs */
+export function resolveModelAlias(model: string): string {
+  return MODEL_ALIASES[model] ?? model;
+}
+
 const defaultPreferences: UserPreferences = {
   lastCwd: process.cwd(),
   lastModel: DEFAULT_MODEL,

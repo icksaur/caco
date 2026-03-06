@@ -10,9 +10,7 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { getCurrentCwd } from './app-state.js';
-import { getActiveAppletLabel } from './applet-runtime.js';
-import { getServerHostname } from './hostname-hash.js';
+
 import { resetTextareaHeight } from './multiline-input.js';
 
 /** Valid main panel states */
@@ -146,6 +144,11 @@ export function setViewState(state: ViewState): void {
       break;
   }
   
+  // If applet panel is visible, ensure expand button is shown
+  if (state !== 'sessions' && isAppletPanelVisible()) {
+    els.expandBtn?.classList.remove('hidden');
+  }
+  
   // Update browser tab title
   updateTitle();
 }
@@ -213,36 +216,7 @@ export function isAppletExpanded(): boolean {
  * Format: hostname context
  */
 export function updateTitle(): void {
-  const baseTitle = getServerHostname();
-  let title = baseTitle;
-  
-  switch (currentState) {
-    case 'sessions':
-      title = `${baseTitle} Sessions`;
-      break;
-    case 'newChat':
-      title = `${baseTitle} New Chat`;
-      break;
-    case 'chatting': {
-      const cwd = getCurrentCwd();
-      if (cwd) {
-        // Show just the last directory name
-        const dirName = cwd.split('/').pop() || cwd;
-        title = `${baseTitle} ${dirName}`;
-      }
-      break;
-    }
-  }
-  
-  // If applet is visible, show its label
-  if (isAppletPanelVisible()) {
-    const label = getActiveAppletLabel();
-    if (label) {
-      title = `${baseTitle} ${label}`;
-    }
-  }
-  
-  document.title = title;
+  document.title = 'Caco';
 }
 
 /**

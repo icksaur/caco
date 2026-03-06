@@ -22,6 +22,7 @@ import { actionBtnClick } from './session-panel.js';
 import { registerCommand } from './command-registry.js';
 import { loadClientExtensions, reloadExtension } from './extension-loader.js';
 import { onGlobalEvent } from './websocket.js';
+import { adHocBar } from './adhoc-bar.js';
 
 declare global {
   interface Window {
@@ -89,6 +90,10 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('online', () => {
     reconnectIfNeeded();
   });
+  
+  // Initialize ad-hoc bar
+  const adHocContainer = document.getElementById('adHocBar');
+  if (adHocContainer) adHocBar.init(adHocContainer);
   
   // Set up event handlers
   setupImagePaste();

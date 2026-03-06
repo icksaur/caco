@@ -13,11 +13,10 @@ import { InputPopup } from './input-popup.js';
  */
 const FALLBACK_MODELS: ModelInfo[] = [
   { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', cost: 1 },
-  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', cost: 1 },
-  { id: 'claude-opus-4.5', name: 'Claude Opus 4.5', cost: 3 },
+  { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', cost: 1 },
+  { id: 'claude-opus-4.6-1m', name: 'Claude Opus 4.6 (1M)', cost: 3 },
   { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', cost: 0.33 },
   { id: 'gpt-4.1', name: 'GPT-4.1', cost: 0 },
-  { id: 'gpt-4o', name: 'GPT-4o', cost: 0 }
 ];
 
 /**

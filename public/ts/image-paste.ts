@@ -1,11 +1,18 @@
 /**
  * Multi-image paste handling (max 3 images)
+ *
+ * Registers images as an ad-hoc bar widget for the active session.
+ * Still owns the images array and hidden input sync.
  */
 
-import { setHasImage } from './app-state.js';
+import { setHasImage, getActiveSessionId } from './app-state.js';
+import { adHocBar } from './adhoc-bar.js';
+import type { AdHocWidgetHandle } from './adhoc-bar.js';
 
 const MAX_IMAGES = 3;
 const images: string[] = [];
+let widgetHandle: AdHocWidgetHandle | null = null;
+let widgetSessionId: string | null = null;
 
 export function setupImagePaste(): void {
   document.addEventListener('paste', (e: ClipboardEvent) => {
@@ -26,7 +33,7 @@ export function setupImagePaste(): void {
         const base64 = event.target?.result as string;
         if (images.length >= MAX_IMAGES) return;
         images.push(base64);
-        renderPreviews();
+        syncWidget();
       };
       reader.onerror = (error) => console.error('FileReader error:', error);
       reader.readAsDataURL(blob);
@@ -34,11 +41,11 @@ export function setupImagePaste(): void {
   });
 }
 
-function renderPreviews(): void {
-  const container = document.getElementById('imagePreview');
-  if (!container) return;
-
-  container.innerHTML = '';
+function renderThumbnails(): HTMLElement {
+  const container = document.createElement('div');
+  container.className = 'image-thumbnails';
+  container.style.display = 'flex';
+  container.style.gap = '8px';
 
   for (let i = 0; i < images.length; i++) {
     const thumb = document.createElement('div');
@@ -60,9 +67,53 @@ function renderPreviews(): void {
     container.appendChild(thumb);
   }
 
-  container.classList.toggle('visible', images.length > 0);
+  return container;
+}
+
+function syncWidget(): void {
+  const sessionId = getActiveSessionId();
   syncHiddenInput();
   setHasImage(images.length > 0);
+
+  if (images.length === 0) {
+    if (widgetHandle) {
+      widgetHandle.remove();
+      widgetHandle = null;
+      widgetSessionId = null;
+    }
+    // Also clear direct render if no session
+    if (!sessionId) {
+      const container = document.getElementById('adHocBar');
+      if (container) {
+        container.innerHTML = '';
+        container.classList.remove('visible');
+      }
+    }
+    return;
+  }
+
+  // No active session (new chat) — render directly to container
+  if (!sessionId) {
+    const container = document.getElementById('adHocBar');
+    if (container) {
+      container.innerHTML = '';
+      container.appendChild(renderThumbnails());
+      container.classList.add('visible');
+    }
+    return;
+  }
+
+  if (widgetHandle && widgetSessionId === sessionId) {
+    widgetHandle.update();
+  } else {
+    if (widgetHandle) widgetHandle.remove();
+    widgetSessionId = sessionId;
+    widgetHandle = adHocBar.addWidget(sessionId, {
+      id: 'images',
+      priority: 0,
+      render: renderThumbnails,
+    });
+  }
 }
 
 function syncHiddenInput(): void {
@@ -72,10 +123,10 @@ function syncHiddenInput(): void {
 
 function removeImageAt(index: number): void {
   images.splice(index, 1);
-  renderPreviews();
+  syncWidget();
 }
 
 export function removeImage(): void {
   images.length = 0;
-  renderPreviews();
+  syncWidget();
 }

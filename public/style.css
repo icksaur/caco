@@ -1693,6 +1693,24 @@ main {
   font-size: var(--text-sm);
 }
 
+.swarm-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.swarm-bar {
+  font-family: monospace;
+  letter-spacing: 1px;
+  color: #6a9955;
+}
+
+.swarm-label {
+  white-space: nowrap;
+}
+
 .image-thumb {
   position: relative;
   flex-shrink: 0;

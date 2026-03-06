@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { SERVER_URL } from './config.js';
 import type { SessionIdRef } from './types.js';
 import sessionManager from './session-manager.js';
+import { broadcastGlobalEvent } from './routes/websocket.js';
 
 const POLL_INTERVAL_MS = 5000;
 const PER_SESSION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -34,6 +35,13 @@ function validateSwarmModel(model: string, count: number): string | null {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
+}
+
+function emitSwarmProgress(sessionId: string, completed: number, total: number): void {
+  broadcastGlobalEvent({
+    type: 'adhoc.swarmProgress',
+    data: { sessionId, completed, total }
+  });
 }
 
 interface SwarmSession {
@@ -159,6 +167,7 @@ Each session runs independently with its own prompt. Results are collected and r
 
         // Poll until all complete
         let completed = sessions.filter(s => s.done).length;
+        emitSwarmProgress(sessionRef.id, completed, sessions.length);
         while (completed < sessions.length) {
           await sleep(POLL_INTERVAL_MS);
 
@@ -185,6 +194,8 @@ Each session runs independently with its own prompt. Results are collected and r
               // Network error — retry next poll
             }
           }
+
+          emitSwarmProgress(sessionRef.id, completed, sessions.length);
         }
 
         // Aggregate results

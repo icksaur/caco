@@ -23,6 +23,7 @@ import { registerCommand } from './command-registry.js';
 import { loadClientExtensions, reloadExtension } from './extension-loader.js';
 import { onGlobalEvent } from './websocket.js';
 import { adHocBar } from './adhoc-bar.js';
+import { setupSwarmProgress } from './swarm-progress.js';
 
 declare global {
   interface Window {
@@ -94,6 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize ad-hoc bar
   const adHocContainer = document.getElementById('adHocBar');
   if (adHocContainer) adHocBar.init(adHocContainer);
+  setupSwarmProgress();
   
   // Set up event handlers
   setupImagePaste();

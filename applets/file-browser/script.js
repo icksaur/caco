@@ -120,11 +120,14 @@ function renderFiles(files) {
       // Files link to appropriate applet
       var ext = f.name.split('.').pop().toLowerCase();
       var imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
+      var markdownExts = ['md', 'mdx', 'markdown'];
       var binaryExts = ['zip', 'tar', 'gz', 'exe', 'bin', 'dll', 'so', 'pdf'];
       var href;
       
       if (imageExts.indexOf(ext) !== -1) {
         href = '?applet=image-viewer&path=' + encodeURIComponent(filePath);
+      } else if (markdownExts.indexOf(ext) !== -1) {
+        href = '?applet=markdown-viewer&path=' + encodeURIComponent(filePath);
       } else if (binaryExts.indexOf(ext) !== -1) {
         href = null; // Binary files don't navigate
       } else {

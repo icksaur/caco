@@ -163,6 +163,7 @@ function setupCwdFooterSync(): void {
     if (!cwdPopup) {
       cwdPopup = new InputPopup({
         anchor: cwdInput,
+        direction: 'down',
         onSelect: (item) => {
           cwdPopup!.hide();
           const { parent } = splitPath(cwdInput.value);

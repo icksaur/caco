@@ -11,6 +11,7 @@ interface InputPopupConfig {
   anchor: HTMLElement;
   onSelect: (item: PopupItem) => void;
   onDismiss: () => void;
+  direction?: 'up' | 'down';
 }
 
 export class InputPopup {
@@ -155,8 +156,13 @@ export class InputPopup {
     const rect = this.config.anchor.getBoundingClientRect();
     this.el.style.left = `${rect.left}px`;
     this.el.style.width = `${rect.width}px`;
-    this.el.style.bottom = `${window.innerHeight - rect.top}px`;
-    this.el.style.top = 'auto';
+    if (this.config.direction === 'down') {
+      this.el.style.top = `${rect.bottom}px`;
+      this.el.style.bottom = 'auto';
+    } else {
+      this.el.style.bottom = `${window.innerHeight - rect.top}px`;
+      this.el.style.top = 'auto';
+    }
   }
 
   private render(): void {

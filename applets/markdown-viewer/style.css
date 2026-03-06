@@ -1,0 +1,65 @@
+.markdown-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 12px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.viewer-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.file-path {
+  font-family: monospace;
+  font-size: 11pt;
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.file-path:hover {
+  color: #aaa;
+  text-decoration: underline;
+}
+
+.viewer-content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  font-size: 11pt;
+  line-height: 1.6;
+}
+
+.status {
+  margin-top: 8px;
+  font-size: 10pt;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.status.error {
+  color: #ff6b6b;
+}
+
+.empty-state {
+  color: #666;
+  text-align: center;
+  padding: 40px;
+}
+
+.error {
+  color: #ff6b6b;
+  text-align: center;
+  padding: 20px;
+}

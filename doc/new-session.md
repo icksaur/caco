@@ -91,11 +91,143 @@ Each is clickable, populates the CWD input.
 
 **Data source**: `GET /api/sessions` already returns `grouped` by CWD. Extract unique CWDs sorted by most recent.
 
-## Implementation Priority
+## Implementation Status
 
-1. **Pre-populate from last CWD** — trivial, immediate UX win
-2. **Path validation** — debounced check, green/red border
-3. **Recent directories** — quick-pick from session history
-4. **Autocomplete popup** — most complex, highest value for new users
+- [x] **Pre-populate from last CWD** — implemented in `chat-view-controller.ts showNewChat()`
+- [x] **Path validation** — implemented in `model-selector.ts setupCwdFooterSync()`, green/red border
+- [ ] **Autocomplete popup** — detailed design below
+- [ ] **Recent directories** — future enhancement
 
-Items 1-2 are quick wins. Item 3 is medium effort. Item 4 is a full feature.
+## Autocomplete Popup Design
+
+### Goal
+
+As the user types a path in `#newChatCwd`, show directory suggestions in a popup. Must be performant — no excessive network traffic.
+
+### Strategy: Fetch on `/`, filter locally
+
+Only fetch a directory listing when the parent directory changes. Between path separators, filter the cached listing client-side.
+
+**Network behavior:**
+```
+User types: /home/carl/r
+  Parent changed to /home/carl/ → FETCH once
+  Filter cached entries by prefix "r" → client-side, instant
+  Show: [repo/, rust-projects/]
+
+User types: /home/carl/re
+  Same parent → NO FETCH
+  Filter by "re" → [repo/]
+
+User types: /home/carl/repo/
+  Parent changed to /home/carl/repo/ → FETCH once
+  Show all children (empty prefix)
+
+User types: /home/carl/repo/c
+  Same parent → NO FETCH
+  Filter by "c" → [caco/]
+```
+
+**Result:** One fetch per directory level navigated. Typing within a level = zero fetches.
+
+### Cache
+
+Single-entry cache — one parent directory at a time:
+
+```typescript
+let cachedParent = '';
+let cachedEntries: string[] = [];
+```
+
+When parent changes: fetch `GET /api/files?path=<parent>`, filter response to directories only (`type === 'directory'`), store in cache. When parent is the same: skip fetch, use cached entries.
+
+### Parsing the input
+
+```typescript
+function splitPath(input: string): { parent: string; prefix: string } {
+  const lastSlash = input.lastIndexOf('/');
+  if (lastSlash === -1) return { parent: '', prefix: input };
+  return {
+    parent: input.slice(0, lastSlash + 1),  // includes trailing /
+    prefix: input.slice(lastSlash + 1)       // after last /
+  };
+}
+```
+
+### Popup lifecycle
+
+Use `InputPopup` (same as `/` and `#`):
+- **Show**: when input has a valid parent directory and there are matching entries
+- **Select**: populate input with `parent + selectedEntry`, trigger input event for validation
+- **Dismiss**: Escape, click outside, or input blurred
+- **Hide**: when no matches or input is empty
+
+### Trigger
+
+Debounce 200ms on `#newChatCwd` input event. Shorter than validation (300ms) because autocomplete should feel responsive.
+
+### Integration with existing code
+
+The autocomplete runs alongside the existing validation + footer sync in `setupCwdFooterSync()`. The popup is created once and reused (same pattern as slash/pound popups in `multiline-input.ts`).
+
+```typescript
+// In model-selector.ts setupCwdFooterSync():
+let cwdPopup: InputPopup | null = null;
+let cachedParent = '';
+let cachedEntries: string[] = [];
+let acDebounce: ReturnType<typeof setTimeout> | null = null;
+
+cwdInput.addEventListener('input', () => {
+  // ... existing validation debounce (300ms) ...
+  
+  // Autocomplete debounce (200ms)
+  if (acDebounce) clearTimeout(acDebounce);
+  acDebounce = setTimeout(() => {
+    if (getViewState() !== 'newChat') return;
+    void updateCwdAutocomplete(cwdInput);
+  }, 200);
+});
+```
+
+### Server endpoint
+
+`GET /api/files?path=<dir>` already returns:
+```json
+{
+  "path": "/home/carl/repo",
+  "files": [
+    { "name": "caco", "type": "directory", "size": 4096 },
+    { "name": "mesh", "type": "directory", "size": 4096 },
+    { "name": "notes.txt", "type": "file", "size": 1234 }
+  ]
+}
+```
+
+Filter to `type === 'directory'` on the client.
+
+### Edge cases
+
+| Case | Behavior |
+|------|----------|
+| Root `/` | Fetch `/`, show top-level dirs |
+| Empty input | No popup |
+| Invalid parent (404) | Clear cache, hide popup |
+| `~` prefix | Expand to `$HOME` before fetching (or let server handle) |
+| Windows paths `C:\` | `lastIndexOf('/')` won't work — use `lastIndexOf(/[\\/]/)` |
+| Very large directories | Show max 20 entries, sorted alphabetically |
+
+### Risks
+
+| Risk | Mitigation |
+|------|------------|
+| User pastes long path → many fetches | Debounce 200ms, single-entry cache means only parent changes trigger fetch |
+| `/` or `/usr` has 1000+ dirs | Limit to 20 suggestions, alphabetical |
+| Network error during fetch | Silently ignore, hide popup |
+| Popup conflicts with validation border | Popup sits above input, border is on the input — no conflict |
+
+### Key files
+
+| File | Change |
+|------|--------|
+| `public/ts/model-selector.ts` | Add autocomplete logic to `setupCwdFooterSync` |
+| `public/ts/input-popup.ts` | No changes — reuse existing class |

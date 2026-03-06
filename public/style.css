@@ -1544,6 +1544,14 @@ main {
   border-color: var(--color-accent);
 }
 
+#newChatCwd.cwd-valid {
+  border-color: #6a9955;
+}
+
+#newChatCwd.cwd-invalid {
+  border-color: #f48771;
+}
+
 .new-chat-error {
   color: var(--color-error);
   font-size: 0.9rem;

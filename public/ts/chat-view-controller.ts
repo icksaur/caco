@@ -51,6 +51,7 @@ class ChatViewController {
    * Show the new-chat view. Clears chat, footer, shows model selector.
    */
   showNewChat(): void {
+    const lastCwd = getCurrentCwd();
     this.footerSessionId = null;
     clearActiveSession();
     regions.chat.clear();
@@ -59,6 +60,14 @@ class ChatViewController {
     clearContextUsage();
     setViewState('newChat');
     loadModels();
+    
+    if (typeof document !== 'undefined') {
+      const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
+      if (cwdInput && lastCwd) {
+        cwdInput.value = lastCwd;
+        cwdInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
   }
 
   /**

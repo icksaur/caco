@@ -6,6 +6,7 @@ import type { ModelInfo, Preferences } from './types.js';
 import { getSelectedModel, setSelectedModel as stateSetSelectedModel, getAvailableModels, setAvailableModels as stateSetAvailableModels } from './app-state.js';
 import { renderStatus } from './context-footer.js';
 import { getViewState } from './view-controller.js';
+import { InputPopup } from './input-popup.js';
 
 /**
  * Fallback model list (used if SDK doesn't return models)
@@ -120,6 +121,17 @@ export function loadModels(): void {
 
 let cwdSyncInstalled = false;
 
+const MAX_SUGGESTIONS = 20;
+
+function splitPath(input: string): { parent: string; prefix: string } {
+  const lastSlash = Math.max(input.lastIndexOf('/'), input.lastIndexOf('\\'));
+  if (lastSlash === -1) return { parent: '', prefix: input };
+  return {
+    parent: input.slice(0, lastSlash + 1),
+    prefix: input.slice(lastSlash + 1).toLowerCase()
+  };
+}
+
 function setupCwdFooterSync(): void {
   if (cwdSyncInstalled) return;
   const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
@@ -127,26 +139,134 @@ function setupCwdFooterSync(): void {
   
   cwdSyncInstalled = true;
   let debounce: ReturnType<typeof setTimeout> | null = null;
+  let cwdPopup: InputPopup | null = null;
+  let cachedParent = '';
+  let cachedDirs: string[] = [];
+  
+  function updateFooter(cwd: string): void {
+    const modelId = getSelectedModel();
+    const models = getAvailableModels();
+    const model = models.find(m => m.id === modelId);
+    renderStatus(model?.name || modelId?.split('/').pop() || '', cwd);
+  }
+  
+  function showSuggestions(dirs: string[], prefix: string): void {
+    const filtered = prefix
+      ? dirs.filter(d => d.toLowerCase().startsWith(prefix))
+      : dirs;
+    
+    if (filtered.length === 0) {
+      cwdPopup?.hide();
+      return;
+    }
+    
+    if (!cwdPopup) {
+      cwdPopup = new InputPopup({
+        anchor: cwdInput,
+        onSelect: (item) => {
+          cwdPopup!.hide();
+          const { parent } = splitPath(cwdInput.value);
+          cwdInput.value = parent + item.id;
+          cwdInput.dispatchEvent(new Event('input', { bubbles: true }));
+          cwdInput.focus();
+        },
+        onDismiss: () => cwdPopup?.hide()
+      });
+    }
+    
+    const items = filtered.slice(0, MAX_SUGGESTIONS).map(d => ({
+      id: d,
+      label: d
+    }));
+    cwdPopup.show(items);
+  }
   
   cwdInput.addEventListener('input', () => {
     if (debounce) clearTimeout(debounce);
     debounce = setTimeout(() => {
       if (getViewState() !== 'newChat') return;
       const cwd = cwdInput.value.trim();
-      const modelId = getSelectedModel();
-      const models = getAvailableModels();
-      const model = models.find(m => m.id === modelId);
-      renderStatus(model?.name || modelId?.split('/').pop() || '', cwd);
-    }, 300);
+      
+      updateFooter(cwd);
+      
+      if (!cwd) {
+        cwdInput.classList.remove('cwd-valid', 'cwd-invalid');
+        cwdPopup?.hide();
+        return;
+      }
+      
+      const { parent, prefix } = splitPath(cwd);
+      
+      if (!parent) {
+        cwdPopup?.hide();
+        return;
+      }
+      
+      // If parent hasn't changed, filter cached entries (no fetch)
+      if (parent === cachedParent) {
+        showSuggestions(cachedDirs, prefix);
+        // Validate: exact path exists if it ends with / and matches a cached entry,
+        // or just check the parent is valid (it was fetched successfully)
+        const exactMatch = !prefix || cachedDirs.some(d => d.toLowerCase() === prefix || d.toLowerCase() === prefix + '/');
+        cwdInput.classList.toggle('cwd-valid', !!exactMatch || !prefix);
+        cwdInput.classList.toggle('cwd-invalid', !!prefix && !exactMatch);
+        return;
+      }
+      
+      // Parent changed — fetch new listing
+      const parentToFetch = parent;
+      void fetch(`/api/files?path=${encodeURIComponent(parentToFetch)}`)
+        .then(async res => {
+          if (cwdInput.value.trim() !== cwd) return; // stale
+          if (!res.ok) {
+            cachedParent = '';
+            cachedDirs = [];
+            cwdInput.classList.add('cwd-invalid');
+            cwdInput.classList.remove('cwd-valid');
+            cwdPopup?.hide();
+            return;
+          }
+          const data = await res.json();
+          const dirs: string[] = (data.files || [])
+            .filter((f: { type: string }) => f.type === 'directory')
+            .map((f: { name: string }) => f.name + '/');
+          
+          cachedParent = parentToFetch;
+          cachedDirs = dirs;
+          
+          if (cwdInput.value.trim() !== cwd) return; // stale
+          showSuggestions(dirs, prefix);
+          
+          // Validation based on fetched data
+          if (!prefix) {
+            cwdInput.classList.add('cwd-valid');
+            cwdInput.classList.remove('cwd-invalid');
+          } else {
+            const match = dirs.some(d => d.toLowerCase().startsWith(prefix));
+            cwdInput.classList.toggle('cwd-valid', match);
+            cwdInput.classList.toggle('cwd-invalid', !match);
+          }
+        })
+        .catch(() => {
+          if (cwdInput.value.trim() !== cwd) return;
+          cwdInput.classList.remove('cwd-valid', 'cwd-invalid');
+          cwdPopup?.hide();
+        });
+    }, 250);
   });
   
+  // Keyboard navigation for popup
+  cwdInput.addEventListener('keydown', (e) => {
+    if (cwdPopup?.isVisible() && cwdPopup.handleKey(e)) {
+      e.preventDefault();
+    }
+  });
+  
+  // Initial render if value exists
   if (getViewState() === 'newChat') {
     const cwd = cwdInput.value.trim();
     if (cwd) {
-      const modelId = getSelectedModel();
-      const models = getAvailableModels();
-      const model = models.find(m => m.id === modelId);
-      renderStatus(model?.name || modelId?.split('/').pop() || '', cwd);
+      updateFooter(cwd);
     }
   }
 }

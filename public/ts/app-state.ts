@@ -160,9 +160,10 @@ export function initFromPreferences(prefs: {
   if (prefs.lastCwd) {
     state.currentCwd = prefs.lastCwd;
   }
-  if (prefs.lastSessionId !== undefined) {
-    state.activeSessionId = prefs.lastSessionId;
-  }
+  // Note: lastSessionId is NOT set here — activeSessionId is only set
+  // by setActiveSession() inside resumeAndLoad() after the session is
+  // actually loaded. Setting it prematurely causes commands like /model
+  // to target a session that isn't loaded yet.
 }
 
 /**

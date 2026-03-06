@@ -2,6 +2,7 @@ import { newSessionClick } from './router.js';
 import { showSessionManager } from './session-panel.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
+import { selectModel } from './model-selector.js';
 import type { PopupItem } from './input-popup.js';
 
 export interface Command {
@@ -71,12 +72,17 @@ registerCommand({
   },
   handler: async (modelId) => {
     const sessionId = getActiveSessionId();
-    if (!sessionId) return;
-    await fetch(`/api/sessions/${sessionId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelId })
-    });
-    chatView.updateStatus(chatView.getCwd(), modelId);
+    if (sessionId) {
+      // Active session: change model via SDK
+      await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelId })
+      });
+      chatView.updateStatus(chatView.getCwd(), modelId);
+    } else {
+      // New chat: just update the model selector
+      selectModel(modelId);
+    }
   }
 });

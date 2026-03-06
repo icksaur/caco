@@ -3,6 +3,7 @@ import { showSessionManager } from './session-panel.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
+import { showToast } from './toast.js';
 import type { PopupItem } from './input-popup.js';
 
 export interface Command {
@@ -83,6 +84,21 @@ registerCommand({
     } else {
       // New chat: just update the model selector
       selectModel(modelId);
+    }
+  }
+});
+
+registerCommand({
+  name: 'restart',
+  description: 'Restart the Caco server',
+  source: 'built-in',
+  handler: async () => {
+    try {
+      const res = await fetch('/api/restart', { method: 'POST' });
+      const data = await res.json();
+      showToast(data.message);
+    } catch {
+      showToast('Failed to restart server');
     }
   }
 });

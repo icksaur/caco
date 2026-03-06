@@ -693,4 +693,17 @@ router.get('/extensions/:slug/client.js', async (req: Request, res: Response) =>
 
 const clientJsCache = new Map<string, { js: string; mtime: number }>();
 
+router.post('/restart', async (_req: Request, res: Response) => {
+  const { requestRestart, getActiveDispatches } = await import('../restart-manager.js');
+  requestRestart();
+  const active = getActiveDispatches();
+  res.json({
+    ok: true,
+    activeDispatches: active,
+    message: active > 0
+      ? `Restart scheduled. Waiting for ${active} active session(s) to complete.`
+      : 'Restart initiated.'
+  });
+});
+
 export default router;

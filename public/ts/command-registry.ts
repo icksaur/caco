@@ -30,10 +30,6 @@ export function findCommand(name: string): Command | undefined {
   return commands.get(name);
 }
 
-function getTextarea(): HTMLTextAreaElement | null {
-  return document.querySelector('#chatForm textarea[name="message"]');
-}
-
 registerCommand({
   name: 'new',
   description: 'New chat',
@@ -63,19 +59,6 @@ registerCommand({
     } catch { return []; }
   },
   handler: (sessionId) => { void sessionClick(sessionId); }
-});
-
-registerCommand({
-  name: 'help',
-  description: 'Show available commands',
-  source: 'built-in',
-  handler: () => {
-    const textarea = getTextarea();
-    if (!textarea) return;
-    const lines = getCommands().map(c => `/${c.name} — ${c.description}`);
-    textarea.value = lines.join('\n');
-    textarea.dispatchEvent(new Event('input'));
-  }
 });
 
 registerCommand({

@@ -96,7 +96,7 @@ async function loadFiles() {
   try {
     var enc = encodeURIComponent(rootPath);
     var responses = await Promise.all([
-      fetch('/api/project-files?cwd=' + enc),
+      fetch('/api/project-files?cwd=' + enc + '&noignore=1'),
       fetch('/api/files?path=' + enc + '&dotfiles=1')
     ]);
     if (!responses[0].ok) throw new Error('HTTP ' + responses[0].status);

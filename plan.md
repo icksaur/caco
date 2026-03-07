@@ -8,490 +8,79 @@ legend:
 
 [ ] incomplete
 [*] complete
+[>] in progress
 
 ---
 
-## caco_session_swarm tool (doc/caco-session-swarm.md)
-
-### Step 1: Create `src/swarm-tool.ts`
-
-[ ] Create a new file `src/swarm-tool.ts` with these exports:
-
-```typescript
-import { defineTool } from '@github/copilot-sdk';
-import { z } from 'zod';
-import { SERVER_URL } from './config.js';
-import type { SessionIdRef } from './types.js';
-```
-
-**`validateSwarmModel(model, count)`** — returns error string or null:
-- count <= 2: any model allowed
-- count <= 4: reject if model contains 'opus' (case-insensitive)
-- count <= 6: reject if model contains 'opus' or 'sonnet' (case-insensitive)
-
-**Module-level lock:**
-```typescript
-let swarmActive = false;
-```
-
-**`createSwarmTool(sessionRef: SessionIdRef, getCorrelationId: GetCorrelationId)`** — returns array with one tool:
-
-Tool name: `caco_session_swarm`
-
-Parameters:
-```typescript
-z.object({
-  cwd: z.string().describe('Working directory for all sessions'),
-  model: z.string().describe('Model ID for all sessions'),
-  prompts: z.array(z.string()).min(1).max(6).describe('Prompt for each session (1-6)')
-})
-```
-
-Handler logic (all HTTP calls use `fetch` against `SERVER_URL`):
-
-1. Check `swarmActive` — if true, return error: `'A swarm is already running.'`
-2. Set `swarmActive = true` in a try/finally block
-3. Call `validateSwarmModel(model, prompts.length)` — if error, return it
-4. For each prompt (index `i`):
-   a. `POST ${SERVER_URL}/api/sessions` with body:
-      ```json
-      {
-        "cwd": cwd,
-        "model": model,
-        "parentSessionId": sessionRef.id,
-        "description": `swarm ${i+1}/${prompts.length}: ${prompt.slice(0, 50)}`
-      }
-      ```
-   b. Record `{ sessionId, startedAt: Date.now(), done: false, result: null }`
-   c. If creation fails, record `{ done: true, result: '(failed to create: <error>)' }`
-5. For each successfully created session, send the prompt:
-   a. Get `correlationId` from `getCorrelationId(sessionRef.id)`
-   b. `POST ${SERVER_URL}/api/sessions/${sessionId}/messages` with body:
-      ```json
-      {
-        "prompt": prompt,
-        "source": "agent",
-        "fromSession": sessionRef.id,
-        "correlationId": correlationId
-      }
-      ```
-   c. If send fails, mark `done: true, result: '(failed to send: <error>)'`
-6. Poll loop (5s interval, 10 min per-session timeout):
-   ```
-   while not all done:
-     sleep 5000ms
-     for each session not done:
-       if elapsed > 10 min: mark done with '(timed out)'
-       else: GET ${SERVER_URL}/api/sessions/${sessionId}/state
-         if status is 'idle' or 'inactive':
-           GET history via sessionManager or fetch last assistant message
-           mark done with result text
-   ```
-   To get the last assistant message, use `GET ${SERVER_URL}/api/sessions/${sessionId}/state` — the session is idle, so fetch its history and find the last `assistant.message` event's content. Alternatively, read from disk via `sessionManager.getHistory(sessionId)` if we import it. **Use the HTTP endpoint approach** to keep the tool decoupled:
-   - There's no HTTP endpoint for "last message" currently. Instead, read history from `sessionManager.getHistory(sessionId)` (import sessionManager). Find the last event with `type === 'assistant.message'` and extract `data.content`.
-7. Build result string:
-   ```typescript
-   const sections = sessions.map((s, i) => 
-     `## Session ${i + 1} (${s.sessionId.slice(0,8)})\n\n${s.result || '(no response)'}`
-   );
-   return {
-     textResultForLlm: sections.join('\n\n---\n\n'),
-     toolTelemetry: {
-       sessionsCreated: sessions.filter(s => s.sessionId).length,
-       sessionsCompleted: sessions.filter(s => s.done && !s.result?.startsWith('(')).length,
-       totalTimeMs: Date.now() - startTime
-     }
-   };
-   ```
-8. Finally block: `swarmActive = false`
-
-**Type for GetCorrelationId:** Import from `./agent-tools.js`:
-```typescript
-import type { GetCorrelationId } from './agent-tools.js';
-```
-
-### Step 2: Wire into server.ts tool factory
-
-[ ] `server.ts`:
-- Add import: `import { createSwarmTool } from './src/swarm-tool.js';`
-- In `toolFactory`, after `agentTools`:
-  ```typescript
-  const swarmTools = createSwarmTool(sessionRef, (id) => sessionManager.getDispatchCorrelationId(id));
-  ```
-- Add `...swarmTools` to the return array
-
-### Step 3: Add to system message
-
-[ ] `src/prompts.ts` — in the "Caco Session Tools" section, add a line:
-```
-- \`caco_session_swarm\` - Dispatch 1-6 parallel sessions and wait for all results
-```
-Add a brief note: `For parallel fan-out (e.g., analyze multiple repos, get diverse perspectives). Model tier enforced: opus ≤2, sonnet ≤4, gpt-4.1 ≤6.`
-
-### Step 4: Test
-
-[ ] All existing tests pass (no new test file needed for v1 — tool is integration-heavy)
-[ ] Typecheck clean
-[ ] Lint clean
-[ ] Build client (bundle unchanged — this is server-only)
-[ ] Manual test: create a swarm with 2 sonnet sessions, verify both complete and results aggregate
-
-## Shared SDK Client (doc/shared-sdk-client.md)
-
-Branch: `shared-client` off `master`
-
-### Step 1: Add ensureClient + sharedClient to SessionManager
-
-[ ] `src/session-manager.ts`:
-  - Add `private sharedClient: CopilotClientInstance | null = null`
-  - Add `private clientStarting: Promise<CopilotClientInstance> | null = null`
-  - Add `private async ensureClient(): Promise<CopilotClientInstance>` with mutex pattern (same as `resumeInProgress`)
-  - Add `async shutdown(): Promise<void>` that stops the shared client
-  - Remove `client` from `ActiveSession` interface
-
-### Step 2: Migrate create() to shared client
-
-[ ] `src/session-manager.ts` `create()`:
-  - Replace `new CopilotClient({ cwd })` + `client.start()` with `await this.ensureClient()`
-  - Add `workingDirectory: cwd` to `createSession()` config
-  - Store `{ cwd, session }` in activeSessions (no `client`)
-
-### Step 3: Migrate _doResume() to shared client
-
-[ ] `src/session-manager.ts` `_doResume()`:
-  - Replace `new CopilotClient({ cwd })` + `client.start()` with `await this.ensureClient()`
-  - Add `workingDirectory: cwd` to `resumeSession()` config
-  - Store `{ cwd, session }` (no `client`)
-
-### Step 4: Migrate stop() — session.destroy() only
-
-[ ] `src/session-manager.ts` `stop()`:
-  - Remove `client.stop()` call — shared client must stay alive
-  - Keep `session.destroy()` call
-  - Remove `client` destructuring from `active`
-
-### Step 5: Migrate _fetchModels() and delete()
-
-[ ] `src/session-manager.ts` `_fetchModels()`:
-  - Use `await this.ensureClient()` instead of creating throwaway client
-  - Remove `client.stop()` call
-
-[ ] `src/session-manager.ts` `delete()`:
-  - Use `await this.ensureClient()` instead of creating throwaway client
-  - Remove `client.stop()` in finally block
-
-### Step 6: Wire shutdown into server lifecycle
-
-[ ] `server.ts` SIGINT handler:
-  - After `sessionState.shutdown()` resolves, call `sessionManager.shutdown()`
-  - This ensures all sessions are destroyed before the shared client stops
-
-### Step 7: Test and verify
-
-[ ] All existing tests pass
-[ ] Typecheck clean
-[ ] Manual test: create session, send message, get response
-[ ] Manual test: create 2nd session, verify both work
-[ ] Manual test: stop one session, verify other still works
-[ ] Manual test: delete session, verify shared client alive
-[ ] Manual test: server shutdown (Ctrl+C), verify clean exit
-
-## ChatViewController (doc/chat-view.md)
-
-### Step 1: Create ChatViewController class
-
-[ ] Create `public/ts/chat-view-controller.ts` with:
-
-```typescript
-class ChatViewController {
-  private viewState: 'sessions' | 'newChat' | 'chatting' = 'sessions';
-
-  // --- View transitions ---
-  showSessions(): void
-    // setViewState('sessions'), loadSessions + loadUsage via showSessionManager
-  
-  showNewChat(): void
-    // regions.chat.clear(), clearStatus(), clearContextFooter()
-    // setViewState('newChat'), loadModels(), updateUrl(session=null)
-  
-  async activateSession(sessionId: string): Promise<void>
-    // reconnectIfNeeded + waitForConnect
-    // POST resume with fetchWithTimeout
-    // setActiveSession, updateMenuIndicators, notifySessionChange
-    // updateStatus(model, cwd)
-    // historyLoader.load()
-    // setViewState('chatting')
-    // Error: toast + don't change view
-  
-  // --- Footer ---
-  updateStatus(model: string, cwd: string): void
-    // calls renderStatus(model, cwd)
-  
-  clearFooter(): void
-    // calls clearStatus() + clearContextFooter()
-  
-  // --- CWD ---
-  getCwd(): string
-    // if viewState is 'newChat': getNewChatCwd()
-    // else: getCurrentCwd() from app-state
-  
-  // --- Form ---
-  setFormEnabled(enabled: boolean): void
-    // delegates to view-controller setFormEnabled
-  
-  // --- Prompt recovery ---
-  savePrompt(prompt: string, sessionId: string): void
-  restorePromptIfSameSession(): void
-    // only restore if active session matches saved sessionId
-
-  getViewState(): 'sessions' | 'newChat' | 'chatting'
-}
-
-export const chatView = new ChatViewController();
-```
-
-Export singleton. Unit test `tests/unit/chat-view-controller.test.ts` covering:
-- showNewChat clears footer + chat
-- activateSession sets view to chatting on success, stays on error
-- getCwd returns newChat CWD vs session CWD based on view state
-- restorePromptIfSameSession only restores when session matches
-
-### Step 2: Migrate router.ts to use chatView
-
-[ ] `router.ts`:
-  - Remove `activateSession()` function body — replace with `chatView.activateSession()`
-  - Remove `newSessionClick()` body — replace with `chatView.showNewChat()`
-  - Remove imports for: setActiveSession, getCurrentCwd, reconnectIfNeeded, waitForConnect, fetchWithTimeout, setSessionLoading, updateMenuIndicators, renderStatus, clearStatus, clearContextFooter, loadModels, notifySessionChange, historyLoader
-  - Keep: sessionClick (delegates), toggleSessions (delegates to showSessions or restores), URL management, applet loading
-  - `sessionClick` uses `chatView.getViewState()` and `historyLoader.isStale()` for short-circuit
-
-### Step 3: Migrate message-streaming.ts to use chatView
-
-[ ] `message-streaming.ts`:
-  - Replace `setFormEnabled` calls with `chatView.setFormEnabled()`
-  - Replace `renderStatus` calls with `chatView.updateStatus()`
-  - Replace `lastSentPrompt/lastSentSessionId` with `chatView.savePrompt()` / `chatView.restorePromptIfSameSession()`
-  - Remove imports for: view-controller (setFormEnabled), context-footer (renderStatus), multiline-input (resetTextareaHeight — keep this one, it's input-specific)
-  - onReconnect handler: call `chatView.activateSession()` instead of `historyLoader.load()` directly
-  - Import chatView instead of the 4 separate modules
-
-### Step 4: Migrate multiline-input.ts to use chatView
-
-[ ] `multiline-input.ts`:
-  - Replace `isViewState('newChat') ? getNewChatCwd() : getCurrentCwd()` with `chatView.getCwd()`
-  - Remove imports: isViewState from view-controller, getNewChatCwd from model-selector, getCurrentCwd from app-state
-  - Import: chatView from chat-view-controller
-
-### Step 5: Clean up view-controller.ts
-
-[ ] `view-controller.ts`:
-  - Remove the `clearContextFooter` call from `setViewState('newChat')` — chatView.showNewChat() handles it
-  - `setViewState` becomes a pure DOM mutator (no side effects)
-  - `setFormEnabled` stays as-is (low-level DOM helper called by chatView)
-
-### Step 6: Test and verify
-
-[ ] All existing tests pass
-[ ] New unit tests pass
-[ ] Typecheck clean
-[ ] Lint clean (changed files)
-[ ] Build client
-[ ] Knip clean
-
-## Applet Reactivity (doc/applet-reactivity.md)
-
-### Step 1: Expose `onSessionEvent` to applets
-
-[ ] `public/ts/applet-runtime.ts`:
-  - Import `onEvent` from `websocket.js` and `isLoadingHistory` from `app-state.js`
-  - Add `onSessionEvent` to the `AppletAPI` interface and the `window.appletAPI` object
-  - Implementation: wraps `onEvent` but filters out events during history replay (`isLoadingHistory()` is true). Returns unsubscribe function.
-
-### Step 2: Expose `onSessionChange` to applets
-
-[ ] `public/ts/applet-runtime.ts`:
-  - Add a module-level callback set `sessionChangeCallbacks`
-  - Add `onSessionChange(cb: (sessionId: string, cwd: string) => void): () => void` to AppletAPI
-  - Export `notifySessionChange(sessionId, cwd)` for `router.ts` to call
-[ ] `public/ts/router.ts` `activateSession()`:
-  - After `setActiveSession`, call `notifySessionChange(sessionId, cwd)`
-
-### Step 3: Git-status auto-refresh on file changes
-
-[ ] `applets/git-status/script.js`:
-  - Subscribe to `onSessionEvent`. On `tool.execution_complete` for edit/create tools, schedule a throttled refresh (2s debounce). On `session.idle`, refresh immediately.
-  - Subscribe to `onSessionChange`. Update the applet's CWD and refresh.
-
-### Step 4: Git-status shows last commit when working tree clean
-
-[ ] `applets/git-status/script.js`:
-  - After `git status --porcelain=v2` returns empty, run `git log -1 --format=%H%n%s%n%an%n%ar`
-  - Render a "clean tree" view with: short hash, message, author, relative time
-  - Include a clickable link to `/?applet=git-diff&path=<cwd>&ref=HEAD~1..HEAD`
-
-### Step 5: Git-diff ref range support
-
-[ ] `applets/git-diff/script.js`:
-  - Check `appletAPI.getAppletUrlParams()` for a `ref` parameter
-  - If present, run `git diff <ref>` instead of the default staged/unstaged diff
-  - Show a header indicating the ref range being viewed
-
-## Chat View + Footer Collaboration Fixes
-
-### Bugs to fix
-
-**B1. Timeout restores message to wrong session**
-`message-streaming.ts`: `lastSentPrompt` is global. The no-events watchdog restores it to the textarea without checking which session is active. If the user switched sessions during the 60s timeout, the old prompt appears in the new session's input.
-
-**B2. Context footer files stale on session switch**
-`router.ts newSessionClick()` calls `clearStatus()` but not `clearContextFooter()`. Old session's file links persist in the footer.
-
-**B3. Pound (#) file reference uses wrong CWD in new-chat**
-`multiline-input.ts`: Pound provider calls `getCurrentCwd()` which returns the *previous* session's directory. For new-chat view, it should use the CWD from the `#newChatCwd` input.
-
-**B4. Footer should show model+cwd in new-chat view**
-When user types a CWD in new-chat, the footer should update with that path (clickable to file-browser). Currently footer is empty until session is created.
-
-### Implementation
-
-[ ] **Fix B1: Scope lastSentPrompt to session**
-  - `message-streaming.ts`: Store `lastSentSessionId` alongside `lastSentPrompt`
-  - In watchdog timeout: check `lastSentSessionId === getActiveSessionId()` before restoring
-  - If session changed, discard the stale prompt (just re-enable form, don't restore text)
-
-[ ] **Fix B2: Clear context footer on new chat and session switch**
-  - `router.ts newSessionClick()`: Add `clearContextFooter()` call alongside `clearStatus()`
-  - `router.ts activateSession()`: `historyLoader.load()` already calls `clearContextFooter()` internally — verify this works
-
-[ ] **Fix B3: Pound provider uses correct CWD**
-  - `multiline-input.ts`: When pound triggers, check `isViewState('newChat')`. If true, read CWD from `getNewChatCwd()` (model-selector.ts) instead of `getCurrentCwd()`
-  - Import `isViewState` from view-controller and `getNewChatCwd` from model-selector
-
-[ ] **Fix B4: New-chat CWD updates footer**
-  - `model-selector.ts`: Add a `debounced input` handler on `#newChatCwd` that calls `renderStatus(selectedModel, cwdValue)` on each change (debounce 300ms)
-  - This gives the user a clickable cwd link in the footer while typing, and shows the selected model name
-
-## Extract HistoryLoader class
-
-### Problem
-
-History loading is spread across 4 files with 3 call sites, a generation counter, pending/stale flags, and a server-side dedup Set. This caused a bug where double history requests left the UI empty. The root cause per `doc/code-quality.md`: wrong abstraction — no single owner of the history lifecycle.
-
-### Current state (what to remove)
-
-| File | State/Logic | Problem |
-|------|-------------|---------|
-| `history.ts` | `historyPending`, `lastHistoryConnectionId`, `historyGeneration`, `isHistoryPending()`, `isHistoryStale()`, `waitForHistoryComplete()` | 3 module-level flags, generation counter for dedup |
-| `message-streaming.ts` | `reloadAfterReconnect()`, reconnect handler calls `requestHistory` | Second call site for history |
-| `router.ts` | `activateSession()` calls `requestHistory` + `waitForHistoryComplete` | Third call site, uses `isHistoryStale()` for short-circuit |
-| `websocket.ts` (server) | `pendingHistory` Set, dedup logic in `requestHistory` handler | Server-side bandaid for client-side double request |
-
-### Design: `HistoryLoader` class
-
-Single class that owns the full request→stream→complete lifecycle. One way to load history. Impossible to double-request.
-
-```typescript
-// public/ts/history-loader.ts
-
-class HistoryLoader {
-  private pending: PendingLoad | null = null;
-  private lastLoadSessionId: string | null = null;
-  private lastLoadConnectionId = -1;
-
-  /**
-   * Load history for a session. Cancels any in-flight request.
-   * Clears chat, requests history via WS, waits for completion.
-   * Sets tracker busy state and form state from server response.
-   */
-  async load(sessionId: string): Promise<void> {
-    this.cancel();
-    
-    setLoadingHistory(true);
-    regions.chat.clear();
-    clearContextFooter();
-    subscribeToSession(sessionId);
-    requestHistory(sessionId);
-    
-    return new Promise<void>(resolve => {
-      const timer = setTimeout(() => {
-        console.warn('[HISTORY] Timed out waiting for historyComplete');
-        this.finish(resolve);
-      }, TIMEOUT_MS);
-      
-      const unsub = onHistoryComplete((data) => {
-        // Ignore completions for wrong session (stale WS message)
-        if (this.pending?.sessionId !== sessionId) return;
-        this.finish(resolve, data);
-      });
-      
-      this.pending = { sessionId, resolve, timer, unsub };
-    });
-  }
-
-  /**
-   * Whether the last loaded history is stale (WS reconnected since).
-   * Used by sessionClick to decide if short-circuit is safe.
-   */
-  isStale(sessionId: string): boolean {
-    return this.lastLoadSessionId !== sessionId 
-        || getConnectionId() !== this.lastLoadConnectionId;
-  }
-
-  private finish(resolve: () => void, data?: { isBusy?: boolean }): void {
-    if (!this.pending) return;
-    const { timer, unsub } = this.pending;
-    clearTimeout(timer);
-    unsub();
-    
-    this.lastLoadSessionId = this.pending.sessionId;
-    this.lastLoadConnectionId = getConnectionId();
-    this.pending = null;
-    
-    setLoadingHistory(false);
-    
-    const isBusy = data?.isBusy ?? false;
-    const activeId = getActiveSessionId();
-    if (activeId) sessionTracker.setBusy(activeId, isBusy);
-    setFormEnabled(!isBusy);
-    
-    if (regions.chat.el.children.length === 0) loadModels();
-    resolve();
-  }
-
-  private cancel(): void {
-    if (!this.pending) return;
-    clearTimeout(this.pending.timer);
-    this.pending.unsub();
-    this.pending.resolve();
-    this.pending = null;
-  }
-}
-
-export const historyLoader = new HistoryLoader();
-```
-
-### Implementation steps
-
-[ ] **Step 1: Create `public/ts/history-loader.ts`**
-  - Class as designed above
-  - Imports: `setLoadingHistory` from app-state, `setFormEnabled` from view-controller, `onHistoryComplete`/`getConnectionId`/`subscribeToSession`/`requestHistory` from websocket, `clearContextFooter` from context-footer, `regions` from dom-regions, `sessionTracker` from session-state-tracker, `getActiveSessionId` from app-state, `loadModels` from model-selector
-  - Export singleton `historyLoader`
-  - Unit test: `tests/unit/history-loader.test.ts`
-
-[ ] **Step 2: Replace callers**
-  - `router.ts activateSession()`: Replace `requestHistory` + `waitForHistoryComplete` with `historyLoader.load(sessionId)`
-  - `router.ts sessionClick()`: Replace `isHistoryStale()` with `historyLoader.isStale(sessionId)`
-  - `message-streaming.ts reloadAfterReconnect()`: Replace with `historyLoader.load(sessionId)`
-  - `message-streaming.ts onReconnect`: Replace `isHistoryPending()` + `requestHistory()` with just calling `historyLoader.load()` (which cancels in-flight)
-  - `main.ts`: Replace `activateSession` call (which already uses historyLoader internally)
-
-[ ] **Step 3: Delete old code**
-  - `history.ts`: Remove `waitForHistoryComplete`, `isHistoryPending`, `isHistoryStale`, `historyGeneration`, `historyPending`, `lastHistoryConnectionId`. Keep `loadPreferences` (unrelated).
-  - `websocket.ts` (server): Remove `pendingHistory` Set and dedup logic from requestHistory handler (no longer needed — client won't double-request)
-
-[ ] **Step 4: Test and verify**
-  - All existing tests pass
-  - Typecheck clean
-  - Lint clean
-  - Build client
-  - Manual test: click session → history loads. Click same session again → short-circuit (no reload). Click different session while first is loading → first cancelled, second loads.
+## File Finder + Dotfiles + Copy Path (doc/features/file-finder.md)
+
+### Step 1: Server — dotfiles query param
+
+[*] `src/routes/api.ts` `GET /api/files`:
+  - Read `req.query.dotfiles` as boolean
+  - In the filter chain, change `!e.name.startsWith('.')` to also check if dotfiles param is truthy
+  - If `dotfiles=1`, skip the dot-prefix filter
+
+[*] `src/routes/api.ts` `walkProjectFiles()`:
+  - Add `dotfiles` parameter to the function signature
+  - Pass it through from `GET /api/project-files` query param `dotfiles`
+  - When truthy, skip the `entry.name.startsWith('.')` check (line 527)
+
+### Step 2: File-browser — dotfiles toggle + copy button
+
+[*] `applets/file-browser/script.js`:
+  - Add a toggle checkbox in the header area labeled "Show dotfiles"
+  - When toggled, re-fetch with `&dotfiles=1` appended to the API URL
+  - Persist toggle state in applet state
+
+[*] `applets/file-browser/script.js`:
+  - Add a 📋 copy button to each file/directory entry
+  - On click, call `navigator.clipboard.writeText(fullAbsolutePath)` and show brief "Copied!" feedback
+  - Prevent click from propagating to the file-open/directory-navigate handler
+
+[*] `applets/file-browser/style.css`:
+  - Style the copy button: small, muted, appears on hover of file-item row
+
+### Step 3: File-finder applet
+
+[*] Create `applets/file-finder/meta.json`:
+  - slug: "file-finder", name: "File Finder"
+  - params: `root` (required, absolute path to search directory)
+  - agentUsage.purpose: "Fuzzy find files in a directory tree and copy paths to clipboard"
+
+[*] Create `applets/file-finder/content.html`:
+  - Search input at top with placeholder "Search files..."
+  - Refresh button next to search input
+  - Scrollable results list div
+  - Status bar at bottom (file count)
+
+[*] Create `applets/file-finder/script.js`:
+  - On load (via onUrlParamsChange), fetch `GET /api/project-files?cwd=<root>`
+  - Store full file list in a variable
+  - On input: fuzzy-filter client-side using simple substring + word-boundary scoring
+  - Render results: each row shows relative path, click copies `root + '/' + relativePath` to clipboard
+  - Each row has an open link (📄) that navigates to markdown-viewer for .md files, text-editor otherwise
+  - Refresh button: clear client file list, re-fetch from server (30s TTL cache — new files appear after cache expires)
+  - On missing root param: show usage hint ("Use ?applet=file-finder&root=/path/to/folder")
+  - On fetch error: show error message in applet with the path that failed
+  - Keyboard: ArrowUp/Down to navigate results, Enter to copy selected
+  - Show "Copied!" toast briefly on successful copy
+
+[*] Create `applets/file-finder/style.css`:
+  - Match text-editor sizing: max-width 900px, margin 0 auto, 11pt font
+  - Search input: full width, dark background, border-radius
+  - Results: scrollable list, selected highlight, hover highlight
+  - Copy feedback: brief green flash on the row
+
+### Step 4: Build and test
+
+[*] Run `npm run build:client` — must succeed
+[*] Run `npx tsc --noEmit` — must pass
+[*] Run `npx vitest run` — no new failures (pre-existing failures are acceptable)
+[ ] Restart server, manually verify:
+  - file-finder loads files and fuzzy search works
+  - Click copies path to clipboard
+  - Open link navigates to correct viewer
+  - Refresh re-fetches
+  - file-browser dotfiles toggle works
+  - file-browser copy button works

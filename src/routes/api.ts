@@ -502,18 +502,20 @@ const FILE_LIST_TTL_MS = 30_000;
 const FILE_LIST_CAP = 10_000;
 const fileListCache = new Map<string, { files: string[]; timestamp: number }>();
 
-async function walkProjectFiles(rootDir: string, showDotfiles = false): Promise<string[]> {
-  const cacheKey = `${rootDir}\0${showDotfiles ? '1' : '0'}`;
+async function walkProjectFiles(rootDir: string, showDotfiles = false, respectGitignore = true): Promise<string[]> {
+  const cacheKey = `${rootDir}\0${showDotfiles ? '1' : '0'}\0${respectGitignore ? '1' : '0'}`;
   const cached = fileListCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < FILE_LIST_TTL_MS) {
     return cached.files;
   }
 
   let ig: ReturnType<typeof ignore> | null = null;
-  try {
-    const gitignoreContent = await readFile(join(rootDir, '.gitignore'), 'utf-8');
-    ig = ignore().add(gitignoreContent);
-  } catch { /* no .gitignore */ }
+  if (respectGitignore) {
+    try {
+      const gitignoreContent = await readFile(join(rootDir, '.gitignore'), 'utf-8');
+      ig = ignore().add(gitignoreContent);
+    } catch { /* no .gitignore */ }
+  }
 
   const files: string[] = [];
 
@@ -554,11 +556,12 @@ router.get('/project-files', async (req: Request, res: Response) => {
   const cwd = (req.query.cwd as string) || programCwd;
   const q = (req.query.q as string) || '';
   const showDotfiles = req.query.dotfiles === '1';
+  const respectGitignore = req.query.noignore !== '1';
 
   try {
     const resolvedCwd = resolve(cwd);
     await access(resolvedCwd);
-    const files = await walkProjectFiles(resolvedCwd, showDotfiles);
+    const files = await walkProjectFiles(resolvedCwd, showDotfiles, respectGitignore);
 
     if (!q) {
       return res.json({ files });

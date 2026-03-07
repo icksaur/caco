@@ -212,6 +212,26 @@ input[type="text"]:focus {
   margin-left: var(--space-sm);
 }
 
+.popup-icon {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.popup-icon.session-unobserved {
+  background: var(--color-unobserved);
+  border-radius: 50%;
+}
+
+.popup-icon.session-busy {
+  background: var(--color-accent);
+  border-radius: 2px;
+  animation: blink 0.7s infinite;
+}
+
 /* ========================================
    BUTTONS
    ======================================== */

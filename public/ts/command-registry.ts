@@ -55,10 +55,10 @@ registerCommand({
         return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
       });
       return sessions.map(s => {
-        const prefix = s.isUnobserved ? '● ' : '';
-        const label = prefix + (s.name || s.summary || s.sessionId.slice(0, 8));
+        const label = s.name || s.summary || s.sessionId.slice(0, 8);
         const desc = s.currentIntent || s.cwd?.split('/').pop() || '';
-        return { id: s.sessionId, label, description: desc };
+        const icon = s.isBusy ? 'session-busy' : s.isUnobserved ? 'session-unobserved' : '';
+        return { id: s.sessionId, label, description: desc, icon };
       });
     } catch { return []; }
   },

@@ -351,6 +351,7 @@ export async function loadSessions(): Promise<void> {
     
     // Sort by updatedAt descending (most recently updated first)
     allSessions.sort((a, b) => {
+      if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
       if (a.updatedAt && b.updatedAt) {
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       }

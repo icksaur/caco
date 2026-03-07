@@ -5,6 +5,7 @@ export interface PopupItem {
   label: string;
   description?: string;
   value?: string;
+  icon?: string;
 }
 
 interface InputPopupConfig {
@@ -172,7 +173,13 @@ export class InputPopup {
       const div = document.createElement('div');
       div.className = 'input-popup-item' + (i === this.selectedIdx ? ' selected' : '');
       div.dataset.idx = String(i);
-      div.textContent = item.label;
+      if (item.icon) {
+        const iconEl = document.createElement('span');
+        iconEl.className = 'popup-icon ' + item.icon;
+        div.appendChild(iconEl);
+      }
+      const labelEl = document.createTextNode(item.label);
+      div.appendChild(labelEl);
       if (item.description) {
         const desc = document.createElement('span');
         desc.className = 'popup-description';

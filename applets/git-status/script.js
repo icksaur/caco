@@ -658,7 +658,7 @@ window.appletAPI.onUrlParamsChange((params) => {
       document.getElementById('noPathMessage').classList.add('hidden');
       if (repoPathLabel) {
         repoPathLabel.textContent = repoPath;
-        repoPathLabel.href = '?applet=file-browser&path=' + encodeURIComponent(repoPath);
+        repoPathLabel.href = '?applet=file-finder&root=' + encodeURIComponent(repoPath);
       }
       refresh();
     }

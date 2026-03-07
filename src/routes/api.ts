@@ -312,6 +312,7 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
  */
 router.get('/files', async (req: Request, res: Response) => {
   const requestedPath = (req.query.path as string) || '';
+  const showDotfiles = req.query.dotfiles === '1';
   
   try {
     // Allow absolute paths directly, resolve relative paths from cwd
@@ -322,7 +323,7 @@ router.get('/files', async (req: Request, res: Response) => {
     const entries = await readdir(resolvedDir, { withFileTypes: true });
     const files = await Promise.all(
       entries
-        .filter(e => !e.name.startsWith('.')) // Hide hidden files
+        .filter(e => showDotfiles || !e.name.startsWith('.'))
         .map(async (entry) => {
           const entryPath = join(resolvedDir, entry.name);
           const stats = await stat(entryPath).catch(() => null);
@@ -501,8 +502,9 @@ const FILE_LIST_TTL_MS = 30_000;
 const FILE_LIST_CAP = 10_000;
 const fileListCache = new Map<string, { files: string[]; timestamp: number }>();
 
-async function walkProjectFiles(rootDir: string): Promise<string[]> {
-  const cached = fileListCache.get(rootDir);
+async function walkProjectFiles(rootDir: string, showDotfiles = false): Promise<string[]> {
+  const cacheKey = `${rootDir}\0${showDotfiles ? '1' : '0'}`;
+  const cached = fileListCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < FILE_LIST_TTL_MS) {
     return cached.files;
   }
@@ -524,7 +526,7 @@ async function walkProjectFiles(rootDir: string): Promise<string[]> {
 
     for (const entry of entries) {
       if (files.length >= FILE_LIST_CAP) return;
-      if (entry.name.startsWith('.')) continue;
+      if (!showDotfiles && entry.name.startsWith('.')) continue;
 
       const fullPath = join(dir, entry.name);
       const relPath = relative(rootDir, fullPath);
@@ -544,18 +546,19 @@ async function walkProjectFiles(rootDir: string): Promise<string[]> {
   await walk(rootDir);
   files.sort((a, b) => a.localeCompare(b));
 
-  fileListCache.set(rootDir, { files, timestamp: Date.now() });
+  fileListCache.set(cacheKey, { files, timestamp: Date.now() });
   return files;
 }
 
 router.get('/project-files', async (req: Request, res: Response) => {
   const cwd = (req.query.cwd as string) || programCwd;
   const q = (req.query.q as string) || '';
+  const showDotfiles = req.query.dotfiles === '1';
 
   try {
     const resolvedCwd = resolve(cwd);
     await access(resolvedCwd);
-    const files = await walkProjectFiles(resolvedCwd);
+    const files = await walkProjectFiles(resolvedCwd, showDotfiles);
 
     if (!q) {
       return res.json({ files });

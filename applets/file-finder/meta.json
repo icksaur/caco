@@ -1,0 +1,24 @@
+{
+  "slug": "file-finder",
+  "name": "File Finder",
+  "description": "Browse and fuzzy-search files in a directory tree with copy-to-clipboard",
+  "params": {
+    "root": {
+      "required": true,
+      "description": "Absolute path to root directory to browse/search"
+    }
+  },
+  "createdAt": "2026-03-07T03:37:00.000Z",
+  "updatedAt": "2026-03-07T04:32:00.000Z",
+  "agentUsage": {
+    "purpose": "Browse and fuzzy-search files in a directory tree, copy paths to clipboard"
+  },
+  "stateSchema": {
+    "get": {
+      "root": "string",
+      "fileCount": "number",
+      "loaded": "boolean"
+    },
+    "set": null
+  }
+}

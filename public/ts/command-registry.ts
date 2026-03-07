@@ -102,3 +102,28 @@ registerCommand({
     }
   }
 });
+
+registerCommand({
+  name: 'compact',
+  description: 'Force context compaction',
+  source: 'built-in',
+  handler: async () => {
+    const sessionId = getActiveSessionId();
+    if (!sessionId) {
+      showToast('No active session');
+      return;
+    }
+    showToast('Compacting...');
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/compact`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`Compacted: ${data.tokensRemoved} tokens, ${data.messagesRemoved} messages removed`);
+      } else {
+        showToast(data.error || 'Compaction failed');
+      }
+    } catch {
+      showToast('Compaction failed');
+    }
+  }
+});

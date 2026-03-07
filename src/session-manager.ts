@@ -710,6 +710,20 @@ class SessionManager {
     console.log(`[MODEL] Changed session ${sessionId.slice(0, 8)} to ${model}`);
   }
 
+  async compactSession(sessionId: string): Promise<{ tokensRemoved: number; messagesRemoved: number }> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error(`Session ${sessionId} is not active`);
+    }
+    const session = active.session as unknown as { rpc: { compaction: { compact: () => Promise<{ success: boolean; tokensRemoved: number; messagesRemoved: number }> } } };
+    const result = await session.rpc.compaction.compact();
+    if (!result.success) {
+      throw new Error('Compaction failed');
+    }
+    console.log(`[COMPACT] Session ${sessionId.slice(0, 8)}: removed ${result.tokensRemoved} tokens, ${result.messagesRemoved} messages`);
+    return { tokensRemoved: result.tokensRemoved, messagesRemoved: result.messagesRemoved };
+  }
+
   /**
    * Check if a session is active
    */

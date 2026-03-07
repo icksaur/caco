@@ -276,6 +276,27 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/sessions/:sessionId/compact
+ * Force context compaction for a session
+ */
+router.post('/sessions/:sessionId/compact', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+
+  if (!sessionManager.isActive(sessionId)) {
+    res.status(404).json({ error: 'Session not active' });
+    return;
+  }
+
+  try {
+    const result = await sessionManager.compactSession(sessionId);
+    res.json(result);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: `Compaction failed: ${msg}` });
+  }
+});
+
+/**
  * GET /api/sessions/:sessionId/state
  * Get session state (for agent-to-agent polling)
  * Returns: status (idle/inactive), cwd, model

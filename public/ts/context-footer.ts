@@ -53,8 +53,9 @@ export function renderStatus(modelName: string, cwd: string, hasGit = false, ses
   
   if (dirName && fullCwd) {
     const encodedCwd = encodeURIComponent(fullCwd);
-    const applet = hasGit ? 'git-status' : 'file-browser';
-    parts.push(`<a href="/?applet=${applet}&path=${encodedCwd}" title="${fullCwd}">${dirName}</a>`);
+    const applet = hasGit ? 'git-status' : 'file-finder';
+    const paramName = hasGit ? 'path' : 'root';
+    parts.push(`<a href="/?applet=${applet}&${paramName}=${encodedCwd}" title="${fullCwd}">${dirName}</a>`);
   }
   
   if (hasIcon && sessionId) {

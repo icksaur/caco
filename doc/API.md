@@ -103,6 +103,16 @@ Returns: `{ success: true }`
 
 Returns: `{ success: true, wasActive: true }`
 
+**POST /api/sessions/:id/compact** - Force context compaction
+
+Returns:
+```json
+{
+  "tokensRemoved": 12345,
+  "messagesRemoved": 8
+}
+```
+
 **GET /api/sessions/:id/state** - Get session state (agent-to-agent)
 
 Returns:

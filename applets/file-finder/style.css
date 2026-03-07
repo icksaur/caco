@@ -1,0 +1,159 @@
+.file-finder {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 12px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  font-size: 14px;
+  color: #888;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.bc-item {
+  color: #6a9fd4;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.bc-item:hover {
+  background: #1e3a5f;
+}
+
+.bc-sep {
+  color: #555;
+}
+
+.finder-header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 11pt;
+  background: #1a1a1a;
+  color: #e0e0e0;
+  border: 1px solid #333;
+  border-radius: 6px;
+  outline: none;
+}
+
+.search-input:focus {
+  border-color: #555;
+}
+
+.refresh-btn {
+  padding: 6px 12px;
+  font-size: 14pt;
+  background: #1a1a1a;
+  color: #888;
+  border: 1px solid #333;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.refresh-btn:hover {
+  color: #ccc;
+  border-color: #555;
+}
+
+.results {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid #333;
+  border-radius: 8px;
+}
+
+.result-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #2a2a2a;
+  text-decoration: none;
+  color: inherit;
+}
+
+.result-item:last-child {
+  border-bottom: none;
+}
+
+.result-item:hover {
+  background: #1e3a5f;
+}
+
+.result-item.selected {
+  background: #1a3050;
+}
+
+.result-item.copied {
+  background: #1a3a1a;
+}
+
+.result-dir {
+  color: #888;
+}
+
+.result-icon {
+  width: 24px;
+  margin-right: 8px;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.result-path {
+  flex: 1;
+  font-family: monospace;
+  font-size: 11pt;
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-btn {
+  opacity: 0;
+  font-size: 14px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.result-item:hover .copy-btn {
+  opacity: 0.6;
+}
+
+.copy-btn:hover {
+  opacity: 1 !important;
+}
+
+.status {
+  margin-top: 8px;
+  font-size: 10pt;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.empty-state {
+  color: #666;
+  text-align: center;
+  padding: 40px;
+}
+
+.empty-state.error {
+  color: #ff6b6b;
+}

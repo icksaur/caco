@@ -13,6 +13,7 @@ var results = document.getElementById('results');
 var status = document.getElementById('status');
 var refreshBtn = document.getElementById('refreshBtn');
 var breadcrumb = document.getElementById('breadcrumb');
+var gitLink = document.getElementById('gitLink');
 
 var fileIcons = {
   js: '📜', ts: '📜', jsx: '📜', tsx: '📜',
@@ -108,6 +109,14 @@ async function loadFiles() {
       dirEntries = dirData.files;
     } else {
       dirEntries = [];
+    }
+
+    var hasGit = dirEntries.some(function(e) { return e.name === '.git' && e.type === 'directory'; });
+    if (hasGit) {
+      gitLink.href = '?applet=git-status&path=' + encodeURIComponent(rootPath);
+      gitLink.classList.remove('hidden');
+    } else {
+      gitLink.classList.add('hidden');
     }
 
     status.textContent = allFiles.length + ' files';

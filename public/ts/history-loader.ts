@@ -13,6 +13,7 @@ import { setFormEnabled } from './view-controller.js';
 import { onHistoryComplete, getConnectionId, subscribeToSession, requestHistory } from './websocket.js';
 import { clearContextFooter } from './context-footer.js';
 import { regions } from './dom-regions.js';
+import { scrollToBottom } from './ui-utils.js';
 import { sessionTracker } from './session-state-tracker.js';
 import { loadModels } from './model-selector.js';
 
@@ -85,6 +86,7 @@ class HistoryLoader {
     this.pending = null;
     
     setLoadingHistory(false);
+    scrollToBottom();
     
     const isBusy = data?.isBusy ?? false;
     const activeId = getActiveSessionId();

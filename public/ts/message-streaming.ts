@@ -135,14 +135,14 @@ function handleEvent(event: SessionEvent): void {
   // Reasoning finalization (special case)
   if (eventType === 'assistant.reasoning') {
     if (chatRegion.finalizeReasoning(event)) {
-      scrollToBottom();
+      if (!isLoadingHistory()) scrollToBottom();
       return;
     }
   }
   
   // Render event (create/find elements + set content)
   chatRegion.renderEvent(event);
-  scrollToBottom();
+  if (!isLoadingHistory()) scrollToBottom();
 }
 
 function registerWsHandlers(): void {

@@ -365,21 +365,40 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     let sentCount = 0;
     
     // Truncate: only stream the last N turns (user.message boundaries)
-    const MAX_HISTORY_TURNS = 10;
+    // For very large sessions, reduce turns to keep event count reasonable
+    const MAX_EVENTS_TARGET = 2000;
+    let maxTurns = 10;
+    
+    // Adaptive: if 10 turns would exceed target, try fewer
     let startIndex = 0;
     let turnsFound = 0;
     for (let i = events.length - 1; i >= 0; i--) {
       if (events[i].type === 'user.message') {
         turnsFound++;
-        if (turnsFound >= MAX_HISTORY_TURNS) {
+        if (turnsFound >= maxTurns) {
           startIndex = i;
           break;
         }
       }
     }
     
+    // If truncated range is still huge, reduce turns until under target
+    while (startIndex > 0 && (events.length - startIndex) > MAX_EVENTS_TARGET && maxTurns > 3) {
+      maxTurns--;
+      turnsFound = 0;
+      for (let i = events.length - 1; i >= 0; i--) {
+        if (events[i].type === 'user.message') {
+          turnsFound++;
+          if (turnsFound >= maxTurns) {
+            startIndex = i;
+            break;
+          }
+        }
+      }
+    }
+    
     if (startIndex > 0) {
-      console.log(`[HISTORY] Truncating: showing ${events.length - startIndex} of ${events.length} events (last ${MAX_HISTORY_TURNS} turns)`);
+      console.log(`[HISTORY] Truncating: showing ${events.length - startIndex} of ${events.length} events (last ${maxTurns} turns)`);
       send(ws, { type: 'event', sessionId, event: {
         type: 'caco.truncated',
         data: { skipped: startIndex, total: events.length }

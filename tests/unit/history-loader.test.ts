@@ -42,6 +42,10 @@ vi.mock('../../public/ts/dom-regions.js', () => ({
   },
 }));
 
+vi.mock('../../public/ts/ui-utils.js', () => ({
+  scrollToBottom: vi.fn(),
+}));
+
 import { HistoryLoader } from '../../public/ts/history-loader.js';
 import { setLoadingHistory } from '../../public/ts/app-state.js';
 import { setFormEnabled } from '../../public/ts/view-controller.js';

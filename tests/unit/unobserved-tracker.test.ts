@@ -5,11 +5,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Mock storage functions
-const mockMeta = new Map<string, Record<string, string | undefined>>();
+const mockMeta = new Map<string, Record<string, unknown>>();
 
 vi.mock('../../src/storage.js', () => ({
   getSessionMeta: vi.fn((sessionId: string) => mockMeta.get(sessionId)),
-  setSessionMeta: vi.fn((sessionId: string, meta: Record<string, string>) => {
+  setSessionMeta: vi.fn((sessionId: string, meta: Record<string, unknown>) => {
     mockMeta.set(sessionId, meta);
   }),
 }));
@@ -43,7 +43,7 @@ describe('UnobservedTracker', () => {
       
       const meta = mockMeta.get('session1');
       expect(meta?.lastIdleAt).toBeDefined();
-      expect(new Date(meta!.lastIdleAt!)).toBeInstanceOf(Date);
+      expect(new Date(meta!.lastIdleAt as string)).toBeInstanceOf(Date);
     });
 
     it('is idempotent - double markIdle does not increment count', () => {
@@ -79,7 +79,7 @@ describe('UnobservedTracker', () => {
       
       const meta = mockMeta.get('session1');
       expect(meta?.lastObservedAt).toBeDefined();
-      expect(new Date(meta!.lastObservedAt!)).toBeInstanceOf(Date);
+      expect(new Date(meta!.lastObservedAt as string)).toBeInstanceOf(Date);
     });
 
     it('returns true only when actually was unobserved', () => {
@@ -209,8 +209,8 @@ describe('UnobservedTracker', () => {
   });
 
   describe('sub-sessions', () => {
-    it('markIdle skips sessions with parentSessionId', () => {
-      mockMeta.set('child1', { name: '', parentSessionId: 'parent1' });
+    it('markIdle skips swarm sessions', () => {
+      mockMeta.set('child1', { name: '', isSwarmSession: true });
 
       const result = unobservedTracker.markIdle('child1');
 
@@ -219,8 +219,8 @@ describe('UnobservedTracker', () => {
       expect(unobservedTracker.getCount()).toBe(0);
     });
 
-    it('markIdle still persists lastIdleAt for sub-sessions', () => {
-      mockMeta.set('child1', { name: '', parentSessionId: 'parent1' });
+    it('markIdle still persists lastIdleAt for swarm sessions', () => {
+      mockMeta.set('child1', { name: '', isSwarmSession: true });
 
       unobservedTracker.markIdle('child1');
 
@@ -228,10 +228,10 @@ describe('UnobservedTracker', () => {
       expect(meta?.lastIdleAt).toBeDefined();
     });
 
-    it('hydrate skips sessions with parentSessionId', () => {
+    it('hydrate skips swarm sessions', () => {
       mockMeta.set('child1', {
         name: '',
-        parentSessionId: 'parent1',
+        isSwarmSession: true,
         lastIdleAt: '2026-02-06T12:00:00Z'
       });
       mockMeta.set('normal1', {
@@ -246,10 +246,10 @@ describe('UnobservedTracker', () => {
       expect(unobservedTracker.getCount()).toBe(1);
     });
 
-    it('does not broadcast for sub-session markIdle', () => {
+    it('does not broadcast for swarm session markIdle', () => {
       const broadcastFn = vi.fn();
       unobservedTracker.setBroadcast(broadcastFn);
-      mockMeta.set('child1', { name: '', parentSessionId: 'parent1' });
+      mockMeta.set('child1', { name: '', isSwarmSession: true });
 
       unobservedTracker.markIdle('child1');
 

@@ -6,6 +6,7 @@ vi.mock('../../public/ts/app-state.js', () => ({
   getCurrentCwd: vi.fn(() => '/current'),
   getSelectedModel: vi.fn(() => 'claude-sonnet-4'),
   getAvailableModels: vi.fn(() => [{ id: 'claude-sonnet-4', name: 'Claude Sonnet 4', cost: 1 }]),
+  clearActiveSession: vi.fn(),
 }));
 
 vi.mock('../../public/ts/view-controller.js', () => {
@@ -68,6 +69,10 @@ vi.mock('../../public/ts/fetch-timeout.js', () => ({
 
 vi.mock('../../public/ts/dom-regions.js', () => ({
   regions: { chat: { el: { children: { length: 0 } }, clear: vi.fn() } },
+}));
+
+vi.mock('../../public/ts/adhoc-bar.js', () => ({
+  adHocBar: { activateSession: vi.fn(), deactivate: vi.fn(), clearSession: vi.fn() },
 }));
 
 import { ChatViewController } from '../../public/ts/chat-view-controller.js';
@@ -222,17 +227,17 @@ describe('ChatViewController', () => {
   describe('updateStatus', () => {
     it('resolves model name and calls renderStatus', () => {
       cvc.updateStatus('/path', 'claude-sonnet-4');
-      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', false);
+      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', false, undefined, undefined, undefined);
     });
 
     it('falls back to model ID suffix when model not found', () => {
       cvc.updateStatus('/path', 'unknown-model');
-      expect(renderStatus).toHaveBeenCalledWith('unknown-model', '/path', false);
+      expect(renderStatus).toHaveBeenCalledWith('unknown-model', '/path', false, undefined, undefined, undefined);
     });
 
     it('passes hasGit flag through', () => {
       cvc.updateStatus('/path', 'claude-sonnet-4', true);
-      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', true);
+      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', true, undefined, undefined, undefined);
     });
   });
 });

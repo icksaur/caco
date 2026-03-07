@@ -64,7 +64,7 @@ describe('app-state', () => {
   });
   
   describe('initialization', () => {
-    it('initFromPreferences sets model, cwd, and sessionId', () => {
+    it('initFromPreferences sets model and cwd but not sessionId', () => {
       appState.initFromPreferences({
         lastModel: 'claude-opus',
         lastCwd: '/projects/myapp',
@@ -73,7 +73,8 @@ describe('app-state', () => {
       
       expect(appState.getSelectedModel()).toBe('claude-opus');
       expect(appState.getCurrentCwd()).toBe('/projects/myapp');
-      expect(appState.getActiveSessionId()).toBe('pref-session-123');
+      // sessionId is NOT set from prefs — only from active resume
+      expect(appState.getActiveSessionId()).toBe(null);
     });
     
     it('initFromSession handles both API formats', () => {

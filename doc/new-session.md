@@ -8,7 +8,7 @@ The new-chat view has a bare text input for CWD and a model selector grid. Probl
 
 1. **CWD input starts empty** — user must type the full path every time. `lastCwd` is in preferences but never pre-populates the input.
 2. **No path validation** — user types a path, hits send, gets a server error if it's invalid. No feedback until submission.
-3. **No autocomplete** — typing `/home/carl/r` gives no suggestions. User must know the exact path.
+3. **No autocomplete** — typing `/home/user/r` gives no suggestions. User must know the exact path.
 
 ## Proposals
 
@@ -31,7 +31,7 @@ Debounced server check as the user types. Show a green ✓ or red ✗ next to th
 **Server endpoint**: `GET /api/files?path=<encoded>` already exists and returns directory listings. A lightweight check:
 
 ```
-GET /api/files?path=/home/carl/repo → 200 (valid dir)
+GET /api/files?path=/home/user/repo → 200 (valid dir)
 GET /api/files?path=/nonexistent   → 404 (invalid)
 ```
 
@@ -60,10 +60,10 @@ When the user types a partial path, show directory suggestions in a popup.
 **Approach A: Reuse InputPopup** — same popup used for `/` and `#` commands. On each keystroke (debounced), fetch directory listing of the parent path and filter by the typed prefix.
 
 ```
-User types: /home/carl/r
-Parent: /home/carl/
+User types: /home/user/r
+Parent: /home/user/
 Prefix: r
-Fetch: GET /api/files?path=/home/carl/
+Fetch: GET /api/files?path=/home/user/
 Filter: entries starting with "r" that are directories
 Show: [repo/, rust-projects/, ...]
 ```
@@ -110,20 +110,20 @@ Only fetch a directory listing when the parent directory changes. Between path s
 
 **Network behavior:**
 ```
-User types: /home/carl/r
-  Parent changed to /home/carl/ → FETCH once
+User types: /home/user/r
+  Parent changed to /home/user/ → FETCH once
   Filter cached entries by prefix "r" → client-side, instant
   Show: [repo/, rust-projects/]
 
-User types: /home/carl/re
+User types: /home/user/re
   Same parent → NO FETCH
   Filter by "re" → [repo/]
 
-User types: /home/carl/repo/
-  Parent changed to /home/carl/repo/ → FETCH once
+User types: /home/user/repo/
+  Parent changed to /home/user/repo/ → FETCH once
   Show all children (empty prefix)
 
-User types: /home/carl/repo/c
+User types: /home/user/repo/c
   Same parent → NO FETCH
   Filter by "c" → [caco/]
 ```
@@ -194,7 +194,7 @@ cwdInput.addEventListener('input', () => {
 `GET /api/files?path=<dir>` already returns:
 ```json
 {
-  "path": "/home/carl/repo",
+  "path": "/home/user/repo",
   "files": [
     { "name": "caco", "type": "directory", "size": 4096 },
     { "name": "mesh", "type": "directory", "size": 4096 },

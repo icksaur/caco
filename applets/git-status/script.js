@@ -702,5 +702,9 @@ window.appletAPI.onSessionEvent((event) => {
 window.appletAPI.onSessionChange((_sessionId, cwd) => {
   if (!cwd) return;
   repoPath = cwd;
-  window.appletAPI.updateAppletUrlParam('path', cwd);
+  if (repoPathLabel) {
+    repoPathLabel.textContent = repoPath;
+    repoPathLabel.href = '?applet=file-finder&root=' + encodeURIComponent(repoPath);
+  }
+  refresh();
 });

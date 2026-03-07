@@ -1,10 +1,11 @@
-import { newSessionClick } from './router.js';
+import { newSessionClick, sessionClick } from './router.js';
 import { showSessionManager } from './session-panel.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
 import type { PopupItem } from './input-popup.js';
+import type { SessionData, SessionsResponse } from './types.js';
 
 export interface Command {
   name: string;
@@ -42,9 +43,26 @@ registerCommand({
 
 registerCommand({
   name: 'sessions',
-  description: 'Open session panel',
+  description: 'Switch session',
   source: 'built-in',
-  handler: () => showSessionManager()
+  picker: async () => {
+    try {
+      const res = await fetch('/api/sessions');
+      const data: SessionsResponse = await res.json();
+      const sessions: SessionData[] = Object.values(data.grouped).flat();
+      sessions.sort((a, b) => {
+        if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
+        return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
+      });
+      return sessions.map(s => {
+        const prefix = s.isUnobserved ? '● ' : '';
+        const label = prefix + (s.name || s.summary || s.sessionId.slice(0, 8));
+        const desc = s.currentIntent || s.cwd?.split('/').pop() || '';
+        return { id: s.sessionId, label, description: desc };
+      });
+    } catch { return []; }
+  },
+  handler: (sessionId) => { void sessionClick(sessionId); }
 });
 
 registerCommand({

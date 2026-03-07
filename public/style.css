@@ -422,7 +422,7 @@ form {
 /* Streaming state - swap buttons, disable input */
 #chatForm.streaming .send-btn { display: none; }
 #chatForm.streaming .stop-btn { display: flex; }
-#chatForm.streaming textarea { pointer-events: none; opacity: 0.6; }
+#chatForm.streaming textarea { opacity: 0.6; }
 
 /* ========================================
    MAIN CONTENT AREA

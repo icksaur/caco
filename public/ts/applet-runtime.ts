@@ -528,6 +528,40 @@ function _hideInstance(instance: AppletInstance): void {
   instance.element.style.display = 'none';
 }
 
+function scopeAppletCSS(css: string, slug: string): string {
+  const scope = `.applet-instance[data-slug="${slug}"]`;
+  const temp = document.createElement('style');
+  temp.textContent = css;
+  document.head.appendChild(temp);
+  const sheet = temp.sheet;
+  if (!sheet) {
+    temp.remove();
+    return css;
+  }
+  
+  const scoped: string[] = [];
+  for (const rule of Array.from(sheet.cssRules)) {
+    if (rule instanceof CSSKeyframesRule) {
+      scoped.push(rule.cssText);
+    } else if (rule instanceof CSSMediaRule) {
+      const inner = Array.from(rule.cssRules)
+        .map(r => r instanceof CSSStyleRule ? `${scope} ${r.selectorText} { ${r.style.cssText} }` : r.cssText)
+        .join('\n');
+      scoped.push(`@media ${rule.conditionText} {\n${inner}\n}`);
+    } else if (rule instanceof CSSStyleRule) {
+      const selectors = rule.selectorText.split(',')
+        .map(s => `${scope} ${s.trim()}`)
+        .join(', ');
+      scoped.push(`${selectors} { ${rule.style.cssText} }`);
+    } else {
+      scoped.push(rule.cssText);
+    }
+  }
+  
+  temp.remove();
+  return scoped.join('\n');
+}
+
 /**
  * Render applet content into a container element
  * Internal function - does the actual HTML/CSS/JS injection
@@ -540,10 +574,10 @@ function renderAppletToInstance(
 ): HTMLStyleElement | null {
   let styleElement: HTMLStyleElement | null = null;
   
-  // Inject CSS first (so HTML renders with styles)
+  // Inject CSS first (so HTML renders with styles), scoped to this applet instance
   if (content.css) {
     styleElement = document.createElement('style');
-    styleElement.textContent = content.css;
+    styleElement.textContent = scopeAppletCSS(content.css, slug);
     styleElement.setAttribute('data-applet', 'true');
     styleElement.setAttribute('data-applet-slug', slug);
     document.head.appendChild(styleElement);

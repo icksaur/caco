@@ -520,6 +520,20 @@ main {
   display: none;
 }
 
+.panel-resizer {
+  display: none;
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.panel-resizer:hover,
+.panel-resizer.dragging {
+  background: var(--color-accent);
+}
+
 /* Scrollbar attaches to this container */
 .chat-scroll {
   flex: 1;
@@ -1906,14 +1920,22 @@ main {
   .applet-panel:not(.hidden) {
     width: 40%;
     min-width: 300px;
-    max-width: 600px;
+    max-width: 80%;
+  }
+  
+  .work-area:has(.applet-panel:not(.hidden)) > .panel-resizer {
+    display: block;
   }
   
   /* Expanded: applet takes full width, hides chat */
   .applet-panel.expanded:not(.hidden) {
-    width: 100%;
+    width: 100% !important;
     max-width: none;
     z-index: 51;
+  }
+  
+  .work-area:has(.applet-panel.expanded:not(.hidden)) > .panel-resizer {
+    display: none;
   }
   
   .new-chat {

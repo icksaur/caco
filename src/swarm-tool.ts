@@ -168,17 +168,21 @@ Each session runs independently with its own prompt. Results are collected and r
 
         // Poll until all complete
         let completed = sessions.filter(s => s.done).length;
+        let pollCount = 0;
         emitSwarmProgress(sessionRef.id, completed, sessions.length);
         while (completed < sessions.length) {
           await sleep(POLL_INTERVAL_MS);
+          pollCount++;
 
           for (const s of sessions) {
             if (s.done || !s.sessionId) continue;
 
+            const elapsed = Math.round((Date.now() - s.startedAt) / 1000);
             if (Date.now() - s.startedAt > PER_SESSION_TIMEOUT_MS) {
               s.done = true;
               s.result = '(timed out after 15 minutes)';
               completed++;
+              console.log(`[SWARM] Session ${s.sessionId.slice(0, 8)} timed out after ${elapsed}s`);
               continue;
             }
 
@@ -190,12 +194,17 @@ Each session runs independently with its own prompt. Results are collected and r
                 s.done = true;
                 s.result = await getLastAssistantMessage(s.sessionId);
                 completed++;
+                console.log(`[SWARM] Session ${s.sessionId.slice(0, 8)} completed after ${elapsed}s`);
               }
             } catch {
               // Network error — retry next poll
             }
           }
 
+          if (pollCount % 6 === 0) {
+            const pending = sessions.filter(s => !s.done).map(s => s.sessionId?.slice(0, 8)).join(', ');
+            console.log(`[SWARM] Poll #${pollCount}: ${completed}/${sessions.length} complete, waiting on: ${pending}`);
+          }
           emitSwarmProgress(sessionRef.id, completed, sessions.length);
         }
 

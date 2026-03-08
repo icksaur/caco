@@ -23,6 +23,7 @@ import { getAndClearPendingAppletState, getNavigationContext } from './applet-ru
 import { resetTextareaHeight } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
 import { removeImage } from './image-paste.js';
+import { notifySessionComplete } from './notifications.js';
 import { markSessionObserved } from './session-observed.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
 import { sessionTracker } from './session-state-tracker.js';
@@ -132,6 +133,7 @@ function handleEvent(event: SessionEvent): void {
         if (eventType === 'session.idle') {
           void markSessionObserved(sessionId);
           adHocBar.clearSession(sessionId);
+          notifySessionComplete(sessionTracker.getIntent(sessionId) || '');
         }
       }
     }

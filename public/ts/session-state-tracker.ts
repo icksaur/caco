@@ -100,6 +100,10 @@ class SessionStateTracker {
     return this.sessions.get(sessionId)?.busy ?? false;
   }
 
+  getIntent(sessionId: string): string | null {
+    return this.sessions.get(sessionId)?.intent ?? null;
+  }
+
   getBusyCount(excludeId?: string): number {
     let count = 0;
     for (const [id, s] of this.sessions) {

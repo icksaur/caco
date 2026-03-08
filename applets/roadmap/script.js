@@ -127,4 +127,5 @@ window.appletAPI.onSessionChange(function(_id, info) {
 
 window.appletAPI.onSessionEvent(function(event) {
   if (event.type === 'session.idle') loadRoadmap();
+  if (event.type === 'tool.execution_complete' && event.data && event.data.toolName === 'update_roadmap') loadRoadmap();
 });

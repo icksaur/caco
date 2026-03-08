@@ -1,0 +1,116 @@
+.roadmap {
+  padding: 16px;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.roadmap h2 {
+  margin: 0 0 12px 0;
+  font-size: 14pt;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.doc-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.doc-link {
+  font-size: 10pt;
+  color: #6a9fd4;
+  text-decoration: none;
+  padding: 2px 8px;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+
+.doc-link:hover {
+  background: #1e3a5f;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.step:last-child {
+  border-bottom: none;
+}
+
+.step-status {
+  font-size: 14pt;
+  cursor: pointer;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  line-height: 1.4;
+  user-select: none;
+}
+
+.step-done .step-title {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.step-blocked .step-title {
+  opacity: 0.5;
+}
+
+.step-active .step-status {
+  color: #6a9fd4;
+}
+
+.step-done .step-status {
+  color: #6a9955;
+}
+
+.step-blocked .step-status {
+  color: #f48771;
+}
+
+.step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-title {
+  font-size: 11pt;
+  color: #e0e0e0;
+}
+
+.step-desc {
+  font-size: 10pt;
+  color: #888;
+  margin-top: 2px;
+}
+
+.step-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.context-link {
+  font-size: 9pt;
+  color: #6a9fd4;
+  text-decoration: none;
+  opacity: 0.7;
+}
+
+.context-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.roadmap-empty, .no-steps {
+  color: #666;
+  text-align: center;
+  padding: 40px;
+}

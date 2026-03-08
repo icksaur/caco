@@ -1,0 +1,18 @@
+{
+  "slug": "roadmap",
+  "name": "Roadmap",
+  "description": "Session roadmap with steps, documents, and status tracking",
+  "params": {},
+  "createdAt": "2026-03-08T20:50:00.000Z",
+  "updatedAt": "2026-03-08T20:50:00.000Z",
+  "agentUsage": {
+    "purpose": "Display and interact with the session's roadmap (steps, documents, status)"
+  },
+  "stateSchema": {
+    "get": {
+      "hasRoadmap": "boolean",
+      "stepCount": "number"
+    },
+    "set": null
+  }
+}

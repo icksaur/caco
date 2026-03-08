@@ -15,7 +15,7 @@ import { join } from 'path';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, getSessionIconPath } from '../storage.js';
+import { getSessionMeta, setSessionMeta, getSessionIconPath, type SessionKind } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -80,7 +80,7 @@ router.get('/sessions', async (_req: Request, res: Response) => {
 });
 
 router.post('/sessions', async (req: Request, res: Response) => {
-  const { cwd, model, description, parentSessionId, isSwarmSession } = req.body as { cwd?: string; model?: string; description?: string; parentSessionId?: string; isSwarmSession?: boolean };
+  const { cwd, model, description, parentSessionId, isSwarmSession, kind } = req.body as { cwd?: string; model?: string; description?: string; parentSessionId?: string; isSwarmSession?: boolean; kind?: SessionKind };
   const clientId = req.headers['x-client-id'] as string | undefined;
   
   const sessionCwd = cwd || process.cwd();
@@ -98,14 +98,14 @@ router.post('/sessions', async (req: Request, res: Response) => {
     const sessionId = await sessionState.ensureSession(model, true, sessionCwd, clientId);
     const actualCwd = sessionManager.getSessionCwd(sessionId);
     
-    // Set description and/or parent if provided
-    if (description || parentSessionId || isSwarmSession) {
-      const meta = getSessionMeta(sessionId) ?? { name: '' };
-      if (description) meta.name = description;
-      if (parentSessionId) meta.parentSessionId = parentSessionId;
-      if (isSwarmSession) meta.isSwarmSession = true;
-      setSessionMeta(sessionId, meta);
-    }
+    // Set metadata
+    const resolvedKind: SessionKind = kind ?? (isSwarmSession ? 'swarm' : parentSessionId ? 'agent' : 'interactive');
+    const meta = getSessionMeta(sessionId) ?? { name: '' };
+    meta.kind = resolvedKind;
+    if (description) meta.name = description;
+    if (parentSessionId) meta.parentSessionId = parentSessionId;
+    if (isSwarmSession) meta.isSwarmSession = true;
+    setSessionMeta(sessionId, meta);
     
     // Broadcast session list change for all clients to refresh
     broadcastGlobalEvent({ 

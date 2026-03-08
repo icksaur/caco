@@ -210,7 +210,7 @@ describe('UnobservedTracker', () => {
 
   describe('sub-sessions', () => {
     it('markIdle skips swarm sessions', () => {
-      mockMeta.set('child1', { name: '', isSwarmSession: true });
+      mockMeta.set('child1', { name: '', kind: 'swarm' });
 
       const result = unobservedTracker.markIdle('child1');
 
@@ -220,7 +220,7 @@ describe('UnobservedTracker', () => {
     });
 
     it('markIdle still persists lastIdleAt for swarm sessions', () => {
-      mockMeta.set('child1', { name: '', isSwarmSession: true });
+      mockMeta.set('child1', { name: '', kind: 'swarm' });
 
       unobservedTracker.markIdle('child1');
 
@@ -231,7 +231,7 @@ describe('UnobservedTracker', () => {
     it('hydrate skips swarm sessions', () => {
       mockMeta.set('child1', {
         name: '',
-        isSwarmSession: true,
+        kind: 'swarm',
         lastIdleAt: '2026-02-06T12:00:00Z'
       });
       mockMeta.set('normal1', {
@@ -249,7 +249,7 @@ describe('UnobservedTracker', () => {
     it('does not broadcast for swarm session markIdle', () => {
       const broadcastFn = vi.fn();
       unobservedTracker.setBroadcast(broadcastFn);
-      mockMeta.set('child1', { name: '', isSwarmSession: true });
+      mockMeta.set('child1', { name: '', kind: 'swarm' });
 
       unobservedTracker.markIdle('child1');
 

@@ -45,9 +45,14 @@ registerCommand({
     try {
       const res = await fetch('/api/sessions');
       const data: SessionsResponse = await res.json();
-      const sessions: SessionData[] = Object.values(data.grouped).flat();
+      const sessions: SessionData[] = Object.values(data.grouped).flat()
+        .filter(s => s.kind !== 'swarm');
       sessions.sort((a, b) => {
         if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
+        const kindOrder = { interactive: 0, scheduled: 1, agent: 2, swarm: 3 };
+        const aKind = kindOrder[a.kind ?? 'interactive'] ?? 0;
+        const bKind = kindOrder[b.kind ?? 'interactive'] ?? 0;
+        if (aKind !== bKind) return aKind - bKind;
         return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
       });
       return sessions.map(s => {

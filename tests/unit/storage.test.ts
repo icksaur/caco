@@ -130,7 +130,7 @@ describe('session metadata (ensureSessionMeta, getSessionMeta, setSessionMeta)',
     
     expect(existsSync(join(TEST_META_DIR, 'meta.json'))).toBe(true);
     const meta = getSessionMeta(TEST_SESSION_ID);
-    expect(meta).toEqual({ name: '' });
+    expect(meta).toMatchObject({ name: '', kind: 'interactive' });
   });
 
   it('ensureSessionMeta does not overwrite existing meta.json', () => {
@@ -155,7 +155,7 @@ describe('session metadata (ensureSessionMeta, getSessionMeta, setSessionMeta)',
     
     expect(existsSync(TEST_META_DIR)).toBe(true);
     const meta = getSessionMeta(TEST_SESSION_ID);
-    expect(meta).toEqual({ name: 'Test Session' });
+    expect(meta).toMatchObject({ name: 'Test Session', kind: 'interactive' });
   });
 
   it('setSessionMeta overwrites existing name', () => {

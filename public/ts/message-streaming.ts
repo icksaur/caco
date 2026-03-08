@@ -66,8 +66,13 @@ function handleEvent(event: SessionEvent): void {
   const data = event.data || {};
   
   // Any live event means the dispatch is working — cancel the no-events watchdog
+  // and ensure busy state is set (handles remote dispatches not initiated by this client)
   if (!isLoadingHistory()) {
     clearNoEventsWatchdog();
+    const activeId = getActiveSessionId();
+    if (activeId && !isTerminalEvent(eventType) && !sessionTracker.isBusy(activeId)) {
+      sessionTracker.setBusy(activeId, true);
+    }
   }
   
   if (eventType === 'user.message' && data.source && data.source !== 'user') {

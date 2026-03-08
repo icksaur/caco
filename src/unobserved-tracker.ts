@@ -55,7 +55,7 @@ class UnobservedTracker {
     for (const sessionId of sessionIds) {
       const meta = getSessionMeta(sessionId);
       if (!meta?.lastIdleAt) continue; // Never went idle
-      if (meta.isSwarmSession) continue; // Swarm sessions skip unobserved tracking
+      if (meta.kind === 'swarm') continue;
       if (!meta.lastObservedAt) {
         // Never observed - add to unobserved set
         this.unobservedSet.add(sessionId);
@@ -85,7 +85,7 @@ class UnobservedTracker {
     setSessionMeta(sessionId, meta);
     
     // Swarm sessions don't become unobserved — parent agent observes them
-    if (meta.isSwarmSession) {
+    if (meta.kind === 'swarm') {
       console.log(`[UNOBSERVED] markIdle: ${sessionId.slice(0, 8)} (swarm session, skipping)`);
       return false;
     }

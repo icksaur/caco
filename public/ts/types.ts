@@ -17,20 +17,23 @@ export interface ModelInfo {
   cost: number;
 }
 
+export type SessionKind = 'interactive' | 'agent' | 'swarm' | 'scheduled';
+
 export interface SessionData {
   sessionId: string;
-  cwd?: string;         // Working directory
-  model?: string;       // Model ID (e.g. "claude-sonnet-4")
-  name?: string;        // Custom name from Caco storage
-  summary?: string;     // SDK-generated summary
+  cwd?: string;
+  model?: string;
+  name?: string;
+  kind?: SessionKind;
+  summary?: string;
   updatedAt?: string;
   isBusy?: boolean;
-  isUnobserved?: boolean;   // Has new activity since last viewed
-  currentIntent?: string;   // What session is currently working on
-  contextFiles?: string[];  // Recently edited files from session context
-  hasIcon?: boolean;        // Has icon.gif or icon.png in session dir
-  scheduleSlug?: string;    // If created by a schedule
-  scheduleNextRun?: string; // Next scheduled run time
+  isUnobserved?: boolean;
+  currentIntent?: string;
+  contextFiles?: string[];
+  hasIcon?: boolean;
+  scheduleSlug?: string;
+  scheduleNextRun?: string;
 }
 
 export interface SessionsResponse {

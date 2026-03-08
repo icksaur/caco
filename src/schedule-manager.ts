@@ -193,7 +193,8 @@ async function createAndExecute(slug: string, definition: ScheduleDefinition): P
     body: JSON.stringify({ 
       cwd: process.cwd(), 
       model: definition.sessionConfig.model || 'claude-sonnet',
-      description: slug
+      description: slug,
+      kind: 'scheduled'
     })
   });
   

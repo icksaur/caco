@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage } from './types.js';
 import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
-import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath } from './storage.js';
+import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, type SessionKind } from './storage.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
@@ -31,6 +31,7 @@ function loadMcpServers(): Record<string, unknown> | undefined {
 interface CopilotClientInstance {
   start(): Promise<void>;
   stop(): Promise<void>;
+  ping(message?: string): Promise<{ message: string; timestamp: number }>;
   createSession(config: CreateSessionConfig): Promise<CopilotSessionInstance>;
   resumeSession(sessionId: string, config?: ResumeSessionConfig): Promise<CopilotSessionInstance>;
   deleteSession(sessionId: string): Promise<void>;
@@ -96,17 +97,18 @@ interface CachedSession {
 interface SessionListItem {
   sessionId: string;
   cwd: string | null;
-  model: string | null;   // Last known model (from cache)
-  name: string;           // Custom name from ~/.caco/sessions/<id>/meta.json
-  summary: string | null; // SDK-generated summary
+  model: string | null;
+  name: string;
+  kind: SessionKind;
+  summary: string | null;
   updatedAt: string | Date | null;
   isBusy: boolean;
-  isUnobserved: boolean;  // Session completed work since last viewed
-  currentIntent: string | null; // Last reported intent
-  contextFiles: string[] | null; // Recently edited files from session context
-  hasIcon: boolean;       // Has icon.gif or icon.png in session dir
-  scheduleSlug: string | null;  // If created by a schedule
-  scheduleNextRun: string | null; // Next scheduled run time
+  isUnobserved: boolean;
+  currentIntent: string | null;
+  contextFiles: string[] | null;
+  hasIcon: boolean;
+  scheduleSlug: string | null;
+  scheduleNextRun: string | null;
 }
 
 interface GroupedSessions {
@@ -222,6 +224,20 @@ class SessionManager {
     if (msg.includes('connection') || msg.includes('EPIPE') || msg.includes('killed') || msg.includes('spawn')) {
       console.warn('[SDK] Shared client appears dead, will recreate on next use');
       this.sharedClient = null;
+    }
+  }
+
+  async ensureClientHealthy(): Promise<void> {
+    const client = await this.ensureClient();
+    try {
+      await Promise.race([
+        client.ping('health'),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('ping timeout')), 5000))
+      ]);
+    } catch (e) {
+      console.warn('[SDK] Ping failed, resetting client:', e instanceof Error ? e.message : e);
+      this.sharedClient = null;
+      await this.ensureClient();
     }
   }
 
@@ -622,10 +638,11 @@ class SessionManager {
       const isUnobserved = unobservedTracker.isUnobserved(sessionId);
       const currentIntent = meta?.currentIntent || null;
       const contextFiles = meta?.context?.files?.slice(0, 3) || null;
+      const kind: SessionKind = meta?.kind ?? 'interactive';
       const scheduleSlug = null;
       const scheduleNextRun = null;
       const hasIcon = getSessionIconPath(sessionId) !== null;
-      result.push({ sessionId, cwd, model, name, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, hasIcon, scheduleSlug, scheduleNextRun });
+      result.push({ sessionId, cwd, model, name, kind, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, hasIcon, scheduleSlug, scheduleNextRun });
     }
     return result;
   }

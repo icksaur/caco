@@ -207,10 +207,12 @@ export async function dispatchMessage(
   
   try {
     // Ensure session is active (defensive - route handler should have done this)
-    // Kept as fallback for direct dispatchMessage() calls
     if (!sessionManager.isActive(sessionId)) {
       await sessionManager.resume(sessionId, sessionState.getSessionConfig());
     }
+    
+    // Verify SDK connection is alive before sending
+    await sessionManager.ensureClientHealthy();
     
     const session = sessionManager.getSession(sessionId);
     if (!session) {
@@ -252,21 +254,26 @@ export async function dispatchMessage(
       console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
     };
     
+    const INITIAL_TIMEOUT_MS = 60_000;
+    let receivedFirstEvent = false;
+    
     const resetWatchdog = () => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      const timeout = receivedFirstEvent ? DISPATCH_TIMEOUT_MS : INITIAL_TIMEOUT_MS;
       timeoutHandle = setTimeout(() => {
         if (!dispatchCompleted) {
-          console.warn(`[DISPATCH:${rid}] No events for ${DISPATCH_TIMEOUT_MS / 1000}s, timing out session ${sessionId}`);
-          onEvent({ type: 'session.error', data: { message: `No response for ${DISPATCH_TIMEOUT_MS / 1000 / 60} minutes` } });
+          const label = receivedFirstEvent ? `${DISPATCH_TIMEOUT_MS / 1000}s between events` : `${INITIAL_TIMEOUT_MS / 1000}s waiting for first event`;
+          console.warn(`[DISPATCH:${rid}] Watchdog: ${label}, timing out session ${sessionId}`);
+          onEvent({ type: 'session.error', data: { message: receivedFirstEvent ? `No response for ${DISPATCH_TIMEOUT_MS / 1000 / 60} minutes` : 'Session not responding (connection may be stale)' } });
           cleanupAndComplete('timeout');
           unsubscribe();
         }
-      }, DISPATCH_TIMEOUT_MS);
+      }, timeout);
     };
     resetWatchdog();
     
     const unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on((event: SessionEvent) => {
-      // Reset watchdog on every event — session is alive
+      receivedFirstEvent = true;
       resetWatchdog();
       // Flush queued caco events before trigger events (so embeds appear at natural break)
       if (isFlushTrigger(event.type)) {

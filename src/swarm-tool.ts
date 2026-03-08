@@ -13,7 +13,7 @@ import sessionManager from './session-manager.js';
 import { broadcastGlobalEvent } from './routes/websocket.js';
 
 const POLL_INTERVAL_MS = 5000;
-const PER_SESSION_TIMEOUT_MS = 10 * 60 * 1000;
+const PER_SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 
 let swarmActive = false;
 
@@ -123,6 +123,7 @@ Each session runs independently with its own prompt. Results are collected and r
                 model,
                 parentSessionId: sessionRef.id,
                 isSwarmSession: true,
+                kind: 'swarm',
                 description: desc
               })
             });
@@ -176,7 +177,7 @@ Each session runs independently with its own prompt. Results are collected and r
 
             if (Date.now() - s.startedAt > PER_SESSION_TIMEOUT_MS) {
               s.done = true;
-              s.result = '(timed out after 10 minutes)';
+              s.result = '(timed out after 15 minutes)';
               completed++;
               continue;
             }

@@ -347,11 +347,14 @@ export async function loadSessions(): Promise<void> {
     container.innerHTML = '';
     
     // Use already-flattened list for rendering
-    allSessions = flatSessions;
+    allSessions = flatSessions.filter(s => s.kind !== 'swarm');
     
-    // Sort by updatedAt descending (most recently updated first)
     allSessions.sort((a, b) => {
       if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
+      const kindOrder: Record<string, number> = { interactive: 0, scheduled: 1, agent: 2, swarm: 3 };
+      const aKind = kindOrder[a.kind ?? 'interactive'] ?? 0;
+      const bKind = kindOrder[b.kind ?? 'interactive'] ?? 0;
+      if (aKind !== bKind) return aKind - bKind;
       if (a.updatedAt && b.updatedAt) {
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       }

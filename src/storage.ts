@@ -36,16 +36,20 @@ interface CacheEntry {
 /**
  * Session metadata stored in ~/.caco/sessions/<id>/meta.json
  */
+export type SessionKind = 'interactive' | 'agent' | 'swarm' | 'scheduled';
+
 export interface SessionMeta {
   name: string;
-  parentSessionId?: string; // Set when created by another session via create_caco_session
-  isSwarmSession?: boolean; // Set when created by caco_session_swarm
-  lastObservedAt?: string;  // ISO timestamp: user last viewed this session
-  lastIdleAt?: string;      // ISO timestamp: session last became idle
-  currentIntent?: string;   // Last reported intent (from report_intent tool)
-  envHint?: string;         // Environment setup hint shown on session resume
-  context?: Record<string, string[]>;  // Named context sets (files, applet, endpoints, etc.)
-  model?: string;           // Last known model ID (synced from SDK on create/resume)
+  kind?: SessionKind;
+  parentSessionId?: string;
+  lastObservedAt?: string;
+  lastIdleAt?: string;
+  currentIntent?: string;
+  envHint?: string;
+  context?: Record<string, string[]>;
+  model?: string;
+  /** @deprecated Use kind === 'swarm' instead */
+  isSwarmSession?: boolean;
 }
 
 /**
@@ -170,7 +174,13 @@ export function getSessionMeta(sessionId: string): SessionMeta | undefined {
   const metaPath = join(getSessionDir(sessionId), 'meta.json');
   if (!existsSync(metaPath)) return undefined;
   try {
-    return JSON.parse(readFileSync(metaPath, 'utf-8'));
+    const meta: SessionMeta = JSON.parse(readFileSync(metaPath, 'utf-8'));
+    if (!meta.kind) {
+      if (meta.isSwarmSession) meta.kind = 'swarm';
+      else if (meta.parentSessionId) meta.kind = 'agent';
+      else meta.kind = 'interactive';
+    }
+    return meta;
   } catch {
     return undefined;
   }

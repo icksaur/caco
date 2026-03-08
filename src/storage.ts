@@ -208,18 +208,31 @@ export function setSessionMeta(sessionId: string, meta: SessionMeta): void {
   writeFileSync(join(sessionDir, 'meta.json'), JSON.stringify(meta, null, 2));
 }
 
-export function getSessionRoadmap(sessionId: string): Roadmap | null {
-  const path = join(getSessionDir(sessionId), 'roadmap.json');
-  if (!existsSync(path)) return null;
+const RESERVED_NAMES = new Set(['meta']);
+
+export function getSessionData(sessionId: string, name: string): Record<string, unknown> | null {
+  if (RESERVED_NAMES.has(name)) return null;
+  const filePath = join(getSessionDir(sessionId), `${name}.json`);
+  if (!existsSync(filePath)) return null;
   try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
+    return JSON.parse(readFileSync(filePath, 'utf-8'));
   } catch { return null; }
 }
 
-export function setSessionRoadmap(sessionId: string, roadmap: Roadmap): void {
+export function setSessionData(sessionId: string, name: string, data: Record<string, unknown>): boolean {
+  if (RESERVED_NAMES.has(name)) return false;
   const dir = getSessionDir(sessionId);
   ensureDir(dir);
-  writeFileSync(join(dir, 'roadmap.json'), JSON.stringify(roadmap, null, 2));
+  writeFileSync(join(dir, `${name}.json`), JSON.stringify(data, null, 2));
+  return true;
+}
+
+export function getSessionRoadmap(sessionId: string): Roadmap | null {
+  return getSessionData(sessionId, 'roadmap') as Roadmap | null;
+}
+
+export function setSessionRoadmap(sessionId: string, roadmap: Roadmap): void {
+  setSessionData(sessionId, 'roadmap', roadmap as unknown as Record<string, unknown>);
 }
 
 /**

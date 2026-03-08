@@ -113,6 +113,14 @@ Returns:
 }
 ```
 
+**GET /api/sessions/:id/data/:name** - Get session JSON document
+
+Returns the named JSON document from `~/.caco/sessions/<id>/<name>.json`, or `{}` if not found. Name `meta` is reserved.
+
+**PUT /api/sessions/:id/data/:name** - Write session JSON document
+
+Body: any JSON object. Replaces the entire document. Returns 403 for reserved names.
+
 **GET /api/sessions/:id/roadmap** - Get session roadmap
 
 Returns roadmap JSON or `{}` if none exists.

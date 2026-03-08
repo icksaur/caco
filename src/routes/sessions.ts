@@ -15,7 +15,7 @@ import { join } from 'path';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionRoadmap, setSessionRoadmap, type SessionKind, type Roadmap } from '../storage.js';
+import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, type SessionKind, type Roadmap } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -330,10 +330,26 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
   });
 });
 
+router.get('/sessions/:sessionId/data/:name', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const name = req.params.name as string;
+  const data = getSessionData(sessionId, name);
+  res.json(data || {});
+});
+
+router.put('/sessions/:sessionId/data/:name', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const name = req.params.name as string;
+  if (!setSessionData(sessionId, name, req.body)) {
+    res.status(403).json({ error: `Cannot write to reserved name: ${name}` });
+    return;
+  }
+  res.json(req.body);
+});
+
 router.get('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const roadmap = getSessionRoadmap(sessionId);
-  res.json(roadmap || {});
+  res.json(getSessionRoadmap(sessionId) || {});
 });
 
 router.patch('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {

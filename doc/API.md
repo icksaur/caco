@@ -113,6 +113,23 @@ Returns:
 }
 ```
 
+**GET /api/sessions/:id/roadmap** - Get session roadmap
+
+Returns roadmap JSON or `{}` if none exists.
+
+**PATCH /api/sessions/:id/roadmap** - Update session roadmap
+
+Body (any subset):
+```json
+{
+  "title": "string",
+  "documents": ["path1", "path2"],
+  "steps": [{ "title": "...", "status": "pending|active|done|blocked", "description": "...", "context": ["..."] }]
+}
+```
+
+Returns updated roadmap.
+
 **GET /api/sessions/:id/state** - Get session state (agent-to-agent)
 
 Returns:

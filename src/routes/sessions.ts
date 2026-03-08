@@ -15,7 +15,7 @@ import { join } from 'path';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, getSessionIconPath, type SessionKind } from '../storage.js';
+import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionRoadmap, setSessionRoadmap, type SessionKind, type Roadmap } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -328,6 +328,25 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
     isActive,
     isBusy
   });
+});
+
+router.get('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const roadmap = getSessionRoadmap(sessionId);
+  res.json(roadmap || {});
+});
+
+router.patch('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const update = req.body as Partial<Roadmap>;
+  
+  const existing = getSessionRoadmap(sessionId) || { title: '', steps: [] };
+  if (update.title !== undefined) existing.title = update.title;
+  if (update.documents !== undefined) existing.documents = update.documents;
+  if (update.steps !== undefined) existing.steps = update.steps;
+  
+  setSessionRoadmap(sessionId, existing);
+  res.json(existing);
 });
 
 /**

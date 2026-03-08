@@ -20,6 +20,7 @@ import { createMcpAuthTools } from './src/mcp-auth-tools.js';
 import { createDevDocsTool } from './src/dev-docs-tool.js';
 import { createExtensionsTool } from './src/extensions-tool.js';
 import { createSwarmTool } from './src/swarm-tool.js';
+import { createRoadmapTools } from './src/roadmap-tool.js';
 import type { SessionIdRef } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
@@ -85,7 +86,9 @@ const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) 
   
   const swarmTools = createSwarmTool(sessionRef);
   
-  return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools];
+  const roadmapTools = createRoadmapTools(sessionRef);
+  
+  return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...roadmapTools];
 };
 
 // System message for sessions - built at startup from prompts module

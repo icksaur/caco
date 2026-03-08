@@ -52,6 +52,19 @@ export interface SessionMeta {
   isSwarmSession?: boolean;
 }
 
+export interface RoadmapStep {
+  title: string;
+  description?: string;
+  status: 'pending' | 'active' | 'done' | 'blocked';
+  context?: string[];
+}
+
+export interface Roadmap {
+  title: string;
+  documents?: string[];
+  steps: RoadmapStep[];
+}
+
 /**
  * MCP server OAuth state stored in ~/.caco/mcp-auth.json
  * Global across all sessions - authenticate once, use everywhere
@@ -193,6 +206,20 @@ export function setSessionMeta(sessionId: string, meta: SessionMeta): void {
   const sessionDir = getSessionDir(sessionId);
   ensureDir(sessionDir);
   writeFileSync(join(sessionDir, 'meta.json'), JSON.stringify(meta, null, 2));
+}
+
+export function getSessionRoadmap(sessionId: string): Roadmap | null {
+  const path = join(getSessionDir(sessionId), 'roadmap.json');
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch { return null; }
+}
+
+export function setSessionRoadmap(sessionId: string, roadmap: Roadmap): void {
+  const dir = getSessionDir(sessionId);
+  ensureDir(dir);
+  writeFileSync(join(dir, 'roadmap.json'), JSON.stringify(roadmap, null, 2));
 }
 
 /**

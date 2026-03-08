@@ -71,6 +71,10 @@ Parameters:
 
 The tool reads the current roadmap, applies the action, writes back. Returns the updated roadmap. This avoids agents producing malformed JSON.
 
+**`get_roadmap`** — reads the current session's roadmap and returns it. Essential for context recovery after compaction — the roadmap persists on disk but conversation history is lost. Agents should call this early in resumed/compacted sessions to understand what's done and what's next.
+
+Returns the full roadmap JSON, or a message indicating no roadmap exists.
+
 ### Applet
 
 **`?applet=roadmap`** — renders the active session's roadmap.
@@ -113,7 +117,8 @@ User switches session:
 
 ## Considerations
 
-- **Agent adoption:** The tool must be in the system prompt so agents know to use it. Include "update roadmap after completing major tasks" in session instructions.
+- **Agent adoption:** Both tools must be in the system prompt. Include "call get_roadmap after compaction or session resume to recover context" and "call update_roadmap after completing major tasks" in session instructions.
+- **Compaction recovery:** The roadmap is the primary context recovery mechanism. After compaction strips conversation history, the agent calls `get_roadmap` to see the full project state — what's done, what's active, what's next. This makes long-lived sessions viable across multiple compaction cycles.
 - **No roadmap yet:** Applet shows an empty state with a "Create roadmap" prompt. Agent can create via tool, or user can click to create a blank one.
 - **Multiple sessions, same project:** Different sessions for the same project will have separate roadmaps. This is intentional — each session's roadmap tracks its own work stream. A shared project roadmap across sessions is a future extension.
 - **Roadmap size:** Keep it small. 5-20 steps max. The applet is a quick-glance overview, not a full project management tool.

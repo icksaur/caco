@@ -19,81 +19,74 @@ Returns empty object if no roadmap exists yet.`,
   });
 
   const updateRoadmap = defineTool('update_roadmap', {
-    description: `Update the session roadmap. Use structured actions to modify the roadmap without editing JSON directly.
+    description: `Update the session roadmap. All parameters are optional — set whatever you need in one call.
 
-Actions:
-- set_title: Set the roadmap title
-- add_step: Add a new step (appended to end, or at stepIndex)
-- update_step: Update an existing step's fields (by stepIndex)
-- remove_step: Remove a step (by stepIndex)
-- add_document: Add a document path to the document list
-- remove_document: Remove a document path
-- reorder_steps: Set new step order (array of current indices)
+- title: Set the roadmap title
+- steps: Replace the entire step list (for bulk creation/reorder)
+- documents: Replace the entire document list
+- addStep: Add a single step (appended, or at addStepIndex)
+- updateStep: Update fields on an existing step (requires updateStepIndex)
+- removeStepIndex: Remove step at this index
 
-Step statuses: pending, active, done, blocked`,
+Step statuses: pending, active, done, blocked
+
+Examples:
+  Create roadmap: { title: "My Project", steps: [{ title: "Research", status: "active" }, { title: "Implement", status: "pending" }] }
+  Mark step done: { updateStepIndex: 0, updateStep: { status: "done" } }
+  Add a step: { addStep: { title: "Test", status: "pending" } }`,
     parameters: z.object({
-      action: z.enum(['set_title', 'add_step', 'update_step', 'remove_step', 'add_document', 'remove_document', 'reorder_steps']),
-      title: z.string().optional().describe('For set_title action'),
-      step: z.object({
+      title: z.string().optional(),
+      steps: z.array(z.object({
         title: z.string(),
         description: z.string().optional(),
         status: z.enum(['pending', 'active', 'done', 'blocked']).optional(),
         context: z.array(z.string()).optional(),
-      }).optional().describe('For add_step, update_step'),
-      stepIndex: z.number().optional().describe('For update_step, remove_step, add_step (insert position)'),
-      document: z.string().optional().describe('For add_document, remove_document'),
-      order: z.array(z.number()).optional().describe('For reorder_steps: new index order'),
+      })).optional().describe('Replace entire step list'),
+      documents: z.array(z.string()).optional().describe('Replace entire document list'),
+      addStep: z.object({
+        title: z.string(),
+        description: z.string().optional(),
+        status: z.enum(['pending', 'active', 'done', 'blocked']).optional(),
+        context: z.array(z.string()).optional(),
+      }).optional().describe('Append a step'),
+      addStepIndex: z.number().optional().describe('Insert position for addStep'),
+      updateStepIndex: z.number().optional().describe('Index of step to update'),
+      updateStep: z.object({
+        title: z.string().optional(),
+        description: z.string().optional(),
+        status: z.enum(['pending', 'active', 'done', 'blocked']).optional(),
+        context: z.array(z.string()).optional(),
+      }).optional().describe('Fields to update on step at updateStepIndex'),
+      removeStepIndex: z.number().optional().describe('Remove step at this index'),
     }),
-    handler: async ({ action, title, step, stepIndex, document, order }) => {
+    handler: async ({ title, steps, documents, addStep, addStepIndex, updateStepIndex, updateStep, removeStepIndex }) => {
       const roadmap: Roadmap = getSessionRoadmap(sessionRef.id) || { title: '', steps: [] };
 
-      switch (action) {
-        case 'set_title':
-          if (!title) return { error: 'title required' };
-          roadmap.title = title;
-          break;
+      if (title !== undefined) roadmap.title = title;
+      if (documents !== undefined) roadmap.documents = documents;
+      if (steps !== undefined) {
+        roadmap.steps = steps.map(s => ({ title: s.title, description: s.description, status: s.status || 'pending', context: s.context }));
+      }
 
-        case 'add_step': {
-          if (!step) return { error: 'step required' };
-          const newStep: RoadmapStep = { title: step.title, description: step.description, status: step.status || 'pending', context: step.context };
-          if (stepIndex !== undefined && stepIndex >= 0 && stepIndex <= roadmap.steps.length) {
-            roadmap.steps.splice(stepIndex, 0, newStep);
-          } else {
-            roadmap.steps.push(newStep);
-          }
-          break;
+      if (addStep) {
+        const newStep: RoadmapStep = { title: addStep.title, description: addStep.description, status: addStep.status || 'pending', context: addStep.context };
+        if (addStepIndex !== undefined && addStepIndex >= 0 && addStepIndex <= roadmap.steps.length) {
+          roadmap.steps.splice(addStepIndex, 0, newStep);
+        } else {
+          roadmap.steps.push(newStep);
         }
+      }
 
-        case 'update_step':
-          if (stepIndex === undefined || !roadmap.steps[stepIndex]) return { error: 'valid stepIndex required' };
-          if (step) {
-            if (step.title) roadmap.steps[stepIndex].title = step.title;
-            if (step.description !== undefined) roadmap.steps[stepIndex].description = step.description;
-            if (step.status) roadmap.steps[stepIndex].status = step.status;
-            if (step.context) roadmap.steps[stepIndex].context = step.context;
-          }
-          break;
+      if (updateStepIndex !== undefined && updateStep && roadmap.steps[updateStepIndex]) {
+        const s = roadmap.steps[updateStepIndex];
+        if (updateStep.title) s.title = updateStep.title;
+        if (updateStep.description !== undefined) s.description = updateStep.description;
+        if (updateStep.status) s.status = updateStep.status;
+        if (updateStep.context) s.context = updateStep.context;
+      }
 
-        case 'remove_step':
-          if (stepIndex === undefined || !roadmap.steps[stepIndex]) return { error: 'valid stepIndex required' };
-          roadmap.steps.splice(stepIndex, 1);
-          break;
-
-        case 'add_document':
-          if (!document) return { error: 'document required' };
-          if (!roadmap.documents) roadmap.documents = [];
-          if (!roadmap.documents.includes(document)) roadmap.documents.push(document);
-          break;
-
-        case 'remove_document':
-          if (!document) return { error: 'document required' };
-          roadmap.documents = (roadmap.documents || []).filter(d => d !== document);
-          break;
-
-        case 'reorder_steps':
-          if (!order || order.length !== roadmap.steps.length) return { error: 'order must be array of all step indices' };
-          roadmap.steps = order.map(i => roadmap.steps[i]).filter(Boolean);
-          break;
+      if (removeStepIndex !== undefined && roadmap.steps[removeStepIndex]) {
+        roadmap.steps.splice(removeStepIndex, 1);
       }
 
       setSessionRoadmap(sessionRef.id, roadmap);

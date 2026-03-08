@@ -8,7 +8,7 @@
  */
 
 import { showAppletPanel } from './view-controller.js';
-import { wsSetState, onStateUpdate, onEvent, isWsConnected } from './websocket.js';
+import { wsSetState, onStateUpdate, onEvent, onGlobalEvent, isWsConnected } from './websocket.js';
 import { getActiveSessionId, getCurrentCwd, isLoadingHistory } from './app-state.js';
 import { regions } from './dom-regions.js';
 import { setNewChatCwd } from './model-selector.js';
@@ -66,6 +66,12 @@ function appletOnSessionEvent(cb: (event: SessionEvent) => void): () => void {
     if (!isLoadingHistory()) cb(event);
   };
   const unsub = onEvent(wrapper);
+  currentApplet?.cleanupFns.push(unsub);
+  return unsub;
+}
+
+function appletOnGlobalEvent(cb: (event: { type: string; data?: Record<string, unknown> }) => void): () => void {
+  const unsub = onGlobalEvent(cb);
   currentApplet?.cleanupFns.push(unsub);
   return unsub;
 }
@@ -140,6 +146,7 @@ interface AppletAPI {
   onUrlParamsChange: typeof onUrlParamsChange;
   onStateUpdate: typeof appletOnStateUpdate;
   onSessionEvent: typeof appletOnSessionEvent;
+  onGlobalEvent: typeof appletOnGlobalEvent;
   onSessionChange: typeof appletOnSessionChange;
   getSessionId: typeof getActiveSessionId;
   getSessionMeta: typeof getSessionMeta;
@@ -174,6 +181,7 @@ export function initAppletRuntime(): void {
     onUrlParamsChange,
     onStateUpdate: appletOnStateUpdate,
     onSessionEvent: appletOnSessionEvent,
+    onGlobalEvent: appletOnGlobalEvent,
     onSessionChange: appletOnSessionChange,
     getSessionId: getActiveSessionId,
     getSessionMeta,

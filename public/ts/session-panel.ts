@@ -527,6 +527,14 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     item.appendChild(row2);
   }
   
+  const intent = tracked?.intent || session.currentIntent;
+  if (intent) {
+    const row3 = document.createElement('div');
+    row3.className = 'session-row session-row-intent';
+    row3.textContent = intent;
+    item.appendChild(row3);
+  }
+  
   return item;
 }
 

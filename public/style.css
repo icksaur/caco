@@ -1102,6 +1102,17 @@ main {
   color: var(--color-link);
 }
 
+.session-row-intent {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  padding-left: calc(12px + var(--space-sm));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.7;
+  font-style: italic;
+}
+
 /* Session title (truncated) */
 .session-title {
   flex: 1;

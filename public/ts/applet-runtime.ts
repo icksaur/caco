@@ -38,16 +38,22 @@ interface AppletInstance {
 let currentApplet: AppletInstance | null = null;
 let pendingAppletState: Record<string, unknown> | null = null;
 
-type SessionChangeCallback = (sessionId: string, cwd: string) => void;
+export interface SessionInfo {
+  sessionId: string;
+  cwd: string;
+  name?: string;
+  kind?: string;
+  model?: string;
+  currentIntent?: string;
+  busy?: boolean;
+}
+
+type SessionChangeCallback = (sessionId: string, info: SessionInfo) => void;
 const sessionChangeCallbacks = new Set<SessionChangeCallback>();
 
-/**
- * Notify applets that the active session changed.
- * Called from router.ts after setActiveSession.
- */
-export function notifySessionChange(sessionId: string, cwd: string): void {
+export function notifySessionChange(sessionId: string, info: SessionInfo): void {
   for (const cb of sessionChangeCallbacks) {
-    try { cb(sessionId, cwd); } catch (e) { console.error('[APPLET] sessionChange callback error:', e); }
+    try { cb(sessionId, info); } catch (e) { console.error('[APPLET] sessionChange callback error:', e); }
   }
 }
 
@@ -75,7 +81,7 @@ function appletOnSessionChange(cb: SessionChangeCallback): () => void {
   
   const id = getActiveSessionId();
   const cwd = getCurrentCwd();
-  if (id) cb(id, cwd);
+  if (id) cb(id, { sessionId: id, cwd });
   
   return unsub;
 }
@@ -87,6 +93,25 @@ function appletOnStateUpdate(cb: (state: Record<string, unknown>) => void): () =
   const unsub = onStateUpdate(cb);
   currentApplet?.cleanupFns.push(unsub);
   return unsub;
+}
+
+async function getSessionMeta(sessionId?: string): Promise<SessionInfo | null> {
+  const id = sessionId || getActiveSessionId();
+  if (!id) return null;
+  try {
+    const res = await fetch(`/api/sessions/${id}/state`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      sessionId: data.sessionId,
+      cwd: data.cwd,
+      name: data.name,
+      kind: data.kind,
+      model: data.model,
+      currentIntent: data.currentIntent,
+      busy: data.isBusy,
+    };
+  } catch { return null; }
 }
 
 /**
@@ -117,6 +142,7 @@ interface AppletAPI {
   onSessionEvent: typeof appletOnSessionEvent;
   onSessionChange: typeof appletOnSessionChange;
   getSessionId: typeof getActiveSessionId;
+  getSessionMeta: typeof getSessionMeta;
   sendAgentMessage: typeof sendAgentMessage;
   saveTempFile: typeof saveTempFile;
   callMCPTool: typeof callMCPTool;
@@ -150,6 +176,7 @@ export function initAppletRuntime(): void {
     onSessionEvent: appletOnSessionEvent,
     onSessionChange: appletOnSessionChange,
     getSessionId: getActiveSessionId,
+    getSessionMeta,
     sendAgentMessage,
     saveTempFile,
     callMCPTool

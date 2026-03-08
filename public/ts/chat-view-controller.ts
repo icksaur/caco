@@ -107,7 +107,7 @@ class ChatViewController {
 
     try {
       const data = await this.resumeAndLoad(sessionId);
-      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.sessionId, data.hasIcon);
+      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.sessionId, data.hasIcon, data.kind, data.currentIntent);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Network error';
       console.error('[CHAT] Error activating session:', msg);
@@ -123,7 +123,7 @@ class ChatViewController {
    */
   private async resumeAndLoad(sessionId: string): Promise<{
     cwd?: string; model?: string; cwdFallback?: string; hasGit?: boolean;
-    name?: string; sessionId?: string; hasIcon?: boolean;
+    name?: string; sessionId?: string; hasIcon?: boolean; kind?: string; currentIntent?: string;
   }> {
     reconnectIfNeeded();
     await waitForConnect();
@@ -162,10 +162,10 @@ class ChatViewController {
   /**
    * Transition to chatting view after successful load.
    */
-  private showChat(sessionId: string, cwd: string, model?: string, hasGit = false, name?: string, _sessionId?: string, hasIcon?: boolean): void {
+  private showChat(sessionId: string, cwd: string, model?: string, hasGit = false, name?: string, _sessionId?: string, hasIcon?: boolean, kind?: string, currentIntent?: string): void {
     this.footerSessionId = sessionId;
     updateMenuIndicators();
-    notifySessionChange(sessionId, cwd);
+    notifySessionChange(sessionId, { sessionId, cwd, name, kind, model, currentIntent });
     this.updateStatus(cwd, model, hasGit, name, sessionId, hasIcon);
     restoreContextUsage(sessionId);
     adHocBar.activateSession(sessionId);

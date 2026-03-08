@@ -699,9 +699,9 @@ window.appletAPI.onSessionEvent((event) => {
   }
 });
 
-window.appletAPI.onSessionChange((_sessionId, cwd) => {
-  if (!cwd) return;
-  repoPath = cwd;
+window.appletAPI.onSessionChange((_sessionId, info) => {
+  if (!info.cwd) return;
+  repoPath = info.cwd;
   if (repoPathLabel) {
     repoPathLabel.textContent = repoPath;
     repoPathLabel.href = '?applet=file-finder&root=' + encodeURIComponent(repoPath);

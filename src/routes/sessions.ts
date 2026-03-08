@@ -145,6 +145,8 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       model,
       hasGit,
       name: meta?.name || null,
+      kind: meta?.kind || 'interactive',
+      currentIntent: meta?.currentIntent || null,
       hasIcon: getSessionIconPath(result.sessionId) !== null,
       cwdFallback: result.usedFallbackCwd
     });
@@ -320,6 +322,9 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
     status: isBusy ? 'busy' : (isActive ? 'idle' : 'inactive'),
     cwd,
     model,
+    name: meta?.name || null,
+    kind: meta?.kind || 'interactive',
+    currentIntent: meta?.currentIntent || null,
     isActive,
     isBusy
   });

@@ -476,8 +476,18 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   const displayName = session.name || session.summary || 'No summary';
   const titleSpan = document.createElement('span');
   titleSpan.className = 'session-title';
-  titleSpan.textContent = displayName;
   titleSpan.title = displayName;
+  
+  const nameText = document.createTextNode(displayName);
+  titleSpan.appendChild(nameText);
+  
+  const intent = tracked?.intent || session.currentIntent;
+  if (intent) {
+    const intentSpan = document.createElement('span');
+    intentSpan.className = 'session-intent';
+    intentSpan.textContent = intent;
+    titleSpan.appendChild(intentSpan);
+  }
   row1.appendChild(titleSpan);
   
   if (session.updatedAt) {
@@ -525,14 +535,6 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     if (dirName) statusParts.push(`<span title="${escapeHtml(fullCwd || '')}">${escapeHtml(dirName)}</span>`);
     row2.innerHTML = statusParts.join(sep);
     item.appendChild(row2);
-  }
-  
-  const intent = tracked?.intent || session.currentIntent;
-  if (intent) {
-    const row3 = document.createElement('div');
-    row3.className = 'session-row session-row-intent';
-    row3.textContent = intent;
-    item.appendChild(row3);
   }
   
   return item;

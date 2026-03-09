@@ -131,9 +131,10 @@ function handlePopState(): void {
  * Toggle sessions overlay
  */
 export function toggleSessions(): void {
-  toggleSessionPanel();
   if (isSessionPanelVisible()) {
-    void loadSessions();
+    hideSessionPanel();
+  } else {
+    showSessionManager();
   }
 }
 

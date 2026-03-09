@@ -5,7 +5,7 @@ export function initNotifications(): void {
   if (Notification.permission === 'granted') {
     permissionGranted = true;
   } else if (Notification.permission !== 'denied') {
-    Notification.requestPermission().then(p => { permissionGranted = p === 'granted'; });
+    void Notification.requestPermission().then(p => { permissionGranted = p === 'granted'; });
   }
 }
 

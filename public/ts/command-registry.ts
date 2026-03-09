@@ -1,5 +1,4 @@
 import { newSessionClick, sessionClick } from './router.js';
-import { showSessionManager } from './session-panel.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';

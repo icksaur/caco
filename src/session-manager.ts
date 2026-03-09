@@ -306,6 +306,11 @@ class SessionManager {
     }
   }
 
+  /** Re-scan disk for sessions (e.g., after import) */
+  refreshCache(): void {
+    this._discoverSessions();
+  }
+
   /**
    * Create a new session for the given cwd
    * @param config - Required config with toolFactory (prevents sessions without tools)

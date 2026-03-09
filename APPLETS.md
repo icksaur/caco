@@ -68,8 +68,8 @@ Applets can also call the shell endpoint directly: `fetch('/api/shell', { method
 Applets are opened via `?applet=slug`. Additional params are passed through:
 
 ```
-?applet=git-status&path=/home/carl/repo
-?applet=file-finder&root=/home/carl/docs
+?applet=git-status&path=/home/user/repo
+?applet=file-finder&root=/home/user/docs
 ?applet=image-viewer&path=/tmp/screenshot.png
 ```
 

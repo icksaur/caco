@@ -12,12 +12,12 @@
  * - Removing them does NOT destroy loaded content
  */
 
-import { getViewState, setViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, toggleSessionPanel, showSessionPanel, hideSessionPanel, isSessionPanelVisible, type ViewState } from './view-controller.js';
+import { showAppletPanel, hideAppletPanel, isAppletPanelVisible, toggleAppletExpanded, hideSessionPanel, isSessionPanelVisible } from './view-controller.js';
 import { getActiveSessionId } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
-import { showSessionManager, loadSessions } from './session-panel.js';
+import { showSessionManager } from './session-panel.js';
 import { chatView } from './chat-view-controller.js';
 
 // Navigation API types (not yet in TypeScript lib)

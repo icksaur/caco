@@ -12,6 +12,7 @@
 import { Router, Request, Response } from 'express';
 import { existsSync, statSync, createReadStream } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
@@ -22,6 +23,7 @@ import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
 
 const router = Router();
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 router.get('/session', async (req: Request, res: Response) => {
   const sessionId = (req.query.sessionId as string) || sessionState.activeSessionId;
   
@@ -380,6 +382,176 @@ router.get('/sessions/:sessionId/icon', (req: Request, res: Response) => {
   res.setHeader('Content-Type', ext);
   res.setHeader('Cache-Control', 'public, max-age=60');
   createReadStream(iconPath).pipe(res);
+});
+
+/**
+ * GET /api/sessions/:sessionId/export
+ * Export a session as a .tar.gz archive containing both SDK and Caco data.
+ * Archive structure: sdk/<sessionId>/... and caco/<sessionId>/...
+ * Query params:
+ *   ?delete=true - Remove session after export (migration mode)
+ */
+router.get('/sessions/:sessionId/export', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const shouldDelete = req.query.delete === 'true';
+
+  if (!UUID_RE.test(sessionId)) {
+    res.status(400).json({ error: 'Invalid session ID format' });
+    return;
+  }
+
+  const sdkBase = join(homedir(), '.copilot', 'session-state');
+  const cacoBase = join(homedir(), '.caco', 'sessions');
+
+  if (!existsSync(join(sdkBase, sessionId))) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+
+  try {
+    const tar = await import('tar');
+    const { mkdtempSync, cpSync, rmSync } = await import('fs');
+    const { tmpdir } = await import('os');
+
+    // Build a staging directory with the archive structure
+    const staging = mkdtempSync(join(tmpdir(), 'caco-export-'));
+    try {
+      cpSync(join(sdkBase, sessionId), join(staging, 'sdk', sessionId), { recursive: true });
+      if (existsSync(join(cacoBase, sessionId))) {
+        cpSync(join(cacoBase, sessionId), join(staging, 'caco', sessionId), { recursive: true });
+      }
+
+      res.setHeader('Content-Type', 'application/gzip');
+      res.setHeader('Content-Disposition', `attachment; filename="${sessionId}.caco-session.tar.gz"`);
+
+      const stream = tar.create({ gzip: true, cwd: staging }, ['.']);
+      stream.on('error', () => rmSync(staging, { recursive: true, force: true }));
+      stream.pipe(res);
+
+      stream.on('end', () => {
+        rmSync(staging, { recursive: true, force: true });
+        if (shouldDelete && !sessionManager.isBusy(sessionId)) {
+          void sessionState.deleteSession(sessionId).then(() => {
+            broadcastGlobalEvent({ type: 'session.listChanged', data: { reason: 'deleted', sessionId } });
+          }).catch(e => console.error(`[EXPORT] Delete after export failed: ${e}`));
+        }
+      });
+    } catch (err) {
+      rmSync(staging, { recursive: true, force: true });
+      throw err;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: `Export failed: ${msg}` });
+    }
+  }
+});
+
+/**
+ * POST /api/sessions/import
+ * Import a session from a .tar.gz archive (raw body, not multipart).
+ * Usage: curl -X POST --data-binary @session.caco-session.tar.gz http://host/api/sessions/import
+ * Query params:
+ *   ?cwd=/new/path - Rewrite CWD in session data (for cross-machine migration)
+ *   ?force=true - Overwrite if session ID already exists
+ */
+router.post('/sessions/import', async (req: Request, res: Response) => {
+  const newCwd = req.query.cwd as string | undefined;
+  const force = req.query.force === 'true';
+
+  try {
+    const tar = await import('tar');
+    const { mkdtempSync, rmSync, existsSync: ex, readdirSync: rd, cpSync, readFileSync: rf, writeFileSync: wf } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { parse: parseYaml } = await import('yaml');
+
+    // Extract to temp directory
+    const staging = mkdtempSync(join(tmpdir(), 'caco-import-'));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const extract = tar.extract({ cwd: staging });
+        req.pipe(extract);
+        extract.on('end', resolve);
+        extract.on('error', reject);
+      });
+
+      // Find session ID from extracted SDK workspace.yaml
+      const sdkDir = join(staging, 'sdk');
+      const cacoDir = join(staging, 'caco');
+
+      if (!ex(sdkDir)) {
+        res.status(400).json({ error: 'Invalid archive: missing sdk/ directory' });
+        return;
+      }
+
+      const sessionDirs = rd(sdkDir).filter(d => ex(join(sdkDir, d, 'workspace.yaml')));
+      if (sessionDirs.length === 0) {
+        res.status(400).json({ error: 'Invalid archive: no session found in sdk/' });
+        return;
+      }
+
+      const sessionId = sessionDirs[0];
+
+      if (!UUID_RE.test(sessionId)) {
+        res.status(400).json({ error: 'Invalid archive: session ID is not a valid UUID' });
+        return;
+      }
+
+      const targetSdk = join(homedir(), '.copilot', 'session-state', sessionId);
+      const targetCaco = join(homedir(), '.caco', 'sessions', sessionId);
+
+      if (ex(targetSdk) && !force) {
+        res.status(409).json({ error: `Session ${sessionId} already exists. Use ?force=true to overwrite.` });
+        return;
+      }
+
+      // Optional CWD rewrite
+      if (newCwd) {
+        // Rewrite workspace.yaml
+        const yamlPath = join(sdkDir, sessionId, 'workspace.yaml');
+        if (ex(yamlPath)) {
+          const yaml = parseYaml(rf(yamlPath, 'utf-8')) as Record<string, string>;
+          const oldCwd = yaml.cwd;
+          if (oldCwd && oldCwd !== newCwd) {
+            let content = rf(yamlPath, 'utf-8');
+            content = content.replaceAll(oldCwd, newCwd);
+            wf(yamlPath, content);
+
+            // Rewrite first line of events.jsonl (session.start context)
+            const eventsPath = join(sdkDir, sessionId, 'events.jsonl');
+            if (ex(eventsPath)) {
+              const lines = rf(eventsPath, 'utf-8').split('\n');
+              if (lines[0]) {
+                lines[0] = lines[0].replaceAll(oldCwd.replace(/\\/g, '\\\\'), newCwd.replace(/\\/g, '\\\\'));
+                lines[0] = lines[0].replaceAll(oldCwd, newCwd);
+              }
+              wf(eventsPath, lines.join('\n'));
+            }
+          }
+        }
+      }
+
+      // Copy to target locations
+      cpSync(join(sdkDir, sessionId), targetSdk, { recursive: true, force: true });
+      if (ex(join(cacoDir, sessionId))) {
+        cpSync(join(cacoDir, sessionId), targetCaco, { recursive: true, force: true });
+      }
+
+      // Refresh session cache
+      sessionManager.refreshCache();
+      broadcastGlobalEvent({ type: 'session.listChanged', data: { reason: 'imported', sessionId } });
+
+      res.json({ ok: true, sessionId, message: `Session ${sessionId} imported successfully` });
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: `Import failed: ${msg}` });
+    }
+  }
 });
 
 export default router;

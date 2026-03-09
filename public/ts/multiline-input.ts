@@ -95,13 +95,11 @@ export function setupMultilineInput(): void {
 }
 
 let pickerPopup: InputPopup | null = null;
-let pickerQuery = '';
 
 function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
   const val = textarea.value;
 
   if (pickerPopup?.isVisible()) {
-    pickerQuery = val;
     pickerPopup.filter(val);
     return;
   }
@@ -125,7 +123,6 @@ function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
         if (cmd.picker) {
           void Promise.resolve(cmd.picker()).then(items => {
             if (pickerPopup) pickerPopup.hide();
-            pickerQuery = '';
             pickerPopup = new InputPopup({
               anchor,
               onSelect: (picked) => {

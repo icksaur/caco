@@ -145,6 +145,12 @@ export function updateMenuIndicators(): void {
   
   const unobservedCount = sessionTracker.getUnobservedCount();
   const busyCount = sessionTracker.getBusyCount(getActiveSessionId() ?? undefined);
+  const activeId = getActiveSessionId();
+  
+  // Update active session highlight in session list
+  document.querySelectorAll('.session-item').forEach(el => {
+    el.classList.toggle('active', el.getAttribute('data-session-id') === activeId);
+  });
   
   if (badge) {
     if (unobservedCount > 0) {

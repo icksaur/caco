@@ -17,6 +17,8 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `GET /api/sessions/:id/icon` - Serve session icon (icon.gif preferred, falls back to icon.png). Returns 404 if no icon exists.
 - `POST /api/sessions/:id/messages` - Send message to session
 - `POST /api/sessions/:id/cancel` - Cancel current streaming
+- `GET /api/sessions/:id/export` - Export session as .tar.gz archive
+- `POST /api/sessions/import` - Import session from .tar.gz archive
 
 **GET /api/session** query params:
 - `sessionId` - Optional session ID (defaults to active session)
@@ -587,6 +589,52 @@ Returns:
   "message": "Restart initiated."
 }
 ```
+
+## Session Migration
+
+Export and import sessions between Caco instances (e.g., work → home).
+
+**GET /api/sessions/:id/export** — Download session as `.tar.gz` archive.
+
+Query params:
+- `?delete=true` — Remove session after export (migration mode)
+
+Archive structure:
+```
+sdk/<sessionId>/workspace.yaml, events.jsonl, checkpoints/, files/
+caco/<sessionId>/meta.json, outputs/, icon.*, roadmap.json
+```
+
+Example — export from machine A:
+```bash
+curl -o session.tar.gz http://machineA:53000/api/sessions/084c42d2-.../export
+# Or with delete (migration):
+curl -o session.tar.gz http://machineA:53000/api/sessions/084c42d2-.../export?delete=true
+```
+
+**POST /api/sessions/import** — Upload a `.tar.gz` archive (raw body, not multipart).
+
+Query params:
+- `?cwd=/new/path` — Rewrite CWD if the project path differs on the target machine
+- `?force=true` — Overwrite if session ID already exists
+
+Example — import on machine B:
+```bash
+curl -X POST --data-binary @session.tar.gz http://machineB:53000/api/sessions/import
+# With CWD rewrite (Windows → Linux):
+curl -X POST --data-binary @session.tar.gz "http://machineB:53000/api/sessions/import?cwd=/home/user/workspace/caco"
+```
+
+Returns:
+```json
+{
+  "ok": true,
+  "sessionId": "084c42d2-...",
+  "message": "Session 084c42d2-... imported successfully"
+}
+```
+
+If CWDs match across machines (e.g., both use `~/workspace/`), no rewrite is needed — just export and import.
 
 ## Debug
 

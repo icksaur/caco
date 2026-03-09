@@ -7,7 +7,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 const DEV_DOCS = `# Caco Development Guide
@@ -98,6 +98,7 @@ It includes applet discovery and is constructed at server startup.
 Read \`API.md\` for the complete API reference, \`APPLETS.md\` for applet authoring, and \`EXTENSIONS.md\` for extensions and skills.
 - API reference, WebSocket protocol, shell API
 - Session management, state sync, context
+- Session migration (export/import between machines) — see API.md "Session Migration" section
 - Applet system, media embedding, scheduling
 - Security model, agent recursion guards
 `;
@@ -120,10 +121,32 @@ export function createDevDocsTool(projectRoot: string) {
       if (section === 'docs') {
         const rootDocs = ['README.md', 'API.md', 'APPLETS.md', 'EXTENSIONS.md', 'code-quality.md']
           .filter(f => existsSync(join(projectRoot, f)))
-          .map(f => `- ${f}`)
+          .map(f => `- ${join(projectRoot, f)}`)
           .join('\n');
+
+        // Scan doc/ subdirectories
+        const docDir = join(projectRoot, 'doc');
+        let subDocs = '';
+        if (existsSync(docDir)) {
+          const scanDir = (dir: string, prefix: string): string[] => {
+            const results: string[] = [];
+            for (const entry of readdirSync(dir, { withFileTypes: true })) {
+              const full = join(dir, entry.name);
+              if (entry.isDirectory()) {
+                results.push(...scanDir(full, `${prefix}${entry.name}/`));
+              } else if (entry.name.endsWith('.md')) {
+                results.push(full);
+              }
+            }
+            return results;
+          };
+          subDocs = scanDir(docDir, 'doc/')
+            .map(f => `- ${f}`)
+            .join('\n');
+        }
+
         return {
-          textResultForLlm: `# Documentation\n\n${rootDocs}`
+          textResultForLlm: `# Documentation\n\nAll paths are absolute — use the view tool to read any file.\n\n## Root docs\n${rootDocs}\n\n## doc/ directory\n${subDocs}`
         };
       }
 

@@ -94,17 +94,17 @@ Each session runs independently with its own prompt. Results are collected and r
     handler: async ({ cwd, model, prompts }) => {
       if (activeSwarms.has(sessionRef.id)) {
         return {
-          textResultForLlm: 'A swarm is already running. Wait for it to complete.',
+          textResultForLlm: 'A swarm is already running for this session. Wait for it to complete.',
           resultType: 'error' as const
         };
       }
+      activeSwarms.add(sessionRef.id);
 
       const tierError = validateSwarmModel(model, prompts.length);
       if (tierError) {
+        activeSwarms.delete(sessionRef.id);
         return { textResultForLlm: tierError, resultType: 'error' as const };
       }
-
-      activeSwarms.add(sessionRef.id);
       const startTime = Date.now();
       const sessions: SwarmSession[] = [];
 

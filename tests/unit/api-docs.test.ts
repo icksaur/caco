@@ -60,7 +60,7 @@ function extractRoutes(): Route[] {
 }
 
 describe('API.md coverage', () => {
-  const apiDoc = readFileSync(join(__dirname, '../../doc/API.md'), 'utf-8');
+  const apiDoc = readFileSync(join(__dirname, '../../API.md'), 'utf-8');
   const routes = extractRoutes();
 
   it('found routes to check', () => {

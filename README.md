@@ -104,6 +104,6 @@ tests/              # Vitest unit tests
 
 ## Documentation
 
-- [doc/index.md](doc/index.md) - Documentation index
-- [doc/doc-guidelines.md](doc/doc-guidelines.md) - Documentation standards
-- [doc/API.md](doc/API.md) - Complete API reference
+- [API.md](API.md) - Complete API reference
+- [APPLETS.md](APPLETS.md) - Applet authoring guide
+- [EXTENSIONS.md](EXTENSIONS.md) - Extensions and skills

@@ -6,7 +6,7 @@
  * All region root lookups go through the `regions` registry.
  *
  * Absorbed from: element-inserter.ts, event-inserter.ts
- * Spec: doc/dom-regions.md
+ * Spec: dom-regions (consolidated)
  *
  * @remarks Unit test all changes - see tests/unit/dom-regions.test.ts
  */

@@ -6,7 +6,7 @@
  * Uses execFile with args array for clean argument passing.
  * Output sanitized (ANSI stripped, line endings normalized).
  * 
- * See doc/shell-api.md for full specification.
+ * See shell API (consolidated) for full specification.
  */
 
 import { Router, Request, Response } from 'express';

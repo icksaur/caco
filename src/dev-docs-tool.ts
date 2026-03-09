@@ -7,7 +7,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { readdirSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 import { join } from 'path';
 
 const DEV_DOCS = `# Caco Development Guide
@@ -27,9 +27,10 @@ The Caco source code is at the project's git root. Key paths:
 | \`public/ts/\` | Frontend TypeScript (bundled to public/bundle.js) |
 | \`public/index.html\` | Single-page app HTML |
 | \`public/style.css\` | All styling |
-| \`doc/\` | Design docs, specs, API reference |
-| \`doc/index.md\` | Documentation index (start here) |
-| \`doc/code-quality.md\` | Code review principles |
+| \`code-quality.md\` | Code review principles |
+| \`API.md\` | Complete API reference |
+| \`APPLETS.md\` | Applet authoring guide |
+| \`EXTENSIONS.md\` | Extensions and skills guide |
 | \`tests/unit/\` | Vitest unit tests |
 | \`applets/\` | Bundled applet definitions |
 
@@ -77,7 +78,7 @@ Copilot SDK → Copilot CLI → AI Models
 - \`public/ts/extension-api.ts\` — ClientExtensionAPI (UI slots, commands, shortcuts, #pound items)
 - \`public/ts/extension-loader.ts\` — Dynamic import + hot-reload of client extensions
 - Call \`caco_extensions\` tool for full API reference and extension authoring guide
-- Spec: \`doc/extensibility.md\`
+- Spec: \`EXTENSIONS.md\`
 
 ## Making Changes
 
@@ -85,7 +86,7 @@ Copilot SDK → Copilot CLI → AI Models
 2. Edit frontend TypeScript in \`public/ts/\` — run \`npm run build:client\`, then \`reload_page\`
 3. Edit HTML/CSS in \`public/\` — use \`reload_page\` tool to apply
 4. Always run \`npm run test\` before committing
-5. Read \`doc/code-quality.md\` for review standards
+5. Read \`code-quality.md\` for review standards
 
 ## System Message
 
@@ -94,7 +95,7 @@ It includes applet discovery and is constructed at server startup.
 
 ## Documentation
 
-Read \`doc/index.md\` for the full documentation index covering:
+Read \`API.md\` for the complete API reference, \`APPLETS.md\` for applet authoring, and \`EXTENSIONS.md\` for extensions and skills.
 - API reference, WebSocket protocol, shell API
 - Session management, state sync, context
 - Applet system, media embedding, scheduling
@@ -117,16 +118,12 @@ export function createDevDocsTool(projectRoot: string) {
 
     handler: async ({ section }) => {
       if (section === 'docs') {
-        const docDir = join(projectRoot, 'doc');
-        if (!existsSync(docDir)) {
-          return { textResultForLlm: 'No doc/ directory found at project root.' };
-        }
-        const files = readdirSync(docDir)
-          .filter(f => f.endsWith('.md'))
-          .map(f => `- doc/${f}`)
+        const rootDocs = ['README.md', 'API.md', 'APPLETS.md', 'EXTENSIONS.md', 'code-quality.md']
+          .filter(f => existsSync(join(projectRoot, f)))
+          .map(f => `- ${f}`)
           .join('\n');
         return {
-          textResultForLlm: `# Documentation Files\n\n${files}\n\nRead doc/index.md for organized index with descriptions.`
+          textResultForLlm: `# Documentation\n\n${rootDocs}`
         };
       }
 

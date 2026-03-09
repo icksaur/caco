@@ -5,7 +5,7 @@
  * When an MCP tool returns 401, the agent can use these tools to register
  * the server for interactive OAuth flow.
  * 
- * See: doc/mcp-oauth-auth.md
+ * See: EXTENSIONS.md (MCP OAuth section)
  */
 
 import { defineTool } from '@github/copilot-sdk';

@@ -105,7 +105,7 @@ export default function(api: ServerExtensionAPI) {
 ## Discovery
 - Server-local (\`.caco/extensions/\`) overrides user-global (\`~/.caco/extensions/\`) on slug collision
 - Hot-reload: CSS and client changes broadcast automatically, server changes require restart
-- Full spec: \`doc/extensibility.md\``;
+- Full spec: \`EXTENSIONS.md\``;
 
       return { textResultForLlm: guide };
     },

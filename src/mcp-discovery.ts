@@ -6,7 +6,7 @@
  * 2. OpenID Connect Discovery (.well-known/openid-configuration) - used by Azure AD
  * 3. WWW-Authenticate header parsing (fallback)
  * 
- * See: doc/mcp-oauth-auth.md
+ * See: EXTENSIONS.md (MCP OAuth section)
  */
 
 export interface OAuthMetadata {

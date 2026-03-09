@@ -107,7 +107,7 @@ Call \`caco_dev_docs\` for project structure, build commands, and architecture w
 
 ## Extensions
 You can create extensions in \`~/.caco/extensions/\` to add CSS themes, client-side JS, slash commands, and custom tools.
-Read \`doc/extensibility.md\` and call \`caco_extensions\` for details on creating extensions to help the user.
+Read \`EXTENSIONS.md\` and call \`caco_extensions\` for details on creating extensions to help the user.
 
 ## Behavior Guidelines
 - Provide direct, helpful answers without unnecessary caveats

@@ -1,0 +1,135 @@
+# Applets
+
+Applets are lightweight HTML/CSS/JS panels that share the DOM with Caco's main UI. They run inside a scoped container (`.applet-instance[data-slug]`) with auto-scoped CSS. One applet is active at a time; loading a new one destroys the previous.
+
+## Layout
+
+- **Desktop:** Side panel (default 40%, resizable, 300px–80%).
+- **Mobile:** Full-screen toggle replaces chat view.
+- **URL-driven:** `?applet=slug&param=value` — applets react to URL param changes.
+
+## Applet Structure
+
+Each applet lives in `applets/<slug>/` with four files:
+
+| File | Purpose |
+|---|---|
+| `meta.json` | Slug, name, description, URL params, `agentUsage`, `stateSchema` |
+| `content.html` | HTML body of the applet |
+| `script.js` | JavaScript — runs in an IIFE with `appletContainer` scoped to the instance |
+| `style.css` | CSS — auto-scoped to the applet's container (see below) |
+
+### meta.json
+
+```json
+{
+  "slug": "my-applet",
+  "name": "My Applet",
+  "description": "One-line description",
+  "params": {
+    "path": { "required": true, "description": "Absolute file path" }
+  },
+  "agentUsage": { "purpose": "What agents use this applet for" },
+  "stateSchema": {
+    "get": { "selectedFile": "string" },
+    "set": null
+  }
+}
+```
+
+## Applet API Reference
+
+All methods are on `window.appletAPI`. Subscriptions auto-cleanup on applet destroy.
+
+| Method | Description |
+|---|---|
+| `onUrlParamsChange(cb)` | URL param changes (fires immediately with current, then on navigation) |
+| `onSessionEvent(cb)` | Live SDK events for the active session (skips history replay) |
+| `onSessionChange(cb)` | Session switch — fires immediately with current session info |
+| `onGlobalEvent(cb)` | Cross-session events (`session.busy`, `session.listChanged`) |
+| `onStateUpdate(cb)` | Agent pushes state to applet via WebSocket |
+| `setAppletState(obj)` | Applet pushes state to agent (queryable via `get_applet_state` tool) |
+| `getSessionId()` | Returns current active session ID |
+| `getSessionMeta(sessionId?)` | Fetch full session metadata (name, kind, model, intent, busy) |
+| `sendAgentMessage(prompt, opts?)` | Send message to active session (opts: `appletSlug`, `imageData`) |
+| `callMCPTool(name, args)` | Call MCP tool — `read_file`, `write_file`, `list_directory` |
+| `navigateAppletUrlParam(k, v)` | Push new URL param (creates browser history entry) |
+| `updateAppletUrlParam(k, v)` | Replace URL param (no history entry) |
+| `getAppletUrlParams()` | Get current URL params (excluding `applet`) |
+| `getAppletSlug()` | Get current applet's slug from URL |
+| `saveTempFile(data, opts?)` | Save temp file to `~/.caco/tmp/` (returns `{ path, filename }`) |
+| `expose(name, fn)` | Expose function globally (needed for `onclick` handlers in IIFE) |
+| `listApplets()` | List saved applets (`{ slug, name, description, updatedAt }[]`) |
+
+Applets can also call the shell endpoint directly: `fetch('/api/shell', { method: 'POST', body: JSON.stringify({ command, args, cwd }) })`.
+
+## URL Params and Navigation
+
+Applets are opened via `?applet=slug`. Additional params are passed through:
+
+```
+?applet=git-status&path=/home/carl/repo
+?applet=file-finder&root=/home/carl/docs
+?applet=image-viewer&path=/tmp/screenshot.png
+```
+
+Use `onUrlParamsChange(cb)` to react to param changes (including initial load and back/forward navigation). Use `navigateAppletUrlParam` for user-initiated navigation (creates history) or `updateAppletUrlParam` for silent state updates.
+
+## Session Reactivity
+
+### onSessionEvent(cb)
+
+Receives live SDK events for the **active session only**. Events pass through a content filter — empty/ephemeral events are dropped. Does NOT fire during history replay.
+
+Use cases: auto-refresh on file edits (git-status uses 2s throttle), watch for `session.idle` to re-fetch data.
+
+### onSessionChange(cb)
+
+Fires immediately with the current session, then again on every session switch. Callback receives `(sessionId, info)` where `info` includes `{ sessionId, cwd, name, kind, model, currentIntent, busy }`.
+
+Use cases: reload applet data when user switches sessions.
+
+### onGlobalEvent(cb)
+
+Receives broadcast events across all sessions: `session.busy` (`{ sessionId, isBusy }`) and `session.listChanged` (`{ reason, sessionId }`).
+
+Use cases: dashboard applets tracking multiple sessions.
+
+## CSS Auto-Scoping
+
+Every CSS rule in `style.css` is automatically prefixed with `.applet-instance[data-slug="<slug>"]`. This prevents style collisions with the main UI and other applets.
+
+- Regular selectors: `.my-class` → `.applet-instance[data-slug="x"] .my-class`
+- Comma selectors are each prefixed independently
+- `@keyframes` and `@media` rules are preserved (media inner rules are scoped)
+- No manual scoping needed — write plain CSS
+
+## Built-in Applets
+
+| Slug | Purpose |
+|---|---|
+| `applet-browser` | Browse and load saved applets |
+| `calculator` | Basic calculator with keyboard support and history |
+| `color-hash` | Generate colored square from string hash |
+| `doodle` | Drawing canvas with AI integration |
+| `drum-machine` | 4-track 16-step drum sequencer |
+| `file-finder` | Fuzzy-search files in a directory tree, copy paths to clipboard |
+| `git-diff` | View file diffs in a git repository |
+| `git-status` | Git staging, commits, push/pull — auto-refreshes on file edits |
+| `image-viewer` | View images with zoom and pan |
+| `jobs` | View and manage scheduled jobs |
+| `markdown-viewer` | Render markdown with syntax highlighting and mermaid diagrams |
+| `mcp-auth` | Authenticate MCP servers requiring OAuth |
+| `roadmap` | Session roadmap with steps, documents, and status tracking |
+| `text-editor` | Edit text files with syntax highlighting, Ctrl+S to save |
+
+## Creating New Applets
+
+1. Create `applets/<slug>/` with `meta.json`, `content.html`, `script.js`, `style.css`
+2. Define params and `agentUsage` in `meta.json`
+3. Use `window.appletAPI` for all platform interaction
+4. CSS is auto-scoped — write plain selectors
+5. JS runs in an IIFE — use `appletAPI.expose()` for `onclick` handlers
+6. Agents discover applets via the `caco_applet_usage` tool and can create new ones via `caco_applet_howto`
+
+The `appletContainer` variable is available in your script, pre-set to your applet's DOM container.

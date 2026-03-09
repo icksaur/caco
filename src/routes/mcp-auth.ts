@@ -9,7 +9,7 @@
  *   GET  /api/mcp/auth/callback - OAuth callback handler
  *   POST /api/mcp/auth/config   - Update server config (add client_id)
  * 
- * See: doc/mcp-oauth-auth.md
+ * See: EXTENSIONS.md (MCP OAuth section)
  */
 
 import { Router, Request, Response } from 'express';

@@ -4,7 +4,7 @@
  * Filters SDK events before broadcasting to clients.
  * Uses a whitelist approach - events are allowed if ANY listed property is present and non-empty.
  * Certain event types always pass through (e.g., session lifecycle events).
- * See doc/chatview-design.md for the property whitelist table.
+ * See event-filter.ts (inline) for the property whitelist table.
  */
 
 export interface FilterableEvent {

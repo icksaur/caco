@@ -67,6 +67,18 @@ export function renderStatus(modelName: string, cwd: string, hasGit = false, ses
   const descEl = footer.querySelector('.context-description') as HTMLElement | null;
   if (descEl) {
     descEl.innerHTML = sessionName ? escapeHtml(sessionName) : '';
+    if (sessionId) {
+      fetch(`/api/sessions/${sessionId}/roadmap`).then(r => r.json()).then(data => {
+        if (data?.title || data?.steps?.length) {
+          const link = document.createElement('a');
+          link.href = '/?applet=roadmap';
+          link.className = 'roadmap-link';
+          link.textContent = '▤';
+          link.title = data.title || 'Roadmap';
+          descEl.appendChild(link);
+        }
+      }).catch(() => {});
+    }
   }
   
   updateFooterVisibility();

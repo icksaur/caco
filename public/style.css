@@ -2022,6 +2022,16 @@ main {
   display: none;
 }
 
+.roadmap-link {
+  margin-left: 6px;
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+.roadmap-link:hover {
+  opacity: 1;
+}
+
 .context-footer a {
   color: var(--color-link);
   text-decoration: none;

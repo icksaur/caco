@@ -195,14 +195,14 @@ export function toggleApplet(): void {
  * Does NOT modify URL - caller is responsible for URL state
  * (Navigation API intercept already has correct URL, page load already has param)
  */
-export async function loadApplet(slug: string): Promise<void> {
+export async function loadApplet(slug: string, urlParams?: Record<string, string>): Promise<void> {
   try {
     console.log(`[ROUTER] Loading applet: ${slug}`);
     
-    // POST to load endpoint
     const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urlParams })
     });
     
     if (!response.ok) {

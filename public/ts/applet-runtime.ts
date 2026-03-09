@@ -11,7 +11,7 @@ import { showAppletPanel } from './view-controller.js';
 import { wsSetState, onStateUpdate, onEvent, onGlobalEvent, isWsConnected } from './websocket.js';
 import { getActiveSessionId, getCurrentCwd, isLoadingHistory } from './app-state.js';
 import { regions } from './dom-regions.js';
-import { setNewChatCwd } from './model-selector.js';
+import { loadApplet } from './router.js';
 import type { SessionEvent } from './types.js';
 
 interface TempFileResult {
@@ -291,11 +291,6 @@ function setAppletState(state: Record<string, unknown>): void {
   // Merge with existing pending state (newer values overwrite)
   pendingAppletState = { ...pendingAppletState, ...state };
   
-  // Sync currentPath to new-chat CWD input
-  if (typeof state.currentPath === 'string') {
-    setNewChatCwd(state.currentPath);
-  }
-  
   // If WebSocket connected, push immediately
   if (isWsConnected()) {
     wsSetState(state);
@@ -424,47 +419,6 @@ async function callMCPTool(toolName: string, params: Record<string, unknown>): P
 }
 
 /**
- * Load a saved applet by slug, optionally with URL params
- * Applet JS can call this to navigate to a different applet with context
- * 
- * @param slug - The applet slug to load
- * @param params - Optional URL params to set (e.g., { file: '/path/to/image.jpg' })
- */
-async function loadAppletBySlug(slug: string, params?: Record<string, string>): Promise<void> {
-  try {
-    console.log(`[APPLET] Loading applet: ${slug}`, params ? `with params: ${JSON.stringify(params)}` : '');
-    
-    // POST to load endpoint (updates server state + returns content)
-    const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urlParams: getAppletUrlParams() })
-    });
-    
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-      throw new Error(error.error || `HTTP ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    // Push applet to stack with correct slug
-    const content: AppletContent = {
-      html: data.html,
-      js: data.js,
-      css: data.css,
-      title: data.title
-    };
-    pushApplet(slug, data.title || slug, content);
-    
-    console.log(`[APPLET] Loaded: ${data.title} (${slug})`);
-  } catch (error) {
-    console.error(`[APPLET] Failed to load "${slug}":`, error);
-    throw error;
-  }
-}
-
-/**
  * Load applet from URL query param (?applet=slug)
  * Called on page load
  * @returns true if an applet was loaded from URL
@@ -475,7 +429,7 @@ export async function loadAppletFromUrl(): Promise<boolean> {
   if (slug) {
     console.log(`[APPLET] Loading from URL param: ${slug}`);
     try {
-      await loadAppletBySlug(slug);
+      await loadApplet(slug, getAppletUrlParams());
       return true;
     } catch (err) {
       console.error('[APPLET] Failed to load from URL:', err);

@@ -36,25 +36,6 @@ function getModels(): ModelInfo[] {
 }
 
 /**
- * Get the cwd from the new chat form
- */
-export function getNewChatCwd(): string {
-  const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
-  return cwdInput?.value.trim() || '';
-}
-
-/**
- * Set the CWD in the new chat form (e.g. from file-browser applet)
- */
-export function setNewChatCwd(cwd: string): void {
-  const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
-  if (cwdInput) {
-    cwdInput.value = cwd;
-    cwdInput.dispatchEvent(new Event('input'));
-  }
-}
-
-/**
  * Show error in new chat form
  */
 export function showNewChatError(message: string): void {

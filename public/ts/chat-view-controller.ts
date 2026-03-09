@@ -9,10 +9,10 @@
  * Delegates to: view-controller (DOM), context-footer (DOM), model-selector (DOM)
  */
 
-import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, clearActiveSession } from './app-state.js';
+import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, clearActiveSession, getNewChatCwd } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
 import { renderStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage } from './context-footer.js';
-import { loadModels, getNewChatCwd } from './model-selector.js';
+import { loadModels } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
 import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websocket.js';
 import { setSessionLoading, updateMenuIndicators } from './session-panel.js';

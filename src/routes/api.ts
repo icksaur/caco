@@ -12,7 +12,6 @@
 
 import { Router, Request, Response } from 'express';
 import express from 'express';
-import { CopilotClient } from '@github/copilot-sdk';
 import { readdir, readFile, stat, writeFile, mkdir, access } from 'fs/promises';
 import { join, dirname, resolve, extname, relative, isAbsolute } from 'path';
 import { homedir } from 'os';
@@ -25,7 +24,7 @@ import { setAppletUserState, getAppletUserState, clearAppletUserState, getActive
 import { listApplets, loadApplet } from '../applet-store.js';
 import { listExtensions, getExtension } from '../extension-store.js';
 import { getUsage } from '../usage-state.js';
-import { MODEL_CACHE_TTL_MS, MAX_FILE_SIZE_BYTES } from '../config.js';
+import { MAX_FILE_SIZE_BYTES, MIME_TYPES } from '../config.js';
 import { apiError } from '../api-error.js';
 import { fuzzyScore } from '../utils/fuzzy-score.js';
 
@@ -33,46 +32,15 @@ const router = Router();
 
 const TEMP_DIR = join(homedir(), '.caco', 'tmp');
 
-let cachedModels: Array<{ id: string; name: string; multiplier: number }> | null = null;
-let modelsCacheTime = 0;
-
-router.get('/models', async (_req: Request, res: Response) => {
-  try {
-    // Return cached models if fresh
-    if (cachedModels && Date.now() - modelsCacheTime < MODEL_CACHE_TTL_MS) {
-      return res.json({ models: cachedModels });
-    }
-    
-    // Create temporary client to list models
-    const client = new CopilotClient({ cwd: process.cwd() });
-    await client.start();
-    
-    try {
-      const sdkModels = await (client as unknown as { listModels(): Promise<Array<{
-        id: string;
-        name: string;
-        billing?: { multiplier: number };
-      }>> }).listModels();
-      
-      // Transform to our format
-      cachedModels = sdkModels.map(m => ({
-        id: m.id,
-        name: m.name,
-        multiplier: m.billing?.multiplier ?? 1
-      }));
-      modelsCacheTime = Date.now();
-      
-      console.log(`[MODELS] Fetched ${cachedModels.length} models from SDK:`, cachedModels.map(m => m.id));
-      
-      res.json({ models: cachedModels });
-    } finally {
-      await client.stop();
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error('[MODELS] Failed to fetch models:', message);
-    res.status(500).json({ error: message, models: [] });
-  }
+router.get('/models', (_req: Request, res: Response) => {
+  const models = sessionManager.getModels();
+  res.json({
+    models: models.map(m => ({
+      id: m.id,
+      name: m.name,
+      multiplier: m.billing?.multiplier ?? 1
+    }))
+  });
 });
 
 router.get('/usage', (_req: Request, res: Response) => {
@@ -115,18 +83,8 @@ router.post('/tmpfile', express.json({ limit: '10mb' }), async (req: Request, re
       detectedMime = mimeType || 'application/octet-stream';
     }
     
-    // Determine file extension from mime type
-    const extMap: Record<string, string> = {
-      'image/png': 'png',
-      'image/jpeg': 'jpg',
-      'image/gif': 'gif',
-      'image/webp': 'webp',
-      'image/svg+xml': 'svg',
-      'application/pdf': 'pdf',
-      'text/plain': 'txt',
-      'application/json': 'json',
-    };
-    const ext = extMap[detectedMime] || 'bin';
+    // Determine file extension from mime type (reverse lookup from MIME_TYPES)
+    const ext = Object.entries(MIME_TYPES).find(([, mime]) => mime === detectedMime)?.[0] || 'bin';
     
     // Generate filename if not provided
     const finalFilename = filename || `${randomUUID()}.${ext}`;
@@ -226,15 +184,17 @@ router.post('/applet/state', (req: Request, res: Response) => {
     res.status(400).json({ error: 'Invalid state object' });
     return;
   }
-  setAppletUserState(state);
+  const sessionId = req.query.sessionId as string | undefined;
+  setAppletUserState(sessionId, state);
   res.json({ ok: true });
 });
 
 /**
  * GET /api/applet/state - Get current applet state (for debugging)
  */
-router.get('/applet/state', (_req: Request, res: Response) => {
-  res.json({ state: getAppletUserState() });
+router.get('/applet/state', (req: Request, res: Response) => {
+  const sessionId = req.query.sessionId as string | undefined;
+  res.json({ state: getAppletUserState(sessionId) });
 });
 
 const programCwd = process.cwd();
@@ -279,12 +239,14 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
       return;
     }
     
+    const sessionId = req.query.sessionId as string | undefined;
+
     // Only clear user state if switching to a different applet
-    const currentSlug = getActiveAppletSlug();
+    const currentSlug = getActiveAppletSlug(sessionId);
     if (slug !== currentSlug) {
-      clearAppletUserState();
+      clearAppletUserState(sessionId);
     }
-    setActiveAppletSlug(slug);
+    setActiveAppletSlug(sessionId, slug);
     
     // Return content for client-side execution
     res.json({
@@ -387,44 +349,8 @@ router.get('/file', async (req: Request, res: Response) => {
       return;
     }
     
-    // Determine content type from extension
     const ext = resolvedPath.split('.').pop()?.toLowerCase() || '';
-    const mimeTypes: Record<string, string> = {
-      // Images
-      jpg: 'image/jpeg',
-      jpeg: 'image/jpeg',
-      png: 'image/png',
-      gif: 'image/gif',
-      webp: 'image/webp',
-      svg: 'image/svg+xml',
-      ico: 'image/x-icon',
-      // Text
-      txt: 'text/plain',
-      md: 'text/markdown',
-      html: 'text/html',
-      css: 'text/css',
-      js: 'text/javascript',
-      ts: 'text/typescript',
-      json: 'application/json',
-      xml: 'application/xml',
-      // Code
-      py: 'text/x-python',
-      rb: 'text/x-ruby',
-      go: 'text/x-go',
-      rs: 'text/x-rust',
-      java: 'text/x-java',
-      c: 'text/x-c',
-      cpp: 'text/x-c++',
-      h: 'text/x-c',
-      sh: 'text/x-shellscript',
-      yaml: 'text/yaml',
-      yml: 'text/yaml',
-      toml: 'text/toml',
-      // Documents
-      pdf: 'application/pdf',
-    };
-    
-    const contentType = mimeTypes[ext] || 'application/octet-stream';
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
     const isText = contentType.startsWith('text/') || contentType === 'application/json';
     
     const fileData = await readFile(resolvedPath);

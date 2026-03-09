@@ -1,170 +1,64 @@
-/**
- * Session State Manager
- * 
- * Single source of truth for the current session state.
- * Consolidates activeSessionId, preferences, and session lifecycle.
- */
-
 import sessionManager from './session-manager.js';
-import { loadPreferences, savePreferences, getDefaultPreferences, DEFAULT_MODEL, resolveModelAlias } from './preferences.js';
+import { loadPreferences, savePreferences, DEFAULT_MODEL, resolveModelAlias } from './preferences.js';
 import { resolveSystemMessage } from './prompts.js';
 import type { UserPreferences, SessionStateConfig, ResumeResult } from './types.js';
 
-/**
- * Manages the active session state for the server.
- * Provides a unified interface for session lifecycle operations.
- * 
- * Multi-client support: Uses Map-based storage with DEFAULT_CLIENT fallback.
- * Existing code using the getters works unchanged (uses default client).
- * New code can pass clientId to scoped methods for isolation.
- */
 class SessionState {
-  /** Default client ID for backward compatibility */
   private static readonly DEFAULT_CLIENT = 'default';
   
-  /** Per-client active session IDs */
   private _clientSessions = new Map<string, string | null>();
-  
-  /** Per-client pending resume IDs */
   private _clientPendingResume = new Map<string, string | null>();
-  
-  private _preferences: UserPreferences = getDefaultPreferences();
-  private _config: SessionStateConfig | null = null;
-  private _initialized = false;
+  private _preferences: UserPreferences;
+  private _config: SessionStateConfig;
 
-  // ─────────────────────────────────────────────────────────────
-  // Legacy getters (use default client for backward compatibility)
-  // ─────────────────────────────────────────────────────────────
+  constructor(config: SessionStateConfig, preferences: UserPreferences, pendingResumeId: string | null) {
+    this._config = config;
+    this._preferences = preferences;
+    if (pendingResumeId) {
+      this._clientPendingResume.set(SessionState.DEFAULT_CLIENT, pendingResumeId);
+    }
+  }
 
-  /**
-   * Get the current active session ID (default client)
-   * @deprecated Use getActiveSessionId(clientId) for multi-client support
-   */
+  /** @deprecated Use getActiveSessionId(clientId) for multi-client support */
   get activeSessionId(): string | null {
     return this._clientSessions.get(SessionState.DEFAULT_CLIENT) ?? null;
   }
 
-  /**
-   * Get session ID for history - active or pending resume (default client)
-   * @deprecated Use getSessionIdForHistory(clientId) for multi-client support
-   */
+  /** @deprecated Use getSessionIdForHistory(clientId) for multi-client support */
   get sessionIdForHistory(): string | null {
     return this.getSessionIdForHistory();
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Multi-client accessors
-  // ─────────────────────────────────────────────────────────────
-
-  /**
-   * Get active session ID for a specific client
-   */
   getActiveSessionId(clientId?: string): string | null {
     return this._clientSessions.get(clientId || SessionState.DEFAULT_CLIENT) ?? null;
   }
 
-  /**
-   * Set active session ID for a specific client
-   */
   private setActiveSessionId(sessionId: string | null, clientId?: string): void {
     this._clientSessions.set(clientId || SessionState.DEFAULT_CLIENT, sessionId);
   }
 
-  /**
-   * Get pending resume ID for a specific client
-   */
   private getPendingResumeId(clientId?: string): string | null {
     return this._clientPendingResume.get(clientId || SessionState.DEFAULT_CLIENT) ?? null;
   }
 
-  /**
-   * Set pending resume ID for a specific client
-   */
   private setPendingResumeId(sessionId: string | null, clientId?: string): void {
     this._clientPendingResume.set(clientId || SessionState.DEFAULT_CLIENT, sessionId);
   }
 
-  /**
-   * Get session ID for history (active or pending) for a specific client
-   */
   getSessionIdForHistory(clientId?: string): string | null {
     const cid = clientId || SessionState.DEFAULT_CLIENT;
     return this._clientSessions.get(cid) ?? this._clientPendingResume.get(cid) ?? null;
   }
 
-  /**
-   * Get the current preferences
-   */
   get preferences(): UserPreferences {
     return this._preferences;
   }
 
-  /**
-   * Check if session state is initialized
-   */
-  get initialized(): boolean {
-    return this._initialized;
-  }
-
-  /**
-   * Get session config for resuming sessions (toolFactory, excludedTools)
-   * Used by stream route to ensure resumed sessions have tools
-   */
   getSessionConfig() {
-    if (!this._config) {
-      throw new Error('SessionState not initialized');
-    }
     return {
       toolFactory: this._config.toolFactory,
       excludedTools: this._config.excludedTools
     };
-  }
-
-  /**
-   * Initialize session state - must be called before other operations
-   */
-  async init(config: SessionStateConfig): Promise<void> {
-    if (this._initialized) return;
-    
-    this._config = config;
-    await sessionManager.init();
-    this._preferences = await loadPreferences();
-    
-    // Check for session to resume - but DON'T resume yet
-    // We only create/resume SDK session on first message (in ensureSession)
-    // This allows user to select model before first message
-    if (this._preferences.lastSessionId) {
-      // Check if this session exists and has messages
-      if (sessionManager.hasMessages(this._preferences.lastSessionId)) {
-        this.setPendingResumeId(this._preferences.lastSessionId);
-        console.log(`✓ Will resume session ${this.getPendingResumeId()} on first message`);
-        this._initialized = true;
-        return;
-      }
-    }
-    
-    // If lastSessionId was explicitly null, wait for first message with model
-    if (this._preferences.lastSessionId === null) {
-      console.log('✓ No existing session - will create on first message');
-      this._initialized = true;
-      return;
-    }
-    
-    // Try most recent session for cwd - but only note it, don't resume yet
-    const cwd = process.cwd();
-    const recentSessionId = sessionManager.getMostRecentForCwd(cwd);
-    
-    if (recentSessionId && sessionManager.hasMessages(recentSessionId)) {
-      this.setPendingResumeId(recentSessionId);
-      this._preferences.lastSessionId = recentSessionId;
-      await savePreferences(this._preferences);
-      console.log(`✓ Will resume session ${this.getPendingResumeId()} on first message`);
-      this._initialized = true;
-      return;
-    }
-    
-    console.log('✓ No existing session - will create on first message');
-    this._initialized = true;
   }
 
   /**
@@ -180,10 +74,6 @@ class SessionState {
    * @param clientId - Client identifier for multi-client support
    */
   async ensureSession(model?: string, newChat?: boolean, cwd?: string, clientId?: string): Promise<string> {
-    if (!this._config) {
-      throw new Error('SessionState not initialized');
-    }
-    
     const activeId = this.getActiveSessionId(clientId);
     
     // Explicit new chat request - just clear the active session reference
@@ -258,14 +148,6 @@ class SessionState {
    * @returns ResumeResult with sessionId and optional fallback CWD used
    */
   async switchSession(sessionId: string, clientId?: string): Promise<ResumeResult> {
-    if (!this._config) {
-      throw new Error('SessionState not initialized');
-    }
-    
-    // Don't stop current session - it may still be running
-    // Just switch which session the client is viewing
-    
-    // Clear any pending resume - we're switching explicitly
     this.setPendingResumeId(null, clientId);
     
     // Resume new session (loads SDK client if needed, doesn't stop others)
@@ -371,4 +253,35 @@ class SessionState {
   }
 }
 
-export const sessionState = new SessionState();
+export let sessionState: SessionState;
+
+export async function createSessionState(config: SessionStateConfig): Promise<SessionState> {
+  await sessionManager.init();
+  const preferences = await loadPreferences();
+
+  let pendingResumeId: string | null = null;
+
+  if (preferences.lastSessionId) {
+    if (sessionManager.hasMessages(preferences.lastSessionId)) {
+      pendingResumeId = preferences.lastSessionId;
+      console.log(`✓ Will resume session ${pendingResumeId} on first message`);
+    }
+  } else if (preferences.lastSessionId === null) {
+    console.log('✓ No existing session - will create on first message');
+  } else {
+    const cwd = process.cwd();
+    const recentSessionId = sessionManager.getMostRecentForCwd(cwd);
+
+    if (recentSessionId && sessionManager.hasMessages(recentSessionId)) {
+      pendingResumeId = recentSessionId;
+      preferences.lastSessionId = recentSessionId;
+      await savePreferences(preferences);
+      console.log(`✓ Will resume session ${pendingResumeId} on first message`);
+    } else {
+      console.log('✓ No existing session - will create on first message');
+    }
+  }
+
+  sessionState = new SessionState(config, preferences, pendingResumeId);
+  return sessionState;
+}

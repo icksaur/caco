@@ -96,12 +96,12 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   
   // Store applet state if provided
   if (appletState && typeof appletState === 'object') {
-    setAppletUserState(appletState);
+    setAppletUserState(sessionId, appletState);
   }
   
   // Store navigation context if provided
   if (appletNavigation && typeof appletNavigation === 'object') {
-    setAppletNavigation(appletNavigation);
+    setAppletNavigation(sessionId, appletNavigation);
   }
   
   const tempFilePaths: string[] = [];
@@ -343,7 +343,7 @@ export async function dispatchMessage(
       }
       
       // Reload requires external state (consumeReloadSignal), so handled separately
-      if (shouldEmitReload(event) && consumeReloadSignal()) {
+      if (shouldEmitReload(event) && consumeReloadSignal(sessionId)) {
         onEvent({ type: 'caco.reload', data: {} });
       }
       

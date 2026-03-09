@@ -3,7 +3,7 @@
  */
 
 import type { SessionsResponse, SessionData } from './types.js';
-import { formatAge, formatStatusParts, fuzzyScore } from './ui-utils.js';
+import { formatAge, formatStatusParts, fuzzyScore, sortSessions } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { showSessionPanel } from './view-controller.js';
@@ -87,6 +87,27 @@ export function setSessionLoading(sessionId: string, loading: boolean): void {
   }
 }
 
+function appendActionButtons(container: Element, sessionId: string, displayName: string): void {
+  const editBtn = document.createElement('button');
+  editBtn.className = 'session-edit';
+  editBtn.textContent = '/';
+  editBtn.title = 'Rename session';
+  editBtn.onclick = (e) => {
+    e.stopPropagation();
+    void renameSession(sessionId, displayName);
+  };
+  container.appendChild(editBtn);
+  
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'session-delete';
+  deleteBtn.textContent = '×';
+  deleteBtn.onclick = (e) => {
+    e.stopPropagation();
+    void deleteSession(sessionId, displayName);
+  };
+  container.appendChild(deleteBtn);
+}
+
 /**
  * Update a single session item's busy state in the DOM
  */
@@ -108,26 +129,8 @@ function updateSessionItemState(sessionId: string, isBusy: boolean): void {
     indicator?.classList.remove('busy');
     // Add action buttons if not present
     if (!item.querySelector('.session-delete')) {
-      const editBtn = document.createElement('button');
-      editBtn.className = 'session-edit';
-      editBtn.textContent = '/';
-      editBtn.title = 'Rename session';
-      editBtn.onclick = (e) => {
-        e.stopPropagation();
-        const title = item.querySelector('.session-title')?.textContent || 'Untitled';
-        void renameSession(sessionId, title);
-      };
-      item.appendChild(editBtn);
-      
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'session-delete';
-      deleteBtn.textContent = '×';
-      deleteBtn.onclick = (e) => {
-        e.stopPropagation();
-        const title = item.querySelector('.session-title')?.textContent || 'Untitled';
-        void deleteSession(sessionId, title);
-      };
-      item.appendChild(deleteBtn);
+      const title = item.querySelector('.session-title')?.textContent || 'Untitled';
+      appendActionButtons(item, sessionId, title);
     }
   }
 }
@@ -349,19 +352,7 @@ export async function loadSessions(): Promise<void> {
     // Use already-flattened list for rendering
     allSessions = flatSessions.filter(s => s.kind !== 'swarm' || s.isBusy);
     
-    allSessions.sort((a, b) => {
-      if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
-      const kindOrder: Record<string, number> = { interactive: 0, scheduled: 1, agent: 2, swarm: 3 };
-      const aKind = kindOrder[a.kind ?? 'interactive'] ?? 0;
-      const bKind = kindOrder[b.kind ?? 'interactive'] ?? 0;
-      if (aKind !== bKind) return aKind - bKind;
-      if (a.updatedAt && b.updatedAt) {
-        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-      }
-      if (a.updatedAt) return -1;
-      if (b.updatedAt) return 1;
-      return 0;
-    });
+    sortSessions(allSessions);
     
     renderFilteredSessions();
   } catch (error) {
@@ -498,24 +489,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   }
   
   if (!isBusy) {
-    const editBtn = document.createElement('button');
-    editBtn.className = 'session-edit';
-    editBtn.textContent = '/';
-    editBtn.title = 'Rename session';
-    editBtn.onclick = (e) => {
-      e.stopPropagation();
-      void renameSession(session.sessionId, displayName);
-    };
-    row1.appendChild(editBtn);
-    
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'session-delete';
-    deleteBtn.textContent = '×';
-    deleteBtn.onclick = (e) => {
-      e.stopPropagation();
-      void deleteSession(session.sessionId, displayName);
-    };
-    row1.appendChild(deleteBtn);
+    appendActionButtons(row1, session.sessionId, displayName);
   }
   
   item.appendChild(row1);

@@ -108,3 +108,25 @@ export function fuzzyScore(target: string, query: string): number {
   
   return queryIdx === query.length ? score : -1;
 }
+
+interface Sortable {
+  isUnobserved?: boolean;
+  kind?: string;
+  updatedAt?: string;
+}
+
+export function sortSessions<T extends Sortable>(sessions: T[]): T[] {
+  const kindOrder: Record<string, number> = { interactive: 0, scheduled: 1, agent: 2, swarm: 3 };
+  return sessions.sort((a, b) => {
+    if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
+    const aKind = kindOrder[a.kind ?? 'interactive'] ?? 0;
+    const bKind = kindOrder[b.kind ?? 'interactive'] ?? 0;
+    if (aKind !== bKind) return aKind - bKind;
+    if (a.updatedAt && b.updatedAt) {
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    }
+    if (a.updatedAt) return -1;
+    if (b.updatedAt) return 1;
+    return 0;
+  });
+}

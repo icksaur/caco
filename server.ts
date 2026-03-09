@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { hostname } from 'os';
 import { readFileSync } from 'fs';
-import { sessionState } from './src/session-state.js';
+import { sessionState, createSessionState } from './src/session-state.js';
 import sessionManager from './src/session-manager.js';
 import { createDisplayTools, type CacoEmbedEvent } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
@@ -21,7 +21,7 @@ import { createDevDocsTool } from './src/dev-docs-tool.js';
 import { createExtensionsTool } from './src/extensions-tool.js';
 import { createSwarmTool } from './src/swarm-tool.js';
 import { createRoadmapTools } from './src/roadmap-tool.js';
-import type { SessionIdRef } from './src/types.js';
+import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, mcpRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
 import { setupWebSocket } from './src/routes/websocket.js';
@@ -30,7 +30,6 @@ import { startScheduleManager, stopScheduleManager } from './src/schedule-manage
 import { getQueue } from './src/caco-event-queue.js';
 import { buildSystemMessage } from './src/prompts.js';
 import { loadServerExtensions } from './src/extension-runtime.js';
-import type { SystemMessage, ToolFactory } from './src/types.js';
 import { PORT, HOST } from './src/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,57 +40,8 @@ const app = express();
 // Mark child processes as running inside Caco (stop.sh checks this)
 process.env.CACO_SESSION = '1';
 
-// Tool factory - creates display tools + applet tools with session cwd baked in
-// Program CWD for applet storage (fixed at startup)
 const programCwd = process.cwd();
 
-let extensionTools: ReturnType<typeof createDevDocsTool> = [];
-
-const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
-  // Queue function for caco.* events - tools queue, events flush on session.idle
-  const queueCacoEvent = (event: CacoEmbedEvent) => {
-    if (sessionRef.id) {
-      const queue = getQueue(sessionRef.id);
-      queue.queue(event);
-      console.log(`[QUEUE] caco.embed queued for session ${sessionRef.id}, pending: ${queue.length}`);
-    } else {
-      console.log('[QUEUE] No sessionRef.id, event not queued');
-    }
-  };
-  
-  // Display tools need sessionCwd for storage scoping and queue for caco events
-  const displayTools = createDisplayTools(
-    (data, meta) => storeOutput(sessionCwd, data, meta),
-    queueCacoEvent
-  );
-  
-  // Applet tools need programCwd for persistent storage
-  const appletTools = createAppletTools(programCwd);
-  
-  // Agent tools need sessionRef for self-identification in callbacks
-  // Uses mutable ref so tools work even when sessionId isn't known at creation time
-  // getDispatchCorrelationId injected to avoid coupling agent-tools to sessionManager
-  const agentTools = createAgentTools(
-    sessionRef, 
-    (id) => sessionManager.getDispatchCorrelationId(id)
-  );
-  
-  // MCP auth tools for registering OAuth-protected servers
-  const mcpAuthTools = createMcpAuthTools();
-  
-  // Dev docs tool for self-modification discovery
-  const devDocs = createDevDocsTool(programCwd);
-  
-  const extIntrospection = createExtensionsTool();
-  
-  const swarmTools = createSwarmTool(sessionRef);
-  
-  const roadmapTools = createRoadmapTools(sessionRef);
-  
-  return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...roadmapTools];
-};
-
-// System message for sessions - built at startup from prompts module
 let SYSTEM_MESSAGE: SystemMessage;
 
 // Middleware
@@ -144,29 +94,51 @@ app.use('/api', shellRoutes);
 // Server Lifecycle
 
 async function start(): Promise<void> {
-  // Load cached usage from disk
   loadUsageCache();
   
-  // Build system message with applet discovery
   SYSTEM_MESSAGE = await buildSystemMessage();
   console.log('✓ System message built with applet discovery');
   
-  extensionTools = await loadServerExtensions(app);
+  const extensionTools = await loadServerExtensions(app);
   
-  // Initialize session state
-  await sessionState.init({
+  const server = createServer(app);
+  
+  const { pushStateToApplet } = setupWebSocket(server);
+  
+  const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
+    const queueCacoEvent = (event: CacoEmbedEvent) => {
+      if (sessionRef.id) {
+        const queue = getQueue(sessionRef.id);
+        queue.queue(event);
+        console.log(`[QUEUE] caco.embed queued for session ${sessionRef.id}, pending: ${queue.length}`);
+      } else {
+        console.log('[QUEUE] No sessionRef.id, event not queued');
+      }
+    };
+    
+    const displayTools = createDisplayTools(
+      (data, meta) => storeOutput(sessionCwd, data, meta),
+      queueCacoEvent
+    );
+    const appletTools = createAppletTools(programCwd, sessionRef, pushStateToApplet);
+    const agentTools = createAgentTools(
+      sessionRef, 
+      (id) => sessionManager.getDispatchCorrelationId(id)
+    );
+    const mcpAuthTools = createMcpAuthTools();
+    const devDocs = createDevDocsTool(programCwd);
+    const extIntrospection = createExtensionsTool();
+    const swarmTools = createSwarmTool(sessionRef);
+    const roadmapTools = createRoadmapTools(sessionRef);
+    
+    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...roadmapTools];
+  };
+  
+  await createSessionState({
     systemMessage: SYSTEM_MESSAGE,
     toolFactory
   });
   
-  // Create HTTP server from Express app
-  const server = createServer(app);
-  
-  // Attach WebSocket server for unified session channel
-  // WS is for server→client push (rendering); POST is for client→server send
-  setupWebSocket(server);
-  
-  // Start schedule manager
   startScheduleManager();
   
   // Start server with retry (for restart scenarios where port may not be free yet)

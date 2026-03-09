@@ -7,8 +7,9 @@
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { getAppletUserState, getAppletNavigation, getActiveAppletSlug, triggerReload } from './applet-state.js';
-import { pushStateToApplet } from './applet-push.js';
+import type { StatePushHandler } from './applet-push.js';
 import { listApplets, type AppletMeta } from './applet-store.js';
+import type { SessionIdRef } from './types.js';
 
 /**
  * Format applet metadata for agent consumption.
@@ -293,7 +294,7 @@ The link uses relative URL format \`/?applet=slug\` which navigates without page
  * Create applet tools
  * Returns an array of tool definitions to include in session creation.
  */
-export function createAppletTools(_programCwd: string) {
+export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef | undefined, pushStateToApplet: StatePushHandler) {
 
   const getAppletState = defineTool('get_applet_state', {
     description: 'Query state pushed by applet JS via setAppletState(). Returns user input, selections, or computed values from the running applet.',
@@ -303,9 +304,10 @@ export function createAppletTools(_programCwd: string) {
     }),
 
     handler: async ({ key }) => {
-      const state = getAppletUserState();
-      const navigation = getAppletNavigation();
-      const activeSlug = getActiveAppletSlug();
+      const sid = sessionRef?.id;
+      const state = getAppletUserState(sid);
+      const navigation = getAppletNavigation(sid);
+      const activeSlug = getActiveAppletSlug(sid);
       
       const meta = {
         activeApplet: activeSlug,
@@ -338,7 +340,7 @@ export function createAppletTools(_programCwd: string) {
     parameters: z.object({}),
 
     handler: async () => {
-      triggerReload();
+      triggerReload(sessionRef?.id);
       
       return {
         textResultForLlm: 'Page reload signal sent. The browser will refresh.',

@@ -4,6 +4,7 @@ import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
+import { sortSessions } from './ui-utils.js';
 import type { PopupItem } from './input-popup.js';
 import type { SessionData, SessionsResponse } from './types.js';
 
@@ -47,14 +48,7 @@ registerCommand({
       const data: SessionsResponse = await res.json();
       const sessions: SessionData[] = Object.values(data.grouped).flat()
         .filter(s => s.kind !== 'swarm' || s.isBusy);
-      sessions.sort((a, b) => {
-        if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
-        const kindOrder = { interactive: 0, scheduled: 1, agent: 2, swarm: 3 };
-        const aKind = kindOrder[a.kind ?? 'interactive'] ?? 0;
-        const bKind = kindOrder[b.kind ?? 'interactive'] ?? 0;
-        if (aKind !== bKind) return aKind - bKind;
-        return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
-      });
+      sortSessions(sessions);
       return sessions.map(s => {
         const label = s.name || s.summary || s.sessionId.slice(0, 8);
         const desc = s.currentIntent || s.cwd?.split('/').pop() || '';

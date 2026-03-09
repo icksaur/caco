@@ -1,11 +1,8 @@
 /**
  * Applet State
  * 
- * Minimal state for applet interactions:
- * - User state pushed from applet JS (for agent to query)
- * - Navigation context (stack + URL params)
- * - Active applet slug tracking
- * - Reload signal
+ * Minimal state for applet interactions, keyed by sessionId so
+ * concurrent browser tabs / sessions don't clobber each other.
  */
 
 export interface NavigationContext {
@@ -13,73 +10,51 @@ export interface NavigationContext {
   urlParams: Record<string, string>;
 }
 
-let appletUserState: Record<string, unknown> = {};
-let appletNavigation: NavigationContext = { stack: [], urlParams: {} };
-let activeSlug: string | null = null;
-let pendingReload = false;
+const DEFAULT_KEY = '_default';
 
-/**
- * Set user state (called from /api/applet/state endpoint or message POST)
- */
-export function setAppletUserState(state: Record<string, unknown>): void {
-  appletUserState = { ...appletUserState, ...state };
+const appletUserStates = new Map<string, Record<string, unknown>>();
+const appletNavigations = new Map<string, NavigationContext>();
+const activeSlugs = new Map<string, string | null>();
+const pendingReloads = new Set<string>();
+
+export function setAppletUserState(sessionId: string | undefined, state: Record<string, unknown>): void {
+  const key = sessionId || DEFAULT_KEY;
+  const prev = appletUserStates.get(key) || {};
+  appletUserStates.set(key, { ...prev, ...state });
 }
 
-/**
- * Get user state (called from get_applet_state tool)
- */
-export function getAppletUserState(): Record<string, unknown> {
-  return appletUserState;
+export function getAppletUserState(sessionId?: string): Record<string, unknown> {
+  return appletUserStates.get(sessionId || DEFAULT_KEY) || {};
 }
 
-/**
- * Clear user state (e.g., on applet change)
- */
-export function clearAppletUserState(): void {
-  appletUserState = {};
+export function clearAppletUserState(sessionId?: string): void {
+  appletUserStates.delete(sessionId || DEFAULT_KEY);
 }
 
-/**
- * Set navigation context (called when receiving message with appletNavigation)
- */
-export function setAppletNavigation(nav: NavigationContext): void {
-  appletNavigation = nav;
+export function setAppletNavigation(sessionId: string | undefined, nav: NavigationContext): void {
+  appletNavigations.set(sessionId || DEFAULT_KEY, nav);
 }
 
-/**
- * Get navigation context (called from get_applet_state tool)
- */
-export function getAppletNavigation(): NavigationContext {
-  return appletNavigation;
+export function getAppletNavigation(sessionId?: string): NavigationContext {
+  return appletNavigations.get(sessionId || DEFAULT_KEY) || { stack: [], urlParams: {} };
 }
 
-/**
- * Get the currently active applet slug
- */
-export function getActiveAppletSlug(): string | null {
-  return activeSlug;
+export function getActiveAppletSlug(sessionId?: string): string | null {
+  return activeSlugs.get(sessionId || DEFAULT_KEY) ?? null;
 }
 
-/**
- * Set the currently active applet slug (called on applet load)
- */
-export function setActiveAppletSlug(slug: string | null): void {
-  activeSlug = slug;
+export function setActiveAppletSlug(sessionId: string | undefined, slug: string | null): void {
+  activeSlugs.set(sessionId || DEFAULT_KEY, slug);
 }
 
-/**
- * Signal that the client should reload
- */
-export function triggerReload(): void {
-  pendingReload = true;
+export function triggerReload(sessionId?: string): void {
+  pendingReloads.add(sessionId || DEFAULT_KEY);
 }
 
-/**
- * Check and consume pending reload signal
- */
-export function consumeReloadSignal(): boolean {
-  if (pendingReload) {
-    pendingReload = false;
+export function consumeReloadSignal(sessionId?: string): boolean {
+  const key = sessionId || DEFAULT_KEY;
+  if (pendingReloads.has(key)) {
+    pendingReloads.delete(key);
     return true;
   }
   return false;

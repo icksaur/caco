@@ -14,8 +14,8 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { getActiveSessionId, isLoadingHistory } from './app-state.js';
-import { getNewChatCwd, showNewChatError } from './model-selector.js';
+import { getActiveSessionId, isLoadingHistory, getSelectedModel, getNewChatCwd } from './app-state.js';
+import { showNewChatError } from './model-selector.js';
 import { isViewState } from './view-controller.js';
 import { onEvent, onReconnect, type SessionEvent } from './websocket.js';
 import { showToast } from './toast.js';
@@ -288,8 +288,7 @@ export function setupFormHandler(): void {
     
     const input = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
     const message = input.value.trim();
-    const modelInput = document.getElementById('selectedModel') as HTMLInputElement;
-    const model = modelInput?.value;
+    const model = getSelectedModel();
     const imageData = (document.getElementById('imageData') as HTMLInputElement).value;
     
     const cwd = getNewChatCwd();

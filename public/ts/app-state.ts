@@ -101,14 +101,6 @@ export function clearActiveSession(): void {
  */
 export function setSelectedModel(modelId: string): void {
   state.selectedModel = modelId;
-  
-  // Sync to hidden form input (DOM side effect)
-  if (typeof document !== 'undefined') {
-    const input = document.getElementById('selectedModel') as HTMLInputElement | null;
-    if (input) {
-      input.value = modelId;
-    }
-  }
 }
 
 /**
@@ -178,6 +170,25 @@ export function initFromSession(data: {
   const sessionId = data.sessionId ?? data.activeSessionId ?? null;
   const cwd = data.cwd ?? data.currentCwd ?? '';
   setActiveSession(sessionId, cwd);
+}
+
+/**
+ * Get the cwd from the new chat form
+ */
+export function getNewChatCwd(): string {
+  const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
+  return cwdInput?.value.trim() || '';
+}
+
+/**
+ * Set the CWD in the new chat form
+ */
+export function setNewChatCwd(cwd: string): void {
+  const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
+  if (cwdInput) {
+    cwdInput.value = cwd;
+    cwdInput.dispatchEvent(new Event('input'));
+  }
 }
 
 // Debug

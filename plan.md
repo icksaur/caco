@@ -12,54 +12,88 @@ legend:
 
 ---
 
-## Session Panel Popout (doc/specs/session-panel-popout.md)
+## Code Quality Cleanup
 
-### Step 1: HTML — move sessionView into .work-area
+### Step 1: Eliminate duplicate code paths
 
-[ ] `public/index.html`:
-  - Move `<div id="sessionView">` from before `<main>` to INSIDE `.work-area` as the FIRST child (before chatPanel)
-  - Add a resizer div: `<div id="sessionResizer" class="panel-resizer"></div>` between sessionView and chatPanel
-  - Change class from `session-overlay` to `session-panel hidden`
+[ ] Consolidate applet loading — `router.ts:loadApplet` and `applet-runtime.ts:loadAppletBySlug`:
+  - Make `loadApplet(slug)` in router.ts accept optional `urlParams`
+  - Delete `loadAppletBySlug` in applet-runtime.ts
+  - Have `loadAppletFromUrl` call `loadApplet` from router.ts via import
 
-### Step 2: CSS — convert from overlay to flex panel
+[ ] Extract session sort comparator — duplicated in `session-panel.ts:352-364` and `command-registry.ts:50-57`:
+  - Create `sortSessions(sessions: SessionData[]): SessionData[]` in `ui-utils.ts`
+  - Call from both session-panel and command-registry
 
-[ ] `public/style.css`:
-  - Remove `.session-overlay` fixed positioning (position:fixed, top/left/right/bottom, z-index:100)
-  - Add `.session-panel`: flex child, `width: 300px`, `min-width: 250px`, `border-right: 1px solid var(--color-border)`, `overflow-y: auto`, `background: var(--bg-surface)`
-  - `.session-panel.hidden { display: none; }`
-  - Desktop: show resizer when session panel visible (`.work-area:has(.session-panel:not(.hidden)) > #sessionResizer { display: block; }`)
-  - Mobile: session panel stays full-screen overlay behavior (media query override)
-  - Remove `.session-overlay.active { display: block; }` rule
+[ ] Extract session action buttons — duplicated in `session-panel.ts` `createSessionItem` and `updateSessionItemState`:
+  - Create `appendActionButtons(item, sessionId, displayName)` helper
+  - Call from both paths
 
-### Step 3: View controller — decouple sessions from ViewState
+[ ] Consolidate model fetching — `api.ts` GET /models has its own cache, `SessionManager` has `_fetchModels`:
+  - Delete the route's `cachedModels`/`modelsCacheTime` and `CopilotClient` instance
+  - Route calls `sessionManager.getModels()` directly
 
-[ ] `public/ts/view-controller.ts`:
-  - Remove `'sessions'` from `ViewState` type → becomes `'newChat' | 'chatting'`
-  - Remove `case 'sessions':` from `setViewState()`
-  - Add `showSessionPanel()` / `hideSessionPanel()` / `toggleSessionPanel()` / `isSessionPanelVisible()` (mirror applet panel functions)
-  - Default `currentState` to `'newChat'` instead of `'sessions'`
+[ ] Consolidate MIME maps — `api.ts` has two (L119 extMap, L392 mimeTypes):
+  - Create one bidirectional `MIME_MAP` in config.ts
+  - Derive both directions from it
 
-### Step 4: Router + session-panel — use new toggle
+### Step 2: Remove side effects from state setters
 
-[ ] `public/ts/router.ts`:
-  - Rewrite `toggleSessions()` to call `toggleSessionPanel()` instead of `setViewState`
-  - Remove `previousMainPanel` tracking (no longer needed — session panel is orthogonal)
+[ ] `app-state.ts` `setSelectedModel` — remove DOM hidden input sync:
+  - Delete the `document.getElementById('selectedModel')` update
+  - In `message-streaming.ts:291` submit handler, call `getSelectedModel()` instead of reading DOM
+  - Remove the hidden input from index.html if no other code uses it
 
-[ ] `public/ts/session-panel.ts`:
-  - `showSessionManager()` → call `showSessionPanel()` + `loadSessions()` (no `setViewState`)
-  - Session click → close panel via `hideSessionPanel()` then activate session
+[ ] `applet-runtime.ts:294` `setAppletState` — remove CWD side effect:
+  - Remove `setNewChatCwd(state.currentPath)` call from setAppletState
+  - Have model-selector's CWD input subscribe to onSessionChange or read from app-state directly
 
-### Step 5: Resizer — reuse panel-resizer pattern
+[ ] Move CWD functions out of model-selector.ts:
+  - Move `getNewChatCwd`/`setNewChatCwd` to app-state.ts
+  - Update all importers (chat-view-controller, message-streaming, applet-runtime)
 
-[ ] `public/ts/panel-resizer.ts`:
-  - Add a second resizer for the session panel (LEFT side, drag right to widen)
-  - Separate localStorage key: `caco:sessionPanelWidth`
+### Step 3: Fix global state scoping
 
-### Step 6: Build and test
+[ ] `src/applet-state.ts` — key state by sessionId:
+  - Change `appletUserState`/`appletNavigation`/`activeSlug`/`pendingReload` to `Map<sessionId, ...>`
+  - Route handlers pass sessionId to get/set functions
 
-[ ] All tests pass
+[ ] `src/swarm-tool.ts:18` — key swarm lock by sessionId:
+  - Change `let swarmActive` to `Set<string>` of active session IDs
+  - Guard checks `swarmActive.has(sessionRef.id)` instead of global boolean
+
+### Step 4: Consolidate SDK disk access
+
+[ ] Create `src/sdk-session-store.ts`:
+  - `readSessionUpdatedAt(sessionId)` — reads workspace.yaml
+  - `readSessionEvents(sessionId)` — reads events.jsonl
+  - `parseSessionModel(sessionId)` — reads model from events
+  - Single import for the `~/.copilot/session-state/` path prefix
+
+[ ] Update `session-manager.ts`:
+  - `parseModelFromSDK` → calls `sdkStore.parseSessionModel`
+  - `_discoverSessions` → calls `sdkStore.readSessionUpdatedAt`
+  - `getHistoryFromDisk` → calls `sdkStore.readSessionEvents`
+  - `list()` → calls `sdkStore.readSessionUpdatedAt`
+
+### Step 5: Fix construction patterns
+
+[ ] `src/unobserved-tracker.ts` — constructor injection:
+  - Pass broadcast callback as constructor parameter
+  - Remove `setBroadcast()` method
+  - Update server.ts to pass the broadcast function at construction
+
+[ ] `src/applet-push.ts` — constructor injection:
+  - Export a factory `createAppletPush(broadcastFn)` instead of module-level nullable
+  - Update server.ts to call factory after WebSocket is set up
+
+[ ] `src/session-state.ts` — factory pattern:
+  - Replace `new SessionState()` + `init(config)` with `createSessionState(config): Promise<SessionState>`
+  - Update server.ts to await the factory
+
+### Step 6: Build, test, verify
+
+[ ] All existing tests pass
 [ ] Typecheck clean
 [ ] Build client
-[ ] Verify: Escape+L toggles side panel, session click switches and closes panel
-[ ] Verify: applet panel and session panel can both be open simultaneously
-[ ] Verify: resizer works for both panels independently
+[ ] Run full test suite — no regressions

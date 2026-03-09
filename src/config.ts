@@ -34,3 +34,39 @@ export const AGENT_MAX_AGE_SECONDS = 60 * 60;
 export const AGENT_RATE_LIMIT_CALLS = 10;
 export const AGENT_RATE_LIMIT_WINDOW_SECONDS = 60;
 
+// Extension→MIME mapping (single source of truth for file types)
+export const MIME_TYPES: Record<string, string> = {
+  // Images
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  // Text
+  txt: 'text/plain',
+  md: 'text/markdown',
+  html: 'text/html',
+  css: 'text/css',
+  js: 'text/javascript',
+  ts: 'text/typescript',
+  json: 'application/json',
+  xml: 'application/xml',
+  // Code
+  py: 'text/x-python',
+  rb: 'text/x-ruby',
+  go: 'text/x-go',
+  rs: 'text/x-rust',
+  java: 'text/x-java',
+  c: 'text/x-c',
+  cpp: 'text/x-c++',
+  h: 'text/x-c',
+  sh: 'text/x-shellscript',
+  yaml: 'text/yaml',
+  yml: 'text/yaml',
+  toml: 'text/toml',
+  // Documents
+  pdf: 'application/pdf',
+};
+

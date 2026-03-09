@@ -1,47 +1,16 @@
-/**
- * UnobservedTracker - Single Source of Truth for Unobserved Sessions
- * 
- * Manages the set of sessions that have completed work but haven't been
- * viewed by any client. This provides:
- * 
- * 1. O(1) count and membership checks
- * 2. Single entry point for all state mutations
- * 3. Automatic persistence to meta.json files
- * 4. Easy unit testing
- * 
- * State Flow:
- *   session.idle event → markIdle(sessionId) → add to set, persist
- *   /observe API call  → markObserved(sessionId) → remove from set, persist
- *   session deleted    → remove(sessionId) → remove from set (no persist needed)
- * 
- * Multi-client Sync:
- *   - All mutations broadcast via WebSocket with current count
- *   - Clients update badge directly from event data (no refetch)
- *   - If client A observes, client B sees update via broadcast
- */
-
 import { getSessionMeta, setSessionMeta } from './storage.js';
+import { broadcastGlobalEvent } from './routes/websocket.js';
 
-/**
- * Callback for broadcasting state changes to all clients
- */
 type BroadcastCallback = (event: {
   type: string;
   data: { reason: string; sessionId: string; unobservedCount: number };
 }) => void;
 
-class UnobservedTracker {
+export class UnobservedTracker {
   private unobservedSet: Set<string> = new Set();
-  private broadcastFn: BroadcastCallback | null = null;
   private initialized = false;
 
-  /**
-   * Set the broadcast function (called after WebSocket module loads)
-   * This avoids circular dependency issues
-   */
-  setBroadcast(fn: BroadcastCallback): void {
-    this.broadcastFn = fn;
-  }
+  constructor(private broadcastFn: BroadcastCallback) {}
 
   /**
    * Initialize tracker by hydrating from existing session metadata
@@ -170,24 +139,18 @@ class UnobservedTracker {
     return Array.from(this.unobservedSet);
   }
 
-  /**
-   * Broadcast state change to all clients
-   * Uses unified session.listChanged event for simplicity
-   */
   private broadcast(type: string, sessionId: string): void {
-    if (this.broadcastFn) {
-      // Emit unified event for client to refresh session list
-      this.broadcastFn({
-        type: 'session.listChanged',
-        data: {
-          reason: type.replace('session.', ''),  // 'idle' or 'observed'
-          sessionId,
-          unobservedCount: this.unobservedSet.size
-        }
-      });
-    }
+    this.broadcastFn({
+      type: 'session.listChanged',
+      data: {
+        reason: type.replace('session.', ''),
+        sessionId,
+        unobservedCount: this.unobservedSet.size
+      }
+    });
   }
 }
 
-// Singleton instance
-export const unobservedTracker = new UnobservedTracker();
+export const unobservedTracker = new UnobservedTracker(
+  (event) => broadcastGlobalEvent(event)
+);

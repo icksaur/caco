@@ -15,7 +15,7 @@ import { broadcastGlobalEvent } from './routes/websocket.js';
 const POLL_INTERVAL_MS = 5000;
 const PER_SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 
-let swarmActive = false;
+const activeSwarms = new Set<string>();
 
 function validateSwarmModel(model: string, count: number): string | null {
   const lower = model.toLowerCase();
@@ -92,7 +92,7 @@ Each session runs independently with its own prompt. Results are collected and r
     }),
 
     handler: async ({ cwd, model, prompts }) => {
-      if (swarmActive) {
+      if (activeSwarms.has(sessionRef.id)) {
         return {
           textResultForLlm: 'A swarm is already running. Wait for it to complete.',
           resultType: 'error' as const
@@ -104,7 +104,7 @@ Each session runs independently with its own prompt. Results are collected and r
         return { textResultForLlm: tierError, resultType: 'error' as const };
       }
 
-      swarmActive = true;
+      activeSwarms.add(sessionRef.id);
       const startTime = Date.now();
       const sessions: SwarmSession[] = [];
 
@@ -222,7 +222,7 @@ Each session runs independently with its own prompt. Results are collected and r
           }
         };
       } finally {
-        swarmActive = false;
+        activeSwarms.delete(sessionRef.id);
         for (const s of sessions) {
           if (!s.sessionId) continue;
           try {

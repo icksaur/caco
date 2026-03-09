@@ -14,7 +14,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
-import { registerStatePushHandler } from '../applet-push.js';
+import { createAppletPush } from '../applet-push.js';
 import sessionManager from '../session-manager.js';
 import { shouldFilter } from '../event-filter.js';
 import { transformForClient } from '../event-transformer.js';
@@ -22,7 +22,6 @@ import { parseMessageSource, type MessageSource } from '../message-source.js';
 import { listEmbedOutputs, parseOutputMarkers, getSessionMeta } from '../storage.js';
 import { CacoEventQueue, isFlushTrigger, type CacoEvent } from '../caco-event-queue.js';
 import { normalizeToolComplete, extractToolResultText, type RawSDKEvent } from '../sdk-normalizer.js';
-import { unobservedTracker } from '../unobserved-tracker.js';
 import { getClientMessageHandler } from '../extension-runtime.js';
 import { watchExtensions } from '../extension-store.js';
 
@@ -75,14 +74,8 @@ interface ServerMessage {
  * Setup WebSocket server on existing HTTP server
  * Single persistent connection - no session in URL
  */
-export function setupWebSocket(server: Server): WebSocketServer {
-  // Register the push handler so applet-tools can push state without direct import
-  registerStatePushHandler(pushStateToAppletInternal);
-  
-  // Wire up UnobservedTracker broadcast to use global WebSocket broadcast
-  unobservedTracker.setBroadcast((event) => {
-    broadcastGlobalEvent(event);
-  });
+export function setupWebSocket(server: Server) {
+  const appletPush = createAppletPush(pushStateToAppletInternal);
   
   const wss = new WebSocketServer({ 
     server, 
@@ -149,7 +142,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
     }
   });
 
-  return wss;
+  return { wss, ...appletPush };
 }
 
 /**
@@ -168,7 +161,7 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
   switch (msg.type) {
     case 'setState':
       if (msg.data) {
-        setAppletUserState(msg.data);
+        setAppletUserState(msg.sessionId, msg.data);
         // Broadcast to all connections (for multi-tab sync)
         broadcastToAll({ type: 'stateUpdate', data: msg.data }, ws);
       }
@@ -189,7 +182,7 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
       break;
       
     case 'getState':
-      send(ws, { type: 'state', id: msg.id, data: getAppletUserState() });
+      send(ws, { type: 'state', id: msg.id, data: getAppletUserState(msg.sessionId) });
       break;
       
     case 'ping':

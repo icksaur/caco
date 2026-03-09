@@ -1,11 +1,10 @@
 import { CopilotClient, approveAll } from '@github/copilot-sdk';
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { parse as parseYaml } from 'yaml';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage } from './types.js';
-import { parseSessionStartEvent, parseWorkspaceYaml } from './session-parsing.js';
 import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, type SessionKind } from './storage.js';
+import { readSessionWorkspace, readSessionEvents, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
@@ -120,31 +119,10 @@ interface GroupedSessions {
 // ============================================================================
 
 /**
- * Parse model from SDK session events (authoritative source).
- * Falls back gracefully if file missing or format changed.
- */
-function parseModelFromSDK(sessionId: string): string | null {
-  try {
-    const eventsPath = join(homedir(), '.copilot', 'session-state', sessionId, 'events.jsonl');
-    if (!existsSync(eventsPath)) return null;
-    
-    const firstLine = readFileSync(eventsPath, 'utf8').split('\n')[0];
-    const event = JSON.parse(firstLine);
-    if (event.type === 'session.start' && event.data?.selectedModel) {
-      return event.data.selectedModel;
-    }
-    console.warn(`[MODEL] Unexpected event format for ${sessionId}`);
-  } catch (e) {
-    console.warn(`[MODEL] Could not parse SDK events for ${sessionId}: ${e instanceof Error ? e.message : e}`);
-  }
-  return null;
-}
-
-/**
  * Sync model to cache. Called on create (with model) or resume (parses SDK).
  */
 function syncModelCache(sessionId: string, model?: string): void {
-  const resolvedModel = model ?? parseModelFromSDK(sessionId);
+  const resolvedModel = model ?? parseSessionModel(sessionId);
   if (resolvedModel) {
     const meta = getSessionMeta(sessionId) ?? { name: '' };
     if (meta.model !== resolvedModel) {
@@ -187,7 +165,6 @@ class SessionManager {
   private sharedClient: CopilotClientInstance | null = null;
   private clientStarting: Promise<CopilotClientInstance> | null = null;
   
-  private stateDir = join(homedir(), '.copilot', 'session-state');
   private static readonly MAX_ACTIVE_SESSIONS = 5;
   private cachedModels: SDKModelInfo[] = [];
   private initialized = false;
@@ -286,27 +263,22 @@ class SessionManager {
   private _discoverSessions(): void {
     this.sessionCache.clear();
     
-    if (!existsSync(this.stateDir)) return;
-    
-    for (const sessionId of readdirSync(this.stateDir)) {
-      const sessionDir = join(this.stateDir, sessionId);
+    for (const sessionId of listSessionIds()) {
       const record: CachedSession = { cwd: null, summary: null };
       
-      // Get cwd from events.jsonl (first line)
-      try {
-        const eventsPath = join(sessionDir, 'events.jsonl');
-        const firstLine = readFileSync(eventsPath, 'utf8').split('\n')[0];
-        record.cwd = parseSessionStartEvent(firstLine).cwd;
-      } catch {
-        // No events.jsonl means session was never initialized — skip it
-        continue;
+      const events = readSessionEvents(sessionId);
+      if (events.length === 0) continue;
+      
+      const startEvent = events[0];
+      if (startEvent.type === 'session.start') {
+        const ctx = startEvent.data?.context as Record<string, unknown> | undefined;
+        record.cwd = typeof ctx?.cwd === 'string' ? ctx.cwd : null;
       }
       
-      // Get summary from workspace.yaml
-      try {
-        const yamlPath = join(sessionDir, 'workspace.yaml');
-        record.summary = parseWorkspaceYaml(readFileSync(yamlPath, 'utf8')).summary;
-      } catch { /* missing or invalid */ }
+      const workspace = readSessionWorkspace(sessionId);
+      if (workspace) {
+        record.summary = workspace.summary ?? null;
+      }
       
       this.sessionCache.set(sessionId, record);
     }
@@ -571,32 +543,7 @@ class SessionManager {
    * Used for displaying history on page load before first message
    */
   private getHistoryFromDisk(sessionId: string): SessionEvent[] {
-    const sessionDir = join(this.stateDir, sessionId);
-    const eventsPath = join(sessionDir, 'events.jsonl');
-    
-    if (!existsSync(eventsPath)) {
-      return [];
-    }
-    
-    try {
-      const content = readFileSync(eventsPath, 'utf-8');
-      const lines = content.split('\n').filter(line => line.trim());
-      const events: SessionEvent[] = [];
-      
-      for (const line of lines) {
-        try {
-          const event = JSON.parse(line);
-          events.push(event);
-        } catch {
-          // Skip malformed lines
-        }
-      }
-      
-      return events;
-    } catch (e) {
-      console.error(`Error reading events from disk for ${sessionId}:`, e);
-      return [];
-    }
+    return readSessionEvents(sessionId) as SessionEvent[];
   }
 
   /**
@@ -626,11 +573,8 @@ class SessionManager {
     const result: SessionListItem[] = [];
     for (const [sessionId, { cwd, summary }] of this.sessionCache) {
       let updatedAt: string | null = null;
-      try {
-        const yamlPath = join(this.stateDir, sessionId, 'workspace.yaml');
-        const yaml = parseYaml(readFileSync(yamlPath, 'utf8')) as { updated_at?: string };
-        updatedAt = yaml.updated_at || null;
-      } catch { /* missing */ }
+      const workspace = readSessionWorkspace(sessionId);
+      if (workspace?.updatedAt) updatedAt = workspace.updatedAt;
       const isBusy = this.isBusy(sessionId);
       const meta = getSessionMeta(sessionId);
       const name = meta?.name || '';
@@ -689,13 +633,9 @@ class SessionManager {
     // Sort by modified time (newest first)
     const sorted = sessions
       .map(s => {
-        const yamlPath = join(this.stateDir, s.sessionId, 'workspace.yaml');
-        try {
-          const yaml = parseYaml(readFileSync(yamlPath, 'utf8')) as { updated_at?: string };
-          return { ...s, updatedAt: new Date(yaml.updated_at || 0) };
-        } catch {
-          return { ...s, updatedAt: new Date(0) };
-        }
+        const workspace = readSessionWorkspace(s.sessionId);
+        const ts = workspace?.updatedAt ? new Date(workspace.updatedAt) : new Date(0);
+        return { ...s, updatedAt: ts };
       })
       .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
     
@@ -783,16 +723,7 @@ class SessionManager {
    * Check if a session has messages (i.e., can be resumed)
    */
   hasMessages(sessionId: string): boolean {
-    const sessionDir = join(this.stateDir, sessionId);
-    const eventsPath = join(sessionDir, 'events.jsonl');
-    try {
-      const content = readFileSync(eventsPath, 'utf8');
-      // Count actual message events (not just session.start)
-      const lines = content.split('\n').filter(l => l.trim());
-      return lines.length > 1; // More than just session.start
-    } catch {
-      return false;
-    }
+    return readSessionEvents(sessionId).length > 1;
   }
 
   /**

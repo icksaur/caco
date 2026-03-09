@@ -7,6 +7,7 @@ vi.mock('../../public/ts/app-state.js', () => ({
   getSelectedModel: vi.fn(() => 'claude-sonnet-4'),
   getAvailableModels: vi.fn(() => [{ id: 'claude-sonnet-4', name: 'Claude Sonnet 4', cost: 1 }]),
   clearActiveSession: vi.fn(),
+  getNewChatCwd: vi.fn(() => '/new-chat-cwd'),
 }));
 
 vi.mock('../../public/ts/view-controller.js', () => {
@@ -31,7 +32,6 @@ vi.mock('../../public/ts/context-footer.js', () => ({
 
 vi.mock('../../public/ts/model-selector.js', () => ({
   loadModels: vi.fn(),
-  getNewChatCwd: vi.fn(() => '/new-chat-cwd'),
 }));
 
 vi.mock('../../public/ts/history-loader.js', () => ({

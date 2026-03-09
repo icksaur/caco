@@ -1,10 +1,5 @@
-/**
- * Unit tests for UnobservedTracker - Single Source of Truth for unobserved sessions
- */
-
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// Mock storage functions
 const mockMeta = new Map<string, Record<string, unknown>>();
 
 vi.mock('../../src/storage.js', () => ({
@@ -14,16 +9,15 @@ vi.mock('../../src/storage.js', () => ({
   }),
 }));
 
-// Import after mocking - use correct path
-import { unobservedTracker } from '../../src/unobserved-tracker.js';
+vi.mock('../../src/routes/websocket.js', () => ({
+  broadcastGlobalEvent: vi.fn(),
+}));
+
+import { unobservedTracker, UnobservedTracker } from '../../src/unobserved-tracker.js';
 
 describe('UnobservedTracker', () => {
   beforeEach(() => {
-    // Reset mock storage
     mockMeta.clear();
-    
-    // Reset tracker state by accessing internal set (for testing only)
-    // In production, state persists across tests via hydration
     (unobservedTracker as any).unobservedSet.clear();
     (unobservedTracker as any).initialized = false;
   });
@@ -248,10 +242,10 @@ describe('UnobservedTracker', () => {
 
     it('does not broadcast for swarm session markIdle', () => {
       const broadcastFn = vi.fn();
-      unobservedTracker.setBroadcast(broadcastFn);
+      const tracker = new UnobservedTracker(broadcastFn);
       mockMeta.set('child1', { name: '', kind: 'swarm' });
 
-      unobservedTracker.markIdle('child1');
+      tracker.markIdle('child1');
 
       expect(broadcastFn).not.toHaveBeenCalled();
     });
@@ -260,9 +254,9 @@ describe('UnobservedTracker', () => {
   describe('broadcast', () => {
     it('calls broadcast function with sessionId and count', () => {
       const broadcastFn = vi.fn();
-      unobservedTracker.setBroadcast(broadcastFn);
+      const tracker = new UnobservedTracker(broadcastFn);
       
-      unobservedTracker.markIdle('session1');
+      tracker.markIdle('session1');
       
       expect(broadcastFn).toHaveBeenCalledWith({
         type: 'session.listChanged',
@@ -272,12 +266,12 @@ describe('UnobservedTracker', () => {
 
     it('broadcasts on markObserved', () => {
       const broadcastFn = vi.fn();
-      unobservedTracker.setBroadcast(broadcastFn);
+      const tracker = new UnobservedTracker(broadcastFn);
       
-      unobservedTracker.markIdle('session1');
+      tracker.markIdle('session1');
       broadcastFn.mockClear();
       
-      unobservedTracker.markObserved('session1');
+      tracker.markObserved('session1');
       
       expect(broadcastFn).toHaveBeenCalledWith({
         type: 'session.listChanged',

@@ -10,6 +10,7 @@ import { showSessionPanel } from './view-controller.js';
 import { sessionClick, newSessionClick } from './router.js';
 import { onGlobalEvent } from './websocket.js';
 import { sessionTracker } from './session-state-tracker.js';
+import { showToast } from './toast.js';
 
 // Module state for fuzzy search
 let allSessions: SessionData[] = [];
@@ -70,6 +71,33 @@ export function initSessionPanel(): void {
     updateSessionItemState(sessionId, state.busy);
     updateMenuIndicators();
   });
+
+  // Drag-drop .tar.gz import
+  const panel = document.getElementById('sessionView');
+  if (panel) {
+    let dragDepth = 0;
+    panel.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      if (dragDepth === 0) panel.classList.add('drop-active');
+      dragDepth++;
+    });
+    panel.addEventListener('dragover', (e) => { e.preventDefault(); });
+    panel.addEventListener('dragleave', () => {
+      dragDepth--;
+      if (dragDepth === 0) panel.classList.remove('drop-active');
+    });
+    panel.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragDepth = 0;
+      panel.classList.remove('drop-active');
+      const file = e.dataTransfer?.files[0];
+      if (!file || !file.name.endsWith('.tar.gz')) {
+        showToast('Drop a .tar.gz session archive');
+        return;
+      }
+      void importSessionFile(file);
+    });
+  }
 }
 
 /**
@@ -619,5 +647,36 @@ async function loadUsage(): Promise<void> {
     }
   } catch (error) {
     console.error('Failed to load usage:', error);
+  }
+}
+
+/**
+ * Import a session from a dropped .tar.gz file
+ */
+let isImporting = false;
+async function importSessionFile(file: File): Promise<void> {
+  if (isImporting) {
+    showToast('Import already in progress');
+    return;
+  }
+  isImporting = true;
+  showToast('Importing session...');
+  try {
+    const res = await fetch('/api/sessions/import?force=true', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/gzip' },
+      body: file
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`Imported session ${(data.sessionId as string).slice(0, 8)}`);
+      void loadSessions();
+    } else {
+      showToast(data.error || 'Import failed');
+    }
+  } catch {
+    showToast('Import failed');
+  } finally {
+    isImporting = false;
   }
 }

@@ -475,6 +475,11 @@ main {
   display: none;
 }
 
+.session-panel.drop-active {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -4px;
+}
+
 .session-content {
   display: flex;
   flex-direction: column;

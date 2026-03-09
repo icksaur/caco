@@ -103,6 +103,27 @@ registerCommand({
 });
 
 registerCommand({
+  name: 'exportsession',
+  description: 'Export current session as .tar.gz',
+  source: 'built-in',
+  handler: async () => {
+    const sessionId = getActiveSessionId();
+    if (!sessionId) {
+      showToast('No active session');
+      return;
+    }
+    // Trigger browser download via hidden anchor
+    const a = document.createElement('a');
+    a.href = `/api/sessions/${sessionId}/export`;
+    a.download = `${sessionId}.caco-session.tar.gz`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast('Exporting session...');
+  }
+});
+
+registerCommand({
   name: 'compact',
   description: 'Force context compaction',
   source: 'built-in',

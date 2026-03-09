@@ -7,7 +7,7 @@
  */
 
 import { spawn } from 'child_process';
-import { appendFileSync, openSync } from 'fs';
+import { appendFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -158,12 +158,12 @@ function spawnServer(): void {
   log('Spawning new server...');
   
   try {
-    const logFd = openSync(join(PROJECT_ROOT, 'server.log'), 'w');
     const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
       cwd: PROJECT_ROOT,
       detached: true,
-      stdio: ['ignore', logFd, logFd],
-      windowsHide: true
+      stdio: 'ignore',
+      windowsHide: true,
+      env: { ...process.env }
     });
     
     child.unref();

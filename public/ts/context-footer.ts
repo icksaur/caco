@@ -51,11 +51,8 @@ export function renderStatus(modelName: string, cwd: string, hasGit = false, ses
     parts.push(`<span class="context-model">${model}</span>`);
   }
   
-  if (dirName && fullCwd) {
-    const encodedCwd = encodeURIComponent(fullCwd);
-    const applet = hasGit ? 'git-status' : 'file-finder';
-    const paramName = hasGit ? 'path' : 'root';
-    parts.push(`<a href="/?applet=${applet}&${paramName}=${encodedCwd}" title="${fullCwd}">${dirName}</a>`);
+  if (dirName) {
+    parts.push(`<span title="${fullCwd || ''}">${dirName}</span>`);
   }
   
   if (hasIcon && sessionId) {
@@ -66,16 +63,28 @@ export function renderStatus(modelName: string, cwd: string, hasGit = false, ses
   
   const descEl = footer.querySelector('.context-description') as HTMLElement | null;
   if (descEl) {
-    descEl.innerHTML = sessionName ? escapeHtml(sessionName) : '';
+    const descParts: string[] = [];
+    if (sessionName) descParts.push(escapeHtml(sessionName));
+    
+    const encodedCwd = fullCwd ? encodeURIComponent(fullCwd) : '';
+    const appletLinks: string[] = [];
+    if (sessionId) {
+      appletLinks.push('<a href="/?applet=roadmap" class="footer-applet-link" id="footerRoadmapLink" style="display:none">roadmap</a>');
+    }
+    if (hasGit && encodedCwd) {
+      appletLinks.push(`<a href="/?applet=git-status&path=${encodedCwd}" class="footer-applet-link">git</a>`);
+    }
+    if (encodedCwd) {
+      appletLinks.push(`<a href="/?applet=file-finder&root=${encodedCwd}" class="footer-applet-link">files</a>`);
+    }
+    
+    descEl.innerHTML = descParts.join('') + (appletLinks.length ? ' ' + appletLinks.join(' ') : '');
+    
     if (sessionId) {
       fetch(`/api/sessions/${sessionId}/roadmap`).then(r => r.json()).then(data => {
         if (data?.title || data?.steps?.length) {
-          const link = document.createElement('a');
-          link.href = '/?applet=roadmap';
-          link.className = 'roadmap-link';
-          link.textContent = '▤';
-          link.title = data.title || 'Roadmap';
-          descEl.appendChild(link);
+          const link = document.getElementById('footerRoadmapLink');
+          if (link) link.style.display = '';
         }
       }).catch(() => {});
     }

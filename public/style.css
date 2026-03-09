@@ -2022,13 +2022,13 @@ main {
   display: none;
 }
 
-.roadmap-link {
+.footer-applet-link {
   margin-left: 6px;
-  opacity: 0.6;
-  font-size: 12px;
+  opacity: 0.5;
+  font-size: var(--text-sm);
 }
 
-.roadmap-link:hover {
+.footer-applet-link:hover {
   opacity: 1;
 }
 

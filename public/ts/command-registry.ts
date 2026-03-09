@@ -46,7 +46,7 @@ registerCommand({
       const res = await fetch('/api/sessions');
       const data: SessionsResponse = await res.json();
       const sessions: SessionData[] = Object.values(data.grouped).flat()
-        .filter(s => s.kind !== 'swarm');
+        .filter(s => s.kind !== 'swarm' || s.isBusy);
       sessions.sort((a, b) => {
         if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
         const kindOrder = { interactive: 0, scheduled: 1, agent: 2, swarm: 3 };

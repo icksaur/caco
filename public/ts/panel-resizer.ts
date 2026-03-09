@@ -1,19 +1,18 @@
-const STORAGE_KEY = 'caco:appletPanelWidth';
-const MIN_WIDTH = 300;
+const MIN_WIDTH = 250;
 
-export function initPanelResizer(): void {
-  const resizer = document.getElementById('panelResizer');
-  const panel = document.getElementById('appletPanel');
+function setupResizer(resizerId: string, panelId: string, storageKey: string, direction: 'left' | 'right'): void {
+  const resizer = document.getElementById(resizerId);
+  const panel = document.getElementById(panelId);
   if (!resizer || !panel) return;
 
-  const saved = localStorage.getItem(STORAGE_KEY);
+  const saved = localStorage.getItem(storageKey);
   if (saved) panel.style.width = saved;
 
   let startX = 0;
   let startWidth = 0;
 
   const onMouseMove = (e: MouseEvent) => {
-    const delta = startX - e.clientX;
+    const delta = direction === 'right' ? startX - e.clientX : e.clientX - startX;
     const newWidth = Math.max(MIN_WIDTH, startWidth + delta);
     const maxWidth = window.innerWidth * 0.8;
     panel.style.width = `${Math.min(newWidth, maxWidth)}px`;
@@ -25,7 +24,7 @@ export function initPanelResizer(): void {
     document.body.style.userSelect = '';
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
-    localStorage.setItem(STORAGE_KEY, panel.style.width);
+    localStorage.setItem(storageKey, panel.style.width);
   };
 
   resizer.addEventListener('mousedown', (e) => {
@@ -38,4 +37,9 @@ export function initPanelResizer(): void {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   });
+}
+
+export function initPanelResizer(): void {
+  setupResizer('panelResizer', 'appletPanel', 'caco:appletPanelWidth', 'right');
+  setupResizer('sessionResizer', 'sessionView', 'caco:sessionPanelWidth', 'left');
 }

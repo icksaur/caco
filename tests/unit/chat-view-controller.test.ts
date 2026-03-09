@@ -10,11 +10,12 @@ vi.mock('../../public/ts/app-state.js', () => ({
 }));
 
 vi.mock('../../public/ts/view-controller.js', () => {
-  let _mockState = 'sessions';
+  let _mockState = 'newChat';
   return {
     setFormEnabled: vi.fn(),
     setViewState: vi.fn((s: string) => { _mockState = s; }),
     getViewState: vi.fn(() => _mockState),
+    showSessionPanel: vi.fn(),
   };
 });
 
@@ -92,9 +93,9 @@ describe('ChatViewController', () => {
     vi.clearAllMocks();
     // Re-wire view state tracking (clearAllMocks preserves implementations
     // from the factory, but we need a fresh closure for each test)
-    let mockState: string = 'sessions';
+    let mockState: string = 'newChat';
     vi.mocked(setViewState).mockImplementation((s: string) => { mockState = s; });
-    vi.mocked(getViewState).mockImplementation(() => mockState as 'sessions' | 'newChat' | 'chatting');
+    vi.mocked(getViewState).mockImplementation(() => mockState as 'newChat' | 'chatting');
     cvc = new ChatViewController();
   });
 

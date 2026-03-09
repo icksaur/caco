@@ -701,6 +701,8 @@ window.appletAPI.onSessionEvent((event) => {
 
 window.appletAPI.onSessionChange((_sessionId, info) => {
   if (!info.cwd) return;
+  var urlPath = new URLSearchParams(window.location.search).get('path');
+  if (urlPath) return;
   repoPath = info.cwd;
   if (repoPathLabel) {
     repoPathLabel.textContent = repoPath;

@@ -76,10 +76,6 @@ export function initInputRouter(): void {
         }
         break;
       }
-      
-      case 'sessions':
-        // Session list view - could add handlers here if needed
-        break;
     }
   });
   

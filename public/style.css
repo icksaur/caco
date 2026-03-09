@@ -457,35 +457,29 @@ main {
 }
 
 /* ========================================
-   SESSION OVERLAY (Full-screen backdrop)
+   SESSION PANEL (Left side panel)
    ======================================== */
-.session-overlay {
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
+.session-panel {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  min-width: 250px;
   height: 100%;
-  z-index: 100;
-  background: var(--bg-base);
-  opacity: 1;
+  border-right: 1px solid var(--color-border);
+  background: var(--bg-surface);
   overflow-y: auto;
+  flex-shrink: 0;
 }
 
-.session-overlay.active {
-  display: block;
+.session-panel.hidden {
+  display: none;
 }
 
-/* Session content - centered column with max-width */
 .session-content {
   display: flex;
   flex-direction: column;
-  max-width: 800px;
-  margin: 0 auto;
-  padding: var(--space-lg);
-  padding-top: 60px; /* Clear hamburger button */
+  padding: var(--space-md);
+  padding-top: 60px;
 }
 
 /* ========================================
@@ -1879,8 +1873,20 @@ html, body {
     border-left: none;
   }
   
+  .session-panel:not(.hidden) {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    width: 100%;
+    border-right: none;
+  }
+  
   /* Hide chat panel when applet is shown on mobile */
   .work-area:has(.applet-panel:not(.hidden)) .chat-panel {
+    display: none;
+  }
+  
+  .work-area:has(.session-panel:not(.hidden)) .chat-panel {
     display: none;
   }
   
@@ -1935,7 +1941,11 @@ main {
     max-width: 80%;
   }
   
-  .work-area:has(.applet-panel:not(.hidden)) > .panel-resizer {
+  .work-area:has(.applet-panel:not(.hidden)) > #panelResizer {
+    display: block;
+  }
+  
+  .work-area:has(.session-panel:not(.hidden)) > #sessionResizer {
     display: block;
   }
   
@@ -1946,7 +1956,7 @@ main {
     z-index: 51;
   }
   
-  .work-area:has(.applet-panel.expanded:not(.hidden)) > .panel-resizer {
+  .work-area:has(.applet-panel.expanded:not(.hidden)) > #panelResizer {
     display: none;
   }
   

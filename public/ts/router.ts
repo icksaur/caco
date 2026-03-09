@@ -12,12 +12,12 @@
  * - Removing them does NOT destroy loaded content
  */
 
-import { getViewState, setViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, type ViewState } from './view-controller.js';
+import { getViewState, setViewState, showAppletPanel, hideAppletPanel, isAppletPanelVisible, isAppletExpanded, toggleAppletExpanded, toggleSessionPanel, showSessionPanel, hideSessionPanel, isSessionPanelVisible, type ViewState } from './view-controller.js';
 import { getActiveSessionId } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
-import { showSessionManager } from './session-panel.js';
+import { showSessionManager, loadSessions } from './session-panel.js';
 import { chatView } from './chat-view-controller.js';
 
 // Navigation API types (not yet in TypeScript lib)
@@ -34,9 +34,6 @@ interface Navigation {
   addEventListener(type: 'navigate', listener: (event: NavigateEvent) => void): void;
   navigate(url: string, options?: { state?: unknown; history?: 'auto' | 'push' | 'replace' }): { committed: Promise<void>; finished: Promise<void> };
 }
-
-// Track the previous main panel state (for toggleSessions restore)
-let previousMainPanel: ViewState = 'newChat';
 
 /**
  * Initialize router - set up Navigation API handler
@@ -134,24 +131,9 @@ function handlePopState(): void {
  * Toggle sessions overlay
  */
 export function toggleSessions(): void {
-  const current = getViewState();
-  
-  if (current === 'sessions') {
-    // Restore previous main panel
-    setViewState(previousMainPanel);
-    
-    // Focus chat input if applet is not expanded
-    // Use setTimeout to ensure focus happens after button click completes
-    if (!isAppletExpanded()) {
-      setTimeout(() => {
-        const chatInput = document.querySelector('.input-text') as HTMLTextAreaElement | null;
-        chatInput?.focus();
-      }, 0);
-    }
-  } else {
-    // Remember current state and show sessions
-    previousMainPanel = current;
-    showSessionManager(); // Sets state and loads sessions + usage
+  toggleSessionPanel();
+  if (isSessionPanelVisible()) {
+    void loadSessions();
   }
 }
 

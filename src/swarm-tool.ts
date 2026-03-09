@@ -106,9 +106,9 @@ Each session runs independently with its own prompt. Results are collected and r
 
       swarmActive = true;
       const startTime = Date.now();
+      const sessions: SwarmSession[] = [];
 
       try {
-        const sessions: SwarmSession[] = [];
 
         // Create all sessions
         console.log(`[SWARM] Creating ${prompts.length} sessions with model ${model}`);
@@ -223,6 +223,13 @@ Each session runs independently with its own prompt. Results are collected and r
         };
       } finally {
         swarmActive = false;
+        for (const s of sessions) {
+          if (!s.sessionId) continue;
+          try {
+            await sessionManager.stop(s.sessionId);
+            await sessionManager.delete(s.sessionId);
+          } catch { /* best effort */ }
+        }
       }
     }
   });

@@ -93,6 +93,14 @@ Use \`caco_session_swarm\` for parallel fan-out (analyze multiple repos, diverse
 
 Use individual session tools for work the user will review separately. For quick sub-tasks, use the built-in \`task\` tool instead.
 
+## Roadmap
+Sessions can have a roadmap — a persistent list of steps with status tracking. The roadmap survives context compaction.
+
+- \`get_roadmap\` - Read the current roadmap (call after resume or compaction to recover context)
+- \`update_roadmap\` - Set title, add/update/remove steps, manage documents. All fields optional — set whatever you need in one call.
+
+Call \`get_roadmap\` early in resumed sessions to understand project state. Update step statuses as you complete work.
+
 ## Self-Modification
 This chat interface is Caco — an open-source, self-extensible project. You can modify its source code.
 Call \`caco_dev_docs\` for project structure, build commands, and architecture when working on Caco itself.

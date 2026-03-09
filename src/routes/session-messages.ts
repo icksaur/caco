@@ -256,8 +256,15 @@ export async function dispatchMessage(
     
     const INITIAL_TIMEOUT_MS = 60_000;
     let receivedFirstEvent = false;
+    let toolExecuting = false;
+    
+    const pauseWatchdog = () => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      timeoutHandle = undefined;
+    };
     
     const resetWatchdog = () => {
+      if (toolExecuting) return;
       if (timeoutHandle) clearTimeout(timeoutHandle);
       const timeout = receivedFirstEvent ? DISPATCH_TIMEOUT_MS : INITIAL_TIMEOUT_MS;
       timeoutHandle = setTimeout(() => {
@@ -274,7 +281,16 @@ export async function dispatchMessage(
     
     const unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on((event: SessionEvent) => {
       receivedFirstEvent = true;
-      resetWatchdog();
+      
+      if (event.type === 'tool.execution_start') {
+        toolExecuting = true;
+        pauseWatchdog();
+      } else if (event.type === 'tool.execution_complete') {
+        toolExecuting = false;
+        resetWatchdog();
+      } else {
+        resetWatchdog();
+      }
       // Flush queued caco events before trigger events (so embeds appear at natural break)
       if (isFlushTrigger(event.type)) {
         const queue = getQueue(sessionId);

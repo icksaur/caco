@@ -10,7 +10,7 @@
  */
 
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, clearActiveSession } from './app-state.js';
-import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, type ViewState } from './view-controller.js';
+import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
 import { renderStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage } from './context-footer.js';
 import { loadModels, getNewChatCwd } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
@@ -45,7 +45,7 @@ class ChatViewController {
    * Show the session list panel.
    */
   showSessions(): void {
-    setViewState('sessions');
+    showSessionPanel();
   }
 
   /**

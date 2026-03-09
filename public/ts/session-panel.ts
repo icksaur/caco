@@ -6,7 +6,7 @@ import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge, formatStatusParts, fuzzyScore } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
-import { setViewState } from './view-controller.js';
+import { showSessionPanel } from './view-controller.js';
 import { sessionClick, newSessionClick } from './router.js';
 import { onGlobalEvent } from './websocket.js';
 import { sessionTracker } from './session-state-tracker.js';
@@ -166,7 +166,7 @@ export function updateMenuIndicators(): void {
  * Show session manager as the main view (landing page)
  */
 export function showSessionManager(): void {
-  setViewState('sessions');
+  showSessionPanel();
   void loadSessions();
   void loadSchedules();
   void loadUsage();
@@ -347,7 +347,7 @@ export async function loadSessions(): Promise<void> {
     container.innerHTML = '';
     
     // Use already-flattened list for rendering
-    allSessions = flatSessions.filter(s => s.kind !== 'swarm');
+    allSessions = flatSessions.filter(s => s.kind !== 'swarm' || s.isBusy);
     
     allSessions.sort((a, b) => {
       if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;

@@ -2,7 +2,8 @@
  * View State Controller
  * 
  * SINGLE SOURCE OF TRUTH for which view is active.
- * Main panel: sessions | newChat | chatting (mutually exclusive)
+ * Main panel: newChat | chatting (mutually exclusive)
+ * Session panel: shown/hidden (orthogonal, toggled separately)
  * Applet panel: shown/hidden (orthogonal, toggled separately)
  * 
  * All view transitions must go through setViewState() to prevent invalid states.
@@ -13,20 +14,16 @@ import { scrollToBottom } from './ui-utils.js';
 
 import { resetTextareaHeight } from './multiline-input.js';
 
-/** Valid main panel states */
-export type ViewState = 'sessions' | 'newChat' | 'chatting';
+export type ViewState = 'newChat' | 'chatting';
 
-/** Current main panel state */
-let currentState: ViewState = 'sessions';
+let currentState: ViewState = 'newChat';
 
-/** Applet expanded state (session-only, not persisted) */
 let appletExpanded = false;
 
-/** Cached DOM element references */
 interface ViewElements {
   chatView: HTMLElement | null;
   sessionView: HTMLElement | null;
-  appletPanel: HTMLElement | null;  // New: container for applet split
+  appletPanel: HTMLElement | null;
   appletView: HTMLElement | null;
   chat: HTMLElement | null;
   newChat: HTMLElement | null;
@@ -38,9 +35,6 @@ interface ViewElements {
 
 let cachedElements: ViewElements | null = null;
 
-/**
- * Get DOM elements (cached after first call)
- */
 function getElements(): ViewElements {
   if (!cachedElements) {
     cachedElements = {
@@ -59,25 +53,14 @@ function getElements(): ViewElements {
   return cachedElements;
 }
 
-/**
- * Get a cached DOM element by key
- * Use this instead of document.getElementById for commonly accessed elements
- */
 export function getCachedElement(key: keyof ViewElements): HTMLElement | null {
   return getElements()[key];
 }
 
-/**
- * Get current view state
- */
 export function getViewState(): ViewState {
   return currentState;
 }
 
-/**
- * Enable/disable form during streaming
- * Just toggles a class - CSS handles visual state
- */
 export function setFormEnabled(enabled: boolean): void {
   const form = document.getElementById('chatForm');
   const cursor = document.getElementById('workingCursor');
@@ -94,37 +77,16 @@ export function setFormEnabled(enabled: boolean): void {
   }
 }
 
-/**
- * Set the main panel view state
- * 
- * This atomically updates main panel DOM elements.
- * Applet panel visibility is managed separately via showAppletPanel/hideAppletPanel.
- */
 export function setViewState(state: ViewState): void {
   const els = getElements();
-  
-  // Skip if already in this state
   if (state === currentState) return;
-  
   currentState = state;
 
-  // Reset main panel elements
-  els.sessionView?.classList.remove('active');
   els.chat?.classList.add('hidden');
   els.newChat?.classList.add('hidden');
   els.footer?.classList.add('hidden');
-  els.menuBtn?.classList.remove('active');
 
-  // Apply state-specific classes
   switch (state) {
-    case 'sessions':
-      els.sessionView?.classList.add('active');
-      els.menuBtn?.classList.add('active');
-      // Hide applet and expand buttons when sessions overlay is up
-      els.appletBtn?.classList.add('hidden');
-      els.expandBtn?.classList.add('hidden');
-      break;
-      
     case 'newChat':
       els.newChat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
@@ -136,30 +98,46 @@ export function setViewState(state: ViewState): void {
     case 'chatting':
       els.chat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
-      // Note: Do NOT clear context footer here - history load already handled it
-      // Scroll to bottom after view is painted
       requestAnimationFrame(() => scrollToBottom());
-      // Show applet button
       els.appletBtn?.classList.remove('hidden');
       break;
   }
   
-  // If applet panel is visible, ensure expand button is shown
-  if (state !== 'sessions' && isAppletPanelVisible()) {
+  if (isAppletPanelVisible()) {
     els.expandBtn?.classList.remove('hidden');
   }
   
-  // Update browser tab title
   updateTitle();
 }
 
-/**
- * Show the applet panel (orthogonal to main panel state)
- */
+export function showSessionPanel(): void {
+  const els = getElements();
+  els.sessionView?.classList.remove('hidden');
+  els.menuBtn?.classList.add('active');
+}
+
+export function hideSessionPanel(): void {
+  const els = getElements();
+  els.sessionView?.classList.add('hidden');
+  els.menuBtn?.classList.remove('active');
+}
+
+export function toggleSessionPanel(): void {
+  if (isSessionPanelVisible()) {
+    hideSessionPanel();
+  } else {
+    showSessionPanel();
+  }
+}
+
+export function isSessionPanelVisible(): boolean {
+  const els = getElements();
+  return !els.sessionView?.classList.contains('hidden');
+}
+
 export function showAppletPanel(): void {
   const els = getElements();
   els.appletPanel?.classList.remove('hidden');
-  // Restore expanded state if previously set
   if (appletExpanded) {
     els.appletPanel?.classList.add('expanded');
   }
@@ -169,81 +147,51 @@ export function showAppletPanel(): void {
   updateTitle();
 }
 
-/**
- * Hide the applet panel (but preserve its content)
- * Button stays visible so user can re-show the panel
- */
 export function hideAppletPanel(): void {
   const els = getElements();
   els.appletPanel?.classList.add('hidden');
   els.appletBtn?.classList.remove('active');
   els.expandBtn?.classList.add('hidden');
-  // Note: applet button stays visible - user can toggle panel back
   updateTitle();
 }
 
-/**
- * Check if applet panel is visible
- */
 export function isAppletPanelVisible(): boolean {
   const els = getElements();
   return !els.appletPanel?.classList.contains('hidden');
 }
 
-/**
- * Toggle applet panel expanded state
- */
 export function toggleAppletExpanded(): void {
   const els = getElements();
   appletExpanded = !appletExpanded;
   els.appletPanel?.classList.toggle('expanded', appletExpanded);
   els.expandBtn?.classList.toggle('active', appletExpanded);
   
-  // Update icon: « (expand) ↔ » (collapse)
   const icon = document.querySelector('.expand-icon');
   if (icon) icon.textContent = appletExpanded ? '»' : '«';
 }
 
-/**
- * Check if applet panel is expanded
- */
 export function isAppletExpanded(): boolean {
   return appletExpanded;
 }
 
-/**
- * Update browser tab title based on current view
- * Format: hostname context
- */
 export function updateTitle(): void {
   document.title = 'Caco';
 }
 
-/**
- * Check if we're in a specific state
- */
 export function isViewState(state: ViewState): boolean {
   return currentState === state;
 }
 
-/**
- * Initialize view state from DOM (for page load)
- * Call this once during app initialization
- */
 export function initViewState(): void {
   const els = getElements();
   
-  // Detect initial main panel state from DOM
   let detectedState: ViewState;
-  if (els.sessionView?.classList.contains('active')) {
-    detectedState = 'sessions';
-  } else if (els.newChat && !els.newChat.classList.contains('hidden')) {
+  if (els.newChat && !els.newChat.classList.contains('hidden')) {
     detectedState = 'newChat';
   } else {
     detectedState = 'chatting';
   }
   
-  // Force proper state by calling setViewState to clean up any inconsistencies
-  currentState = detectedState === 'sessions' ? 'chatting' : 'sessions'; // Set to different state first
-  setViewState(detectedState); // Now properly transition to detected state
+  currentState = detectedState === 'newChat' ? 'chatting' : 'newChat';
+  setViewState(detectedState);
 }

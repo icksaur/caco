@@ -12,7 +12,58 @@ legend:
 
 ---
 
-## Code Quality Cleanup
+## /sessiontransfer Slash Command
+
+### Step 1: Add CORS for session transfer endpoints
+
+[ ] `server.ts`:
+  - Add CORS headers to `/api/sessions/import` and `GET /api/sessions` for cross-origin transfer
+  - Use a targeted middleware on just those routes, not app-wide
+  - Allow `Content-Type: application/gzip` and `application/json`
+
+### Step 2: Register the command
+
+[ ] `public/ts/command-registry.ts`:
+  - Register `sessiontransfer` command with `description: 'Transfer session to remote Caco'`
+  - Handler takes `args` string — the HTTPS URL
+  - Import `getActiveSessionId` from app-state, `showToast` from toast, `chatView` from chat-view-controller
+
+### Step 3: Implement handler — validation
+
+[ ] Handler start:
+  - Parse args: `const url = args.trim().replace(/\/+$/, '')`
+  - Validate: `if (!url)` → toast "Usage: /sessiontransfer https://host.example.com"
+  - Validate: `if (!url.startsWith('https://'))` → toast "URL must be HTTPS"
+  - Get `sessionId` from `getActiveSessionId()` → toast "No active session" if null
+
+### Step 4: Implement handler — preflight + duplicate check
+
+[ ] After validation:
+  - `fetch(url + '/api/sessions', { signal: AbortSignal.timeout(10000) })`
+  - On failure: toast "Cannot reach remote Caco at {host}"
+  - Flatten sessions: `Object.values(data.grouped).flat().some(s => s.sessionId === sessionId)`
+  - If found: toast "Session already exists on remote"
+
+### Step 5: Implement handler — compact, export, upload, cleanup
+
+[ ] After preflight:
+  - Toast "Compacting..."
+  - `POST /api/sessions/${sessionId}/compact` (local, ignore errors)
+  - Toast "Exporting..."
+  - `fetch('/api/sessions/' + sessionId + '/export', { signal: AbortSignal.timeout(60000) })` → blob
+  - On failure: toast "Failed to export session", return
+  - Toast "Uploading to {host}..."
+  - `fetch(url + '/api/sessions/import', { method: 'POST', body: blob, headers: { 'Content-Type': 'application/gzip' }, signal: AbortSignal.timeout(120000) })`
+  - On failure: toast "Remote import failed: {error}", return
+  - Toast "Cleaning up..."
+  - `DELETE /api/sessions/${sessionId}` (local)
+  - On delete failure: toast "Transferred but failed to delete local copy" — do NOT call showNewChat, keep user in session
+  - On full success: toast "Session transferred to {host}", call `chatView.showNewChat()`
+
+### Step 6: Build and test
+
+[ ] `npm run build:client` — must succeed
+[ ] `npx vitest run` — no new failures
 
 ### Step 1: Eliminate duplicate code paths
 

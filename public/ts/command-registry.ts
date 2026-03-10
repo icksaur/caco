@@ -124,6 +124,58 @@ registerCommand({
 });
 
 registerCommand({
+  name: 'sessiontransfer',
+  description: 'Transfer session to another Caco instance',
+  source: 'built-in',
+  handler: async (args) => {
+    const url = args.trim().replace(/\/+$/, '');
+    if (!url) { showToast('Usage: /sessiontransfer https://host.example.com'); return; }
+    if (!url.startsWith('https://')) { showToast('URL must be HTTPS'); return; }
+    const sessionId = getActiveSessionId();
+    if (!sessionId) { showToast('No active session'); return; }
+
+    try {
+      const res = await fetch(url + '/api/sessions', { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const exists = Object.values(data.grouped).flat().some((s: any) => s.sessionId === sessionId);
+      if (exists) { showToast('Session already exists on remote'); return; }
+    } catch {
+      showToast('Cannot reach remote Caco'); return;
+    }
+
+    showToast('Compacting...');
+    await fetch('/api/sessions/' + sessionId + '/compact', { method: 'POST' }).catch(() => {});
+
+    showToast('Exporting...');
+    let blob: Blob;
+    try {
+      const res = await fetch('/api/sessions/' + sessionId + '/export', { signal: AbortSignal.timeout(60000) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      blob = await res.blob();
+    } catch { showToast('Failed to export session'); return; }
+
+    showToast('Uploading...');
+    try {
+      const res = await fetch(url + '/api/sessions/import', {
+        method: 'POST', body: blob,
+        headers: { 'Content-Type': 'application/gzip' },
+        signal: AbortSignal.timeout(120000)
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'HTTP ' + res.status); }
+    } catch (e) { showToast('Import failed: ' + (e instanceof Error ? e.message : e)); return; }
+
+    try {
+      await fetch('/api/sessions/' + sessionId, { method: 'DELETE' });
+      showToast('Session transferred!');
+      chatView.showNewChat();
+    } catch {
+      showToast('Transferred but failed to delete local copy');
+    }
+  }
+});
+
+registerCommand({
   name: 'compact',
   description: 'Force context compaction',
   source: 'built-in',

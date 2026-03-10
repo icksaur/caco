@@ -82,6 +82,19 @@ app.get('/', (_req, res) => {
 // Static files (after index.html route so injection works)
 app.use(express.static('public'));
 
+// CORS for session transfer endpoints (cross-instance import)
+const transferCors: express.RequestHandler = (_req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (_req.method === 'OPTIONS') { res.sendStatus(204); return; }
+  next();
+};
+app.use('/api/sessions/import', transferCors);
+app.use('/api/sessions', (req, res, next) => {
+  if (req.path === '/' || req.path === '') { transferCors(req, res, next); } else { next(); }
+});
+
 // API routes
 app.use('/api', sessionRoutes);
 app.use('/api', apiRoutes);

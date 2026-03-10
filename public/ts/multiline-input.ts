@@ -116,7 +116,6 @@ function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
       onSelect: (item) => {
         slashPopup!.hide();
         textarea.value = `/${item.id} `;
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
         autoResize(textarea);
         textarea.focus();
       },

@@ -20,7 +20,7 @@ import { isViewState } from './view-controller.js';
 import { onEvent, onReconnect, type SessionEvent } from './websocket.js';
 import { showToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
-import { resetTextareaHeight } from './multiline-input.js';
+import { resetTextareaHeight, tryExecuteSlashCommand } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
 import { removeImage } from './image-paste.js';
 import { notifySessionComplete } from './notifications.js';
@@ -302,7 +302,6 @@ export function setupFormHandler(): void {
     if (!message) return;
     
     if (message.startsWith('/')) {
-      const { tryExecuteSlashCommand } = await import('./multiline-input.js');
       if (tryExecuteSlashCommand(message)) {
         input.value = '';
         resetTextareaHeight();

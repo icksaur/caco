@@ -134,16 +134,6 @@ registerCommand({
     const sessionId = getActiveSessionId();
     if (!sessionId) { showToast('No active session'); return; }
 
-    try {
-      const res = await fetch(url + '/api/sessions', { signal: AbortSignal.timeout(10000) });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-      const exists = Object.values(data.grouped).flat().some((s: any) => s.sessionId === sessionId);
-      if (exists) { showToast('Session already exists on remote'); return; }
-    } catch {
-      showToast('Cannot reach remote Caco'); return;
-    }
-
     showToast('Compacting...');
     await fetch('/api/sessions/' + sessionId + '/compact', { method: 'POST' }).catch(() => {});
 
@@ -162,7 +152,10 @@ registerCommand({
         headers: { 'Content-Type': 'application/gzip' },
         signal: AbortSignal.timeout(120000)
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'HTTP ' + res.status); }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({ error: 'HTTP ' + res.status }));
+        throw new Error(d.error || 'HTTP ' + res.status);
+      }
     } catch (e) { showToast('Import failed: ' + (e instanceof Error ? e.message : e)); return; }
 
     try {

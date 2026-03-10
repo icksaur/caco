@@ -90,10 +90,8 @@ const transferCors: express.RequestHandler = (_req, res, next) => {
   if (_req.method === 'OPTIONS') { res.sendStatus(204); return; }
   next();
 };
+// CORS for session import endpoint only (cross-instance transfer)
 app.use('/api/sessions/import', transferCors);
-app.use('/api/sessions', (req, res, next) => {
-  if (req.path === '/' || req.path === '') { transferCors(req, res, next); } else { next(); }
-});
 
 // API routes
 app.use('/api', sessionRoutes);

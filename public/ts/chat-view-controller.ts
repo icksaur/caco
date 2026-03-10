@@ -281,6 +281,16 @@ class ChatViewController {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }
   }
+
+  /**
+   * Get last sent input for the current session (up-arrow recall).
+   * Returns empty string if no history or session mismatch.
+   */
+  getLastInput(): string {
+    const activeId = getActiveSessionId();
+    if (!activeId || this.lastPromptSessionId !== activeId) return '';
+    return this.lastPrompt;
+  }
 }
 
 export const chatView = new ChatViewController();

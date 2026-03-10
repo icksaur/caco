@@ -225,6 +225,26 @@ describe('ChatViewController', () => {
     });
   });
 
+  describe('getLastInput', () => {
+    it('returns last prompt for matching session', () => {
+      vi.mocked(getActiveSessionId).mockReturnValue('s1');
+      cvc.savePrompt('my message', 's1');
+      expect(cvc.getLastInput()).toBe('my message');
+    });
+
+    it('returns empty string when session differs', () => {
+      vi.mocked(getActiveSessionId).mockReturnValue('s2');
+      cvc.savePrompt('my message', 's1');
+      expect(cvc.getLastInput()).toBe('');
+    });
+
+    it('returns empty string when no active session (new chat)', () => {
+      vi.mocked(getActiveSessionId).mockReturnValue(null);
+      cvc.savePrompt('my message', 's1');
+      expect(cvc.getLastInput()).toBe('');
+    });
+  });
+
   describe('updateStatus', () => {
     it('resolves model name and calls renderStatus', () => {
       cvc.updateStatus('/path', 'claude-sonnet-4');

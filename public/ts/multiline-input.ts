@@ -91,6 +91,17 @@ export function setupMultilineInput(): void {
       const form = textarea.closest('form');
       if (form && !form.classList.contains('streaming')) form.requestSubmit();
     }
+
+    // Up-arrow on empty input: recall last sent message for this session
+    if (e.key === 'ArrowUp' && !textarea.value) {
+      const last = chatView.getLastInput();
+      if (last) {
+        e.preventDefault();
+        textarea.value = last;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.setSelectionRange(last.length, last.length);
+      }
+    }
   });
 }
 

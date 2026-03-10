@@ -301,6 +301,15 @@ export function setupFormHandler(): void {
     
     if (!message) return;
     
+    if (message.startsWith('/')) {
+      const { tryExecuteSlashCommand } = await import('./multiline-input.js');
+      if (tryExecuteSlashCommand(message)) {
+        input.value = '';
+        resetTextareaHeight();
+        return;
+      }
+    }
+    
     chatView.setFormEnabled(false);
     
     input.value = '';

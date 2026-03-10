@@ -95,6 +95,7 @@ export function setupMultilineInput(): void {
 }
 
 let pickerPopup: InputPopup | null = null;
+let pendingPickerCmd: string | null = null;
 
 function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
   const val = textarea.value;
@@ -114,35 +115,10 @@ function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
       anchor,
       onSelect: (item) => {
         slashPopup!.hide();
-        textarea.value = '';
+        textarea.value = `/${item.id} `;
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         autoResize(textarea);
-        const cmd = findCommand(item.id);
-        if (!cmd) return;
-        
-        if (cmd.picker) {
-          void Promise.resolve(cmd.picker()).then(items => {
-            if (pickerPopup) pickerPopup.hide();
-            pickerPopup = new InputPopup({
-              anchor,
-              onSelect: (picked) => {
-                pickerPopup!.hide();
-                textarea.value = '';
-                autoResize(textarea);
-                void Promise.resolve(cmd.handler(picked.id));
-              },
-              onDismiss: () => {
-                pickerPopup!.hide();
-                textarea.value = '';
-                autoResize(textarea);
-                setTimeout(() => textarea.focus(), 0);
-              }
-            });
-            pickerPopup.show(items);
-          });
-        } else {
-          void Promise.resolve(cmd.handler(''));
-        }
+        textarea.focus();
       },
       onDismiss: () => slashPopup!.hide()
     });
@@ -231,4 +207,45 @@ export function registerPoundProvider(provider: () => PopupItem[]): () => void {
     const idx = poundProviders.indexOf(provider);
     if (idx >= 0) poundProviders.splice(idx, 1);
   };
+}
+
+export function tryExecuteSlashCommand(message: string): boolean {
+  const match = message.match(/^\/(\S+)\s*(.*)/);
+  if (!match) return false;
+  const [, name, args] = match;
+  const cmd = findCommand(name);
+  if (!cmd) return false;
+
+  if (cmd.picker && !args.trim()) {
+    const textarea = document.querySelector('#chatForm textarea[name="message"]') as HTMLTextAreaElement;
+    const anchor = document.querySelector('#chatForm .input-bar') as HTMLElement;
+    if (!textarea || !anchor) return false;
+
+    pendingPickerCmd = name;
+    void Promise.resolve(cmd.picker()).then(items => {
+      if (pickerPopup) pickerPopup.hide();
+      pickerPopup = new InputPopup({
+        anchor,
+        onSelect: (picked) => {
+          pickerPopup!.hide();
+          pendingPickerCmd = null;
+          textarea.value = `/${name} ${picked.id}`;
+          autoResize(textarea);
+          textarea.focus();
+        },
+        onDismiss: () => {
+          pickerPopup!.hide();
+          pendingPickerCmd = null;
+          textarea.value = `/${name} `;
+          autoResize(textarea);
+          setTimeout(() => textarea.focus(), 0);
+        }
+      });
+      pickerPopup.show(items);
+    });
+    return true;
+  }
+
+  void Promise.resolve(cmd.handler(args.trim()));
+  return true;
 }

@@ -4,7 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { getCliOAuthTokens } from './cli-oauth.js';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage } from './types.js';
-import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, type SessionKind } from './storage.js';
+import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, getMcpAuth, type SessionKind } from './storage.js';
 import { readSessionWorkspace, readSessionEvents, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
@@ -31,14 +31,28 @@ function loadMcpServers(): Record<string, unknown> | undefined {
 }
 
 /**
- * Inject CLI OAuth tokens into remote MCP server configs.
- * The CLI stores tokens in ~/.copilot/mcp-oauth-config/<sha256(url)>.tokens.json
+ * Inject OAuth tokens into remote MCP server configs.
+ * Checks Caco's own auth store first, then CLI tokens as fallback.
  */
 function injectOAuthTokens(servers: Record<string, Record<string, unknown>>): void {
+  const cacoAuth = getMcpAuth();
+
   for (const [name, server] of Object.entries(servers)) {
     const url = server.url as string | undefined;
     if (!url || server.type === 'local') continue;
 
+    // Check Caco's own auth store first
+    const serverId = new URL(url).hostname.replace(/\./g, '-');
+    const cacoServer = cacoAuth.servers[serverId];
+    if (cacoServer?.token && (!cacoServer.expiresAt || cacoServer.expiresAt > Date.now())) {
+      const headers = (server.headers || {}) as Record<string, string>;
+      headers['Authorization'] = `Bearer ${cacoServer.token}`;
+      server.headers = headers;
+      console.log(`[MCP] Injected Caco token for ${name}`);
+      continue;
+    }
+
+    // Fall back to CLI tokens
     const tokens = getCliOAuthTokens(url);
     if (!tokens) continue;
 
@@ -50,7 +64,7 @@ function injectOAuthTokens(servers: Record<string, Record<string, unknown>>): vo
     const headers = (server.headers || {}) as Record<string, string>;
     headers['Authorization'] = `Bearer ${tokens.accessToken}`;
     server.headers = headers;
-    console.log(`[MCP] Injected OAuth token for ${name}`);
+    console.log(`[MCP] Injected CLI token for ${name}`);
   }
 }
 

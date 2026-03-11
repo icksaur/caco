@@ -17,6 +17,8 @@ export interface OAuthMetadata {
   token_endpoint: string;
   scopes_supported?: string[];
   client_id?: string;
+  redirect_uris?: string[];
+  registration_endpoint?: string;
 }
 
 // In-memory cache for discovery results (simple TTL cache)
@@ -98,16 +100,43 @@ async function discoverViaMcpProtocol(serverUrl: string): Promise<OAuthMetadata 
       issuer?: string;
       authorization_endpoint?: string;
       token_endpoint?: string;
+      registration_endpoint?: string;
     };
 
     if (!oidc.authorization_endpoint || !oidc.token_endpoint) return null;
 
-    return {
+    const result: OAuthMetadata = {
       issuer: oidc.issuer,
       authorization_endpoint: oidc.authorization_endpoint,
       token_endpoint: oidc.token_endpoint,
       scopes_supported: resource.scopes_supported,
     };
+
+    // Try dynamic client registration to get clientId + redirect_uris
+    const origin = new URL(serverUrl).origin;
+    const regUrl = oidc.registration_endpoint || `${origin}/register`;
+    try {
+      const regRes = await fetch(regUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: '{}',
+      });
+      if (regRes.ok) {
+        const reg = await regRes.json() as {
+          client_id?: string;
+          redirect_uris?: string[];
+          scope?: string;
+        };
+        if (reg.client_id) result.client_id = reg.client_id;
+        if (reg.redirect_uris) result.redirect_uris = reg.redirect_uris;
+        if (reg.scope && !result.scopes_supported?.length) {
+          result.scopes_supported = [reg.scope];
+        }
+        result.registration_endpoint = regUrl;
+      }
+    } catch { /* registration optional */ }
+
+    return result;
   } catch {
     return null;
   }

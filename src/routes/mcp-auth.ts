@@ -102,8 +102,12 @@ router.get('/start', async (req: Request, res: Response) => {
         tokenEndpoint: metadata.token_endpoint,
         scopes: metadata.scopes_supported,
       };
+      // Use registration-provided clientId + redirect_uris if available
+      if (metadata.client_id) serverAuth.clientId = metadata.client_id;
+      if (metadata.redirect_uris) serverAuth.redirectUris = metadata.redirect_uris;
       setMcpServerAuth(serverId, serverAuth);
-      console.log(`[MCP-AUTH] Discovered endpoints for ${serverId}: ${metadata.authorization_endpoint}`);
+      console.log(`[MCP-AUTH] Discovered endpoints for ${serverId}: ${metadata.authorization_endpoint}` +
+        (metadata.client_id ? ` (clientId from registration: ${metadata.client_id})` : ''));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       res.status(500).send(errorHtml(`OAuth discovery failed for "${serverId}": ${msg}`));
@@ -116,25 +120,40 @@ router.get('/start', async (req: Request, res: Response) => {
   const codeChallenge = generateCodeChallenge(codeVerifier);
   const state = randomBytes(32).toString('base64url');
 
-  // Use the CLI's registered redirect URI (specific port whitelisted in Azure AD app)
-  const cliConfig = getCliOAuthConfig(serverAuth.url);
-  const cliRedirect = cliConfig?.redirectUri;
+  // Determine redirect URI: prefer discovered redirect_uris, fall back to CLI config
   let callbackPort = 0;
   let callbackPath = '/callback';
-  if (cliRedirect) {
-    const parsed = new URL(cliRedirect);
+  const localhostRedirect = serverAuth.redirectUris?.find(u => u.startsWith('http://127.0.0.1:') || u.startsWith('http://localhost:'));
+  if (localhostRedirect) {
+    const parsed = new URL(localhostRedirect);
     callbackPort = parseInt(parsed.port, 10) || 0;
     callbackPath = parsed.pathname || '/';
+  } else {
+    const cliConfig = getCliOAuthConfig(serverAuth.url);
+    if (cliConfig?.redirectUri) {
+      const parsed = new URL(cliConfig.redirectUri);
+      callbackPort = parseInt(parsed.port, 10) || 0;
+      callbackPath = parsed.pathname || '/';
+    }
   }
 
-  const { port, callbackPromise, server: tempServer } = await startTempCallbackServer(state, callbackPort, callbackPath);
+  let tempResult;
+  try {
+    tempResult = await startTempCallbackServer(state, callbackPort, callbackPath);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).send(errorHtml(`Failed to start OAuth callback: ${msg}`));
+    return;
+  }
+  const { port, callbackPromise, server: tempServer } = tempResult;
   const callbackUrl = `http://127.0.0.1:${port}${callbackPath}`;
 
   console.log(`[MCP-AUTH] Temp callback server on port ${port} for ${serverId}`);
 
-  // Build authorization URL
+  // Build authorization URL — use discovered clientId if available
+  const clientId = serverAuth.clientId!;
   const authUrl = new URL(serverAuth.authorizationEndpoint);
-  authUrl.searchParams.set('client_id', serverAuth.clientId!);
+  authUrl.searchParams.set('client_id', clientId);
   authUrl.searchParams.set('redirect_uri', callbackUrl);
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('state', state);
@@ -163,7 +182,7 @@ router.get('/start', async (req: Request, res: Response) => {
       code,
       redirect_uri: callbackUrl,
       code_verifier: codeVerifier,
-      client_id: serverAuth.clientId!,
+      client_id: clientId,
       scope: scopes.join(' '),
     });
 
@@ -202,19 +221,30 @@ router.get('/start', async (req: Request, res: Response) => {
     console.log(`[MCP-AUTH] Token acquired for ${serverId}`);
   } finally {
     tempServer.close();
+    activeTempServer = null;
   }
 });
+
+// Track active temp auth servers to prevent port conflicts
+let activeTempServer: HttpServer | null = null;
 
 /**
  * Start a temporary HTTP server to receive the OAuth callback.
  * Uses a specific port if provided (to match CLI's registered redirect URI).
+ * Closes any previously active temp server first.
  */
 function startTempCallbackServer(expectedState: string, preferredPort = 0, callbackPath = '/callback'): Promise<{
   port: number;
   callbackPromise: Promise<{ code?: string; error?: string }>;
   server: HttpServer;
 }> {
-  return new Promise((resolveSetup) => {
+  // Close any previous temp server
+  if (activeTempServer) {
+    activeTempServer.close();
+    activeTempServer = null;
+  }
+
+  return new Promise((resolveSetup, rejectSetup) => {
     let resolveCallback: (value: { code?: string; error?: string }) => void;
     const callbackPromise = new Promise<{ code?: string; error?: string }>((resolve) => {
       resolveCallback = resolve;
@@ -258,9 +288,16 @@ function startTempCallbackServer(expectedState: string, preferredPort = 0, callb
       }
     });
 
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      clearTimeout(timeout);
+      activeTempServer = null;
+      rejectSetup(new Error(`Failed to start callback server: ${err.code || err.message}`));
+    });
+
     server.listen(preferredPort, '127.0.0.1', () => {
       const addr = server.address();
       const port = typeof addr === 'object' && addr ? addr.port : 0;
+      activeTempServer = server;
       resolveSetup({ port, callbackPromise, server });
     });
   });

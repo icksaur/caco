@@ -75,6 +75,7 @@ export interface MCPAuthState {
   tokenEndpoint: string;            // OAuth token URL
   scopes?: string[];                // OAuth scopes
   clientId?: string | null;         // OAuth Application ID (required for auth)
+  redirectUris?: string[];          // Allowed redirect URIs (from registration)
   token?: string;                   // Access token (if authenticated)
   refreshToken?: string;            // Refresh token (optional)
   expiresAt?: number;               // Unix timestamp ms

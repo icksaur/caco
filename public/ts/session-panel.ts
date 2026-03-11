@@ -660,7 +660,7 @@ async function importSessionFile(file: File): Promise<void> {
     return;
   }
   isImporting = true;
-  showToast('Importing session...');
+  showToast('Importing session...', { type: 'info', autoHideMs: 5000 });
   try {
     const res = await fetch('/api/sessions/import?force=true', {
       method: 'POST',
@@ -669,7 +669,7 @@ async function importSessionFile(file: File): Promise<void> {
     });
     const data = await res.json();
     if (res.ok) {
-      showToast(`Imported session ${(data.sessionId as string).slice(0, 8)}`);
+      showToast(`Imported session ${(data.sessionId as string).slice(0, 8)}`, { type: 'success', autoHideMs: 3000 });
       void loadSessions();
     } else {
       showToast(data.error || 'Import failed');

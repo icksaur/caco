@@ -74,15 +74,22 @@ registerCommand({
     const sessionId = getActiveSessionId();
     if (sessionId) {
       // Active session: change model via SDK
-      await fetch(`/api/sessions/${sessionId}`, {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: modelId })
       });
-      chatView.updateStatus(chatView.getCwd(), modelId);
+      if (res.ok) {
+        chatView.updateStatus(chatView.getCwd(), modelId);
+        showToast(`Model changed to ${modelId}`, { type: 'success', autoHideMs: 3000 });
+      } else {
+        const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+        showToast(data.error || 'Failed to change model');
+      }
     } else {
       // New chat: just update the model selector
       selectModel(modelId);
+      showToast(`Model changed to ${modelId}`, { type: 'success', autoHideMs: 3000 });
     }
   }
 });
@@ -95,7 +102,7 @@ registerCommand({
     try {
       const res = await fetch('/api/restart', { method: 'POST' });
       const data = await res.json();
-      showToast(data.message);
+      showToast(data.message, { type: 'info', autoHideMs: 3000 });
     } catch {
       showToast('Failed to restart server');
     }
@@ -119,52 +126,7 @@ registerCommand({
     document.body.appendChild(a);
     a.click();
     a.remove();
-    showToast('Exporting session...');
-  }
-});
-
-registerCommand({
-  name: 'sessiontransfer',
-  description: 'Transfer session to another Caco instance',
-  source: 'built-in',
-  handler: async (args) => {
-    const url = args.trim().replace(/\/+$/, '');
-    if (!url) { showToast('Usage: /sessiontransfer https://host.example.com'); return; }
-    if (!url.startsWith('https://')) { showToast('URL must be HTTPS'); return; }
-    const sessionId = getActiveSessionId();
-    if (!sessionId) { showToast('No active session'); return; }
-
-    showToast('Compacting...');
-    await fetch('/api/sessions/' + sessionId + '/compact', { method: 'POST' }).catch(() => {});
-
-    showToast('Exporting...');
-    let blob: Blob;
-    try {
-      const res = await fetch('/api/sessions/' + sessionId + '/export', { signal: AbortSignal.timeout(60000) });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      blob = await res.blob();
-    } catch { showToast('Failed to export session'); return; }
-
-    showToast('Uploading...');
-    try {
-      const res = await fetch(url + '/api/sessions/import', {
-        method: 'POST', body: blob,
-        headers: { 'Content-Type': 'application/gzip' },
-        signal: AbortSignal.timeout(120000)
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({ error: 'HTTP ' + res.status }));
-        throw new Error(d.error || 'HTTP ' + res.status);
-      }
-    } catch (e) { showToast('Import failed: ' + (e instanceof Error ? e.message : e)); return; }
-
-    try {
-      await fetch('/api/sessions/' + sessionId, { method: 'DELETE' });
-      showToast('Session transferred!');
-      chatView.showNewChat();
-    } catch {
-      showToast('Transferred but failed to delete local copy');
-    }
+    showToast('Exporting session...', { type: 'info', autoHideMs: 3000 });
   }
 });
 
@@ -178,12 +140,12 @@ registerCommand({
       showToast('No active session');
       return;
     }
-    showToast('Compacting...');
+    showToast('Compacting...', { type: 'info', autoHideMs: 5000 });
     try {
       const res = await fetch(`/api/sessions/${sessionId}/compact`, { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
-        showToast(`Compacted: ${data.tokensRemoved} tokens, ${data.messagesRemoved} messages removed`);
+        showToast(`Compacted: ${data.tokensRemoved} tokens, ${data.messagesRemoved} messages removed`, { type: 'success', autoHideMs: 5000 });
       } else {
         showToast(data.error || 'Compaction failed');
       }

@@ -5,12 +5,12 @@
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences } from './history.js';
-import { deleteSession, initSessionPanel } from './session-panel.js';
+import { deleteSession, initSessionPanel, loadSessions, loadSchedules } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initRegions } from './dom-regions.js';
-import { initViewState, setViewState } from './view-controller.js';
+import { initViewState, setViewState, showSessionPanel } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { initInputRouter } from './input-router.js';
 import { setupMultilineInput } from './multiline-input.js';
@@ -76,6 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize session panel (subscribe to WS session state events)
     initSessionPanel();
+    showSessionPanel();
+    void loadSessions();
+    void loadSchedules();
     
     // Connect WebSocket once on page load
     connectWs();

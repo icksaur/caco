@@ -18,6 +18,6 @@ export function initAppletButton(callbacks: AppletButtonCallbacks): void {
   onButton('appletBtn', {
     onPress: callbacks.onPress,
     onLongPress: callbacks.onLongPress,
-    longPressDuration: 1000
+    longPressDuration: 500
   });
 }

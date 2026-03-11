@@ -12,6 +12,7 @@ import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { getMcpAuth, setMcpAuth, type MCPAuthState } from './storage.js';
 import { discoverOAuthMetadata } from './mcp-discovery.js';
+import { getCliOAuthConfig } from './cli-oauth.js';
 
 /**
  * Create MCP authentication tools
@@ -88,8 +89,9 @@ After calling this, tell the user: "Please authenticate [server name] by opening
           };
         }
         
-        // Check if discovery provided a client_id
-        const resolvedClientId = clientId || metadata.client_id || null;
+        // Check if discovery provided a client_id, fall back to CLI OAuth config
+        const cliConfig = getCliOAuthConfig(serverUrl);
+        const resolvedClientId = clientId || metadata.client_id || cliConfig?.clientId || null;
         
         // Create server state
         const serverState: MCPAuthState = {

@@ -14,8 +14,9 @@
 
 import { Router, Request, Response } from 'express';
 import { randomBytes, createHash } from 'crypto';
-import { getMcpAuth, getMcpServerAuth, setMcpServerAuth, type MCPAuthState } from '../storage.js';
+import { getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth, type MCPAuthState } from '../storage.js';
 import { SERVER_URL } from '../config.js';
+import { listCliOAuthConfigs, getCliOAuthConfig } from '../cli-oauth.js';
 
 const router = Router();
 
@@ -31,10 +32,38 @@ const STATE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
  * GET /api/mcp/auth/servers
- * List all MCP servers with their auth status (for applet display)
+ * List all MCP servers with their auth status (for applet display).
+ * Auto-merges CLI OAuth configs to pre-populate clientId and auth endpoints.
  */
 router.get('/servers', (_req: Request, res: Response) => {
   const store = getMcpAuth();
+  let changed = false;
+
+  // Auto-register CLI OAuth servers that aren't in Caco's store yet
+  const cliConfigs = listCliOAuthConfigs();
+  for (const cli of cliConfigs) {
+    const id = new URL(cli.serverUrl).hostname.replace(/\./g, '-');
+    if (!store.servers[id]) {
+      const cliDetail = getCliOAuthConfig(cli.serverUrl);
+      const authServer = cliDetail?.authorizationServerUrl || 'https://login.microsoftonline.com/common';
+      const tenant = authServer.replace('https://login.microsoftonline.com/', '').replace('/v2.0', '');
+      const base = `https://login.microsoftonline.com/${tenant}`;
+      store.servers[id] = {
+        url: cli.serverUrl,
+        authorizationEndpoint: `${base}/oauth2/v2.0/authorize`,
+        tokenEndpoint: `${base}/oauth2/v2.0/token`,
+        clientId: cli.clientId,
+        needsAuth: !cli.hasTokens || cli.tokenExpired,
+        needsClientId: false,
+      };
+      changed = true;
+    } else if (!store.servers[id].clientId && cli.clientId) {
+      store.servers[id].clientId = cli.clientId;
+      store.servers[id].needsClientId = false;
+      changed = true;
+    }
+  }
+  if (changed) setMcpAuth(store);
   
   const servers = Object.entries(store.servers).map(([id, state]) => ({
     id,

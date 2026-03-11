@@ -2,7 +2,7 @@ import { CopilotClient, approveAll } from '@github/copilot-sdk';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { createHash } from 'crypto';
+import { getCliOAuthTokens } from './cli-oauth.js';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage } from './types.js';
 import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, type SessionKind } from './storage.js';
 import { readSessionWorkspace, readSessionEvents, parseSessionModel, listSessionIds } from './sdk-session-store.js';
@@ -35,35 +35,22 @@ function loadMcpServers(): Record<string, unknown> | undefined {
  * The CLI stores tokens in ~/.copilot/mcp-oauth-config/<sha256(url)>.tokens.json
  */
 function injectOAuthTokens(servers: Record<string, Record<string, unknown>>): void {
-  const oauthDir = join(homedir(), '.copilot', 'mcp-oauth-config');
-  if (!existsSync(oauthDir)) return;
-
   for (const [name, server] of Object.entries(servers)) {
     const url = server.url as string | undefined;
     if (!url || server.type === 'local') continue;
 
-    const hash = createHash('sha256').update(url).digest('hex');
-    const tokenPath = join(oauthDir, `${hash}.tokens.json`);
-    if (!existsSync(tokenPath)) continue;
+    const tokens = getCliOAuthTokens(url);
+    if (!tokens) continue;
 
-    try {
-      const tokens = JSON.parse(readFileSync(tokenPath, 'utf-8')) as {
-        accessToken?: string;
-        expiresAt?: number;
-      };
-      if (!tokens.accessToken) continue;
-      if (tokens.expiresAt && tokens.expiresAt * 1000 < Date.now()) {
-        console.log(`[MCP] Token expired for ${name}, skipping injection`);
-        continue;
-      }
-
-      const headers = (server.headers || {}) as Record<string, string>;
-      headers['Authorization'] = `Bearer ${tokens.accessToken}`;
-      server.headers = headers;
-      console.log(`[MCP] Injected OAuth token for ${name}`);
-    } catch {
-      // Skip malformed token files
+    if (tokens.expiresAt && tokens.expiresAt < Date.now() / 1000) {
+      console.log(`[MCP] Token expired for ${name}, skipping injection`);
+      continue;
     }
+
+    const headers = (server.headers || {}) as Record<string, string>;
+    headers['Authorization'] = `Bearer ${tokens.accessToken}`;
+    server.headers = headers;
+    console.log(`[MCP] Injected OAuth token for ${name}`);
   }
 }
 

@@ -221,7 +221,7 @@ export function showSessionManager(): void {
 /**
  * Load and render schedules
  */
-async function loadSchedules(): Promise<void> {
+export async function loadSchedules(): Promise<void> {
   const container = document.getElementById('schedulesList');
   if (!container) return;
   

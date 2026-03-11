@@ -14,21 +14,12 @@
 
 import { Router, Request, Response } from 'express';
 import { randomBytes, createHash } from 'crypto';
+import { createServer, type Server as HttpServer } from 'http';
 import { getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth, type MCPAuthState } from '../storage.js';
-import { SERVER_URL } from '../config.js';
 import { listCliOAuthConfigs, getCliOAuthConfig } from '../cli-oauth.js';
+import { discoverOAuthMetadata } from '../mcp-discovery.js';
 
 const router = Router();
-
-// In-memory store for OAuth state (CSRF protection + PKCE)
-// Map: state -> { serverId, codeVerifier, expiresAt }
-interface PendingAuth {
-  serverId: string;
-  codeVerifier: string;
-  expiresAt: number;
-}
-const pendingAuth = new Map<string, PendingAuth>();
-const STATE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
  * GET /api/mcp/auth/servers
@@ -44,14 +35,10 @@ router.get('/servers', (_req: Request, res: Response) => {
   for (const cli of cliConfigs) {
     const id = new URL(cli.serverUrl).hostname.replace(/\./g, '-');
     if (!store.servers[id]) {
-      const cliDetail = getCliOAuthConfig(cli.serverUrl);
-      const authServer = cliDetail?.authorizationServerUrl || 'https://login.microsoftonline.com/common';
-      const tenant = authServer.replace('https://login.microsoftonline.com/', '').replace('/v2.0', '');
-      const base = `https://login.microsoftonline.com/${tenant}`;
       store.servers[id] = {
         url: cli.serverUrl,
-        authorizationEndpoint: `${base}/oauth2/v2.0/authorize`,
-        tokenEndpoint: `${base}/oauth2/v2.0/token`,
+        authorizationEndpoint: '',
+        tokenEndpoint: '',
         clientId: cli.clientId,
         needsAuth: !cli.hasTokens || cli.tokenExpired,
         needsClientId: false,
@@ -86,7 +73,7 @@ router.get('/servers', (_req: Request, res: Response) => {
  * 
  * Redirects to OAuth provider's authorization endpoint
  */
-router.get('/start', (req: Request, res: Response) => {
+router.get('/start', async (req: Request, res: Response) => {
   const serverId = req.query.server as string;
   
   if (!serverId) {
@@ -94,7 +81,7 @@ router.get('/start', (req: Request, res: Response) => {
     return;
   }
   
-  const serverAuth = getMcpServerAuth(serverId);
+  let serverAuth = getMcpServerAuth(serverId);
   if (!serverAuth) {
     res.status(404).send(errorHtml(`Server "${serverId}" not found`));
     return;
@@ -104,196 +91,180 @@ router.get('/start', (req: Request, res: Response) => {
     res.status(400).send(errorHtml(`Server "${serverId}" requires a client_id. Configure it in the MCP Auth applet.`));
     return;
   }
+
+  // Run discovery if endpoints or scopes are missing
+  if (!serverAuth.authorizationEndpoint || !serverAuth.scopes?.length) {
+    try {
+      const metadata = await discoverOAuthMetadata(serverAuth.url);
+      serverAuth = {
+        ...serverAuth,
+        authorizationEndpoint: metadata.authorization_endpoint,
+        tokenEndpoint: metadata.token_endpoint,
+        scopes: metadata.scopes_supported,
+      };
+      setMcpServerAuth(serverId, serverAuth);
+      console.log(`[MCP-AUTH] Discovered endpoints for ${serverId}: ${metadata.authorization_endpoint}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).send(errorHtml(`OAuth discovery failed for "${serverId}": ${msg}`));
+      return;
+    }
+  }
   
-  // Generate PKCE code verifier and challenge
+  // PKCE
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
-  
-  // Generate state parameter for CSRF protection
   const state = randomBytes(32).toString('base64url');
-  
-  // Store pending auth state
-  pendingAuth.set(state, {
-    serverId,
-    codeVerifier,
-    expiresAt: Date.now() + STATE_TTL_MS,
-  });
-  
-  // Clean up expired states
-  cleanupExpiredStates();
-  
+
+  // Use the CLI's registered redirect URI (specific port whitelisted in Azure AD app)
+  const cliConfig = getCliOAuthConfig(serverAuth.url);
+  const cliRedirect = cliConfig?.redirectUri;
+  let callbackPort = 0;
+  let callbackPath = '/callback';
+  if (cliRedirect) {
+    const parsed = new URL(cliRedirect);
+    callbackPort = parseInt(parsed.port, 10) || 0;
+    callbackPath = parsed.pathname || '/';
+  }
+
+  const { port, callbackPromise, server: tempServer } = await startTempCallbackServer(state, callbackPort, callbackPath);
+  const callbackUrl = `http://127.0.0.1:${port}${callbackPath}`;
+
+  console.log(`[MCP-AUTH] Temp callback server on port ${port} for ${serverId}`);
+
   // Build authorization URL
-  const callbackUrl = `${SERVER_URL}/api/mcp/auth/callback`;
   const authUrl = new URL(serverAuth.authorizationEndpoint);
-  authUrl.searchParams.set('client_id', serverAuth.clientId);
+  authUrl.searchParams.set('client_id', serverAuth.clientId!);
   authUrl.searchParams.set('redirect_uri', callbackUrl);
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('state', state);
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
-  
-  if (serverAuth.scopes && serverAuth.scopes.length > 0) {
-    authUrl.searchParams.set('scope', serverAuth.scopes.join(' '));
-  }
-  
-  // Redirect to OAuth provider
-  res.redirect(authUrl.toString());
-});
 
-/**
- * GET /api/mcp/auth/callback
- * OAuth callback handler
- * 
- * Query params:
- *   code  - Authorization code from OAuth provider
- *   state - State parameter for CSRF validation
- *   error - OAuth error (if auth failed)
- */
-router.get('/callback', async (req: Request, res: Response) => {
-  const { code, state, error, error_description } = req.query as Record<string, string>;
-  
-  // Handle OAuth errors
-  if (error) {
-    const message = error_description || error;
-    res.send(errorPostMessage(null, message));
-    return;
-  }
-  
-  if (!state || !code) {
-    res.status(400).send(errorHtml('Missing code or state parameter'));
-    return;
-  }
-  
-  // Validate state parameter
-  const pending = pendingAuth.get(state);
-  if (!pending) {
-    res.status(400).send(errorHtml('Invalid or expired state parameter. Please try again.'));
-    return;
-  }
-  
-  if (pending.expiresAt < Date.now()) {
-    pendingAuth.delete(state);
-    res.status(400).send(errorHtml('Authentication timed out. Please try again.'));
-    return;
-  }
-  
-  // Clean up state immediately
-  pendingAuth.delete(state);
-  
-  const { serverId, codeVerifier } = pending;
-  const serverAuth = getMcpServerAuth(serverId);
-  
-  if (!serverAuth) {
-    res.status(404).send(errorHtml(`Server "${serverId}" not found`));
-    return;
-  }
-  
-  // Exchange code for tokens
+  const scopes = [...(serverAuth.scopes || [])];
+  if (!scopes.includes('offline_access')) scopes.push('offline_access');
+  authUrl.searchParams.set('scope', scopes.join(' '));
+
+  // Redirect browser to OAuth provider
+  res.redirect(authUrl.toString());
+
+  // Wait for the callback (or timeout)
   try {
-    const callbackUrl = `${SERVER_URL}/api/mcp/auth/callback`;
+    const { code, error } = await callbackPromise;
     
-    // Build token request
-    // NOTE: Include scope in token exchange for Azure AD (SDK #941 workaround)
+    if (error || !code) {
+      setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: error || 'No code received' });
+      return;
+    }
+
+    // Exchange code for token
     const tokenParams = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
       redirect_uri: callbackUrl,
       code_verifier: codeVerifier,
       client_id: serverAuth.clientId!,
+      scope: scopes.join(' '),
     });
-    
-    if (serverAuth.scopes && serverAuth.scopes.length > 0) {
-      tokenParams.set('scope', serverAuth.scopes.join(' '));
-    }
-    
+
     const tokenResponse = await fetch(serverAuth.tokenEndpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
       body: tokenParams.toString(),
     });
-    
+
     if (!tokenResponse.ok) {
-      // Try to parse error response
       let errorMessage = `Token exchange failed: ${tokenResponse.status}`;
       try {
         const errorData = await tokenResponse.json() as { error?: string; error_description?: string };
         errorMessage = errorData.error_description || errorData.error || errorMessage;
-      } catch {
-        // Ignore JSON parse errors
-      }
-      
-      // Update server state with error
-      setMcpServerAuth(serverId, {
-        ...serverAuth,
-        needsAuth: true,
-        error: errorMessage,
-      });
-      
-      res.send(errorPostMessage(serverId, errorMessage));
+      } catch { /* ignore */ }
+      setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: errorMessage });
+      console.error(`[MCP-AUTH] Token exchange failed for ${serverId}: ${errorMessage}`);
       return;
     }
-    
-    // Parse token response
-    // Handle both JSON and URL-encoded responses (per SDK #759)
-    let tokenData: { access_token?: string; refresh_token?: string; expires_in?: number };
-    const contentType = tokenResponse.headers.get('content-type') || '';
-    
-    if (contentType.includes('application/json')) {
-      tokenData = await tokenResponse.json() as typeof tokenData;
-    } else {
-      // URL-encoded response (GitHub style)
-      const text = await tokenResponse.text();
-      const params = new URLSearchParams(text);
-      tokenData = {
-        access_token: params.get('access_token') || undefined,
-        refresh_token: params.get('refresh_token') || undefined,
-        expires_in: params.get('expires_in') ? parseInt(params.get('expires_in')!, 10) : undefined,
-      };
-    }
-    
+
+    const tokenData = await tokenResponse.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
     if (!tokenData.access_token) {
-      const errorMessage = 'No access_token in response';
-      setMcpServerAuth(serverId, {
-        ...serverAuth,
-        needsAuth: true,
-        error: errorMessage,
-      });
-      res.send(errorPostMessage(serverId, errorMessage));
+      setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: 'No access_token in response' });
       return;
     }
-    
-    // Calculate expiry time
-    const expiresAt = tokenData.expires_in 
-      ? Date.now() + (tokenData.expires_in * 1000)
-      : undefined;
-    
-    // Update server state with tokens
+
+    const expiresAt = tokenData.expires_in ? Date.now() + (tokenData.expires_in * 1000) : undefined;
     setMcpServerAuth(serverId, {
       ...serverAuth,
       token: tokenData.access_token,
       refreshToken: tokenData.refresh_token,
       expiresAt,
       needsAuth: false,
-      needsClientId: false,
       error: undefined,
     });
-    
-    // Return success HTML that notifies opener
-    res.send(successPostMessage(serverId));
-    
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : 'Token exchange failed';
-    setMcpServerAuth(serverId, {
-      ...serverAuth,
-      needsAuth: true,
-      error: errorMessage,
-    });
-    res.send(errorPostMessage(serverId, errorMessage));
+    console.log(`[MCP-AUTH] Token acquired for ${serverId}`);
+  } finally {
+    tempServer.close();
   }
 });
+
+/**
+ * Start a temporary HTTP server to receive the OAuth callback.
+ * Uses a specific port if provided (to match CLI's registered redirect URI).
+ */
+function startTempCallbackServer(expectedState: string, preferredPort = 0, callbackPath = '/callback'): Promise<{
+  port: number;
+  callbackPromise: Promise<{ code?: string; error?: string }>;
+  server: HttpServer;
+}> {
+  return new Promise((resolveSetup) => {
+    let resolveCallback: (value: { code?: string; error?: string }) => void;
+    const callbackPromise = new Promise<{ code?: string; error?: string }>((resolve) => {
+      resolveCallback = resolve;
+    });
+
+    const TIMEOUT_MS = 120_000;
+    const timeout = setTimeout(() => {
+      resolveCallback({ error: 'Authentication timed out' });
+      server.close();
+    }, TIMEOUT_MS);
+
+    const server = createServer((req, resp) => {
+      const url = new URL(req.url || '/', `http://127.0.0.1`);
+      if (url.pathname !== callbackPath) {
+        resp.writeHead(404);
+        resp.end();
+        return;
+      }
+
+      const code = url.searchParams.get('code') || undefined;
+      const state = url.searchParams.get('state');
+      const error = url.searchParams.get('error') || undefined;
+      const errorDesc = url.searchParams.get('error_description') || undefined;
+
+      // Respond to browser immediately
+      resp.writeHead(200, { 'Content-Type': 'text/html' });
+      if (error) {
+        resp.end(`<html><body><h3>Authentication failed</h3><p>${escapeHtml(errorDesc || error)}</p><p>You can close this window.</p></body></html>`);
+      } else {
+        resp.end(`<html><body><h3>Authenticated</h3><p>You can close this window.</p><script>window.close()</script></body></html>`);
+      }
+
+      clearTimeout(timeout);
+
+      if (state !== expectedState) {
+        resolveCallback({ error: 'Invalid state parameter' });
+      } else if (error) {
+        resolveCallback({ error: errorDesc || error });
+      } else {
+        resolveCallback({ code });
+      }
+    });
+
+    server.listen(preferredPort, '127.0.0.1', () => {
+      const addr = server.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      resolveSetup({ port, callbackPromise, server });
+    });
+  });
+}
 
 /**
  * POST /api/mcp/auth/config
@@ -349,22 +320,6 @@ function generateCodeChallenge(verifier: string): string {
 }
 
 // ============================================================================
-// State Management
-// ============================================================================
-
-/**
- * Clean up expired pending auth states
- */
-function cleanupExpiredStates(): void {
-  const now = Date.now();
-  for (const [key, value] of pendingAuth.entries()) {
-    if (value.expiresAt < now) {
-      pendingAuth.delete(key);
-    }
-  }
-}
-
-// ============================================================================
 // HTML Response Helpers
 // ============================================================================
 
@@ -380,50 +335,12 @@ function errorHtml(message: string): string {
 </html>`;
 }
 
-function successPostMessage(serverId: string): string {
-  return `<!DOCTYPE html>
-<html>
-<body>
-<script>
-  window.opener.postMessage({
-    type: 'mcp-auth-complete',
-    server: '${escapeJs(serverId)}'
-  }, location.origin);
-  window.close();
-</script>
-</body>
-</html>`;
-}
-
-function errorPostMessage(serverId: string | null, error: string): string {
-  return `<!DOCTYPE html>
-<html>
-<body>
-<script>
-  window.opener.postMessage({
-    type: 'mcp-auth-error',
-    server: ${serverId ? `'${escapeJs(serverId)}'` : 'null'},
-    error: '${escapeJs(error)}'
-  }, location.origin);
-  window.close();
-</script>
-</body>
-</html>`;
-}
-
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-}
-
-function escapeJs(str: string): string {
-  return str
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
-    .replace(/\n/g, '\\n');
 }
 
 export default router;

@@ -68,61 +68,34 @@ function renderServer(server) {
   var needsClientId = server.needsClientId;
   var needsAuth = server.needsAuth && !needsClientId;
   
-  // Determine badge and state
-  var badge, stateClass;
-  if (server.error) {
-    badge = '<span class="badge badge-error">✗ Error</span>';
-    stateClass = 'error';
-  } else if (needsClientId) {
-    badge = '<span class="badge badge-warn">⚠ Config</span>';
-    stateClass = 'config';
-  } else if (needsAuth) {
-    badge = '<span class="badge badge-warn">⚠ Needs Auth</span>';
-    stateClass = 'needs-auth';
-  } else if (isExpired) {
-    badge = '<span class="badge badge-warn">⚠ Expired</span>';
-    stateClass = 'expired';
-  } else {
-    badge = '<span class="badge badge-ok">✓ OK</span>';
-    stateClass = 'ok';
-  }
+  var escapedId = escapeAttr(server.id);
   
-  // Expiry info
-  var expiryHtml = '';
-  if (server.expiresAt && !needsClientId) {
-    var expiryDate = new Date(server.expiresAt);
-    var expiryText = isExpired ? 'Expired: ' : 'Expires: ';
-    expiryHtml = '<div class="server-expiry">' + expiryText + expiryDate.toLocaleString() + '</div>';
+  // Status icon
+  var icon = (isOk && !server.error) ? '<span class="status-icon status-ok">&#x2713;</span>'
+    : '<span class="status-icon status-bad">&#x2717;</span>';
+  
+  // Action link
+  var actionHtml = '';
+  if (needsClientId) {
+    actionHtml = renderClientIdForm(escapedId);
+  } else if (needsAuth || isExpired || server.error) {
+    actionHtml = '<a href="#" class="auth-link" data-action="authenticate" data-server-id="' + escapedId + '">Authenticate</a>';
+  } else if (isOk) {
+    actionHtml = '<a href="#" class="auth-link" data-action="authenticate" data-server-id="' + escapedId + '">Re-authenticate</a>';
   }
   
   // Error message
-  var errorHtml = '';
-  if (server.error) {
-    errorHtml = '<div class="server-error">' + escapeHtml(server.error) + '</div>';
-  }
+  var errorHtml = server.error ? '<div class="server-error">' + escapeHtml(server.error) + '</div>' : '';
   
-  // Actions based on state - use data attributes instead of inline handlers
-  var actionsHtml = '';
-  var escapedId = escapeAttr(server.id);
-  if (needsClientId) {
-    actionsHtml = renderClientIdForm(escapedId);
-  } else if (needsAuth || isExpired) {
-    actionsHtml = '<div class="server-actions"><button class="auth-btn primary" data-action="authenticate" data-server-id="' + escapedId + '">Authenticate</button></div>';
-  } else if (isOk) {
-    actionsHtml = '<div class="server-actions"><button class="auth-btn" data-action="authenticate" data-server-id="' + escapedId + '">Re-authenticate</button></div>';
-  } else if (server.error) {
-    actionsHtml = '<div class="server-actions"><button class="auth-btn" data-action="retry">Retry</button></div>';
-  }
-  
-  return '<div class="server-card" data-state="' + stateClass + '" data-server-id="' + escapedId + '">' +
-    '<div class="server-header">' +
+  return '<div class="server-card" data-server-id="' + escapedId + '">' +
+    '<div class="server-row">' +
+      icon +
       '<span class="server-id">' + escapeHtml(server.id) + '</span>' +
-      badge +
+      (needsClientId ? '' : '<span class="server-action">' + actionHtml + '</span>') +
     '</div>' +
     '<div class="server-url">' + escapeHtml(server.url) + '</div>' +
-    expiryHtml +
     errorHtml +
-    actionsHtml +
+    (needsClientId ? actionHtml : '') +
   '</div>';
 }
 
@@ -233,12 +206,15 @@ window.addEventListener('message', function(event) {
 // Event delegation for button clicks (avoids inline handlers with server IDs)
 listEl.addEventListener('click', function(event) {
   var target = event.target;
-  if (!target.matches || !target.matches('button[data-action]')) {
-    return;
-  }
+  if (!target.matches) return;
   
-  var action = target.getAttribute('data-action');
-  var serverId = target.getAttribute('data-server-id');
+  // Handle both buttons and links
+  var actionEl = target.matches('[data-action]') ? target : target.closest('[data-action]');
+  if (!actionEl) return;
+  
+  event.preventDefault();
+  var action = actionEl.getAttribute('data-action');
+  var serverId = actionEl.getAttribute('data-server-id');
   
   if (action === 'authenticate' && serverId) {
     authenticate(serverId);

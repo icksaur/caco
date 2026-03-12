@@ -4,22 +4,10 @@
   margin: 0 auto;
 }
 
-.mcp-auth-title {
-  margin: 0 0 4px 0;
-  font-size: 1.25em;
-  font-weight: 600;
-}
-
-.mcp-auth-subtitle {
-  margin: 0 0 16px 0;
-  color: var(--text-muted);
-  font-size: 0.9em;
-}
-
 .server-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .loading {
@@ -29,95 +17,70 @@
 }
 
 .server-card {
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-secondary);
+  padding: 8px 12px;
 }
 
-.server-header {
+.server-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  gap: 8px;
+}
+
+.status-icon {
+  font-size: 1em;
+  flex-shrink: 0;
+}
+
+.status-ok {
+  color: var(--color-success, #4caf50);
+}
+
+.status-bad {
+  color: var(--color-error, #e53935);
 }
 
 .server-id {
   font-weight: 600;
-  font-size: 1em;
+  font-size: 0.95em;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-action {
+  flex-shrink: 0;
+}
+
+.auth-link {
+  color: var(--color-accent, #5c9aff);
+  text-decoration: none;
+  font-size: 0.85em;
+}
+
+.auth-link:hover {
+  text-decoration: underline;
 }
 
 .server-url {
-  font-size: 0.85em;
+  font-size: 0.8em;
   color: var(--text-muted);
+  padding-left: 22px;
   word-break: break-all;
 }
 
-.server-expiry {
-  font-size: 0.85em;
-  color: var(--text-muted);
-  margin-top: 4px;
-}
-
 .server-error {
-  font-size: 0.85em;
-  color: var(--error);
-  margin-top: 4px;
-}
-
-.server-actions {
-  margin-top: 8px;
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.badge {
-  font-size: 0.85em;
-  font-weight: 500;
-}
-
-.badge-ok {
-  color: var(--success);
-}
-
-.badge-warn {
-  color: var(--warning);
-}
-
-.badge-error {
-  color: var(--error);
-}
-
-.auth-btn {
-  padding: 6px 12px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  cursor: pointer;
-  font-size: 0.85em;
-}
-
-.auth-btn:hover {
-  background: var(--bg-secondary);
-}
-
-.auth-btn.primary {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
-}
-
-.auth-btn.primary:hover {
-  opacity: 0.9;
+  font-size: 0.8em;
+  color: var(--color-error, #e53935);
+  padding-left: 22px;
+  margin-top: 2px;
 }
 
 /* Client ID input form */
 .client-id-form {
-  margin-top: 8px;
+  margin-top: 6px;
+  padding-left: 22px;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -125,11 +88,11 @@
 
 .client-id-input {
   flex: 1;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   font-size: 0.85em;
-  background: var(--bg-primary);
+  background: var(--bg-surface);
   color: var(--text-primary);
 }
 
@@ -138,9 +101,26 @@
 }
 
 .client-id-hint {
-  font-size: 0.8em;
+  font-size: 0.75em;
   color: var(--text-muted);
-  margin-top: 4px;
+  padding-left: 22px;
+  margin-top: 2px;
+}
+
+.auth-btn {
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85em;
+}
+
+.auth-btn.primary {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
 }
 
 /* Empty and error states */
@@ -151,17 +131,12 @@
   color: var(--text-muted);
 }
 
-.empty-icon {
-  font-size: 2em;
-  margin-bottom: 8px;
-}
-
 .empty-hint {
   font-size: 0.9em;
   opacity: 0.8;
 }
 
 .error-message {
-  color: var(--error);
+  color: var(--color-error, #e53935);
   margin-bottom: 12px;
 }

@@ -96,6 +96,16 @@ It includes applet discovery and is constructed at server startup.
 ## Documentation
 
 Read \`API.md\` for the complete API reference, \`APPLETS.md\` for applet authoring, and \`EXTENSIONS.md\` for extensions and skills.
+
+## Schedules
+
+Recurring cron-based sessions. REST API:
+- \`PUT /api/schedule/:slug\` — create/update. Body: \`{ "prompt": "...", "schedule": { "type": "cron", "expression": "0 9 * * *" }, "sessionConfig": { "model": "claude-sonnet", "persistSession": true } }\`
+- \`GET /api/schedule\` — list all
+- \`POST /api/schedule/:slug/run\` — trigger manually
+- \`DELETE /api/schedule/:slug\` — remove
+
+See \`API.md\` for full schema details.
 - API reference, WebSocket protocol, shell API
 - Session management, state sync, context
 - Session migration (export/import between machines) — see API.md "Session Migration" section

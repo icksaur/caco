@@ -31,6 +31,12 @@
   background: #1e3a5f;
 }
 
+.doc-text {
+  font-size: 10pt;
+  color: #999;
+  padding: 2px 8px;
+}
+
 .step {
   display: flex;
   align-items: flex-start;

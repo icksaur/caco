@@ -1,4 +1,5 @@
 var sessionId = null;
+var sessionCwd = null;
 var roadmap = null;
 
 var header = document.getElementById('header');
@@ -19,7 +20,38 @@ function getViewer(path) {
   return 'text-editor';
 }
 
+function isAbsPath(s) {
+  return s.startsWith('/') || /^[A-Za-z]:[/\\]/.test(s);
+}
+
+function isUri(s) {
+  return /^https?:\/\//.test(s);
+}
+
+function isRelPath(s) {
+  return /[/\\]/.test(s) || /\.\w{1,10}$/.test(s);
+}
+
+function renderLink(s) {
+  var resolved = s;
+  // Resolve relative paths using session CWD
+  if (!isAbsPath(s) && !isUri(s) && isRelPath(s) && sessionCwd) {
+    var sep = sessionCwd.indexOf('\\') >= 0 ? '\\' : '/';
+    resolved = sessionCwd + sep + s;
+  }
+  var display = s.split(/[/\\]/).pop() || s;
+  if (isAbsPath(resolved)) {
+    var applet = getViewer(resolved);
+    return '<a class="doc-link" href="?applet=' + applet + '&path=' + encodeURIComponent(resolved) + '" title="' + esc(s) + '">' + esc(display) + '</a>';
+  }
+  if (isUri(s)) {
+    return '<a class="doc-link" href="' + esc(s) + '" target="_blank" title="' + esc(s) + '">' + esc(display) + '</a>';
+  }
+  return '<span class="doc-text" title="' + esc(s) + '">' + esc(s) + '</span>';
+}
+
 async function loadRoadmap() {
+  console.log('[ROADMAP] loadRoadmap called, sessionId=' + sessionId, 'cwd=' + sessionCwd);
   if (!sessionId) return;
   try {
     var res = await fetch('/api/sessions/' + sessionId + '/roadmap');
@@ -34,7 +66,7 @@ async function loadRoadmap() {
     render();
     window.appletAPI.setAppletState({ hasRoadmap: !!roadmap, stepCount: roadmap ? roadmap.steps.length : 0 });
   } catch (e) {
-    empty.textContent = 'Error loading roadmap';
+    empty.textContent = 'Error loading roadmap: ' + (e.message || e) + ' (sessionId=' + sessionId + ')';
     empty.style.display = '';
   }
 }
@@ -69,10 +101,7 @@ function render() {
   if (roadmap.documents && roadmap.documents.length) {
     var dHtml = '<div class="doc-list">';
     for (var i = 0; i < roadmap.documents.length; i++) {
-      var d = roadmap.documents[i];
-      var name = d.split('/').pop();
-      var applet = getViewer(d);
-      dHtml += '<a class="doc-link" href="?applet=' + applet + '&path=' + encodeURIComponent(d) + '" title="' + esc(d) + '">' + esc(name) + '</a>';
+      dHtml += renderLink(roadmap.documents[i]);
     }
     dHtml += '</div>';
     docs.innerHTML = dHtml;
@@ -101,10 +130,7 @@ function render() {
     if (s.context && s.context.length) {
       html += '<div class="step-context">';
       for (var ci = 0; ci < s.context.length; ci++) {
-        var c = s.context[ci];
-        var cName = c.split('/').pop();
-        var cApplet = getViewer(c);
-        html += '<a class="context-link" href="?applet=' + cApplet + '&path=' + encodeURIComponent(c) + '">' + esc(cName) + '</a>';
+        html += renderLink(s.context[ci]);
       }
       html += '</div>';
     }
@@ -122,6 +148,7 @@ function render() {
 
 window.appletAPI.onSessionChange(function(_id, info) {
   sessionId = info.sessionId;
+  sessionCwd = info.cwd;
   loadRoadmap();
 });
 
@@ -129,3 +156,14 @@ window.appletAPI.onSessionEvent(function(event) {
   if (event.type === 'session.idle') loadRoadmap();
   if (event.type === 'tool.execution_complete' && event.data && event.data.toolName === 'update_roadmap') loadRoadmap();
 });
+
+// Initial load if session is already active
+var initId = window.appletAPI.getSessionId();
+console.log('[ROADMAP] Init, getSessionId=' + initId);
+if (initId) {
+  sessionId = initId;
+  fetch('/api/sessions/' + initId + '/state').then(function(r) { return r.json(); }).then(function(data) {
+    sessionCwd = data.cwd || null;
+    loadRoadmap();
+  }).catch(function() { loadRoadmap(); });
+}

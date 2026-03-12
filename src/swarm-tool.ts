@@ -76,8 +76,8 @@ Use for fan-out tasks: analyze multiple repos, parallelize independent subtasks,
 Each session runs independently with its own prompt. Results are collected and returned as one structured response.
 
 **Model tiers (enforced):**
-- 1-2 sessions: any model (opus allowed)
-- 3-4 sessions: sonnet or cheaper
+- 1-2 sessions: use opus for best quality (any model allowed)
+- 3-4 sessions: sonnet or cheaper (opus rejected)
 - 5-6 sessions: gpt-4.1 or cheaper
 
 **Tips:**

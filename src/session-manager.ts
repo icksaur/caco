@@ -69,20 +69,40 @@ function injectOAuthTokens(servers: Record<string, Record<string, unknown>>): vo
 }
 
 /**
- * Repair corrupted session events.jsonl by adding missing ephemeral:true
- * to session.shutdown events. Returns true if repair was applied.
+ * Repair corrupted session events.jsonl.
+ * Handles: missing ephemeral:true on shutdown, unknown event types.
+ * Returns true if repair was applied.
  */
-function repairSessionEvents(sessionId: string): boolean {
+function repairSessionEvents(sessionId: string, errorMessage?: string): boolean {
   const eventsPath = join(homedir(), '.copilot', 'session-state', sessionId, 'events.jsonl');
   if (!existsSync(eventsPath)) return false;
   try {
-    const content = readFileSync(eventsPath, 'utf-8');
+    let content = readFileSync(eventsPath, 'utf-8');
+    let changed = false;
+
+    // Fix missing ephemeral:true on session.shutdown
     const needle = '"type":"session.shutdown","data":{';
-    if (!content.includes(needle)) return false;
-    const repaired = content.replaceAll(needle, '"type":"session.shutdown","ephemeral":true,"data":{');
-    if (repaired === content) return false;
-    writeFileSync(eventsPath, repaired);
-    console.log(`[SESSION] Repaired ephemeral field in ${eventsPath}`);
+    if (content.includes(needle)) {
+      content = content.replaceAll(needle, '"type":"session.shutdown","ephemeral":true,"data":{');
+      changed = true;
+      console.log(`[SESSION] Repaired ephemeral field in ${eventsPath}`);
+    }
+
+    // Strip lines with unknown event types
+    const unknownMatch = errorMessage?.match(/Unknown event type: "([^"]+)"/);
+    if (unknownMatch) {
+      const badType = unknownMatch[1];
+      const lines = content.split('\n');
+      const filtered = lines.filter(line => !line.includes(`"type":"${badType}"`));
+      if (filtered.length < lines.length) {
+        content = filtered.join('\n');
+        changed = true;
+        console.log(`[SESSION] Stripped ${lines.length - filtered.length} lines with unknown type "${badType}" from ${eventsPath}`);
+      }
+    }
+
+    if (!changed) return false;
+    writeFileSync(eventsPath, content);
     return true;
   } catch (e) {
     console.error(`[SESSION] Failed to repair ${eventsPath}:`, e);
@@ -481,9 +501,9 @@ class SessionManager {
       } as ResumeSessionConfig);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('Session file is corrupted') && msg.includes('ephemeral')) {
-        console.warn(`[SESSION] Attempting auto-repair for corrupted session ${sessionId}`);
-        if (repairSessionEvents(sessionId)) {
+      if (msg.includes('Session file is corrupted')) {
+        console.warn(`[SESSION] Attempting auto-repair for corrupted session ${sessionId}: ${msg}`);
+        if (repairSessionEvents(sessionId, msg)) {
           // Retry once after repair
           try {
             session = await client.resumeSession(sessionId, {

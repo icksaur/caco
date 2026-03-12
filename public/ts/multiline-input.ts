@@ -106,7 +106,7 @@ export function setupMultilineInput(): void {
 }
 
 let pickerPopup: InputPopup | null = null;
-let pendingPickerCmd: string | null = null;
+let _pendingPickerCmd: string | null = null;
 
 function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
   const val = textarea.value;
@@ -231,21 +231,21 @@ export function tryExecuteSlashCommand(message: string): boolean {
     const anchor = document.querySelector('#chatForm .input-bar') as HTMLElement;
     if (!textarea || !anchor) return false;
 
-    pendingPickerCmd = name;
+    _pendingPickerCmd = name;
     void Promise.resolve(cmd.picker()).then(items => {
       if (pickerPopup) pickerPopup.hide();
       pickerPopup = new InputPopup({
         anchor,
         onSelect: (picked) => {
           pickerPopup!.hide();
-          pendingPickerCmd = null;
+          _pendingPickerCmd = null;
           textarea.value = `/${name} ${picked.id}`;
           autoResize(textarea);
           textarea.focus();
         },
         onDismiss: () => {
           pickerPopup!.hide();
-          pendingPickerCmd = null;
+          _pendingPickerCmd = null;
           textarea.value = `/${name} `;
           autoResize(textarea);
           setTimeout(() => textarea.focus(), 0);

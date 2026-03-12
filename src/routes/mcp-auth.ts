@@ -16,7 +16,7 @@ import { Router, Request, Response } from 'express';
 import { randomBytes, createHash } from 'crypto';
 import { createServer, type Server as HttpServer } from 'http';
 import { getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth, type MCPAuthState } from '../storage.js';
-import { listCliOAuthConfigs, getCliOAuthConfig } from '../cli-oauth.js';
+import { listCliOAuthConfigs } from '../cli-oauth.js';
 import { discoverOAuthMetadata } from '../mcp-discovery.js';
 
 const router = Router();
@@ -120,21 +120,14 @@ router.get('/start', async (req: Request, res: Response) => {
   const codeChallenge = generateCodeChallenge(codeVerifier);
   const state = randomBytes(32).toString('base64url');
 
-  // Determine redirect URI: prefer discovered redirect_uris, fall back to CLI config
+  // Determine redirect URI: prefer discovered redirect_uris, fall back to random port
   let callbackPort = 0;
-  let callbackPath = '/callback';
+  let callbackPath = '/';
   const localhostRedirect = serverAuth.redirectUris?.find(u => u.startsWith('http://127.0.0.1:') || u.startsWith('http://localhost:'));
   if (localhostRedirect) {
     const parsed = new URL(localhostRedirect);
     callbackPort = parseInt(parsed.port, 10) || 0;
     callbackPath = parsed.pathname || '/';
-  } else {
-    const cliConfig = getCliOAuthConfig(serverAuth.url);
-    if (cliConfig?.redirectUri) {
-      const parsed = new URL(cliConfig.redirectUri);
-      callbackPort = parseInt(parsed.port, 10) || 0;
-      callbackPath = parsed.pathname || '/';
-    }
   }
 
   let tempResult;
@@ -146,7 +139,7 @@ router.get('/start', async (req: Request, res: Response) => {
     return;
   }
   const { port, callbackPromise, server: tempServer } = tempResult;
-  const callbackUrl = `http://127.0.0.1:${port}${callbackPath}`;
+  const callbackUrl = `http://localhost:${port}${callbackPath}`;
 
   console.log(`[MCP-AUTH] Temp callback server on port ${port} for ${serverId}`);
 
@@ -257,7 +250,7 @@ function startTempCallbackServer(expectedState: string, preferredPort = 0, callb
     }, TIMEOUT_MS);
 
     const server = createServer((req, resp) => {
-      const url = new URL(req.url || '/', `http://127.0.0.1`);
+      const url = new URL(req.url || '/', 'http://127.0.0.1');
       if (url.pathname !== callbackPath) {
         resp.writeHead(404);
         resp.end();
@@ -274,7 +267,7 @@ function startTempCallbackServer(expectedState: string, preferredPort = 0, callb
       if (error) {
         resp.end(`<html><body><h3>Authentication failed</h3><p>${escapeHtml(errorDesc || error)}</p><p>You can close this window.</p></body></html>`);
       } else {
-        resp.end(`<html><body><h3>Authenticated</h3><p>You can close this window.</p><script>window.close()</script></body></html>`);
+        resp.end('<html><body><h3>Authenticated</h3><p>You can close this window.</p><script>window.close()</script></body></html>');
       }
 
       clearTimeout(timeout);
@@ -294,7 +287,7 @@ function startTempCallbackServer(expectedState: string, preferredPort = 0, callb
       rejectSetup(new Error(`Failed to start callback server: ${err.code || err.message}`));
     });
 
-    server.listen(preferredPort, '127.0.0.1', () => {
+    server.listen(preferredPort, 'localhost', () => {
       const addr = server.address();
       const port = typeof addr === 'object' && addr ? addr.port : 0;
       activeTempServer = server;

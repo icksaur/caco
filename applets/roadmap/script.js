@@ -25,7 +25,12 @@ function isAbsPath(s) {
 }
 
 function isUri(s) {
-  return /^https?:\/\//.test(s);
+  return /https?:\/\//.test(s);
+}
+
+function extractUri(s) {
+  var m = s.match(/(https?:\/\/\S+)/);
+  return m ? m[1] : null;
 }
 
 function isRelPath(s) {
@@ -33,9 +38,15 @@ function isRelPath(s) {
 }
 
 function renderLink(s) {
+  // Check for embedded URI first (e.g. "WI: https://...")
+  var uri = extractUri(s);
+  if (uri) {
+    var label = s.replace(uri, '').replace(/[:\s]+$/, '').trim();
+    return '<a class="doc-link" href="' + esc(uri) + '" target="_blank" title="' + esc(uri) + '">' + esc(label || uri.split('/').pop() || uri) + '</a>';
+  }
+
   var resolved = s;
-  // Resolve relative paths using session CWD
-  if (!isAbsPath(s) && !isUri(s) && isRelPath(s) && sessionCwd) {
+  if (!isAbsPath(s) && isRelPath(s) && sessionCwd) {
     var sep = sessionCwd.indexOf('\\') >= 0 ? '\\' : '/';
     resolved = sessionCwd + sep + s;
   }
@@ -43,9 +54,6 @@ function renderLink(s) {
   if (isAbsPath(resolved)) {
     var applet = getViewer(resolved);
     return '<a class="doc-link" href="?applet=' + applet + '&path=' + encodeURIComponent(resolved) + '" title="' + esc(s) + '">' + esc(display) + '</a>';
-  }
-  if (isUri(s)) {
-    return '<a class="doc-link" href="' + esc(s) + '" target="_blank" title="' + esc(s) + '">' + esc(display) + '</a>';
   }
   return '<span class="doc-text" title="' + esc(s) + '">' + esc(s) + '</span>';
 }

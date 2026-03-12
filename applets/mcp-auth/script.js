@@ -74,11 +74,9 @@ function renderServer(server) {
   var icon = (isOk && !server.error) ? '<span class="status-icon status-ok">&#x2713;</span>'
     : '<span class="status-icon status-bad">&#x2717;</span>';
   
-  // Action link
+  // Action link — always show Authenticate, discovery may resolve missing clientId
   var actionHtml = '';
-  if (needsClientId) {
-    actionHtml = renderClientIdForm(escapedId);
-  } else if (needsAuth || isExpired || server.error) {
+  if (needsAuth || isExpired || server.error || needsClientId) {
     actionHtml = '<a href="#" class="auth-link" data-action="authenticate" data-server-id="' + escapedId + '">Authenticate</a>';
   } else if (isOk) {
     actionHtml = '<a href="#" class="auth-link" data-action="authenticate" data-server-id="' + escapedId + '">Re-authenticate</a>';
@@ -91,11 +89,10 @@ function renderServer(server) {
     '<div class="server-row">' +
       icon +
       '<span class="server-id">' + escapeHtml(server.id) + '</span>' +
-      (needsClientId ? '' : '<span class="server-action">' + actionHtml + '</span>') +
+      '<span class="server-action">' + actionHtml + '</span>' +
     '</div>' +
     '<div class="server-url">' + escapeHtml(server.url) + '</div>' +
     errorHtml +
-    (needsClientId ? actionHtml : '') +
   '</div>';
 }
 

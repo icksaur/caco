@@ -87,13 +87,8 @@ router.get('/start', async (req: Request, res: Response) => {
     return;
   }
   
-  if (!serverAuth.clientId) {
-    res.status(400).send(errorHtml(`Server "${serverId}" requires a client_id. Configure it in the MCP Auth applet.`));
-    return;
-  }
-
-  // Run discovery if endpoints or scopes are missing
-  if (!serverAuth.authorizationEndpoint || !serverAuth.scopes?.length) {
+  // Run discovery if endpoints, scopes, or clientId are missing
+  if (!serverAuth.authorizationEndpoint || !serverAuth.scopes?.length || !serverAuth.clientId) {
     try {
       const metadata = await discoverOAuthMetadata(serverAuth.url);
       serverAuth = {
@@ -113,6 +108,11 @@ router.get('/start', async (req: Request, res: Response) => {
       res.status(500).send(errorHtml(`OAuth discovery failed for "${serverId}": ${msg}`));
       return;
     }
+  }
+
+  if (!serverAuth.clientId) {
+    res.status(400).send(errorHtml(`Server "${serverId}" requires a client_id. Configure it in the MCP Auth applet.`));
+    return;
   }
   
   // PKCE

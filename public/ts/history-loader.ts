@@ -11,7 +11,7 @@
 import { getActiveSessionId, setLoadingHistory } from './app-state.js';
 import { setFormEnabled } from './view-controller.js';
 import { onHistoryComplete, getConnectionId, subscribeToSession, requestHistory } from './websocket.js';
-import { clearContextFooter } from './context-footer.js';
+import { clearContextFooter, updateContextUsage } from './context-footer.js';
 import { regions } from './dom-regions.js';
 import { scrollToBottom } from './ui-utils.js';
 import { sessionTracker } from './session-state-tracker.js';
@@ -75,7 +75,7 @@ class HistoryLoader {
     return this.pending !== null;
   }
 
-  private finish(resolve: () => void, data?: { isBusy?: boolean }): void {
+  private finish(resolve: () => void, data?: { isBusy?: boolean; usage?: { tokenLimit: number; currentTokens: number } }): void {
     if (!this.pending) return;
     const { sessionId, timer, unsub } = this.pending;
     clearTimeout(timer);
@@ -92,6 +92,9 @@ class HistoryLoader {
     const activeId = getActiveSessionId();
     if (activeId) {
       sessionTracker.setBusy(activeId, isBusy);
+      if (data?.usage) {
+        updateContextUsage(data.usage, activeId);
+      }
     }
     setFormEnabled(!isBusy);
     

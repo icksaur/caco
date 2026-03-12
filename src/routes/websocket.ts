@@ -29,6 +29,7 @@ const allConnections = new Set<WebSocket>();
 const sessionSubscribers = new Map<string, Set<WebSocket>>();
 const clientSubscription = new Map<WebSocket, string>();
 const wsAlive = new WeakMap<WebSocket, boolean>();
+const usageCache = new Map<string, { tokenLimit: number; currentTokens: number }>();
 
 // Re-export MessageSource from shared module for backward compatibility
 export type { MessageSource } from '../message-source.js';
@@ -483,7 +484,8 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     
     console.log(`[HISTORY] Streamed ${sentCount} events (from ${events.length} raw) for ${shortId}`);
     const isBusy = sessionManager.isBusy(sessionId);
-    send(ws, { type: 'historyComplete', sessionId, data: { isBusy } });
+    const usage = usageCache.get(sessionId);
+    send(ws, { type: 'historyComplete', sessionId, data: { isBusy, usage } });
     console.log(`[HISTORY] historyComplete sent for ${shortId}, isBusy=${isBusy}, ws.readyState=${ws.readyState}`);
     
   } catch (error) {
@@ -531,6 +533,13 @@ export function broadcastEvent(
   sessionId: string,
   event: SessionEvent
 ): void {
+  if (event.type === 'session.usage_info' && event.data) {
+    const d = event.data as { tokenLimit?: number; currentTokens?: number };
+    if (d.tokenLimit && d.currentTokens) {
+      usageCache.set(sessionId, { tokenLimit: d.tokenLimit, currentTokens: d.currentTokens });
+    }
+  }
+  
   const subscribers = sessionSubscribers.get(sessionId);
   if (!subscribers || subscribers.size === 0 || shouldFilter(event)) {
     return;

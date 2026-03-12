@@ -65,12 +65,14 @@ export async function discoverOAuthMetadata(serverUrl: string): Promise<OAuthMet
  * POST → 401 → resource_metadata URL → scopes + auth server → OIDC config
  */
 async function discoverViaMcpProtocol(serverUrl: string): Promise<OAuthMetadata | null> {
+  const timeout = AbortSignal.timeout(10_000);
   try {
     // Probe with POST (MCP uses POST for JSON-RPC)
     const probe = await fetch(serverUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: '{}',
+      signal: timeout,
     });
 
     if (probe.status !== 401) return null;
@@ -80,7 +82,7 @@ async function discoverViaMcpProtocol(serverUrl: string): Promise<OAuthMetadata 
     if (!resourceMetadataUrl) return null;
 
     // Fetch protected resource metadata
-    const resourceRes = await fetch(resourceMetadataUrl, { headers: { 'Accept': 'application/json' } });
+    const resourceRes = await fetch(resourceMetadataUrl, { headers: { 'Accept': 'application/json' }, signal: timeout });
     if (!resourceRes.ok) return null;
 
     const resource = await resourceRes.json() as {
@@ -93,7 +95,7 @@ async function discoverViaMcpProtocol(serverUrl: string): Promise<OAuthMetadata 
 
     // Fetch auth server OIDC configuration
     const oidcUrl = `${authServerUrl.replace(/\/+$/, '')}/.well-known/openid-configuration`;
-    const oidcRes = await fetch(oidcUrl, { headers: { 'Accept': 'application/json' } });
+    const oidcRes = await fetch(oidcUrl, { headers: { 'Accept': 'application/json' }, signal: timeout });
     if (!oidcRes.ok) return null;
 
     const oidc = await oidcRes.json() as {
@@ -120,6 +122,7 @@ async function discoverViaMcpProtocol(serverUrl: string): Promise<OAuthMetadata 
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: '{}',
+        signal: timeout,
       });
       if (regRes.ok) {
         const reg = await regRes.json() as {

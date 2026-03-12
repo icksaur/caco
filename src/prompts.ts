@@ -101,6 +101,18 @@ Sessions can have a roadmap — a persistent list of steps with status tracking.
 
 Call \`get_roadmap\` early in resumed sessions to understand project state. Update step statuses as you complete work.
 
+## Schedules
+Caco supports recurring scheduled sessions via REST API:
+- \`PUT /api/schedule/:slug\` — create/update a schedule with cron expression
+- \`GET /api/schedule\` — list all schedules
+- \`POST /api/schedule/:slug/run\` — manually trigger
+- \`DELETE /api/schedule/:slug\` — remove
+
+Example: \`PUT /api/schedule/daily-report\` with body:
+\`\`\`json
+{ "prompt": "Generate a status report", "schedule": { "type": "cron", "expression": "0 9 * * *" }, "sessionConfig": { "model": "claude-sonnet", "persistSession": true } }
+\`\`\`
+
 ## Self-Modification
 This chat interface is Caco — an open-source, self-extensible project. You can modify its source code.
 Call \`caco_dev_docs\` for project structure, build commands, and architecture when working on Caco itself.

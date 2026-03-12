@@ -146,7 +146,12 @@ class ChatViewController {
       hasGit?: boolean;
       hasIcon?: boolean;
       cwdFallback?: string;
+      repairMessage?: string;
     };
+
+    if (data.repairMessage) {
+      showToast(`Session repaired: ${data.repairMessage}`, { type: 'info', autoHideMs: 8000 });
+    }
 
     if (data.cwdFallback) {
       showToast(`Original directory is gone, using: ${data.cwdFallback}`, { type: 'info', autoHideMs: 5000 });

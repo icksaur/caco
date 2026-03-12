@@ -150,7 +150,8 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       kind: meta?.kind || 'interactive',
       currentIntent: meta?.currentIntent || null,
       hasIcon: getSessionIconPath(result.sessionId) !== null,
-      cwdFallback: result.usedFallbackCwd
+      cwdFallback: result.usedFallbackCwd,
+      repairMessage: result.repairMessage || null
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

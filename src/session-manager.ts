@@ -70,43 +70,55 @@ function injectOAuthTokens(servers: Record<string, Record<string, unknown>>): vo
 
 /**
  * Repair corrupted session events.jsonl.
- * Handles: missing ephemeral:true on shutdown, unknown event types.
- * Returns true if repair was applied.
+ * - Fixes missing ephemeral:true on session.shutdown
+ * - For unknown event types: truncates to the last session.idle before the bad line
+ * Returns a description of what was repaired, or null if no repair was possible.
  */
-function repairSessionEvents(sessionId: string, errorMessage?: string): boolean {
+function repairSessionEvents(sessionId: string, errorMessage?: string): string | null {
   const eventsPath = join(homedir(), '.copilot', 'session-state', sessionId, 'events.jsonl');
-  if (!existsSync(eventsPath)) return false;
+  if (!existsSync(eventsPath)) return null;
   try {
     let content = readFileSync(eventsPath, 'utf-8');
-    let changed = false;
 
     // Fix missing ephemeral:true on session.shutdown
     const needle = '"type":"session.shutdown","data":{';
     if (content.includes(needle)) {
       content = content.replaceAll(needle, '"type":"session.shutdown","ephemeral":true,"data":{');
-      changed = true;
+      writeFileSync(eventsPath, content);
       console.log(`[SESSION] Repaired ephemeral field in ${eventsPath}`);
+      return 'Fixed missing ephemeral flag on shutdown events';
     }
 
-    // Strip lines with unknown event types
-    const unknownMatch = errorMessage?.match(/Unknown event type: "([^"]+)"/);
-    if (unknownMatch) {
-      const badType = unknownMatch[1];
+    // For unknown event types or other corruption: truncate to last session.idle
+    if (errorMessage?.includes('Unknown event type') || errorMessage?.includes('corrupted')) {
       const lines = content.split('\n');
-      const filtered = lines.filter(line => !line.includes(`"type":"${badType}"`));
-      if (filtered.length < lines.length) {
-        content = filtered.join('\n');
-        changed = true;
-        console.log(`[SESSION] Stripped ${lines.length - filtered.length} lines with unknown type "${badType}" from ${eventsPath}`);
+
+      // Find the bad line number from error message (e.g., "line 1845:")
+      const lineMatch = errorMessage?.match(/line (\d+)/);
+      const badLineNum = lineMatch ? parseInt(lineMatch[1], 10) : lines.length;
+
+      // Find last session.idle before the bad line
+      let truncateAt = -1;
+      for (let i = Math.min(badLineNum - 1, lines.length - 1); i >= 0; i--) {
+        if (lines[i].includes('"type":"session.idle"')) {
+          truncateAt = i;
+          break;
+        }
       }
+
+      if (truncateAt < 0) return null; // No safe truncation point
+
+      const kept = lines.slice(0, truncateAt + 1);
+      const removed = lines.length - kept.length;
+      writeFileSync(eventsPath, kept.join('\n') + '\n');
+      console.log(`[SESSION] Truncated ${eventsPath} to line ${truncateAt + 1}, removed ${removed} lines after last idle`);
+      return `Truncated session history to last stable point (removed ${removed} lines). Recent conversation may be lost.`;
     }
 
-    if (!changed) return false;
-    writeFileSync(eventsPath, content);
-    return true;
+    return null;
   } catch (e) {
     console.error(`[SESSION] Failed to repair ${eventsPath}:`, e);
-    return false;
+    return null;
   }
 }
 
@@ -489,6 +501,7 @@ class SessionManager {
     const tools = config.toolFactory(cwd, sessionRef);
     
     let session: CopilotSessionInstance;
+    let repairMessage: string | undefined;
     try {
       session = await client.resumeSession(sessionId, {
         streaming: true,
@@ -503,7 +516,9 @@ class SessionManager {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes('Session file is corrupted')) {
         console.warn(`[SESSION] Attempting auto-repair for corrupted session ${sessionId}: ${msg}`);
-        if (repairSessionEvents(sessionId, msg)) {
+        const repair = repairSessionEvents(sessionId, msg);
+        if (repair) {
+          repairMessage = repair;
           // Retry once after repair
           try {
             session = await client.resumeSession(sessionId, {
@@ -541,8 +556,8 @@ class SessionManager {
     // Sync model from SDK to cache (may have changed via copilot-cli)
     syncModelCache(sessionId);
     
-    console.log(`✓ Resumed session ${sessionId} for ${cwd}${usedFallbackCwd ? ' (fallback)' : ''}`);
-    return { sessionId, usedFallbackCwd };
+    console.log(`✓ Resumed session ${sessionId} for ${cwd}${usedFallbackCwd ? ' (fallback)' : ''}${repairMessage ? ' (repaired)' : ''}`);
+    return { sessionId, usedFallbackCwd, repairMessage };
   }
 
   /**

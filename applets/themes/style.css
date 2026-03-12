@@ -1,0 +1,48 @@
+.theme-picker {
+  padding: 16px;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.theme-picker h2 {
+  margin: 0 0 16px 0;
+  font-size: 14pt;
+  color: var(--color-text);
+}
+
+.theme-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+  cursor: pointer;
+  background: var(--bg-surface);
+  transition: background 0.15s;
+}
+
+.theme-item:hover {
+  background: var(--bg-hover);
+}
+
+.theme-item.active {
+  border-color: var(--color-accent);
+}
+
+.theme-name {
+  font-weight: 600;
+  color: var(--color-text);
+  margin-right: 12px;
+}
+
+.theme-desc {
+  flex: 1;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.theme-check {
+  color: var(--color-success-bright);
+  font-size: 16px;
+}

@@ -55,6 +55,16 @@ window.hideToast = hideToast;
 
 // Wrap async init in void to satisfy eslint no-misused-promises
 document.addEventListener('DOMContentLoaded', () => {
+  // Load saved theme before rendering
+  const savedTheme = localStorage.getItem('caco:theme');
+  if (savedTheme && savedTheme !== 'dark') {
+    const link = document.createElement('link');
+    link.id = 'cacoThemeLink';
+    link.rel = 'stylesheet';
+    link.href = `/themes/${savedTheme}.css`;
+    document.head.appendChild(link);
+  }
+
   void (async () => {
     // Initialize DOM region registry (must be first — other modules access regions)
     initRegions();

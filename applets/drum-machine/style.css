@@ -17,8 +17,8 @@
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  background: #2a6f2a;
-  color: #fff;
+  background: var(--color-success);
+  color: var(--color-text-bright);
 }
 
 .play-btn.playing {
@@ -29,16 +29,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 .tempo input {
   width: 60px;
   padding: 6px;
-  background: #222;
-  border: 1px solid #444;
+  background: var(--bg-surface);
+  border: 1px solid var(--bg-hover);
   border-radius: 4px;
-  color: #fff;
+  color: var(--color-text-bright);
   text-align: center;
 }
 
@@ -57,7 +57,7 @@
   width: 50px;
   min-width: 50px;
   font-size: 12px;
-  color: #888;
+  color: var(--color-text-muted);
   text-align: right;
   padding-right: 8px;
 }
@@ -70,8 +70,8 @@
 .step {
   width: 32px;
   height: 32px;
-  background: #333;
-  border: 1px solid #444;
+  background: var(--color-border);
+  border: 1px solid var(--bg-hover);
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.1s, border-color 0.1s;
@@ -79,7 +79,7 @@
 }
 
 .step:hover {
-  background: #444;
+  background: var(--bg-hover);
 }
 
 .step.active {
@@ -88,7 +88,7 @@
 }
 
 .step.playing {
-  border-color: #fff;
+  border-color: var(--color-text-bright);
   box-shadow: inset 0 0 8px rgba(255,255,255,0.5);
 }
 

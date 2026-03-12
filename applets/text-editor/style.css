@@ -19,7 +19,7 @@
   flex: 1;
   font-family: monospace;
   font-size: 11pt;
-  color: #888;
+  color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -27,21 +27,21 @@
 
 .save-btn {
   padding: 6px 16px;
-  background: #2a6f2a;
+  background: var(--color-success);
   border: none;
   border-radius: 6px;
-  color: #fff;
+  color: var(--color-text-bright);
   font-size: 11pt;
   cursor: pointer;
 }
 
 .save-btn:hover {
-  background: #3a8f3a;
+  background: var(--color-success-hover);
 }
 
 .save-btn:disabled {
-  background: #333;
-  color: #666;
+  background: var(--color-border);
+  color: var(--color-text-muted);
   cursor: not-allowed;
 }
 
@@ -65,8 +65,8 @@
   bottom: 0;
   margin: 0;
   padding: 12px;
-  background: #1a1a1a;
-  border: 1px solid #333;
+  background: var(--bg-base);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   overflow: auto;
   pointer-events: none;
@@ -79,7 +79,7 @@
   tab-size: 2;
   white-space: pre-wrap;
   word-wrap: break-word;
-  color: #e0e0e0;
+  color: var(--color-text);
   display: block;
 }
 
@@ -91,7 +91,7 @@
   border: 1px solid transparent;
   border-radius: 8px;
   color: transparent;
-  caret-color: #fff;
+  caret-color: var(--color-text-bright);
   font-family: 'SF Mono', Monaco, 'Courier New', monospace;
   font-size: 11pt;
   line-height: 1.5;
@@ -110,32 +110,32 @@
 
 .editor-area textarea:focus {
   outline: none;
-  border-color: #555;
+  border-color: var(--color-text-dim);
 }
 
 /* When textarea focused, show border on highlight layer too */
 .editor-area textarea:focus + .highlight-layer,
 .editor-area:has(textarea:focus) .highlight-layer {
-  border-color: #555;
+  border-color: var(--color-text-dim);
 }
 
 .status {
   margin-top: 8px;
   font-size: 10pt;
-  color: #666;
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
 .status.error {
-  color: #ff6b6b;
+  color: var(--color-error);
 }
 
 .status.success {
-  color: #6bff6b;
+  color: var(--color-success-bright);
 }
 
 .no-file {
-  color: #666;
+  color: var(--color-text-muted);
   text-align: center;
   padding: 40px;
 }

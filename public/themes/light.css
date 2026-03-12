@@ -1,0 +1,73 @@
+:root {
+  --bg-base: #ffffff;
+  --bg-surface: #f6f8fa;
+  --bg-raised: #ffffff;
+  --bg-input: #f6f8fa;
+  --bg-hover: #eaeef2;
+
+  --color-text: #24292e;
+  --color-text-bright: #000000;
+  --color-text-muted: #57606a;
+  --color-text-dim: #8b949e;
+  --color-border: #d0d7de;
+  --color-link: #0969da;
+
+  --color-accent: #0969da;
+  --color-accent-hover: #0550ae;
+  --color-accent-active: #033d8b;
+  --color-success: #2da44e;
+  --color-success-bg: #dafbe1;
+  --color-success-hover: #218838;
+  --color-success-bright: #1a7f37;
+  --color-error: #cf222e;
+  --color-error-bg: #ffebe9;
+  --color-info: #0969da;
+  --color-info-bg: #ddf4ff;
+  --color-danger: #cf222e;
+  --color-danger-hover: #a40e26;
+  --color-unobserved: #cf222e;
+
+  --color-user-bg: #ddf4ff;
+  --color-assistant-bg: transparent;
+  --color-applet-bg: #fff8c5;
+  --color-agent-bg: #fbefff;
+  --color-scheduler-bg: #dafbe1;
+  --color-activity-bg: #f6f8fa;
+  --color-selector-bg: #f6f8fa;
+  --color-selector-hover: #eaeef2;
+
+  --color-menu-btn: #ddf4ff;
+  --color-menu-btn-border: #54aeff;
+  --color-menu-btn-icon: #0969da;
+  --color-menu-btn-hover: #b6e3ff;
+  --color-menu-btn-active: #0969da;
+  --color-menu-btn-active-border: #0550ae;
+
+  --color-applet-btn: #fff8c5;
+  --color-applet-btn-border: #d4a72c;
+  --color-applet-btn-icon: #9a6700;
+  --color-applet-btn-hover: #f5e6a0;
+  --color-applet-btn-active: #bf8700;
+  --color-applet-btn-active-border: #9a6700;
+
+  --color-stop-btn: #cf222e;
+  --color-danger-active: #82071e;
+  --color-valid: #1a7f37;
+  --color-error-surface: #ffebe9;
+  --color-error-surface-hover: #ffc1ba;
+  --color-error-soft: #cf222e;
+  --color-blockquote-text: #57606a;
+  --color-cost-cheap: #1a7f37;
+  --color-cost-expensive: #bf8700;
+  --color-cost-premium: #cf222e;
+  --color-cost-ultra: #8250df;
+  --color-usage-low: #bf8700;
+  --color-usage-critical: #cf222e;
+  --color-context-usage: #9a6700;
+  --color-context-dim: #8b949e;
+
+  --color-overlay-light: rgba(0, 0, 0, 0.04);
+  --color-overlay-error: rgba(207, 34, 46, 0.1);
+  --color-shadow: rgba(0, 0, 0, 0.1);
+  --color-shadow-heavy: rgba(0, 0, 0, 0.15);
+}

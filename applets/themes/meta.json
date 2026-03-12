@@ -1,0 +1,10 @@
+{
+  "slug": "themes",
+  "name": "Themes",
+  "description": "Switch between color themes",
+  "params": {},
+  "createdAt": "2026-03-12T02:35:00.000Z",
+  "updatedAt": "2026-03-12T02:35:00.000Z",
+  "agentUsage": { "purpose": "Switch Caco color theme" },
+  "stateSchema": { "get": { "theme": "string" }, "set": null }
+}

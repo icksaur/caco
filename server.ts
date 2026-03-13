@@ -67,6 +67,13 @@ app.use((_req, res, next) => {
 
 // Routes
 
+function allowLocalhostCorsSimple(req: import('express').Request, res: import('express').Response): void {
+  const origin = req.headers.origin;
+  if (origin && /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+}
+
 // Serve chat interface with injected server hostname (BEFORE static files)
 // Read and transform once at startup — hostname doesn't change at runtime
 const indexHtmlPath = join(__dirname, 'public', 'index.html');
@@ -84,6 +91,11 @@ app.get('/', (req, res) => {
     return;
   }
   res.type('html').send(cachedIndexHtml);
+});
+
+app.get('/api/info', (req, res) => {
+  allowLocalhostCorsSimple(req, res);
+  res.json({ hostname: serverHostname });
 });
 
 app.get('/api/favicon', (_req, res) => {

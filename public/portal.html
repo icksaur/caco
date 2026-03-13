@@ -156,6 +156,17 @@ function loadPeers() {
     savePeers();
   }
   activePeerId = localStorage.getItem(ACTIVE_KEY) || peers[0]?.id;
+
+  // Resolve hostnames for any peers still using fallback names
+  peers.forEach(function(peer) {
+    fetch(peer.url + '/api/info').then(function(r) { return r.json(); }).then(function(data) {
+      if (data.hostname && peer.name !== data.hostname) {
+        peer.name = data.hostname;
+        savePeers();
+        renderSidebar();
+      }
+    }).catch(function() {});
+  });
 }
 
 function savePeers() {
@@ -289,14 +300,20 @@ function addPeer() {
     return;
   }
   
-  var hostname;
-  try { hostname = new URL(url).hostname; } catch { hostname = url; }
-  var name = prompt('Name:', hostname) || hostname;
-  
   var id = Math.random().toString(36).slice(2, 8);
-  peers.push({ id: id, url: url, name: name });
+  var fallbackName;
+  try { fallbackName = new URL(url).hostname; } catch { fallbackName = url; }
+  peers.push({ id: id, url: url, name: fallbackName });
   savePeers();
   switchTo(id);
+
+  // Fetch real hostname from the remote Caco
+  fetch(url + '/api/info').then(function(r) { return r.json(); }).then(function(data) {
+    if (data.hostname) {
+      var peer = peers.find(function(p) { return p.id === id; });
+      if (peer) { peer.name = data.hostname; savePeers(); renderSidebar(); }
+    }
+  }).catch(function() {});
 }
 
 function removePeer(peerId) {

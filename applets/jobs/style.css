@@ -7,7 +7,7 @@
   max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 .header {
@@ -16,7 +16,7 @@
   justify-content: space-between;
   margin-bottom: 30px;
   padding-bottom: 15px;
-  border-bottom: 2px solid #3a3a3a;
+  border-bottom: 2px solid var(--color-border);
 }
 
 .header h1 {
@@ -26,9 +26,9 @@
 }
 
 .refresh-btn {
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
-  color: #e0e0e0;
+  background: var(--bg-raised);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
@@ -37,19 +37,19 @@
 }
 
 .refresh-btn:hover {
-  background: #3a3a3a;
-  border-color: #4a4a4a;
+  background: var(--color-border);
+  border-color: var(--bg-hover);
 }
 
 .loading, .error, .empty {
   text-align: center;
   padding: 40px;
-  color: #999;
+  color: var(--color-text-muted);
   font-size: 16px;
 }
 
 .error {
-  color: #ff6b6b;
+  color: var(--color-error);
   background: rgba(255, 107, 107, 0.1);
   border: 1px solid rgba(255, 107, 107, 0.3);
   border-radius: 8px;
@@ -61,15 +61,15 @@
 }
 
 .job-card {
-  background: #1e1e1e;
-  border: 1px solid #3a3a3a;
+  background: var(--bg-base);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 20px;
   transition: all 0.2s;
 }
 
 .job-card:hover {
-  border-color: #4a4a4a;
+  border-color: var(--bg-hover);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
@@ -89,7 +89,7 @@
 .job-slug {
   font-size: 20px;
   font-weight: 600;
-  color: #fff;
+  color: var(--color-text-bright);
   font-family: 'Monaco', 'Menlo', monospace;
 }
 
@@ -111,7 +111,7 @@
 
 .status-disabled {
   background: rgba(153, 153, 153, 0.2);
-  color: #999;
+  color: var(--color-text-muted);
   border: 1px solid rgba(153, 153, 153, 0.4);
 }
 
@@ -131,16 +131,16 @@
 
 .result-error {
   background: rgba(255, 107, 107, 0.2);
-  color: #ff6b6b;
+  color: var(--color-error);
 }
 
 .job-prompt {
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background: var(--bg-raised);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 15px;
-  color: #ccc;
+  color: var(--color-text);
   font-size: 14px;
   line-height: 1.5;
   font-family: 'Monaco', 'Menlo', monospace;
@@ -167,13 +167,13 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #888;
+  color: var(--color-text-muted);
   font-weight: 600;
 }
 
 .detail-value {
   font-size: 14px;
-  color: #e0e0e0;
+  color: var(--color-text);
   font-family: 'Monaco', 'Menlo', monospace;
 }
 
@@ -187,13 +187,13 @@
 }
 
 .detail-value.error {
-  color: #ff6b6b;
+  color: var(--color-error);
   word-break: break-word;
 }
 
 .schedule-info {
-  background: #252525;
-  border: 1px solid #3a3a3a;
+  background: var(--bg-surface);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 10px;
   margin-top: 10px;
@@ -201,7 +201,7 @@
 
 .schedule-type {
   font-size: 12px;
-  color: #aaa;
+  color: var(--color-text-muted);
   margin-bottom: 4px;
 }
 
@@ -218,15 +218,15 @@
 }
 
 .job-prompt::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: var(--bg-base);
   border-radius: 4px;
 }
 
 .job-prompt::-webkit-scrollbar-thumb {
-  background: #3a3a3a;
+  background: var(--color-border);
   border-radius: 4px;
 }
 
 .job-prompt::-webkit-scrollbar-thumb:hover {
-  background: #4a4a4a;
+  background: var(--bg-hover);
 }

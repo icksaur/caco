@@ -39,7 +39,7 @@
 }
 
 .color-swatch.active {
-  border: 2px solid #007acc;
+  border: 2px solid var(--color-accent);
 }
 
 .pencil-sizes {
@@ -49,7 +49,7 @@
 
 .size-btn {
   padding: 6px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-text);
   background: transparent;
   border-radius: 3px;
   cursor: pointer;
@@ -57,9 +57,9 @@
 }
 
 .size-btn.active {
-  background: #007acc;
+  background: var(--color-accent);
   color: white;
-  border-color: #007acc;
+  border-color: var(--color-accent);
 }
 
 .actions {
@@ -79,7 +79,7 @@
 }
 
 .canvas-wrapper {
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-text);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -99,7 +99,7 @@
 #prompt-input {
   flex: 1;
   padding: 8px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-text);
   border-radius: 3px;
   font-size: 13px;
   font-family: inherit;
@@ -107,12 +107,12 @@
 
 #prompt-input:focus {
   outline: none;
-  border-color: #007acc;
+  border-color: var(--color-accent);
 }
 
 .send-btn {
   padding: 8px 16px;
-  background: #007acc;
+  background: var(--color-accent);
   color: white;
   border: none;
   border-radius: 3px;

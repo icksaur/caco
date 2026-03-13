@@ -10,7 +10,7 @@ h1 {
 }
 
 .subtitle {
-  color: #666;
+  color: var(--color-text-muted);
   margin: 0 0 20px 0;
   font-size: 14px;
 }
@@ -18,7 +18,7 @@ h1 {
 .applet-card {
   display: block;
   text-decoration: none;
-  background: #1c1c1e;
+  background: var(--bg-base);
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 12px;
@@ -34,32 +34,32 @@ h1 {
 .applet-name {
   font-size: 18px;
   font-weight: 600;
-  color: #fff;
+  color: var(--color-text-bright);
   margin: 0 0 4px 0;
 }
 
 .applet-slug {
   font-size: 12px;
-  color: #888;
+  color: var(--color-text-muted);
   font-family: monospace;
   margin: 0 0 8px 0;
 }
 
 .applet-desc {
   font-size: 14px;
-  color: #aaa;
+  color: var(--color-text-muted);
   margin: 0;
   line-height: 1.4;
 }
 
 .empty-state {
   text-align: center;
-  color: #666;
+  color: var(--color-text-muted);
   padding: 40px;
 }
 
 .loading {
   text-align: center;
-  color: #888;
+  color: var(--color-text-muted);
   padding: 40px;
 }

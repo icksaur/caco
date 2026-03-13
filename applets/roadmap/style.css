@@ -8,7 +8,7 @@
   margin: 0 0 12px 0;
   font-size: 14pt;
   font-weight: 600;
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 .doc-list {
@@ -20,15 +20,15 @@
 
 .doc-link {
   font-size: 10pt;
-  color: #6a9fd4;
+  color: var(--color-link);
   text-decoration: none;
   padding: 2px 8px;
-  border: 1px solid #333;
+  border: 1px solid var(--color-border);
   border-radius: 4px;
 }
 
 .doc-link:hover {
-  background: #1e3a5f;
+  background: var(--color-info-bg);
 }
 
 .doc-text {
@@ -42,7 +42,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 8px 0;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--bg-raised);
 }
 
 .step:last-child {
@@ -69,15 +69,15 @@
 }
 
 .step-active .step-status {
-  color: #6a9fd4;
+  color: var(--color-link);
 }
 
 .step-done .step-status {
-  color: #6a9955;
+  color: var(--color-success-bright);
 }
 
 .step-blocked .step-status {
-  color: #f48771;
+  color: var(--color-error);
 }
 
 .step-body {
@@ -87,12 +87,12 @@
 
 .step-title {
   font-size: 11pt;
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 .step-desc {
   font-size: 10pt;
-  color: #888;
+  color: var(--color-text-muted);
   margin-top: 2px;
 }
 
@@ -105,7 +105,7 @@
 
 .context-link {
   font-size: 9pt;
-  color: #6a9fd4;
+  color: var(--color-link);
   text-decoration: none;
   opacity: 0.7;
 }
@@ -116,7 +116,7 @@
 }
 
 .roadmap-empty, .no-steps {
-  color: #666;
+  color: var(--color-text-muted);
   text-align: center;
   padding: 40px;
 }

@@ -7,8 +7,8 @@
   flex-direction: column;
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  color: #e0e0e0;
-  background: #1e1e1e;
+  color: var(--color-text);
+  background: var(--bg-base);
 }
 
 /* Header */
@@ -17,14 +17,14 @@
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  background: #252526;
-  border-bottom: 1px solid #3c3c3c;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .back-btn {
   background: transparent;
-  border: 1px solid #4c4c4c;
-  color: #808080;
+  border: 1px solid var(--bg-hover);
+  color: var(--color-text-muted);
   font-size: 14px;
   cursor: pointer;
   padding: 4px 10px;
@@ -33,9 +33,9 @@
 }
 
 .back-btn:hover {
-  color: #e0e0e0;
-  background: #3c3c3c;
-  border-color: #606060;
+  color: var(--color-text);
+  background: var(--bg-input);
+  border-color: var(--color-text-dim);
 }
 
 .file-info {
@@ -57,13 +57,13 @@
 
 .diff-type {
   font-size: 12px;
-  color: #808080;
+  color: var(--color-text-muted);
 }
 
 .refresh-btn {
   background: transparent;
   border: none;
-  color: #808080;
+  color: var(--color-text-muted);
   font-size: 18px;
   cursor: pointer;
   padding: 4px 8px;
@@ -72,8 +72,8 @@
 }
 
 .refresh-btn:hover {
-  color: #e0e0e0;
-  background: #3c3c3c;
+  color: var(--color-text);
+  background: var(--bg-input);
 }
 
 .refresh-btn.spinning {
@@ -88,8 +88,8 @@
 /* Messages */
 .error-message {
   padding: 12px 16px;
-  background: #5a1d1d;
-  color: #f48771;
+  background: var(--color-error-bg);
+  color: var(--color-error);
   font-size: 13px;
 }
 
@@ -101,12 +101,12 @@
 .no-diff-message {
   padding: 32px 16px;
   text-align: center;
-  color: #808080;
+  color: var(--color-text-muted);
   font-size: 14px;
 }
 
 .no-params-message small {
-  color: #606060;
+  color: var(--color-text-dim);
 }
 
 .no-params-message.hidden,
@@ -115,7 +115,7 @@
 }
 
 .no-diff-message {
-  color: #6a9955;
+  color: var(--color-success-bright);
 }
 
 /* Diff content */
@@ -164,5 +164,5 @@
 }
 
 .diff-meta {
-  color: #606060;
+  color: var(--color-text-dim);
 }

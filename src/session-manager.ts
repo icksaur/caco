@@ -115,8 +115,8 @@ function repairSessionEvents(sessionId: string, errorMessage?: string): string |
       }
     }
 
-    // For unknown event types or other corruption: truncate to last session.idle
-    if (errorMessage?.includes('Unknown event type') || errorMessage?.includes('corrupted')) {
+    // For any corruption we couldn't specifically fix: truncate to last session.idle
+    if (errorMessage?.includes('corrupted')) {
       const lines = content.split('\n');
 
       // Find the bad line number from error message (e.g., "line 1845:")

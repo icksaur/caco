@@ -86,12 +86,14 @@ app.get('/api/favicon', (_req, res) => {
     return `hsl(${h}, 70%, 50%)`;
   });
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
-<rect x="0" y="0" width="17" height="17" fill="${colors[0]}" rx="4" ry="4"/>
-<rect x="15" y="0" width="17" height="17" fill="${colors[1]}" rx="4" ry="4"/>
-<rect x="0" y="15" width="17" height="17" fill="${colors[2]}" rx="4" ry="4"/>
-<rect x="15" y="15" width="17" height="17" fill="${colors[3]}" rx="4" ry="4"/>
-<rect x="6" y="6" width="20" height="20" fill="url(#m)" rx="2"/>
-<defs><radialGradient id="m"><stop offset="0" stop-color="${colors[0]}" stop-opacity="0.3"/><stop offset="1" stop-opacity="0"/></radialGradient></defs>
+<foreignObject width="32" height="32">
+<div xmlns="http://www.w3.org/1999/xhtml" style="width:32px;height:32px;border-radius:4px;background:
+  radial-gradient(ellipse at 0% 0%, ${colors[0]}, transparent 60%),
+  radial-gradient(ellipse at 100% 0%, ${colors[1]}, transparent 60%),
+  radial-gradient(ellipse at 0% 100%, ${colors[2]}, transparent 60%),
+  radial-gradient(ellipse at 100% 100%, ${colors[3]}, transparent 60%),
+  #444;"></div>
+</foreignObject>
 </svg>`;
   res.type('image/svg+xml').send(svg);
 });

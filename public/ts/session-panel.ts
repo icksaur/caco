@@ -201,6 +201,7 @@ export function updateMenuIndicators(): void {
     window.parent.postMessage({
       type: 'caco:status',
       origin: window.location.origin,
+      hostname: (window as unknown as { SERVER_HOSTNAME?: string }).SERVER_HOSTNAME || window.location.hostname,
       busyCount: sessionTracker.getBusyCount(),
       unobservedCount
     }, '*');

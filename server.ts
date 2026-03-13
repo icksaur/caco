@@ -60,7 +60,7 @@ app.use((_req, res, next) => {
     "connect-src 'self' ws: wss:; " +
     "font-src 'self'; " +
     'frame-src \'self\' http://localhost:* https://www.youtube.com https://www.youtube-nocookie.com https://w.soundcloud.com https://player.vimeo.com https://open.spotify.com https://platform.twitter.com; ' +
-    "frame-ancestors *;"
+    'frame-ancestors *;'
   );
   next();
 });

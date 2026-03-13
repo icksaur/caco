@@ -16,5 +16,8 @@
     "public/markdown-renderer.js",
     "public/script.js",
     "tests/api.test.ts"
+  ],
+  "ignoreDependencies": [
+    "@types/tar"
   ]
 }

@@ -211,8 +211,11 @@ export async function dispatchMessage(
       await sessionManager.resume(sessionId, sessionState.getSessionConfig());
     }
     
-    // Verify SDK connection is alive before sending
     await sessionManager.ensureClientHealthy();
+    
+    if (!sessionManager.isActive(sessionId)) {
+      await sessionManager.resume(sessionId, sessionState.getSessionConfig());
+    }
     
     const session = sessionManager.getSession(sessionId);
     if (!session) {

@@ -335,6 +335,7 @@ class SessionManager {
     } catch (e) {
       console.warn('[SDK] Ping failed, resetting client:', e instanceof Error ? e.message : e);
       this.sharedClient = null;
+      this.activeSessions.clear();
       await this.ensureClient();
     }
   }

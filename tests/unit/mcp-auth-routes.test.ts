@@ -296,4 +296,123 @@ describe('MCP Auth Routes', () => {
       expect(isValid).toBeFalsy();
     });
   });
+
+  describe('refreshAccessToken', () => {
+    // Import the module to get the real function with mocked storage
+    let refreshAccessToken: (serverId: string) => Promise<boolean>;
+
+    beforeEach(async () => {
+      const mod = await import('../../src/routes/mcp-auth.js');
+      refreshAccessToken = mod.refreshAccessToken;
+    });
+
+    it('returns false when server has no refresh token', async () => {
+      mockedGetMcpServerAuth.mockReturnValue({
+        url: 'https://api.example.com',
+        authorizationEndpoint: 'https://auth.example.com/authorize',
+        tokenEndpoint: 'https://auth.example.com/token',
+        clientId: 'test-client',
+        needsAuth: true,
+        needsClientId: false,
+      });
+
+      const result = await refreshAccessToken('test-server');
+      expect(result).toBe(false);
+    });
+
+    it('returns false when server has no token endpoint', async () => {
+      mockedGetMcpServerAuth.mockReturnValue({
+        url: 'https://api.example.com',
+        authorizationEndpoint: '',
+        tokenEndpoint: '',
+        refreshToken: 'rt_12345',
+        clientId: 'test-client',
+        needsAuth: true,
+        needsClientId: false,
+      });
+
+      const result = await refreshAccessToken('test-server');
+      expect(result).toBe(false);
+    });
+
+    it('returns false when server not found', async () => {
+      mockedGetMcpServerAuth.mockReturnValue(undefined);
+
+      const result = await refreshAccessToken('nonexistent');
+      expect(result).toBe(false);
+    });
+
+    it('calls token endpoint with refresh_token grant and saves result', async () => {
+      const serverAuth = {
+        url: 'https://api.example.com',
+        authorizationEndpoint: 'https://auth.example.com/authorize',
+        tokenEndpoint: 'https://auth.example.com/token',
+        clientId: 'test-client',
+        refreshToken: 'rt_12345',
+        scopes: ['read', 'write'],
+        needsAuth: true,
+        needsClientId: false,
+      };
+      mockedGetMcpServerAuth.mockReturnValue(serverAuth);
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          access_token: 'new_at_12345',
+          refresh_token: 'new_rt_12345',
+          expires_in: 3600,
+        }),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const result = await refreshAccessToken('test-server');
+      expect(result).toBe(true);
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toBe('https://auth.example.com/token');
+      expect(opts.method).toBe('POST');
+      const body = new URLSearchParams(opts.body as string);
+      expect(body.get('grant_type')).toBe('refresh_token');
+      expect(body.get('refresh_token')).toBe('rt_12345');
+      expect(body.get('client_id')).toBe('test-client');
+      expect(body.get('scope')).toBe('read write');
+
+      expect(mockedSetMcpServerAuth).toHaveBeenCalledWith('test-server', expect.objectContaining({
+        token: 'new_at_12345',
+        refreshToken: 'new_rt_12345',
+        needsAuth: false,
+      }));
+
+      vi.unstubAllGlobals();
+    });
+
+    it('sets needsAuth true on refresh failure', async () => {
+      const serverAuth = {
+        url: 'https://api.example.com',
+        authorizationEndpoint: 'https://auth.example.com/authorize',
+        tokenEndpoint: 'https://auth.example.com/token',
+        clientId: 'test-client',
+        refreshToken: 'rt_expired',
+        needsAuth: false,
+        needsClientId: false,
+      };
+      mockedGetMcpServerAuth.mockReturnValue(serverAuth);
+
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({ error_description: 'Token expired' }),
+      }));
+
+      const result = await refreshAccessToken('test-server');
+      expect(result).toBe(false);
+
+      expect(mockedSetMcpServerAuth).toHaveBeenCalledWith('test-server', expect.objectContaining({
+        needsAuth: true,
+      }));
+
+      vi.unstubAllGlobals();
+    });
+  });
 });

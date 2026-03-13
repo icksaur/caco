@@ -9,7 +9,7 @@ import { homedir } from 'os';
  * the full Express server to be running.
  */
 
-// Duplicate the logic from src/routes/mcp.ts for testing
+// Duplicate the logic from src/routes/workspace-api.ts for testing
 const ALLOWED_BASES = [
   process.cwd(),
   join(homedir(), '.caco'),

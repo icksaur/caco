@@ -18,7 +18,7 @@ import { randomBytes, createHash } from 'crypto';
 import { createServer } from 'http';
 import { getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth, type MCPAuthState } from '../storage.js';
 import { listCliOAuthConfigs } from '../cli-oauth.js';
-import { discoverOAuthMetadata } from '../mcp-discovery.js';
+import { discoverOAuthMetadata, serverIdFromUrl } from '../mcp-discovery.js';
 
 const router = Router();
 
@@ -47,7 +47,7 @@ router.get('/servers', (_req: Request, res: Response) => {
   // Auto-register CLI OAuth servers that aren't in Caco's store yet
   const cliConfigs = listCliOAuthConfigs();
   for (const cli of cliConfigs) {
-    const id = new URL(cli.serverUrl).hostname.replace(/\./g, '-');
+    const id = serverIdFromUrl(cli.serverUrl);
     if (!store.servers[id]) {
       store.servers[id] = {
         url: cli.serverUrl,
@@ -218,59 +218,24 @@ router.get('/callback', async (req: Request, res: Response) => {
     return;
   }
 
-  const { serverId, codeVerifier, callbackUrl, clientId, tokenEndpoint, scopes } = pending;
+  const { serverId } = pending;
   const serverAuth = getMcpServerAuth(serverId);
   if (!serverAuth) {
     res.status(404).send(errorHtml(`Server "${serverId}" not found`));
     return;
   }
 
-  // Exchange code for token
   try {
-    const tokenParams = new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: callbackUrl,
-      code_verifier: codeVerifier,
-      client_id: clientId,
-      scope: scopes.join(' '),
-    });
-
-    const tokenResponse = await fetch(tokenEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
-      body: tokenParams.toString(),
-    });
-
-    if (!tokenResponse.ok) {
-      let errorMessage = `Token exchange failed: ${tokenResponse.status}`;
-      try {
-        const errorData = await tokenResponse.json() as { error?: string; error_description?: string };
-        errorMessage = errorData.error_description || errorData.error || errorMessage;
-      } catch { /* ignore */ }
-      setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: errorMessage });
-      res.send(callbackHtml(serverId, errorMessage));
-      return;
-    }
-
-    const tokenData = await tokenResponse.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
-    if (!tokenData.access_token) {
-      setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: 'No access_token in response' });
-      res.send(callbackHtml(serverId, 'No access_token in response'));
-      return;
-    }
-
-    const expiresAt = tokenData.expires_in ? Date.now() + (tokenData.expires_in * 1000) : undefined;
+    const tokens = await exchangeCodeForToken(pending, code);
     setMcpServerAuth(serverId, {
       ...serverAuth,
-      token: tokenData.access_token,
-      refreshToken: tokenData.refresh_token,
-      expiresAt,
+      token: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt: tokens.expiresAt,
       needsAuth: false,
       error: undefined,
     });
     console.log(`[MCP-AUTH] Token acquired for ${serverId}`);
-
     res.send(callbackHtml(serverId, null));
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Token exchange failed';
@@ -313,6 +278,107 @@ router.post('/config', (req: Request, res: Response) => {
 });
 
 // ============================================================================
+// Token Refresh
+// ============================================================================
+
+export async function refreshAccessToken(serverId: string): Promise<boolean> {
+  const serverAuth = getMcpServerAuth(serverId);
+  if (!serverAuth?.refreshToken || !serverAuth.tokenEndpoint || !serverAuth.clientId) {
+    return false;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: serverAuth.refreshToken,
+      client_id: serverAuth.clientId,
+    });
+    if (serverAuth.scopes?.length) {
+      params.set('scope', serverAuth.scopes.join(' '));
+    }
+
+    const res = await fetch(serverAuth.tokenEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      body: params.toString(),
+    });
+
+    if (!res.ok) {
+      let msg = `Refresh failed: ${res.status}`;
+      try { const d = await res.json() as { error_description?: string }; msg = d.error_description || msg; } catch { /* */ }
+      console.warn(`[MCP-AUTH] Refresh failed for ${serverId}: ${msg}`);
+      setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: msg });
+      return false;
+    }
+
+    const data = await res.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+    if (!data.access_token) {
+      setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: 'No access_token in refresh response' });
+      return false;
+    }
+
+    const expiresAt = data.expires_in ? Date.now() + (data.expires_in * 1000) : undefined;
+    setMcpServerAuth(serverId, {
+      ...serverAuth,
+      token: data.access_token,
+      refreshToken: data.refresh_token || serverAuth.refreshToken,
+      expiresAt,
+      needsAuth: false,
+      error: undefined,
+    });
+    console.log(`[MCP-AUTH] Token refreshed for ${serverId}`);
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[MCP-AUTH] Refresh error for ${serverId}: ${msg}`);
+    setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: msg });
+    return false;
+  }
+}
+
+// ============================================================================
+// Shared Token Exchange
+// ============================================================================
+
+interface TokenResult {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
+}
+
+async function exchangeCodeForToken(pending: PendingAuth, code: string): Promise<TokenResult> {
+  const params = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: pending.callbackUrl,
+    code_verifier: pending.codeVerifier,
+    client_id: pending.clientId,
+    scope: pending.scopes.join(' '),
+  });
+
+  const res = await fetch(pending.tokenEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+    body: params.toString(),
+  });
+
+  if (!res.ok) {
+    let msg = `Token exchange failed: ${res.status}`;
+    try { const d = await res.json() as { error_description?: string; error?: string }; msg = d.error_description || d.error || msg; } catch { /* */ }
+    throw new Error(msg);
+  }
+
+  const data = await res.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+  if (!data.access_token) throw new Error('No access_token in response');
+
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt: data.expires_in ? Date.now() + (data.expires_in * 1000) : undefined,
+  };
+}
+
+// ============================================================================
 // Temp Server for Registration-Mandated Redirect URIs
 // ============================================================================
 
@@ -350,52 +416,24 @@ function startTempTokenExchange(expectedState: string, port: number, path: strin
 
     void (async () => {
       try {
-      const tokenParams = new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: pending.callbackUrl,
-        code_verifier: pending.codeVerifier,
-        client_id: pending.clientId,
-        scope: pending.scopes.join(' '),
-      });
-
-      const tokenRes = await fetch(pending.tokenEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
-        body: tokenParams.toString(),
-      });
-
-      if (!tokenRes.ok) {
-        let msg = `Token exchange failed: ${tokenRes.status}`;
-        try { const d = await tokenRes.json() as { error_description?: string }; msg = d.error_description || msg; } catch { /* */ }
+        const tokens = await exchangeCodeForToken(pending, code);
+        setMcpServerAuth(pending.serverId, {
+          ...serverAuth,
+          token: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: tokens.expiresAt,
+          needsAuth: false,
+          error: undefined,
+        });
+        console.log(`[MCP-AUTH] Token acquired for ${pending.serverId} (temp server)`);
+        resp.writeHead(200, { 'Content-Type': 'text/html' });
+        resp.end('<html><body><h3>Authenticated</h3><p>You can close this window.</p><script>window.close()</script></body></html>');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         setMcpServerAuth(pending.serverId, { ...serverAuth, needsAuth: true, error: msg });
         resp.writeHead(200, { 'Content-Type': 'text/html' });
-        resp.end(`<html><body><h3>Failed</h3><p>${escapeHtml(msg)}</p></body></html>`);
-        return;
+        resp.end(`<html><body><h3>Error</h3><p>${escapeHtml(msg)}</p></body></html>`);
       }
-
-      const tokenData = await tokenRes.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
-      if (!tokenData.access_token) {
-        setMcpServerAuth(pending.serverId, { ...serverAuth, needsAuth: true, error: 'No access_token' });
-        resp.writeHead(200, { 'Content-Type': 'text/html' });
-        resp.end('<html><body><h3>Failed</h3><p>No access token received.</p></body></html>');
-        return;
-      }
-
-      const expiresAt = tokenData.expires_in ? Date.now() + (tokenData.expires_in * 1000) : undefined;
-      setMcpServerAuth(pending.serverId, {
-        ...serverAuth, token: tokenData.access_token, refreshToken: tokenData.refresh_token,
-        expiresAt, needsAuth: false, error: undefined,
-      });
-      console.log(`[MCP-AUTH] Token acquired for ${pending.serverId} (temp server)`);
-
-      resp.writeHead(200, { 'Content-Type': 'text/html' });
-      resp.end('<html><body><h3>Authenticated</h3><p>You can close this window.</p><script>window.close()</script></body></html>');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      resp.writeHead(200, { 'Content-Type': 'text/html' });
-      resp.end(`<html><body><h3>Error</h3><p>${escapeHtml(msg)}</p></body></html>`);
-    }
     })();
   });
 

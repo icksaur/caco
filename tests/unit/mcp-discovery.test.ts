@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseWWWAuthenticate } from '../../src/mcp-discovery.js';
+import { parseWWWAuthenticate, serverIdFromUrl } from '../../src/mcp-discovery.js';
 
 describe('parseWWWAuthenticate', () => {
   it('parses standard OAuth format', () => {
@@ -52,5 +52,23 @@ describe('parseWWWAuthenticate', () => {
     
     expect(result).not.toBeNull();
     expect(result!.authorization_endpoint).toBe('https://auth.example.com/authorize');
+  });
+});
+
+describe('serverIdFromUrl', () => {
+  it('converts hostname dots to hyphens', () => {
+    expect(serverIdFromUrl('https://api.example.com/mcp')).toBe('api-example-com');
+  });
+
+  it('handles localhost', () => {
+    expect(serverIdFromUrl('http://localhost:3000')).toBe('localhost');
+  });
+
+  it('handles single-segment hostname', () => {
+    expect(serverIdFromUrl('https://myserver/api')).toBe('myserver');
+  });
+
+  it('handles devtunnel URLs', () => {
+    expect(serverIdFromUrl('https://abc123.devtunnels.ms/mcp')).toBe('abc123-devtunnels-ms');
   });
 });

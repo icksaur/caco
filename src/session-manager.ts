@@ -10,17 +10,20 @@ import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
 
+import { refreshAccessToken } from './routes/mcp-auth.js';
+import { serverIdFromUrl } from './mcp-discovery.js';
+
 /**
  * Load MCP server config from ~/.copilot/mcp-config.json
  * Injects OAuth tokens from CLI's mcp-oauth-config for remote servers.
  */
-function loadMcpServers(): Record<string, unknown> | undefined {
+async function loadMcpServers(): Promise<Record<string, unknown> | undefined> {
   try {
     const configPath = join(homedir(), '.copilot', 'mcp-config.json');
     if (!existsSync(configPath)) return undefined;
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     if (config.mcpServers && Object.keys(config.mcpServers).length > 0) {
-      injectOAuthTokens(config.mcpServers);
+      await injectOAuthTokens(config.mcpServers);
       console.log(`[MCP] Loaded ${Object.keys(config.mcpServers).length} servers from mcp-config.json`);
       return config.mcpServers;
     }
@@ -32,24 +35,38 @@ function loadMcpServers(): Record<string, unknown> | undefined {
 
 /**
  * Inject OAuth tokens into remote MCP server configs.
- * Checks Caco's own auth store first, then CLI tokens as fallback.
+ * Checks Caco's own auth store first (refreshing if expired), then CLI tokens as fallback.
  */
-function injectOAuthTokens(servers: Record<string, Record<string, unknown>>): void {
+async function injectOAuthTokens(servers: Record<string, Record<string, unknown>>): Promise<void> {
   const cacoAuth = getMcpAuth();
 
   for (const [name, server] of Object.entries(servers)) {
     const url = server.url as string | undefined;
     if (!url || server.type === 'local') continue;
 
-    // Check Caco's own auth store first
-    const serverId = new URL(url).hostname.replace(/\./g, '-');
+    const serverId = serverIdFromUrl(url);
     const cacoServer = cacoAuth.servers[serverId];
-    if (cacoServer?.token && (!cacoServer.expiresAt || cacoServer.expiresAt > Date.now())) {
-      const headers = (server.headers || {}) as Record<string, string>;
-      headers['Authorization'] = `Bearer ${cacoServer.token}`;
-      server.headers = headers;
-      console.log(`[MCP] Injected Caco token for ${name}`);
-      continue;
+    if (cacoServer?.token) {
+      const expired = cacoServer.expiresAt && cacoServer.expiresAt <= Date.now();
+      if (expired && cacoServer.refreshToken) {
+        const refreshed = await refreshAccessToken(serverId);
+        if (refreshed) {
+          const updated = getMcpAuth().servers[serverId];
+          if (updated?.token) {
+            const headers = (server.headers || {}) as Record<string, string>;
+            headers['Authorization'] = `Bearer ${updated.token}`;
+            server.headers = headers;
+            console.log(`[MCP] Injected refreshed Caco token for ${name}`);
+            continue;
+          }
+        }
+      } else if (!expired) {
+        const headers = (server.headers || {}) as Record<string, string>;
+        headers['Authorization'] = `Bearer ${cacoServer.token}`;
+        server.headers = headers;
+        console.log(`[MCP] Injected Caco token for ${name}`);
+        continue;
+      }
     }
 
     // Fall back to CLI tokens
@@ -452,7 +469,7 @@ class SessionManager {
         excludedTools: config.excludedTools,
         onPermissionRequest: approveAll,
         configDir: join(homedir(), '.copilot'),
-        mcpServers: loadMcpServers(),
+        mcpServers: await loadMcpServers(),
         workingDirectory: cwd
       } as CreateSessionConfig);
     } catch (e) {
@@ -550,7 +567,7 @@ class SessionManager {
         excludedTools: config.excludedTools,
         onPermissionRequest: approveAll,
         configDir: join(homedir(), '.copilot'),
-        mcpServers: loadMcpServers(),
+        mcpServers: await loadMcpServers(),
         workingDirectory: cwd
       } as ResumeSessionConfig);
     } catch (e) {
@@ -568,7 +585,7 @@ class SessionManager {
               excludedTools: config.excludedTools,
               onPermissionRequest: approveAll,
               configDir: join(homedir(), '.copilot'),
-              mcpServers: loadMcpServers(),
+              mcpServers: await loadMcpServers(),
               workingDirectory: cwd
             } as ResumeSessionConfig);
           } catch (retryErr) {

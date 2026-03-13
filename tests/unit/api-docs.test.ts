@@ -15,7 +15,7 @@ const ROUTE_PREFIXES: Record<string, string> = {
   'sessions.ts': '/api',
   'session-messages.ts': '/api',
   'api.ts': '/api',
-  'mcp.ts': '/api/mcp',
+  'workspace-api.ts': '/api/mcp',
   'schedule.ts': '/api',
   'shell.ts': '/api',
 };

@@ -21,6 +21,10 @@ export interface OAuthMetadata {
   registration_endpoint?: string;
 }
 
+export function serverIdFromUrl(url: string): string {
+  return new URL(url).hostname.replace(/\./g, '-');
+}
+
 // In-memory cache for discovery results (simple TTL cache)
 const discoveryCache = new Map<string, { metadata: OAuthMetadata; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes

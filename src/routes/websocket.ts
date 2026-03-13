@@ -334,9 +334,10 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
   }
   
   try {
+    const fetchStart = Date.now();
     console.log(`[HISTORY] Fetching events from SDK for ${shortId}...`);
     const events = await sessionManager.getHistory(sessionId);
-    console.log(`[HISTORY] Got ${events.length} events for ${shortId}, ws.readyState=${ws.readyState}`);
+    console.log(`[HISTORY] Got ${events.length} events for ${shortId} in ${Date.now() - fetchStart}ms, ws.readyState=${ws.readyState}`);
     
     if (ws.readyState !== WebSocket.OPEN) {
       console.warn(`[HISTORY] WebSocket closed before streaming for ${shortId}, aborting`);
@@ -482,7 +483,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
       });
     }
     
-    console.log(`[HISTORY] Streamed ${sentCount} events (from ${events.length} raw) for ${shortId}`);
+    console.log(`[HISTORY] Streamed ${sentCount} events (from ${events.length} raw) for ${shortId} in ${Date.now() - fetchStart}ms total`);
     const isBusy = sessionManager.isBusy(sessionId);
     const usage = usageCache.get(sessionId);
     send(ws, { type: 'historyComplete', sessionId, data: { isBusy, usage } });

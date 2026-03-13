@@ -15,10 +15,10 @@
   --color-accent: #268bd2;
   --color-accent-hover: #1e6faa;
   --color-accent-active: #175585;
-  --color-success: #586e00;
-  --color-success-bg: #0a3018;
-  --color-success-hover: #6b8500;
-  --color-success-bright: #859900;
+  --color-success: #073a2a;
+  --color-success-bg: #05312a;
+  --color-success-hover: #0a4535;
+  --color-success-bright: #2aa198;
   --color-error: #dc322f;
   --color-error-bg: #3b1414;
   --color-info: #268bd2;
@@ -52,7 +52,7 @@
 
   --color-stop-btn: #dc322f;
   --color-danger-active: #8a1f11;
-  --color-valid: #859900;
+  --color-valid: #2aa198;
   --color-error-surface: #3b1414;
   --color-error-surface-hover: #4e1e1e;
   --color-error-soft: #dc322f;

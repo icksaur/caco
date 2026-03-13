@@ -143,6 +143,56 @@ var peerStatus = {};
 var peerTimers = {};
 var longPressTimer = null;
 
+function hashHostname(hostname) {
+  var h1 = 0x811c9dc5, h2 = 0x1000193, h3 = 0xdeadbeef, h4 = 0xcafebabe;
+  for (var i = 0; i < hostname.length; i++) {
+    var c = hostname.charCodeAt(i);
+    h1 ^= c; h1 = Math.imul(h1, 0x01000193);
+    h2 ^= c; h2 = Math.imul(h2, 0x85ebca6b);
+    h3 ^= c; h3 = Math.imul(h3, 0xc2b2ae35);
+    h4 ^= c; h4 = Math.imul(h4, 0x27d4eb2f);
+  }
+  return [h1 & 0xFF, h2 & 0xFF, h3 & 0xFF, h4 & 0xFF];
+}
+
+function hslToRgb(h, s, l) {
+  if (s === 0) { var v = Math.round(l * 255); return [v, v, v]; }
+  var hue2rgb = function(p, q, t) {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1/6) return p + (q - p) * 6 * t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+    return p;
+  };
+  var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  var p = 2 * l - q;
+  return [Math.round(hue2rgb(p, q, h + 1/3) * 255), Math.round(hue2rgb(p, q, h) * 255), Math.round(hue2rgb(p, q, h - 1/3) * 255)];
+}
+
+function createPeerIcon(url) {
+  var hostname;
+  try { hostname = new URL(url).host; } catch { hostname = url; }
+  var bytes = hashHostname(hostname);
+  var colors = bytes.map(function(b) { return hslToRgb(b / 255, 0.7, 0.5); });
+  var size = 28;
+  var canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  canvas.className = 'peer-icon';
+  var ctx = canvas.getContext('2d');
+  var img = ctx.createImageData(size, size);
+  for (var y = 0; y < size; y++) {
+    for (var x = 0; x < size; x++) {
+      var nx = x / (size - 1), ny = y / (size - 1);
+      var w = [(1-nx)*(1-ny), nx*(1-ny), (1-nx)*ny, nx*ny];
+      var idx = (y * size + x) * 4;
+      for (var c = 0; c < 3; c++) img.data[idx+c] = Math.round(colors[0][c]*w[0] + colors[1][c]*w[1] + colors[2][c]*w[2] + colors[3][c]*w[3]);
+      img.data[idx+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
 function loadPeers() {
   try { peers = JSON.parse(localStorage.getItem(PEERS_KEY)) || []; } catch { peers = []; }
   if (!peers.length) {
@@ -172,17 +222,8 @@ function renderSidebar() {
     if (status === 'offline') el.classList.add('offline');
     el.dataset.id = peer.id;
     
-    var img = document.createElement('img');
-    img.className = 'peer-icon';
-    img.src = peer.url + '/caco.png';
-    img.alt = peer.name;
-    img.onerror = function() {
-      var fb = document.createElement('div');
-      fb.className = 'peer-icon-fallback';
-      fb.textContent = peer.name[0].toUpperCase();
-      this.replaceWith(fb);
-    };
-    el.appendChild(img);
+    var icon = createPeerIcon(peer.url);
+    el.appendChild(icon);
     
     var name = document.createElement('div');
     name.className = 'peer-name';

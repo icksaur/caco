@@ -80,8 +80,12 @@ html, body { height: 100%; background: #1a1a1a; color: #d4d4d4; font-family: -ap
 }
 .peer-badge.unobserved { display: block; background: #b13333; }
 .peer-badge.busy { display: block; background: #007acc; animation: blink 0.7s infinite; border-radius: 2px; }
+.peer-badge.transferring { display: block; background: #d29922; animation: blink 0.5s infinite; }
 
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.peer.drop-target { background: #2a4a2a; outline: 2px solid #3fb950; outline-offset: -2px; }
+.peer.drop-self { background: #3a2a2a; outline: 2px solid #f85149; outline-offset: -2px; }
 
 .add-btn {
   width: 44px;
@@ -142,6 +146,8 @@ var activePeerId = null;
 var peerStatus = {};
 var peerTimers = {};
 var longPressTimer = null;
+var pendingDrag = null;
+var transferring = false;
 
 function loadPeers() {
   try { peers = JSON.parse(localStorage.getItem(PEERS_KEY)) || []; } catch { peers = []; }
@@ -209,6 +215,35 @@ function renderSidebar() {
       el.addEventListener('mouseup', function() { if (longPressTimer) clearTimeout(longPressTimer); });
       el.addEventListener('mouseleave', function() { if (longPressTimer) clearTimeout(longPressTimer); });
     }
+    
+    (function(peerRef) {
+      var dragDepth = 0;
+      el.addEventListener('dragenter', function(e) {
+        e.preventDefault();
+        dragDepth++;
+        if (dragDepth === 1 && pendingDrag) {
+          el.classList.add(isSourcePeer(peerRef) ? 'drop-self' : 'drop-target');
+        }
+      });
+      el.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = pendingDrag && !isSourcePeer(peerRef) ? 'copy' : 'none';
+      });
+      el.addEventListener('dragleave', function() {
+        dragDepth--;
+        if (dragDepth === 0) {
+          el.classList.remove('drop-target', 'drop-self');
+        }
+      });
+      el.addEventListener('drop', function(e) {
+        e.preventDefault();
+        dragDepth = 0;
+        el.classList.remove('drop-target', 'drop-self');
+        if (!pendingDrag || transferring) return;
+        if (isSourcePeer(peerRef)) return;
+        transferSession(peerRef);
+      });
+    })(peer);
     
     sidebar.insertBefore(el, addBtn.parentElement === sidebar ? sidebar.querySelector('.spacer') : addBtn);
   });
@@ -303,8 +338,82 @@ function updateBadges() {
   });
 }
 
+function isSourcePeer(peer) {
+  if (!pendingDrag) return false;
+  var o = pendingDrag.origin;
+  return peer.url === o || peer.url + '/' === o || o.startsWith(peer.url);
+}
+
+function transferSession(targetPeer) {
+  if (!pendingDrag || transferring) return;
+  var drag = pendingDrag;
+  pendingDrag = null;
+  transferring = true;
+  var badge = document.getElementById('badge-' + targetPeer.id);
+  if (badge) { badge.className = 'peer-badge transferring'; badge.style.display = 'block'; }
+  
+  fetch(drag.origin + '/api/sessions/' + drag.sessionId + '/export')
+    .then(function(res) {
+      if (!res.ok) throw new Error('Export failed: ' + res.status);
+      return res.blob();
+    })
+    .then(function(blob) {
+      return fetch(targetPeer.url + '/api/sessions/import?force=true', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/gzip' },
+        body: blob
+      });
+    })
+    .then(function(res) {
+      return res.json().then(function(data) {
+        if (!res.ok) throw new Error(data.error || 'Import failed');
+        showStatus('Transferred "' + drag.sessionName + '" to ' + targetPeer.name);
+      });
+    })
+    .catch(function(err) {
+      showStatus('Transfer failed: ' + err.message);
+    })
+    .finally(function() {
+      transferring = false;
+      if (badge) { badge.className = 'peer-badge'; badge.style.display = ''; }
+      updateBadges();
+    });
+}
+
+function showStatus(msg) {
+  var el = document.getElementById('emptyState');
+  if (!el) return;
+  var old = el.textContent;
+  var oldDisplay = el.style.display;
+  el.textContent = msg;
+  el.style.display = 'flex';
+  setTimeout(function() {
+    el.textContent = old;
+    el.style.display = oldDisplay;
+  }, 4000);
+}
+
 window.addEventListener('message', function(e) {
-  if (e.data?.type !== 'caco:status') return;
+  if (!e.data?.type) return;
+  
+  var isKnownPeer = peers.some(function(p) {
+    return p.url === e.origin || p.url + '/' === e.origin || e.origin.startsWith(p.url);
+  });
+  
+  if (e.data.type === 'caco:transfer:dragstart') {
+    if (!isKnownPeer) return;
+    pendingDrag = { sessionId: e.data.sessionId, sessionName: e.data.sessionName, origin: e.data.origin };
+    return;
+  }
+  if (e.data.type === 'caco:transfer:dragend') {
+    pendingDrag = null;
+    document.querySelectorAll('.peer.drop-target, .peer.drop-self').forEach(function(el) {
+      el.classList.remove('drop-target', 'drop-self');
+    });
+    return;
+  }
+  
+  if (e.data.type !== 'caco:status') return;
   var origin = e.data.origin;
   peerStatus[origin] = { busyCount: e.data.busyCount, unobservedCount: e.data.unobservedCount };
   

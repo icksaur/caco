@@ -113,7 +113,7 @@ function hashHostnameToBytes(h: string): number[] {
 // Static files (after index.html route so injection works)
 app.use(express.static('public'));
 
-// CORS for session transfer endpoints (cross-instance import)
+// CORS for session transfer endpoints (cross-instance import/export)
 const transferCors: express.RequestHandler = (_req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -121,8 +121,8 @@ const transferCors: express.RequestHandler = (_req, res, next) => {
   if (_req.method === 'OPTIONS') { res.sendStatus(204); return; }
   next();
 };
-// CORS for session import endpoint only (cross-instance transfer)
 app.use('/api/sessions/import', transferCors);
+app.use('/api/sessions/:sessionId/export', transferCors);
 
 // API routes
 app.use('/api', sessionRoutes);

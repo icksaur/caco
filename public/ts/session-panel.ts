@@ -485,6 +485,24 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   item.dataset.sessionId = session.sessionId;
   item.onclick = () => sessionClick(session.sessionId);
   
+  if (window.parent !== window) {
+    item.draggable = true;
+    const dragName = session.name || session.summary || 'No summary';
+    item.addEventListener('dragstart', (e) => {
+      e.dataTransfer!.effectAllowed = 'copy';
+      e.dataTransfer!.setDragImage(item, 0, 0);
+      window.parent.postMessage({
+        type: 'caco:transfer:dragstart',
+        sessionId: session.sessionId,
+        sessionName: dragName,
+        origin: window.location.origin
+      }, '*');
+    });
+    item.addEventListener('dragend', () => {
+      window.parent.postMessage({ type: 'caco:transfer:dragend' }, '*');
+    });
+  }
+  
   // Row 1: indicator + title + age + action buttons
   const row1 = document.createElement('div');
   row1.className = 'session-row session-row-main';

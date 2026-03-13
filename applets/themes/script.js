@@ -6,7 +6,8 @@ var themes = [
   { id: 'catppuccin-latte', name: 'Catppuccin Latte', description: 'Warm light pastels' },
   { id: 'dracula', name: 'Dracula', description: 'Purple dark' },
   { id: 'gruvbox-dark', name: 'Gruvbox Dark', description: 'Retro warm' },
-  { id: 'solarized-dark', name: 'Solarized Dark', description: 'Classic teal' }
+  { id: 'solarized-dark', name: 'Solarized Dark', description: 'Classic teal' },
+  { id: 'virtual-boy', name: 'Virtual Boy', description: 'Monochrome red LCD' }
 ];
 
 var STORAGE_KEY = 'caco:theme';

@@ -1,0 +1,12 @@
+:root {
+  --base: #000000;    /* pure black - off pixels */
+  --text: #ff0000;    /* bright red - full intensity */
+  --border: #550000;  /* dark red - low intensity */
+  --accent: #ff0000;  /* bright red - buttons, links, focus */
+  --green: #aa0000;   /* medium red - no green on this display */
+  --red: #ff4444;     /* high red - errors */
+  --orange: #cc0000;  /* medium-bright red - warnings */
+  --yellow: #ff6666;  /* light red - highlights */
+  --purple: #880000;  /* dark-medium red */
+  --cyan: #dd0000;    /* medium-bright red - info */
+}

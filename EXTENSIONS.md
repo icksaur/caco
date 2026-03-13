@@ -169,6 +169,6 @@ Then add it to the theme list in `applets/themes/script.js`.
 
 ### Built-in Themes
 
-Dark (default), Light, Nord, Catppuccin Mocha, Catppuccin Latte, Dracula, Gruvbox Dark, Solarized Dark.
+Dark (default), Light, Nord, Catppuccin Mocha, Catppuccin Latte, Dracula, Gruvbox Dark, Solarized Dark, Virtual Boy.
 
 The theme picker applet (`?applet=themes`) lets users switch. Selection is saved to `localStorage` and restored on page load.

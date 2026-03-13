@@ -57,7 +57,7 @@ app.use((_req, res, next) => {
     "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
     "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: blob: https: http://localhost:*; " +
-    "connect-src 'self' ws: wss:; " +
+    "connect-src 'self' ws: wss: http://localhost:*; " +
     "font-src 'self'; " +
     'frame-src \'self\' http://localhost:* https://www.youtube.com https://www.youtube-nocookie.com https://w.soundcloud.com https://player.vimeo.com https://open.spotify.com https://platform.twitter.com; ' +
     'frame-ancestors *;'

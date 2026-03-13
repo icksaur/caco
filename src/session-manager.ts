@@ -285,6 +285,8 @@ class SessionManager {
   // Shared SDK client — all sessions use one CLI backend process
   private sharedClient: CopilotClientInstance | null = null;
   private clientStarting: Promise<CopilotClientInstance> | null = null;
+  private idleTimer: NodeJS.Timeout | null = null;
+  private static readonly SDK_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
   
   private static readonly MAX_ACTIVE_SESSIONS = 5;
   private cachedModels: SDKModelInfo[] = [];
@@ -326,6 +328,7 @@ class SessionManager {
   }
 
   async ensureClientHealthy(): Promise<void> {
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     const client = await this.ensureClient();
     try {
       await Promise.race([
@@ -338,6 +341,17 @@ class SessionManager {
       this.activeSessions.clear();
       await this.ensureClient();
     }
+  }
+
+  resetIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      if (!this.sharedClient) return;
+      console.log('[SDK] Idle timeout, tearing down client to prevent stale connection');
+      this.sharedClient.stop().catch(() => {});
+      this.sharedClient = null;
+      this.activeSessions.clear();
+    }, SessionManager.SDK_IDLE_TIMEOUT_MS);
   }
 
   /**
@@ -864,6 +878,7 @@ class SessionManager {
    */
   endDispatch(sessionId: string): void {
     dispatchState.end(sessionId);
+    this.resetIdleTimer();
   }
 
   /**

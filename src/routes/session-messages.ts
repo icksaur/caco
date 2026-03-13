@@ -257,7 +257,7 @@ export async function dispatchMessage(
       console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
     };
     
-    const INITIAL_TIMEOUT_MS = 60_000;
+    const INITIAL_TIMEOUT_MS = 30_000;
     let receivedFirstEvent = false;
     let toolExecuting = false;
     

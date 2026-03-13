@@ -86,14 +86,12 @@ app.get('/api/favicon', (_req, res) => {
     return `hsl(${h}, 70%, 50%)`;
   });
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
-<defs>
-<linearGradient id="t" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${colors[0]}"/><stop offset="1" stop-color="${colors[1]}"/></linearGradient>
-<linearGradient id="b" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${colors[2]}"/><stop offset="1" stop-color="${colors[3]}"/></linearGradient>
-<linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="white" stop-opacity="1"/><stop offset="1" stop-color="white" stop-opacity="0"/></linearGradient>
-</defs>
-<rect width="32" height="32" fill="url(#b)" rx="4"/>
-<rect width="32" height="32" fill="url(#t)" opacity="0.5" rx="4"/>
-<rect width="32" height="16" fill="url(#t)" rx="4"/>
+<rect x="0" y="0" width="17" height="17" fill="${colors[0]}" rx="4" ry="4"/>
+<rect x="15" y="0" width="17" height="17" fill="${colors[1]}" rx="4" ry="4"/>
+<rect x="0" y="15" width="17" height="17" fill="${colors[2]}" rx="4" ry="4"/>
+<rect x="15" y="15" width="17" height="17" fill="${colors[3]}" rx="4" ry="4"/>
+<rect x="6" y="6" width="20" height="20" fill="url(#m)" rx="2"/>
+<defs><radialGradient id="m"><stop offset="0" stop-color="${colors[0]}" stop-opacity="0.3"/><stop offset="1" stop-opacity="0"/></radialGradient></defs>
 </svg>`;
   res.type('image/svg+xml').send(svg);
 });

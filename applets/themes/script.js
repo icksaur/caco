@@ -1,7 +1,12 @@
 var themes = [
-  { id: 'dark', name: 'Dark', description: 'Default dark theme' },
-  { id: 'light', name: 'Light', description: 'Clean light theme' },
-  { id: 'solarized-dark', name: 'Solarized Dark', description: 'Solarized color scheme' }
+  { id: 'dark', name: 'Dark', description: 'Default' },
+  { id: 'light', name: 'Light', description: 'Clean light' },
+  { id: 'nord', name: 'Nord', description: 'Arctic blue' },
+  { id: 'catppuccin-mocha', name: 'Catppuccin Mocha', description: 'Warm dark pastels' },
+  { id: 'catppuccin-latte', name: 'Catppuccin Latte', description: 'Warm light pastels' },
+  { id: 'dracula', name: 'Dracula', description: 'Purple dark' },
+  { id: 'gruvbox-dark', name: 'Gruvbox Dark', description: 'Retro warm' },
+  { id: 'solarized-dark', name: 'Solarized Dark', description: 'Classic teal' }
 ];
 
 var STORAGE_KEY = 'caco:theme';

@@ -52,6 +52,46 @@ export function readSessionEvents(sessionId: string): SessionEvent[] {
   }
 }
 
+export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: number): { events: SessionEvent[]; totalLines: number; skipped: number } {
+  try {
+    const eventsPath = sessionPath(sessionId, 'events.jsonl');
+    if (!existsSync(eventsPath)) return { events: [], totalLines: 0, skipped: 0 };
+    const content = readFileSync(eventsPath, 'utf-8');
+    const lines = content.split('\n');
+    const totalLines = lines.length;
+
+    let startIndex = 0;
+    let turns = maxTurns;
+    let turnsFound = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].includes('"user.message"')) {
+        turnsFound++;
+        if (turnsFound >= turns) { startIndex = i; break; }
+      }
+    }
+
+    while (startIndex > 0 && (lines.length - startIndex) > maxEvents && turns > 3) {
+      turns--;
+      turnsFound = 0;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].includes('"user.message"')) {
+          turnsFound++;
+          if (turnsFound >= turns) { startIndex = i; break; }
+        }
+      }
+    }
+
+    const events: SessionEvent[] = [];
+    for (let i = startIndex; i < lines.length; i++) {
+      if (!lines[i].trim()) continue;
+      try { events.push(JSON.parse(lines[i])); } catch { /* skip */ }
+    }
+    return { events, totalLines, skipped: startIndex };
+  } catch {
+    return { events: [], totalLines: 0, skipped: 0 };
+  }
+}
+
 export function parseSessionModel(sessionId: string): string | null {
   const events = readSessionEvents(sessionId);
   let model: string | null = null;

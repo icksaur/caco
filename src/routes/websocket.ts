@@ -16,6 +16,7 @@ import type { Server } from 'http';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
 import { createAppletPush } from '../applet-push.js';
 import sessionManager from '../session-manager.js';
+import { readLastTurns } from '../sdk-session-store.js';
 import { shouldFilter } from '../event-filter.js';
 import { transformForClient } from '../event-transformer.js';
 import { parseMessageSource, type MessageSource } from '../message-source.js';
@@ -335,17 +336,15 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
   
   try {
     const fetchStart = Date.now();
-    console.log(`[HISTORY] Fetching events from SDK for ${shortId}...`);
-    const events = await sessionManager.getHistory(sessionId);
-    console.log(`[HISTORY] Got ${events.length} events for ${shortId} in ${Date.now() - fetchStart}ms, ws.readyState=${ws.readyState}`);
+    console.log(`[HISTORY] Reading events from disk for ${shortId}...`);
+    const { events, totalLines, skipped } = readLastTurns(sessionId, 10, 2000);
+    console.log(`[HISTORY] Read ${events.length} events (from ${totalLines} total) for ${shortId} in ${Date.now() - fetchStart}ms, ws.readyState=${ws.readyState}`);
     
     if (ws.readyState !== WebSocket.OPEN) {
       console.warn(`[HISTORY] WebSocket closed before streaming for ${shortId}, aborting`);
       return;
     }
     
-    // Build lookup: outputId → embed metadata
-    // Used to queue caco.embed after tool.execution_complete that created it
     const embedLookup = new Map<string, { provider: string; title: string }>();
     for (const { outputId, metadata } of listEmbedOutputs(sessionId)) {
       embedLookup.set(outputId, {
@@ -355,53 +354,19 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     }
     console.log(`[HISTORY] Loaded ${embedLookup.size} embeds for session ${sessionId}`);
     
-    // Queue for scheduling caco events - same pattern as live streaming
     const queue = new CacoEventQueue();
     let sentCount = 0;
     
-    // Truncate: only stream the last N turns (user.message boundaries)
-    // For very large sessions, reduce turns to keep event count reasonable
-    const MAX_EVENTS_TARGET = 2000;
-    let maxTurns = 10;
-    
-    // Adaptive: if 10 turns would exceed target, try fewer
-    let startIndex = 0;
-    let turnsFound = 0;
-    for (let i = events.length - 1; i >= 0; i--) {
-      if (events[i].type === 'user.message') {
-        turnsFound++;
-        if (turnsFound >= maxTurns) {
-          startIndex = i;
-          break;
-        }
-      }
-    }
-    
-    // If truncated range is still huge, reduce turns until under target
-    while (startIndex > 0 && (events.length - startIndex) > MAX_EVENTS_TARGET && maxTurns > 3) {
-      maxTurns--;
-      turnsFound = 0;
-      for (let i = events.length - 1; i >= 0; i--) {
-        if (events[i].type === 'user.message') {
-          turnsFound++;
-          if (turnsFound >= maxTurns) {
-            startIndex = i;
-            break;
-          }
-        }
-      }
-    }
-    
-    if (startIndex > 0) {
-      console.log(`[HISTORY] Truncating: showing ${events.length - startIndex} of ${events.length} events (last ${maxTurns} turns)`);
+    if (skipped > 0) {
+      console.log(`[HISTORY] Truncated: skipped ${skipped} of ${totalLines} lines`);
       send(ws, { type: 'event', sessionId, event: {
         type: 'caco.truncated',
-        data: { skipped: startIndex, total: events.length }
+        data: { skipped, total: totalLines }
       } as unknown as SessionEvent });
       sentCount++;
     }
     
-    for (let i = startIndex; i < events.length; i++) {
+    for (let i = 0; i < events.length; i++) {
       const evt = events[i];
       // Flush queued embeds before trigger events (same as live stream)
       if (isFlushTrigger(evt.type)) {
@@ -492,33 +457,6 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[HISTORY] Error streaming history for ${shortId}:`, message);
-    
-    // SDK session expired — try to resume and reload from disk
-    if (message.includes('Session not found') || message.includes('session.getMessages failed')) {
-      console.log(`[HISTORY] Session ${sessionId} expired, cleaning up and reading from disk`);
-      await sessionManager.stop(sessionId).catch(() => {});
-      
-      // Fall back to disk-based history (session is stopped, getHistory reads from disk)
-      try {
-        const diskEvents = await sessionManager.getHistory(sessionId);
-        if (diskEvents.length > 0) {
-          let sentCount = 0;
-          for (const evt of diskEvents) {
-            if (!shouldFilter(evt)) {
-              for (const transformed of transformForClient(evt)) {
-                const enriched = enrichUserMessageWithSource(transformed);
-                send(ws, { type: 'event', sessionId, event: enriched });
-                sentCount++;
-              }
-            }
-          }
-          console.log(`[HISTORY] Recovered ${sentCount} events from disk for ${shortId}`);
-        }
-      } catch {
-        // Disk read also failed — nothing to show
-      }
-    }
-    
     send(ws, { type: 'historyComplete', sessionId, data: { isBusy: false } });
   }
 }

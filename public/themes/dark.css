@@ -1,73 +1,12 @@
 :root {
-  --bg-base: #1e1e1e;
-  --bg-surface: #252526;
-  --bg-raised: #2d2d2d;
-  --bg-input: #3c3c3c;
-  --bg-hover: #4c4c4c;
-
-  --color-text: #d4d4d4;
-  --color-text-bright: #ffffff;
-  --color-text-muted: #858585;
-  --color-text-dim: #6a6a6a;
-  --color-border: #3e3e42;
-  --color-link: #4daafc;
-
-  --color-accent: #007acc;
-  --color-accent-hover: #005a9e;
-  --color-accent-active: #004578;
-  --color-success: #285b2a;
-  --color-success-bg: #1f3d23;
-  --color-success-hover: #2a6b38;
-  --color-success-bright: #4caf50;
-  --color-error: #f48771;
-  --color-error-bg: #4a2a2a;
-  --color-info: #4daafc;
-  --color-info-bg: #1e3a5f;
-  --color-danger: #c42b1c;
-  --color-danger-hover: #a32515;
-  --color-unobserved: #b13333;
-
-  --color-user-bg: #2c4258;
-  --color-assistant-bg: transparent;
-  --color-applet-bg: #9b7514;
-  --color-agent-bg: #5c3d6e;
-  --color-scheduler-bg: #1a4a4a;
-  --color-activity-bg: #2d2d2d;
-  --color-selector-bg: #2d333b;
-  --color-selector-hover: #3d434b;
-
-  --color-menu-btn: #1e3a5f;
-  --color-menu-btn-border: #2a4a6f;
-  --color-menu-btn-icon: #6a9fd4;
-  --color-menu-btn-hover: #264f78;
-  --color-menu-btn-active: #2d6cb5;
-  --color-menu-btn-active-border: #4a90d9;
-
-  --color-applet-btn: #4a3520;
-  --color-applet-btn-border: #5f4530;
-  --color-applet-btn-icon: #d4956a;
-  --color-applet-btn-hover: #5c4328;
-  --color-applet-btn-active: #b5702d;
-  --color-applet-btn-active-border: #d98c4a;
-
-  --color-stop-btn: #c62828;
-  --color-danger-active: #8a1f11;
-  --color-valid: #6a9955;
-  --color-error-surface: #5e1f1f;
-  --color-error-surface-hover: #7e2f2f;
-  --color-error-soft: #e06c75;
-  --color-blockquote-text: #b0b0b0;
-  --color-cost-cheap: #8bc34a;
-  --color-cost-expensive: #ff9800;
-  --color-cost-premium: #f44336;
-  --color-cost-ultra: #ab47bc;
-  --color-usage-low: #f59e0b;
-  --color-usage-critical: #ef4444;
-  --color-context-usage: #e5c07b;
-  --color-context-dim: #808080;
-
-  --color-overlay-light: rgba(255, 255, 255, 0.1);
-  --color-overlay-error: rgba(244, 135, 113, 0.2);
-  --color-shadow: rgba(0, 0, 0, 0.3);
-  --color-shadow-heavy: rgba(0, 0, 0, 0.4);
+  --base: #1e1e1e;
+  --text: #d4d4d4;
+  --border: #3e3e42;
+  --accent: #007acc;
+  --green: #4caf50;
+  --red: #f48771;
+  --orange: #d4956a;
+  --yellow: #e5c07b;
+  --purple: #ab47bc;
+  --cyan: #4daafc;
 }

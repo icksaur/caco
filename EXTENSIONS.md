@@ -141,3 +141,34 @@ in `~/.caco/mcp-auth.json` and reused across sessions. See `MCPAuthState` in
 | `src/mcp-discovery.ts` | OAuth metadata discovery (RFC 8414, OIDC) |
 | `src/routes/mcp-auth.ts` | OAuth start/callback, token exchange, PKCE |
 | `src/storage.ts` | MCPAuthState interface, `mcp-auth.json` I/O |
+
+## Themes
+
+Caco's UI uses 10 base CSS variables. Theme files override these in `:root` — all other colors are derived automatically via `color-mix()`.
+
+### Creating a Theme
+
+Add a CSS file to `public/themes/<name>.css`:
+
+```css
+:root {
+  --base: #282a36;      /* darkest background */
+  --text: #f8f8f2;      /* primary text */
+  --border: #44475a;    /* borders and dividers */
+  --accent: #bd93f9;    /* buttons, links, focus rings */
+  --green: #50fa7b;     /* success, valid, additions */
+  --red: #ff5555;       /* errors, danger, deletions */
+  --orange: #ffb86c;    /* warnings, applet button */
+  --yellow: #f1fa8c;    /* usage indicators, highlights */
+  --purple: #bd93f9;    /* cost tiers, agent messages */
+  --cyan: #8be9fd;      /* info, links, session button */
+}
+```
+
+Then add it to the theme list in `applets/themes/script.js`.
+
+### Built-in Themes
+
+Dark (default), Light, Nord, Catppuccin Mocha, Catppuccin Latte, Dracula, Gruvbox Dark, Solarized Dark.
+
+The theme picker applet (`?applet=themes`) lets users switch. Selection is saved to `localStorage` and restored on page load.

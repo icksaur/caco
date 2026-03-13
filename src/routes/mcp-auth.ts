@@ -15,6 +15,7 @@
 
 import { Router, Request, Response } from 'express';
 import { randomBytes, createHash } from 'crypto';
+import { createServer } from 'http';
 import { getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth, type MCPAuthState } from '../storage.js';
 import { listCliOAuthConfigs } from '../cli-oauth.js';
 import { discoverOAuthMetadata } from '../mcp-discovery.js';
@@ -133,9 +134,18 @@ router.get('/start', async (req: Request, res: Response) => {
   const codeChallenge = generateCodeChallenge(codeVerifier);
   const state = randomBytes(32).toString('base64url');
 
-  // Build callback URL using the browser's origin (works through tunnels)
-  const browserOrigin = origin || `http://localhost:${req.socket.localPort || 53000}`;
-  const callbackUrl = `${browserOrigin}/api/mcp/auth/callback`;
+  // Determine callback URL:
+  // - Servers with fixed redirect_uris from registration: use their localhost URI
+  // - All others: use browser's origin + our /callback route (works through tunnels)
+  let callbackUrl: string;
+  const registeredRedirect = serverAuth.redirectUris?.find(u =>
+    u.startsWith('http://localhost:') || u.startsWith('http://127.0.0.1:'));
+  if (registeredRedirect) {
+    callbackUrl = registeredRedirect;
+  } else {
+    const browserOrigin = origin || `http://localhost:${req.socket.localPort || 53000}`;
+    callbackUrl = `${browserOrigin}/api/mcp/auth/callback`;
+  }
 
   const clientId = serverAuth.clientId!;
   const scopes = [...(serverAuth.scopes || [])];
@@ -164,6 +174,16 @@ router.get('/start', async (req: Request, res: Response) => {
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
   authUrl.searchParams.set('scope', scopes.join(' '));
+
+  // For registered redirects (e.g., localhost:3000), start a temp server to catch the callback.
+  // For main-port callbacks, Express /callback handles it.
+  if (registeredRedirect) {
+    const parsed = new URL(registeredRedirect);
+    const tempPort = parseInt(parsed.port, 10) || 0;
+    const tempPath = parsed.pathname || '/';
+
+    startTempTokenExchange(state, tempPort, tempPath, serverAuth);
+  }
 
   res.redirect(authUrl.toString());
 });
@@ -291,6 +311,105 @@ router.post('/config', (req: Request, res: Response) => {
   
   res.json({ ok: true });
 });
+
+// ============================================================================
+// Temp Server for Registration-Mandated Redirect URIs
+// ============================================================================
+
+/**
+ * Start a temp HTTP server for servers with fixed redirect URIs (from registration).
+ * Catches the OAuth callback, exchanges code for token, then shuts down.
+ * Runs in the background — /start has already redirected the browser.
+ */
+function startTempTokenExchange(expectedState: string, port: number, path: string, serverAuth: MCPAuthState): void {
+  const server = createServer((req, resp) => {
+    const url = new URL(req.url || '/', 'http://localhost');
+    if (url.pathname !== path) { resp.writeHead(404); resp.end(); return; }
+
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    const error = url.searchParams.get('error');
+    const errorDesc = url.searchParams.get('error_description');
+
+    server.close();
+
+    if (error || !code || state !== expectedState) {
+      const msg = errorDesc || error || 'Invalid state';
+      resp.writeHead(200, { 'Content-Type': 'text/html' });
+      resp.end(`<html><body><h3>Authentication failed</h3><p>${escapeHtml(msg)}</p></body></html>`);
+      return;
+    }
+
+    const pending = pendingAuth.get(state);
+    if (!pending) {
+      resp.writeHead(200, { 'Content-Type': 'text/html' });
+      resp.end('<html><body><h3>Expired</h3><p>Please try again.</p></body></html>');
+      return;
+    }
+    pendingAuth.delete(state);
+
+    void (async () => {
+      try {
+      const tokenParams = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: pending.callbackUrl,
+        code_verifier: pending.codeVerifier,
+        client_id: pending.clientId,
+        scope: pending.scopes.join(' '),
+      });
+
+      const tokenRes = await fetch(pending.tokenEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+        body: tokenParams.toString(),
+      });
+
+      if (!tokenRes.ok) {
+        let msg = `Token exchange failed: ${tokenRes.status}`;
+        try { const d = await tokenRes.json() as { error_description?: string }; msg = d.error_description || msg; } catch { /* */ }
+        setMcpServerAuth(pending.serverId, { ...serverAuth, needsAuth: true, error: msg });
+        resp.writeHead(200, { 'Content-Type': 'text/html' });
+        resp.end(`<html><body><h3>Failed</h3><p>${escapeHtml(msg)}</p></body></html>`);
+        return;
+      }
+
+      const tokenData = await tokenRes.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+      if (!tokenData.access_token) {
+        setMcpServerAuth(pending.serverId, { ...serverAuth, needsAuth: true, error: 'No access_token' });
+        resp.writeHead(200, { 'Content-Type': 'text/html' });
+        resp.end('<html><body><h3>Failed</h3><p>No access token received.</p></body></html>');
+        return;
+      }
+
+      const expiresAt = tokenData.expires_in ? Date.now() + (tokenData.expires_in * 1000) : undefined;
+      setMcpServerAuth(pending.serverId, {
+        ...serverAuth, token: tokenData.access_token, refreshToken: tokenData.refresh_token,
+        expiresAt, needsAuth: false, error: undefined,
+      });
+      console.log(`[MCP-AUTH] Token acquired for ${pending.serverId} (temp server)`);
+
+      resp.writeHead(200, { 'Content-Type': 'text/html' });
+      resp.end('<html><body><h3>Authenticated</h3><p>You can close this window.</p><script>window.close()</script></body></html>');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      resp.writeHead(200, { 'Content-Type': 'text/html' });
+      resp.end(`<html><body><h3>Error</h3><p>${escapeHtml(msg)}</p></body></html>`);
+    }
+    })();
+  });
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    console.error(`[MCP-AUTH] Temp server failed on port ${port}: ${err.code || err.message}`);
+  });
+
+  server.listen(port, 'localhost', () => {
+    console.log(`[MCP-AUTH] Temp callback server on port ${port}`);
+  });
+
+  // Auto-close after 2 minutes
+  setTimeout(() => server.close(), STATE_TTL_MS);
+}
 
 // ============================================================================
 // PKCE Helpers

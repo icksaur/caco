@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caco Portal</title>
+<link rel="icon" href="/caco.png">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; background: #1a1a1a; color: #d4d4d4; font-family: -apple-system, sans-serif; overflow: hidden; }
+
+.portal { display: flex; height: 100%; }
+
+.sidebar {
+  width: 56px;
+  background: #111;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 4px;
+  border-right: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.peer {
+  width: 44px;
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 8px;
+  position: relative;
+  transition: background 0.15s;
+}
+.peer:hover { background: #2a2a2a; }
+.peer.active { background: #333; border-left: 3px solid #007acc; }
+.peer.offline { opacity: 0.4; }
+
+.peer-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+.peer-icon-fallback {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ccc;
+}
+
+.peer-name {
+  font-size: 8px;
+  color: #888;
+  margin-top: 2px;
+  max-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.peer-badge {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: none;
+}
+.peer-badge.unobserved { display: block; background: #b13333; }
+.peer-badge.busy { display: block; background: #007acc; animation: blink 0.7s infinite; border-radius: 2px; }
+
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.add-btn {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 8px;
+  font-size: 20px;
+  color: #666;
+  margin-top: 4px;
+}
+.add-btn:hover { background: #2a2a2a; color: #aaa; }
+
+.spacer { flex: 1; }
+
+.main { flex: 1; position: relative; }
+.main iframe {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: none;
+}
+.main iframe.active { display: block; }
+
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  font-size: 14px;
+}
+</style>
+</head>
+<body>
+<div class="portal">
+  <div class="sidebar" id="sidebar">
+    <div class="spacer"></div>
+    <div class="add-btn" id="addBtn" title="Add Caco instance">+</div>
+  </div>
+  <div class="main" id="main">
+    <div class="empty-state" id="emptyState">Click + to add a Caco instance</div>
+  </div>
+</div>
+
+<script>
+var PEERS_KEY = 'caco:portal:peers';
+var ACTIVE_KEY = 'caco:portal:active';
+var OFFLINE_TIMEOUT = 15000;
+
+var peers = [];
+var activePeerId = null;
+var peerStatus = {};
+var peerTimers = {};
+var longPressTimer = null;
+
+function loadPeers() {
+  try { peers = JSON.parse(localStorage.getItem(PEERS_KEY)) || []; } catch { peers = []; }
+  if (!peers.length) {
+    peers = [{ id: 'local', url: window.location.origin, name: 'local' }];
+    savePeers();
+  }
+  activePeerId = localStorage.getItem(ACTIVE_KEY) || peers[0]?.id;
+}
+
+function savePeers() {
+  localStorage.setItem(PEERS_KEY, JSON.stringify(peers));
+}
+
+function saveActive() {
+  localStorage.setItem(ACTIVE_KEY, activePeerId);
+}
+
+function renderSidebar() {
+  var sidebar = document.getElementById('sidebar');
+  sidebar.querySelectorAll('.peer').forEach(function(el) { el.remove(); });
+  var addBtn = document.getElementById('addBtn');
+  
+  peers.forEach(function(peer) {
+    var el = document.createElement('div');
+    el.className = 'peer' + (peer.id === activePeerId ? ' active' : '');
+    var status = peerStatus[peer.url];
+    if (status === 'offline') el.classList.add('offline');
+    el.dataset.id = peer.id;
+    
+    var img = document.createElement('img');
+    img.className = 'peer-icon';
+    img.src = peer.url + '/caco.png';
+    img.alt = peer.name;
+    img.onerror = function() {
+      var fb = document.createElement('div');
+      fb.className = 'peer-icon-fallback';
+      fb.textContent = peer.name[0].toUpperCase();
+      this.replaceWith(fb);
+    };
+    el.appendChild(img);
+    
+    var name = document.createElement('div');
+    name.className = 'peer-name';
+    name.textContent = peer.name;
+    el.appendChild(name);
+    
+    var badge = document.createElement('div');
+    badge.className = 'peer-badge';
+    badge.id = 'badge-' + peer.id;
+    el.appendChild(badge);
+    
+    el.addEventListener('click', function() { switchTo(peer.id); });
+    
+    if (peer.id !== 'local') {
+      el.addEventListener('mousedown', function(e) {
+        var pid = peer.id;
+        longPressTimer = setTimeout(function() {
+          longPressTimer = null;
+          if (confirm('Remove ' + peer.name + '?')) {
+            removePeer(pid);
+          }
+        }, 500);
+      });
+      el.addEventListener('mouseup', function() { if (longPressTimer) clearTimeout(longPressTimer); });
+      el.addEventListener('mouseleave', function() { if (longPressTimer) clearTimeout(longPressTimer); });
+    }
+    
+    sidebar.insertBefore(el, addBtn.parentElement === sidebar ? sidebar.querySelector('.spacer') : addBtn);
+  });
+  
+  updateBadges();
+}
+
+function ensureIframe(peer) {
+  var existing = document.getElementById('frame-' + peer.id);
+  if (existing) return existing;
+  
+  var iframe = document.createElement('iframe');
+  iframe.id = 'frame-' + peer.id;
+  iframe.src = peer.url;
+  iframe.allow = 'clipboard-write';
+  document.getElementById('main').appendChild(iframe);
+  
+  startOfflineTimer(peer);
+  document.getElementById('emptyState').style.display = 'none';
+  return iframe;
+}
+
+function switchTo(peerId) {
+  activePeerId = peerId;
+  saveActive();
+  
+  var peer = peers.find(function(p) { return p.id === peerId; });
+  if (peer) ensureIframe(peer);
+  
+  document.querySelectorAll('.main iframe').forEach(function(f) {
+    f.classList.toggle('active', f.id === 'frame-' + peerId);
+  });
+  
+  renderSidebar();
+}
+
+function addPeer() {
+  var url = prompt('Caco instance URL:');
+  if (!url) return;
+  url = url.trim().replace(/\/+$/, '');
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    alert('URL must start with http:// or https://');
+    return;
+  }
+  
+  var hostname;
+  try { hostname = new URL(url).hostname; } catch { hostname = url; }
+  var name = prompt('Name:', hostname) || hostname;
+  
+  var id = Math.random().toString(36).slice(2, 8);
+  peers.push({ id: id, url: url, name: name });
+  savePeers();
+  switchTo(id);
+}
+
+function removePeer(peerId) {
+  peers = peers.filter(function(p) { return p.id !== peerId; });
+  savePeers();
+  
+  var frame = document.getElementById('frame-' + peerId);
+  if (frame) frame.remove();
+  
+  if (activePeerId === peerId) {
+    activePeerId = peers[0]?.id || null;
+    saveActive();
+    if (activePeerId) switchTo(activePeerId);
+  }
+  
+  renderSidebar();
+}
+
+function startOfflineTimer(peer) {
+  if (peerTimers[peer.id]) clearTimeout(peerTimers[peer.id]);
+  peerTimers[peer.id] = setTimeout(function() {
+    if (!peerStatus[peer.url] || peerStatus[peer.url] === 'offline') {
+      peerStatus[peer.url] = 'offline';
+      renderSidebar();
+    }
+  }, OFFLINE_TIMEOUT);
+}
+
+function updateBadges() {
+  peers.forEach(function(peer) {
+    var badge = document.getElementById('badge-' + peer.id);
+    if (!badge) return;
+    var status = peerStatus[peer.url];
+    badge.className = 'peer-badge';
+    if (status && status !== 'offline') {
+      if (status.unobservedCount > 0) badge.classList.add('unobserved');
+      else if (status.busyCount > 0) badge.classList.add('busy');
+    }
+  });
+}
+
+window.addEventListener('message', function(e) {
+  if (e.data?.type !== 'caco:status') return;
+  var origin = e.data.origin;
+  peerStatus[origin] = { busyCount: e.data.busyCount, unobservedCount: e.data.unobservedCount };
+  
+  var peer = peers.find(function(p) { return p.url === origin || p.url + '/' === origin || origin.startsWith(p.url); });
+  if (peer) {
+    if (peerTimers[peer.id]) clearTimeout(peerTimers[peer.id]);
+    var el = document.querySelector('.peer[data-id="' + peer.id + '"]');
+    if (el) el.classList.remove('offline');
+  }
+  
+  updateBadges();
+});
+
+document.getElementById('addBtn').addEventListener('click', addPeer);
+
+loadPeers();
+renderSidebar();
+
+if (activePeerId) {
+  var activePeer = peers.find(function(p) { return p.id === activePeerId; });
+  if (activePeer) switchTo(activePeerId);
+}
+</script>
+</body>
+</html>

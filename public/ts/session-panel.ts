@@ -190,12 +190,20 @@ export function updateMenuIndicators(): void {
   }
   
   if (busyIndicator) {
-    // Show busy indicator only when no unobserved badge and other sessions are busy
     if (unobservedCount === 0 && busyCount > 0) {
       busyIndicator.classList.remove('hidden');
     } else {
       busyIndicator.classList.add('hidden');
     }
+  }
+  
+  if (window.parent !== window) {
+    window.parent.postMessage({
+      type: 'caco:status',
+      origin: window.location.origin,
+      busyCount: sessionTracker.getBusyCount(),
+      unobservedCount
+    }, '*');
   }
 }
 

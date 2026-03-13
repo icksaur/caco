@@ -19,17 +19,13 @@ function getCurrentTheme() {
 
 function applyTheme(themeId) {
   var existing = document.getElementById(LINK_ID);
-  if (themeId === 'dark') {
-    if (existing) existing.remove();
-  } else {
-    if (!existing) {
-      existing = document.createElement('link');
-      existing.id = LINK_ID;
-      existing.rel = 'stylesheet';
-      document.head.appendChild(existing);
-    }
-    existing.href = '/themes/' + themeId + '.css';
+  if (!existing) {
+    existing = document.createElement('link');
+    existing.id = LINK_ID;
+    existing.rel = 'stylesheet';
+    document.head.appendChild(existing);
   }
+  existing.href = '/themes/' + themeId + '.css';
   localStorage.setItem(STORAGE_KEY, themeId);
   render();
   window.appletAPI.setAppletState({ theme: themeId });

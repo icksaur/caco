@@ -57,7 +57,7 @@ window.hideToast = hideToast;
 document.addEventListener('DOMContentLoaded', () => {
   // Load saved theme before rendering
   const savedTheme = localStorage.getItem('caco:theme');
-  if (savedTheme && savedTheme !== 'dark') {
+  if (savedTheme) {
     const link = document.createElement('link');
     link.id = 'cacoThemeLink';
     link.rel = 'stylesheet';

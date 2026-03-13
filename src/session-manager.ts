@@ -89,6 +89,32 @@ function repairSessionEvents(sessionId: string, errorMessage?: string): string |
       return 'Fixed missing ephemeral flag on shutdown events';
     }
 
+    // Fix missing displayName on attachments (SDK started requiring it)
+    if (errorMessage?.includes('displayName')) {
+      const lines = content.split('\n');
+      let fixed = 0;
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].includes('"attachments"')) continue;
+        try {
+          const obj = JSON.parse(lines[i]);
+          const atts = obj?.data?.attachments;
+          if (!Array.isArray(atts)) continue;
+          for (const att of atts) {
+            if (!att.displayName) {
+              att.displayName = att.path ? att.path.split('/').pop() : 'attachment';
+              fixed++;
+            }
+          }
+          if (fixed) lines[i] = JSON.stringify(obj);
+        } catch { /* skip unparseable lines */ }
+      }
+      if (fixed) {
+        writeFileSync(eventsPath, lines.join('\n'));
+        console.log(`[SESSION] Repaired ${fixed} attachment(s) missing displayName in ${eventsPath}`);
+        return `Fixed ${fixed} attachment(s) missing displayName`;
+      }
+    }
+
     // For unknown event types or other corruption: truncate to last session.idle
     if (errorMessage?.includes('Unknown event type') || errorMessage?.includes('corrupted')) {
       const lines = content.split('\n');

@@ -79,6 +79,37 @@ app.get('/', (_req, res) => {
   res.type('html').send(cachedIndexHtml);
 });
 
+app.get('/api/favicon', (_req, res) => {
+  const bytes = hashHostnameToBytes(serverHostname);
+  const colors = bytes.map(b => {
+    const h = Math.round((b / 255) * 360);
+    return `hsl(${h}, 70%, 50%)`;
+  });
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+<defs>
+<linearGradient id="t" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${colors[0]}"/><stop offset="1" stop-color="${colors[1]}"/></linearGradient>
+<linearGradient id="b" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${colors[2]}"/><stop offset="1" stop-color="${colors[3]}"/></linearGradient>
+<linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="white" stop-opacity="1"/><stop offset="1" stop-color="white" stop-opacity="0"/></linearGradient>
+</defs>
+<rect width="32" height="32" fill="url(#b)" rx="4"/>
+<rect width="32" height="32" fill="url(#t)" opacity="0.5" rx="4"/>
+<rect width="32" height="16" fill="url(#t)" rx="4"/>
+</svg>`;
+  res.type('image/svg+xml').send(svg);
+});
+
+function hashHostnameToBytes(h: string): number[] {
+  let h1 = 0x811c9dc5, h2 = 0x1000193, h3 = 0xdeadbeef, h4 = 0xcafebabe;
+  for (let i = 0; i < h.length; i++) {
+    const c = h.charCodeAt(i);
+    h1 ^= c; h1 = Math.imul(h1, 0x01000193);
+    h2 ^= c; h2 = Math.imul(h2, 0x85ebca6b);
+    h3 ^= c; h3 = Math.imul(h3, 0xc2b2ae35);
+    h4 ^= c; h4 = Math.imul(h4, 0x27d4eb2f);
+  }
+  return [h1 & 0xFF, h2 & 0xFF, h3 & 0xFF, h4 & 0xFF];
+}
+
 // Static files (after index.html route so injection works)
 app.use(express.static('public'));
 

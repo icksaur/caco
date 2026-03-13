@@ -24,6 +24,25 @@ import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
 const router = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Allow cross-origin requests from localhost (for portal session transfers) */
+function allowLocalhostCors(req: Request, res: Response): boolean {
+  const origin = req.headers.origin;
+  if (origin && /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return true;
+  }
+  return false;
+}
+
+router.options('/sessions/:sessionId/export', (req, res) => { allowLocalhostCors(req, res); });
+router.options('/sessions/import', (req, res) => { allowLocalhostCors(req, res); });
+
 router.get('/session', async (req: Request, res: Response) => {
   const sessionId = (req.query.sessionId as string) || sessionState.activeSessionId;
   
@@ -393,6 +412,7 @@ router.get('/sessions/:sessionId/icon', (req: Request, res: Response) => {
  *   ?delete=true - Remove session after export (migration mode)
  */
 router.get('/sessions/:sessionId/export', async (req: Request, res: Response) => {
+  if (allowLocalhostCors(req, res)) return;
   const sessionId = req.params.sessionId as string;
   const shouldDelete = req.query.delete === 'true';
 
@@ -458,6 +478,7 @@ router.get('/sessions/:sessionId/export', async (req: Request, res: Response) =>
  *   ?force=true - Overwrite if session ID already exists
  */
 router.post('/sessions/import', async (req: Request, res: Response) => {
+  if (allowLocalhostCors(req, res)) return;
   const newCwd = req.query.cwd as string | undefined;
   const force = req.query.force === 'true';
 

@@ -144,7 +144,7 @@ router.get('/start', async (req: Request, res: Response) => {
     callbackUrl = registeredRedirect;
   } else {
     const browserOrigin = origin || `http://localhost:${req.socket.localPort || 53000}`;
-    callbackUrl = `${browserOrigin}/api/mcp/auth/callback`;
+    callbackUrl = `${browserOrigin}/`;
   }
 
   const clientId = serverAuth.clientId!;

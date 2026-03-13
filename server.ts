@@ -76,7 +76,13 @@ const cachedIndexHtml = readFileSync(indexHtmlPath, 'utf-8').replace(
   `<script>window.SERVER_HOSTNAME = ${JSON.stringify(serverHostname)};</script></head>`
 );
 
-app.get('/', (_req, res) => {
+app.get('/', (req, res) => {
+  // OAuth callback: redirect to /api/mcp/auth/callback with same query params
+  if (req.query.code && req.query.state) {
+    const qs = new URLSearchParams(req.query as Record<string, string>).toString();
+    res.redirect(`/api/mcp/auth/callback?${qs}`);
+    return;
+  }
   res.type('html').send(cachedIndexHtml);
 });
 

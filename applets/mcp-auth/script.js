@@ -114,7 +114,7 @@ function renderClientIdForm(escapedId) {
  */
 function authenticate(serverId) {
   var popup = window.open(
-    '/api/mcp/auth/start?server=' + encodeURIComponent(serverId),
+    '/api/mcp/auth/start?server=' + encodeURIComponent(serverId) + '&origin=' + encodeURIComponent(location.origin),
     'mcp-auth-' + serverId,
     'width=500,height=700,popup=yes'
   );

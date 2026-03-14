@@ -10,7 +10,7 @@ import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
 
-import { refreshAccessToken } from './routes/mcp-auth.js';
+import { refreshAccessToken } from './mcp-auth-service.js';
 import { serverIdFromUrl } from './mcp-discovery.js';
 
 /**

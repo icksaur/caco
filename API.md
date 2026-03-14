@@ -140,6 +140,18 @@ Body (any subset):
 
 Returns updated roadmap.
 
+**GET /api/sessions/:id/notes** - Get session notes
+
+Returns `{ notes: [{ ts, text }, ...] }`. Notes are NDJSON on disk.
+
+**POST /api/sessions/:id/notes** - Append a note
+
+Body: `{ "text": "string" }`. Returns `{ ok: true, entry: { ts, text } }`.
+
+**POST /api/sessions/:id/notes/archive** - Archive a note
+
+Body: `{ "ts": number }`. Moves note from active to notes-archive.json.
+
 **GET /api/sessions/:id/state** - Get session state (agent-to-agent)
 
 Returns:

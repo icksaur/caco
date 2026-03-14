@@ -16,7 +16,7 @@
  * We store Caco-specific metadata separately to avoid coupling with SDK internals.
  */
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { OUTPUT_CACHE_TTL_MS } from './config.js';
@@ -234,6 +234,57 @@ export function getSessionRoadmap(sessionId: string): Roadmap | null {
 
 export function setSessionRoadmap(sessionId: string, roadmap: Roadmap): void {
   setSessionData(sessionId, 'roadmap', roadmap as unknown as Record<string, unknown>);
+}
+
+// ============================================================================
+// Session Notes (NDJSON — one JSON fragment per line)
+// ============================================================================
+
+export interface NoteEntry {
+  ts: number;
+  text: string;
+}
+
+function notesPath(sessionId: string): string {
+  return join(getSessionDir(sessionId), 'notes.json');
+}
+
+function archivePath(sessionId: string): string {
+  return join(getSessionDir(sessionId), 'notes-archive.json');
+}
+
+function readNdjson(filePath: string): NoteEntry[] {
+  if (!existsSync(filePath)) return [];
+  try {
+    return readFileSync(filePath, 'utf-8')
+      .split('\n')
+      .filter(line => line.trim())
+      .map(line => JSON.parse(line) as NoteEntry);
+  } catch { return []; }
+}
+
+export function getSessionNotes(sessionId: string): NoteEntry[] {
+  return readNdjson(notesPath(sessionId));
+}
+
+export function appendSessionNote(sessionId: string, text: string): NoteEntry {
+  const dir = getSessionDir(sessionId);
+  ensureDir(dir);
+  const entry: NoteEntry = { ts: Date.now(), text };
+  appendFileSync(notesPath(sessionId), JSON.stringify(entry) + '\n');
+  return entry;
+}
+
+export function archiveSessionNote(sessionId: string, ts: number): boolean {
+  const notes = getSessionNotes(sessionId);
+  const idx = notes.findIndex(n => n.ts === ts);
+  if (idx < 0) return false;
+  const [removed] = notes.splice(idx, 1);
+  const dir = getSessionDir(sessionId);
+  ensureDir(dir);
+  appendFileSync(archivePath(sessionId), JSON.stringify(removed) + '\n');
+  writeFileSync(notesPath(sessionId), notes.map(n => JSON.stringify(n)).join('\n') + (notes.length ? '\n' : ''));
+  return true;
 }
 
 /**

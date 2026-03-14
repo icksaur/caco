@@ -16,7 +16,7 @@ import { homedir } from 'os';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, type SessionKind, type Roadmap } from '../storage.js';
+import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, type SessionKind, type Roadmap } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -395,6 +395,25 @@ router.patch('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
   
   setSessionRoadmap(sessionId, existing);
   res.json(existing);
+});
+
+router.get('/sessions/:sessionId/notes', (req: Request, res: Response) => {
+  res.json({ notes: getSessionNotes(req.params.sessionId as string) });
+});
+
+router.post('/sessions/:sessionId/notes', (req: Request, res: Response) => {
+  const { text } = req.body as { text?: string };
+  if (!text?.trim()) { res.status(400).json({ error: 'text required' }); return; }
+  const entry = appendSessionNote(req.params.sessionId as string, text.trim());
+  res.json({ ok: true, entry });
+});
+
+router.post('/sessions/:sessionId/notes/archive', (req: Request, res: Response) => {
+  const { ts } = req.body as { ts?: number };
+  if (!ts) { res.status(400).json({ error: 'ts required' }); return; }
+  const ok = archiveSessionNote(req.params.sessionId as string, ts);
+  if (!ok) { res.status(404).json({ error: 'Note not found' }); return; }
+  res.json({ ok: true });
 });
 
 /**

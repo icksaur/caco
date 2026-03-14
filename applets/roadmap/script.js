@@ -1,10 +1,12 @@
 var sessionId = null;
 var sessionCwd = null;
 var roadmap = null;
+var sessionNotes = [];
 
 var header = document.getElementById('header');
 var docs = document.getElementById('docs');
 var steps = document.getElementById('steps');
+var notesEl = document.getElementById('notes');
 var empty = document.getElementById('empty');
 
 var statusIcons = { pending: '○', active: '◐', done: '●', blocked: '⊘' };
@@ -69,7 +71,7 @@ async function loadRoadmap() {
       empty.style.display = 'none';
     } else {
       roadmap = null;
-      empty.style.display = '';
+      empty.style.display = sessionNotes.length ? 'none' : '';
     }
     render();
     window.appletAPI.setAppletState({ hasRoadmap: !!roadmap, stepCount: roadmap ? roadmap.steps.length : 0 });
@@ -154,15 +156,69 @@ function render() {
   });
 }
 
+async function loadNotes() {
+  if (!sessionId) return;
+  try {
+    var res = await fetch('/api/sessions/' + sessionId + '/notes');
+    var data = await res.json();
+    sessionNotes = data.notes || [];
+  } catch { sessionNotes = []; }
+  renderNotes();
+}
+
+function formatNoteTime(ts) {
+  var d = new Date(ts);
+  var h = d.getHours().toString().padStart(2, '0');
+  var m = d.getMinutes().toString().padStart(2, '0');
+  return h + ':' + m;
+}
+
+function renderNotes() {
+  if (!sessionNotes.length) { notesEl.innerHTML = ''; return; }
+  var html = '<div class="notes-header">notes</div>';
+  for (var i = 0; i < sessionNotes.length; i++) {
+    var n = sessionNotes[i];
+    html += '<div class="note-entry">';
+    html += '<span class="note-time">' + formatNoteTime(n.ts) + '</span>';
+    html += '<span class="note-text">' + esc(n.text) + '</span>';
+    html += '<span class="note-archive" data-ts="' + n.ts + '" title="Archive">⌸</span>';
+    html += '</div>';
+  }
+  notesEl.innerHTML = html;
+  notesEl.querySelectorAll('.note-archive').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      archiveNote(Number(this.getAttribute('data-ts')));
+    });
+  });
+}
+
+async function archiveNote(ts) {
+  await fetch('/api/sessions/' + sessionId + '/notes/archive', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ts: ts })
+  });
+  loadNotes();
+}
+
+function loadAll() {
+  loadRoadmap();
+  loadNotes();
+}
+
 window.appletAPI.onSessionChange(function(_id, info) {
   sessionId = info.sessionId;
   sessionCwd = info.cwd;
-  loadRoadmap();
+  loadAll();
 });
 
 window.appletAPI.onSessionEvent(function(event) {
-  if (event.type === 'session.idle') loadRoadmap();
-  if (event.type === 'tool.execution_complete' && event.data && event.data.toolName === 'update_roadmap') loadRoadmap();
+  if (event.type === 'session.idle') loadAll();
+  if (event.type === 'tool.execution_complete' && event.data) {
+    if (event.data.toolName === 'update_roadmap') loadRoadmap();
+    if (event.data.toolName === 'session_note') loadNotes();
+  }
 });
 
 // Initial load if session is already active
@@ -172,6 +228,6 @@ if (initId) {
   sessionId = initId;
   fetch('/api/sessions/' + initId + '/state').then(function(r) { return r.json(); }).then(function(data) {
     sessionCwd = data.cwd || null;
-    loadRoadmap();
-  }).catch(function() { loadRoadmap(); });
+    loadAll();
+  }).catch(function() { loadAll(); });
 }

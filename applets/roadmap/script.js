@@ -168,9 +168,14 @@ async function loadNotes() {
 
 function formatNoteTime(ts) {
   var d = new Date(ts);
+  var now = new Date();
   var h = d.getHours().toString().padStart(2, '0');
   var m = d.getMinutes().toString().padStart(2, '0');
-  return h + ':' + m;
+  var time = h + ':' + m;
+  if (d.toDateString() === now.toDateString()) return time;
+  var mon = (d.getMonth() + 1).toString().padStart(2, '0');
+  var day = d.getDate().toString().padStart(2, '0');
+  return mon + '/' + day + ' ' + time;
 }
 
 function renderNotes() {

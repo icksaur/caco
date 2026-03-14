@@ -481,9 +481,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
 /**
  * Rename a session (custom name)
  */
-export async function renameSession(sessionId: string, currentName: string): Promise<void> {
-  const newName = prompt('Session name:', currentName);
-  if (newName === null) return; // Cancelled
+export async function renameSession(sessionId: string, newName: string): Promise<void> {
   
   try {
     const response = await fetch(`/api/sessions/${sessionId}`, {

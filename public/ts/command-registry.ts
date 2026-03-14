@@ -32,7 +32,7 @@ export function findCommand(name: string): Command | undefined {
 }
 
 registerCommand({
-  name: 'new',
+  name: 'session-new',
   description: 'New chat',
   source: 'built-in',
   handler: () => newSessionClick()
@@ -56,27 +56,25 @@ async function fetchSessionPicker(): Promise<PopupItem[]> {
 
 registerCommand({
   name: 'session-rename',
-  description: 'Rename a session',
+  description: 'Rename current session',
   source: 'built-in',
-  picker: fetchSessionPicker,
-  handler: async (sessionId) => {
-    const res = await fetch(`/api/sessions/${sessionId}/state`);
-    const data = await res.json();
-    const currentName = data?.meta?.name || data?.meta?.summary || sessionId.slice(0, 8);
-    await renameSession(sessionId, currentName);
+  handler: async (newName) => {
+    const sessionId = getActiveSessionId();
+    if (!sessionId) { showToast('No active session'); return; }
+    const trimmed = newName.trim();
+    if (!trimmed) { showToast('Usage: /session-rename <new name>'); return; }
+    await renameSession(sessionId, trimmed);
   }
 });
 
 registerCommand({
   name: 'session-delete',
-  description: 'Delete a session',
+  description: 'Delete current session',
   source: 'built-in',
-  picker: fetchSessionPicker,
-  handler: async (sessionId) => {
-    const res = await fetch(`/api/sessions/${sessionId}/state`);
-    const data = await res.json();
-    const name = data?.meta?.name || data?.meta?.summary || sessionId.slice(0, 8);
-    await deleteSession(sessionId, name);
+  handler: async () => {
+    const sessionId = getActiveSessionId();
+    if (!sessionId) { showToast('No active session'); return; }
+    await deleteSession(sessionId);
   }
 });
 
@@ -160,7 +158,7 @@ registerCommand({
 });
 
 registerCommand({
-  name: 'compact',
+  name: 'session-compact',
   description: 'Force context compaction',
   source: 'built-in',
   handler: async () => {

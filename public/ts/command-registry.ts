@@ -1,12 +1,10 @@
-import { newSessionClick, sessionClick } from './router.js';
+import { newSessionClick } from './router.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
-import { sortSessions } from './ui-utils.js';
 import { deleteSession, renameSession } from './session-panel.js';
 import type { PopupItem } from './input-popup.js';
-import type { SessionData, SessionsResponse } from './types.js';
 
 export interface Command {
   name: string;
@@ -38,22 +36,6 @@ registerCommand({
   handler: () => newSessionClick()
 });
 
-async function fetchSessionPicker(): Promise<PopupItem[]> {
-  try {
-    const res = await fetch('/api/sessions');
-    const data: SessionsResponse = await res.json();
-    const sessions: SessionData[] = Object.values(data.grouped).flat()
-      .filter(s => s.kind !== 'swarm' || s.isBusy);
-    sortSessions(sessions);
-    return sessions.map(s => {
-      const label = s.name || s.summary || s.sessionId.slice(0, 8);
-      const desc = s.currentIntent || s.cwd?.split('/').pop() || '';
-      const icon = s.isBusy ? 'session-busy' : s.isUnobserved ? 'session-unobserved' : '';
-      return { id: s.sessionId, label, description: desc, icon };
-    });
-  } catch { return []; }
-}
-
 registerCommand({
   name: 'session-rename',
   description: 'Rename current session',
@@ -79,15 +61,7 @@ registerCommand({
 });
 
 registerCommand({
-  name: 'sessions',
-  description: 'Switch session',
-  source: 'built-in',
-  picker: fetchSessionPicker,
-  handler: (sessionId) => { void sessionClick(sessionId); }
-});
-
-registerCommand({
-  name: 'model',
+  name: 'session-model',
   description: 'Change session model',
   source: 'built-in',
   picker: () => {
@@ -137,7 +111,7 @@ registerCommand({
 });
 
 registerCommand({
-  name: 'exportsession',
+  name: 'session-export',
   description: 'Export current session as .tar.gz',
   source: 'built-in',
   handler: async () => {

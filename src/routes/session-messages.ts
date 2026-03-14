@@ -258,6 +258,10 @@ export async function dispatchMessage(
     };
     
     const INITIAL_TIMEOUT_MS = 30_000;
+    const meta = getSessionMeta(sessionId);
+    const betweenEventTimeout = meta?.kind === 'swarm' || meta?.kind === 'agent'
+      ? 15 * 60 * 1000
+      : DISPATCH_TIMEOUT_MS;
     let receivedFirstEvent = false;
     let toolExecuting = false;
     
@@ -269,12 +273,12 @@ export async function dispatchMessage(
     const resetWatchdog = () => {
       if (toolExecuting) return;
       if (timeoutHandle) clearTimeout(timeoutHandle);
-      const timeout = receivedFirstEvent ? DISPATCH_TIMEOUT_MS : INITIAL_TIMEOUT_MS;
+      const timeout = receivedFirstEvent ? betweenEventTimeout : INITIAL_TIMEOUT_MS;
       timeoutHandle = setTimeout(() => {
         if (!dispatchCompleted) {
-          const label = receivedFirstEvent ? `${DISPATCH_TIMEOUT_MS / 1000}s between events` : `${INITIAL_TIMEOUT_MS / 1000}s waiting for first event`;
+          const label = receivedFirstEvent ? `${betweenEventTimeout / 1000}s between events` : `${INITIAL_TIMEOUT_MS / 1000}s waiting for first event`;
           console.warn(`[DISPATCH:${rid}] Watchdog: ${label}, timing out session ${sessionId}`);
-          onEvent({ type: 'session.error', data: { message: receivedFirstEvent ? `No response for ${DISPATCH_TIMEOUT_MS / 1000 / 60} minutes` : 'Session not responding (connection may be stale)' } });
+          onEvent({ type: 'session.error', data: { message: receivedFirstEvent ? `No response for ${betweenEventTimeout / 1000 / 60} minutes` : 'Session not responding (connection may be stale)' } });
           cleanupAndComplete('timeout');
           unsubscribe();
         }

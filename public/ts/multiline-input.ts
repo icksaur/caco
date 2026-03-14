@@ -121,6 +121,14 @@ function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
     return;
   }
 
+  const query = val.slice(1);
+  const hasArgs = query.includes(' ');
+
+  if (hasArgs) {
+    if (slashPopup?.isVisible()) slashPopup.hide();
+    return;
+  }
+
   if (!slashPopup) {
     slashPopup = new InputPopup({
       anchor,
@@ -143,7 +151,6 @@ function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
     slashPopup.show(items);
   }
 
-  const query = val.slice(1);
   slashPopup.filter(query);
 }
 

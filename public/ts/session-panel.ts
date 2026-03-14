@@ -354,6 +354,14 @@ function renderFilteredSessions(): void {
   const heading = document.createElement('div');
   heading.className = 'section-header';
   heading.textContent = 'sessions';
+  
+  const addBtn = document.createElement('button');
+  addBtn.className = 'session-add-btn';
+  addBtn.textContent = '+';
+  addBtn.title = 'New session';
+  addBtn.onclick = (e) => { e.stopPropagation(); newSessionClick(); };
+  heading.appendChild(addBtn);
+  
   container.appendChild(heading);
   
   if (allSessions.length === 0) {

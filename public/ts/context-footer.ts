@@ -39,7 +39,7 @@ export function renderContextFooter(context: SessionContext): void {
 /**
  * Render status (model name + cwd) in the right side of the footer.
  */
-export function renderStatus(modelName: string, cwd: string, hasGit = false, sessionName?: string, sessionId?: string, hasIcon?: boolean): void {
+export function renderStatus(modelName: string, cwd: string, hasGit = false, sessionName?: string, sessionId?: string, hasIcon?: boolean, gitBranch?: string | null): void {
   const footer = regions.footer.el;
   const statusEl = footer.querySelector('.context-status') as HTMLElement | null;
   if (!statusEl) return;
@@ -72,7 +72,8 @@ export function renderStatus(modelName: string, cwd: string, hasGit = false, ses
       appletLinks.push('<a href="/?applet=roadmap" class="footer-applet-link" id="footerRoadmapLink" style="display:none">roadmap</a>');
     }
     if (hasGit && encodedCwd) {
-      appletLinks.push(`<a href="/?applet=git-status&path=${encodedCwd}" class="footer-applet-link">git</a>`);
+      const gitLabel = gitBranch ? `⎇ ${escapeHtml(gitBranch)}` : 'git';
+      appletLinks.push(`<a href="/?applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);
     }
     if (encodedCwd) {
       appletLinks.push(`<a href="/?applet=file-finder&root=${encodedCwd}" class="footer-applet-link">files</a>`);

@@ -10,7 +10,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { existsSync, statSync, createReadStream } from 'fs';
+import { existsSync, statSync, createReadStream, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import sessionManager from '../session-manager.js';
@@ -24,6 +24,14 @@ import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
 const router = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function readGitBranch(cwd: string): string | null {
+  try {
+    const head = readFileSync(join(cwd, '.git', 'HEAD'), 'utf-8').trim();
+    if (head.startsWith('ref: refs/heads/')) return head.slice(16);
+    return head.slice(0, 8);
+  } catch { return null; }
+}
 
 /** Allow cross-origin requests from localhost (for portal session transfers) */
 function allowLocalhostCors(req: Request, res: Response): boolean {
@@ -156,6 +164,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
     const model = sessionManager.getSessionModel(result.sessionId);
     
     const hasGit = !!(cwd && existsSync(join(cwd, '.git')));
+    const gitBranch = hasGit && cwd ? readGitBranch(cwd) : null;
     const meta = getSessionMeta(result.sessionId);
     
     res.json({ 
@@ -165,6 +174,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       isBusy,
       model,
       hasGit,
+      gitBranch,
       name: meta?.name || null,
       kind: meta?.kind || 'interactive',
       currentIntent: meta?.currentIntent || null,

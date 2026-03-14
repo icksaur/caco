@@ -248,17 +248,17 @@ describe('ChatViewController', () => {
   describe('updateStatus', () => {
     it('resolves model name and calls renderStatus', () => {
       cvc.updateStatus('/path', 'claude-sonnet-4');
-      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', false, undefined, undefined, undefined);
+      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', false, undefined, undefined, undefined, undefined);
     });
 
     it('falls back to model ID suffix when model not found', () => {
       cvc.updateStatus('/path', 'unknown-model');
-      expect(renderStatus).toHaveBeenCalledWith('unknown-model', '/path', false, undefined, undefined, undefined);
+      expect(renderStatus).toHaveBeenCalledWith('unknown-model', '/path', false, undefined, undefined, undefined, undefined);
     });
 
     it('passes hasGit flag through', () => {
       cvc.updateStatus('/path', 'claude-sonnet-4', true);
-      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', true, undefined, undefined, undefined);
+      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', true, undefined, undefined, undefined, undefined);
     });
   });
 });

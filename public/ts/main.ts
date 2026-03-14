@@ -5,7 +5,7 @@
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences } from './history.js';
-import { deleteSession, initSessionPanel, loadSessions, loadSchedules } from './session-panel.js';
+import { deleteSession, initSessionPanel, loadSessions, loadSchedules, renameSession } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
@@ -18,7 +18,6 @@ import { connectWs, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
 import { initRouter, toggleSessions, toggleApplet } from './router.js';
-import { actionBtnClick } from './session-panel.js';
 import { registerCommand } from './command-registry.js';
 import { initPanelResizer } from './panel-resizer.js';
 import { initNotifications } from './notifications.js';
@@ -32,7 +31,6 @@ declare global {
     removeImage: typeof removeImage;
     scrollToBottom: typeof scrollToBottom;
     toggleSessions: typeof toggleSessions;
-    actionBtnClick: typeof actionBtnClick;
     deleteSession: typeof deleteSession;
     selectModel: typeof selectModel;
     loadModels: typeof loadModels;
@@ -45,7 +43,6 @@ declare global {
 window.removeImage = removeImage;
 window.scrollToBottom = scrollToBottom;
 window.toggleSessions = toggleSessions;
-window.actionBtnClick = actionBtnClick;
 window.deleteSession = deleteSession;
 window.selectModel = selectModel;
 window.loadModels = loadModels;

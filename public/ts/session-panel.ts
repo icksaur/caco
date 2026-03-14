@@ -3,7 +3,7 @@
  */
 
 import type { SessionsResponse, SessionData } from './types.js';
-import { formatAge, formatStatusParts, fuzzyScore, sortSessions } from './ui-utils.js';
+import { formatAge, formatStatusParts, sortSessions } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { showSessionPanel } from './view-controller.js';
@@ -12,44 +12,13 @@ import { onGlobalEvent } from './websocket.js';
 import { sessionTracker } from './session-state-tracker.js';
 import { showToast } from './toast.js';
 
-// Module state for fuzzy search
+// Module state
 let allSessions: SessionData[] = [];
-let searchQuery = '';
-
-/**
- * Perform action button click - new session or resume first match
- * Single source of truth for action button behavior
- */
-export function actionBtnClick(): void {
-  if (!searchQuery) {
-    newSessionClick();  // Empty search → new session
-  } else {
-    const firstSession = document.querySelector('.session-item') as HTMLElement;
-    if (firstSession?.dataset.sessionId) {
-      void sessionClick(firstSession.dataset.sessionId);  // Has matches → resume
-    }
-    // No matches → do nothing (button is disabled anyway)
-  }
-}
 
 /**
  * Initialize session panel - subscribe to global events for session list changes
  */
 export function initSessionPanel(): void {
-  // Set up search input handlers
-  const searchInput = document.getElementById('sessionSearchInput') as HTMLInputElement | null;
-  if (searchInput) {
-    searchInput.addEventListener('input', () => {
-      searchQuery = searchInput.value.toLowerCase().trim();
-      renderFilteredSessions();
-    });
-    
-    searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        actionBtnClick();
-      }
-    });
-  }
 
   // Subscribe to unified session list change event
   onGlobalEvent((event) => {
@@ -115,30 +84,6 @@ export function setSessionLoading(sessionId: string, loading: boolean): void {
   }
 }
 
-function appendActionButtons(container: Element, sessionId: string, displayName: string): void {
-  const editBtn = document.createElement('button');
-  editBtn.className = 'session-edit';
-  editBtn.textContent = '/';
-  editBtn.title = 'Rename session';
-  editBtn.onclick = (e) => {
-    e.stopPropagation();
-    void renameSession(sessionId, displayName);
-  };
-  container.appendChild(editBtn);
-  
-  const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'session-delete';
-  deleteBtn.textContent = '×';
-  deleteBtn.onclick = (e) => {
-    e.stopPropagation();
-    void deleteSession(sessionId, displayName);
-  };
-  container.appendChild(deleteBtn);
-}
-
-/**
- * Update a single session item's busy state in the DOM
- */
 function updateSessionItemState(sessionId: string, isBusy: boolean): void {
   const item = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
   if (!item) return;
@@ -149,17 +94,9 @@ function updateSessionItemState(sessionId: string, isBusy: boolean): void {
     item.classList.add('busy');
     indicator?.classList.add('busy');
     indicator?.classList.remove('unobserved');
-    // Remove action buttons when busy
-    item.querySelector('.session-edit')?.remove();
-    item.querySelector('.session-delete')?.remove();
   } else {
     item.classList.remove('busy');
     indicator?.classList.remove('busy');
-    // Add action buttons if not present
-    if (!item.querySelector('.session-delete')) {
-      const title = item.querySelector('.session-title')?.textContent || 'Untitled';
-      appendActionButtons(item, sessionId, title);
-    }
   }
 }
 
@@ -407,23 +344,6 @@ export async function loadSessions(): Promise<void> {
  * Render sessions filtered by current search query
  */
 function renderFilteredSessions(): void {
-  // Compute filtered FIRST (needed for button state)
-  const filtered = searchQuery
-    ? allSessions.filter(s => matchesSearch(s, searchQuery))
-    : allSessions;
-  
-  // Update action button state (single source of truth)
-  const btn = document.getElementById('actionBtn') as HTMLButtonElement | null;
-  if (btn) {
-    if (!searchQuery) {
-      btn.textContent = '+ New session';
-      btn.disabled = false;
-    } else {
-      btn.textContent = 'Resume session';
-      btn.disabled = filtered.length === 0;
-    }
-  }
-  
   const container = document.getElementById('sessionList');
   if (!container) return;
   
@@ -431,36 +351,23 @@ function renderFilteredSessions(): void {
   
   container.innerHTML = '';
   
-  // Add sessions heading
   const heading = document.createElement('div');
   heading.className = 'section-header';
   heading.textContent = 'sessions';
   container.appendChild(heading);
   
-  // Show empty state if no matches
-  if (filtered.length === 0) {
+  if (allSessions.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'schedules-empty';
-    empty.textContent = searchQuery ? 'no matching sessions' : 'no sessions';
+    empty.textContent = 'no sessions';
     container.appendChild(empty);
     return;
   }
   
-  // Render each session with CWD below
-  for (const session of filtered) {
+  for (const session of allSessions) {
     const item = createSessionItem(session, activeSessionId ?? undefined);
     container.appendChild(item);
   }
-}
-
-
-/**
- * Check if a session matches the search query (fuzzy match)
- */
-function matchesSearch(session: SessionData, query: string): boolean {
-  const name = (session.name || session.summary || '').toLowerCase();
-  const cwd = (session.cwd || '').toLowerCase();
-  return fuzzyScore(name, query) >= 0 || fuzzyScore(cwd, query) >= 0;
 }
 
 /**
@@ -549,10 +456,6 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     row1.appendChild(ageSpan);
   }
   
-  if (!isBusy) {
-    appendActionButtons(row1, session.sessionId, displayName);
-  }
-  
   item.appendChild(row1);
   
   // Row 2: model·cwd
@@ -578,7 +481,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
 /**
  * Rename a session (custom name)
  */
-async function renameSession(sessionId: string, currentName: string): Promise<void> {
+export async function renameSession(sessionId: string, currentName: string): Promise<void> {
   const newName = prompt('Session name:', currentName);
   if (newName === null) return; // Cancelled
   

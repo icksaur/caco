@@ -4,6 +4,7 @@ import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
 import { sortSessions } from './ui-utils.js';
+import { deleteSession, renameSession } from './session-panel.js';
 import type { PopupItem } from './input-popup.js';
 import type { SessionData, SessionsResponse } from './types.js';
 
@@ -37,25 +38,53 @@ registerCommand({
   handler: () => newSessionClick()
 });
 
+async function fetchSessionPicker(): Promise<PopupItem[]> {
+  try {
+    const res = await fetch('/api/sessions');
+    const data: SessionsResponse = await res.json();
+    const sessions: SessionData[] = Object.values(data.grouped).flat()
+      .filter(s => s.kind !== 'swarm' || s.isBusy);
+    sortSessions(sessions);
+    return sessions.map(s => {
+      const label = s.name || s.summary || s.sessionId.slice(0, 8);
+      const desc = s.currentIntent || s.cwd?.split('/').pop() || '';
+      const icon = s.isBusy ? 'session-busy' : s.isUnobserved ? 'session-unobserved' : '';
+      return { id: s.sessionId, label, description: desc, icon };
+    });
+  } catch { return []; }
+}
+
+registerCommand({
+  name: 'session-rename',
+  description: 'Rename a session',
+  source: 'built-in',
+  picker: fetchSessionPicker,
+  handler: async (sessionId) => {
+    const res = await fetch(`/api/sessions/${sessionId}/state`);
+    const data = await res.json();
+    const currentName = data?.meta?.name || data?.meta?.summary || sessionId.slice(0, 8);
+    await renameSession(sessionId, currentName);
+  }
+});
+
+registerCommand({
+  name: 'session-delete',
+  description: 'Delete a session',
+  source: 'built-in',
+  picker: fetchSessionPicker,
+  handler: async (sessionId) => {
+    const res = await fetch(`/api/sessions/${sessionId}/state`);
+    const data = await res.json();
+    const name = data?.meta?.name || data?.meta?.summary || sessionId.slice(0, 8);
+    await deleteSession(sessionId, name);
+  }
+});
+
 registerCommand({
   name: 'sessions',
   description: 'Switch session',
   source: 'built-in',
-  picker: async () => {
-    try {
-      const res = await fetch('/api/sessions');
-      const data: SessionsResponse = await res.json();
-      const sessions: SessionData[] = Object.values(data.grouped).flat()
-        .filter(s => s.kind !== 'swarm' || s.isBusy);
-      sortSessions(sessions);
-      return sessions.map(s => {
-        const label = s.name || s.summary || s.sessionId.slice(0, 8);
-        const desc = s.currentIntent || s.cwd?.split('/').pop() || '';
-        const icon = s.isBusy ? 'session-busy' : s.isUnobserved ? 'session-unobserved' : '';
-        return { id: s.sessionId, label, description: desc, icon };
-      });
-    } catch { return []; }
-  },
+  picker: fetchSessionPicker,
   handler: (sessionId) => { void sessionClick(sessionId); }
 });
 

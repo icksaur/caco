@@ -1184,32 +1184,6 @@ main {
 }
 
 /* Action buttons (edit, delete) */
-.session-edit,
-.session-delete {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 16px;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.session-edit:hover,
-.session-delete:hover {
-  background: var(--color-selector-hover);
-  color: var(--color-text);
-}
-
-.session-delete:hover {
-  color: var(--color-error);
-}
-
 /* Busy state styling */
 .session-item.busy {
   border-left: 3px solid var(--color-error);
@@ -1395,50 +1369,6 @@ main {
 }
 
 /* Session top row: search + new session button */
-.session-top-row {
-  display: flex;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-lg);
-}
-
-.session-search-input {
-  flex: 4 1 0;  /* grow:4, shrink:1, basis:0 for proper ratio */
-  min-width: 0;
-  padding: var(--space-sm) var(--space-md);
-  font-size: var(--text-base);
-  background: var(--bg-input);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  outline: none;
-  transition: border-color var(--transition-fast);
-}
-
-.session-search-input:focus {
-  border-color: var(--color-accent);
-}
-
-.session-search-input::placeholder {
-  color: var(--color-text-dim);
-}
-
-.new-session-btn {
-  flex: 1 1 0;  /* grow:1, shrink:1, basis:0 for proper ratio */
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-success);
-  border: none;
-  border-radius: var(--radius-md);
-  color: var(--color-text-bright);
-  font-size: var(--text-base);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--transition-fast);
-}
-
-.new-session-btn:hover {
-  background: var(--color-success-hover);
-}
-
 .schedules-list {
   display: flex;
   flex-direction: column;

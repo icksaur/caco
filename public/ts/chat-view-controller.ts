@@ -25,8 +25,8 @@ import { regions } from './dom-regions.js';
 const RESUME_TIMEOUT_MS = 30000;
 
 class ChatViewController {
-  private lastPrompt = '';
-  private lastPromptSessionId = '';
+  private sessionDrafts = new Map<string, string>();
+  private sessionPrompts = new Map<string, string>();
   private footerSessionId: string | null = null;
 
   getViewState(): ViewState {
@@ -39,6 +39,29 @@ class ChatViewController {
    */
   getFooterSessionId(): string | null {
     return this.footerSessionId;
+  }
+
+  private getTextarea(): HTMLTextAreaElement | null {
+    return typeof document !== 'undefined'
+      ? document.querySelector('#chatForm textarea[name="message"]') as HTMLTextAreaElement | null
+      : null;
+  }
+
+  private saveDraft(): void {
+    const id = getActiveSessionId();
+    const ta = this.getTextarea();
+    if (!id || !ta) return;
+    const val = ta.value.trim();
+    if (val) this.sessionDrafts.set(id, ta.value);
+    else this.sessionDrafts.delete(id);
+  }
+
+  private restoreDraft(sessionId: string): void {
+    const ta = this.getTextarea();
+    if (!ta) return;
+    const draft = this.sessionDrafts.get(sessionId) || '';
+    ta.value = draft;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   /**
@@ -103,6 +126,7 @@ class ChatViewController {
       return;
     }
 
+    this.saveDraft();
     setSessionLoading(sessionId, true);
 
     try {
@@ -177,6 +201,7 @@ class ChatViewController {
     restoreContextUsage(sessionId);
     adHocBar.activateSession(sessionId);
     setViewState('chatting');
+    this.restoreDraft(sessionId);
   }
 
   /**
@@ -269,34 +294,31 @@ class ChatViewController {
    * Save the last sent prompt for recovery on timeout/error.
    */
   savePrompt(prompt: string, sessionId: string): void {
-    this.lastPrompt = prompt;
-    this.lastPromptSessionId = sessionId;
+    this.sessionPrompts.set(sessionId, prompt);
+    this.sessionDrafts.delete(sessionId);
   }
 
-  /**
-   * Restore the saved prompt to the textarea, but only if the user is
-   * still viewing the same session. Prevents cross-session prompt leaks.
-   */
-  restorePromptIfSameSession(): void {
-    if (!this.lastPrompt) return;
-    if (this.lastPromptSessionId !== getActiveSessionId()) return;
-
-    if (typeof document === 'undefined') return;
-    const input = document.querySelector('#chatForm textarea') as HTMLTextAreaElement;
-    if (input) {
-      input.value = this.lastPrompt;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+  restoreFailedPrompt(sessionId: string): void {
+    const prompt = this.sessionPrompts.get(sessionId);
+    if (!prompt) return;
+    if (sessionId === getActiveSessionId()) {
+      const ta = this.getTextarea();
+      if (ta) {
+        ta.value = prompt;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    } else {
+      this.sessionDrafts.set(sessionId, prompt);
     }
   }
 
   /**
    * Get last sent input for the current session (up-arrow recall).
-   * Returns empty string if no history or session mismatch.
    */
   getLastInput(): string {
     const activeId = getActiveSessionId();
-    if (!activeId || this.lastPromptSessionId !== activeId) return '';
-    return this.lastPrompt;
+    if (!activeId) return '';
+    return this.sessionPrompts.get(activeId) || this.sessionDrafts.get(activeId) || '';
   }
 }
 

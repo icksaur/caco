@@ -208,20 +208,19 @@ describe('ChatViewController', () => {
     });
   });
 
-  describe('savePrompt / restorePromptIfSameSession', () => {
+  describe('savePrompt / restoreFailedPrompt', () => {
     it('does not throw when session matches (no DOM in test)', () => {
       vi.mocked(getActiveSessionId).mockReturnValue('s1');
       cvc.savePrompt('hello', 's1');
-      // restorePromptIfSameSession calls document.querySelector which is
-      // undefined in Node — verify save/match logic via getCwd-style test
-      expect(() => cvc.restorePromptIfSameSession()).not.toThrow();
+      expect(() => cvc.restoreFailedPrompt('s1')).not.toThrow();
     });
 
-    it('skips restore when session changed', () => {
+    it('saves as draft when session differs', () => {
       vi.mocked(getActiveSessionId).mockReturnValue('s2');
       cvc.savePrompt('hello', 's1');
-      // Should be a no-op (different session)
-      expect(() => cvc.restorePromptIfSameSession()).not.toThrow();
+      cvc.restoreFailedPrompt('s1');
+      vi.mocked(getActiveSessionId).mockReturnValue('s1');
+      expect(cvc.getLastInput()).toBe('hello');
     });
   });
 
@@ -232,10 +231,13 @@ describe('ChatViewController', () => {
       expect(cvc.getLastInput()).toBe('my message');
     });
 
-    it('returns empty string when session differs', () => {
+    it('returns prompt for active session only', () => {
+      cvc.savePrompt('msg for s1', 's1');
+      cvc.savePrompt('msg for s2', 's2');
+      vi.mocked(getActiveSessionId).mockReturnValue('s1');
+      expect(cvc.getLastInput()).toBe('msg for s1');
       vi.mocked(getActiveSessionId).mockReturnValue('s2');
-      cvc.savePrompt('my message', 's1');
-      expect(cvc.getLastInput()).toBe('');
+      expect(cvc.getLastInput()).toBe('msg for s2');
     });
 
     it('returns empty string when no active session (new chat)', () => {

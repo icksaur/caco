@@ -33,18 +33,19 @@ import { chatView } from './chat-view-controller.js';
 
 let chatRegion: ChatRegion;
 let noEventsTimer: ReturnType<typeof setTimeout> | null = null;
+let noEventsSessionId: string | null = null;
 const NO_EVENTS_TIMEOUT_MS = 60000;
 
-function startNoEventsWatchdog(): void {
+function startNoEventsWatchdog(sessionId: string): void {
   clearNoEventsWatchdog();
+  noEventsSessionId = sessionId;
   noEventsTimer = setTimeout(() => {
     noEventsTimer = null;
     console.warn('[SEND] No events received after 60s — dispatch may have failed');
     
-    const activeId = getActiveSessionId();
-    if (activeId) sessionTracker.setBusy(activeId, false);
-    chatView.setFormEnabled(true);
-    chatView.restorePromptIfSameSession();
+    sessionTracker.setBusy(sessionId, false);
+    if (sessionId === getActiveSessionId()) chatView.setFormEnabled(true);
+    chatView.restoreFailedPrompt(sessionId);
     
     showToast('No response received — try again.');
   }, NO_EVENTS_TIMEOUT_MS);
@@ -253,19 +254,20 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     }
     
     console.log(`[SEND] Message accepted (${requestId})`);
-    startNoEventsWatchdog();
+    startNoEventsWatchdog(sessionId!);
     
   } catch (error) {
     console.error('[SEND] Error:', error);
     clearNoEventsWatchdog();
     
-    const activeId = getActiveSessionId();
-    if (activeId) sessionTracker.setBusy(activeId, false);
+    const sendSessionId = getActiveSessionId();
+    if (sendSessionId) {
+      sessionTracker.setBusy(sendSessionId, false);
+      chatView.restoreFailedPrompt(sendSessionId);
+    }
     chatView.setFormEnabled(true);
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    chatView.restorePromptIfSameSession();
-    
     showToast(errorMessage);
   }
 }

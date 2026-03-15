@@ -48,6 +48,24 @@ router.get('/usage', (_req: Request, res: Response) => {
   res.json({ usage });
 });
 
+router.get('/themes', async (_req: Request, res: Response) => {
+  try {
+    const themesDir = join(process.cwd(), 'public', 'themes');
+    const files = await readdir(themesDir);
+    const themes = files
+      .filter(f => f.endsWith('.css'))
+      .map(f => {
+        const id = f.replace('.css', '');
+        const name = id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        return { id, name };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ themes });
+  } catch {
+    res.json({ themes: [] });
+  }
+});
+
 /**
  * POST /api/tmpfile - Write temporary file to ~/.caco/tmp/
  * Body: { data: string, mimeType?: string, filename?: string }

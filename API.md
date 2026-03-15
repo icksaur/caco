@@ -230,6 +230,10 @@ Returns:
 
 Returns `null` if no usage data has been received yet.
 
+**GET /api/themes** - List available themes
+
+Returns `{ themes: [{ id, name }, ...] }`. Scans `public/themes/` for CSS files.
+
 ## Display Outputs
 
 - `GET /api/outputs/:id` - Get display output by ID

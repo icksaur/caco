@@ -264,6 +264,7 @@ export async function dispatchMessage(
       : DISPATCH_TIMEOUT_MS;
     let receivedFirstEvent = false;
     let toolExecuting = false;
+    let retried = false;
     
     const pauseWatchdog = () => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -275,18 +276,41 @@ export async function dispatchMessage(
       if (timeoutHandle) clearTimeout(timeoutHandle);
       const timeout = receivedFirstEvent ? betweenEventTimeout : INITIAL_TIMEOUT_MS;
       timeoutHandle = setTimeout(() => {
-        if (!dispatchCompleted) {
-          const label = receivedFirstEvent ? `${betweenEventTimeout / 1000}s between events` : `${INITIAL_TIMEOUT_MS / 1000}s waiting for first event`;
-          console.warn(`[DISPATCH:${rid}] Watchdog: ${label}, timing out session ${sessionId}`);
-          onEvent({ type: 'session.error', data: { message: receivedFirstEvent ? `No response for ${betweenEventTimeout / 1000 / 60} minutes` : 'Session not responding (connection may be stale)' } });
-          cleanupAndComplete('timeout');
+        if (dispatchCompleted) return;
+        
+        if (!receivedFirstEvent && !retried) {
+          retried = true;
+          console.warn(`[DISPATCH:${rid}] No first event after ${INITIAL_TIMEOUT_MS / 1000}s, retrying with fresh client`);
+          onEvent({ type: 'session.info', data: { message: 'Reconnecting...' } });
           unsubscribe();
+          void (async () => {
+            try {
+              await sessionManager.ensureClientHealthy();
+              await sessionManager.resume(sessionId, sessionState.getSessionConfig());
+              const retrySession = sessionManager.getSession(sessionId);
+              if (!retrySession) throw new Error('No session after retry');
+              unsubscribe = (retrySession as unknown as { on: (cb: SDKEventCallback) => () => void }).on(handleEvent);
+              await (retrySession as unknown as { send: (opts: Record<string, unknown>) => Promise<unknown> }).send(messageOptions);
+              resetWatchdog();
+            } catch (e) {
+              console.error(`[DISPATCH:${rid}] Retry failed:`, e instanceof Error ? e.message : e);
+              onEvent({ type: 'session.error', data: { message: 'Session not responding after retry' } });
+              cleanupAndComplete('retry-failed');
+            }
+          })();
+          return;
         }
+        
+        const label = receivedFirstEvent ? `${betweenEventTimeout / 1000}s between events` : `${INITIAL_TIMEOUT_MS / 1000}s waiting for first event`;
+        console.warn(`[DISPATCH:${rid}] Watchdog: ${label}, timing out session ${sessionId}`);
+        onEvent({ type: 'session.error', data: { message: receivedFirstEvent ? `No response for ${betweenEventTimeout / 1000 / 60} minutes` : 'Session not responding (connection may be stale)' } });
+        cleanupAndComplete('timeout');
+        unsubscribe();
       }, timeout);
     };
     resetWatchdog();
     
-    const unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on((event: SessionEvent) => {
+    const handleEvent = (event: SessionEvent) => {
       receivedFirstEvent = true;
       
       if (event.type === 'tool.execution_start') {
@@ -355,14 +379,15 @@ export async function dispatchMessage(
       }
       
       if (event.type === 'session.idle' || event.type === 'session.error') {
-        // Mark session as idle for unobserved tracking (via tracker for single source of truth)
         if (event.type === 'session.idle') {
           unobservedTracker.markIdle(sessionId);
         }
         cleanupAndComplete(event.type);
         unsubscribe();
       }
-    });
+    };
+    
+    let unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on(handleEvent);
     
     // Send message — this is the critical step. If it fails, the caller
     // gets an error. If it succeeds, streaming continues in the background.

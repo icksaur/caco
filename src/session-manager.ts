@@ -303,7 +303,9 @@ class SessionManager {
   private sharedClient: CopilotClientInstance | null = null;
   private clientStarting: Promise<CopilotClientInstance> | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
+  private healthTimer: NodeJS.Timeout | null = null;
   private static readonly SDK_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+  private static readonly HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
   
   private static readonly MAX_ACTIVE_SESSIONS = 5;
   private cachedModels: SDKModelInfo[] = [];
@@ -321,6 +323,7 @@ class SessionManager {
       const client = new CopilotClient({ cwd: process.cwd() }) as unknown as CopilotClientInstance;
       await client.start();
       this.sharedClient = client;
+      this.startHealthCheck();
       console.log('[SDK] Shared client started');
       return client;
     })();
@@ -341,6 +344,7 @@ class SessionManager {
     if (msg.includes('connection') || msg.includes('EPIPE') || msg.includes('killed') || msg.includes('spawn')) {
       console.warn('[SDK] Shared client appears dead, will recreate on next use');
       this.sharedClient = null;
+      this.stopHealthCheck();
     }
   }
 
@@ -365,10 +369,48 @@ class SessionManager {
     this.idleTimer = setTimeout(() => {
       if (!this.sharedClient) return;
       console.log('[SDK] Idle timeout, tearing down client to prevent stale connection');
+      this.stopHealthCheck();
       this.sharedClient.stop().catch(() => {});
       this.sharedClient = null;
       this.activeSessions.clear();
     }, SessionManager.SDK_IDLE_TIMEOUT_MS);
+  }
+
+  private startHealthCheck(): void {
+    this.stopHealthCheck();
+    this.healthTimer = setInterval(() => {
+      void this.proactiveHealthCheck();
+    }, SessionManager.HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  private stopHealthCheck(): void {
+    if (this.healthTimer) { clearInterval(this.healthTimer); this.healthTimer = null; }
+  }
+
+  private async proactiveHealthCheck(): Promise<void> {
+    if (!this.sharedClient) { this.stopHealthCheck(); return; }
+    
+    const state = (this.sharedClient as unknown as { getState?: () => string }).getState?.();
+    if (state && state !== 'connected') {
+      console.warn(`[SDK] Health check: client state is "${state}", resetting`);
+      this.sharedClient = null;
+      this.activeSessions.clear();
+      this.stopHealthCheck();
+      return;
+    }
+
+    try {
+      await Promise.race([
+        this.sharedClient.ping('health-check'),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('ping timeout')), 5000))
+      ]);
+    } catch (e) {
+      console.warn('[SDK] Health check failed, resetting client:', e instanceof Error ? e.message : e);
+      this.sharedClient.stop().catch(() => {});
+      this.sharedClient = null;
+      this.activeSessions.clear();
+      this.stopHealthCheck();
+    }
   }
 
   /**
@@ -990,6 +1032,8 @@ class SessionManager {
    * Shut down the shared SDK client. Call after all sessions are destroyed.
    */
   async shutdown(): Promise<void> {
+    this.stopHealthCheck();
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     if (this.sharedClient) {
       try {
         await this.sharedClient.stop();

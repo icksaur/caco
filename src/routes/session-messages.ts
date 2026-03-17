@@ -257,7 +257,7 @@ export async function dispatchMessage(
       console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
     };
     
-    const INITIAL_TIMEOUT_MS = 30_000;
+    const INITIAL_TIMEOUT_MS = 45_000;
     const meta = getSessionMeta(sessionId);
     const betweenEventTimeout = meta?.kind === 'swarm' || meta?.kind === 'agent'
       ? 15 * 60 * 1000

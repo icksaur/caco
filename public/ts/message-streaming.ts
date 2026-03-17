@@ -34,7 +34,7 @@ import { chatView } from './chat-view-controller.js';
 let chatRegion: ChatRegion;
 let noEventsTimer: ReturnType<typeof setTimeout> | null = null;
 let _noEventsSessionId: string | null = null;
-const NO_EVENTS_TIMEOUT_MS = 60000;
+const NO_EVENTS_TIMEOUT_MS = 45000;
 
 function startNoEventsWatchdog(sessionId: string): void {
   clearNoEventsWatchdog();

@@ -840,6 +840,7 @@ main {
 .user-message {
   background: var(--color-user-bg);
   padding: var(--space-lg);
+  white-space: pre-wrap;
 }
 
 .assistant-message {

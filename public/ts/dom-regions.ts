@@ -381,6 +381,9 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'user.message': (element, data) => {
     const value = getByPath(data, 'content');
     element.textContent = typeof value === 'string' ? value : '';
+    if (typeof window !== 'undefined' && window.renderMarkdownElement) {
+      window.renderMarkdownElement(element as unknown as Element);
+    }
   },
   'assistant.message': (element, data) => {
     const content = getByPath(data, 'content');

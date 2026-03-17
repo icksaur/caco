@@ -91,6 +91,7 @@ const FORBIDDEN_TAGS = [
  */
 function configureMarked(): void {
   marked.use({
+    breaks: true,
     renderer: {
       code(code: string, language: string): string {
         const safe = escapeHtml(code);

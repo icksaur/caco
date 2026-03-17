@@ -5,7 +5,7 @@
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences } from './history.js';
-import { deleteSession, initSessionPanel, loadSessions, loadSchedules, renameSession, getCachedSessions } from './session-panel.js';
+import { deleteSession, initSessionPanel, loadSessions, loadSchedules, getCachedSessions } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';

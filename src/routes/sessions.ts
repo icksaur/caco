@@ -16,7 +16,7 @@ import { homedir } from 'os';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, type SessionKind, type Roadmap } from '../storage.js';
+import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -50,6 +50,23 @@ function allowLocalhostCors(req: Request, res: Response): boolean {
 
 router.options('/sessions/:sessionId/export', (req, res) => { allowLocalhostCors(req, res); });
 router.options('/sessions/import', (req, res) => { allowLocalhostCors(req, res); });
+
+// Peer management
+router.get('/peers', (_req: Request, res: Response) => {
+  res.json(getPeers());
+});
+
+router.post('/peers', (req: Request, res: Response) => {
+  const peers = req.body as CacoPeer[];
+  if (!Array.isArray(peers)) {
+    res.status(400).json({ error: 'Expected array of {url, hostname}' });
+    return;
+  }
+  // Only store remote peers (skip self)
+  const remote = peers.filter(p => p.url && p.hostname && !p.url.includes('localhost:53000'));
+  setPeers(remote);
+  res.json({ ok: true, count: remote.length });
+});
 
 router.get('/session', async (req: Request, res: Response) => {
   const sessionId = (req.query.sessionId as string) || sessionState.activeSessionId;
@@ -94,12 +111,32 @@ router.get('/sessions', async (_req: Request, res: Response) => {
       }
     }
   }
+
+  // Fetch peer sessions (non-blocking, best-effort)
+  const peers = getPeers();
+  const peerSessions: Record<string, unknown> = {};
+  if (peers.length > 0) {
+    const results = await Promise.allSettled(
+      peers.map(async (peer) => {
+        const r = await fetch(`${peer.url}/api/sessions`, { signal: AbortSignal.timeout(3000) });
+        if (!r.ok) return null;
+        return { peer, data: await r.json() };
+      })
+    );
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value) {
+        const { peer, data } = result.value;
+        peerSessions[`${peer.hostname} (${peer.url})`] = data.grouped || {};
+      }
+    }
+  }
   
   res.json({
     activeSessionId: sessionState.activeSessionId,
     currentCwd: process.cwd(),
     grouped,
     unobservedCount,
+    peers: peerSessions,
     models: models.map(m => ({
       id: m.id,
       name: m.name,

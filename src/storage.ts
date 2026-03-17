@@ -777,3 +777,28 @@ export function removeMcpServerAuth(serverId: string): void {
   delete store.servers[serverId];
   setMcpAuth(store);
 }
+
+// ============================================================================
+// Peer Storage
+// ============================================================================
+
+const PEERS_FILE = join(STORAGE_ROOT, 'peers.json');
+
+export interface CacoPeer {
+  url: string;
+  hostname: string;
+}
+
+export function getPeers(): CacoPeer[] {
+  if (!existsSync(PEERS_FILE)) return [];
+  try {
+    return JSON.parse(readFileSync(PEERS_FILE, 'utf-8')) as CacoPeer[];
+  } catch {
+    return [];
+  }
+}
+
+export function setPeers(peers: CacoPeer[]): void {
+  ensureDir(STORAGE_ROOT);
+  writeFileSync(PEERS_FILE, JSON.stringify(peers, null, 2), 'utf-8');
+}

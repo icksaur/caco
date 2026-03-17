@@ -19,6 +19,8 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `POST /api/sessions/:id/cancel` - Cancel current streaming
 - `GET /api/sessions/:id/export` - Export session as .tar.gz archive
 - `POST /api/sessions/import` - Import session from .tar.gz archive
+- `GET /api/peers` - List known Caco peers
+- `POST /api/peers` - Update peer list (from portal)
 
 **GET /api/session** query params:
 - `sessionId` - Optional session ID (defaults to active session)

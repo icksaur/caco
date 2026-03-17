@@ -160,6 +160,9 @@ function loadPeers() {
 
 function savePeers() {
   localStorage.setItem(PEERS_KEY, JSON.stringify(peers));
+  // Persist to server so agents can discover peers
+  var remote = peers.filter(function(p) { return p.id !== 'local'; }).map(function(p) { return { url: p.url, hostname: p.name }; });
+  fetch('/api/peers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(remote) }).catch(function() {});
 }
 
 function saveActive() {

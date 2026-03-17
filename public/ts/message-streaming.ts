@@ -33,12 +33,12 @@ import { chatView } from './chat-view-controller.js';
 
 let chatRegion: ChatRegion;
 let noEventsTimer: ReturnType<typeof setTimeout> | null = null;
-let noEventsSessionId: string | null = null;
+let _noEventsSessionId: string | null = null;
 const NO_EVENTS_TIMEOUT_MS = 60000;
 
 function startNoEventsWatchdog(sessionId: string): void {
   clearNoEventsWatchdog();
-  noEventsSessionId = sessionId;
+  _noEventsSessionId = sessionId;
   noEventsTimer = setTimeout(() => {
     noEventsTimer = null;
     console.warn('[SEND] No events received after 60s — dispatch may have failed');

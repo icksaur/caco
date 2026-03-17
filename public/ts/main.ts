@@ -5,7 +5,7 @@
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences } from './history.js';
-import { deleteSession, initSessionPanel, loadSessions, loadSchedules, renameSession } from './session-panel.js';
+import { deleteSession, initSessionPanel, loadSessions, loadSchedules, renameSession, getCachedSessions } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
@@ -13,7 +13,7 @@ import { initRegions } from './dom-regions.js';
 import { initViewState, setViewState, showSessionPanel } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { initInputRouter } from './input-router.js';
-import { setupMultilineInput } from './multiline-input.js';
+import { setupMultilineInput, registerPoundProvider } from './multiline-input.js';
 import { connectWs, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
@@ -86,6 +86,17 @@ document.addEventListener('DOMContentLoaded', () => {
     showSessionPanel();
     void loadSessions();
     void loadSchedules();
+    
+    registerPoundProvider(() => {
+      return getCachedSessions()
+        .filter(s => s.kind !== 'swarm')
+        .map(s => ({
+          id: `session:${s.sessionId}`,
+          label: s.name || s.summary || s.sessionId.slice(0, 8),
+          description: 'session',
+          value: `caco-session:${s.sessionId}`,
+        }));
+    });
     
     // Connect WebSocket once on page load
     connectWs();

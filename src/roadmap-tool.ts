@@ -21,10 +21,15 @@ export function createRoadmapTools(sessionRef: SessionIdRef) {
 Call this after session resume or context compaction to recover project state. The roadmap persists on disk and survives compaction.
 
 Returns empty object if no roadmap exists yet.`,
-    parameters: z.object({}),
-    handler: async () => {
-      const roadmap = getSessionRoadmap(sessionRef.id);
-      if (!roadmap) return { exists: false, message: 'No roadmap exists for this session. Use update_roadmap to create one.' };
+    parameters: z.object({
+      sessionId: z.string().optional().describe('Read another session\'s roadmap (read-only). Use the caco-session:UUID from user input.'),
+    }),
+    handler: async ({ sessionId }) => {
+      const targetId = sessionId || sessionRef.id;
+      const roadmap = getSessionRoadmap(targetId);
+      if (!roadmap) return { exists: false, message: targetId === sessionRef.id
+        ? 'No roadmap exists for this session. Use update_roadmap to create one.'
+        : `No roadmap exists for session ${targetId.slice(0, 8)}.` };
       return roadmap;
     }
   });
@@ -124,12 +129,19 @@ Examples:
 
 - No parameters: returns all notes (timestamped entries)
 - append: add a new note (timestamped automatically)
+- sessionId: read another session's notes (read-only, cannot append)
 
 Use notes to record decisions, findings, and context that should survive compaction.`,
     parameters: z.object({
       append: z.string().optional().describe('Text to append as a new timestamped note'),
+      sessionId: z.string().optional().describe('Read another session\'s notes (read-only). Use the caco-session:UUID from user input.'),
     }),
-    handler: async ({ append }) => {
+    handler: async ({ append, sessionId }) => {
+      if (sessionId && sessionId !== sessionRef.id) {
+        const notes = getSessionNotes(sessionId);
+        if (!notes.length) return { notes: [], message: `No notes for session ${sessionId.slice(0, 8)}.` };
+        return { notes };
+      }
       if (append) {
         const entry = appendSessionNote(sessionRef.id, append);
         return { appended: entry };

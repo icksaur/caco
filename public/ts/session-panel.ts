@@ -15,6 +15,10 @@ import { showToast } from './toast.js';
 // Module state
 let allSessions: SessionData[] = [];
 
+export function getCachedSessions(): SessionData[] {
+  return allSessions;
+}
+
 /**
  * Initialize session panel - subscribe to global events for session list changes
  */

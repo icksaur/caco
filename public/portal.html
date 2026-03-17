@@ -413,6 +413,25 @@ window.addEventListener('message', function(e) {
     });
     return;
   }
+
+  // Cross-iframe navigation: child iframe requests navigating a peer to a session
+  if (e.data.type === 'caco:navigate') {
+    var targetUrl = e.data.targetUrl;
+    var sessionId = e.data.sessionId;
+    if (!targetUrl || !sessionId) return;
+
+    // Find the peer and its iframe
+    var targetPeer = peers.find(function(p) { return p.url === targetUrl || targetUrl.startsWith(p.url); });
+    if (!targetPeer) return;
+
+    var targetFrame = document.getElementById('frame-' + targetPeer.id);
+    if (targetFrame) {
+      targetFrame.contentWindow.postMessage({ type: 'caco:navigateSession', sessionId: sessionId }, '*');
+      // Switch portal to show that peer
+      switchTo(targetPeer.id);
+    }
+    return;
+  }
   
   if (e.data.type !== 'caco:status') return;
   var origin = e.data.origin;

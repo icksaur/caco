@@ -17,7 +17,7 @@ import { setupMultilineInput, registerPoundProvider } from './multiline-input.js
 import { connectWs, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
-import { initRouter, toggleSessions, toggleApplet } from './router.js';
+import { initRouter, toggleSessions, toggleApplet, sessionClick } from './router.js';
 import { registerCommand } from './command-registry.js';
 import { initPanelResizer } from './panel-resizer.js';
 import { initNotifications } from './notifications.js';
@@ -188,6 +188,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   
+  // Cross-iframe navigation: portal sends caco:navigateSession to switch sessions
+  window.addEventListener('message', (e) => {
+    if (e.data?.type === 'caco:navigateSession' && e.data.sessionId) {
+      void sessionClick(e.data.sessionId);
+    }
+  });
+
   // Initialize hostname-based favicon and button colors
   initHostnameHash();
   

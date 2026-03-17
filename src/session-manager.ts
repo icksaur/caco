@@ -168,8 +168,8 @@ function repairSessionEvents(sessionId: string, errorMessage?: string): string |
 interface CopilotClientInstance {
   start(): Promise<void>;
   stop(): Promise<void>;
-  ping(message?: string): Promise<{ message: string; timestamp: number }>;
-  createSession(config: CreateSessionConfig): Promise<CopilotSessionInstance>;
+  forceStop(): Promise<void>;
+  ping(message?: string): Promise<{ message: string; timestamp: number }>;  createSession(config: CreateSessionConfig): Promise<CopilotSessionInstance>;
   resumeSession(sessionId: string, config?: ResumeSessionConfig): Promise<CopilotSessionInstance>;
   deleteSession(sessionId: string): Promise<void>;
   listModels(): Promise<SDKModelInfo[]>;
@@ -342,9 +342,11 @@ class SessionManager {
   private handleClientError(error: unknown): void {
     const msg = error instanceof Error ? error.message : String(error);
     if (msg.includes('connection') || msg.includes('EPIPE') || msg.includes('killed') || msg.includes('spawn')) {
-      console.warn('[SDK] Shared client appears dead, will recreate on next use');
+      console.warn('[SDK] Shared client appears dead, force-stopping');
+      const client = this.sharedClient;
       this.sharedClient = null;
       this.stopHealthCheck();
+      if (client) client.forceStop().catch(() => {});
     }
   }
 
@@ -357,7 +359,9 @@ class SessionManager {
         new Promise((_, reject) => setTimeout(() => reject(new Error('ping timeout')), 5000))
       ]);
     } catch (e) {
-      console.warn('[SDK] Ping failed, resetting client:', e instanceof Error ? e.message : e);
+      console.warn('[SDK] Ping failed, force-stopping client:', e instanceof Error ? e.message : e);
+      this.stopHealthCheck();
+      try { await client.forceStop(); } catch { /* already dead */ }
       this.sharedClient = null;
       this.activeSessions.clear();
       await this.ensureClient();
@@ -390,26 +394,28 @@ class SessionManager {
   private async proactiveHealthCheck(): Promise<void> {
     if (!this.sharedClient) { this.stopHealthCheck(); return; }
     
-    const state = (this.sharedClient as unknown as { getState?: () => string }).getState?.();
+    const client = this.sharedClient;
+    const state = (client as unknown as { getState?: () => string }).getState?.();
     if (state && state !== 'connected') {
-      console.warn(`[SDK] Health check: client state is "${state}", resetting`);
+      console.warn(`[SDK] Health check: client state is "${state}", force-stopping`);
       this.sharedClient = null;
       this.activeSessions.clear();
       this.stopHealthCheck();
+      try { await client.forceStop(); } catch { /* */ }
       return;
     }
 
     try {
       await Promise.race([
-        this.sharedClient.ping('health-check'),
+        client.ping('health-check'),
         new Promise((_, reject) => setTimeout(() => reject(new Error('ping timeout')), 5000))
       ]);
     } catch (e) {
-      console.warn('[SDK] Health check failed, resetting client:', e instanceof Error ? e.message : e);
-      this.sharedClient.stop().catch(() => {});
+      console.warn('[SDK] Health check failed, force-stopping client:', e instanceof Error ? e.message : e);
       this.sharedClient = null;
       this.activeSessions.clear();
       this.stopHealthCheck();
+      try { await client.forceStop(); } catch { /* */ }
     }
   }
 

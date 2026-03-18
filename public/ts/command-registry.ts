@@ -58,7 +58,7 @@ registerCommand({
     if (!sessionId) { showToast('No active session'); return; }
     const res = await fetch(`/api/sessions/${sessionId}/state`).catch(() => null);
     const data = res?.ok ? await res.json().catch(() => null) : null;
-    const name = data?.meta?.name || data?.meta?.summary || undefined;
+    const name = data?.name || data?.summary || undefined;
     await deleteSession(sessionId, name);
   }
 });

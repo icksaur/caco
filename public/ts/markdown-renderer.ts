@@ -47,7 +47,7 @@ async function getMermaid(): Promise<MermaidAPI> {
 }
 
 declare const marked: {
-  use(options: { renderer: object }): void;
+  use(options: { renderer?: object; breaks?: boolean }): void;
   parse(markdown: string): string;
 };
 

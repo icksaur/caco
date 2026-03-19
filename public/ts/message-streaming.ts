@@ -32,31 +32,6 @@ import { fetchWithTimeout } from './fetch-timeout.js';
 import { chatView } from './chat-view-controller.js';
 
 let chatRegion: ChatRegion;
-let noEventsTimer: ReturnType<typeof setTimeout> | null = null;
-let _noEventsSessionId: string | null = null;
-const NO_EVENTS_TIMEOUT_MS = 45000;
-
-function startNoEventsWatchdog(sessionId: string): void {
-  clearNoEventsWatchdog();
-  _noEventsSessionId = sessionId;
-  noEventsTimer = setTimeout(() => {
-    noEventsTimer = null;
-    console.warn('[SEND] No events received after 60s — dispatch may have failed');
-    
-    sessionTracker.setBusy(sessionId, false);
-    if (sessionId === getActiveSessionId()) chatView.setFormEnabled(true);
-    chatView.restoreFailedPrompt(sessionId);
-    
-    showToast('No response received — try again.');
-  }, NO_EVENTS_TIMEOUT_MS);
-}
-
-function clearNoEventsWatchdog(): void {
-  if (noEventsTimer) {
-    clearTimeout(noEventsTimer);
-    noEventsTimer = null;
-  }
-}
 
 /**
  * Handle incoming SDK event (history or live)
@@ -66,16 +41,6 @@ function clearNoEventsWatchdog(): void {
 function handleEvent(event: SessionEvent): void {
   let eventType = event.type;
   const data = event.data || {};
-  
-  // Any live event means the dispatch is working — cancel the no-events watchdog
-  // and ensure busy state is set (handles remote dispatches not initiated by this client)
-  if (!isLoadingHistory()) {
-    clearNoEventsWatchdog();
-    const activeId = getActiveSessionId();
-    if (activeId && !isTerminalEvent(eventType) && !sessionTracker.isBusy(activeId)) {
-      sessionTracker.setBusy(activeId, true);
-    }
-  }
   
   if (eventType === 'user.message' && data.source && data.source !== 'user') {
     eventType = `caco.${data.source}`;
@@ -135,6 +100,11 @@ function handleEvent(event: SessionEvent): void {
           void markSessionObserved(sessionId);
           adHocBar.clearSession(sessionId);
           notifySessionComplete(sessionTracker.getIntent(sessionId) || '');
+        }
+
+        // Server says dispatch failed — restore the user's prompt
+        if (eventType === 'session.error' && data.restorePrompt) {
+          chatView.restoreFailedPrompt(sessionId);
         }
       }
     }
@@ -254,12 +224,11 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     }
     
     console.log(`[SEND] Message accepted (${requestId})`);
-    startNoEventsWatchdog(sessionId!);
     
   } catch (error) {
     console.error('[SEND] Error:', error);
-    clearNoEventsWatchdog();
     
+    // HTTP-level failure — POST itself failed, restore prompt
     const sendSessionId = getActiveSessionId();
     if (sendSessionId) {
       sessionTracker.setBusy(sendSessionId, false);

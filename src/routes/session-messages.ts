@@ -294,7 +294,7 @@ export async function dispatchMessage(
               resetWatchdog();
             } catch (e) {
               console.error(`[DISPATCH:${rid}] Retry failed:`, e instanceof Error ? e.message : e);
-              onEvent({ type: 'session.error', data: { message: 'Session not responding after retry' } });
+              onEvent({ type: 'session.error', data: { message: 'Session not responding after retry', restorePrompt: true } });
               cleanupAndComplete('retry-failed');
             }
           })();
@@ -303,7 +303,7 @@ export async function dispatchMessage(
         
         const label = receivedFirstEvent ? `${betweenEventTimeout / 1000}s between events` : `${INITIAL_TIMEOUT_MS / 1000}s waiting for first event`;
         console.warn(`[DISPATCH:${rid}] Watchdog: ${label}, timing out session ${sessionId}`);
-        onEvent({ type: 'session.error', data: { message: receivedFirstEvent ? `No response for ${betweenEventTimeout / 1000 / 60} minutes` : 'Session not responding (connection may be stale)' } });
+        onEvent({ type: 'session.error', data: { message: receivedFirstEvent ? `No response for ${betweenEventTimeout / 1000 / 60} minutes` : 'Session not responding (connection may be stale)', restorePrompt: true } });
         cleanupAndComplete('timeout');
         unsubscribe();
       }, timeout);
@@ -402,10 +402,10 @@ export async function dispatchMessage(
       console.error(`[DISPATCH:${rid}] Send error:`, message);
       
       if (message.includes('Session not found') || message.includes('session.send failed')) {
-        onEvent({ type: 'session.error', data: { message: 'Session expired - please start a new session' } });
+        onEvent({ type: 'session.error', data: { message: 'Session expired - please start a new session', restorePrompt: true } });
         sessionManager.stop(sessionId).catch(() => {});
       } else {
-        onEvent({ type: 'session.error', data: { message } });
+        onEvent({ type: 'session.error', data: { message, restorePrompt: true } });
       }
       
       cleanupAndComplete('send error');
@@ -420,8 +420,7 @@ export async function dispatchMessage(
       dispatchCompleted = true;
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[DISPATCH:${rid}] Outer error:`, message);
-      onEvent({ type: 'session.error', data: { message } });
-      
+      onEvent({ type: 'session.error', data: { message, restorePrompt: true } });      
       sessionManager.endDispatch(sessionId);
       broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
       if (tempFilePaths) {

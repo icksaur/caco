@@ -1193,7 +1193,7 @@ main {
   border-left: 3px solid var(--color-unobserved);
 }
 
-.session-item[draggable="true"] { cursor: grab; }
+.session-item[draggable="true"] { cursor: pointer; }
 .session-item[draggable="true"]:active { cursor: grabbing; }
 
 .model-name {

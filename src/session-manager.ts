@@ -971,6 +971,33 @@ class SessionManager {
   }
 
   /**
+   * List MCP server status by querying tools from an active session.
+   * Compares configured servers against tools loaded (by namespace prefix).
+   */
+  async getMcpStatus(sessionId: string): Promise<{ configured: string[]; connected: string[]; tools: Record<string, number> }> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) throw new Error(`Session ${sessionId} is not active`);
+
+    const session = active.session as unknown as { rpc: { tools: { list: (p?: unknown) => Promise<{ tools: { name: string; namespacedName?: string }[] }> } } };
+    const result = await session.rpc.tools.list({});
+
+    // Group tools by MCP server namespace
+    const toolsByServer: Record<string, number> = {};
+    for (const tool of result.tools) {
+      if (tool.namespacedName) {
+        const server = tool.namespacedName.split('/')[0];
+        toolsByServer[server] = (toolsByServer[server] || 0) + 1;
+      }
+    }
+
+    // Get configured MCP server names from config
+    const configured = Object.keys(await loadMcpServers() || {});
+    const connected = Object.keys(toolsByServer);
+
+    return { configured, connected, tools: toolsByServer };
+  }
+
+  /**
    * Send a message without waiting (for streaming)
    * @throws Error if session is not active
    */

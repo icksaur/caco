@@ -14,6 +14,7 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `PATCH /api/sessions/:id` - Update session metadata (name, env hint, context)
 - `DELETE /api/sessions/:id` - Delete a session
 - `GET /api/sessions/:id/state` - Get session state (for agent-to-agent polling)
+- `GET /api/sessions/:id/mcp` - Get MCP server connection status for session
 - `GET /api/sessions/:id/icon` - Serve session icon (icon.gif preferred, falls back to icon.png). Returns 404 if no icon exists.
 - `POST /api/sessions/:id/messages` - Send message to session
 - `POST /api/sessions/:id/cancel` - Cancel current streaming

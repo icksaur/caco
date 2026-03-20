@@ -399,28 +399,6 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
   });
 });
 
-/**
- * GET /api/sessions/:sessionId/mcp
- * Get MCP server connection status for a session.
- * Returns configured servers vs connected (tools loaded).
- */
-router.get('/sessions/:sessionId/mcp', async (req: Request, res: Response) => {
-  const sessionId = req.params.sessionId as string;
-
-  if (!sessionManager.isActive(sessionId)) {
-    res.status(404).json({ error: 'Session not active' });
-    return;
-  }
-
-  try {
-    const status = await sessionManager.getMcpStatus(sessionId);
-    res.json(status);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: msg });
-  }
-});
-
 router.get('/sessions/:sessionId/data/:name', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const name = req.params.name as string;

@@ -242,39 +242,3 @@ listEl.addEventListener('keypress', function(event) {
 
 // Initial load
 fetchServers();
-fetchMcpStatus();
-
-var statusEl = document.getElementById('mcp-status');
-
-async function fetchMcpStatus() {
-  // Get active session ID
-  var sessionId = window.appletAPI ? window.appletAPI.getSessionId() : null;
-  if (!sessionId) {
-    statusEl.innerHTML = '<div class="status-hint">Open a session to see MCP connection status</div>';
-    return;
-  }
-
-  try {
-    var res = await fetch('/api/sessions/' + sessionId + '/mcp');
-    if (!res.ok) {
-      statusEl.innerHTML = '<div class="status-hint">Session not active</div>';
-      return;
-    }
-    var data = await res.json();
-
-    var html = '<div class="status-header">Session MCP Servers</div>';
-    for (var i = 0; i < data.configured.length; i++) {
-      var name = data.configured[i];
-      var isConnected = data.connected.indexOf(name) >= 0;
-      var toolCount = data.tools[name] || 0;
-      var icon = isConnected
-        ? '<span class="status-icon status-ok">&#x2713;</span>'
-        : '<span class="status-icon status-bad">&#x2717;</span>';
-      var detail = isConnected ? toolCount + ' tools' : 'not connected';
-      html += '<div class="status-row">' + icon + '<span class="status-name">' + escapeHtml(name) + '</span><span class="status-detail">' + detail + '</span></div>';
-    }
-    statusEl.innerHTML = html;
-  } catch (err) {
-    statusEl.innerHTML = '<div class="status-hint">Failed to load status</div>';
-  }
-}

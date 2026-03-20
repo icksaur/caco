@@ -978,8 +978,9 @@ class SessionManager {
     const active = this.activeSessions.get(sessionId);
     if (!active) throw new Error(`Session ${sessionId} is not active`);
 
-    const session = active.session as unknown as { rpc: { tools: { list: (p?: unknown) => Promise<{ tools: { name: string; namespacedName?: string }[] }> } } };
-    const result = await session.rpc.tools.list({});
+    // tools.list is on the client RPC, not the session
+    const client = await this.ensureClient() as unknown as { rpc: { tools: { list: (p?: unknown) => Promise<{ tools: { name: string; namespacedName?: string }[] }> } } };
+    const result = await client.rpc.tools.list({});
 
     // Group tools by MCP server namespace
     const toolsByServer: Record<string, number> = {};

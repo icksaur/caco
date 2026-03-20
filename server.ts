@@ -20,6 +20,7 @@ import { createMcpAuthTools } from './src/mcp-auth-tools.js';
 import { createDevDocsTool } from './src/dev-docs-tool.js';
 import { createExtensionsTool } from './src/extensions-tool.js';
 import { createSwarmTool } from './src/swarm-tool.js';
+import { createDelegateTool } from './src/delegate-tool.js';
 import { createRoadmapTools } from './src/roadmap-tool.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
@@ -190,9 +191,10 @@ async function start(): Promise<void> {
     const devDocs = createDevDocsTool(programCwd);
     const extIntrospection = createExtensionsTool();
     const swarmTools = createSwarmTool(sessionRef);
+    const delegateTools = createDelegateTool(sessionRef);
     const roadmapTools = createRoadmapTools(sessionRef);
     
-    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...roadmapTools];
+    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools];
   };
   
   await createSessionState({

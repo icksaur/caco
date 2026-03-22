@@ -8,23 +8,16 @@ import { getSessionMeta } from './storage.js';
 
 const DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
 
-async function countAssistantMessages(sessionId: string): Promise<number> {
+async function getLastAssistantMessage(sessionId: string): Promise<string> {
   try {
     const events = await sessionManager.getHistory(sessionId);
-    return events.filter(e => e.type === 'assistant.message').length;
-  } catch { return 0; }
-}
-
-async function getAssistantMessageAfter(sessionId: string, priorCount: number): Promise<string> {
-  try {
-    const events = await sessionManager.getHistory(sessionId);
-    const assistantMessages = events.filter(e => e.type === 'assistant.message');
-    if (assistantMessages.length > priorCount) {
-      const firstNew = assistantMessages[priorCount];
-      const content = firstNew.data?.content;
-      if (typeof content === 'string') return content;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === 'assistant.message') {
+        const content = events[i].data?.content;
+        if (typeof content === 'string') return content;
+      }
     }
-    return '(no new response)';
+    return '(no assistant response found)';
   } catch (e) {
     return `(error reading history: ${e instanceof Error ? e.message : e})`;
   }
@@ -59,7 +52,6 @@ The delegate sessions must already exist. The user provides session IDs (caco-se
 
       const delegates: Array<{
         sessionId: string;
-        priorCount: number;
         startedAt: number;
         done: boolean;
         result: string | null;
@@ -74,8 +66,7 @@ The delegate sessions must already exist. The user provides session IDs (caco-se
           return { textResultForLlm: `Session ${p.sessionId.slice(0, 8)} ("${meta?.name || 'unnamed'}") is busy. Wait or choose another session.`, resultType: 'error' as const };
         }
 
-        const priorCount = await countAssistantMessages(p.sessionId);
-        delegates.push({ sessionId: p.sessionId, priorCount, startedAt: Date.now(), done: false, result: null });
+        delegates.push({ sessionId: p.sessionId, startedAt: Date.now(), done: false, result: null });
       }
 
       for (let i = 0; i < delegates.length; i++) {
@@ -109,7 +100,7 @@ The delegate sessions must already exist. The user provides session IDs (caco-se
 
           if (result === 'idle') {
             d.done = true;
-            d.result = await getAssistantMessageAfter(d.sessionId, d.priorCount);
+            d.result = await getLastAssistantMessage(d.sessionId);
             console.log(`[DELEGATE] Session ${d.sessionId.slice(0, 8)} responded`);
           } else if (result === 'gone') {
             d.done = true;

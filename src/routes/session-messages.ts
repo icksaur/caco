@@ -157,7 +157,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     await dispatchMessage(
       sessionId, 
       promptToSend, 
-      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId },
+      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId, needsObservation: !source },
       {
         onEvent: (evt) => broadcastEvent(sessionId, evt)
       }
@@ -191,11 +191,11 @@ export interface DispatchCallbacks {
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string },
+  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePaths, correlationId, requestId } = options || {};
+  const { tempFilePaths, correlationId, requestId, needsObservation } = options || {};
   const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
   
@@ -380,7 +380,7 @@ export async function dispatchMessage(
       }
       
       if (event.type === 'session.idle' || event.type === 'session.error') {
-        if (event.type === 'session.idle') {
+        if (event.type === 'session.idle' && needsObservation) {
           unobservedTracker.markIdle(sessionId);
         }
         cleanupAndComplete(event.type);

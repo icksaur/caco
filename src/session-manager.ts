@@ -983,18 +983,19 @@ class SessionManager {
   }
 
   /**
-   * Send a message to the SDK session.
-   * Returns when the RPC send completes (events stream via session.on()).
-   * @throws Error if session is not active or SDK rejects the send
+   * Send a message to the SDK session (fire-and-forget).
+   * Returns the send promise; callers should attach .catch() but NOT await.
+   * Events stream via session.on(), not via the returned promise.
+   * @throws Error synchronously if session is not active
    */
-  async sendStream(sessionId: string, message: string, options: Partial<SendOptions> = {}): Promise<void> {
+  sendStream(sessionId: string, message: string, options: Partial<SendOptions> = {}): Promise<string> {
     const active = this.activeSessions.get(sessionId);
     if (!active) {
       throw new Error(`Session ${sessionId} is not active`);
     }
     
     const { session } = active;
-    await session.send({
+    return session.send({
       ...options,
       prompt: message,
     });

@@ -202,7 +202,7 @@ interface ResumeSessionConfig {
 
 interface CopilotSessionInstance {
   sessionId: string;
-  send(options: SendOptions): AsyncIterable<SessionEvent>;
+  send(options: SendOptions): Promise<string>;
   sendAndWait(options: SendOptions, timeout?: number): Promise<unknown>;
   getMessages(): Promise<SessionEvent[]>;
   destroy(): Promise<void>;
@@ -667,6 +667,18 @@ class SessionManager {
   }
 
   /**
+   * Drop a session from the active map without calling session.destroy().
+   * Used when the SDK already lost track of the session (e.g., "Session not found"
+   * RPC error). Allows resume() to re-register with the SDK on next attempt.
+   */
+  dropStaleSession(sessionId: string): void {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) return;
+    this.activeSessions.delete(sessionId);
+    console.log(`[SDK] Dropped stale session ${sessionId} from active map`);
+  }
+
+  /**
    * Stop an active session (releases lock)
    */
   async stop(sessionId: string): Promise<void> {
@@ -971,19 +983,20 @@ class SessionManager {
   }
 
   /**
-   * Send a message without waiting (for streaming)
-   * @throws Error if session is not active
+   * Send a message to the SDK session.
+   * Returns when the RPC send completes (events stream via session.on()).
+   * @throws Error if session is not active or SDK rejects the send
    */
-  sendStream(sessionId: string, message: string, options: Partial<SendOptions> = {}): AsyncIterable<SessionEvent> {
+  async sendStream(sessionId: string, message: string, options: Partial<SendOptions> = {}): Promise<void> {
     const active = this.activeSessions.get(sessionId);
     if (!active) {
       throw new Error(`Session ${sessionId} is not active`);
     }
     
     const { session } = active;
-    return session.send({
+    await session.send({
       ...options,
-      prompt: message,  // Must come AFTER spread to override any options.prompt
+      prompt: message,
     });
   }
 

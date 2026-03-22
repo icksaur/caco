@@ -285,6 +285,7 @@ export async function dispatchMessage(
           unsubscribe();
           void (async () => {
             try {
+              sessionManager.dropStaleSession(sessionId);
               await sessionManager.ensureClientHealthy();
               await sessionManager.resume(sessionId, sessionState.getSessionConfig());
               const retrySession = sessionManager.getSession(sessionId);
@@ -396,14 +397,35 @@ export async function dispatchMessage(
     
     console.log(`[DISPATCH:${rid}] Sending to SDK for session ${sessionId}`);
     try {
-      sessionManager.sendStream(sessionId, prompt, messageOptions);
+      await sessionManager.sendStream(sessionId, prompt, messageOptions);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[DISPATCH:${rid}] Send error:`, message);
       
       if (message.includes('Session not found') || message.includes('session.send failed')) {
+        sessionManager.dropStaleSession(sessionId);
+        if (!retried) {
+          retried = true;
+          console.log(`[DISPATCH:${rid}] Session lost by SDK, retrying with fresh resume`);
+          onEvent({ type: 'session.info', data: { message: 'Reconnecting...' } });
+          unsubscribe();
+          try {
+            await sessionManager.ensureClientHealthy();
+            await sessionManager.resume(sessionId, sessionState.getSessionConfig());
+            const retrySession = sessionManager.getSession(sessionId);
+            if (!retrySession) throw new Error('No session after retry');
+            unsubscribe = (retrySession as unknown as { on: (cb: SDKEventCallback) => () => void }).on(handleEvent);
+            await (retrySession as unknown as { send: (opts: Record<string, unknown>) => Promise<unknown> }).send(messageOptions);
+            resetWatchdog();
+            return; // Retry succeeded, streaming continues via handleEvent
+          } catch (retryErr) {
+            console.error(`[DISPATCH:${rid}] Retry failed:`, retryErr instanceof Error ? retryErr.message : retryErr);
+            onEvent({ type: 'session.error', data: { message: 'Session not responding after retry', restorePrompt: true } });
+            cleanupAndComplete('retry-failed');
+            throw retryErr;
+          }
+        }
         onEvent({ type: 'session.error', data: { message: 'Session expired - please start a new session', restorePrompt: true } });
-        sessionManager.stop(sessionId).catch(() => {});
       } else {
         onEvent({ type: 'session.error', data: { message, restorePrompt: true } });
       }

@@ -4,24 +4,20 @@
  * Consolidates busy tracking and correlation context into one source of truth.
  * A session is "dispatching" when actively processing a message from the SDK.
  * 
- * During dispatch:
- * - Session is marked busy (can't receive new messages)
- * - correlationId is available for tools to inherit
- * 
- * Lifecycle: start() → getCorrelationId() → end()
+ * Extends EventEmitter: emits 'idle' when a dispatch ends, enabling
+ * event-driven completion detection in swarm/delegate tools.
  */
+
+import { EventEmitter } from 'events';
 
 export interface ActiveDispatch {
   correlationId: string;
   startedAt: number;
 }
 
-export class DispatchState {
+export class DispatchState extends EventEmitter {
   private dispatches = new Map<string, ActiveDispatch>();
 
-  /**
-   * Start a dispatch - marks session as busy with correlation context
-   */
   start(sessionId: string, correlationId: string): void {
     if (this.dispatches.has(sessionId)) {
       console.warn(`[DISPATCH] Session ${sessionId} already dispatching, overwriting context`);
@@ -32,42 +28,86 @@ export class DispatchState {
     });
   }
 
-  /**
-   * End a dispatch - clears busy state and correlation context
-   */
   end(sessionId: string): void {
     this.dispatches.delete(sessionId);
+    this.emit('idle', sessionId);
   }
 
-  /**
-   * Check if session is currently dispatching
-   */
   isBusy(sessionId: string): boolean {
     return this.dispatches.has(sessionId);
   }
 
-  /**
-   * Get correlationId for active dispatch (used by tools)
-   * Returns undefined if no dispatch is active
-   */
   getCorrelationId(sessionId: string): string | undefined {
     return this.dispatches.get(sessionId)?.correlationId;
   }
 
-  /**
-   * Get dispatch info (for debugging/metrics)
-   */
   getDispatch(sessionId: string): ActiveDispatch | undefined {
     return this.dispatches.get(sessionId);
   }
 
-  /**
-   * Get all active dispatches (for debugging)
-   */
   getAllActive(): Map<string, ActiveDispatch> {
     return new Map(this.dispatches);
   }
+
+  waitForIdle(sessionId: string, timeoutMs: number): Promise<'idle' | 'timeout'> {
+    return new Promise((resolve) => {
+      if (!this.isBusy(sessionId)) { resolve('idle'); return; }
+
+      let resolved = false;
+      const cleanup = () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        this.removeListener('idle', onIdle);
+      };
+
+      const timer = setTimeout(() => { cleanup(); resolve('timeout'); }, timeoutMs);
+
+      const onIdle = (id: string) => {
+        if (id !== sessionId) return;
+        cleanup();
+        resolve('idle');
+      };
+
+      this.on('idle', onIdle);
+      if (!this.isBusy(sessionId)) { cleanup(); resolve('idle'); }
+    });
+  }
 }
 
-// Singleton instance
+export function waitForSessionIdle(
+  sessionId: string,
+  timeoutMs: number,
+  isGone: () => boolean
+): Promise<'idle' | 'timeout' | 'gone'> {
+  return new Promise((resolve) => {
+    if (isGone()) { resolve('gone'); return; }
+    if (!dispatchState.isBusy(sessionId)) { resolve('idle'); return; }
+
+    let resolved = false;
+    const cleanup = () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      clearInterval(goneCheck);
+      dispatchState.removeListener('idle', onIdle);
+    };
+
+    const timer = setTimeout(() => { cleanup(); resolve('timeout'); }, timeoutMs);
+
+    const goneCheck = setInterval(() => {
+      if (isGone()) { cleanup(); resolve('gone'); }
+    }, 10_000);
+
+    const onIdle = (id: string) => {
+      if (id !== sessionId) return;
+      cleanup();
+      resolve('idle');
+    };
+
+    dispatchState.on('idle', onIdle);
+    if (!dispatchState.isBusy(sessionId)) { cleanup(); resolve('idle'); }
+  });
+}
+
 export const dispatchState = new DispatchState();

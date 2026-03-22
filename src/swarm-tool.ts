@@ -11,8 +11,8 @@ import { SERVER_URL } from './config.js';
 import type { SessionIdRef } from './types.js';
 import sessionManager from './session-manager.js';
 import { broadcastGlobalEvent } from './routes/websocket.js';
+import { waitForSessionIdle } from './dispatch-state.js';
 
-const POLL_INTERVAL_MS = 5000;
 const PER_SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 
 const activeSwarms = new Set<string>();
@@ -31,10 +31,6 @@ function validateSwarmModel(model: string, count: number): string | null {
     return `${model} not allowed for ${count} sessions (max 4 for sonnet). Use gpt-4.1 or cheaper.`;
   }
   return null;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
 }
 
 function emitSwarmProgress(sessionId: string, completed: number, total: number): void {
@@ -166,47 +162,39 @@ Each session runs independently with its own prompt. Results are collected and r
           }
         }
 
-        // Poll until all complete
+        // Wait for all sessions via event-driven idle detection
         let completed = sessions.filter(s => s.done).length;
-        let pollCount = 0;
         emitSwarmProgress(sessionRef.id, completed, sessions.length);
-        while (completed < sessions.length) {
-          await sleep(POLL_INTERVAL_MS);
-          pollCount++;
 
-          for (const s of sessions) {
-            if (s.done || !s.sessionId) continue;
+        const waitPromises = sessions
+          .filter(s => !s.done && s.sessionId)
+          .map(async (s) => {
+            const result = await waitForSessionIdle(
+              s.sessionId!,
+              PER_SESSION_TIMEOUT_MS,
+              () => !sessionManager.getSessionCwd(s.sessionId!)
+            );
 
             const elapsed = Math.round((Date.now() - s.startedAt) / 1000);
-            if (Date.now() - s.startedAt > PER_SESSION_TIMEOUT_MS) {
+            if (result === 'idle') {
+              s.done = true;
+              s.result = await getLastAssistantMessage(s.sessionId!);
+              console.log(`[SWARM] Session ${s.sessionId!.slice(0, 8)} completed after ${elapsed}s`);
+            } else if (result === 'gone') {
+              s.done = true;
+              s.result = '(session disappeared during processing)';
+              console.log(`[SWARM] Session ${s.sessionId!.slice(0, 8)} gone after ${elapsed}s`);
+            } else {
               s.done = true;
               s.result = '(timed out after 15 minutes)';
-              completed++;
-              console.log(`[SWARM] Session ${s.sessionId.slice(0, 8)} timed out after ${elapsed}s`);
-              continue;
+              console.log(`[SWARM] Session ${s.sessionId!.slice(0, 8)} timed out after ${elapsed}s`);
             }
 
-            try {
-              const res = await fetch(`${SERVER_URL}/api/sessions/${s.sessionId}/state`);
-              if (!res.ok) continue;
-              const state = await res.json();
-              if (state.status === 'idle' || state.status === 'inactive') {
-                s.done = true;
-                s.result = await getLastAssistantMessage(s.sessionId);
-                completed++;
-                console.log(`[SWARM] Session ${s.sessionId.slice(0, 8)} completed after ${elapsed}s`);
-              }
-            } catch {
-              // Network error — retry next poll
-            }
-          }
+            completed++;
+            emitSwarmProgress(sessionRef.id, completed, sessions.length);
+          });
 
-          if (pollCount % 6 === 0) {
-            const pending = sessions.filter(s => !s.done).map(s => s.sessionId?.slice(0, 8)).join(', ');
-            console.log(`[SWARM] Poll #${pollCount}: ${completed}/${sessions.length} complete, waiting on: ${pending}`);
-          }
-          emitSwarmProgress(sessionRef.id, completed, sessions.length);
-        }
+        await Promise.all(waitPromises);
 
         // Aggregate results
         const sections = sessions.map((s, i) =>

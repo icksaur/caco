@@ -114,4 +114,73 @@ describe('DispatchState', () => {
       expect(state.getDispatch('session-1')).toBeUndefined();
     });
   });
+
+  describe('idle event emission', () => {
+    it('emits idle event when dispatch ends', () => {
+      const events: string[] = [];
+      state.on('idle', (id: string) => events.push(id));
+
+      state.start('session-1', 'corr-123');
+      state.end('session-1');
+
+      expect(events).toEqual(['session-1']);
+    });
+
+    it('emits idle on double-end', () => {
+      const events: string[] = [];
+      state.on('idle', (id: string) => events.push(id));
+
+      state.start('session-1', 'corr-123');
+      state.end('session-1');
+      state.end('session-1');
+
+      expect(events).toEqual(['session-1', 'session-1']);
+    });
+
+    it('does not interfere with other sessions', () => {
+      const events: string[] = [];
+      state.on('idle', (id: string) => events.push(id));
+
+      state.start('session-1', 'corr-1');
+      state.start('session-2', 'corr-2');
+      state.end('session-1');
+
+      expect(events).toEqual(['session-1']);
+      expect(state.isBusy('session-2')).toBe(true);
+    });
+  });
+
+  describe('waitForIdle', () => {
+    it('resolves immediately when not busy', async () => {
+      const result = await state.waitForIdle('session-1', 5000);
+      expect(result).toBe('idle');
+    });
+
+    it('resolves when dispatch ends', async () => {
+      state.start('session-1', 'corr-123');
+
+      const promise = state.waitForIdle('session-1', 5000);
+      state.end('session-1');
+
+      const result = await promise;
+      expect(result).toBe('idle');
+    });
+
+    it('resolves with timeout when dispatch never ends', async () => {
+      state.start('session-1', 'corr-123');
+
+      const result = await state.waitForIdle('session-1', 50);
+      expect(result).toBe('timeout');
+    });
+
+    it('cleans up listener after resolution', async () => {
+      state.start('session-1', 'corr-123');
+
+      const promise = state.waitForIdle('session-1', 5000);
+      state.end('session-1');
+      await promise;
+
+      expect(state.listenerCount('idle')).toBe(0);
+    });
+  });
 });

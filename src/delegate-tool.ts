@@ -3,13 +3,10 @@ import { z } from 'zod';
 import { SERVER_URL } from './config.js';
 import type { SessionIdRef } from './types.js';
 import sessionManager from './session-manager.js';
+import { waitForSessionIdle } from './dispatch-state.js';
+import { getSessionMeta } from './storage.js';
 
-const POLL_INTERVAL_MS = 5000;
 const DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
-}
 
 async function countAssistantMessages(sessionId: string): Promise<number> {
   try {
@@ -69,17 +66,12 @@ The delegate sessions must already exist. The user provides session IDs (caco-se
       }> = [];
 
       for (const p of prompts) {
-        try {
-          const stateRes = await fetch(`${SERVER_URL}/api/sessions/${p.sessionId}/state`);
-          if (!stateRes.ok) {
-            return { textResultForLlm: `Session ${p.sessionId.slice(0, 8)} not found.`, resultType: 'error' as const };
-          }
-          const state = await stateRes.json();
-          if (state.isBusy) {
-            return { textResultForLlm: `Session ${p.sessionId.slice(0, 8)} ("${state.name || 'unnamed'}") is busy. Wait or choose another session.`, resultType: 'error' as const };
-          }
-        } catch (e) {
-          return { textResultForLlm: `Failed to check session ${p.sessionId.slice(0, 8)}: ${e instanceof Error ? e.message : e}`, resultType: 'error' as const };
+        if (!sessionManager.getSessionCwd(p.sessionId)) {
+          return { textResultForLlm: `Session ${p.sessionId.slice(0, 8)} not found.`, resultType: 'error' as const };
+        }
+        if (sessionManager.isBusy(p.sessionId)) {
+          const meta = getSessionMeta(p.sessionId);
+          return { textResultForLlm: `Session ${p.sessionId.slice(0, 8)} ("${meta?.name || 'unnamed'}") is busy. Wait or choose another session.`, resultType: 'error' as const };
         }
 
         const priorCount = await countAssistantMessages(p.sessionId);
@@ -106,34 +98,31 @@ The delegate sessions must already exist. The user provides session IDs (caco-se
         }
       }
 
-      let completed = delegates.filter(d => d.done).length;
-      while (completed < delegates.length) {
-        await sleep(POLL_INTERVAL_MS);
+      const waitPromises = delegates
+        .filter(d => !d.done)
+        .map(async (d) => {
+          const result = await waitForSessionIdle(
+            d.sessionId,
+            DELEGATE_TIMEOUT_MS,
+            () => !sessionManager.getSessionCwd(d.sessionId)
+          );
 
-        for (const d of delegates) {
-          if (d.done) continue;
-
-          if (Date.now() - d.startedAt > DELEGATE_TIMEOUT_MS) {
+          if (result === 'idle') {
+            d.done = true;
+            d.result = await getAssistantMessageAfter(d.sessionId, d.priorCount);
+            console.log(`[DELEGATE] Session ${d.sessionId.slice(0, 8)} responded`);
+          } else if (result === 'gone') {
+            d.done = true;
+            d.result = '(session disappeared during processing)';
+            console.log(`[DELEGATE] Session ${d.sessionId.slice(0, 8)} gone`);
+          } else {
             d.done = true;
             d.result = '(timed out after 15 minutes)';
-            completed++;
             console.log(`[DELEGATE] Session ${d.sessionId.slice(0, 8)} timed out`);
-            continue;
           }
+        });
 
-          try {
-            const res = await fetch(`${SERVER_URL}/api/sessions/${d.sessionId}/state`);
-            if (!res.ok) continue;
-            const state = await res.json();
-            if (state.status === 'idle' || state.status === 'inactive') {
-              d.done = true;
-              d.result = await getAssistantMessageAfter(d.sessionId, d.priorCount);
-              completed++;
-              console.log(`[DELEGATE] Session ${d.sessionId.slice(0, 8)} responded`);
-            }
-          } catch { /* retry next poll */ }
-        }
-      }
+      await Promise.all(waitPromises);
 
       const results = delegates.map(d => ({
         sessionId: d.sessionId,

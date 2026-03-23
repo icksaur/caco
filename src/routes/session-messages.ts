@@ -259,9 +259,10 @@ export async function dispatchMessage(
     
     const INITIAL_TIMEOUT_MS = 45_000;
     const meta = getSessionMeta(sessionId);
-    const betweenEventTimeout = meta?.kind === 'swarm' || meta?.kind === 'agent'
+    const baseTimeout = meta?.kind === 'swarm' || meta?.kind === 'agent'
       ? 15 * 60 * 1000
       : DISPATCH_TIMEOUT_MS;
+    let betweenEventTimeout = baseTimeout;
     let receivedFirstEvent = false;
     let toolExecuting = false;
     let retried = false;
@@ -319,6 +320,7 @@ export async function dispatchMessage(
         pauseWatchdog();
       } else if (event.type === 'tool.execution_complete') {
         toolExecuting = false;
+        betweenEventTimeout = 15 * 60 * 1000;
         resetWatchdog();
       } else {
         resetWatchdog();

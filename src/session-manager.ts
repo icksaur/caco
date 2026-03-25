@@ -372,6 +372,11 @@ class SessionManager {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
       if (!this.sharedClient) return;
+      if (dispatchState.getAllActive().size > 0) {
+        console.log('[SDK] Idle timeout skipped — active dispatches exist');
+        this.resetIdleTimer();
+        return;
+      }
       console.log('[SDK] Idle timeout, tearing down client to prevent stale connection');
       this.stopHealthCheck();
       this.sharedClient.stop().catch(() => {});

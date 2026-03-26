@@ -26,7 +26,9 @@ Use this to dispatch work to an existing session, such as:
 - Coordinating across projects (e.g., "update the API client after the schema change")
 - Notifying a session of state changes
 
-The target session receives your message and works on it autonomously. The user can watch its progress in the Caco session list.`,
+The target session receives your message and works on it autonomously. The user can watch its progress in the Caco session list.
+
+**Important:** If you need the other session's response to continue your work, use \`caco_session_delegate\` instead — it waits for the response and returns it to you. Use send_caco_message only for fire-and-forget dispatches where you don't need the result.`,
 
     parameters: z.object({
       sessionId: z.string().describe('Target session ID to send the message to'),

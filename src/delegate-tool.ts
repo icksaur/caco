@@ -25,7 +25,9 @@ async function getLastAssistantMessage(sessionId: string): Promise<string> {
 
 export function createDelegateTool(sessionRef: SessionIdRef) {
   const cacoSessionDelegate = defineTool('caco_session_delegate', {
-    description: `Delegate work to 1-2 existing Caco sessions and wait for their response. Use this to collaborate with a known Caco session that has useful context and perspective.
+    description: `Delegate work to 1-2 existing Caco sessions and wait for their response. Returns the delegate's full response so you can use it immediately.
+
+**This is the preferred tool for cross-session collaboration.** Unlike send_caco_message (fire-and-forget), this tool blocks until the delegate responds and gives you the result.
 
 The delegate sessions must already exist. The user provides session IDs (caco-session:UUID format) or you can verify them with get_session_state first.
 

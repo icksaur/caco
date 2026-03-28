@@ -200,6 +200,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       chatView.savePrompt(prompt, sessionId || '');
       console.log('[SEND] Session created:', sessionId);
       chatView.onNewSessionCreated(sessionId || '', data.cwd);
+      sessionTracker.setBusy(sessionId!, true);
     }
     
     const requestId = `req-${Date.now().toString(36)}`;

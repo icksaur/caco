@@ -472,16 +472,17 @@ export async function dispatchMessage(
 router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   
-  // Get the session and abort it
   const session = sessionManager.getSession(sessionId);
   if (session) {
     try {
-      // SDK session has abort() method, but TypeScript types don't expose it
       await (session as unknown as { abort: () => Promise<void> }).abort();
     } catch (error) {
       console.error('Failed to abort session:', error);
     }
   }
+  
+  sessionManager.endDispatch(sessionId);
+  broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
   
   res.json({ ok: true });
 });

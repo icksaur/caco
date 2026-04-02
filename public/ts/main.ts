@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
           id: `session:${s.sessionId}`,
           label: s.name || s.summary || s.sessionId.slice(0, 8),
           description: 'session',
-          value: `caco-session:${s.sessionId}`,
+          value: '`caco-session:' + s.sessionId + '`',
         }));
     });
     

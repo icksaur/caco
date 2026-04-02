@@ -35,7 +35,9 @@ The target session receives your message and works on it autonomously. The user 
       message: z.string().describe('The message/prompt to send to the target session')
     }),
 
-    handler: async ({ sessionId, message }) => {
+    handler: async ({ sessionId: rawSessionId, message }) => {
+      // Strip caco-session: prefix if present (agents commonly include it)
+      const sessionId = rawSessionId.replace(/^caco-session:/, '');
       try {
         const correlationId = getCorrelationId(sessionRef.id);
         
@@ -86,7 +88,8 @@ The target session receives your message and works on it autonomously. The user 
       sessionId: z.string().describe('Target session ID to check')
     }),
 
-    handler: async ({ sessionId }) => {
+    handler: async ({ sessionId: rawSessionId }) => {
+      const sessionId = rawSessionId.replace(/^caco-session:/, '');
       try {
         const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/state`);
         

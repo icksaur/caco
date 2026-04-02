@@ -148,12 +148,10 @@ function registerWsHandlers(): void {
 export function stopStreaming(): void {
   const sessionId = getActiveSessionId();
   if (sessionId) {
-    sessionTracker.setBusy(sessionId, false);
+    // Don't clear busy state — let the server confirm via session.idle/session.error
     fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' })
       .catch(err => console.error('Failed to cancel:', err));
   }
-  
-  chatView.setFormEnabled(true);
 }
 
 const SEND_TIMEOUT_MS = 30000;

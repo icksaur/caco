@@ -481,8 +481,9 @@ router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) =
     }
   }
   
-  sessionManager.endDispatch(sessionId);
-  broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
+  // Don't endDispatch here — let the SDK emit session.idle/session.error
+  // which triggers cleanupAndComplete() in the dispatch event handler.
+  // This ensures busy state only clears when the SDK truly stops.
   
   res.json({ ok: true });
 });

@@ -3,7 +3,7 @@ import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
-import { deleteSession, renameSession } from './session-panel.js';
+import { archiveSession, renameSession } from './session-panel.js';
 import type { PopupItem } from './input-popup.js';
 
 export interface Command {
@@ -50,8 +50,8 @@ registerCommand({
 });
 
 registerCommand({
-  name: 'session-delete',
-  description: 'Delete current session',
+  name: 'session-archive',
+  description: 'Archive current session',
   source: 'built-in',
   handler: async () => {
     const sessionId = getActiveSessionId();
@@ -59,7 +59,7 @@ registerCommand({
     const res = await fetch(`/api/sessions/${sessionId}/state`).catch(() => null);
     const data = res?.ok ? await res.json().catch(() => null) : null;
     const name = data?.name || data?.summary || undefined;
-    await deleteSession(sessionId, name);
+    await archiveSession(sessionId, name);
   }
 });
 

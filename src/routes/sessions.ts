@@ -17,6 +17,7 @@ import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
 import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
+import { readSessionWorkspace } from '../sdk-session-store.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -250,24 +251,30 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const clientId = req.headers['x-client-id'] as string | undefined;
   
-  // Prevent deletion of busy sessions
   if (sessionManager.isBusy(sessionId)) {
     return res.status(400).json({ 
-      error: 'Cannot delete session while it is processing',
+      error: 'Cannot archive session while it is processing',
       code: 'SESSION_BUSY'
     });
   }
   
+  const wasActive = sessionId === sessionState.getActiveSessionId(clientId);
+  const workspace = readSessionWorkspace(sessionId);
+  const cwd = workspace?.cwd || sessionManager.getSessionCwd(sessionId) || sessionState.preferences.lastCwd || process.cwd();
+  
   try {
-    const wasActive = await sessionState.deleteSession(sessionId, clientId);
+    const { archivePath } = await sessionManager.archive(sessionId);
     
-    // Broadcast session list change for all clients to refresh
+    if (wasActive) {
+      await sessionState.prepareNewChat(cwd, clientId);
+    }
+    
     broadcastGlobalEvent({ 
       type: 'session.listChanged', 
       data: { reason: 'deleted', sessionId } 
     });
     
-    res.json({ success: true, wasActive });
+    res.json({ success: true, wasActive, archivePath });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(400).json({ error: message });

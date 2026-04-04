@@ -5,7 +5,7 @@
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences } from './history.js';
-import { deleteSession, initSessionPanel, loadSessions, loadSchedules, getCachedSessions } from './session-panel.js';
+import { archiveSession, initSessionPanel, loadSessions, loadSchedules, getCachedSessions } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
 import { setupFormHandler, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
@@ -31,7 +31,7 @@ declare global {
     removeImage: typeof removeImage;
     scrollToBottom: typeof scrollToBottom;
     toggleSessions: typeof toggleSessions;
-    deleteSession: typeof deleteSession;
+    archiveSession: typeof archiveSession;
     selectModel: typeof selectModel;
     loadModels: typeof loadModels;
     stopStreaming: typeof stopStreaming;
@@ -43,7 +43,7 @@ declare global {
 window.removeImage = removeImage;
 window.scrollToBottom = scrollToBottom;
 window.toggleSessions = toggleSessions;
-window.deleteSession = deleteSession;
+window.archiveSession = archiveSession;
 window.selectModel = selectModel;
 window.loadModels = loadModels;
 window.stopStreaming = stopStreaming;

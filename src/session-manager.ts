@@ -1,7 +1,7 @@
 import { CopilotClient, approveAll } from '@github/copilot-sdk';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, cpSync, rmSync, mkdtempSync, createWriteStream } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { getCliOAuthTokens } from './cli-oauth.js';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage } from './types.js';
 import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, getMcpAuth, type SessionKind } from './storage.js';
@@ -815,6 +815,64 @@ class SessionManager {
     }
     
     this.sessionCache.delete(sessionId);
+  }
+
+  async exportToFile(sessionId: string, outputPath: string): Promise<void> {
+    const sdkBase = join(homedir(), '.copilot', 'session-state');
+    const cacoBase = join(homedir(), '.caco', 'sessions');
+
+    const staging = mkdtempSync(join(tmpdir(), 'caco-export-'));
+    try {
+      cpSync(join(sdkBase, sessionId), join(staging, 'sdk', sessionId), { recursive: true });
+      if (existsSync(join(cacoBase, sessionId))) {
+        cpSync(join(cacoBase, sessionId), join(staging, 'caco', sessionId), { recursive: true });
+      }
+
+      const tar = await import('tar');
+      await new Promise<void>((resolve, reject) => {
+        const stream = tar.create({ gzip: true, cwd: staging }, ['.']);
+        const out = createWriteStream(outputPath);
+        stream.on('error', reject);
+        out.on('error', reject);
+        out.on('finish', resolve);
+        stream.pipe(out);
+      });
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  }
+
+  async archive(sessionId: string): Promise<{ archivePath: string }> {
+    const sdkPath = join(homedir(), '.copilot', 'session-state', sessionId);
+    if (!existsSync(sdkPath)) {
+      throw new Error('SDK session data not found — cannot archive without full data');
+    }
+
+    if (this.activeSessions.has(sessionId)) {
+      await this.stop(sessionId);
+    }
+
+    dispatchState.start(sessionId, 'archive');
+    try {
+      const archiveDir = join(homedir(), '.caco', 'sessions', 'archive');
+      mkdirSync(archiveDir, { recursive: true });
+      const archivePath = join(archiveDir, `${sessionId}.caco-session.tar.gz`);
+      await this.exportToFile(sessionId, archivePath);
+
+      const client = await this.ensureClient();
+      await client.deleteSession(sessionId);
+
+      const cacoPath = join(homedir(), '.caco', 'sessions', sessionId);
+      if (existsSync(cacoPath)) {
+        rmSync(cacoPath, { recursive: true });
+      }
+
+      this.sessionCache.delete(sessionId);
+      console.log(`✓ Archived session ${sessionId} → ${archivePath}`);
+      return { archivePath };
+    } finally {
+      dispatchState.end(sessionId);
+    }
   }
 
   /**

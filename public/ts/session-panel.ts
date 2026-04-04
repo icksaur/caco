@@ -517,28 +517,23 @@ export async function renameSession(sessionId: string, newName: string): Promise
 /**
  * Delete a session
  */
-export async function deleteSession(sessionId: string, displayName?: string): Promise<void> {
+export async function archiveSession(sessionId: string, displayName?: string): Promise<void> {
   const name = displayName || sessionId.slice(0, 8);
-  if (!confirm(`Delete session "${name}"?\n\nThis cannot be undone.`)) {
-    return;
-  }
-  
   try {
-    const response = await fetch(`/api/sessions/${sessionId}`, {
-      method: 'DELETE'
-    });
-    
+    const response = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
     if (response.ok) {
-      // Refresh session list - stays in session view
-      // If we deleted the active session, user can pick another or start new
+      const data = await response.json();
+      showToast(`Archived "${name}" → ${data.archivePath}`, { type: 'success', autoHideMs: 5000 });
       void loadSessions();
+      if (data.wasActive) {
+        newSessionClick();
+      }
     } else {
       const err = await response.json();
-      alert('Failed to delete session: ' + err.error);
+      showToast(err.error || 'Archive failed');
     }
   } catch (error) {
-    console.error('Failed to delete session:', error);
-    alert('Failed to delete session: ' + (error as Error).message);
+    showToast('Archive failed: ' + (error as Error).message);
   }
 }
 

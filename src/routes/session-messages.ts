@@ -472,20 +472,12 @@ export async function dispatchMessage(
 router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   
-  const session = sessionManager.getSession(sessionId);
-  if (session) {
-    try {
-      await (session as unknown as { abort: () => Promise<void> }).abort();
-    } catch (error) {
-      console.error('Failed to abort session:', error);
-    }
+  const { forced } = await sessionManager.cancelSession(sessionId);
+  if (forced) {
+    broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
   }
   
-  // Don't endDispatch here — let the SDK emit session.idle/session.error
-  // which triggers cleanupAndComplete() in the dispatch event handler.
-  // This ensures busy state only clears when the SDK truly stops.
-  
-  res.json({ ok: true });
+  res.json({ ok: true, forced });
 });
 
 export default router;

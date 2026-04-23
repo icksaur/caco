@@ -148,9 +148,17 @@ function registerWsHandlers(): void {
 export function stopStreaming(): void {
   const sessionId = getActiveSessionId();
   if (sessionId) {
-    // Don't clear busy state — let the server confirm via session.idle/session.error
     fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' })
-      .catch(err => console.error('Failed to cancel:', err));
+      .then(r => r.json())
+      .then(data => {
+        if (data.forced) {
+          showToast('Session force-stopped', { type: 'info', autoHideMs: 3000 });
+        }
+      })
+      .catch(err => {
+        console.error('Failed to cancel:', err);
+        showToast('Failed to stop session');
+      });
   }
 }
 

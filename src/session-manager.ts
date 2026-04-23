@@ -207,6 +207,7 @@ interface CopilotSessionInstance {
   getMessages(): Promise<SessionEvent[]>;
   destroy(): Promise<void>;
   setModel(model: string): Promise<void>;
+  abort(): Promise<void>;
 }
 
 interface SendOptions {
@@ -1019,6 +1020,49 @@ class SessionManager {
   endDispatch(sessionId: string): void {
     dispatchState.end(sessionId);
     this.resetIdleTimer();
+  }
+
+  /**
+   * Cancel an active session dispatch.
+   * Calls abort(), waits briefly for the SDK to confirm idle, then force-clears if needed.
+   * Returns { forced: true } if the SDK didn't confirm within the timeout.
+   */
+  async cancelSession(sessionId: string): Promise<{ forced: boolean }> {
+    const ABORT_TIMEOUT_MS = 10_000;
+    const IDLE_WAIT_MS = 5_000;
+
+    const session = this.activeSessions.get(sessionId);
+
+    // Session not in memory but dispatch state says busy — force-clear immediately
+    if (!session && this.isBusy(sessionId)) {
+      console.warn(`[CANCEL] Session ${sessionId.slice(0, 8)} not in memory, force-clearing dispatch`);
+      this.endDispatch(sessionId);
+      return { forced: true };
+    }
+
+    if (!session) return { forced: false };
+
+    // Call abort with a timeout so we don't hang if the CLI is unresponsive
+    try {
+      await Promise.race([
+        session.session.abort(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('abort timeout')), ABORT_TIMEOUT_MS))
+      ]);
+    } catch (e) {
+      console.error(`[CANCEL] abort() failed for ${sessionId.slice(0, 8)}:`, e instanceof Error ? e.message : e);
+    }
+
+    // If not busy anymore, abort worked
+    if (!this.isBusy(sessionId)) return { forced: false };
+
+    // Wait briefly for the SDK to emit session.idle/error
+    const result = await dispatchState.waitForIdle(sessionId, IDLE_WAIT_MS);
+    if (result === 'idle') return { forced: false };
+
+    // SDK didn't confirm — force-clear
+    console.warn(`[CANCEL] Force-clearing stuck dispatch for ${sessionId.slice(0, 8)}`);
+    this.endDispatch(sessionId);
+    return { forced: true };
   }
 
   /**

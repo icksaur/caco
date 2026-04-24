@@ -205,7 +205,7 @@ interface CopilotSessionInstance {
   send(options: SendOptions): Promise<string>;
   sendAndWait(options: SendOptions, timeout?: number): Promise<unknown>;
   getMessages(): Promise<SessionEvent[]>;
-  destroy(): Promise<void>;
+  disconnect(): Promise<void>;
   setModel(model: string): Promise<void>;
   abort(): Promise<void>;
 }
@@ -673,7 +673,7 @@ class SessionManager {
   }
 
   /**
-   * Drop a session from the active map without calling session.destroy().
+   * Drop a session from the active map without calling session.disconnect().
    * Used when the SDK already lost track of the session (e.g., "Session not found"
    * RPC error). Allows resume() to re-register with the SDK on next attempt.
    */
@@ -697,14 +697,14 @@ class SessionManager {
     const { cwd, session } = active;
     
     try {
-      await session.destroy();
+      await session.disconnect();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      console.warn(`Warning: session.destroy() failed: ${message}`);
+      console.warn(`Warning: session.disconnect() failed: ${message}`);
     }
     
     // Note: we do NOT stop the shared client here — other sessions use it.
-    // session.destroy() removes the session from the SDK but leaves a small
+    // session.disconnect() removes the session from the SDK but leaves a small
     // entry in client.sessions Map. This is acceptable; client.stop() on
     // shutdown clears everything.
     

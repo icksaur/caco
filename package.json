@@ -25,7 +25,7 @@
   "author": "",
   "type": "module",
   "dependencies": {
-    "@github/copilot-sdk": "^0.1.17",
+    "@github/copilot-sdk": "^0.3.0",
     "cron-parser": "^5.5.0",
     "express": "^5.2.1",
     "ignore": "^7.0.5",

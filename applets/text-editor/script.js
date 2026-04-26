@@ -63,30 +63,36 @@ function getLanguageExtension(langKey) {
   }
 }
 
-var cacoTheme = CM.EditorView.theme({
-  '&': {
-    backgroundColor: 'var(--bg-base)',
-    color: 'var(--color-text)',
-    fontSize: '11pt',
-    height: '100%',
-  },
-  '.cm-content': {
-    fontFamily: "'SF Mono', Monaco, 'Courier New', monospace",
-    padding: '12px 0',
-  },
-  '.cm-gutters': {
-    backgroundColor: 'var(--bg-base)',
-    borderRight: '1px solid var(--color-border)',
-    color: 'var(--color-text-dim)',
-  },
-  '.cm-activeLine': { backgroundColor: 'var(--bg-raised)' },
-  '.cm-activeLineGutter': { backgroundColor: 'var(--bg-raised)' },
-  '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--color-text-bright)' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
-    backgroundColor: 'rgba(100, 149, 237, 0.3)',
-  },
-  '.cm-scroller': { overflow: 'auto' },
-});
+var cacoTheme = null;
+
+function ensureTheme() {
+  if (cacoTheme) return cacoTheme;
+  cacoTheme = CM.EditorView.theme({
+    '&': {
+      backgroundColor: 'var(--bg-base)',
+      color: 'var(--color-text)',
+      fontSize: '11pt',
+      height: '100%',
+    },
+    '.cm-content': {
+      fontFamily: "'SF Mono', Monaco, 'Courier New', monospace",
+      padding: '12px 0',
+    },
+    '.cm-gutters': {
+      backgroundColor: 'var(--bg-base)',
+      borderRight: '1px solid var(--color-border)',
+      color: 'var(--color-text-dim)',
+    },
+    '.cm-activeLine': { backgroundColor: 'var(--bg-raised)' },
+    '.cm-activeLineGutter': { backgroundColor: 'var(--bg-raised)' },
+    '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--color-text-bright)' },
+    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
+      backgroundColor: 'rgba(100, 149, 237, 0.3)',
+    },
+    '.cm-scroller': { overflow: 'auto' },
+  });
+  return cacoTheme;
+}
 
 function createEditor(content, langKey) {
   if (editorView) editorView.destroy();
@@ -105,7 +111,7 @@ function createEditor(content, langKey) {
       { key: 'Mod-s', run: function() { if (!saveBtn.disabled) saveBtn.click(); return true; } },
       { key: 'Mod-p', run: function() { openFinder(); return true; } },
     ]),
-    cacoTheme,
+    ensureTheme(),
     CM.EditorView.updateListener.of(function(update) {
       if (update.docChanged) {
         var text = update.state.doc.toString();

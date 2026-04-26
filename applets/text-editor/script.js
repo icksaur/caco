@@ -155,6 +155,7 @@ function createEditor(content, langKey) {
     state: CM.EditorState.create({ doc: content, extensions: extensions }),
     parent: editorArea,
   });
+  editorView.focus();
 }
 
 function openFinder() {

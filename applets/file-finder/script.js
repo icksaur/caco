@@ -124,6 +124,7 @@ async function loadFiles() {
     filtered = allFiles;
     selectedIdx = 0;
     render();
+    searchInput.focus();
     window.appletAPI.setAppletState({ root: rootPath, fileCount: allFiles.length, loaded: true });
   } catch (err) {
     results.innerHTML = '<div class="empty-state error">Failed to load: ' + esc(rootPath) + '<br>' + esc(err.message) + '</div>';

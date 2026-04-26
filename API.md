@@ -287,6 +287,7 @@ Returns:
 
 - `GET /api/applets` - List all saved applets
 - `POST /api/applets/:slug/load` - Load applet + clear server state
+- `GET /api/applets/:slug/assets/:filename` - Serve static applet asset (JS bundles, images)
 
 **GET /api/applets** response:
 ```json

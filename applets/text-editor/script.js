@@ -2,6 +2,7 @@ var currentFilePath = '';
 var originalContent = '';
 var isDirty = false;
 var editorView = null;
+var cmReady = false;
 
 var saveBtn = document.getElementById('saveBtn');
 var statusEl = document.getElementById('status');
@@ -9,6 +10,17 @@ var filePathEl = document.getElementById('filePath');
 var folderBtn = document.getElementById('folderBtn');
 var viewLink = document.getElementById('viewLink');
 var editorArea = document.getElementById('editorArea');
+
+function loadCMBundle() {
+  return new Promise(function(resolve, reject) {
+    if (window.CM) { resolve(); return; }
+    var s = document.createElement('script');
+    s.src = '/api/applets/text-editor/assets/codemirror-bundle.js';
+    s.onload = function() { resolve(); };
+    s.onerror = function() { reject(new Error('Failed to load CodeMirror')); };
+    document.head.appendChild(s);
+  });
+}
 
 var viewerMap = {
   md: 'markdown-viewer', mdx: 'markdown-viewer', markdown: 'markdown-viewer',
@@ -151,8 +163,20 @@ function updateHeader(path) {
 async function loadFile(path) {
   if (!path) {
     updateHeader('');
-    createEditor('', '');
+    if (cmReady) createEditor('', '');
     return;
+  }
+
+  if (!cmReady) {
+    statusEl.textContent = 'Loading editor...';
+    try {
+      await loadCMBundle();
+      cmReady = true;
+    } catch (err) {
+      statusEl.textContent = 'Error: ' + err.message;
+      statusEl.className = 'status error';
+      return;
+    }
   }
 
   updateHeader(path);

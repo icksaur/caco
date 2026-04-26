@@ -1,11 +1,11 @@
+<script src="codemirror-bundle.js"></script>
 <div class="text-editor">
   <div class="editor-header">
+    <button class="folder-btn" id="folderBtn" title="Open in file finder (Ctrl+P)">📁</button>
     <span class="file-path" id="filePath">No file loaded</span>
+    <a class="view-link" id="viewLink" style="display:none">→ view</a>
     <button class="save-btn" id="saveBtn" disabled>Save</button>
   </div>
-  <div class="editor-area">
-    <pre class="highlight-layer"><code id="highlightCode"></code></pre>
-    <textarea id="editor" placeholder="No file loaded..." spellcheck="false"></textarea>
-  </div>
+  <div class="editor-area" id="editorArea"></div>
   <div class="status" id="status"></div>
 </div>

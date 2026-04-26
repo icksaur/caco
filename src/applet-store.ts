@@ -114,6 +114,14 @@ async function resolveAppletDir(slug: string): Promise<AppletFilePaths | null> {
   return null;
 }
 
+export async function resolveAppletAsset(slug: string, filename: string): Promise<string | null> {
+  const userPath = join(USER_APPLET_DIR, slug, filename);
+  try { await stat(userPath); return userPath; } catch { /* */ }
+  const bundledPath = join(BUNDLED_APPLET_DIR, slug, filename);
+  try { await stat(bundledPath); return bundledPath; } catch { /* */ }
+  return null;
+}
+
 /**
  * Validate slug (URL-safe identifier)
  */

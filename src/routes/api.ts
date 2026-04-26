@@ -281,6 +281,24 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/applets/:slug/assets/:filename', async (req: Request, res: Response) => {
+  const slug = req.params.slug as string;
+  const filename = req.params.filename as string;
+  if (!/^[a-z0-9-]+$/.test(slug) || !/^[a-zA-Z0-9._-]+$/.test(filename)) {
+    res.status(400).end();
+    return;
+  }
+  const { resolveAppletAsset } = await import('../applet-store.js');
+  const filePath = await resolveAppletAsset(slug, filename);
+  if (!filePath) { res.status(404).end(); return; }
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const mime: Record<string, string> = { js: 'application/javascript', css: 'text/css', json: 'application/json', png: 'image/png', svg: 'image/svg+xml' };
+  res.setHeader('Content-Type', mime[ext || ''] || 'application/octet-stream');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  const { createReadStream } = await import('fs');
+  createReadStream(filePath).pipe(res);
+});
+
 /**
  * GET /api/files - List files in a directory
  * Query params:

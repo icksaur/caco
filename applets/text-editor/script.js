@@ -15,7 +15,7 @@ function loadCMBundle() {
   return new Promise(function(resolve, reject) {
     if (window.CM) { resolve(); return; }
     var s = document.createElement('script');
-    s.src = '/api/applets/text-editor/assets/codemirror-bundle.js';
+    s.src = '/api/applets/text-editor/assets/codemirror-bundle.js?v=2';
     s.onload = function() { resolve(); };
     s.onerror = function() { reject(new Error('Failed to load CodeMirror')); };
     document.head.appendChild(s);

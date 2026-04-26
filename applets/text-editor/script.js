@@ -67,30 +67,58 @@ var cacoTheme = null;
 
 function ensureTheme() {
   if (cacoTheme) return cacoTheme;
-  cacoTheme = CM.EditorView.theme({
-    '&': {
-      backgroundColor: 'var(--bg-base)',
-      color: 'var(--color-text)',
-      fontSize: '11pt',
-      height: '100%',
-    },
-    '.cm-content': {
-      fontFamily: "'SF Mono', Monaco, 'Courier New', monospace",
-      padding: '12px 0',
-    },
-    '.cm-gutters': {
-      backgroundColor: 'var(--bg-base)',
-      borderRight: '1px solid var(--color-border)',
-      color: 'var(--color-text-dim)',
-    },
-    '.cm-activeLine': { backgroundColor: 'var(--bg-raised)' },
-    '.cm-activeLineGutter': { backgroundColor: 'var(--bg-raised)' },
-    '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--color-text-bright)' },
-    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
-      backgroundColor: 'rgba(100, 149, 237, 0.3)',
-    },
-    '.cm-scroller': { overflow: 'auto' },
-  });
+  var isDark = getComputedStyle(document.documentElement).getPropertyValue('--bg-base').trim().match(/^#([0-9a-f]{2})/i);
+  var dark = isDark ? parseInt(isDark[1], 16) < 128 : true;
+
+  var highlightStyle = CM.HighlightStyle.define([
+    { tag: CM.tags.keyword, color: 'var(--color-purple, #c678dd)' },
+    { tag: [CM.tags.name, CM.tags.deleted, CM.tags.character, CM.tags.macroName], color: 'var(--color-red, #e06c75)' },
+    { tag: [CM.tags.function(CM.tags.variableName), CM.tags.labelName], color: 'var(--color-accent, #61afef)' },
+    { tag: [CM.tags.color, CM.tags.constant(CM.tags.name), CM.tags.standard(CM.tags.name)], color: 'var(--color-orange, #d19a66)' },
+    { tag: [CM.tags.definition(CM.tags.name), CM.tags.separator], color: 'var(--color-text, #abb2bf)' },
+    { tag: [CM.tags.typeName, CM.tags.className, CM.tags.number, CM.tags.changed, CM.tags.annotation, CM.tags.modifier, CM.tags.self, CM.tags.namespace], color: 'var(--color-yellow, #e5c07b)' },
+    { tag: [CM.tags.string, CM.tags.special(CM.tags.brace)], color: 'var(--color-green, #98c379)' },
+    { tag: [CM.tags.regexp, CM.tags.escape, CM.tags.special(CM.tags.string)], color: 'var(--color-cyan, #56b6c2)' },
+    { tag: CM.tags.comment, color: 'var(--color-text-dim, #5c6370)', fontStyle: 'italic' },
+    { tag: CM.tags.meta, color: 'var(--color-text-muted, #7f848e)' },
+    { tag: CM.tags.strong, fontWeight: 'bold' },
+    { tag: CM.tags.emphasis, fontStyle: 'italic' },
+    { tag: CM.tags.link, color: 'var(--color-accent, #61afef)', textDecoration: 'underline' },
+    { tag: CM.tags.heading, fontWeight: 'bold', color: 'var(--color-red, #e06c75)' },
+    { tag: CM.tags.atom, color: 'var(--color-orange, #d19a66)' },
+    { tag: CM.tags.bool, color: 'var(--color-orange, #d19a66)' },
+    { tag: CM.tags.processingInstruction, color: 'var(--color-text-muted, #7f848e)' },
+  ]);
+
+  cacoTheme = [
+    CM.EditorView.theme({
+      '&': {
+        backgroundColor: 'var(--bg-base)',
+        color: 'var(--color-text)',
+        fontSize: '11pt',
+        height: '100%',
+      },
+      '.cm-content': {
+        fontFamily: "'SF Mono', Monaco, 'Courier New', monospace",
+        padding: '12px 0',
+        caretColor: 'var(--color-text-bright)',
+      },
+      '.cm-gutters': {
+        backgroundColor: 'var(--bg-base)',
+        borderRight: '1px solid var(--color-border)',
+        color: 'var(--color-text-dim)',
+      },
+      '.cm-activeLine': { backgroundColor: 'var(--bg-raised)' },
+      '.cm-activeLineGutter': { backgroundColor: 'var(--bg-raised)' },
+      '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--color-text-bright)' },
+      '.cm-cursor': { borderLeftColor: 'var(--color-text-bright)' },
+      '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
+        backgroundColor: 'rgba(100, 149, 237, 0.3) !important',
+      },
+      '.cm-scroller': { overflow: 'auto' },
+    }, { dark: dark }),
+    CM.syntaxHighlighting(highlightStyle),
+  ];
   return cacoTheme;
 }
 
@@ -102,7 +130,6 @@ function createEditor(content, langKey) {
     CM.history(),
     CM.bracketMatching(),
     CM.indentOnInput(),
-    CM.syntaxHighlighting(CM.defaultHighlightStyle, { fallback: true }),
     CM.highlightActiveLine(),
     CM.keymap.of([
       ...CM.defaultKeymap,
@@ -111,7 +138,7 @@ function createEditor(content, langKey) {
       { key: 'Mod-s', run: function() { if (!saveBtn.disabled) saveBtn.click(); return true; } },
       { key: 'Mod-p', run: function() { openFinder(); return true; } },
     ]),
-    ensureTheme(),
+    ...ensureTheme(),
     CM.EditorView.updateListener.of(function(update) {
       if (update.docChanged) {
         var text = update.state.doc.toString();

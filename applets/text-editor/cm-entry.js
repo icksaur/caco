@@ -1,7 +1,8 @@
 export { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
 export { EditorState } from '@codemirror/state';
 export { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-export { syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput, LanguageSupport, StreamLanguage } from '@codemirror/language';
+export { syntaxHighlighting, defaultHighlightStyle, HighlightStyle, bracketMatching, indentOnInput, LanguageSupport, StreamLanguage } from '@codemirror/language';
+export { tags } from '@lezer/highlight';
 export { javascript } from '@codemirror/lang-javascript';
 export { json } from '@codemirror/lang-json';
 export { markdown } from '@codemirror/lang-markdown';

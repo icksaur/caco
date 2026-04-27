@@ -162,19 +162,26 @@ router.get('/sessions/search', (req: Request, res: Response) => {
 
   for (const s of sessions) {
     if (s.kind === 'swarm') continue;
-    const matches = searchSessionEvents(s.sessionId, query);
-    if (matches.length > 0) {
+    const { matches, totalMatches } = searchSessionEvents(s.sessionId, query);
+    if (totalMatches > 0) {
       results.push({
         sessionId: s.sessionId,
         name: s.name || s.sessionId.slice(0, 8),
         cwd: s.cwd,
-        matchCount: matches.length,
+        matchCount: totalMatches,
         matches,
       });
     }
   }
 
-  results.sort((a, b) => b.matchCount - a.matchCount);
+  results.sort((a, b) => {
+    if (a.matchCount !== b.matchCount) return b.matchCount - a.matchCount;
+    const aMeta = getSessionMeta(a.sessionId);
+    const bMeta = getSessionMeta(b.sessionId);
+    const aTime = aMeta?.lastUsedAt ? new Date(aMeta.lastUsedAt).getTime() : 0;
+    const bTime = bMeta?.lastUsedAt ? new Date(bMeta.lastUsedAt).getTime() : 0;
+    return bTime - aTime;
+  });
   res.json({ results, query });
 });
 

@@ -133,39 +133,48 @@ export function extractSnippet(text: string, query: string, contextChars = 40): 
   return { snippet, matchStart, matchEnd: matchStart + query.length };
 }
 
-export function searchSessionEvents(sessionId: string, query: string, maxMatches = 5): SearchMatch[] {
+export interface SearchResult {
+  matches: SearchMatch[];
+  totalMatches: number;
+}
+
+export function searchSessionEvents(sessionId: string, query: string, maxSnippets = 5): SearchResult {
   const eventsPath = sessionPath(sessionId, 'events.jsonl');
-  if (!existsSync(eventsPath)) return [];
+  if (!existsSync(eventsPath)) return { matches: [], totalMatches: 0 };
 
   const lowerQuery = query.toLowerCase();
   const matches: SearchMatch[] = [];
+  let totalMatches = 0;
 
   try {
     const content = readFileSync(eventsPath, 'utf-8');
     const lines = content.split('\n');
 
     for (const line of lines) {
-      if (matches.length >= maxMatches) break;
       if (!line.includes('"user.message"') && !line.includes('"assistant.message"')) continue;
 
       try {
         const event = JSON.parse(line);
         const text = event.data?.content;
         if (typeof text !== 'string') continue;
+        if (!text.toLowerCase().includes(lowerQuery)) continue;
 
-        const result = extractSnippet(text, lowerQuery);
-        if (result) {
-          matches.push({
-            snippet: result.snippet,
-            matchStart: result.matchStart,
-            matchEnd: result.matchEnd,
-            eventType: event.type,
-            timestamp: event.timestamp,
-          });
+        totalMatches++;
+        if (matches.length < maxSnippets) {
+          const result = extractSnippet(text, lowerQuery);
+          if (result) {
+            matches.push({
+              snippet: result.snippet,
+              matchStart: result.matchStart,
+              matchEnd: result.matchEnd,
+              eventType: event.type,
+              timestamp: event.timestamp,
+            });
+          }
         }
       } catch { /* skip malformed lines */ }
     }
   } catch { /* file read error */ }
 
-  return matches;
+  return { matches, totalMatches };
 }

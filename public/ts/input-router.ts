@@ -8,6 +8,7 @@
 
 import { getViewState, isAppletPanelVisible, toggleAppletExpanded } from './view-controller.js';
 import { toggleSessions, toggleApplet } from './router.js';
+import { getCurrentCwd, getNewChatCwd } from './app-state.js';
 
 export type KeyHandler = (e: KeyboardEvent) => void;
 
@@ -56,6 +57,14 @@ export function initInputRouter(): void {
       }
       escapeTime = Date.now();
       e.preventDefault();
+      return;
+    }
+    
+    // Global Ctrl+P: open file finder (works from any context)
+    if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+      e.preventDefault();
+      const cwd = getCurrentCwd() || getNewChatCwd() || '~';
+      window.location.href = '/?applet=file-finder&root=' + encodeURIComponent(cwd);
       return;
     }
     

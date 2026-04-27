@@ -136,7 +136,6 @@ function createEditor(content, langKey) {
       ...CM.historyKeymap,
       CM.indentWithTab,
       { key: 'Mod-s', run: function() { if (!saveBtn.disabled) saveBtn.click(); return true; } },
-      { key: 'Mod-p', run: function() { openFinder(); return true; } },
     ]),
     ...ensureTheme(),
     CM.EditorView.updateListener.of(function(update) {

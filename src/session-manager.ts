@@ -718,6 +718,27 @@ class SessionManager {
     console.log(`✓ Stopped session ${sessionId}`);
   }
 
+  async changeCwd(sessionId: string, newCwd: string): Promise<void> {
+    if (this.isBusy(sessionId)) {
+      throw new Error('Cannot change CWD while session is processing');
+    }
+
+    const cached = this.sessionCache.get(sessionId);
+    if (!cached) throw new Error(`Session ${sessionId} not found`);
+
+    const oldCwd = cached.cwd;
+
+    if (this.activeSessions.has(sessionId)) {
+      await this.stop(sessionId);
+    }
+
+    cached.cwd = newCwd;
+    this.sessionCache.set(sessionId, cached);
+    registerSession(newCwd, sessionId);
+
+    console.log(`✓ Changed CWD for ${sessionId}: ${oldCwd} → ${newCwd}`);
+  }
+
   /**
    * Evict oldest inactive sessions when over MAX_ACTIVE_SESSIONS.
    * Only evicts sessions that are not currently busy (not dispatching).

@@ -50,6 +50,34 @@ registerCommand({
 });
 
 registerCommand({
+  name: 'session-cwd',
+  description: 'Change session working directory',
+  source: 'built-in',
+  handler: async (newCwd) => {
+    const sessionId = getActiveSessionId();
+    if (!sessionId) { showToast('No active session'); return; }
+    const trimmed = newCwd.trim();
+    if (!trimmed) { showToast('Usage: /session-cwd <path>'); return; }
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cwd: trimmed })
+      });
+      if (res.ok) {
+        chatView.updateStatus(trimmed);
+        showToast(`CWD → ${trimmed}`, { type: 'success', autoHideMs: 3000 });
+      } else {
+        const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+        showToast(data.error || 'Failed to change CWD');
+      }
+    } catch {
+      showToast('Failed to change CWD');
+    }
+  }
+});
+
+registerCommand({
   name: 'session-archive',
   description: 'Archive current session',
   source: 'built-in',

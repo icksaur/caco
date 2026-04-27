@@ -326,21 +326,35 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
  */
 router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { name, envHint, model, setContext } = req.body as { 
+  const { name, envHint, model, cwd: newCwd, setContext } = req.body as { 
     name?: string; 
     envHint?: string;
     model?: string;
+    cwd?: string;
     setContext?: { setName: string; items: string[]; mode?: 'replace' | 'merge' };
   };
   
-  // Validate session exists
-  const cwd = sessionManager.getSessionCwd(sessionId);
-  if (!cwd) {
+  const currentCwd = sessionManager.getSessionCwd(sessionId);
+  if (!currentCwd) {
     res.status(404).json({ error: `Session not found: ${sessionId}` });
     return;
   }
+
+  if (newCwd !== undefined) {
+    const { existsSync } = await import('fs');
+    if (!newCwd.trim() || !existsSync(newCwd)) {
+      res.status(400).json({ error: `Directory not found: ${newCwd}` });
+      return;
+    }
+    try {
+      await sessionManager.changeCwd(sessionId, newCwd);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(400).json({ error: msg });
+      return;
+    }
+  }
   
-  // Merge with existing meta to preserve fields not being updated
   const existing = getSessionMeta(sessionId) ?? { name: '' };
   const updated = {
     ...existing,

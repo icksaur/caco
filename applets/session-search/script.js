@@ -53,7 +53,7 @@ function renderResults(results, query) {
     for (var j = 0; j < r.matches.length; j++) {
       var m = r.matches[j];
       html += '<div class="result-snippet">';
-      html += '<span class="snippet-type">' + (m.eventType === 'user.message' ? 'user' : 'assistant') + '</span> ';
+      html += '<span class="snippet-type">' + (m.eventType === 'user.message' ? 'user' : m.eventType === 'note' ? 'note' : m.eventType === 'roadmap' ? 'roadmap' : 'assistant') + '</span> ';
       html += highlightSnippet(m.snippet, m.matchStart, m.matchEnd);
       html += '</div>';
     }

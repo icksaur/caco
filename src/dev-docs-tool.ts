@@ -10,10 +10,22 @@ import { z } from 'zod';
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 
-const DEV_DOCS = `# Caco Development Guide
+const DEV_DOCS = `# Caco Documentation
 
 Caco is a self-extensible chat frontend for the GitHub Copilot CLI SDK.
-**You are running inside Caco.** You can modify its source code, and changes take effect on restart.
+**You are running inside Caco.**
+
+## General Usage
+
+For setup, usage, keyboard shortcuts, autostart on login, and user-facing features, read \`README.md\` at the project root. Key topics covered:
+- Quick start and installation
+- Autostart on Windows login (VBS wrapper in Startup folder)
+- Session panel, applet browser, keyboard shortcuts
+- User data locations (\`~/.caco/\`)
+
+## Development Guide
+
+You can modify Caco's source code, and changes take effect on restart.
 
 ## Project Root
 
@@ -115,13 +127,16 @@ See \`API.md\` for full schema details.
 
 export function createDevDocsTool(projectRoot: string) {
   const cacoDevDocs = defineTool('caco_dev_docs', {
-    description: `Get development documentation for the Caco project itself. Call this when asked to modify, extend, or debug Caco's own code. Returns project structure, build commands, architecture overview, and pointers to detailed docs.
+    description: `Get documentation for the Caco project. Call this when the user asks about Caco itself — how to use it, how to set it up, or how to modify it.
 
 **When to call:**
+- User asks about Caco usage, setup, autostart, or configuration
 - User asks to change how Caco works (UI, tools, prompts, API)
 - User asks about Caco's architecture or internals
 - You need to find where a Caco feature is implemented
-- You want to add a new tool, applet, or route to Caco`,
+- You want to add a new tool, applet, or route to Caco
+
+For general usage and setup, read \`README.md\` at the project root.`,
 
     parameters: z.object({
       section: z.string().optional().describe('Optional: "docs" to list all doc files, or omit for full dev guide')

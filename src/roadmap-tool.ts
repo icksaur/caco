@@ -125,13 +125,11 @@ Examples:
   });
 
   const sessionNote = defineTool('session_note', {
-    description: `Read or append session notes. Notes persist on disk and survive context compaction.
+    description: `Your persistent memory for this session. Record decisions, discoveries, dead ends, and anything you'd want to remember after context compaction. Notes survive compaction and can be read back later — use them liberally. No structure required; capture insights while they're fresh.
 
 - No parameters: returns all notes (timestamped entries)
 - append: add a new note (timestamped automatically)
-- sessionId: read another session's notes (read-only, cannot append)
-
-Use notes to record decisions, findings, and context that should survive compaction.`,
+- sessionId: read another session's notes (read-only, cannot append)`,
     parameters: z.object({
       append: z.string().optional().describe('Text to append as a new timestamped note'),
       sessionId: z.string().optional().describe('Read another session\'s notes (read-only). Use the caco-session:UUID from user input.'),

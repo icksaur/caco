@@ -1,6 +1,12 @@
 # Stop the Caco server
 Set-Location $PSScriptRoot
 
+# Prevent agents from killing their own server
+if ($env:CACO_SESSION) {
+    Write-Host "ERROR: Don't run stop.ps1 from inside Caco - use the restart_server tool"
+    exit 1
+}
+
 # Read port from server.port file, fall back to env, then default
 if (Test-Path server.port) {
     $Port = (Get-Content server.port).Trim()

@@ -1,6 +1,12 @@
 # Start the Caco server in background
 Set-Location $PSScriptRoot
 
+# Prevent agents from killing their own server
+if ($env:CACO_SESSION) {
+    Write-Host "ERROR: Don't run start.ps1 from inside Caco - use the restart_server tool"
+    exit 1
+}
+
 # Port configuration: CACO_PORT → PORT → 53000
 if ($env:CACO_PORT) { $Port = $env:CACO_PORT }
 elseif ($env:PORT) { $Port = $env:PORT }

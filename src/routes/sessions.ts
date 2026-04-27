@@ -17,7 +17,7 @@ import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
 import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
-import { readSessionWorkspace, searchSessionEvents } from '../sdk-session-store.js';
+import { readSessionWorkspace, searchSessionEvents, searchSessionNotes, searchSessionRoadmap } from '../sdk-session-store.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -161,9 +161,13 @@ router.get('/sessions/search', (req: Request, res: Response) => {
   }> = [];
 
   for (const s of sessions) {
-    if (s.kind === 'swarm') continue;
-    const { matches, totalMatches } = searchSessionEvents(s.sessionId, query);
+    if (s.kind === 'swarm' || !s.cwd) continue;
+    const events = searchSessionEvents(s.sessionId, query);
+    const notes = searchSessionNotes(s.sessionId, query);
+    const roadmap = searchSessionRoadmap(s.sessionId, query);
+    const totalMatches = events.totalMatches + notes.totalMatches + roadmap.totalMatches;
     if (totalMatches > 0) {
+      const matches = [...events.matches, ...notes.matches, ...roadmap.matches];
       results.push({
         sessionId: s.sessionId,
         name: s.name || s.sessionId.slice(0, 8),

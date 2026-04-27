@@ -50,6 +50,24 @@ npm run dev        # Start with auto-reload
 
 Open `http://localhost:53000`
 
+### Autostart on Windows Login
+
+A VBS wrapper launches Caco in the background with no visible window:
+
+```powershell
+# Create startup shortcut (one-time setup)
+$startup = [Environment]::GetFolderPath('Startup')
+$ws = New-Object -ComObject WScript.Shell
+$sc = $ws.CreateShortcut("$startup\Caco.lnk")
+$sc.TargetPath = "wscript.exe"
+$sc.Arguments = "<path-to-caco>\start-hidden.vbs"
+$sc.WorkingDirectory = "<path-to-caco>"
+$sc.WindowStyle = 7
+$sc.Save()
+```
+
+To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Caco.lnk"`
+
 ## Usage
 
 Use the session UI via the session button.  Scheduled sessions appear here.  You can create new sessions, resume, rename, or delete sessions in the view.  The search is fuzzy-find and enter will resume a session.

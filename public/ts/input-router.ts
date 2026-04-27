@@ -70,6 +70,13 @@ export function initInputRouter(): void {
       return;
     }
     
+    // Global Ctrl+Shift+F: open session search
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
+      e.preventDefault();
+      window.location.href = '/?applet=session-search';
+      return;
+    }
+    
     // Let native inputs handle their own events (for non-ESC keys)
     const target = e.target as HTMLElement;
     const tag = target.tagName.toLowerCase();

@@ -8,6 +8,7 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 
 - `GET /api/session` - Get session info (accepts `?sessionId=`)
 - `GET /api/sessions` - List all sessions with available models
+- `GET /api/sessions/search` - Search message text across sessions
 - `POST /api/sessions` - Create new session
 - `POST /api/sessions/:id/resume` - Resume an existing session
 - `POST /api/sessions/:id/observe` - Mark session as observed

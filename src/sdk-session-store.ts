@@ -114,3 +114,58 @@ export function listSessionIds(): string[] {
     return [];
   }
 }
+
+export interface SearchMatch {
+  snippet: string;
+  matchStart: number;
+  matchEnd: number;
+  eventType: string;
+  timestamp?: string;
+}
+
+export function extractSnippet(text: string, query: string, contextChars = 40): { snippet: string; matchStart: number; matchEnd: number } | null {
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return null;
+  const start = Math.max(0, idx - contextChars);
+  const end = Math.min(text.length, idx + query.length + contextChars);
+  const snippet = (start > 0 ? '...' : '') + text.slice(start, end) + (end < text.length ? '...' : '');
+  const matchStart = (start > 0 ? 3 : 0) + (idx - start);
+  return { snippet, matchStart, matchEnd: matchStart + query.length };
+}
+
+export function searchSessionEvents(sessionId: string, query: string, maxMatches = 5): SearchMatch[] {
+  const eventsPath = sessionPath(sessionId, 'events.jsonl');
+  if (!existsSync(eventsPath)) return [];
+
+  const lowerQuery = query.toLowerCase();
+  const matches: SearchMatch[] = [];
+
+  try {
+    const content = readFileSync(eventsPath, 'utf-8');
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      if (matches.length >= maxMatches) break;
+      if (!line.includes('"user.message"') && !line.includes('"assistant.message"')) continue;
+
+      try {
+        const event = JSON.parse(line);
+        const text = event.data?.content;
+        if (typeof text !== 'string') continue;
+
+        const result = extractSnippet(text, lowerQuery);
+        if (result) {
+          matches.push({
+            snippet: result.snippet,
+            matchStart: result.matchStart,
+            matchEnd: result.matchEnd,
+            eventType: event.type,
+            timestamp: event.timestamp,
+          });
+        }
+      } catch { /* skip malformed lines */ }
+    }
+  } catch { /* file read error */ }
+
+  return matches;
+}

@@ -17,7 +17,7 @@ import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
 import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
-import { readSessionWorkspace } from '../sdk-session-store.js';
+import { readSessionWorkspace, searchSessionEvents } from '../sdk-session-store.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -145,6 +145,37 @@ router.get('/sessions', async (_req: Request, res: Response) => {
       cost: m.billing?.multiplier ?? 1
     }))
   });
+});
+
+router.get('/sessions/search', (req: Request, res: Response) => {
+  const query = (req.query.q as string || '').trim();
+  if (!query) { res.json({ results: [] }); return; }
+
+  const sessions = sessionManager.list();
+  const results: Array<{
+    sessionId: string;
+    name: string;
+    cwd: string | null;
+    matchCount: number;
+    matches: Array<{ snippet: string; matchStart: number; matchEnd: number; eventType: string; timestamp?: string }>;
+  }> = [];
+
+  for (const s of sessions) {
+    if (s.kind === 'swarm') continue;
+    const matches = searchSessionEvents(s.sessionId, query);
+    if (matches.length > 0) {
+      results.push({
+        sessionId: s.sessionId,
+        name: s.name || s.sessionId.slice(0, 8),
+        cwd: s.cwd,
+        matchCount: matches.length,
+        matches,
+      });
+    }
+  }
+
+  results.sort((a, b) => b.matchCount - a.matchCount);
+  res.json({ results, query });
 });
 
 router.post('/sessions', async (req: Request, res: Response) => {

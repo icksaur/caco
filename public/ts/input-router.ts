@@ -63,7 +63,9 @@ export function initInputRouter(): void {
     // Global Ctrl+P: open file finder (works from any context)
     if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
       e.preventDefault();
-      const cwd = getCurrentCwd() || getNewChatCwd() || '~';
+      const cwd = getViewState() === 'newChat'
+        ? (getNewChatCwd() || getCurrentCwd() || '~')
+        : (getCurrentCwd() || '~');
       window.location.href = '/?applet=file-finder&root=' + encodeURIComponent(cwd);
       return;
     }

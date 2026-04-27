@@ -18,6 +18,8 @@
     "tests/api.test.ts"
   ],
   "ignoreDependencies": [
-    "@types/tar"
+    "@types/tar",
+    "@codemirror/*",
+    "@lezer/*"
   ]
 }

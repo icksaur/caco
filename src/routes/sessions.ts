@@ -16,7 +16,7 @@ import { homedir } from 'os';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
+import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
 import { readSessionWorkspace } from '../sdk-session-store.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
@@ -136,6 +136,7 @@ router.get('/sessions', async (_req: Request, res: Response) => {
     activeSessionId: sessionState.activeSessionId,
     currentCwd: process.cwd(),
     grouped,
+    sessionOrder: getSessionOrder(),
     unobservedCount,
     peers: peerSessions,
     models: models.map(m => ({

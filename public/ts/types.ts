@@ -40,6 +40,7 @@ export interface SessionsResponse {
   activeSessionId: string;
   currentCwd: string;
   grouped: Record<string, SessionData[]>;
+  sessionOrder?: string[];   // MRU snapshot order (session IDs)
   models?: ModelInfo[];    // Models from SDK (if available)
   unobservedCount?: number; // Total sessions with unobserved activity
 }

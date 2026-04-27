@@ -306,7 +306,7 @@ export async function loadSessions(): Promise<void> {
     if (!response.ok) return;
     
     const data: SessionsResponse = await response.json();
-    const { grouped, models } = data;
+    const { grouped, models, sessionOrder } = data;
     
     // Flatten sessions for tracker sync
     const flatSessions: SessionData[] = [];
@@ -336,7 +336,21 @@ export async function loadSessions(): Promise<void> {
     // Use already-flattened list for rendering
     allSessions = flatSessions.filter(s => s.kind !== 'swarm' || s.isBusy);
     
-    sortSessions(allSessions);
+    if (sessionOrder && sessionOrder.length > 0) {
+      const NOT_IN_SNAPSHOT = -1;
+      const orderMap = new Map(sessionOrder.map((id, i) => [id, i]));
+      allSessions.sort((a, b) => {
+        if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
+        const aIdx = orderMap.get(a.sessionId) ?? NOT_IN_SNAPSHOT;
+        const bIdx = orderMap.get(b.sessionId) ?? NOT_IN_SNAPSHOT;
+        if (aIdx === NOT_IN_SNAPSHOT && bIdx === NOT_IN_SNAPSHOT) return 0;
+        if (aIdx === NOT_IN_SNAPSHOT) return -1;
+        if (bIdx === NOT_IN_SNAPSHOT) return 1;
+        return aIdx - bIdx;
+      });
+    } else {
+      sortSessions(allSessions);
+    }
     
     renderFilteredSessions();
   } catch (error) {

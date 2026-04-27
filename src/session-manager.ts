@@ -4,7 +4,7 @@ import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { getCliOAuthTokens } from './cli-oauth.js';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage } from './types.js';
-import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, getMcpAuth, type SessionKind } from './storage.js';
+import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, getMcpAuth, setSessionOrder, type SessionKind } from './storage.js';
 import { readSessionWorkspace, readSessionEvents, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
@@ -899,6 +899,21 @@ class SessionManager {
       result.push({ sessionId, cwd, model, name, kind, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, hasIcon, scheduleSlug, scheduleNextRun });
     }
     return result;
+  }
+
+  snapshotSessionOrder(): void {
+    const sessions = this.list();
+    const sorted = sessions.sort((a, b) => {
+      const aMeta = getSessionMeta(a.sessionId);
+      const bMeta = getSessionMeta(b.sessionId);
+      const aTime = aMeta?.lastUsedAt ? new Date(aMeta.lastUsedAt).getTime()
+        : a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const bTime = bMeta?.lastUsedAt ? new Date(bMeta.lastUsedAt).getTime()
+        : b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return bTime - aTime;
+    });
+    setSessionOrder(sorted.map(s => s.sessionId));
+    console.log(`[MRU] Snapshot: ${sorted.length} sessions ordered`);
   }
 
   /**

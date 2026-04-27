@@ -44,6 +44,7 @@ export interface SessionMeta {
   parentSessionId?: string;
   lastObservedAt?: string;
   lastIdleAt?: string;
+  lastUsedAt?: string;
   currentIntent?: string;
   envHint?: string;
   context?: Record<string, string[]>;
@@ -719,6 +720,24 @@ export function listActivities(sessionId: string): StoredActivity[] {
   return activities.sort((a, b) => 
     a.metadata.createdAt.localeCompare(b.metadata.createdAt)
   );
+}
+
+// ============================================================================
+// Session Order (MRU snapshot)
+// ============================================================================
+
+const SESSION_ORDER_FILE = join(STORAGE_ROOT, 'session-order.json');
+
+export function getSessionOrder(): string[] {
+  if (!existsSync(SESSION_ORDER_FILE)) return [];
+  try {
+    return JSON.parse(readFileSync(SESSION_ORDER_FILE, 'utf-8')) as string[];
+  } catch { return []; }
+}
+
+export function setSessionOrder(ids: string[]): void {
+  ensureDir(STORAGE_ROOT);
+  writeFileSync(SESSION_ORDER_FILE, JSON.stringify(ids));
 }
 
 // ============================================================================

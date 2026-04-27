@@ -154,6 +154,11 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   }
   
   try {
+    if (!source) {
+      const meta = getSessionMeta(sessionId);
+      if (meta) setSessionMeta(sessionId, { ...meta, lastUsedAt: new Date().toISOString() });
+    }
+    
     await dispatchMessage(
       sessionId, 
       promptToSend, 

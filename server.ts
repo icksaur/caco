@@ -204,6 +204,13 @@ async function start(): Promise<void> {
   
   startScheduleManager();
   
+  sessionManager.snapshotSessionOrder();
+  const msToMidnight = new Date().setHours(24, 0, 0, 0) - Date.now();
+  setTimeout(function midnightSnapshot() {
+    sessionManager.snapshotSessionOrder();
+    setTimeout(midnightSnapshot, 24 * 60 * 60 * 1000);
+  }, msToMidnight);
+  
   // Start server with retry (for restart scenarios where port may not be free yet)
   const MAX_RETRIES = 10;
   const RETRY_DELAY_MS = 500;

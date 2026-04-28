@@ -136,18 +136,12 @@ function updateFolderBadges(): void {
     const folderName = header.dataset.folder;
     if (!folderName) return;
     const state = folderState.get(folderName);
-    let badge = header.querySelector('.session-indicator');
-    if (state && (state.hasBusy || state.hasUnobserved)) {
-      if (!badge) {
-        badge = document.createElement('span');
-        badge.className = 'session-indicator';
-        header.appendChild(badge);
-      }
-      badge.classList.toggle('busy', state.hasBusy);
-      badge.classList.toggle('unobserved', state.hasUnobserved && !state.hasBusy);
-    } else {
-      badge?.remove();
-    }
+    const badge = header.querySelector('.session-indicator');
+    if (!badge) return;
+    const hasBusy = state?.hasBusy ?? false;
+    const hasUnobserved = state?.hasUnobserved ?? false;
+    badge.classList.toggle('busy', hasBusy);
+    badge.classList.toggle('unobserved', hasUnobserved && !hasBusy);
   });
 }
 
@@ -527,6 +521,12 @@ function createFolderHeader(folder: FolderGroup): HTMLElement {
   header.dataset.folder = folder.name;
   header.onclick = () => toggleFolder(folder.name);
   
+  const indicator = document.createElement('span');
+  indicator.className = 'session-indicator';
+  if (folder.hasBusy) indicator.classList.add('busy');
+  else if (folder.hasUnobserved) indicator.classList.add('unobserved');
+  header.appendChild(indicator);
+  
   const icon = document.createElement('span');
   icon.className = 'folder-icon';
   icon.textContent = '📁';
@@ -546,14 +546,6 @@ function createFolderHeader(folder: FolderGroup): HTMLElement {
   count.className = 'folder-count';
   count.textContent = `${folder.sessions.length}`;
   header.appendChild(count);
-  
-  if (folder.hasBusy || folder.hasUnobserved) {
-    const badge = document.createElement('span');
-    badge.className = 'session-indicator';
-    if (folder.hasBusy) badge.classList.add('busy');
-    else if (folder.hasUnobserved) badge.classList.add('unobserved');
-    header.appendChild(badge);
-  }
   
   return header;
 }

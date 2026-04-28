@@ -78,6 +78,38 @@ registerCommand({
 });
 
 registerCommand({
+  name: 'session-folder',
+  description: 'Move session to a folder (or "/" for root)',
+  source: 'built-in',
+  handler: async (arg) => {
+    const sessionId = getActiveSessionId();
+    if (!sessionId) { showToast('No active session'); return; }
+    const trimmed = arg.trim();
+    if (!trimmed) { showToast('Usage: /session-folder <name> or / for root'); return; }
+    if (trimmed !== '/' && trimmed.toLowerCase() !== 'root' && trimmed.includes('/')) {
+      showToast('Nested folders not supported yet');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: trimmed })
+      });
+      if (res.ok) {
+        const dest = (trimmed === '/' || trimmed.toLowerCase() === 'root') ? 'root' : `/${trimmed}`;
+        showToast(`Session moved to ${dest}`, { type: 'success', autoHideMs: 3000 });
+      } else {
+        const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+        showToast(data.error || 'Failed to move session');
+      }
+    } catch {
+      showToast('Failed to move session');
+    }
+  }
+});
+
+registerCommand({
   name: 'session-archive',
   description: 'Archive current session',
   source: 'built-in',

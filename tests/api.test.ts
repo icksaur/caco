@@ -38,7 +38,7 @@ describe('API Routes', () => {
       const res = await fetch(`${BASE}/sessions`);
       assert.strictEqual(res.status, 200);
       const data = await res.json();
-      assert.ok('grouped' in data, 'should have grouped property');
+      assert.ok('sessions' in data, 'should have sessions property');
       assert.ok('models' in data, 'should have models property');
     });
 

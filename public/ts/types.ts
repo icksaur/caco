@@ -34,12 +34,14 @@ export interface SessionData {
   hasIcon?: boolean;
   scheduleSlug?: string;
   scheduleNextRun?: string;
+  folder?: string;
 }
 
 export interface SessionsResponse {
   activeSessionId: string;
   currentCwd: string;
-  grouped: Record<string, SessionData[]>;
+  sessions: SessionData[];
+  grouped?: Record<string, SessionData[]>;  // deprecated, peer compat
   sessionOrder?: string[];   // MRU snapshot order (session IDs)
   models?: ModelInfo[];    // Models from SDK (if available)
   unobservedCount?: number; // Total sessions with unobserved activity

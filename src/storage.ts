@@ -49,6 +49,7 @@ export interface SessionMeta {
   envHint?: string;
   context?: Record<string, string[]>;
   model?: string;
+  folder?: string;
   /** @deprecated Use kind === 'swarm' instead */
   isSwarmSession?: boolean;
 }

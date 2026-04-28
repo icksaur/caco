@@ -44,23 +44,22 @@ Returns:
   "activeSessionId": "uuid | null",
   "currentCwd": "/path/to/cwd",
   "unobservedCount": 2,
-  "grouped": {
-    "/path": [
-      {
-        "sessionId": "uuid",
-        "cwd": "/path",
-        "model": "claude-sonnet-4.5",
-        "name": "Custom Name",
-        "summary": "SDK-generated summary",
-        "updatedAt": "2026-01-27T12:00:00.000Z",
-        "isBusy": false,
-        "isUnobserved": true,
-        "currentIntent": "Reading file...",
-        "scheduleSlug": "daily-backup",
-        "scheduleNextRun": "2026-01-28T00:00:00.000Z"
-      }
-    ]
-  },
+  "sessions": [
+    {
+      "sessionId": "uuid",
+      "cwd": "/path",
+      "model": "claude-sonnet-4.5",
+      "name": "Custom Name",
+      "summary": "SDK-generated summary",
+      "updatedAt": "2026-01-27T12:00:00.000Z",
+      "isBusy": false,
+      "isUnobserved": true,
+      "currentIntent": "Reading file...",
+      "scheduleSlug": "daily-backup",
+      "scheduleNextRun": "2026-01-28T00:00:00.000Z",
+      "folder": "work"
+    }
+  ],
   "models": [{ "id": "model-id", "name": "Model Name", "cost": 1 }]
 }
 ```
@@ -94,6 +93,7 @@ Body:
 {
   "name": "string (custom session name, empty to clear)",
   "envHint": "string (environment setup hint shown on resume)",
+  "folder": "string (virtual folder name, '/' or 'root' to move to root, empty to clear)",
   "setContext": {
     "setName": "files | applet | endpoints | ports",
     "items": ["path/to/file.ts", "other/file.ts"],

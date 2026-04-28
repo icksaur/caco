@@ -18,6 +18,7 @@ import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
 import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
 import { readSessionWorkspace, searchSessionEvents, searchSessionNotes, searchSessionRoadmap } from '../sdk-session-store.js';
+import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -94,22 +95,18 @@ router.get('/session', async (req: Request, res: Response) => {
 });
 
 router.get('/sessions', async (_req: Request, res: Response) => {
-  const grouped = sessionManager.listAllGrouped();
+  const sessions = sessionManager.list();
   const models = sessionManager.getModels();
   
-  // Get unobserved count from tracker (O(1)) and enrich with schedule info
   const unobservedCount = unobservedTracker.getCount();
-  for (const sessions of Object.values(grouped)) {
-    for (const session of sessions) {
-      // Look up schedule info for this session
-      const scheduleInfo = await getScheduleForSession(session.sessionId);
-      if (scheduleInfo) {
-        session.scheduleSlug = scheduleInfo.slug;
-        session.scheduleNextRun = scheduleInfo.nextRun;
-      } else {
-        session.scheduleSlug = null;
-        session.scheduleNextRun = null;
-      }
+  for (const session of sessions) {
+    const scheduleInfo = await getScheduleForSession(session.sessionId);
+    if (scheduleInfo) {
+      session.scheduleSlug = scheduleInfo.slug;
+      session.scheduleNextRun = scheduleInfo.nextRun;
+    } else {
+      session.scheduleSlug = null;
+      session.scheduleNextRun = null;
     }
   }
 
@@ -127,7 +124,9 @@ router.get('/sessions', async (_req: Request, res: Response) => {
     for (const result of results) {
       if (result.status === 'fulfilled' && result.value) {
         const { peer, data } = result.value;
-        peerSessions[`${peer.hostname} (${peer.url})`] = data.grouped || {};
+        // Peer compat: handle both flat sessions and legacy grouped format
+        const peerList = data.sessions || Object.values(data.grouped || {}).flat();
+        peerSessions[`${peer.hostname} (${peer.url})`] = peerList;
       }
     }
   }
@@ -135,7 +134,7 @@ router.get('/sessions', async (_req: Request, res: Response) => {
   res.json({
     activeSessionId: sessionState.activeSessionId,
     currentCwd: process.cwd(),
-    grouped,
+    sessions,
     sessionOrder: getSessionOrder(),
     unobservedCount,
     peers: peerSessions,
@@ -330,11 +329,12 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
  */
 router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { name, envHint, model, cwd: newCwd, setContext } = req.body as { 
+  const { name, envHint, model, cwd: newCwd, setContext, folder } = req.body as { 
     name?: string; 
     envHint?: string;
     model?: string;
     cwd?: string;
+    folder?: string;
     setContext?: { setName: string; items: string[]; mode?: 'replace' | 'merge' };
   };
   
@@ -359,11 +359,19 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
     }
   }
   
+  if (folder !== undefined) {
+    if (folder !== '' && folder !== '/' && folder.toLowerCase() !== 'root' && !isValidFolder(folder)) {
+      res.status(400).json({ error: 'Invalid folder name: only letters, numbers, space, dash, underscore. Nested paths not supported.' });
+      return;
+    }
+  }
+
   const existing = getSessionMeta(sessionId) ?? { name: '' };
   const updated = {
     ...existing,
     ...(name !== undefined && { name }),
     ...(envHint !== undefined && { envHint }),
+    ...(folder !== undefined && { folder: normalizeFolder(folder) || undefined }),
   };
   
   // Handle model change via SDK
@@ -400,10 +408,10 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
   setSessionMeta(sessionId, updated);
   
   // Broadcast session list change if name changed (for clients to refresh)
-  if (name !== undefined) {
+  if (name !== undefined || folder !== undefined) {
     broadcastGlobalEvent({ 
       type: 'session.listChanged', 
-      data: { reason: 'renamed', sessionId } 
+      data: { reason: folder !== undefined ? 'updated' : 'renamed', sessionId } 
     });
   }
   

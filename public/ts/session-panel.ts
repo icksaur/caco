@@ -3,7 +3,7 @@
  */
 
 import type { SessionsResponse, SessionData } from './types.js';
-import { formatAge, formatStatusParts, sortSessions } from './ui-utils.js';
+import { formatAge, formatStatusParts } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { showSessionPanel } from './view-controller.js';
@@ -11,9 +11,15 @@ import { sessionClick, newSessionClick } from './router.js';
 import { onGlobalEvent } from './websocket.js';
 import { sessionTracker } from './session-state-tracker.js';
 import { showToast } from './toast.js';
+import { buildSessionListModel } from './session-list-model.js';
+import type { SessionListModel, FolderGroup } from './session-list-model.js';
 
 // Module state
 let allSessions: SessionData[] = [];
+let currentSessionOrder: string[] = [];
+const collapsedFolders = new Set<string>(
+  (() => { try { return JSON.parse(localStorage.getItem('caco:collapsed-folders') || '[]'); } catch { return []; } })()
+);
 
 export function getCachedSessions(): SessionData[] {
   return allSessions;
@@ -40,26 +46,38 @@ export function initSessionPanel(): void {
   });
   
   // Tracker drives DOM updates for session items and menu badges
+  let badgeUpdatePending = false;
   sessionTracker.onChange((sessionId, state) => {
     updateSessionItemState(sessionId, state.busy);
+    if (!badgeUpdatePending) {
+      badgeUpdatePending = true;
+      requestAnimationFrame(() => { badgeUpdatePending = false; updateFolderBadges(); });
+    }
     updateMenuIndicators();
   });
 
-  // Drag-drop .tar.gz import
+  // Drag-drop .tar.gz import (guarded against session drags)
   const panel = document.getElementById('sessionView');
   if (panel) {
     let dragDepth = 0;
+    const isSessionDrag = (e: DragEvent) => e.dataTransfer?.types.includes('text/x-caco-session') ?? false;
     panel.addEventListener('dragenter', (e) => {
+      if (isSessionDrag(e)) return;
       e.preventDefault();
       if (dragDepth === 0) panel.classList.add('drop-active');
       dragDepth++;
     });
-    panel.addEventListener('dragover', (e) => { e.preventDefault(); });
-    panel.addEventListener('dragleave', () => {
+    panel.addEventListener('dragover', (e) => {
+      if (isSessionDrag(e)) return;
+      e.preventDefault();
+    });
+    panel.addEventListener('dragleave', (e) => {
+      if (isSessionDrag(e)) return;
       dragDepth--;
       if (dragDepth === 0) panel.classList.remove('drop-active');
     });
     panel.addEventListener('drop', (e) => {
+      if (isSessionDrag(e)) return;
       e.preventDefault();
       dragDepth = 0;
       panel.classList.remove('drop-active');
@@ -102,6 +120,35 @@ function updateSessionItemState(sessionId: string, isBusy: boolean): void {
     item.classList.remove('busy');
     indicator?.classList.remove('busy');
   }
+}
+
+function updateFolderBadges(): void {
+  const folderState = new Map<string, { hasBusy: boolean; hasUnobserved: boolean }>();
+  for (const s of allSessions) {
+    if (!s.folder) continue;
+    let state = folderState.get(s.folder);
+    if (!state) { state = { hasBusy: false, hasUnobserved: false }; folderState.set(s.folder, state); }
+    const tracked = sessionTracker.get(s.sessionId);
+    if (tracked?.busy ?? s.isBusy) state.hasBusy = true;
+    if (tracked?.unobserved ?? s.isUnobserved) state.hasUnobserved = true;
+  }
+  document.querySelectorAll<HTMLElement>('.folder-header[data-folder]').forEach(header => {
+    const folderName = header.dataset.folder;
+    if (!folderName) return;
+    const state = folderState.get(folderName);
+    let badge = header.querySelector('.session-indicator');
+    if (state && (state.hasBusy || state.hasUnobserved)) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'session-indicator';
+        header.appendChild(badge);
+      }
+      badge.classList.toggle('busy', state.hasBusy);
+      badge.classList.toggle('unobserved', state.hasUnobserved && !state.hasBusy);
+    } else {
+      badge?.remove();
+    }
+  });
 }
 
 /**
@@ -306,16 +353,12 @@ export async function loadSessions(): Promise<void> {
     if (!response.ok) return;
     
     const data: SessionsResponse = await response.json();
-    const { grouped, models, sessionOrder } = data;
+    const { sessions: sessionList, models, sessionOrder } = data;
     
-    // Flatten sessions for tracker sync
-    const flatSessions: SessionData[] = [];
-    for (const [cwd, sessions] of Object.entries(grouped)) {
-      if (cwd === '(unknown)') continue;
-      for (const session of sessions) {
-        flatSessions.push({ ...session, cwd });
-      }
-    }
+    // Flat session list from API (filter unknown CWDs)
+    const flatSessions: SessionData[] = (sessionList || []).filter(
+      (s: SessionData) => s.cwd && s.cwd !== '(unknown)'
+    );
     
     // Sync tracker with server state (drives menu indicators via onChange)
     sessionTracker.syncFromList(flatSessions);
@@ -333,26 +376,10 @@ export async function loadSessions(): Promise<void> {
     
     container.innerHTML = '';
     
-    // Use already-flattened list for rendering
     allSessions = flatSessions.filter(s => s.kind !== 'swarm' || s.isBusy);
+    currentSessionOrder = sessionOrder || [];
     
-    if (sessionOrder && sessionOrder.length > 0) {
-      const NOT_IN_SNAPSHOT = -1;
-      const orderMap = new Map(sessionOrder.map((id, i) => [id, i]));
-      allSessions.sort((a, b) => {
-        if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
-        const aIdx = orderMap.get(a.sessionId) ?? NOT_IN_SNAPSHOT;
-        const bIdx = orderMap.get(b.sessionId) ?? NOT_IN_SNAPSHOT;
-        if (aIdx === NOT_IN_SNAPSHOT && bIdx === NOT_IN_SNAPSHOT) return 0;
-        if (aIdx === NOT_IN_SNAPSHOT) return -1;
-        if (bIdx === NOT_IN_SNAPSHOT) return 1;
-        return aIdx - bIdx;
-      });
-    } else {
-      sortSessions(allSessions);
-    }
-    
-    renderFilteredSessions();
+    renderFromModel(buildSessionListModel(allSessions, currentSessionOrder, collapsedFolders));
   } catch (error) {
     console.error('Failed to load sessions:', error);
   }
@@ -361,7 +388,80 @@ export async function loadSessions(): Promise<void> {
 /**
  * Render sessions filtered by current search query
  */
-function renderFilteredSessions(): void {
+function saveCollapsedFolders(): void {
+  localStorage.setItem('caco:collapsed-folders', JSON.stringify([...collapsedFolders]));
+}
+
+function toggleFolder(name: string): void {
+  if (collapsedFolders.has(name)) {
+    collapsedFolders.delete(name);
+  } else {
+    collapsedFolders.add(name);
+  }
+  saveCollapsedFolders();
+  renderFromModel(buildSessionListModel(allSessions, currentSessionOrder, collapsedFolders));
+}
+
+const movingSessionIds = new Set<string>();
+
+function setupZoneDragHandlers(zone: HTMLElement, folderName: string): void {
+  let dragDepth = 0;
+  const isSessionDrag = (e: DragEvent) => e.dataTransfer?.types.includes('text/x-caco-session') ?? false;
+
+  zone.addEventListener('dragover', (e) => {
+    if (!isSessionDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = 'move';
+  });
+  zone.addEventListener('dragenter', (e) => {
+    if (!isSessionDrag(e)) return;
+    dragDepth++;
+    if (dragDepth === 1) zone.classList.add('drop-highlight');
+  });
+  zone.addEventListener('dragleave', (e) => {
+    if (!isSessionDrag(e)) return;
+    dragDepth--;
+    if (dragDepth === 0) zone.classList.remove('drop-highlight');
+  });
+  zone.addEventListener('drop', (e) => {
+    if (!isSessionDrag(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepth = 0;
+    zone.classList.remove('drop-highlight');
+    const sessionId = e.dataTransfer!.getData('text/x-caco-session');
+    if (!sessionId || movingSessionIds.has(sessionId)) return;
+    const current = allSessions.find(s => s.sessionId === sessionId)?.folder ?? '';
+    if (current === folderName) return;
+    const session = allSessions.find(s => s.sessionId === sessionId);
+    if (session) session.folder = folderName || undefined;
+    movingSessionIds.add(sessionId);
+    const patchFolder = folderName || '/';
+    void (async () => {
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folder: patchFolder })
+        });
+        if (res.ok) {
+          const dest = folderName ? `/${folderName}` : 'root';
+          showToast(`Session moved to ${dest}`, { type: 'success', autoHideMs: 3000 });
+          void loadSessions();
+        } else {
+          const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+          showToast(data.error || 'Failed to move session');
+        }
+      } catch {
+        showToast('Failed to move session');
+      } finally {
+        movingSessionIds.delete(sessionId);
+      }
+    })();
+  });
+}
+
+function renderFromModel(model: SessionListModel): void {
   const container = document.getElementById('sessionList');
   if (!container) return;
   
@@ -382,7 +482,7 @@ function renderFilteredSessions(): void {
   
   container.appendChild(heading);
   
-  if (allSessions.length === 0) {
+  if (model.root.length === 0 && model.folders.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'schedules-empty';
     empty.textContent = 'no sessions';
@@ -390,10 +490,72 @@ function renderFilteredSessions(): void {
     return;
   }
   
-  for (const session of allSessions) {
-    const item = createSessionItem(session, activeSessionId ?? undefined);
-    container.appendChild(item);
+  const rootZone = document.createElement('div');
+  rootZone.className = 'folder-zone';
+  rootZone.dataset.folder = '';
+  if (model.root.length === 0 && model.folders.length > 0) {
+    const indicator = document.createElement('div');
+    indicator.className = 'root-drop-indicator';
+    rootZone.appendChild(indicator);
   }
+  for (const session of model.root) {
+    rootZone.appendChild(createSessionItem(session, activeSessionId ?? undefined));
+  }
+  setupZoneDragHandlers(rootZone, '');
+  container.appendChild(rootZone);
+  
+  for (const folder of model.folders) {
+    const zone = document.createElement('div');
+    zone.className = 'folder-zone';
+    zone.dataset.folder = folder.name;
+    zone.appendChild(createFolderHeader(folder));
+    const content = document.createElement('div');
+    content.className = 'folder-content';
+    if (folder.collapsed) content.style.display = 'none';
+    for (const session of folder.sessions) {
+      content.appendChild(createSessionItem(session, activeSessionId ?? undefined));
+    }
+    zone.appendChild(content);
+    setupZoneDragHandlers(zone, folder.name);
+    container.appendChild(zone);
+  }
+}
+
+function createFolderHeader(folder: FolderGroup): HTMLElement {
+  const header = document.createElement('div');
+  header.className = 'folder-header';
+  header.dataset.folder = folder.name;
+  header.onclick = () => toggleFolder(folder.name);
+  
+  const icon = document.createElement('span');
+  icon.className = 'folder-icon';
+  icon.textContent = '📁';
+  header.appendChild(icon);
+  
+  const chevron = document.createElement('span');
+  chevron.className = 'folder-chevron';
+  chevron.textContent = folder.collapsed ? '▸' : '▾';
+  header.appendChild(chevron);
+  
+  const name = document.createElement('span');
+  name.className = 'folder-name';
+  name.textContent = folder.name;
+  header.appendChild(name);
+  
+  const count = document.createElement('span');
+  count.className = 'folder-count';
+  count.textContent = `${folder.sessions.length}`;
+  header.appendChild(count);
+  
+  if (folder.hasBusy || folder.hasUnobserved) {
+    const badge = document.createElement('span');
+    badge.className = 'session-indicator';
+    if (folder.hasBusy) badge.classList.add('busy');
+    else if (folder.hasUnobserved) badge.classList.add('unobserved');
+    header.appendChild(badge);
+  }
+  
+  return header;
 }
 
 /**
@@ -419,23 +581,30 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   item.dataset.sessionId = session.sessionId;
   item.onclick = () => sessionClick(session.sessionId);
   
-  if (window.parent !== window) {
-    item.draggable = true;
-    const dragName = session.name || session.summary || 'No summary';
-    item.addEventListener('dragstart', (e) => {
+  item.draggable = true;
+  item.addEventListener('dragstart', (e) => {
+    e.dataTransfer!.setData('text/x-caco-session', session.sessionId);
+    e.dataTransfer!.effectAllowed = 'move';
+    e.dataTransfer!.setDragImage(item, 0, 0);
+    item.classList.add('dragging');
+    if (window.parent !== window) {
       e.dataTransfer!.effectAllowed = 'copy';
-      e.dataTransfer!.setDragImage(item, 0, 0);
+      const dragName = session.name || session.summary || 'No summary';
       window.parent.postMessage({
         type: 'caco:transfer:dragstart',
         sessionId: session.sessionId,
         sessionName: dragName,
         origin: window.location.origin
       }, '*');
-    });
-    item.addEventListener('dragend', () => {
+    }
+  });
+  item.addEventListener('dragend', () => {
+    item.classList.remove('dragging');
+    document.querySelectorAll('.folder-zone.drop-highlight').forEach(z => z.classList.remove('drop-highlight'));
+    if (window.parent !== window) {
       window.parent.postMessage({ type: 'caco:transfer:dragend' }, '*');
-    });
-  }
+    }
+  });
   
   // Row 1: indicator + title + age + action buttons
   const row1 = document.createElement('div');

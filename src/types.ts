@@ -33,9 +33,6 @@ export interface OutputEntry {
   createdAt: number;
 }
 
-export interface GroupedSessions {
-  [cwd: string]: SessionListItem[];
-}
 
 export interface SessionListItem {
   id: string;
@@ -43,6 +40,7 @@ export interface SessionListItem {
   age: string;
   isActive: boolean;
   lastActiveAt?: string;
+  folder?: string;
 }
 
 export interface SystemMessage {
@@ -100,7 +98,7 @@ export interface SessionResponse {
 export interface SessionsListResponse {
   activeSessionId: string | null;
   currentCwd: string;
-  grouped: GroupedSessions;
+  sessions: SessionListItem[];
 }
 
 export interface CopilotClient {

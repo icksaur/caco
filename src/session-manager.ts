@@ -247,10 +247,7 @@ interface SessionListItem {
   hasIcon: boolean;
   scheduleSlug: string | null;
   scheduleNextRun: string | null;
-}
-
-interface GroupedSessions {
-  [cwd: string]: SessionListItem[];
+  folder?: string;
 }
 
 // ============================================================================
@@ -917,7 +914,7 @@ class SessionManager {
       const scheduleSlug = null;
       const scheduleNextRun = null;
       const hasIcon = getSessionIconPath(sessionId) !== null;
-      result.push({ sessionId, cwd, model, name, kind, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, hasIcon, scheduleSlug, scheduleNextRun });
+      result.push({ sessionId, cwd, model, name, kind, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, hasIcon, scheduleSlug, scheduleNextRun, folder: meta?.folder });
     }
     return result;
   }
@@ -935,31 +932,6 @@ class SessionManager {
     });
     setSessionOrder(sorted.map(s => s.sessionId));
     console.log(`[MRU] Snapshot: ${sorted.length} sessions ordered`);
-  }
-
-  /**
-   * List all sessions grouped by cwd
-   */
-  listAllGrouped(): GroupedSessions {
-    const sessions = this.list();
-    const grouped: GroupedSessions = {};
-    
-    for (const s of sessions) {
-      const key = s.cwd || '(unknown)';
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(s);
-    }
-    
-    // Sort each group by updatedAt descending
-    for (const cwd of Object.keys(grouped)) {
-      grouped[cwd].sort((a, b) => {
-        const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-        return bTime - aTime;
-      });
-    }
-    
-    return grouped;
   }
 
   /**

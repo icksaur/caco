@@ -21,6 +21,9 @@ const collapsedFolders = new Set<string>(
   (() => { try { return JSON.parse(localStorage.getItem('caco:collapsed-folders') || '[]'); } catch { return []; } })()
 );
 
+// Track active session drags (iframe may restrict dataTransfer.types during dragover)
+let sessionDragActive = false;
+
 export function getCachedSessions(): SessionData[] {
   return allSessions;
 }
@@ -60,7 +63,7 @@ export function initSessionPanel(): void {
   const panel = document.getElementById('sessionView');
   if (panel) {
     let dragDepth = 0;
-    const isSessionDrag = (e: DragEvent) => e.dataTransfer?.types.includes('text/x-caco-session') ?? false;
+    const isSessionDrag = (e: DragEvent) => sessionDragActive || (e.dataTransfer?.types.includes('text/x-caco-session') ?? false);
     panel.addEventListener('dragenter', (e) => {
       if (isSessionDrag(e)) return;
       e.preventDefault();
@@ -400,7 +403,7 @@ const movingSessionIds = new Set<string>();
 
 function setupZoneDragHandlers(zone: HTMLElement, folderName: string): void {
   let dragDepth = 0;
-  const isSessionDrag = (e: DragEvent) => e.dataTransfer?.types.includes('text/x-caco-session') ?? false;
+  const isSessionDrag = (e: DragEvent) => sessionDragActive || (e.dataTransfer?.types.includes('text/x-caco-session') ?? false);
 
   zone.addEventListener('dragover', (e) => {
     if (!isSessionDrag(e)) return;
@@ -576,11 +579,11 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   item.draggable = true;
   item.addEventListener('dragstart', (e) => {
     e.dataTransfer!.setData('text/x-caco-session', session.sessionId);
-    e.dataTransfer!.effectAllowed = 'move';
+    e.dataTransfer!.effectAllowed = 'copyMove';
     e.dataTransfer!.setDragImage(item, 0, 0);
     item.classList.add('dragging');
+    sessionDragActive = true;
     if (window.parent !== window) {
-      e.dataTransfer!.effectAllowed = 'copy';
       const dragName = session.name || session.summary || 'No summary';
       window.parent.postMessage({
         type: 'caco:transfer:dragstart',
@@ -592,6 +595,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   });
   item.addEventListener('dragend', () => {
     item.classList.remove('dragging');
+    sessionDragActive = false;
     document.querySelectorAll('.folder-zone.drop-highlight').forEach(z => z.classList.remove('drop-highlight'));
     if (window.parent !== window) {
       window.parent.postMessage({ type: 'caco:transfer:dragend' }, '*');

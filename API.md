@@ -801,6 +801,66 @@ Returns available models from SDK.
 
 Creates a new session and optionally sends an initial message. Returns the new session ID.
 
+### Session Memory Tools
+
+Defined in `src/roadmap-tool.ts` and `src/presentation-tool.ts`:
+
+- `get_roadmap` - Read session roadmap (steps, documents, status)
+- `update_roadmap` - Add/update/remove steps, set title and documents
+- `session_note` - Append or read timestamped notes that survive compaction
+- `get_presentation` - Read session slide deck
+- `update_presentation` - Create/update/remove slides
+
+**get_roadmap** parameters:
+- `sessionId` (string, optional) - Read another session's roadmap
+
+**update_roadmap** parameters (all optional):
+- `title` (string) - Set title
+- `steps` (array) - Replace entire step list
+- `documents` (string[]) - Replace document list
+- `addStep` (object) - Append a step `{ title, description?, status?, context? }`
+- `stepTitle` (string) - Find step by title (case-insensitive prefix match)
+- `updateStep` (object) - Update fields on matched step
+- `removeStepIndex` / `removeStepTitle` - Remove a step
+
+**session_note** parameters:
+- `append` (string, optional) - Add a timestamped note
+- `sessionId` (string, optional) - Read another session's notes
+
+**get_presentation** parameters:
+- `sessionId` (string, optional) - Read another session's presentation
+
+**update_presentation** parameters (all optional):
+- `title` (string) - Set title
+- `slides` (string[]) - Replace entire slide list (max 100)
+- `addSlide` (string) - Append a slide (markdown)
+- `addSlideIndex` (number) - Insert position
+- `updateSlideIndex` (number) + `updateSlide` (string) - Update a slide
+- `removeSlideIndex` (number) - Remove a slide
+- `removeAll` (boolean) - Delete entire presentation
+
+### Session History Tool
+
+Defined in `src/session-history-tool.ts`:
+
+- `session_store_sql` - Query the global session history database
+
+**session_store_sql** parameters:
+- `query` (string, required) - SQL query (SELECT only)
+
+Executes read-only SQL against `~/.copilot/session-store.db` — the cross-session history database maintained by the Copilot CLI. Tables: `sessions`, `turns`, `checkpoints`, `session_files`, `session_refs`, `search_index`.
+
+Uses `sql.js` (WASM SQLite). Returns up to 500 rows as `{ columns, rows, rowCount, truncated }`.
+
+This works around a limitation where SDK-spawned sessions don't get the CLI's built-in `session_store` SQL routing.
+
+### Dev and Extension Tools
+
+Defined in `src/dev-docs-tool.ts` and `src/extensions-tool.ts`:
+
+- `caco_dev_docs` - Get Caco documentation (usage, setup, architecture, build commands)
+- `caco_extensions` - Discover loaded extensions and extension API
+
 ## JavaScript APIs (Applet Runtime)
 
 Global functions available to applet JavaScript code via `window.appletAPI` or legacy globals.

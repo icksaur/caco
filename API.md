@@ -843,9 +843,9 @@ Defined in `src/roadmap-tool.ts` and `src/presentation-tool.ts`:
 
 Defined in `src/session-history-tool.ts`:
 
-- `session_store_sql` - Query the global session history database
+- `caco_session_store_sql` - Query the global session history database
 
-**session_store_sql** parameters:
+**caco_session_store_sql** parameters:
 - `query` (string, required) - SQL query (SELECT only)
 
 Executes read-only SQL against `~/.copilot/session-store.db` — the cross-session history database maintained by the Copilot CLI. Tables: `sessions`, `turns`, `checkpoints`, `session_files`, `session_refs`, `search_index`.

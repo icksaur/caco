@@ -22,6 +22,8 @@ import { createExtensionsTool } from './src/extensions-tool.js';
 import { createSwarmTool } from './src/swarm-tool.js';
 import { createDelegateTool } from './src/delegate-tool.js';
 import { createRoadmapTools } from './src/roadmap-tool.js';
+import { createPresentationTools } from './src/presentation-tool.js';
+import { createSessionHistoryTool } from './src/session-history-tool.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
@@ -193,8 +195,10 @@ async function start(): Promise<void> {
     const swarmTools = createSwarmTool(sessionRef);
     const delegateTools = createDelegateTool(sessionRef);
     const roadmapTools = createRoadmapTools(sessionRef);
+    const presentationTools = createPresentationTools(sessionRef);
+    const sessionHistoryTools = createSessionHistoryTool();
     
-    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools];
+    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools, ...presentationTools, ...sessionHistoryTools];
   };
   
   await createSessionState({

@@ -12,6 +12,8 @@ export interface TrackedSession {
   busy: boolean;
   unobserved: boolean;
   intent: string | null;
+  /** Set by client-side setBusy(true) — prevents syncFromList from clearing busy prematurely */
+  localBusy?: boolean;
 }
 
 type ChangeListener = (sessionId: string, state: TrackedSession) => void;
@@ -41,8 +43,9 @@ class SessionStateTracker {
 
   setBusy(sessionId: string, busy: boolean): void {
     const s = this.getOrCreate(sessionId);
-    if (s.busy === busy) return;
+    if (s.busy === busy && s.localBusy === busy) return;
     s.busy = busy;
+    s.localBusy = busy || undefined;
     this.notify(sessionId, s);
   }
 
@@ -72,8 +75,10 @@ class SessionStateTracker {
       const s = this.getOrCreate(item.sessionId);
       let changed = false;
 
-      const busy = item.isBusy ?? false;
+      const busy = s.localBusy || (item.isBusy ?? false);
       if (s.busy !== busy) { s.busy = busy; changed = true; }
+      // Clear localBusy once server confirms busy
+      if (item.isBusy && s.localBusy) s.localBusy = undefined;
 
       const unobserved = item.isUnobserved ?? false;
       if (s.unobserved !== unobserved) { s.unobserved = unobserved; changed = true; }

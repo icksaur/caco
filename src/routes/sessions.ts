@@ -16,8 +16,9 @@ import { homedir } from 'os';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
+import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getSessionRoadmap, setSessionRoadmap, getSessionPresentation, setSessionPresentation, deleteSessionData, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
 import { readSessionWorkspace, searchSessionEvents, searchSessionNotes, searchSessionRoadmap } from '../sdk-session-store.js';
+import { applyPresentationUpdate, type PresentationUpdateParams } from '../presentation-tool.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
@@ -471,9 +472,14 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
   });
 });
 
+router.get('/sessions/:sessionId/data', (req: Request, res: Response) => {
+  res.json(listSessionData(req.params.sessionId as string));
+});
+
 router.get('/sessions/:sessionId/data/:name', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const name = req.params.name as string;
+  if (!isValidDataName(name)) { res.status(400).json({ error: 'Invalid data name' }); return; }
   const data = getSessionData(sessionId, name);
   res.json(data || {});
 });
@@ -481,6 +487,7 @@ router.get('/sessions/:sessionId/data/:name', (req: Request, res: Response) => {
 router.put('/sessions/:sessionId/data/:name', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const name = req.params.name as string;
+  if (!isValidDataName(name)) { res.status(400).json({ error: 'Invalid data name' }); return; }
   if (!setSessionData(sessionId, name, req.body)) {
     res.status(403).json({ error: `Cannot write to reserved name: ${name}` });
     return;
@@ -504,6 +511,28 @@ router.patch('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
   
   setSessionRoadmap(sessionId, existing);
   res.json(existing);
+});
+
+router.get('/sessions/:sessionId/presentation', (req: Request, res: Response) => {
+  res.json(getSessionPresentation(req.params.sessionId as string) || {});
+});
+
+router.patch('/sessions/:sessionId/presentation', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const params = req.body as PresentationUpdateParams;
+  const existing = getSessionPresentation(sessionId);
+  try {
+    const result = applyPresentationUpdate(existing, params);
+    if (result === null) {
+      deleteSessionData(sessionId, 'presentation');
+      res.json({ removed: true });
+      return;
+    }
+    setSessionPresentation(sessionId, result);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 router.get('/sessions/:sessionId/notes', (req: Request, res: Response) => {

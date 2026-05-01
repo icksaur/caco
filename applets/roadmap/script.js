@@ -8,6 +8,7 @@ var docs = document.getElementById('docs');
 var steps = document.getElementById('steps');
 var notesEl = document.getElementById('notes');
 var empty = document.getElementById('empty');
+var presLink = document.getElementById('presLink');
 
 var statusIcons = { pending: '○', active: '◐', done: '●', blocked: '⊘' };
 var statusOrder = ['pending', 'active', 'done', 'blocked'];
@@ -210,6 +211,21 @@ async function archiveNote(ts) {
 function loadAll() {
   loadRoadmap();
   loadNotes();
+  checkPresentation();
+}
+
+async function checkPresentation() {
+  if (!sessionId) return;
+  try {
+    var res = await fetch('/api/sessions/' + sessionId + '/data');
+    var keys = await res.json();
+    if (Array.isArray(keys) && keys.indexOf('presentation') !== -1) {
+      presLink.innerHTML = '<a class="doc-link" href="?applet=presentation">📊 Presentation</a>';
+      presLink.style.display = '';
+    } else {
+      presLink.style.display = 'none';
+    }
+  } catch { presLink.style.display = 'none'; }
 }
 
 window.appletAPI.onSessionChange(function(_id, info) {

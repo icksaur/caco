@@ -21,7 +21,7 @@ describe('SessionStateTracker', () => {
       const cb = vi.fn();
       t.onChange(cb);
       t.setBusy('s1', true);
-      expect(cb).toHaveBeenCalledWith('s1', { busy: true, unobserved: false, intent: null });
+      expect(cb).toHaveBeenCalledWith('s1', expect.objectContaining({ busy: true, unobserved: false, intent: null }));
     });
 
     it('does not notify when value unchanged', () => {

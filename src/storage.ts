@@ -16,7 +16,7 @@
  * We store Caco-specific metadata separately to avoid coupling with SDK internals.
  */
 
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, readdirSync, statSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { OUTPUT_CACHE_TTL_MS } from './config.js';
@@ -65,6 +65,11 @@ export interface Roadmap {
   title: string;
   documents?: string[];
   steps: RoadmapStep[];
+}
+
+export interface Presentation {
+  title: string;
+  slides: string[];
 }
 
 /**
@@ -212,9 +217,24 @@ export function setSessionMeta(sessionId: string, meta: SessionMeta): void {
 }
 
 const RESERVED_NAMES = new Set(['meta']);
+const SAFE_DATA_NAME = /^[a-zA-Z0-9_-]+$/;
+
+export function isValidDataName(name: string): boolean {
+  return SAFE_DATA_NAME.test(name) && !RESERVED_NAMES.has(name);
+}
+
+export function listSessionData(sessionId: string): string[] {
+  const dir = getSessionDir(sessionId);
+  if (!existsSync(dir)) return [];
+  try {
+    return readdirSync(dir)
+      .filter(f => f.endsWith('.json') && f !== 'meta.json' && f !== 'notes.json' && f !== 'notes-archive.json')
+      .map(f => f.replace('.json', ''));
+  } catch { return []; }
+}
 
 export function getSessionData(sessionId: string, name: string): Record<string, unknown> | null {
-  if (RESERVED_NAMES.has(name)) return null;
+  if (!isValidDataName(name)) return null;
   const filePath = join(getSessionDir(sessionId), `${name}.json`);
   if (!existsSync(filePath)) return null;
   try {
@@ -223,7 +243,7 @@ export function getSessionData(sessionId: string, name: string): Record<string, 
 }
 
 export function setSessionData(sessionId: string, name: string, data: Record<string, unknown>): boolean {
-  if (RESERVED_NAMES.has(name)) return false;
+  if (!isValidDataName(name)) return false;
   const dir = getSessionDir(sessionId);
   ensureDir(dir);
   writeFileSync(join(dir, `${name}.json`), JSON.stringify(data, null, 2));
@@ -236,6 +256,21 @@ export function getSessionRoadmap(sessionId: string): Roadmap | null {
 
 export function setSessionRoadmap(sessionId: string, roadmap: Roadmap): void {
   setSessionData(sessionId, 'roadmap', roadmap as unknown as Record<string, unknown>);
+}
+
+export function getSessionPresentation(sessionId: string): Presentation | null {
+  return getSessionData(sessionId, 'presentation') as Presentation | null;
+}
+
+export function setSessionPresentation(sessionId: string, presentation: Presentation): void {
+  setSessionData(sessionId, 'presentation', presentation as unknown as Record<string, unknown>);
+}
+
+export function deleteSessionData(sessionId: string, name: string): boolean {
+  if (!isValidDataName(name)) return false;
+  const filePath = join(getSessionDir(sessionId), `${name}.json`);
+  if (!existsSync(filePath)) return false;
+  try { unlinkSync(filePath); return true; } catch { return false; }
 }
 
 // ============================================================================

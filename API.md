@@ -143,6 +143,32 @@ Body (any subset):
 
 Returns updated roadmap.
 
+**GET /api/sessions/:id/presentation** - Get session presentation
+
+Returns presentation JSON or `{}` if none exists.
+
+**PATCH /api/sessions/:id/presentation** - Update session presentation
+
+Body (any subset):
+```json
+{
+  "title": "string",
+  "slides": ["markdown string", "..."],
+  "addSlide": "markdown string",
+  "addSlideIndex": 0,
+  "updateSlideIndex": 0,
+  "updateSlide": "new content",
+  "removeSlideIndex": 0,
+  "removeAll": true
+}
+```
+
+Returns updated presentation, or `{ removed: true }` on removeAll.
+
+**GET /api/sessions/:id/data** - List session data keys
+
+Returns `["roadmap", "presentation", ...]`. Excludes meta.json and notes.
+
 **GET /api/sessions/:id/notes** - Get session notes
 
 Returns `{ notes: [{ ts, text }, ...] }`. Notes are NDJSON on disk.

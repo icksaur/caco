@@ -4,7 +4,7 @@
 
 import type { ModelInfo, Preferences } from './types.js';
 import { getSelectedModel, setSelectedModel as stateSetSelectedModel, getAvailableModels, setAvailableModels as stateSetAvailableModels } from './app-state.js';
-import { renderStatus } from './context-footer.js';
+import { renderNewChatStatus } from './context-footer.js';
 import { getViewState } from './view-controller.js';
 import { InputPopup } from './input-popup.js';
 
@@ -127,7 +127,7 @@ function setupCwdFooterSync(): void {
     const modelId = getSelectedModel();
     const models = getAvailableModels();
     const model = models.find(m => m.id === modelId);
-    renderStatus(model?.name || modelId?.split('/').pop() || '', cwd);
+    renderNewChatStatus(model?.name || modelId?.split('/').pop() || '', cwd);
   }
   
   function showSuggestions(dirs: string[], prefix: string): void {
@@ -290,7 +290,7 @@ export function selectModel(modelId: string): void {
   const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
   const cwd = cwdInput?.value.trim() || '';
   if (cwd && modelInfo && getViewState() === 'newChat') {
-    renderStatus(modelInfo.name, cwd);
+    renderNewChatStatus(modelInfo.name, cwd);
   }
 }
 

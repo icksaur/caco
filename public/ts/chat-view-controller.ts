@@ -11,7 +11,7 @@
 
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, clearActiveSession, getNewChatCwd } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
-import { renderStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage } from './context-footer.js';
+import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, refreshRoadmapLink } from './context-footer.js';
 import { loadModels } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
 import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websocket.js';
@@ -253,7 +253,11 @@ class ChatViewController {
     const models = getAvailableModels();
     const model = models.find(m => m.id === id);
     const modelName = model?.name || id?.split('/').pop() || '';
-    renderStatus(modelName, cwd, hasGit, name, sessionId, hasIcon, gitBranch);
+    if (sessionId) {
+      renderSessionStatus({ modelName, cwd, hasGit, sessionName: name, sessionId, hasIcon, gitBranch });
+    } else {
+      renderNewChatStatus(modelName, cwd);
+    }
   }
 
   /**

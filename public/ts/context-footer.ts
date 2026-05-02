@@ -2,7 +2,9 @@
  * Context Footer
  * 
  * Left side: recently edited files as clickable links.
- * Right side: model name + clickable cwd (added via renderStatus).
+ * Center: token usage percentage.
+ * Right side: model name + clickable cwd.
+ * Description row: session name, git, applet links, roadmap.
  * Updated via WebSocket events or on session load.
  */
 
@@ -13,6 +15,8 @@ export interface SessionContext {
   files?: string[];
   [key: string]: string[] | undefined;
 }
+
+let activeFooterSessionId: string | null = null;
 
 /**
  * Render file links in the context footer.
@@ -37,67 +41,109 @@ export function renderContextFooter(context: SessionContext): void {
 }
 
 /**
- * Render status (model name + cwd) in the right side of the footer.
+ * Render status for the new-chat view (model + cwd only, no session data).
  */
-export function renderStatus(modelName: string, cwd: string, hasGit = false, sessionName?: string, sessionId?: string, hasIcon?: boolean, gitBranch?: string | null): void {
+export function renderNewChatStatus(modelName: string, cwd: string): void {
+  activeFooterSessionId = null;
   const footer = regions.footer.el;
   const statusEl = footer.querySelector('.context-status') as HTMLElement | null;
   if (!statusEl) return;
   
   const { model, dirName, fullCwd } = formatStatusParts(modelName, cwd);
   const parts: string[] = [];
-  
-  if (model) {
-    parts.push(`<span class="context-model">${model}</span>`);
-  }
-  
-  if (dirName) {
-    parts.push(`<span title="${fullCwd || ''}">${dirName}</span>`);
-  }
-  
-  if (hasIcon && sessionId) {
-    parts.push(`<img class="context-icon" src="/api/sessions/${sessionId}/icon" alt="">`);
-  }
-  
+  if (model) parts.push(`<span class="context-model">${model}</span>`);
+  if (dirName) parts.push(`<span title="${fullCwd || ''}">${dirName}</span>`);
   statusEl.innerHTML = parts.join('<span class="context-sep">·</span>');
   
   const descEl = footer.querySelector('.context-description') as HTMLElement | null;
-  if (descEl) {
-    const descParts: string[] = [];
-    if (sessionName) descParts.push(escapeHtml(sessionName));
-    
-    const encodedCwd = fullCwd ? encodeURIComponent(fullCwd) : '';
-    const appletLinks: string[] = [];
-    if (sessionId) {
-      appletLinks.push('<a href="/?applet=roadmap" class="footer-applet-link" id="footerRoadmapLink" style="display:none">roadmap</a>');
-    }
-    if (hasGit && encodedCwd) {
-      const gitLabel = gitBranch ? `⎇ ${escapeHtml(gitBranch)}` : 'git';
-      appletLinks.push(`<a href="/?applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);
-    }
-    if (encodedCwd) {
-      appletLinks.push(`<a href="/?applet=file-finder&root=${encodedCwd}" class="footer-applet-link">files</a>`);
-    }
-    
-    descEl.innerHTML = descParts.join('') + (appletLinks.length ? ' ' + appletLinks.join(' ') : '');
-    
-    if (sessionId) {
-      fetch(`/api/sessions/${sessionId}/roadmap`).then(r => r.json()).then(data => {
-        if (data?.title || data?.steps?.length) {
-          const link = document.getElementById('footerRoadmapLink');
-          if (link) link.style.display = '';
-        }
-      }).catch(() => {});
-    }
-  }
+  if (descEl) descEl.innerHTML = '';
   
   updateFooterVisibility();
+}
+
+interface SessionStatusParams {
+  modelName: string;
+  cwd: string;
+  hasGit?: boolean;
+  sessionName?: string;
+  sessionId: string;
+  hasIcon?: boolean;
+  gitBranch?: string | null;
+}
+
+/**
+ * Render status for an active session (full metadata).
+ */
+export function renderSessionStatus(params: SessionStatusParams): void {
+  const { modelName, cwd, hasGit = false, sessionName, sessionId, hasIcon, gitBranch } = params;
+  activeFooterSessionId = sessionId;
+  
+  const footer = regions.footer.el;
+  const statusEl = footer.querySelector('.context-status') as HTMLElement | null;
+  if (!statusEl) return;
+  
+  const { model, dirName, fullCwd } = formatStatusParts(modelName, cwd);
+  const parts: string[] = [];
+  if (model) parts.push(`<span class="context-model">${model}</span>`);
+  if (dirName) parts.push(`<span title="${fullCwd || ''}">${dirName}</span>`);
+  if (hasIcon && sessionId) {
+    parts.push(`<img class="context-icon" src="/api/sessions/${sessionId}/icon" alt="">`);
+  }
+  statusEl.innerHTML = parts.join('<span class="context-sep">·</span>');
+  
+  renderDescription(sessionId, sessionName, hasGit, gitBranch, fullCwd);
+  updateFooterVisibility();
+}
+
+function renderDescription(sessionId: string, sessionName?: string, hasGit = false, gitBranch?: string | null, fullCwd?: string): void {
+  const footer = regions.footer.el;
+  const descEl = footer.querySelector('.context-description') as HTMLElement | null;
+  if (!descEl) return;
+
+  const descParts: string[] = [];
+  if (sessionName) descParts.push(escapeHtml(sessionName));
+  
+  const encodedCwd = fullCwd ? encodeURIComponent(fullCwd) : '';
+  const appletLinks: string[] = [];
+  appletLinks.push('<a href="/?applet=roadmap" class="footer-applet-link" id="footerRoadmapLink" style="display:none">roadmap</a>');
+  if (hasGit && encodedCwd) {
+    const gitLabel = gitBranch ? `⎇ ${escapeHtml(gitBranch)}` : 'git';
+    appletLinks.push(`<a href="/?applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);
+  }
+  if (encodedCwd) {
+    appletLinks.push(`<a href="/?applet=file-finder&root=${encodedCwd}" class="footer-applet-link">files</a>`);
+  }
+  
+  descEl.innerHTML = descParts.join('') + (appletLinks.length ? ' ' + appletLinks.join(' ') : '');
+  
+  checkRoadmap(sessionId);
+}
+
+/**
+ * Check if a session has a roadmap and show/hide the link.
+ * Verifies session ownership after async fetch to prevent stale updates.
+ */
+function checkRoadmap(sessionId: string): void {
+  fetch(`/api/sessions/${sessionId}/roadmap`).then(r => r.json()).then(data => {
+    if (activeFooterSessionId !== sessionId) return;
+    const link = document.getElementById('footerRoadmapLink');
+    if (link) link.style.display = (data?.title || data?.steps?.length) ? '' : 'none';
+  }).catch(() => {});
+}
+
+/**
+ * Re-check roadmap visibility for the current session.
+ * Called when roadmap may have changed (e.g., tool update events).
+ */
+export function refreshRoadmapLink(): void {
+  if (activeFooterSessionId) checkRoadmap(activeFooterSessionId);
 }
 
 /**
  * Clear status from the footer.
  */
 export function clearStatus(): void {
+  activeFooterSessionId = null;
   const footer = regions.footer.el;
   const statusEl = footer.querySelector('.context-status');
   const descEl = footer.querySelector('.context-description');
@@ -133,7 +179,6 @@ export function handleContextEvent(data: { context: SessionContext }): void {
 
 const PIE_GLYPHS = ['○', '◔', '◑', '◕', '●'];
 
-// Cache usage per session so it restores on switch
 const usageCache = new Map<string, { tokenLimit: number; currentTokens: number }>();
 
 /**
@@ -141,7 +186,7 @@ const usageCache = new Map<string, { tokenLimit: number; currentTokens: number }
  * Caches per session so it restores when switching back.
  */
 export function updateContextUsage(data: { tokenLimit?: number; currentTokens?: number }, sessionId?: string): void {
-  if (!data.tokenLimit || !data.currentTokens) return;
+  if (data.tokenLimit == null || data.currentTokens == null) return;
   
   if (sessionId) {
     usageCache.set(sessionId, { tokenLimit: data.tokenLimit, currentTokens: data.currentTokens });

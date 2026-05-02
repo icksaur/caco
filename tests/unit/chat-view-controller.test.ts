@@ -21,13 +21,15 @@ vi.mock('../../public/ts/view-controller.js', () => {
 });
 
 vi.mock('../../public/ts/context-footer.js', () => ({
-  renderStatus: vi.fn(),
+  renderSessionStatus: vi.fn(),
+  renderNewChatStatus: vi.fn(),
   clearStatus: vi.fn(),
   clearContextFooter: vi.fn(),
   clearContextUsage: vi.fn(),
   restoreContextUsage: vi.fn(),
   renderContextFooter: vi.fn(),
   updateContextUsage: vi.fn(),
+  refreshRoadmapLink: vi.fn(),
 }));
 
 vi.mock('../../public/ts/model-selector.js', () => ({
@@ -78,7 +80,7 @@ vi.mock('../../public/ts/adhoc-bar.js', () => ({
 
 import { ChatViewController } from '../../public/ts/chat-view-controller.js';
 import { setViewState, getViewState } from '../../public/ts/view-controller.js';
-import { clearStatus, clearContextFooter, renderStatus } from '../../public/ts/context-footer.js';
+import { clearStatus, clearContextFooter, renderSessionStatus, renderNewChatStatus } from '../../public/ts/context-footer.js';
 import { loadModels } from '../../public/ts/model-selector.js';
 import { regions } from '../../public/ts/dom-regions.js';
 import { showToast } from '../../public/ts/toast.js';
@@ -248,19 +250,22 @@ describe('ChatViewController', () => {
   });
 
   describe('updateStatus', () => {
-    it('resolves model name and calls renderStatus', () => {
+    it('resolves model name and calls renderNewChatStatus without sessionId', () => {
       cvc.updateStatus('/path', 'claude-sonnet-4');
-      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', false, undefined, undefined, undefined, undefined);
+      expect(renderNewChatStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path');
     });
 
     it('falls back to model ID suffix when model not found', () => {
       cvc.updateStatus('/path', 'unknown-model');
-      expect(renderStatus).toHaveBeenCalledWith('unknown-model', '/path', false, undefined, undefined, undefined, undefined);
+      expect(renderNewChatStatus).toHaveBeenCalledWith('unknown-model', '/path');
     });
 
-    it('passes hasGit flag through', () => {
-      cvc.updateStatus('/path', 'claude-sonnet-4', true);
-      expect(renderStatus).toHaveBeenCalledWith('Claude Sonnet 4', '/path', true, undefined, undefined, undefined, undefined);
+    it('calls renderSessionStatus with sessionId', () => {
+      cvc.updateStatus('/path', 'claude-sonnet-4', true, 'My Session', 'sess-123', false, 'main');
+      expect(renderSessionStatus).toHaveBeenCalledWith({
+        modelName: 'Claude Sonnet 4', cwd: '/path', hasGit: true,
+        sessionName: 'My Session', sessionId: 'sess-123', hasIcon: false, gitBranch: 'main'
+      });
     });
   });
 });

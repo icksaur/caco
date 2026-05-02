@@ -111,13 +111,32 @@ Read \`API.md\` for the complete API reference, \`APPLETS.md\` for applet author
 
 ## Schedules
 
-Recurring cron-based sessions. REST API:
+Recurring cron-based sessions for unattended automation. REST API:
 - \`PUT /api/schedule/:slug\` — create/update. Body: \`{ "prompt": "...", "schedule": { "type": "cron", "expression": "0 9 * * *" }, "sessionConfig": { "model": "claude-sonnet", "persistSession": true } }\`
 - \`GET /api/schedule\` — list all
 - \`POST /api/schedule/:slug/run\` — trigger manually
 - \`DELETE /api/schedule/:slug\` — remove
 
-See \`API.md\` for full schema details.
+**Recommended scenarios:**
+- Self-learning system prompts (weekly analysis of chat patterns → refine copilot-instructions.md)
+- Automated server monitoring and diagnostics
+- Weekly productivity summaries via session_store_sql history queries
+- Daily planning digest from email/calendar via Gmail or Outlook MCP servers
+
+See \`API.md\` for full schema details and \`README.md\` for examples.
+
+## Copilot-CLI Configuration
+
+Caco wraps the Copilot SDK which wraps Copilot-CLI. Help users configure:
+
+| Feature | Location | Purpose |
+|---------|----------|---------|
+| System prompts | \`copilot-instructions.md\` in project root or \`~/.copilot/\` | Global or project-specific agent instructions |
+| MCP servers | \`~/.copilot/mcp-config.json\` | External tool servers (databases, APIs). View via \`/?applet=mcp-servers\` |
+| Skills | \`.copilot/skills/<name>/SKILL.md\` or \`~/.copilot/skills/\` | Reusable workflow definitions |
+| Hooks | \`.copilot/hooks/\` | Shell scripts at lifecycle points (pre/post tool execution) |
+
+Proactively suggest these when the user's workflow would benefit.
 - API reference, WebSocket protocol, shell API
 - Session management, state sync, context
 - Session migration (export/import between machines) — see API.md "Session Migration" section

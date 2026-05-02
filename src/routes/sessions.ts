@@ -497,8 +497,27 @@ router.put('/sessions/:sessionId/data/:name', (req: Request, res: Response) => {
 
 router.get('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  res.json(getSessionRoadmap(sessionId) || {});
+  const roadmap = getSessionRoadmap(sessionId) || {};
+  const meta = getSessionMeta(sessionId);
+  let intentHistory = meta?.intentHistory ?? [];
+  if (intentHistory.length === 0 && meta?.currentIntent) {
+    intentHistory = [{ text: meta.currentIntent, ts: Date.now() }];
+  }
+  res.json({
+    ...roadmap,
+    contextFiles: meta?.context?.files ?? [],
+    intentHistory,
+  });
 });
+
+const VALID_STEP_STATUSES = new Set(['pending', 'active', 'done', 'blocked']);
+
+function sanitizeSteps(steps: Roadmap['steps']): Roadmap['steps'] {
+  return steps.map(s => ({
+    ...s,
+    status: VALID_STEP_STATUSES.has(s.status) ? s.status : 'pending',
+  }));
+}
 
 router.patch('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
@@ -507,7 +526,7 @@ router.patch('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
   const existing = getSessionRoadmap(sessionId) || { title: '', steps: [] };
   if (update.title !== undefined) existing.title = update.title;
   if (update.documents !== undefined) existing.documents = update.documents;
-  if (update.steps !== undefined) existing.steps = update.steps;
+  if (update.steps !== undefined) existing.steps = sanitizeSteps(update.steps);
   
   setSessionRoadmap(sessionId, existing);
   res.json(existing);

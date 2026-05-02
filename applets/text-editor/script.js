@@ -127,6 +127,7 @@ function createEditor(content, langKey) {
 
   var langExts = getLanguageExtension(langKey);
   var extensions = [
+    CM.EditorView.lineWrapping,
     CM.history(),
     CM.bracketMatching(),
     CM.indentOnInput(),

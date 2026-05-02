@@ -46,6 +46,7 @@ export interface SessionMeta {
   lastIdleAt?: string;
   lastUsedAt?: string;
   currentIntent?: string;
+  intentHistory?: Array<{ text: string; ts: number }>;
   envHint?: string;
   context?: Record<string, string[]>;
   model?: string;
@@ -352,6 +353,10 @@ export function markSessionIdle(sessionId: string): void {
 export function setSessionIntent(sessionId: string, intent: string): void {
   const meta = getSessionMeta(sessionId) ?? { name: '' };
   meta.currentIntent = intent;
+  const history = meta.intentHistory ?? [];
+  history.push({ text: intent, ts: Date.now() });
+  if (history.length > 5) history.splice(0, history.length - 5);
+  meta.intentHistory = history;
   setSessionMeta(sessionId, meta);
 }
 

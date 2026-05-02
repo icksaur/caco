@@ -487,7 +487,7 @@ router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) =
 
 export default router;
 
-const MAX_CONTEXT_FILES = 3;
+const MAX_CONTEXT_FILES = 10;
 
 /**
  * Auto-add file paths to session context when agent uses edit/create tools.

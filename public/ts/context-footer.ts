@@ -27,7 +27,9 @@ export function renderContextFooter(context: SessionContext): void {
   const linksContainer = footer.querySelector('.context-links');
   if (!linksContainer) return;
   
-  const files = formatContextFiles(context.files ?? []);
+  const allFiles = context.files ?? [];
+  const recentFiles = allFiles.length > 3 ? allFiles.slice(-3) : allFiles;
+  const files = formatContextFiles(recentFiles);
   const links = files.map(({ name, path }) => {
     const encodedPath = encodeURIComponent(path);
     return `<a href="/?applet=text-editor&path=${encodedPath}" title="${path}">${name}</a>`;
@@ -105,7 +107,7 @@ function renderDescription(sessionId: string, sessionName?: string, hasGit = fal
   
   const encodedCwd = fullCwd ? encodeURIComponent(fullCwd) : '';
   const appletLinks: string[] = [];
-  appletLinks.push('<a href="/?applet=roadmap" class="footer-applet-link" id="footerRoadmapLink" style="display:none">roadmap</a>');
+  appletLinks.push('<a href="/?applet=session-context" class="footer-applet-link" id="footerRoadmapLink" style="display:none">context dashboard</a>');
   if (hasGit && encodedCwd) {
     const gitLabel = gitBranch ? `⎇ ${escapeHtml(gitBranch)}` : 'git';
     appletLinks.push(`<a href="/?applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);

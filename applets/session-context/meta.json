@@ -1,0 +1,19 @@
+{
+  "slug": "session-context",
+  "name": "Session Context",
+  "description": "Session context dashboard: edited files, roadmap, activity, and notes",
+  "params": {},
+  "createdAt": "2026-03-08T20:50:00.000Z",
+  "updatedAt": "2026-05-02T00:00:00.000Z",
+  "agentUsage": {
+    "purpose": "Display session context: recently edited files, roadmap steps, activity history, and notes"
+  },
+  "stateSchema": {
+    "get": {
+      "hasRoadmap": "boolean",
+      "stepCount": "number",
+      "fileCount": "number"
+    },
+    "set": null
+  }
+}

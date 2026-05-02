@@ -98,14 +98,19 @@ export function getAppletPaths(slug: string): AppletFilePaths {
  * Resolve where an applet lives: user dir first, then bundled.
  * Returns null if not found in either location.
  */
+const SLUG_ALIASES: Record<string, string> = {
+  'roadmap': 'session-context',
+};
+
 async function resolveAppletDir(slug: string): Promise<AppletFilePaths | null> {
-  const userPaths = buildPaths(USER_APPLET_DIR, slug);
+  const resolved = SLUG_ALIASES[slug] ?? slug;
+  const userPaths = buildPaths(USER_APPLET_DIR, resolved);
   try {
     await stat(userPaths.meta);
     return userPaths;
   } catch { /* not in user dir */ }
 
-  const bundledPaths = buildPaths(BUNDLED_APPLET_DIR, slug);
+  const bundledPaths = buildPaths(BUNDLED_APPLET_DIR, resolved);
   try {
     await stat(bundledPaths.meta);
     return bundledPaths;
@@ -115,9 +120,10 @@ async function resolveAppletDir(slug: string): Promise<AppletFilePaths | null> {
 }
 
 export async function resolveAppletAsset(slug: string, filename: string): Promise<string | null> {
-  const userPath = join(USER_APPLET_DIR, slug, filename);
+  const resolved = SLUG_ALIASES[slug] ?? slug;
+  const userPath = join(USER_APPLET_DIR, resolved, filename);
   try { await stat(userPath); return userPath; } catch { /* */ }
-  const bundledPath = join(BUNDLED_APPLET_DIR, slug, filename);
+  const bundledPath = join(BUNDLED_APPLET_DIR, resolved, filename);
   try { await stat(bundledPath); return bundledPath; } catch { /* */ }
   return null;
 }

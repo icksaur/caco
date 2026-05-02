@@ -185,6 +185,98 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+/**
+ * MCP Server & Tool Discovery
+ */
+
+var mcpServerContent = document.getElementById('mcp-server-content');
+var editConfigLink = document.getElementById('edit-config-link');
+var mcpCollapsed = {};
+
+var STATUS_ICONS = {
+  'connected': '<span class="status-icon status-ok">✓</span>',
+  'failed': '<span class="status-icon status-bad">✗</span>',
+  'needs-auth': '<span class="status-icon status-auth">🔑</span>',
+  'pending': '<span class="status-icon status-pending">⏳</span>',
+  'disabled': '<span class="status-icon status-disabled">○</span>',
+  'not_configured': '<span class="status-icon status-disabled">○</span>'
+};
+
+async function fetchMcpServers() {
+  mcpServerContent.innerHTML = '<div class="loading">Loading servers...</div>';
+  try {
+    var res = await fetch('/api/mcp/servers');
+    var data = await res.json();
+
+    if (data.configExists && editConfigLink) {
+      editConfigLink.href = '/?applet=text-editor&path=' + encodeURIComponent(data.configPath);
+      editConfigLink.style.display = 'inline';
+    }
+
+    if (!data.clientRunning) {
+      mcpServerContent.innerHTML = '<div class="mcp-empty">Start a session to discover servers and tools</div>';
+      return;
+    }
+
+    if (data.servers.length === 0) {
+      mcpServerContent.innerHTML = '<div class="mcp-empty">No MCP servers configured</div>';
+      return;
+    }
+
+    mcpServerContent.innerHTML = data.servers.map(renderMcpServer).join('');
+  } catch (err) {
+    mcpServerContent.innerHTML = '<div class="mcp-empty">Failed to load: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+function renderMcpServer(server) {
+  var icon = STATUS_ICONS[server.status] || STATUS_ICONS['disabled'];
+  var toolCount = server.tools.length;
+  var toolLabel = toolCount === 0 ? 'no tools' : toolCount + ' tool' + (toolCount === 1 ? '' : 's');
+  var isCollapsed = mcpCollapsed[server.name] !== false;
+  var chevron = isCollapsed ? '▸' : '▾';
+  var escapedName = escapeAttr(server.name);
+
+  var toolsHtml = '';
+  if (!isCollapsed && toolCount > 0) {
+    toolsHtml = '<ul class="mcp-tool-list">' +
+      server.tools.map(function(t) {
+        return '<li><span class="mcp-tool-name">' + escapeHtml(t.name) + '</span>' +
+          (t.description ? ' <span class="mcp-tool-desc">— ' + escapeHtml(t.description) + '</span>' : '') +
+          '</li>';
+      }).join('') + '</ul>';
+  }
+
+  var errorHtml = server.error ? '<div class="server-error">' + escapeHtml(server.error) + '</div>' : '';
+
+  return '<div class="mcp-server-card">' +
+    '<div class="mcp-server-row" data-server="' + escapedName + '">' +
+      '<span class="mcp-chevron">' + chevron + '</span>' +
+      icon +
+      '<span class="mcp-server-name">' + escapeHtml(server.name) + '</span>' +
+      '<span class="mcp-tool-count">' + toolLabel + '</span>' +
+    '</div>' +
+    errorHtml +
+    toolsHtml +
+  '</div>';
+}
+
+function toggleMcpServer(name) {
+  if (mcpCollapsed[name] === false) {
+    mcpCollapsed[name] = true;
+  } else {
+    mcpCollapsed[name] = false;
+  }
+  fetchMcpServers();
+}
+
+mcpServerContent.addEventListener('click', function(event) {
+  var row = event.target.closest('.mcp-server-row');
+  if (!row) return;
+  var name = row.getAttribute('data-server');
+  if (name) toggleMcpServer(name);
+});
+
 // Listen for auth completion messages from popup
 // Only accept messages from same origin to prevent cross-origin attacks
 window.addEventListener('message', function(event) {
@@ -241,4 +333,5 @@ listEl.addEventListener('keypress', function(event) {
 });
 
 // Initial load
+fetchMcpServers();
 fetchServers();

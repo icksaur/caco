@@ -1164,6 +1164,43 @@ class SessionManager {
   }
 
   /**
+   * List MCP servers via session RPC. Returns server name, status, source, error.
+   * Requires at least one active session. Returns empty array if none available.
+   */
+  async listMcpServers(): Promise<Array<{ name: string; status: string; source?: string; error?: string }>> {
+    const firstSession = this.activeSessions.values().next().value;
+    if (!firstSession) return [];
+    try {
+      const session = firstSession.session as unknown as { rpc: { mcp: { list: () => Promise<{ servers: Array<{ name: string; status: string; source?: string; error?: string }> }> } } };
+      const result = await session.rpc.mcp.list();
+      return result.servers;
+    } catch (e) {
+      console.error('[MCP] Failed to list MCP servers:', e instanceof Error ? e.message : e);
+      return [];
+    }
+  }
+
+  /**
+   * List all tools via client RPC. Returns tool name, namespacedName, description.
+   * Requires a running SDK client. Returns empty array if not available.
+   */
+  async listAllTools(): Promise<Array<{ name: string; namespacedName?: string; description: string }>> {
+    if (!this.sharedClient) return [];
+    try {
+      const client = this.sharedClient as unknown as { rpc: { tools: { list: (params: { model?: string }) => Promise<{ tools: Array<{ name: string; namespacedName?: string; description: string }> }> } } };
+      const result = await client.rpc.tools.list({});
+      return result.tools;
+    } catch (e) {
+      console.error('[MCP] Failed to list tools:', e instanceof Error ? e.message : e);
+      return [];
+    }
+  }
+
+  isClientRunning(): boolean {
+    return this.sharedClient !== null;
+  }
+
+  /**
    * Shut down the shared SDK client. Call after all sessions are destroyed.
    */
   async shutdown(): Promise<void> {

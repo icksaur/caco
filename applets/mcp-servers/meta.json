@@ -1,0 +1,18 @@
+{
+  "slug": "mcp-servers",
+  "name": "MCP Servers",
+  "description": "MCP server status, tools, and authentication",
+  "params": {},
+  "createdAt": "2026-02-10T00:00:00.000Z",
+  "updatedAt": "2026-05-01T00:00:00.000Z",
+  "agentUsage": {
+    "purpose": "User views MCP server status and tools, and authenticates servers requiring OAuth"
+  },
+  "stateSchema": {
+    "get": {
+      "serverCount": "number",
+      "pendingAuthCount": "number"
+    },
+    "set": null
+  }
+}

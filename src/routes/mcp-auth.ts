@@ -1,12 +1,10 @@
 /**
- * MCP OAuth Authentication Routes
+ * MCP Routes
  * 
- * Handles OAuth flow for MCP servers requiring interactive authentication.
- * 
- * Primary flow: uses Caco's own port for callback (works through tunnels).
- * Fallback: temp server on registration-mandated port.
+ * Server status/tools + OAuth authentication for MCP servers.
  * 
  * Endpoints:
+ *   GET  /api/mcp/servers       - List MCP servers with status and tools
  *   GET  /api/mcp/auth/servers  - List servers with auth status
  *   GET  /api/mcp/auth/start    - Initiate OAuth flow (opens in popup)
  *   GET  /api/mcp/auth/callback - OAuth callback (main-port flow)

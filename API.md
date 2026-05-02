@@ -532,12 +532,40 @@ Returns: `{ slug: "daily-backup", status: "executed", sessionId: "uuid" }`
 
 HTTP endpoints for applet JS to call MCP tools directly.
 
+- `GET /api/mcp/servers` - List MCP servers with status and tools (requires active SDK client)
 - `GET /api/mcp/tools` - List available MCP tools
 - `POST /api/mcp/read_file` - Read file contents
 - `POST /api/mcp/write_file` - Write file contents
 - `POST /api/mcp/list_directory` - List directory contents
 
 **Allowed directories:** Current workspace, `~/.caco/`, `/tmp/`
+
+**GET /api/mcp/servers** - List MCP servers with status and discovered tools
+
+Requires an active SDK client. Returns server connection status from `session.rpc.mcp.list()` and tool names from `client.rpc.tools.list()`, grouped by server.
+
+Returns:
+```json
+{
+  "configPath": "/home/user/.copilot/mcp-config.json",
+  "configExists": true,
+  "clientRunning": true,
+  "servers": [
+    {
+      "name": "playwright",
+      "status": "connected",
+      "source": "user",
+      "error": null,
+      "tools": [
+        { "name": "navigate", "description": "Navigate to a URL" },
+        { "name": "screenshot", "description": "Take a screenshot" }
+      ]
+    }
+  ]
+}
+```
+
+When no SDK client is running: `{ clientRunning: false, servers: [] }`.
 
 **GET /api/mcp/tools** - List available tools
 

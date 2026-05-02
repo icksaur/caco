@@ -27,7 +27,7 @@ Call this when an MCP tool returns 401 Unauthorized. This tool will:
 2. Register the server in the MCP auth store
 3. Tell you to direct the user to authenticate
 
-After calling this, tell the user: "Please authenticate [server name] by opening /?applet=mcp-auth"`,
+After calling this, tell the user: "Please authenticate [server name] by opening /?applet=mcp-servers"`,
 
     parameters: z.object({
       serverUrl: z.string().url().describe('The MCP server URL that returned 401'),
@@ -51,12 +51,12 @@ After calling this, tell the user: "Please authenticate [server name] by opening
               textResultForLlm: `Server "${serverId}" is already registered but needs configuration. ` +
                 (existing.needsClientId 
                   ? 'It requires a client_id (OAuth Application ID). Ask the user for their Azure App Registration\'s Application ID, then call register_mcp_server again with the clientId parameter.'
-                  : 'Tell the user to authenticate by opening /?applet=mcp-auth'),
+                  : 'Tell the user to authenticate by opening /?applet=mcp-servers'),
               resultType: 'text' as const
             };
           }
           return {
-            textResultForLlm: `Server "${serverId}" is already authenticated. If you're getting 401 errors, the token may have expired. Tell the user to re-authenticate via /?applet=mcp-auth`,
+            textResultForLlm: `Server "${serverId}" is already authenticated. If you're getting 401 errors, the token may have expired. Tell the user to re-authenticate via /?applet=mcp-servers`,
             resultType: 'text' as const
           };
         }
@@ -120,8 +120,8 @@ After calling this, tell the user: "Please authenticate [server name] by opening
         
         return {
           textResultForLlm: `Server "${serverId}" registered for OAuth. ` +
-            'Tell the user to authenticate by opening /?applet=mcp-auth ' +
-            'or clicking this link: [MCP Authentication](/?applet=mcp-auth)',
+            'Tell the user to authenticate by opening /?applet=mcp-servers ' +
+            'or clicking this link: [MCP Authentication](/?applet=mcp-servers)',
           resultType: 'text' as const
         };
         

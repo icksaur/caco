@@ -6,16 +6,14 @@ A dangerous solution to any problem.
 
 ## What is this?
 
-A self-extensible chat front-end for the [GitHub Copilot CLI SDK](https://github.com/github/copilot-sdk).
+A self-extensible front-end for the [GitHub Copilot SDK](https://github.com/github/copilot-sdk).
 
 **Key capabilities:**
-- Agent-generated custom "applets"
-- Applet-to-agent collaboration
-- Agent-to-agent collaboration
-- Session scheduling
-- Self modification and self introspection
-- Document-centric meta-context
-- Almost everything else Copilot-CLI can do
+- self modification and self introspection
+- session-to-session orchestration, delegation, and scatter-gather
+- extensibile slash commands, pound-completion, applets and internal tools
+- custom UI elements for all those times a chat interface doesn't make sense
+- almost everything else Copilot-CLI can do
 
 ## Basic Architecture
 
@@ -24,7 +22,7 @@ Browser (localhost:53000)
     ↓ WebSocket + fetch
 Express Server
     ↓ JSON-RPC
-Copilot SDK → Copilot CLI → AI Models
+Copilot SDK → Copilot-CLI → GitHub Copilot
 ```
 
 **Frontend:** TypeScript, bundled with esbuild  
@@ -44,8 +42,11 @@ copilot --version  # Verify CLI works
 ## Quick Start
 
 ```bash
-npm install
-npm run dev        # Start with auto-reload
+npm install && npm run build && ./start.sh
+```
+
+```powershell
+npm install && npm run build && .\start.ps1
 ```
 
 Open `http://localhost:53000`
@@ -70,11 +71,13 @@ To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Star
 
 ## Usage
 
-Use the session UI via the session button.  Scheduled sessions appear here.  You can create new sessions, resume, rename, or delete sessions in the view.  The search is fuzzy-find and enter will resume a session.
+Toggle the session-view UI via the session button.  Scheduled sessions appear here.  You can select and create new sessions here.
 
 Chat sessions started in the browser UI have a prompt explaining features to the agent.  Ask the agent about any features.
 
 Long-press/click-and-hold on the applet button to load the applet browser.
+
+Type a forward slash `/` to see all less-common controls, like session archival, model selection, and session renaming.
 
 ## Shortcuts
 

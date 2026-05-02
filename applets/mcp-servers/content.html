@@ -1,0 +1,35 @@
+<div class="mcp-auth-container">
+
+  <div id="mcp-server-list" class="mcp-servers-section">
+    <div class="mcp-section-header">
+      <h3>MCP Servers</h3>
+      <div class="mcp-header-actions">
+        <a id="edit-config-link" href="#" class="mcp-edit-link" style="display:none">✏️ Edit config</a>
+        <button id="refresh-btn" class="mcp-refresh-btn" onclick="fetchMcpServers()">↻</button>
+      </div>
+    </div>
+    <div id="mcp-server-content" class="server-list">
+      <div class="loading">Loading servers...</div>
+    </div>
+  </div>
+
+  <hr class="mcp-divider">
+
+  <div class="mcp-auth-section">
+    <h3>Authentication</h3>
+    <div id="server-list" class="server-list">
+      <div class="loading">Loading...</div>
+    </div>
+    
+    <div id="empty-state" class="empty-state" style="display:none">
+      <p>No OAuth MCP servers detected</p>
+      <p class="empty-hint">They appear here when an MCP tool returns 401 Unauthorized</p>
+    </div>
+    
+    <div id="error-state" class="error-state" style="display:none">
+      <p class="error-message"></p>
+      <button onclick="fetchServers()">Retry</button>
+    </div>
+  </div>
+
+</div>

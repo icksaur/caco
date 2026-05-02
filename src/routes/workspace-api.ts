@@ -7,9 +7,11 @@
 
 import { Router, Request, Response } from 'express';
 import { readFile, writeFile, readdir, stat } from 'fs/promises';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
+import sessionManager from '../session-manager.js';
 
 const router = Router();
 
@@ -147,6 +149,48 @@ router.get('/tools', (_req: Request, res: Response) => {
     ],
     allowedDirectories: ALLOWED_BASES
   });
+});
+
+router.get('/servers', async (_req: Request, res: Response) => {
+  const configPath = join(homedir(), '.copilot', 'mcp-config.json');
+  const configExists = existsSync(configPath);
+  const clientRunning = sessionManager.isClientRunning();
+
+  if (!clientRunning) {
+    res.json({ configPath, configExists, clientRunning: false, servers: [] });
+    return;
+  }
+
+  try {
+    const [mcpServers, allTools] = await Promise.all([
+      sessionManager.listMcpServers(),
+      sessionManager.listAllTools(),
+    ]);
+
+    const toolsByServer = new Map<string, Array<{ name: string; description: string }>>();
+    for (const tool of allTools) {
+      if (!tool.namespacedName || !tool.namespacedName.includes('/')) continue;
+      const slashIdx = tool.namespacedName.indexOf('/');
+      const serverName = tool.namespacedName.slice(0, slashIdx);
+      const toolName = tool.namespacedName.slice(slashIdx + 1);
+      let list = toolsByServer.get(serverName);
+      if (!list) { list = []; toolsByServer.set(serverName, list); }
+      list.push({ name: toolName, description: tool.description });
+    }
+
+    const servers = mcpServers.map(s => ({
+      name: s.name,
+      status: s.status,
+      source: s.source ?? null,
+      error: s.error ?? null,
+      tools: toolsByServer.get(s.name) || [],
+    }));
+
+    res.json({ configPath, configExists, clientRunning: true, servers });
+  } catch (e) {
+    console.error('[MCP] Failed to list servers/tools:', e instanceof Error ? e.message : e);
+    res.json({ configPath, configExists, clientRunning: true, servers: [], error: 'Failed to query SDK' });
+  }
 });
 
 export default router;

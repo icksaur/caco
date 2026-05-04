@@ -1,18 +1,57 @@
 .image-viewer {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 20px;
   height: 100%;
+}
+
+.iv-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  flex-shrink: 0;
 }
 
 .image-path {
   font-family: monospace;
   font-size: 12px;
-  color: var(--color-text-muted);
-  margin-bottom: 16px;
-  word-break: break-all;
+  color: var(--color-text-muted, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.iv-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.iv-btn {
+  background: none;
+  border: 1px solid var(--color-border, rgba(255,255,255,0.15));
+  border-radius: 4px;
+  color: var(--color-text-muted, #888);
+  cursor: pointer;
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.iv-btn:hover { color: var(--text-primary, #ddd); border-color: var(--text-primary, #ddd); }
+
+.iv-zoom-label {
+  font-size: 11px;
+  color: var(--color-text-muted, #888);
+  min-width: 36px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .image-container {
@@ -20,38 +59,34 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  overflow: auto;
+  overflow: hidden;
+  position: relative;
 }
 
 .image-container img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  border-radius: 4px;
+  transform-origin: center center;
+  transition: transform 0.1s ease-out;
+  user-select: none;
 }
 
-.no-image {
-  color: var(--color-text-muted);
+.no-image, .empty-state {
+  color: var(--color-text-muted, #888);
   text-align: center;
   padding: 40px;
 }
 
 .error {
-  color: var(--color-error);
+  color: var(--color-error, #e53935);
   text-align: center;
   padding: 20px;
 }
 
 .loading {
-  color: var(--color-text-muted);
-  text-align: center;
-  padding: 40px;
-}
-
-.empty-state {
-  color: var(--color-text-muted);
+  color: var(--color-text-muted, #888);
   text-align: center;
   padding: 40px;
 }

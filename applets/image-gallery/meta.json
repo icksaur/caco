@@ -1,0 +1,10 @@
+{
+  "slug": "image-gallery",
+  "name": "Image Gallery",
+  "description": "Browse images in a directory as a thumbnail grid",
+  "params": {
+    "path": { "required": true, "description": "Directory path to browse" }
+  },
+  "createdAt": "2026-05-03T00:00:00.000Z",
+  "updatedAt": "2026-05-03T00:00:00.000Z"
+}

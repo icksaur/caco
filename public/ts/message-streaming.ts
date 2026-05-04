@@ -305,6 +305,14 @@ export function setupFormHandler(): void {
 
   sessionTracker.onChange(() => updateButton());
 
+  const stopBtn = form.querySelector('.stop-btn') as HTMLButtonElement | null;
+  if (stopBtn) {
+    stopBtn.addEventListener('click', () => {
+      const sessionId = getActiveSessionId();
+      if (sessionId) void fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' });
+    });
+  }
+
   let submitting = false;
 
   form.addEventListener('submit', (e) => {
@@ -316,13 +324,6 @@ export function setupFormHandler(): void {
     const sessionId = getActiveSessionId();
     const isBusy = sessionId ? (sessionTracker.get(sessionId)?.busy ?? false) : false;
     const state = computeFormState(isBusy, !!message);
-    
-    if (state.buttonAction === 'abort') {
-      if (sessionId) {
-        void fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' });
-      }
-      return;
-    }
 
     if (message.startsWith('/')) {
       if (tryExecuteSlashCommand(message)) {

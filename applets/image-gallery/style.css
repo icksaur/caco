@@ -1,0 +1,91 @@
+.ig-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.ig-toolbar {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  flex-shrink: 0;
+}
+
+.ig-path {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--color-text-muted, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.ig-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+
+.ig-cell {
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 4px;
+  overflow: hidden;
+  transition: outline-color 0.15s;
+  outline: 2px solid transparent;
+}
+.ig-cell:hover {
+  outline-color: var(--color-accent, #5c9aff);
+}
+
+.ig-thumb {
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--color-bg-hover, rgba(255,255,255,0.05));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ig-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ig-name {
+  font-size: 11px;
+  color: var(--color-text-muted, #888);
+  padding: 3px 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  text-align: center;
+}
+
+.ig-cell-error .ig-thumb {
+  background: var(--color-bg-hover, rgba(255,255,255,0.05));
+}
+
+.ig-cell-msg {
+  font-size: 10px;
+  color: var(--color-text-muted, #888);
+  text-align: center;
+  padding: 8px;
+}
+
+.ig-empty, .ig-error {
+  color: var(--color-text-muted, #888);
+  text-align: center;
+  padding: 40px;
+}
+
+.ig-error {
+  color: var(--color-error, #e53935);
+}

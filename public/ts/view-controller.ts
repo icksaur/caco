@@ -67,12 +67,12 @@ export function setFormEnabled(enabled: boolean): void {
   if (!form) return;
   
   if (enabled) {
-    form.classList.remove('streaming');
+    form.classList.remove('busy');
     cursor?.classList.add('hidden');
     const input = form.querySelector('textarea') as HTMLTextAreaElement;
     input?.focus();
   } else {
-    form.classList.add('streaming');
+    form.classList.add('busy');
     cursor?.classList.remove('hidden');
   }
 }

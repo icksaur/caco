@@ -38,16 +38,17 @@ const router = Router();
 router.post('/sessions/:sessionId/messages', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const requestId = (req.headers['x-request-id'] as string) || `srv-${Date.now().toString(36)}`;
-  const { prompt, imageData, appletState, appletNavigation, source, appletSlug, fromSession, scheduleSlug, correlationId } = req.body as {
+  const { prompt, imageData, appletState, appletNavigation, source, appletSlug, fromSession, scheduleSlug, correlationId, mode } = req.body as {
     prompt?: string;
     imageData?: string;
     appletState?: Record<string, unknown>;
     appletNavigation?: NavigationContext;
     source?: MessageSource;
     appletSlug?: string;
-    fromSession?: string;  // For agent-to-agent: originating session ID
-    scheduleSlug?: string; // For scheduler: schedule slug for prefix
-    correlationId?: string; // For tracking related calls
+    fromSession?: string;
+    scheduleSlug?: string;
+    correlationId?: string;
+    mode?: 'immediate' | 'enqueue';
   };
   
   const clientId = req.headers['x-client-id'] as string | undefined;
@@ -70,6 +71,29 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // Verify session exists (getSessionCwd returns null if not found)
   if (!sessionManager.getSessionCwd(sessionId)) {
     res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+  
+  if (mode === 'immediate') {
+    if (fromSession || source === 'agent') {
+      res.status(403).json({ error: 'Steering is only available for user input' });
+      return;
+    }
+    if (!sessionManager.isBusy(sessionId)) {
+      res.status(400).json({ error: 'Cannot steer: session is not busy' });
+      return;
+    }
+    try {
+      await sessionManager.sendStream(sessionId, prompt!, { mode: 'immediate' });
+      broadcastEvent(sessionId, {
+        type: 'user.message',
+        data: { content: prompt },
+      } as unknown as SessionEvent);
+      res.json({ ok: true, sessionId, steered: true });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ error: `Steer failed: ${msg}` });
+    }
     return;
   }
   

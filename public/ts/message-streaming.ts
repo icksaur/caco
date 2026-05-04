@@ -30,9 +30,11 @@ import { sessionTracker } from './session-state-tracker.js';
 import { adHocBar } from './adhoc-bar.js';
 import { refreshRoadmapLink } from './context-footer.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
+import { computeFormState } from './form-state.js';
 import { chatView } from './chat-view-controller.js';
 
 let chatRegion: ChatRegion;
+let steerCount = 0;
 
 /**
  * Handle incoming SDK event (history or live)
@@ -102,6 +104,7 @@ function handleEvent(event: SessionEvent): void {
           adHocBar.clearSession(sessionId);
           notifySessionComplete(sessionTracker.getIntent(sessionId) || '');
           refreshRoadmapLink();
+          steerCount = 0;
         }
 
         // Server says dispatch failed — restore the user's prompt
@@ -262,15 +265,110 @@ export function setupFormHandler(): void {
   
   const form = document.getElementById('chatForm') as HTMLFormElement;
   if (!form) return;
-  
+
+  const updateButton = (): void => {
+    const input = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
+    const sendBtn = form.querySelector('.send-btn') as HTMLButtonElement | null;
+    const stopBtn = form.querySelector('.stop-btn') as HTMLButtonElement | null;
+    const sessionId = getActiveSessionId();
+    const isBusy = sessionId ? (sessionTracker.get(sessionId)?.busy ?? false) : false;
+    const hasText = (input?.value.trim().length ?? 0) > 0;
+    const state = computeFormState(isBusy, hasText);
+
+    if (sendBtn) {
+      if (state.buttonLabel === 'send') {
+        sendBtn.style.display = '';
+        sendBtn.textContent = 'Send';
+      } else if (state.buttonLabel === 'steer') {
+        sendBtn.style.display = '';
+        sendBtn.textContent = 'Steer';
+      } else {
+        sendBtn.style.display = 'none';
+      }
+    }
+    if (stopBtn) {
+      if (state.buttonLabel === 'stop') {
+        stopBtn.style.display = 'flex';
+        stopBtn.textContent = steerCount > 0 ? `Stop (${steerCount})` : 'Stop';
+      } else {
+        stopBtn.style.display = 'none';
+      }
+    }
+    if (input) input.placeholder = state.placeholder;
+    form.classList.toggle('busy', isBusy);
+  };
+
+  const textarea = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
+  if (textarea) {
+    textarea.addEventListener('input', updateButton);
+  }
+
+  sessionTracker.onChange(() => updateButton());
+
+  let submitting = false;
+
   form.addEventListener('submit', (e) => {
     e.preventDefault();
+    if (submitting) return;
     
     const input = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
     const message = input.value.trim();
+    const sessionId = getActiveSessionId();
+    const isBusy = sessionId ? (sessionTracker.get(sessionId)?.busy ?? false) : false;
+    const state = computeFormState(isBusy, !!message);
+    
+    if (state.buttonAction === 'abort') {
+      if (sessionId) {
+        void fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' });
+      }
+      return;
+    }
+
+    if (message.startsWith('/')) {
+      if (tryExecuteSlashCommand(message)) {
+        input.value = '';
+        resetTextareaHeight();
+        updateButton();
+        return;
+      }
+    }
+
+    if (!message) return;
+
+    if (state.buttonAction === 'steer' && sessionId) {
+      input.value = '';
+      resetTextareaHeight();
+      steerCount++;
+      submitting = true;
+      updateButton();
+      void (async () => {
+        try {
+          const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: message, mode: 'immediate' })
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({ error: 'Steer failed' }));
+            showToast(data.error || 'Steer failed');
+            if (!input.value.trim()) { input.value = message; resetTextareaHeight(); }
+            steerCount = Math.max(0, steerCount - 1);
+            updateButton();
+          }
+        } catch {
+          showToast('Steer failed');
+          if (!input.value.trim()) { input.value = message; resetTextareaHeight(); }
+          steerCount = Math.max(0, steerCount - 1);
+          updateButton();
+        } finally {
+          submitting = false;
+        }
+      })();
+      return;
+    }
+
     const model = getSelectedModel();
     const imageData = (document.getElementById('imageData') as HTMLInputElement).value;
-    
     const cwd = getNewChatCwd();
     const isNewChat = isViewState('newChat');
     
@@ -279,17 +377,9 @@ export function setupFormHandler(): void {
       return;
     }
     
-    if (!message) return;
-    
-    if (message.startsWith('/')) {
-      if (tryExecuteSlashCommand(message)) {
-        input.value = '';
-        resetTextareaHeight();
-        return;
-      }
-    }
-    
     chatView.setFormEnabled(false);
+    steerCount = 0;
+    updateButton();
     
     input.value = '';
     resetTextareaHeight();

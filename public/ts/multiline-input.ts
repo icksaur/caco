@@ -89,7 +89,7 @@ export function setupMultilineInput(): void {
       if (slashPopup?.isVisible() || poundPopup?.isVisible()) return;
       e.preventDefault();
       const form = textarea.closest('form');
-      if (form && !form.classList.contains('streaming')) form.requestSubmit();
+      if (form) form.requestSubmit();
     }
 
     // Up-arrow on empty input: recall last sent message for this session

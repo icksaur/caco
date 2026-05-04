@@ -71,7 +71,9 @@ Call this to check if a presentation exists or to read its content. Returns empt
   });
 
   const updatePresentation = defineTool('update_presentation', {
-    description: `Create or update a visual presentation for the current session. Use slides to explain architecture, show diagrams, present plans, or summarize findings. Each slide is markdown — supports mermaid diagrams, code blocks, lists, and headings.
+    description: `Create or update a visual presentation for the current session. Only create or modify presentations when the user explicitly requests one — do not auto-generate presentations for internal work like code reviews or research summaries.
+
+Use slides to explain architecture, show diagrams, present plans, or summarize findings. Each slide is markdown — supports mermaid diagrams, code blocks, lists, and headings.
 
 All parameters are optional — set whatever you need in one call.
 

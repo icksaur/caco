@@ -2,128 +2,184 @@
 
 ## Goal
 
-Allow users to send additional guidance to the agent mid-turn without canceling. While the agent is working, the user can type a message and send it as a "steer" — a queued follow-up that the agent processes after its current turn.
+Allow users to send guidance to the agent mid-turn without canceling. The SDK's `mode: "immediate"` injects messages into the current LLM turn.
 
-## SDK Capability
+## SDK Behavior
 
-The Copilot SDK supports `mode: "enqueue"` on `session.send()`:
+`session.send({ prompt, mode: "immediate" })` adds to the `ImmediatePromptProcessor` queue. Before the next LLM request within the current turn, all queued immediate messages are injected as user messages. The agent adjusts its response.
 
-```typescript
-session.send({ prompt: "focus on the auth module instead", mode: "enqueue" });
-```
+Key details:
+- Multiple steers **append** (FIFO). Each `send({ mode: "immediate" })` adds another.
+- If the turn completes before processing, the message auto-moves to the regular queue for the next turn.
+- Best-effort within current turn — if agent committed to a tool call, steering takes effect after that call completes (still same turn).
+- No capability flag needed — `mode` is passed directly via RPC.
 
-This queues a message that the SDK delivers after the current turn completes. The agent sees it as the next user message. The SDK emits `pending_messages.modified` (empty payload) when the queue changes.
+`pending_messages.modified` event fires when the queue changes (empty payload — no count or contents exposed). No RPC to query queue state.
 
-This is not true mid-execution steering (the agent doesn't see the steer during its current turn). It's a queued follow-up — but the UX feels like steering because the user doesn't have to wait for idle to type.
+## Current Form Behavior
 
-## Current Behavior
-
-1. User sends a message → textarea greys out, "Stop" button appears
-2. Agent works (streaming events)
-3. User can only click "Stop" (calls `POST /api/sessions/:id/cancel` → `session.abort()`)
-4. On `session.idle` → textarea re-enables, "Stop" disappears
+- `setFormEnabled(false)` adds `.streaming` class to `#chatForm`
+- Textarea is not HTML `disabled` — `.streaming` class controls visual muting
+- Enter key handler (multiline-input.ts:92) checks `.streaming` and blocks submit
+- Session drafts (`sessionDrafts` Map) save/restore textarea on session switch
+- Slash commands: `tryExecuteSlashCommand()` intercepts before send. Runs locally regardless of busy state.
 
 ## Proposed Behavior
 
-1. User sends a message → textarea greys out, "Stop" button appears
-2. **User types in the greyed-out textarea** → button changes from "Stop" to "Steer ▸"
-3. **User clicks "Steer ▸"** (or presses Enter) → message sent via enqueue, textarea clears, button reverts to "Stop"
-4. **User clears textarea** → button reverts to "Stop"
-5. Agent finishes current turn → picks up the queued steer as next message
-6. Only one steer can be queued at a time. Re-steering replaces the pending steer.
+### Form state machine
 
-## UI Changes
+Pure function, two inputs, four states:
 
-### Textarea behavior while busy
+```typescript
+type ButtonState = 'send' | 'stop' | 'steer' | 'hidden';
+type ButtonAction = 'send' | 'abort' | 'steer' | 'none';
 
-Currently the textarea is disabled (`disabled` attribute) while streaming. Change to:
-- Remove `disabled` — textarea is always editable
-- Add visual indicator that the session is busy (keep the existing greyed styling via CSS class, not `disabled`)
-- Placeholder text: "Steer the agent..." while busy
+interface FormState {
+  buttonLabel: ButtonState;
+  buttonAction: ButtonAction;
+  placeholder: string;
+  textareaBusy: boolean;
+}
 
-### Button states
+function computeFormState(sessionBusy: boolean, hasText: boolean): FormState {
+  if (!sessionBusy) {
+    return {
+      buttonLabel: hasText ? 'send' : 'hidden',
+      buttonAction: hasText ? 'send' : 'none',
+      placeholder: 'Ask anything...',
+      textareaBusy: false,
+    };
+  }
+  return {
+    buttonLabel: hasText ? 'steer' : 'stop',
+    buttonAction: hasText ? 'steer' : 'abort',
+    placeholder: 'Steer the agent...',
+    textareaBusy: true,
+  };
+}
+```
 
-| State | Button text | Action |
-|-------|------------|--------|
-| Idle, empty textarea | (hidden or "Send") | Normal send |
-| Idle, has text | "Send" | Normal send |
-| Busy, empty textarea | "Stop" | Cancel/abort |
-| Busy, has text | "Steer ▸" | Enqueue message |
+| busy | hasText | Button | Action |
+|------|---------|--------|--------|
+| false | false | hidden | — |
+| false | true | **Send** | normal send |
+| true | false | **Stop** | abort |
+| true | true | **Steer** | `mode: "immediate"` |
 
-### Visual feedback after steering
+### Submit flow
 
-After the steer is sent:
-- Brief toast: "Steer queued" (auto-hide 2s)
-- The steered text appears in the chat as a user message (since it will be processed as the next turn)
-- Textarea clears, button reverts to "Stop"
+```
+On submit (Enter or button click):
+  1. If slash command (starts with /) → tryExecuteSlashCommand() → if matched, done
+  2. Read computeFormState(sessionBusy, hasText)
+  3. If buttonAction === 'send' → normal streamResponse()
+  4. If buttonAction === 'steer' → POST /api/sessions/:id/messages with { mode: 'immediate' }
+  5. If buttonAction === 'abort' → POST /api/sessions/:id/cancel
+  6. If buttonAction === 'none' → no-op
+```
+
+Slash commands run identically in busy and idle states — they're local UI actions.
+
+### Enter key guard
+
+Replace the `.streaming` guard (multiline-input.ts:92) with:
+```typescript
+if (form) form.requestSubmit();
+```
+The submit handler itself decides what to do based on `computeFormState()`. No need to block Enter while busy.
+
+### Steer counter
+
+Track steers client-side since the SDK doesn't expose queue contents:
+- Increment on each steer sent
+- Reset to 0 on `session.idle`
+- Display as badge on Stop button when > 0: `Stop (2)`
+- `pending_messages.modified` event not used for counter (empty payload, unreliable for counting)
+
+### Visual feedback
+
+- Steered message appears immediately in chat as a normal user message (optimistic insert)
+- Textarea clears after steer, button reverts to Stop
+- Placeholder changes to "Steer the agent..." while busy
+- No special "steered" label on messages — they're just user messages
+
+### Draft interaction
+
+No changes needed. Existing `saveDraft()`/`restoreDraft()` works naturally:
+- Switch away from busy session with steer text → saves as draft
+- Switch back → restores draft, `computeFormState()` re-evaluates
+- Session goes idle while away → draft becomes normal Send on return
 
 ## API Changes
 
-### Modified: `POST /api/sessions/:id/messages`
+### Modified: POST /api/sessions/:id/messages
 
-Add optional `mode` field:
+Accept `mode` field. When `mode === 'immediate'`:
+- Skip `dispatchState.start()` (session already dispatching)
+- Skip the busy-session rejection guard
+- Call `sessionManager.sendStream(sessionId, prompt, { mode: 'immediate' })`
+- Broadcast user message event to WebSocket subscribers
+- Return 200 immediately
 
-```json
-{
-  "prompt": "focus on auth instead",
-  "mode": "enqueue"
-}
-```
-
-Pass through to `session.send({ prompt, mode })`. Default remains `undefined` (SDK default behavior for normal sends).
-
-### No new endpoints
-
-The existing messages endpoint handles both normal sends and steers.
+This is a **separate code path** from `dispatchMessage()` — no event subscription setup, no retry logic, no dispatch state tracking. Just send + broadcast.
 
 ## Implementation
 
-### Backend
+### Step 1: computeFormState + tests
 
-**`src/session-manager.ts`** — `sendStream()`: pass `mode` through to `session.send()`:
+Create `public/ts/form-state.ts`:
+- Export `computeFormState(sessionBusy, hasText): FormState`
+- Export types
 
-```typescript
-sendStream(sessionId: string, message: string, options: Partial<SendOptions> = {}): Promise<string> {
-  const { session } = this.activeSessions.get(sessionId)!;
-  return session.send({ ...options, prompt: message });
-}
-```
+Create `tests/unit/form-state.test.ts`:
+- Test all 4 state table rows
+- Test that slash commands are orthogonal (not part of state machine)
 
-No change needed — `options` already spreads into the send call. The `mode` field just needs to be included in the route handler.
+### Step 2: Backend — steer route
 
-**`src/routes/session-messages.ts`** — POST handler: read `mode` from body, include in send options. Add a guard: if `mode === 'enqueue'`, skip the `dispatchState.start()` call (the session is already dispatching).
+`src/routes/session-messages.ts`:
+- Read `mode` from request body
+- If `mode === 'immediate'`: validate session exists + is active, call `sendStream()` with mode, broadcast user message, return. No `dispatchMessage()`.
+- Normal sends unchanged
 
-### Frontend
+### Step 3: Wire form state to UI
 
-**`public/ts/multiline-input.ts`** or **`public/ts/message-streaming.ts`**:
-- Remove `disabled` attribute from textarea while busy. Use a CSS class for visual styling instead.
-- Track `isBusy` state to determine button behavior.
-- On form submit while busy: send with `mode: "enqueue"` instead of normal send.
+`public/ts/multiline-input.ts`:
+- Remove `.streaming` Enter guard (line 92)
+- Import and use `computeFormState()` to determine submit behavior
 
-**`public/ts/view-controller.ts`** or equivalent:
-- `setFormEnabled(false)` currently sets `disabled`. Change to toggle a `.busy` class instead.
-- Button text logic: check busy state + textarea content to determine label.
+`public/ts/view-controller.ts`:
+- `setFormEnabled()` toggles `.busy` class instead of `.streaming`
+- Update placeholder text based on state
 
-**`public/style.css`**:
-- `.chat-form.busy textarea` — greyed/muted styling (replaces `:disabled`)
-- Button transition between Stop/Steer states
+`public/ts/message-streaming.ts`:
+- Form submit handler: check `computeFormState()` before deciding send vs steer vs abort
+- On steer: POST with `{ mode: 'immediate' }`, insert user message optimistically, clear textarea
+- Track steer counter, reset on idle
 
-## Edge Cases
+### Step 4: Button rendering
 
-1. **User steers then cancels** — Cancel aborts the current turn. The queued steer may or may not be processed depending on SDK behavior. Need to test: does `abort()` clear the pending message queue?
-2. **Multiple rapid steers** — Only one can be queued. Second steer replaces the first. The SDK may handle this differently (append vs replace). Need to test.
-3. **Steer while session is finishing** — Race between steer send and `session.idle`. If idle arrives before the enqueue completes, it becomes a normal next message. Acceptable — no harm done.
-4. **Long tool execution** — User may want to steer while a tool runs for minutes. The steer won't affect the current tool — it queues for after. The UI should make this clear.
+- Button text driven by `computeFormState().buttonLabel`
+- Re-evaluate on: textarea `input` event, busy state change, session switch
+- Steer counter badge: `Stop (N)` when N > 0
 
-## Open Questions
+### Step 5: CSS
 
-1. Does `session.abort()` clear pending enqueued messages, or do they survive cancellation?
-2. Does the SDK support replacing a pending enqueued message, or does each `send({ mode: "enqueue" })` append?
-3. Should the steer message appear immediately in the chat (optimistic insert), or only when the SDK processes it?
-4. Should the textarea placeholder change to indicate "steering mode" vs "normal input"?
+- Replace `.streaming` with `.busy` on form
+- `.chat-form.busy textarea` — muted styling (editable but visually dimmed)
+- Button label transitions
+- Steer counter badge styling
+
+### Step 6: Audit + build + test
+
+- `grep -rn 'streaming' public/ts/` — update all `.streaming` references
+- `npx tsc --noEmit`, `npm run build:client`, `npm test`
+- Manual test: send message, type while busy, Enter steers, button shows Steer/Stop correctly
 
 ## Risks
 
-1. **SDK behavior untested** — `mode: "enqueue"` exists in types but Caco hasn't used it. First implementation should test basic enqueue behavior before building full UI.
-2. **Textarea disabled→enabled change** — Other code may rely on `disabled` attribute checks. Need to audit all references to textarea disabled state.
-3. **Button state management** — Adding a third state (Steer) to the existing Send/Stop toggle increases complexity. Must ensure states don't desync.
+1. **`.streaming` class removal** — other code checks this class. Must audit and update all references.
+2. **Busy-guard bypass** — the `mode: 'immediate'` path must be precise. Only `immediate` mode skips the guard.
+3. **Optimistic insert** — user message appears in chat before SDK processes it. If the session dies, the message is orphaned in the DOM. Acceptable — same as current behavior for normal sends.
+4. **Steer counter desync** — counter is client-side, SDK processing is async. Off-by-one is harmless since it resets on idle.
+5. **Untested SDK behavior** — `mode: "immediate"` is documented but Caco hasn't used it. First steer in production is a live test.

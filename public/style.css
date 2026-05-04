@@ -492,10 +492,8 @@ form {
   transform: scale(0.98);
 }
 
-/* Streaming state - swap buttons, disable input */
-#chatForm.streaming .send-btn { display: none; }
-#chatForm.streaming .stop-btn { display: flex; }
-#chatForm.streaming textarea { opacity: 0.6; }
+/* Busy state - textarea stays editable but muted */
+#chatForm.busy textarea { opacity: 0.6; }
 
 /* ========================================
    MAIN CONTENT AREA

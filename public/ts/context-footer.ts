@@ -188,7 +188,7 @@ const usageCache = new Map<string, { tokenLimit: number; currentTokens: number }
  * Caches per session so it restores when switching back.
  */
 export function updateContextUsage(data: { tokenLimit?: number; currentTokens?: number }, sessionId?: string): void {
-  if (data.tokenLimit == null || data.currentTokens == null) return;
+  if (data.tokenLimit === null || data.tokenLimit === undefined || data.currentTokens === null || data.currentTokens === undefined) return;
   
   if (sessionId) {
     usageCache.set(sessionId, { tokenLimit: data.tokenLimit, currentTokens: data.currentTokens });

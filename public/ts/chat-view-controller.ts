@@ -11,7 +11,7 @@
 
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, clearActiveSession, getNewChatCwd } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
-import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, refreshRoadmapLink } from './context-footer.js';
+import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage } from './context-footer.js';
 import { loadModels } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
 import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websocket.js';

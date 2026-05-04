@@ -28,7 +28,7 @@ async function loadSqlJs() {
 }
 
 export function createSessionHistoryTool() {
-  const tool = defineTool('session_store_sql', {
+  const tool = defineTool('caco_session_store_sql', {
     description: `Execute read-only SQL queries against the global session history database (~/.copilot/session-store.db).
 
 This database contains cross-session history maintained by the Copilot CLI. Available tables: sessions, turns, checkpoints, session_files, session_refs, search_index.

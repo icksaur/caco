@@ -1,4 +1,5 @@
 import type { SessionData } from './types.js';
+import { sessionTracker } from './session-state-tracker.js';
 
 export interface FolderGroup {
   name: string;
@@ -56,12 +57,18 @@ export function buildSessionListModel(
   for (const name of sortedNames) {
     const folderSessions = folderMap.get(name)!;
     folderSessions.sort(cmp);
+    const state = { hasBusy: false, hasUnobserved: false };
+    for (const s of folderSessions) {
+      const tracked = sessionTracker.get(s.sessionId);
+      if (tracked?.busy ?? s.isBusy) state.hasBusy = true;
+      if (tracked?.unobserved ?? s.isUnobserved) state.hasUnobserved = true;
+    }
     folders.push({
       name,
       sessions: folderSessions,
       collapsed: collapsedFolders.has(name),
-      hasBusy: folderSessions.some(s => s.isBusy),
-      hasUnobserved: folderSessions.some(s => s.isUnobserved),
+      hasBusy: state.hasBusy,
+      hasUnobserved: state.hasUnobserved,
     });
   }
 

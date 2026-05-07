@@ -24,6 +24,7 @@ import { createDelegateTool } from './src/delegate-tool.js';
 import { createRoadmapTools } from './src/roadmap-tool.js';
 import { createPresentationTools } from './src/presentation-tool.js';
 import { createSessionHistoryTool } from './src/session-history-tool.js';
+import { createMemoryTools } from './src/memory-tool.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
@@ -197,8 +198,9 @@ async function start(): Promise<void> {
     const roadmapTools = createRoadmapTools(sessionRef);
     const presentationTools = createPresentationTools(sessionRef);
     const sessionHistoryTools = createSessionHistoryTool();
+    const memoryTools = createMemoryTools();
     
-    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools, ...presentationTools, ...sessionHistoryTools];
+    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools, ...presentationTools, ...sessionHistoryTools, ...memoryTools];
   };
   
   await createSessionState({

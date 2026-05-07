@@ -12,6 +12,7 @@ import { dispatchState } from './dispatch-state.js';
 
 import { refreshAccessToken } from './mcp-auth-service.js';
 import { serverIdFromUrl } from './mcp-discovery.js';
+import { formatMemoryForPrompt } from './memory-tool.js';
 
 /**
  * Load MCP server config from ~/.copilot/mcp-config.json
@@ -198,6 +199,7 @@ interface ResumeSessionConfig {
   streaming?: boolean;
   tools?: unknown[];
   excludedTools?: string[];
+  systemMessage?: { mode: 'append'; content: string };
 }
 
 interface CopilotSessionInstance {
@@ -611,6 +613,7 @@ class SessionManager {
     
     let session: CopilotSessionInstance;
     let repairMessage: string | undefined;
+    const memoryContent = formatMemoryForPrompt();
     try {
       session = await client.resumeSession(sessionId, {
         streaming: true,
@@ -619,7 +622,8 @@ class SessionManager {
         onPermissionRequest: approveAll,
         configDir: join(homedir(), '.copilot'),
         mcpServers: await loadMcpServers(),
-        workingDirectory: cwd
+        workingDirectory: cwd,
+        ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
       } as ResumeSessionConfig);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -637,7 +641,8 @@ class SessionManager {
               onPermissionRequest: approveAll,
               configDir: join(homedir(), '.copilot'),
               mcpServers: await loadMcpServers(),
-              workingDirectory: cwd
+              workingDirectory: cwd,
+              ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
             } as ResumeSessionConfig);
           } catch (retryErr) {
             this.handleClientError(retryErr);

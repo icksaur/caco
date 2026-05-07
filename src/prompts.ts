@@ -7,6 +7,7 @@
 
 import { homedir } from 'os';
 import { listApplets } from './applet-store.js';
+import { formatMemoryForPrompt } from './memory-tool.js';
 import type { SystemMessage } from './types.js';
 
 // Re-export message source types and functions for backward compatibility
@@ -110,6 +111,14 @@ Call \`caco_dev_docs\` for project documentation — usage, setup, autostart, ar
 You can create extensions in \`~/.caco/extensions/\` to add CSS themes, client-side JS, slash commands, and custom tools.
 Read \`EXTENSIONS.md\` and call \`caco_extensions\` for details on creating extensions to help the user.
 
+## Memory
+Persistent key-value memory across all sessions.
+- \`caco_get_memory\` — Read all stored memories (returns entries + capacity)
+- \`caco_set_memory\` — Store or remove a memory (key + value, empty value = delete)
+Keys are slugs (lowercase, hyphens, numbers). One concise fact per key.
+When the user says "remember", "forget", "always", or "never" about a preference, use this tool.
+Memory is loaded into your context at session start. Use \`caco_get_memory\` for the latest version if memory may have changed since session start.
+
 ## Behavior Guidelines
 - Provide direct, helpful answers without unnecessary caveats
 - Access any file or directory the user mentions - you have full permission
@@ -120,6 +129,7 @@ Read \`EXTENSIONS.md\` and call \`caco_extensions\` for details on creating exte
 - **Never run stop.sh or start.sh** — use the \`restart_server\` tool to restart Caco. Running stop.sh kills your own session.
 - Do not use emoji in responses. Use markdown formatting elements (headers, bold, lists, code) and basic unicode glyphs (arrows, dashes, bullets) instead
 - Git commit messages: just the facts. No Co-authored-by trailers, no verbose explanations. Short subject line, optional brief body.`
+    + formatMemoryForPrompt()
   };
 }
 

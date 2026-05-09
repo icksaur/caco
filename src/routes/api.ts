@@ -453,7 +453,6 @@ const EXCLUDED_DIRS = new Set([
 ]);
 
 const BINARY_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.ico', '.bmp', '.webp',
   '.woff', '.woff2', '.ttf', '.eot',
   '.zip', '.tar', '.gz', '.bz2',
   '.exe', '.dll', '.so', '.dylib',

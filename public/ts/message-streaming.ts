@@ -35,6 +35,21 @@ import { chatView } from './chat-view-controller.js';
 
 let chatRegion: ChatRegion;
 let steerCount = 0;
+let currentOptions: string[] = [];
+
+function renderOptions(container: HTMLElement, options: string[], muted: boolean): void {
+  if (options.length === 0) { container.style.display = 'none'; return; }
+  container.style.display = '';
+  container.innerHTML = options.map(o =>
+    `<button class="response-option-btn${muted ? ' muted' : ''}" data-prompt="${o.replace(/"/g, '&quot;')}">${o.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</button>`
+  ).join('');
+}
+
+export function setResponseOptions(options: string[]): void {
+  currentOptions = options;
+  const ta = document.querySelector('#chatForm textarea') as HTMLTextAreaElement | null;
+  ta?.dispatchEvent(new Event('input', { bubbles: true }));
+}
 
 /**
  * Handle incoming SDK event (history or live)
@@ -93,6 +108,7 @@ function handleEvent(event: SessionEvent): void {
   // Terminal events: update tracker (which drives form state via subscriber)
   if (isTerminalEvent(eventType)) {
     chatRegion.removeStreamingCursors();
+    chatRegion.removeThinking();
     
     if (!isLoadingHistory()) {
       const sessionId = getActiveSessionId();
@@ -105,6 +121,13 @@ function handleEvent(event: SessionEvent): void {
           notifySessionComplete(sessionTracker.getIntent(sessionId) || '');
           refreshRoadmapLink();
           steerCount = 0;
+          void fetch(`/api/sessions/${sessionId}/state`).then(r => r.json()).then(d => {
+            if (d.responseOptions?.length) {
+              currentOptions = d.responseOptions;
+              const ta = document.querySelector('#chatForm textarea') as HTMLTextAreaElement | null;
+              ta?.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+          }).catch(() => {});
         }
 
         // Server says dispatch failed — restore the user's prompt
@@ -270,10 +293,11 @@ export function setupFormHandler(): void {
     const input = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
     const sendBtn = form.querySelector('.send-btn') as HTMLButtonElement | null;
     const stopBtn = form.querySelector('.stop-btn') as HTMLButtonElement | null;
+    const optionsEl = document.getElementById('responseOptions');
     const sessionId = getActiveSessionId();
     const isBusy = sessionId ? (sessionTracker.get(sessionId)?.busy ?? false) : false;
     const hasText = (input?.value.trim().length ?? 0) > 0;
-    const state = computeFormState(isBusy, hasText);
+    const state = computeFormState(isBusy, hasText, currentOptions.length > 0);
 
     if (sendBtn) {
       if (state.buttonLabel === 'send') {
@@ -296,6 +320,14 @@ export function setupFormHandler(): void {
     }
     if (input) input.placeholder = state.placeholder;
     form.classList.toggle('busy', isBusy);
+
+    if (optionsEl) {
+      if (state.optionsVisible || state.optionsMuted) {
+        renderOptions(optionsEl, currentOptions, state.optionsMuted);
+      } else {
+        optionsEl.style.display = 'none';
+      }
+    }
   };
 
   const textarea = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
@@ -310,6 +342,20 @@ export function setupFormHandler(): void {
     stopBtn.addEventListener('click', () => {
       const sessionId = getActiveSessionId();
       if (sessionId) void fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' });
+    });
+  }
+
+  const optionsContainer = document.getElementById('responseOptions');
+  if (optionsContainer) {
+    optionsContainer.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.response-option-btn') as HTMLElement | null;
+      if (!btn || btn.classList.contains('muted')) return;
+      const prompt = btn.dataset.prompt;
+      if (!prompt) return;
+      currentOptions = [];
+      updateButton();
+      if (textarea) { textarea.value = prompt; textarea.dispatchEvent(new Event('input', { bubbles: true })); }
+      form.requestSubmit();
     });
   }
 
@@ -380,6 +426,7 @@ export function setupFormHandler(): void {
     
     chatView.setFormEnabled(false);
     steerCount = 0;
+    currentOptions = [];
     updateButton();
     
     input.value = '';

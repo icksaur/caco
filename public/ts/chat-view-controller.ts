@@ -18,6 +18,7 @@ import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websock
 import { setSessionLoading, updateMenuIndicators } from './session-panel.js';
 import { notifySessionChange } from './applet-runtime.js';
 import { showToast } from './toast.js';
+import { setResponseOptions } from './message-streaming.js';
 import { adHocBar } from './adhoc-bar.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
 import { regions } from './dom-regions.js';
@@ -82,6 +83,7 @@ class ChatViewController {
     clearStatus();
     clearContextFooter();
     clearContextUsage();
+    setResponseOptions([]);
     adHocBar.deactivate();
     setViewState('newChat');
     loadModels();
@@ -132,6 +134,7 @@ class ChatViewController {
     try {
       const data = await this.resumeAndLoad(sessionId);
       this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.sessionId, data.hasIcon, data.kind, data.currentIntent, data.gitBranch);
+      setResponseOptions(data.responseOptions?.length ? data.responseOptions : []);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Network error';
       console.error('[CHAT] Error activating session:', msg);
@@ -148,7 +151,7 @@ class ChatViewController {
   private async resumeAndLoad(sessionId: string): Promise<{
     cwd?: string; model?: string; cwdFallback?: string; hasGit?: boolean;
     name?: string; sessionId?: string; hasIcon?: boolean; kind?: string;
-    currentIntent?: string; gitBranch?: string | null;
+    currentIntent?: string; gitBranch?: string | null; responseOptions?: string[];
   }> {
     reconnectIfNeeded();
     await waitForConnect();
@@ -173,6 +176,7 @@ class ChatViewController {
       hasIcon?: boolean;
       cwdFallback?: string;
       repairMessage?: string;
+      responseOptions?: string[];
     };
 
     if (data.repairMessage) {

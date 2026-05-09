@@ -51,6 +51,7 @@ export interface SessionMeta {
   context?: Record<string, string[]>;
   model?: string;
   folder?: string;
+  responseOptions?: string[];
   /** @deprecated Use kind === 'swarm' instead */
   isSwarmSession?: boolean;
 }

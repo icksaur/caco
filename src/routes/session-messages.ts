@@ -83,6 +83,11 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
       res.status(400).json({ error: 'Cannot steer: session is not busy' });
       return;
     }
+    const steerMeta = getSessionMeta(sessionId);
+    if (steerMeta?.responseOptions) {
+      steerMeta.responseOptions = undefined;
+      setSessionMeta(sessionId, steerMeta);
+    }
     try {
       await sessionManager.sendStream(sessionId, prompt!, { mode: 'immediate' });
       broadcastEvent(sessionId, {
@@ -129,7 +134,13 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   }
   
   const tempFilePaths: string[] = [];
-  
+
+  // Clear response options when user sends a message
+  const meta = getSessionMeta(sessionId);
+  if (meta?.responseOptions) {
+    meta.responseOptions = undefined;
+    setSessionMeta(sessionId, meta);
+  }  
   // Pre-process images (multiple supported, newline-separated)
   if (imageData) {
     const imageStrings = imageData.split('\n').filter(Boolean);
@@ -500,6 +511,12 @@ export async function dispatchMessage(
  */
 router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
+  
+  const cancelMeta = getSessionMeta(sessionId);
+  if (cancelMeta?.responseOptions) {
+    cancelMeta.responseOptions = undefined;
+    setSessionMeta(sessionId, cancelMeta);
+  }
   
   const { forced } = await sessionManager.cancelSession(sessionId);
   if (forced) {

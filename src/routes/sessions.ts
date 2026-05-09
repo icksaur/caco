@@ -261,7 +261,8 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       currentIntent: meta?.currentIntent || null,
       hasIcon: getSessionIconPath(result.sessionId) !== null,
       cwdFallback: result.usedFallbackCwd,
-      repairMessage: result.repairMessage || null
+      repairMessage: result.repairMessage || null,
+      responseOptions: meta?.responseOptions || null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -467,6 +468,7 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
     name: meta?.name || null,
     kind: meta?.kind || 'interactive',
     currentIntent: meta?.currentIntent || null,
+    responseOptions: meta?.responseOptions || null,
     isActive,
     isBusy
   });

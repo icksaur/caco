@@ -219,9 +219,31 @@ input[type="text"]:focus {
   padding: 2px 0; /* Minimal padding to prevent text hanging low */
 }
 
+/* Response option buttons */
+.response-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 var(--space-sm) 4px;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.response-option-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  padding: 4px 12px;
+  transition: background 0.15s, opacity 0.15s;
+}
+.response-option-btn:hover { background: var(--color-bg-hover); }
+.response-option-btn.muted { opacity: 0.3; cursor: default; pointer-events: none; }
+
 /* Input bar - horizontal flex container */
 #chatForm .input-bar {
-  flex: 1;
   display: flex;
   align-items: center;
   gap: var(--space-sm);
@@ -229,6 +251,7 @@ input[type="text"]:focus {
   background: var(--bg-input);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  width: 100%;
 }
 
 #chatForm .input-bar:focus-within {
@@ -361,6 +384,9 @@ footer {
 footer form {
   max-width: 800px;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 footer.hidden { display: none; }

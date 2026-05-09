@@ -29,6 +29,7 @@ function esc(s) {
 function getViewer(path) {
   var ext = (path.split('.').pop() || '').toLowerCase();
   if (['md', 'mdx', 'markdown'].indexOf(ext) !== -1) return 'markdown-viewer';
+  if (['html', 'htm'].indexOf(ext) !== -1) return 'html-viewer';
   if (IMAGE_EXTS.indexOf(ext) !== -1) return 'image-viewer';
   return 'text-editor';
 }

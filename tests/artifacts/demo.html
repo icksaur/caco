@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HTML Viewer Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, system-ui, sans-serif;
+    margin: 0;
+    padding: 24px;
+    background: #1a1a1a;
+    color: #ddd;
+    line-height: 1.5;
+  }
+  h1 { color: #5c9aff; margin-top: 0; }
+  h2 { color: #4caf50; border-bottom: 1px solid #333; padding-bottom: 4px; margin-top: 32px; }
+  .card {
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 12px 0;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin: 12px 0;
+  }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { padding: 8px 12px; border: 1px solid #444; text-align: left; }
+  th { background: #2a2a2a; color: #5c9aff; }
+  .pass { color: #4caf50; font-weight: bold; }
+  .fail { color: #e53935; font-weight: bold; }
+  .pending { color: #ffa726; }
+  button {
+    background: #5c9aff;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-right: 8px;
+  }
+  button:hover { background: #7aafff; }
+  pre {
+    background: #0a0a0a;
+    color: #5c9aff;
+    padding: 8px 12px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 12px;
+    margin: 4px 0;
+  }
+  details summary {
+    cursor: pointer;
+    padding: 6px 0;
+    user-select: none;
+  }
+  details[open] summary { color: #5c9aff; }
+</style>
+</head>
+<body>
+  <h1>HTML Viewer — Sandbox Test</h1>
+  <p>This page exercises styles, SVG, an interactive counter, and tries to break out of the sandbox.</p>
+
+  <h2>1. Styled content</h2>
+  <div class="grid">
+    <div class="card">
+      <strong>Card A</strong>
+      <p>Inline styles work. Grid layout works.</p>
+    </div>
+    <div class="card">
+      <strong>Card B</strong>
+      <p>Custom fonts, colors, borders.</p>
+    </div>
+    <div class="card">
+      <strong>Card C</strong>
+      <p>Responsive grid via <code>auto-fit minmax</code>.</p>
+    </div>
+  </div>
+
+  <h2>2. SVG diagram</h2>
+  <svg width="100%" height="140" viewBox="0 0 400 140" style="background:#0a0a0a;border-radius:6px">
+    <defs>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#888"/>
+      </marker>
+    </defs>
+    <rect x="20" y="40" width="80" height="60" rx="6" fill="#5c9aff"/>
+    <text x="60" y="75" text-anchor="middle" fill="white" font-family="sans-serif">Browser</text>
+    <line x1="100" y1="70" x2="150" y2="70" stroke="#888" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="160" y="40" width="80" height="60" rx="6" fill="#4caf50"/>
+    <text x="200" y="75" text-anchor="middle" fill="white" font-family="sans-serif">Sandbox</text>
+    <line x1="240" y1="70" x2="290" y2="70" stroke="#888" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="300" y="40" width="80" height="60" rx="6" fill="#e53935"/>
+    <text x="340" y="75" text-anchor="middle" fill="white" font-family="sans-serif">Isolated</text>
+  </svg>
+
+  <h2>3. Interactive counter (script runs in iframe)</h2>
+  <div class="card">
+    <button id="dec">−</button>
+    <span id="count" style="font-size:24px;margin:0 16px;font-family:monospace">0</span>
+    <button id="inc">+</button>
+    <span style="margin-left:16px;color:#888">Counter using DOM events.</span>
+  </div>
+
+  <h2>4. Collapsible details</h2>
+  <details>
+    <summary>How does sandbox isolation work?</summary>
+    <p>The iframe has <code>sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"</code>. Without <code>allow-same-origin</code>, the iframe gets a unique origin and cannot:</p>
+    <ul>
+      <li>Read the parent's localStorage or cookies</li>
+      <li>Make same-origin fetches to Caco's <code>/api/*</code></li>
+      <li>Access <code>window.parent</code>'s DOM (DOMException on access)</li>
+    </ul>
+  </details>
+
+  <h2>5. Sandbox break-out tests</h2>
+  <p>Each test attempts an isolation breach. A green check means the sandbox blocked it.</p>
+  <table id="results">
+    <thead><tr><th>#</th><th>Test</th><th>Expected</th><th>Result</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+<script>
+  // Interactive counter — should work
+  var n = 0;
+  var countEl = document.getElementById('count');
+  document.getElementById('inc').addEventListener('click', function() { countEl.textContent = ++n; });
+  document.getElementById('dec').addEventListener('click', function() { countEl.textContent = --n; });
+
+  // Sandbox tests
+  var tbody = document.querySelector('#results tbody');
+  var idx = 0;
+
+  function record(name, expected, blocked, detail) {
+    idx++;
+    var row = document.createElement('tr');
+    var cls = blocked ? 'pass' : 'fail';
+    var verdict = blocked ? '✓ blocked' : '✗ allowed';
+    row.innerHTML = '<td>' + idx + '</td><td>' + name + '</td><td>' + expected + '</td>' +
+      '<td class="' + cls + '">' + verdict + (detail ? '<pre>' + detail + '</pre>' : '') + '</td>';
+    tbody.appendChild(row);
+  }
+
+  // Test 1: Read parent localStorage
+  try {
+    var ls = window.parent.localStorage.getItem('test');
+    record('Read parent.localStorage', 'blocked', false, 'got: ' + ls);
+  } catch (e) {
+    record('Read parent.localStorage', 'blocked', true, e.name + ': ' + e.message);
+  }
+
+  // Test 2: Read parent DOM
+  try {
+    var body = window.parent.document.body;
+    record('Read parent.document.body', 'blocked', false, body ? body.tagName : 'null');
+  } catch (e) {
+    record('Read parent.document.body', 'blocked', true, e.name);
+  }
+
+  // Test 3: Same-origin fetch (Caco API)
+  fetch('/api/sessions').then(function(r) {
+    record('Fetch /api/sessions', 'blocked', false, 'status: ' + r.status);
+  }).catch(function(e) {
+    record('Fetch /api/sessions', 'blocked', true, e.message);
+  });
+
+  // Test 4: Read parent.location
+  try {
+    var loc = window.parent.location.href;
+    record('Read parent.location.href', 'blocked', false, loc);
+  } catch (e) {
+    record('Read parent.location.href', 'blocked', true, e.name);
+  }
+
+  // Test 5: Top navigation
+  try {
+    window.top.location = 'https://example.com';
+    record('Navigate window.top', 'blocked', false, 'navigation succeeded');
+  } catch (e) {
+    record('Navigate window.top', 'blocked', true, e.name);
+  }
+
+  // Test 6: postMessage to parent (this works — it's the bridge)
+  // We don't expect this to be blocked; it's a feature.
+  try {
+    window.parent.postMessage({ test: 'iframe-says-hi' }, '*');
+    record('postMessage to parent', 'allowed (intended)', false, 'sent — but Caco does not listen');
+  } catch (e) {
+    record('postMessage to parent', 'allowed (intended)', true, e.name);
+  }
+
+  // Test 7: Read own location (should work)
+  try {
+    var ownLoc = window.location.href;
+    record('Read own window.location', 'allowed', false, ownLoc.slice(0, 60) + '...');
+  } catch (e) {
+    record('Read own window.location', 'allowed', true, e.name);
+  }
+
+  // Test 8: External fetch (CORS-permitted)
+  fetch('https://api.github.com').then(function(r) {
+    record('Fetch external (github.com)', 'allowed (CORS-dependent)', false, 'status: ' + r.status);
+  }).catch(function(e) {
+    record('Fetch external (github.com)', 'allowed (CORS-dependent)', true, e.message);
+  });
+</script>
+</body>
+</html>

@@ -73,12 +73,12 @@ Call this to check if a presentation exists or to read its content. Returns empt
   const updatePresentation = defineTool('update_presentation', {
     description: `Create or update a visual presentation for the current session. Only create or modify presentations when the user explicitly requests one — do not auto-generate presentations for internal work like code reviews or research summaries.
 
-Use slides to explain architecture, show diagrams, present plans, or summarize findings. Each slide is markdown — supports mermaid diagrams, code blocks, lists, and headings.
+Use slides to explain architecture, show diagrams, present plans, or summarize findings. Each slide is markdown with inline HTML/SVG support — prefer inline \`<svg>\` for diagrams (better visual quality and sizing than mermaid), code blocks, lists, and headings.
 
 All parameters are optional — set whatever you need in one call.
 
 Examples:
-  Create: { title: "Architecture", slides: ["# Overview\\n\\nMain components", "# Data Flow\\n\\n\`\`\`mermaid\\ngraph LR\\nA-->B\\n\`\`\`"] }
+  Create: { title: "Architecture", slides: ["# Overview\\n\\nMain components", "# Data Flow\\n\\n<svg width='400' height='100'><rect x='10' y='30' width='80' height='40' fill='#5c9aff'/><text x='50' y='55' text-anchor='middle' fill='white'>A</text><line x1='90' y1='50' x2='150' y2='50' stroke='#888'/><rect x='150' y='30' width='80' height='40' fill='#4caf50'/><text x='190' y='55' text-anchor='middle' fill='white'>B</text></svg>"] }
   Add slide: { addSlide: "# New Slide\\n\\nContent here" }
   Update slide 2: { updateSlideIndex: 1, updateSlide: "# Updated\\n\\nNew content" }
   Delete all: { removeAll: true }`,

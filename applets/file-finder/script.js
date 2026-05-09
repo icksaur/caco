@@ -32,8 +32,10 @@ function getApplet(name) {
   var ext = name.split('.').pop().toLowerCase();
   var imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
   var mdExts = ['md', 'mdx', 'markdown'];
+  var htmlExts = ['html', 'htm'];
   if (imageExts.indexOf(ext) !== -1) return 'image-viewer';
   if (mdExts.indexOf(ext) !== -1) return 'markdown-viewer';
+  if (htmlExts.indexOf(ext) !== -1) return 'html-viewer';
   return 'text-editor';
 }
 

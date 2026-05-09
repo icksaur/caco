@@ -117,10 +117,11 @@ Every CSS rule in `style.css` is automatically prefixed with `.applet-instance[d
 | `git-diff` | View file diffs in a git repository |
 | `git-status` | Git staging, commits, push/pull — auto-refreshes on file edits |
 | `image-viewer` | View images with zoom and pan |
+| `html-viewer` | Render HTML files in a sandboxed iframe (interactive but isolated) |
 | `jobs` | View and manage scheduled jobs |
 | `markdown-viewer` | Render markdown with syntax highlighting and mermaid diagrams |
-| `mcp-auth` | Authenticate MCP servers requiring OAuth |
-| `roadmap` | Session roadmap with steps, documents, and status tracking |
+| `mcp-servers` | View MCP server status, tools, and OAuth authentication |
+| `session-context` | Session context dashboard: edited files, roadmap, activity, notes |
 | `text-editor` | Edit text files with syntax highlighting, Ctrl+S to save |
 
 ## Creating New Applets

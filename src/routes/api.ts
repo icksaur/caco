@@ -392,6 +392,10 @@ router.get('/file', async (req: Request, res: Response) => {
     const fileData = await readFile(resolvedPath);
     res.setHeader('Content-Type', contentType + (isText ? '; charset=utf-8' : ''));
     res.setHeader('Content-Length', stats.size);
+    if (ext === 'html' || ext === 'htm') {
+      res.setHeader('Content-Security-Policy',
+        "default-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; connect-src 'none'; frame-src 'none'; object-src 'none'");
+    }
     res.send(fileData);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {

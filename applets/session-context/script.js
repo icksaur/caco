@@ -22,9 +22,7 @@ var statusIcons = { pending: '○', active: '◐', done: '●', blocked: '⊘' }
 var statusOrder = ['pending', 'active', 'done', 'blocked'];
 var IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
 
-function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+function esc(s) { return appletAPI.escapeHtml(s); }
 
 function getViewer(path) {
   var ext = (path.split('.').pop() || '').toLowerCase();

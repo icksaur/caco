@@ -54,11 +54,7 @@ function hideError() {
 /**
  * Escape HTML entities
  */
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+function escapeHtml(text) { return appletAPI.escapeHtml(text); }
 
 /**
  * Render diff with syntax highlighting

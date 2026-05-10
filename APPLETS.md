@@ -52,14 +52,18 @@ All methods are on `window.appletAPI`. Subscriptions auto-cleanup on applet dest
 | `getSessionId()` | Returns current active session ID |
 | `getSessionMeta(sessionId?)` | Fetch full session metadata (name, kind, model, intent, busy) |
 | `sendAgentMessage(prompt, opts?)` | Send message to active session (opts: `appletSlug`, `imageData`) |
-| `callMCPTool(name, args)` | Call MCP tool — `read_file`, `write_file`, `list_directory` |
-| `navigateAppletUrlParam(k, v)` | Push new URL param (creates browser history entry) |
-| `updateAppletUrlParam(k, v)` | Replace URL param (no history entry) |
+| `callMCPTool(name, args)` | Call MCP tool — `read_file`, `write_file`, `list_directory`. Throws on tool error. |
+| `navigateAppletUrlParam(k, v)` | Push new URL param (creates browser history entry). Pass `null` to delete. |
+| `updateAppletUrlParam(k, v)` | Replace URL param (no history entry). |
 | `getAppletUrlParams()` | Get current URL params (excluding `applet`) |
 | `getAppletSlug()` | Get current applet's slug from URL |
 | `saveTempFile(data, opts?)` | Save temp file to `~/.caco/tmp/` (returns `{ path, filename }`) |
-| `expose(name, fn)` | Expose function globally (needed for `onclick` handlers in IIFE) |
+| `loadApplet(slug, urlParams?)` | Navigate to another applet |
+| `expose(name, fn)` or `expose({fn1,fn2})` | Expose functions globally (needed for `onclick` handlers in IIFE) |
 | `listApplets()` | List saved applets (`{ slug, name, description, updatedAt }[]`) |
+| `fetch(url, opts?)` | fetch wrapper with 10s timeout. Throws on HTTP errors with server's error message. |
+| `escapeHtml(str)` | Escape `&`, `<`, `>`, `"`, `'` for safe `innerHTML` insertion. |
+| `toast(msg, opts?)` | Show toast notification. opts: `{ type: 'info'\|'success'\|'error', autoHideMs }`. |
 
 Applets can also call the shell endpoint directly: `fetch('/api/shell', { method: 'POST', body: JSON.stringify({ command, args, cwd }) })`.
 

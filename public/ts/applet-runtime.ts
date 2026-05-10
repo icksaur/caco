@@ -12,6 +12,7 @@ import { wsSetState, onStateUpdate, onEvent, onGlobalEvent, isWsConnected } from
 import { getActiveSessionId, getCurrentCwd, isLoadingHistory } from './app-state.js';
 import { regions } from './dom-regions.js';
 import { loadApplet } from './router.js';
+import { showToast } from './toast.js';
 import type { SessionEvent } from './types.js';
 
 interface TempFileResult {
@@ -133,12 +134,64 @@ function expose(nameOrObj: string | Record<string, unknown>, fn?: unknown): void
 }
 
 /**
+ * Escape HTML special chars for safe insertion into innerHTML.
+ */
+function escapeHtml(s: unknown): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+interface AppletFetchOptions extends RequestInit {
+  timeout?: number;
+}
+
+/**
+ * fetch wrapper with timeout and HTTP error handling.
+ * Throws on non-OK responses with the server's error message if available.
+ */
+async function appletFetch(url: string, options: AppletFetchOptions = {}): Promise<Response> {
+  const { timeout = 10000, ...init } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    if (!res.ok) {
+      const errMsg = await res.json().then(d => d?.error).catch(() => null);
+      throw new Error(errMsg || `HTTP ${res.status}`);
+    }
+    return res;
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw new Error(`Request timeout after ${timeout}ms`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+interface ToastOptions {
+  type?: 'info' | 'success' | 'error';
+  autoHideMs?: number;
+}
+
+/**
+ * Show a toast notification from an applet.
+ */
+function appletToast(message: string, options: ToastOptions = {}): void {
+  showToast(message, options);
+}
+
+/**
  * Applet API interface - exposed as window.appletAPI
  */
 interface AppletAPI {
   expose: typeof expose;
   setAppletState: typeof setAppletState;
   listApplets: typeof listSavedApplets;
+  loadApplet: typeof loadApplet;
   getAppletUrlParams: typeof getAppletUrlParams;
   getAppletSlug: typeof getAppletSlug;
   updateAppletUrlParam: typeof updateAppletUrlParam;
@@ -153,6 +206,9 @@ interface AppletAPI {
   sendAgentMessage: typeof sendAgentMessage;
   saveTempFile: typeof saveTempFile;
   callMCPTool: typeof callMCPTool;
+  fetch: typeof appletFetch;
+  escapeHtml: typeof escapeHtml;
+  toast: typeof appletToast;
 }
 
 declare global {
@@ -174,6 +230,7 @@ export function initAppletRuntime(): void {
     expose,
     setAppletState,
     listApplets: listSavedApplets,
+    loadApplet,
     getAppletUrlParams,
     getAppletSlug,
     updateAppletUrlParam,
@@ -187,7 +244,10 @@ export function initAppletRuntime(): void {
     getSessionMeta,
     sendAgentMessage,
     saveTempFile,
-    callMCPTool
+    callMCPTool,
+    fetch: appletFetch,
+    escapeHtml,
+    toast: appletToast,
   };
   
   window.appletAPI = api;

@@ -147,10 +147,15 @@ expose({ handleClick, handleSubmit, handleCancel });
 \`\`\`
 
 **Navigation:**
-- \`appletAPI.loadApplet(slug)\` - Navigate to another applet
+- \`appletAPI.loadApplet(slug, urlParams?)\` - Navigate to another applet
 - \`appletAPI.listApplets()\` - Get array of saved applets (async)
 - \`appletAPI.getAppletSlug()\` - Get current applet slug from URL
-- \`appletContainer\` - Reference to container element
+- \`appletContainer\` - Reference to container element (closure-captured, available in callbacks)
+
+**Utility helpers (use these — avoid reimplementing):**
+- \`appletAPI.fetch(url, opts?)\` - fetch wrapper with 10s timeout and HTTP error handling. Throws on non-OK with server's error message.
+- \`appletAPI.escapeHtml(str)\` - Escape & < > " ' for safe innerHTML insertion.
+- \`appletAPI.toast(msg, { type, autoHideMs })\` - Show a toast notification. Type: 'info' | 'success' | 'error'.
 
 **Agent Communication (two patterns):**
 

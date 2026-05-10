@@ -4,9 +4,7 @@ var dirEntries = [];
 var filtered = [];
 var selectedIdx = 0;
 
-function esc(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+function esc(s) { return appletAPI.escapeHtml(s); }
 
 var searchInput = document.getElementById('searchInput');
 var results = document.getElementById('results');

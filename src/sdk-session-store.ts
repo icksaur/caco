@@ -99,8 +99,10 @@ export function parseSessionModel(sessionId: string): string | null {
   for (const event of events) {
     if (event.type === 'session.start' && event.data?.selectedModel) {
       model = String(event.data.selectedModel);
-    } else if (event.type === 'session.model_change' && event.data?.model) {
-      model = String(event.data.model);
+    } else if (event.type === 'session.model_change') {
+      // SDK emits { previousModel, newModel }
+      const newModel = (event.data as { newModel?: unknown })?.newModel ?? (event.data as { model?: unknown })?.model;
+      if (newModel) model = String(newModel);
     }
   }
   return model;

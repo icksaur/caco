@@ -6,9 +6,7 @@ var emptyEl = document.getElementById('igEmpty');
 var errorEl = document.getElementById('igError');
 var observer = null;
 
-function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+function esc(s) { return appletAPI.escapeHtml(s); }
 
 function isImage(name) {
   var ext = (name.split('.').pop() || '').toLowerCase();

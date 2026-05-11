@@ -16,7 +16,10 @@ var errorEl = document.getElementById('error-state');
 /**
  * Escape string for safe use in HTML attributes (data-* values)
  */
-function escapeAttr(str) { return appletAPI.escapeHtml(str); }
+function escapeHtml(str) {
+  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function escapeAttr(str) { return escapeHtml(str); }
 
 /**
  * Fetch servers from API and update display
@@ -164,11 +167,6 @@ function updateAppletState() {
     });
   }
 }
-
-/**
- * Escape HTML to prevent XSS
- */
-function escapeHtml(str) { return appletAPI.escapeHtml(str); }
 
 /**
  * MCP Server & Tool Discovery

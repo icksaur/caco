@@ -135,6 +135,7 @@ class ChatViewController {
       const data = await this.resumeAndLoad(sessionId);
       this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.sessionId, data.hasIcon, data.kind, data.currentIntent, data.gitBranch);
       setResponseOptions(data.responseOptions?.length ? data.responseOptions : []);
+      void this.restoreApplet(data.activeApplet, data.appletParams);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Network error';
       console.error('[CHAT] Error activating session:', msg);
@@ -152,6 +153,7 @@ class ChatViewController {
     cwd?: string; model?: string; cwdFallback?: string; hasGit?: boolean;
     name?: string; sessionId?: string; hasIcon?: boolean; kind?: string;
     currentIntent?: string; gitBranch?: string | null; responseOptions?: string[];
+    activeApplet?: string | null; appletParams?: Record<string, string> | null;
   }> {
     reconnectIfNeeded();
     await waitForConnect();
@@ -177,6 +179,8 @@ class ChatViewController {
       cwdFallback?: string;
       repairMessage?: string;
       responseOptions?: string[];
+      activeApplet?: string | null;
+      appletParams?: Record<string, string> | null;
     };
 
     if (data.repairMessage) {
@@ -192,6 +196,32 @@ class ChatViewController {
     await historyLoader.load(data.sessionId);
 
     return data;
+  }
+
+  /**
+   * Restore the session's applet panel. Called after session resume.
+   * Updates URL params, then loads the applet so its onUrlParamsChange
+   * callback sees the correct params.
+   * Only loads if the session has a saved activeApplet — respects current
+   * panel visibility otherwise.
+   */
+  private async restoreApplet(activeApplet?: string | null, appletParams?: Record<string, string> | null): Promise<void> {
+    if (!activeApplet) return;
+    try {
+      const params = new URLSearchParams();
+      params.set('applet', activeApplet);
+      for (const [k, v] of Object.entries(appletParams || {})) {
+        params.set(k, v);
+      }
+      const newUrl = window.location.pathname + '?' + params.toString();
+      if (newUrl !== window.location.pathname + window.location.search) {
+        window.history.replaceState(null, '', newUrl);
+      }
+      const { loadApplet } = await import('./router.js');
+      await loadApplet(activeApplet, appletParams || {});
+    } catch (e) {
+      console.warn('[CHAT] Failed to restore applet:', e);
+    }
   }
 
   /**

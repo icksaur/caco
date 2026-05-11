@@ -281,6 +281,27 @@ export function getAppletSlug(): string | null {
 }
 
 /**
+ * Debounced sync of URL params to session metadata.
+ * Called after navigateAppletUrlParam / updateAppletUrlParam so meta.appletParams
+ * stays current as the user navigates within an applet.
+ */
+let _appletParamsSyncTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleAppletParamsSync(): void {
+  if (_appletParamsSyncTimer) clearTimeout(_appletParamsSyncTimer);
+  _appletParamsSyncTimer = setTimeout(() => {
+    _appletParamsSyncTimer = null;
+    const sessionId = getActiveSessionId();
+    if (!sessionId) return;
+    const appletParams = getAppletUrlParams();
+    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}/applet`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appletParams }),
+    }).catch(() => { /* best-effort */ });
+  }, 300);
+}
+
+/**
  * Update a URL query param (for applet state sharing)
  * Uses replaceState so it doesn't create history entries
  */
@@ -288,6 +309,7 @@ export function updateAppletUrlParam(key: string, value: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set(key, value);
   history.replaceState(history.state, '', url.toString());
+  scheduleAppletParamsSync();
 }
 
 /**
@@ -302,6 +324,7 @@ export function navigateAppletUrlParam(key: string, value: string): void {
     url.searchParams.delete(key);
   }
   history.pushState(null, '', url.toString());
+  scheduleAppletParamsSync();
 }
 
 /**

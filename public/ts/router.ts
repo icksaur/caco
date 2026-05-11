@@ -109,14 +109,40 @@ async function handleNavigation(url: URL): Promise<void> {
   
   // Handle applet param
   if (appletSlug && appletSlug !== getActiveAppletSlug()) {
-    await loadApplet(appletSlug);
+    const urlParams: Record<string, string> = {};
+    url.searchParams.forEach((value, key) => {
+      if (key !== 'applet' && key !== 'session') urlParams[key] = value;
+    });
+    await loadApplet(appletSlug, urlParams);
   } else if (appletSlug && appletSlug === getActiveAppletSlug()) {
     showAppletPanel();
     window.dispatchEvent(new PopStateEvent('popstate'));
+    // Sync new params to session meta
+    void syncAppletParamsToMeta();
   } else if (!appletSlug && isAppletPanelVisible()) {
     // URL has no applet param - hide panel (but preserve content)
     hideAppletPanel();
   }
+}
+
+/**
+ * Push current URL params (excluding session, applet) to session meta.
+ * Used when applet stays the same but params change via URL navigation.
+ */
+async function syncAppletParamsToMeta(): Promise<void> {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) return;
+  const appletParams: Record<string, string> = {};
+  new URL(window.location.href).searchParams.forEach((value, key) => {
+    if (key !== 'applet' && key !== 'session') appletParams[key] = value;
+  });
+  try {
+    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/applet`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appletParams }),
+    });
+  } catch { /* best-effort */ }
 }
 
 /**
@@ -200,10 +226,11 @@ export async function loadApplet(slug: string, urlParams?: Record<string, string
   try {
     console.log(`[ROUTER] Loading applet: ${slug}`);
     
+    const sessionId = getActiveSessionId();
     const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urlParams })
+      body: JSON.stringify({ urlParams, sessionId })
     });
     
     if (!response.ok) {

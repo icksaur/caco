@@ -19,7 +19,7 @@ import { randomUUID } from 'crypto';
 import ignore from 'ignore';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
-import { getOutput } from '../storage.js';
+import { getOutput, getSessionMeta, setSessionMeta } from '../storage.js';
 import { setAppletUserState, getAppletUserState, clearAppletUserState, getActiveAppletSlug, setActiveAppletSlug } from '../applet-state.js';
 import { listApplets, loadApplet } from '../applet-store.js';
 import { listExtensions, getExtension } from '../extension-store.js';
@@ -257,7 +257,9 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
       return;
     }
     
-    const sessionId = req.query.sessionId as string | undefined;
+    const body = req.body as { sessionId?: string; urlParams?: Record<string, string> };
+    const sessionId = body.sessionId ?? (req.query.sessionId as string | undefined);
+    const urlParams = body.urlParams ?? {};
 
     // Only clear user state if switching to a different applet
     const currentSlug = getActiveAppletSlug(sessionId);
@@ -265,6 +267,16 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
       clearAppletUserState(sessionId);
     }
     setActiveAppletSlug(sessionId, slug);
+
+    // Persist to session metadata
+    if (sessionId) {
+      const meta = getSessionMeta(sessionId);
+      if (meta) {
+        meta.activeApplet = slug;
+        meta.appletParams = urlParams;
+        setSessionMeta(sessionId, meta);
+      }
+    }
     
     // Return content for client-side execution
     res.json({

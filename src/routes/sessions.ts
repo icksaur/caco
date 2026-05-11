@@ -263,11 +263,37 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       cwdFallback: result.usedFallbackCwd,
       repairMessage: result.repairMessage || null,
       responseOptions: meta?.responseOptions || null,
+      activeApplet: meta?.activeApplet || null,
+      appletParams: meta?.appletParams || null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(400).json({ error: message });
   }
+});
+
+/**
+ * PATCH /api/sessions/:sessionId/applet
+ * Update applet params (debounced sync from navigateAppletUrlParam/updateAppletUrlParam).
+ * Keeps meta.appletParams in sync with the actual URL as the user navigates within an applet.
+ */
+router.patch('/sessions/:sessionId/applet', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const { appletParams } = req.body as { appletParams?: Record<string, string> };
+
+  const meta = getSessionMeta(sessionId);
+  if (!meta) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+  // Only update if there's an active applet; otherwise ignore (no-op).
+  if (!meta.activeApplet) {
+    res.json({ ok: true, ignored: 'no active applet' });
+    return;
+  }
+  meta.appletParams = appletParams || {};
+  setSessionMeta(sessionId, meta);
+  res.json({ ok: true });
 });
 
 /**

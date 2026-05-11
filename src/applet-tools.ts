@@ -391,7 +391,7 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
   });
 
   const cacoAppletHowto = defineTool('caco_applet_howto', {
-    description: `Get documentation for CREATING new applets (HTML/JS/CSS widgets). Call when the user asks for an interactive tool, custom dashboard, or one-off editor (e.g., drag-drop ticket triage, parameter tuner, annotation UI). Applets persist on disk and survive across sessions. For inline diagrams or styled tables in chat responses, use inline HTML/SVG directly instead — no applet needed. For USING existing applets, call caco_applet_usage instead.`,
+    description: 'Get documentation for CREATING new applets (HTML/JS/CSS widgets). Call when the user asks for an interactive tool, custom dashboard, or one-off editor (e.g., drag-drop ticket triage, parameter tuner, annotation UI). Applets persist on disk and survive across sessions. For inline diagrams or styled tables in chat responses, use inline HTML/SVG directly instead — no applet needed. For USING existing applets, call caco_applet_usage instead.',
 
     parameters: z.object({}),
 

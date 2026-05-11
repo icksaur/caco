@@ -47,6 +47,7 @@ function renderOptions(container: HTMLElement, options: string[], muted: boolean
 
 export function setResponseOptions(options: string[]): void {
   currentOptions = options;
+  if (typeof document === 'undefined') return;
   const ta = document.querySelector('#chatForm textarea') as HTMLTextAreaElement | null;
   ta?.dispatchEvent(new Event('input', { bubbles: true }));
 }

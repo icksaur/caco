@@ -13,6 +13,7 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `POST /api/sessions/:id/resume` - Resume an existing session
 - `POST /api/sessions/:id/observe` - Mark session as observed
 - `PATCH /api/sessions/:id` - Update session metadata (name, env hint, context)
+- `PATCH /api/sessions/:id/applet` - Update active applet params and panel visibility
 - `DELETE /api/sessions/:id` - Delete a session
 - `GET /api/sessions/:id/state` - Get session state (for agent-to-agent polling)
 - `GET /api/sessions/:id/icon` - Serve session icon (icon.gif preferred, falls back to icon.png). Returns 404 if no icon exists.
@@ -107,6 +108,14 @@ Returns: `{ success: true }`
 **DELETE /api/sessions/:id** - Delete session
 
 Returns: `{ success: true, wasActive: true }`
+
+**PATCH /api/sessions/:id/applet** - Update active applet state for a session
+
+Body: `{ appletParams?: Record<string, string>, panelVisible?: boolean }`
+
+Updates `appletParams` and/or `appletPanelVisible` in session meta. No-op if the session has no active applet. Used by the frontend to sync URL params (debounced) and panel toggle state.
+
+Returns: `{ ok: true }`
 
 **POST /api/sessions/:id/compact** - Force context compaction
 

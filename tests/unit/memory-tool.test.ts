@@ -1,10 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, writeFileSync, mkdirSync, rmSync, readFileSync } from 'fs';
+import { existsSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
 const testDir = join(tmpdir(), 'caco-memory-test-' + Date.now());
-const testFile = join(testDir, 'memory.json');
 
 // Patch homedir before importing
 import { vi } from 'vitest';

@@ -11,7 +11,7 @@ var slideCounter = document.getElementById('slideCounter');
 var nav = document.getElementById('nav');
 var empty = document.getElementById('empty');
 
-function esc(s) { return appletAPI.escapeHtml(s); }
+function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
 async function loadPresentation() {
   if (!sessionId) return;

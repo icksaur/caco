@@ -4,7 +4,7 @@ var dirEntries = [];
 var filtered = [];
 var selectedIdx = 0;
 
-function esc(s) { return appletAPI.escapeHtml(s); }
+function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
 var searchInput = document.getElementById('searchInput');
 var results = document.getElementById('results');

@@ -2,7 +2,7 @@ var searchInput = document.getElementById('searchInput');
 var searchBtn = document.getElementById('searchBtn');
 var resultsEl = document.getElementById('results');
 
-function esc(s) { return appletAPI.escapeHtml(s); }
+function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
 function highlightSnippet(snippet, matchStart, matchEnd) {
   var before = esc(snippet.slice(0, matchStart));

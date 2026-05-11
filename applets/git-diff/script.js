@@ -54,7 +54,7 @@ function hideError() {
 /**
  * Escape HTML entities
  */
-function escapeHtml(text) { return appletAPI.escapeHtml(text); }
+function escapeHtml(text) { return String(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
 /**
  * Render diff with syntax highlighting

@@ -533,7 +533,7 @@ async function showLastCommit() {
   }
 }
 
-function escapeHtml(text) { return appletAPI.escapeHtml(text); }
+function escapeHtml(text) { return String(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
 function colorizeStatLine(line) {
   // Summary line: " 5 files changed, 20 insertions(+), 3 deletions(-)"

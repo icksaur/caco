@@ -54,6 +54,7 @@ export interface SessionMeta {
   responseOptions?: string[];
   activeApplet?: string;
   appletParams?: Record<string, string>;
+  appletPanelVisible?: boolean;
   /** @deprecated Use kind === 'swarm' instead */
   isSwarmSession?: boolean;
 }

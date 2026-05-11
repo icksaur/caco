@@ -135,7 +135,7 @@ class ChatViewController {
       const data = await this.resumeAndLoad(sessionId);
       this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.sessionId, data.hasIcon, data.kind, data.currentIntent, data.gitBranch);
       setResponseOptions(data.responseOptions?.length ? data.responseOptions : []);
-      void this.restoreApplet(data.activeApplet, data.appletParams);
+      void this.restoreApplet(data.activeApplet, data.appletParams, data.appletPanelVisible);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Network error';
       console.error('[CHAT] Error activating session:', msg);
@@ -154,6 +154,7 @@ class ChatViewController {
     name?: string; sessionId?: string; hasIcon?: boolean; kind?: string;
     currentIntent?: string; gitBranch?: string | null; responseOptions?: string[];
     activeApplet?: string | null; appletParams?: Record<string, string> | null;
+    appletPanelVisible?: boolean;
   }> {
     reconnectIfNeeded();
     await waitForConnect();
@@ -181,6 +182,7 @@ class ChatViewController {
       responseOptions?: string[];
       activeApplet?: string | null;
       appletParams?: Record<string, string> | null;
+      appletPanelVisible?: boolean;
     };
 
     if (data.repairMessage) {
@@ -205,10 +207,12 @@ class ChatViewController {
    * Only loads if the session has a saved activeApplet — respects current
    * panel visibility otherwise.
    */
-  private async restoreApplet(activeApplet?: string | null, appletParams?: Record<string, string> | null): Promise<void> {
+  private async restoreApplet(activeApplet?: string | null, appletParams?: Record<string, string> | null, panelVisible?: boolean): Promise<void> {
     if (!activeApplet) return;
     try {
       const params = new URLSearchParams();
+      const sessionId = getActiveSessionId();
+      if (sessionId) params.set('session', sessionId);
       params.set('applet', activeApplet);
       for (const [k, v] of Object.entries(appletParams || {})) {
         params.set(k, v);
@@ -218,7 +222,14 @@ class ChatViewController {
         window.history.replaceState(null, '', newUrl);
       }
       const { loadApplet } = await import('./router.js');
-      await loadApplet(activeApplet, appletParams || {});
+      await loadApplet(activeApplet, appletParams || {}, { restore: true });
+      // Apply per-session visibility. Default to visible if not explicitly false.
+      const { showAppletPanel, hideAppletPanel } = await import('./view-controller.js');
+      if (panelVisible === false) {
+        hideAppletPanel();
+      } else {
+        showAppletPanel();
+      }
     } catch (e) {
       console.warn('[CHAT] Failed to restore applet:', e);
     }

@@ -30,9 +30,10 @@ export function renderContextFooter(context: SessionContext): void {
   const allFiles = context.files ?? [];
   const recentFiles = allFiles.length > 3 ? allFiles.slice(-3) : allFiles;
   const files = formatContextFiles(recentFiles);
+  const sessionPart = activeFooterSessionId ? `session=${encodeURIComponent(activeFooterSessionId)}&` : '';
   const links = files.map(({ name, path }) => {
     const encodedPath = encodeURIComponent(path);
-    return `<a href="/?applet=text-editor&path=${encodedPath}" title="${path}">${name}</a>`;
+    return `<a href="/?${sessionPart}applet=text-editor&path=${encodedPath}" title="${path}">${name}</a>`;
   });
   
   linksContainer.innerHTML = links.length
@@ -106,14 +107,15 @@ function renderDescription(sessionId: string, sessionName?: string, hasGit = fal
   if (sessionName) descParts.push(escapeHtml(sessionName));
   
   const encodedCwd = fullCwd ? encodeURIComponent(fullCwd) : '';
+  const encodedSession = encodeURIComponent(sessionId);
   const appletLinks: string[] = [];
-  appletLinks.push('<a href="/?applet=session-context" class="footer-applet-link" id="footerRoadmapLink" style="display:none">context dashboard</a>');
+  appletLinks.push(`<a href="/?session=${encodedSession}&applet=session-context" class="footer-applet-link" id="footerRoadmapLink" style="display:none">context dashboard</a>`);
   if (hasGit && encodedCwd) {
     const gitLabel = gitBranch ? `⎇ ${escapeHtml(gitBranch)}` : 'git';
-    appletLinks.push(`<a href="/?applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);
+    appletLinks.push(`<a href="/?session=${encodedSession}&applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);
   }
   if (encodedCwd) {
-    appletLinks.push(`<a href="/?applet=file-finder&root=${encodedCwd}" class="footer-applet-link">files</a>`);
+    appletLinks.push(`<a href="/?session=${encodedSession}&applet=file-finder&root=${encodedCwd}" class="footer-applet-link">files</a>`);
   }
   
   descEl.innerHTML = descParts.join('') + (appletLinks.length ? ' ' + appletLinks.join(' ') : '');

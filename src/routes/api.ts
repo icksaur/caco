@@ -257,9 +257,10 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
       return;
     }
     
-    const body = req.body as { sessionId?: string; urlParams?: Record<string, string> };
+    const body = req.body as { sessionId?: string; urlParams?: Record<string, string>; restore?: boolean };
     const sessionId = body.sessionId ?? (req.query.sessionId as string | undefined);
     const urlParams = body.urlParams ?? {};
+    const isRestore = !!body.restore;
 
     // Only clear user state if switching to a different applet
     const currentSlug = getActiveAppletSlug(sessionId);
@@ -274,6 +275,11 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
       if (meta) {
         meta.activeApplet = slug;
         meta.appletParams = urlParams;
+        // Explicit user open implies visible. Restore on session switch
+        // must not overwrite the user's saved visibility preference.
+        if (!isRestore) {
+          meta.appletPanelVisible = true;
+        }
         setSessionMeta(sessionId, meta);
       }
     }

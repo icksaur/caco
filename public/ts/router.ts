@@ -208,13 +208,26 @@ export function toggleApplet(): void {
     return;
   }
   
-  // Toggle applet panel visibility
-  // CSS handles the responsive behavior (mobile: full screen, desktop: split)
-  if (isAppletPanelVisible()) {
-    hideAppletPanel();
-  } else {
+  // Toggle applet panel visibility. Persist preference to session meta.
+  const willShow = !isAppletPanelVisible();
+  if (willShow) {
     showAppletPanel();
+  } else {
+    hideAppletPanel();
   }
+  void persistPanelVisibility(willShow);
+}
+
+async function persistPanelVisibility(visible: boolean): Promise<void> {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) return;
+  try {
+    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/applet`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ panelVisible: visible }),
+    });
+  } catch { /* best-effort */ }
 }
 
 /**
@@ -222,7 +235,7 @@ export function toggleApplet(): void {
  * Does NOT modify URL - caller is responsible for URL state
  * (Navigation API intercept already has correct URL, page load already has param)
  */
-export async function loadApplet(slug: string, urlParams?: Record<string, string>): Promise<void> {
+export async function loadApplet(slug: string, urlParams?: Record<string, string>, options?: { restore?: boolean }): Promise<void> {
   try {
     console.log(`[ROUTER] Loading applet: ${slug}`);
     
@@ -230,7 +243,7 @@ export async function loadApplet(slug: string, urlParams?: Record<string, string
     const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urlParams, sessionId })
+      body: JSON.stringify({ urlParams, sessionId, restore: options?.restore ?? false })
     });
     
     if (!response.ok) {
@@ -248,7 +261,8 @@ export async function loadApplet(slug: string, urlParams?: Record<string, string
     };
     
     pushApplet(slug, data.title || slug, content);
-    showAppletPanel();
+    // On restore, caller controls visibility; don't force-show.
+    if (!options?.restore) showAppletPanel();
     
     console.log(`[ROUTER] Applet loaded: ${data.title || slug}`);
   } catch (error) {

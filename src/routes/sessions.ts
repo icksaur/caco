@@ -265,6 +265,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       responseOptions: meta?.responseOptions || null,
       activeApplet: meta?.activeApplet || null,
       appletParams: meta?.appletParams || null,
+      appletPanelVisible: meta?.appletPanelVisible ?? true,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -279,7 +280,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
  */
 router.patch('/sessions/:sessionId/applet', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { appletParams } = req.body as { appletParams?: Record<string, string> };
+  const { appletParams, panelVisible } = req.body as { appletParams?: Record<string, string>; panelVisible?: boolean };
 
   const meta = getSessionMeta(sessionId);
   if (!meta) {
@@ -291,7 +292,8 @@ router.patch('/sessions/:sessionId/applet', (req: Request, res: Response) => {
     res.json({ ok: true, ignored: 'no active applet' });
     return;
   }
-  meta.appletParams = appletParams || {};
+  if (appletParams !== undefined) meta.appletParams = appletParams;
+  if (panelVisible !== undefined) meta.appletPanelVisible = panelVisible;
   setSessionMeta(sessionId, meta);
   res.json({ ok: true });
 });

@@ -156,13 +156,21 @@ registerBuiltin('restart', async () => {
 registerBuiltin('session-export', async () => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
-  const a = document.createElement('a');
-  a.href = `/api/sessions/${sessionId}/export`;
-  a.download = `${sessionId}.caco-session.tar.gz`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
   showToast('Exporting session...', { type: 'info', autoHideMs: 3000 });
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/export`);
+    if (!res.ok) { showToast(`Export failed: HTTP ${res.status}`); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${sessionId}.caco-session.tar.gz`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 100);
+  } catch (e) {
+    showToast(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
 });
 
 registerBuiltin('session-compact', async () => {

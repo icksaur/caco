@@ -11,6 +11,7 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `GET /api/sessions/search` - Search message text across sessions
 - `POST /api/sessions` - Create new session
 - `POST /api/sessions/:id/resume` - Resume an existing session
+- `POST /api/sessions/:id/fork` - Fork session into a new side conversation
 - `POST /api/sessions/:id/observe` - Mark session as observed
 - `PATCH /api/sessions/:id` - Update session metadata (name, env hint, context)
 - `PATCH /api/sessions/:id/applet` - Update active applet params and panel visibility
@@ -80,6 +81,14 @@ Returns: `{ sessionId: "uuid", cwd: "string", model: "string" }`
 **POST /api/sessions/:id/resume** - Resume session
 
 Returns: `{ success: true, sessionId: "uuid", cwd: "string", isBusy: false }`
+
+**POST /api/sessions/:id/fork** - Fork session into a new side conversation
+
+Creates a new session that inherits the parent's full conversation history (via the SDK's `sessions.fork` RPC). The child has fresh caco state (no roadmap, notes, intent history, applet panel) but inherits name (prefixed with `[fork] `), folder, model, cwd, and `parentSessionId`.
+
+Body: `{ "toEventId": "optional-uuid", "initialMessage": "optional string" }` — when `toEventId` omitted, copies all events. If `initialMessage` is provided (or even if not), the new session immediately receives a `[agent:<parentId>]`-prefixed orientation message so the model knows it has been forked.
+
+Returns: `{ ok: true, sessionId: "new-uuid", cwd: "string", name: "[fork] ...", model: "string" }`
 
 **POST /api/sessions/:id/observe** - Mark session as observed
 

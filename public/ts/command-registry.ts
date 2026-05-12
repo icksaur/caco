@@ -23,6 +23,7 @@ export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string
   { name: 'session-model', description: 'Change session model' },
   { name: 'restart', description: 'Restart the Caco server' },
   { name: 'session-export', description: 'Export current session as .tar.gz' },
+  { name: 'session-fork', description: 'Fork session into a new side conversation (inherits history)' },
   { name: 'session-compact', description: 'Force context compaction' },
 ];
 
@@ -158,18 +159,40 @@ registerBuiltin('session-export', async () => {
   if (!sessionId) { showToast('No active session'); return; }
   showToast('Exporting session...', { type: 'info', autoHideMs: 3000 });
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/export`);
-    if (!res.ok) { showToast(`Export failed: HTTP ${res.status}`); return; }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${sessionId}.caco-session.tar.gz`;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 100);
+    // Use a hidden iframe rather than blob+anchor click. Blob anchor clicks
+    // can interact with the Navigation API / session restore in ways that
+    // cause the download to re-trigger on hard refresh.
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = `/api/sessions/${sessionId}/export`;
+    document.body.appendChild(iframe);
+    setTimeout(() => iframe.remove(), 60_000);
   } catch (e) {
     showToast(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+});
+
+registerBuiltin('session-fork', async (message) => {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) { showToast('No active session'); return; }
+  const trimmed = message.trim();
+  showToast('Forking session...', { type: 'info', autoHideMs: 2000 });
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/fork`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(trimmed ? { initialMessage: trimmed } : {}),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+      showToast(data.error || 'Fork failed');
+      return;
+    }
+    const data = await res.json();
+    showToast(`Forked → ${data.name}`, { type: 'success', autoHideMs: 3000 });
+    await chatView.activateSession(data.sessionId);
+  } catch (e) {
+    showToast(`Fork failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 });
 

@@ -1206,6 +1206,37 @@ class SessionManager {
   }
 
   /**
+   * Fork an existing session. Returns the new session ID.
+   * Uses the SDK's experimental sessions.fork RPC to copy events to a new session.
+   * Mirrors the post-creation registration steps that create() does:
+   * sessionCache.set, registerSession, ensureSessionMeta.
+   *
+   * The caller is responsible for writing the new session's caco meta
+   * (name, folder, model, parentSessionId, kind) before this returns to the user.
+   */
+  async forkSession(parentSessionId: string, toEventId?: string): Promise<{ sessionId: string; cwd: string }> {
+    const parentRecord = this.sessionCache.get(parentSessionId);
+    if (!parentRecord) {
+      throw new Error(`Parent session ${parentSessionId} not found`);
+    }
+    if (!parentRecord.cwd) {
+      throw new Error(`Parent session ${parentSessionId} has no cwd`);
+    }
+    const parentCwd = parentRecord.cwd;
+    const client = await this.ensureClient();
+    const rpcClient = client as unknown as { rpc: { sessions: { fork: (p: { sessionId: string; toEventId?: string }) => Promise<{ sessionId: string }> } } };
+    const result = await rpcClient.rpc.sessions.fork({ sessionId: parentSessionId, toEventId });
+    const newId = result.sessionId;
+
+    // Mirror what create() does for cache registration
+    this.sessionCache.set(newId, { cwd: parentCwd, summary: null });
+    registerSession(parentCwd, newId);
+    ensureSessionMeta(newId);
+
+    return { sessionId: newId, cwd: parentCwd };
+  }
+
+  /**
    * Shut down the shared SDK client. Call after all sessions are destroyed.
    */
   async shutdown(): Promise<void> {

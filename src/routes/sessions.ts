@@ -23,6 +23,8 @@ import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
+import { dispatchMessage } from './session-messages.js';
+import { prefixMessageSource } from '../message-source.js';
 
 const router = Router();
 
@@ -296,6 +298,71 @@ router.patch('/sessions/:sessionId/applet', (req: Request, res: Response) => {
   if (panelVisible !== undefined) meta.appletPanelVisible = panelVisible;
   setSessionMeta(sessionId, meta);
   res.json({ ok: true });
+});
+
+/**
+ * POST /api/sessions/:sessionId/fork
+ * Fork a session: create a new session that inherits the parent's full
+ * conversation history. Child session has fresh caco state (no roadmap,
+ * notes, intent history, applet state). Inherits name (prefixed), folder,
+ * model, cwd, and parentSessionId.
+ */
+router.post('/sessions/:sessionId/fork', async (req: Request, res: Response) => {
+  const parentId = req.params.sessionId as string;
+  const { toEventId, initialMessage } = req.body as { toEventId?: string; initialMessage?: string };
+
+  if (!sessionManager.getSessionCwd(parentId)) {
+    res.status(404).json({ error: `Session not found: ${parentId}` });
+    return;
+  }
+  const parentMeta = getSessionMeta(parentId);
+  if (!parentMeta) {
+    res.status(404).json({ error: `Session meta not found: ${parentId}` });
+    return;
+  }
+
+  let newId: string;
+  let cwd: string;
+  try {
+    const result = await sessionManager.forkSession(parentId, toEventId);
+    newId = result.sessionId;
+    cwd = result.cwd;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[FORK] SDK fork failed:', msg);
+    res.status(500).json({ error: `Fork failed: ${msg}` });
+    return;
+  }
+
+  try {
+    const parentName = parentMeta.name || parentId.slice(0, 8);
+    const childName = `[fork] ${parentName}`;
+    setSessionMeta(newId, {
+      name: childName,
+      folder: parentMeta.folder,
+      model: parentMeta.model,
+      parentSessionId: parentId,
+      kind: 'interactive',
+    });
+    broadcastGlobalEvent({ type: 'session.listChanged', data: { reason: 'forked', sessionId: newId, parentId } });
+
+    const trimmedInitial = (initialMessage || '').trim();
+    const noticeBody = [
+      `You have been forked from session \`${parentId}\`.`,
+      `Your new session ID is \`${newId}\`. The inherited history above belongs to the parent; from this point forward you operate independently.`,
+      trimmedInitial ? `\nThe user's first message follows:\n\n${trimmedInitial}` : '',
+    ].filter(Boolean).join('\n');
+    const prefixed = prefixMessageSource('agent', parentId, noticeBody);
+    void dispatchMessage(newId, prefixed).catch(err => {
+      console.error(`[FORK] Failed to dispatch fork notice for ${newId}:`, err);
+    });
+
+    res.json({ ok: true, sessionId: newId, cwd, name: childName, model: parentMeta.model || null });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[FORK] Caco-side setup failed for orphan session ${newId} — recoverable via restart:`, msg);
+    res.status(500).json({ error: `Fork partially failed (orphan ${newId}): ${msg}` });
+  }
 });
 
 /**
@@ -660,6 +727,7 @@ router.get('/sessions/:sessionId/export', async (req: Request, res: Response) =>
 
       res.setHeader('Content-Type', 'application/gzip');
       res.setHeader('Content-Disposition', `attachment; filename="${sessionId}.caco-session.tar.gz"`);
+      res.setHeader('Cache-Control', 'no-store');
 
       const stream = tar.create({ gzip: true, cwd: staging }, ['.']);
       stream.on('error', () => rmSync(staging, { recursive: true, force: true }));

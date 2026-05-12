@@ -91,6 +91,7 @@ Type a forward slash `/` to see all less-common controls, like session archival,
 | `/session-archive` | Archive current session |
 | `/session-model` | Change session model |
 | `/session-export` | Export current session as .tar.gz |
+| `/session-fork [message]` | Fork session into a new side conversation (inherits history) |
 | `/session-compact` | Force context compaction |
 | `/restart` | Restart the Caco server |
 

@@ -153,6 +153,9 @@ expose({ handleClick, handleSubmit, handleCancel });
 - \`appletContainer\` - Reference to container element (closure-captured, available in callbacks)
 
 **Utility helpers (use these — avoid reimplementing):**
+
+> Timing: \`appletAPI.*\` is available inside event handlers, async callbacks, and any code that runs after applet initialization. At the applet script's top level the API may not yet be on \`window\` — inline the logic instead of calling an \`appletAPI\` helper eagerly.
+
 - \`appletAPI.fetch(url, opts?)\` - fetch wrapper with 10s timeout and HTTP error handling. Throws on non-OK with server's error message.
 - \`appletAPI.escapeHtml(str)\` - Escape & < > " ' for safe innerHTML insertion.
 - \`appletAPI.toast(msg, { type, autoHideMs })\` - Show a toast notification. Type: 'info' | 'success' | 'error'.

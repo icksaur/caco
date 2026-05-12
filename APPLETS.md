@@ -41,6 +41,8 @@ Each applet lives in `applets/<slug>/` with four files:
 
 All methods are on `window.appletAPI`. Subscriptions auto-cleanup on applet destroy.
 
+> **Timing:** `appletAPI` is available inside event handlers, async callbacks, and any code that runs after applet initialization. At the script's top level the API may not be on `window` yet — inline logic instead of calling an `appletAPI` helper eagerly.
+
 | Method | Description |
 |---|---|
 | `onUrlParamsChange(cb)` | URL param changes (fires immediately with current, then on navigation) |
@@ -62,7 +64,7 @@ All methods are on `window.appletAPI`. Subscriptions auto-cleanup on applet dest
 | `expose(name, fn)` or `expose({fn1,fn2})` | Expose functions globally (needed for `onclick` handlers in IIFE) |
 | `listApplets()` | List saved applets (`{ slug, name, description, updatedAt }[]`) |
 | `fetch(url, opts?)` | fetch wrapper with 10s timeout. Throws on HTTP errors with server's error message. |
-| `escapeHtml(str)` | Escape `&`, `<`, `>`, `"`, `'` for safe `innerHTML` insertion. |
+| `escapeHtml(str)` | Escape `&`, `<`, `>`, `"`, `'` for safe `innerHTML`. |
 | `toast(msg, opts?)` | Show toast notification. opts: `{ type: 'info'\|'success'\|'error', autoHideMs }`. |
 
 Applets can also call the shell endpoint directly: `fetch('/api/shell', { method: 'POST', body: JSON.stringify({ command, args, cwd }) })`.

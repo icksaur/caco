@@ -135,6 +135,11 @@ function expose(nameOrObj: string | Record<string, unknown>, fn?: unknown): void
 
 /**
  * Escape HTML special chars for safe insertion into innerHTML.
+ *
+ * Timing: only call from event handlers or async contexts where `appletAPI`
+ * is guaranteed initialized. Calling at the applet script's top level may
+ * run before `window.appletAPI` is set. Top-level call sites should inline
+ * the escape logic to avoid the load-order dependency.
  */
 function escapeHtml(s: unknown): string {
   return String(s ?? '')

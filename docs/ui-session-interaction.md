@@ -20,7 +20,7 @@ If the user starts typing in the text input, the buttons grey out (muted opacity
 
 The option list must survive session resume. Stored in session metadata (`meta.json` field `responseOptions?: string[]`). On resume, if the session is idle and has `responseOptions`, the buttons reappear. When the user sends any message (clicked or typed), the field is cleared.
 
-### Tool: `caco_offer_options`
+### Tool: `caco_offer_action`
 
 ```typescript
 Parameters:
@@ -164,7 +164,7 @@ The `{{repository_path}}` and `{{specific_area}}` render highlighted. Send is bl
 
 **Concept:** Already exists in embryonic form — `caco_applet_howto` and `set_applet_state`/`get_applet_state` allow agents to create and communicate with applets. The missing piece is **discoverability** — agents don't proactively create applets for interactions that would benefit from them.
 
-**Enhancement:** Add to the `caco_offer_options` tool a variant that offers an applet link as one of the options: `{ label: "Configure", applet: "/?applet=custom-form&..." }`. This bridges chat-based options with rich applet UI when a form or visual interaction is needed.
+**Enhancement:** Add to the `caco_offer_action` tool a variant that offers an applet link as one of the options: `{ label: "Configure", applet: "/?applet=custom-form&..." }`. This bridges chat-based options with rich applet UI when a form or visual interaction is needed.
 
 **Why it works:** Leverages existing applet infrastructure. No new UI surface. Agent decides when a custom UI is warranted. Transparent — the applet is inspectable code.
 

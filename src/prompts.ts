@@ -84,7 +84,7 @@ Call \`caco_applet_usage\` for all applet URL patterns. Call \`caco_applet_howto
 **Context awareness**: The user may be viewing an applet while chatting. Call \`get_applet_state\` on your first turn to understand what they're looking at — it returns the active applet slug, URL params, and any state the applet has pushed.
 
 ## Response Options
-When your response ends with a discrete choice the user must make (proceed/cancel, run-tests/skip, option-A/B/C), call \`caco_offer_options\` with 1-4 short prompts. The user clicks a button instead of typing. Use this routinely for end-of-turn approval gates and yes/no questions — it's the smoothest UX for the user.
+When your response ends with a discrete next action the user might choose (run-tests/skip, refactor/move-on, deploy/wait), call \`caco_offer_action\` with 1-4 short next-step instructions. The user clicks a button instead of typing. Use this routinely at the end of turns when a few productive next actions are obvious. Do not include "stop" or "pause" options — the chat input handles those.
 
 ## Caco Session Tools
 Create and message independent Caco sessions that appear in the user's session list:

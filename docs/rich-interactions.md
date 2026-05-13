@@ -84,11 +84,11 @@ You can't build reactive UIs on top of free text. Every interaction pattern in t
 
 `set_applet_state` already gives Caco the channel. What's missing is the convention that agents emit structured state as a matter of course, not just when explicitly asked.
 
-**Implication for Caco:** Tool descriptions and the system prompt should encourage structured emission. Adding tools that take typed parameters (like `caco_offer_options` does today) makes the structure obvious.
+**Implication for Caco:** Tool descriptions and the system prompt should encourage structured emission. Adding tools that take typed parameters (like `caco_offer_action` does today) makes the structure obvious.
 
 ## Twelve concrete patterns for Caco
 
-The following patterns are buildable with Caco's existing primitives — applets, `set/get_applet_state`, inline HTML/SVG, `caco_offer_options`, and tool file I/O. All have been pre-validated as plausibly small implementations.
+The following patterns are buildable with Caco's existing primitives — applets, `set/get_applet_state`, inline HTML/SVG, `caco_offer_action`, and tool file I/O. All have been pre-validated as plausibly small implementations.
 
 ### A. Steering & oversight (during agent work)
 
@@ -144,7 +144,7 @@ Every pattern follows the same shape:
 └─────────────────────────────────────────────────────┘
 ```
 
-This is the same loop that `caco_offer_options` already implements, generalized. Every new pattern is a richer surface for the same loop.
+This is the same loop that `caco_offer_action` already implements, generalized. Every new pattern is a richer surface for the same loop.
 
 ## Seven design principles
 
@@ -189,7 +189,7 @@ Several patterns in this paper imply new tools (`caco_propose_diff`, `caco_open_
 - **One generic surface tool, many uses.** Instead of `caco_render_hypothesis_tree`, a single `caco_render_panel(html, state_schema)` that takes arbitrary HTML and a state schema. The agent generates the markup; Caco renders and wires it. This trades structure for flexibility but matches the article's "agent generates HTML on the fly" pattern.
 - **Convention over tooling.** Patterns become *prompt patterns* — the system prompt teaches "when debugging, emit an SVG tree like this and the user will be able to click branches." No new tool. The interactive behavior comes from existing inline-HTML rendering plus standard event delegation.
 - **Tool families with one entry point.** `caco_render` with a `kind` parameter (kind: 'hypothesis-tree' | 'diff-board' | 'scope-picker' | ...). Caco maps `kind` to a specific renderer. Tool count stays small; richness grows by adding renderer types.
-- **Rely on `caco_offer_options` and `set_applet_state` more.** They already cover ~60% of the patterns. The expensive ones are the ones that need new tools.
+- **Rely on `caco_offer_action` and `set_applet_state` more.** They already cover ~60% of the patterns. The expensive ones are the ones that need new tools.
 
 **Recommendation:** Pick **one generic surface tool** as the main investment. Patterns become *kinds* registered with that tool. Sessions only need to remember one tool name to access the entire interaction layer. The generic tool can be polished, well-described, and tested for reliability across model sizes.
 
@@ -215,7 +215,7 @@ Patterns in roughly increasing complexity:
 | 3 (medium) | Hypothesis ladder (#3), multi-select queue (#5), replay scrubber (#9) | 3-5 days each |
 | 4 (large) | Annotation thread (#8), parameter tuner (#11), branching session preview (#10), inspector delta (#12) | 1-2 weeks each |
 
-Tier 1 patterns are essentially extensions of `caco_offer_options`. Tier 2 patterns are new applets with the existing API. Tier 3 introduces richer state schemas and tool conventions. Tier 4 has design depth and may need spec passes.
+Tier 1 patterns are essentially extensions of `caco_offer_action`. Tier 2 patterns are new applets with the existing API. Tier 3 introduces richer state schemas and tool conventions. Tier 4 has design depth and may need spec passes.
 
 ## Reference: source documents
 

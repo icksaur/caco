@@ -18,12 +18,13 @@ import {
   mutate,
   clearChanges,
   patchStyle,
+  notifySurfaceUpdate,
   INITIAL_DATA_TOKEN,
   type SurfaceItem,
   type MutateResult,
   type SurfaceStyle,
 } from './surface-store.js';
-import { broadcastEvent, type SessionEvent } from './routes/websocket.js';
+import { broadcastEvent } from './routes/websocket.js';
 import type { SessionIdRef } from './types.js';
 
 const ITEM_SCHEMA = z.object({
@@ -32,12 +33,7 @@ const ITEM_SCHEMA = z.object({
 }).passthrough();
 
 function notify(sessionId: string, result: MutateResult): void {
-  if (result.ok) {
-    broadcastEvent(sessionId, {
-      type: 'caco.surface.updated',
-      data: { dataToken: result.dataToken, origin: 'agent' },
-    } as SessionEvent);
-  }
+  notifySurfaceUpdate(sessionId, 'agent', result, broadcastEvent);
 }
 
 export function createSurfaceTools(sessionRef: SessionIdRef) {

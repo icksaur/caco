@@ -17,13 +17,14 @@
 
 import { Router, Request, Response } from 'express';
 import sessionManager from '../session-manager.js';
-import { broadcastEvent, type SessionEvent } from './websocket.js';
+import { broadcastEvent } from './websocket.js';
 import {
   getSurface,
   mutate,
   clearChanges,
   putChange,
   patchStyle,
+  notifySurfaceUpdate,
   type MutateRequest,
   type SurfaceItem,
   type MutateResult,
@@ -40,15 +41,8 @@ function ensureSession(sessionId: string, res: Response): boolean {
   return true;
 }
 
-function notifyChange(sessionId: string, dataToken: string, origin: 'agent' | 'user'): void {
-  broadcastEvent(sessionId, {
-    type: 'caco.surface.updated',
-    data: { dataToken, origin },
-  } as SessionEvent);
-}
-
 function maybeNotify(sessionId: string, origin: 'agent' | 'user', result: MutateResult): void {
-  if (result.ok) notifyChange(sessionId, result.dataToken, origin);
+  notifySurfaceUpdate(sessionId, origin, result, broadcastEvent);
 }
 
 router.get('/sessions/:sessionId/surface', (req: Request, res: Response) => {

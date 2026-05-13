@@ -58,6 +58,24 @@ export interface FailResult {
 
 export type MutateResult = OkResult | FailResult;
 
+/** Event type for surface updates — use this constant to avoid typo bugs. */
+export const SURFACE_UPDATED_EVENT = 'caco.surface.updated';
+
+/** Broadcast a surface update if the mutation succeeded. Caller provides broadcastEvent to avoid circular imports. */
+export function notifySurfaceUpdate(
+  sessionId: string,
+  origin: 'agent' | 'user',
+  result: MutateResult,
+  broadcast: (sessionId: string, event: { type: string; data?: Record<string, unknown> }) => void
+): void {
+  if (result.ok) {
+    broadcast(sessionId, {
+      type: SURFACE_UPDATED_EVENT,
+      data: { dataToken: result.dataToken, origin },
+    });
+  }
+}
+
 /** Canonical JSON: keys sorted recursively. */
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);

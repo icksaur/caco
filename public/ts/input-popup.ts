@@ -87,12 +87,22 @@ export class InputPopup {
         .map(s => s.item);
     }
     this.selectedIdx = 0;
+    if (this.filtered.length === 0) {
+      this.el.style.display = 'none';
+      return;
+    }
+    this.el.style.display = '';
     this.render();
     this.position();
   }
 
   handleKey(e: KeyboardEvent): boolean {
     if (!this.isVisible()) return false;
+    // No items to navigate — let the textarea handle the key. Otherwise we
+    // swallow arrow keys with no visible feedback.
+    if (this.filtered.length === 0 && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter' || e.key === 'Tab')) {
+      return false;
+    }
 
     switch (e.key) {
       case 'ArrowDown':

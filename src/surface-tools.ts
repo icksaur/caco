@@ -34,7 +34,7 @@ const ITEM_SCHEMA = z.object({
 function notify(sessionId: string, result: MutateResult): void {
   if (result.ok) {
     broadcastEvent(sessionId, {
-      type: 'surface.updated',
+      type: 'caco.surface.updated',
       data: { dataToken: result.dataToken, origin: 'agent' },
     } as SessionEvent);
   }

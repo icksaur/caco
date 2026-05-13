@@ -42,7 +42,7 @@ function ensureSession(sessionId: string, res: Response): boolean {
 
 function notifyChange(sessionId: string, dataToken: string, origin: 'agent' | 'user'): void {
   broadcastEvent(sessionId, {
-    type: 'surface.updated',
+    type: 'caco.surface.updated',
     data: { dataToken, origin },
   } as SessionEvent);
 }

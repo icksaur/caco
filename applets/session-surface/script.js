@@ -201,7 +201,7 @@ function onStateBus() {
   }
   if (window.appletAPI.onSessionEvent) {
     window.appletAPI.onSessionEvent(function (event) {
-      if (event && event.type === 'surface.updated') {
+      if (event && event.type === 'caco.surface.updated') {
         // Only refresh if the event is for the currently viewed session
         var sid = sessionId();
         if (sid && event.data && event.data.sessionId && event.data.sessionId !== sid) return;

@@ -81,7 +81,9 @@ function callRender() {
   if (!doc) { renderEmpty(); return; }
   if (agentRender) {
     try {
-      agentRender(Object.assign({}, doc, { changes: Object.assign({}, doc.changes) }));
+      var result = agentRender(Object.assign({}, doc, { changes: Object.assign({}, doc.changes) }));
+      // If render() returns a string, treat it as HTML
+      if (typeof result === 'string') itemsRoot.innerHTML = result;
     } catch (e) {
       itemsRoot.innerHTML = '<div class="surface-error">Render error: ' + esc(e.message) + '</div>';
     }

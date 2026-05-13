@@ -1,40 +1,22 @@
-// session-surface — V1 roadmap-style applet.
-// Reads /api/sessions/:id/surface, renders status badges, lets the user
-// cycle status, PUTs to /surface/changes/:itemId.
-// Timing note: do not call window.appletAPI at the top level of this IIFE —
-// it may not be wired yet. Access it inside async callbacks instead.
+// session-surface — agent-driven rendering shell.
+// Loads surface doc from /api/sessions/:id/surface.
+// If customScript is present, evaluates it with bindings: surface, root, mutateChange, appletAPI.
+// Agent must define a render(surface) function in customScript.
+// Fallback: renders item labels as plain text when no customScript.
 
-var statusOrder = ['pending', 'active', 'done', 'blocked'];
+var doc = null;
+var pendingPuts = Promise.resolve();
+var customCleanup = null;
 
-function nextStatus(s) {
-  var i = statusOrder.indexOf(s);
-  return statusOrder[(i + 1) % statusOrder.length];
-}
+var itemsRoot = document.getElementById('surface-items');
+var footer = document.getElementById('surface-footer');
+var toastEl = document.getElementById('surface-toast');
+var customStyleEl = null;
 
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-
-function sanitize(html) {
-  var purify = window.DOMPurify;
-  if (!purify) return esc(html);
-  return purify.sanitize(html, {
-    ALLOWED_TAGS: ['a', 'p', 'br', 'span', 'strong', 'em', 'code', 'pre', 'kbd', 'ul', 'ol', 'li'],
-    ALLOWED_ATTR: ['href', 'title', 'target', 'rel'],
-    ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|\/)/i,
-  });
-}
-
-var doc = null;
-var pendingPuts = Promise.resolve();
-var hasUnacknowledged = false;
-
-var itemsRoot = document.getElementById('surface-items');
-var footer = document.getElementById('surface-footer');
-var titleEl = document.getElementById('surface-title');
-var styleBadge = document.getElementById('surface-style');
-var toastEl = document.getElementById('surface-toast');
 
 function showToast(msg, ms) {
   toastEl.textContent = msg;
@@ -42,120 +24,30 @@ function showToast(msg, ms) {
   setTimeout(function () { toastEl.classList.remove('visible'); }, ms || 3000);
 }
 
-function statusClass(s) {
-  if (s === 'done') return 'status-done';
-  if (s === 'active') return 'status-active';
-  if (s === 'blocked') return 'status-blocked';
-  return 'status-pending';
-}
-
-function renderItem(item) {
-  var status = item.status || 'pending';
-  var div = document.createElement('div');
-  div.className = 'surface-item';
-  div.id = 'item-' + item.id;
-  div.dataset.type = item.type || 'task';
-
-  var badge = document.createElement('button');
-  badge.className = 'status-badge ' + statusClass(status);
-  badge.textContent = status;
-  badge.title = 'Click to cycle status';
-  badge.addEventListener('click', function () { cycleStatus(item.id); });
-
-  var body = document.createElement('div');
-  body.className = 'surface-item-body';
-
-  var label = document.createElement('div');
-  label.className = 'surface-item-label';
-  label.textContent = item.label || item.id;
-  body.appendChild(label);
-
-  if (item.description) {
-    var desc = document.createElement('div');
-    desc.className = 'surface-item-desc';
-    desc.innerHTML = sanitize(item.description);
-    body.appendChild(desc);
-  }
-
-  div.appendChild(badge);
-  div.appendChild(body);
-  return div;
-}
-
-function renderEmpty() {
-  itemsRoot.innerHTML = '';
-  var msg = document.createElement('div');
-  msg.className = 'surface-empty';
-  msg.textContent = 'No surface document for this session yet. The agent populates it via caco_mutate_surface.';
-  itemsRoot.appendChild(msg);
-}
-
-function render() {
-  if (!doc) { renderEmpty(); updateFooter(); return; }
-  titleEl.textContent = doc.style === 'roadmap' ? 'Roadmap' : 'Session Surface';
-  styleBadge.textContent = doc.style || '';
-  var visibleItems = doc.items.map(function (it) {
-    var dirty = doc.changes && doc.changes[it.id];
-    return dirty ? dirty : it;
-  });
-  itemsRoot.innerHTML = '';
-  if (visibleItems.length === 0) {
-    renderEmpty();
-  } else {
-    visibleItems.forEach(function (item) { itemsRoot.appendChild(renderItem(item)); });
-  }
-  updateFooter();
-}
-
-function updateFooter() {
-  if (!doc) { footer.textContent = ''; return; }
-  var dirtyCount = doc.changes ? Object.keys(doc.changes).length : 0;
-  hasUnacknowledged = dirtyCount > 0;
-  if (dirtyCount > 0) {
-    footer.textContent = 'Agent will see your changes on its next response. (' + dirtyCount + ' unack)';
-    footer.classList.add('has-changes');
-  } else {
-    footer.textContent = '';
-    footer.classList.remove('has-changes');
-  }
-}
-
 function sessionId() {
   return window.appletAPI && window.appletAPI.getSessionId ? window.appletAPI.getSessionId() : null;
 }
 
-async function fetchSurface() {
-  var sid = sessionId();
-  if (!sid) { doc = null; render(); return; }
-  try {
-    var res = await fetch('/api/sessions/' + encodeURIComponent(sid) + '/surface');
-    if (res.status === 404) { doc = null; render(); return; }
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    doc = await res.json();
-    render();
-  } catch (e) {
-    showToast('Failed to load surface: ' + e.message);
-  }
-}
+// --- Human-side mutation (exposed to customScript as mutateChange) ---
 
-function cycleStatus(itemId) {
-  // Compute the post-edit item locally, append to put queue.
-  if (!doc) return;
-  var current = (doc.changes && doc.changes[itemId]) || doc.items.find(function (it) { return it.id === itemId; });
-  if (!current) return;
-  var nextItem = Object.assign({}, current, { status: nextStatus(current.status || 'pending') });
+function mutateChange(itemId, fullItem) {
+  if (!doc) return Promise.reject(new Error('No surface document'));
+  // Optimistic local update
+  doc.changes = Object.assign({}, doc.changes || {});
+  doc.changes[itemId] = fullItem;
+  callRender();
+  updateFooter();
 
-  // Optimistic local render — visible immediately.
-  doc.changes = Object.assign({}, doc.changes || {}, {});
-  doc.changes[itemId] = nextItem;
-  render();
-
-  pendingPuts = pendingPuts.then(function () { return putItem(itemId, nextItem); });
+  return new Promise(function (resolve) {
+    pendingPuts = pendingPuts.then(function () {
+      return putItem(itemId, fullItem).then(resolve);
+    });
+  });
 }
 
 async function putItem(itemId, item) {
   var sid = sessionId();
-  if (!sid || !doc) return;
+  if (!sid || !doc) return { ok: false, reason: 'no-session' };
   try {
     var res = await fetch('/api/sessions/' + encodeURIComponent(sid) + '/surface/changes/' + encodeURIComponent(itemId), {
       method: 'PUT',
@@ -166,25 +58,134 @@ async function putItem(itemId, item) {
     if (body.ok) {
       doc.dataToken = body.dataToken;
       updateFooter();
-      return;
+      return body;
     }
-    if (body.reason === 'stale') {
-      // Refresh, then re-apply the user's intent (re-cycle from new state) — but
-      // only once. To keep things simple in V1 we just refetch and drop the local edit.
+    if (body.reason === 'stale' || body.reason === 'unknown-item') {
       await fetchSurface();
-      showToast('Surface changed remotely. Try again.');
-      return;
-    }
-    if (body.reason === 'unknown-item') {
-      await fetchSurface();
-      showToast('Item no longer exists.');
-      return;
+      showToast(body.reason === 'stale' ? 'Surface changed remotely.' : 'Item no longer exists.');
+      return body;
     }
     showToast('Update failed: ' + (body.reason || 'unknown'));
+    return body;
   } catch (e) {
     showToast('Network error: ' + e.message);
+    return { ok: false, reason: 'network' };
   }
 }
+
+// --- Rendering ---
+
+var agentRender = null;
+
+function callRender() {
+  if (!doc) { renderEmpty(); return; }
+  if (agentRender) {
+    try {
+      agentRender(Object.assign({}, doc, { changes: Object.assign({}, doc.changes) }));
+    } catch (e) {
+      itemsRoot.innerHTML = '<div class="surface-error">Render error: ' + esc(e.message) + '</div>';
+    }
+  } else {
+    renderFallback();
+  }
+  updateFooter();
+}
+
+function renderFallback() {
+  // Minimal: show item labels as text
+  if (!doc || !doc.items || doc.items.length === 0) { renderEmpty(); return; }
+  itemsRoot.innerHTML = '';
+  doc.items.forEach(function (item) {
+    var merged = (doc.changes && doc.changes[item.id]) || item;
+    var div = document.createElement('div');
+    div.className = 'surface-fallback-item';
+    div.id = 'item-' + item.id;
+    div.dataset.type = item.type || '';
+    div.textContent = merged.label || merged.title || merged.id;
+    if (merged.description) {
+      var desc = document.createElement('div');
+      desc.className = 'surface-fallback-desc';
+      desc.textContent = merged.description;
+      div.appendChild(desc);
+    }
+    itemsRoot.appendChild(div);
+  });
+}
+
+function renderEmpty() {
+  itemsRoot.innerHTML = '';
+  var msg = document.createElement('div');
+  msg.className = 'surface-empty';
+  msg.textContent = 'No surface document. The agent populates it via caco_mutate_surface.';
+  itemsRoot.appendChild(msg);
+}
+
+function updateFooter() {
+  if (!doc) { footer.textContent = ''; return; }
+  var dirtyCount = doc.changes ? Object.keys(doc.changes).length : 0;
+  if (dirtyCount > 0) {
+    footer.textContent = 'Agent will see your changes on its next response. (' + dirtyCount + ' unack)';
+    footer.classList.add('has-changes');
+  } else {
+    footer.textContent = '';
+    footer.classList.remove('has-changes');
+  }
+}
+
+// --- customScript evaluation ---
+
+function evalCustomScript(script) {
+  if (customCleanup) { try { customCleanup(); } catch (e) { /* ignore */ } customCleanup = null; }
+  agentRender = null;
+  if (!script) return;
+
+  try {
+    var fn = new Function('surface', 'root', 'mutateChange', 'appletAPI',
+      script + '\nif (typeof render === "function") return render;');
+    var renderFn = fn(
+      Object.assign({}, doc, { changes: Object.assign({}, doc.changes || {}) }),
+      itemsRoot,
+      mutateChange,
+      window.appletAPI || {}
+    );
+    if (typeof renderFn === 'function') {
+      agentRender = renderFn;
+    }
+  } catch (e) {
+    itemsRoot.innerHTML = '<div class="surface-error">Script error: ' + esc(e.message) + '</div>';
+  }
+}
+
+function injectCustomStyle(css) {
+  if (customStyleEl) { customStyleEl.remove(); customStyleEl = null; }
+  if (!css) return;
+  customStyleEl = document.createElement('style');
+  customStyleEl.textContent = css;
+  document.head.appendChild(customStyleEl);
+}
+
+// --- Data loading ---
+
+async function fetchSurface() {
+  var sid = sessionId();
+  if (!sid) { doc = null; agentRender = null; callRender(); return; }
+  try {
+    var res = await fetch('/api/sessions/' + encodeURIComponent(sid) + '/surface');
+    if (res.status === 404) { doc = null; agentRender = null; callRender(); return; }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var newDoc = await res.json();
+    var scriptChanged = !doc || doc.customScript !== newDoc.customScript;
+    var styleChanged = !doc || doc.customStyle !== newDoc.customStyle;
+    doc = newDoc;
+    if (styleChanged) injectCustomStyle(doc.customStyle);
+    if (scriptChanged) evalCustomScript(doc.customScript);
+    callRender();
+  } catch (e) {
+    showToast('Failed to load surface: ' + e.message);
+  }
+}
+
+// --- Event wiring ---
 
 function onStateBus() {
   if (!window.appletAPI) return;
@@ -193,9 +194,7 @@ function onStateBus() {
   }
   if (window.appletAPI.onSessionEvent) {
     window.appletAPI.onSessionEvent(function (event) {
-      if (event && event.type === 'surface.updated') {
-        fetchSurface();
-      }
+      if (event && event.type === 'surface.updated') fetchSurface();
     });
   }
 }
@@ -206,5 +205,4 @@ setTimeout(function () {
   fetchSurface();
 }, 0);
 
-// Refresh when the tab regains focus.
 window.addEventListener('focus', function () { fetchSurface(); });

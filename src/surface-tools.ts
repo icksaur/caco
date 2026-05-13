@@ -17,9 +17,11 @@ import {
   getSurface,
   mutate,
   clearChanges,
+  patchStyle,
   INITIAL_DATA_TOKEN,
   type SurfaceItem,
   type MutateResult,
+  type SurfaceStyle,
 } from './surface-store.js';
 import { broadcastEvent, type SessionEvent } from './routes/websocket.js';
 import type { SessionIdRef } from './types.js';
@@ -118,5 +120,26 @@ Use when you have read caco_get_surface_changes, decided no structural mutation 
     },
   });
 
-  return [cacoGetSurface, cacoGetSurfaceChanges, cacoMutateSurface, cacoClearSurfaceChanges];
+  const cacoSetSurfaceStyle = defineTool('caco_set_surface_style', {
+    description: `Set the surface document's style, customScript, and/or customStyle. The customScript is JavaScript that the applet evaluates to render items — it must define a render(surface) function. customStyle is CSS scoped to the applet.
+
+Requires the current dataToken. Returns { ok: true, dataToken } on success or { ok: false, reason: "stale" } on token mismatch.`,
+    parameters: z.object({
+      dataToken: z.string().describe('Current dataToken from caco_get_surface'),
+      style: z.enum(['roadmap', 'custom']).optional().describe('Style identifier'),
+      customScript: z.string().nullable().optional().describe('Agent-authored JS. Must define render(surface). Set null to clear.'),
+      customStyle: z.string().nullable().optional().describe('Agent-authored CSS scoped to the applet. Set null to clear.'),
+    }),
+    handler: async ({ dataToken, style, customScript, customStyle }) => {
+      const result = patchStyle(sessionRef.id, dataToken, {
+        style: style as SurfaceStyle | undefined,
+        customScript,
+        customStyle,
+      });
+      notify(sessionRef.id, result);
+      return result;
+    },
+  });
+
+  return [cacoGetSurface, cacoGetSurfaceChanges, cacoMutateSurface, cacoClearSurfaceChanges, cacoSetSurfaceStyle];
 }

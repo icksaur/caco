@@ -109,6 +109,23 @@ export function deleteSurface(sessionId: string): boolean {
   return deleteSessionData(sessionId, SURFACE_DATA_NAME);
 }
 
+/** Patch style, customScript, and/or customStyle. */
+export function patchStyle(
+  sessionId: string,
+  dataToken: string,
+  patch: { style?: SurfaceStyle; customScript?: string | null; customStyle?: string | null }
+): MutateResult {
+  const doc = getOrInitSurface(sessionId);
+  if (doc.dataToken !== dataToken) {
+    return { ok: false, reason: 'stale', currentDataToken: doc.dataToken };
+  }
+  if (patch.style !== undefined) doc.style = patch.style;
+  if (patch.customScript !== undefined) doc.customScript = patch.customScript;
+  if (patch.customStyle !== undefined) doc.customStyle = patch.customStyle;
+  const saved = persist(sessionId, doc);
+  return { ok: true, dataToken: saved.dataToken };
+}
+
 /** Re-stamp the document with a fresh token and persist it. */
 function persist(sessionId: string, doc: SurfaceDoc): SurfaceDoc {
   const { dataToken: _ignored, ...body } = doc;

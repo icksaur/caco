@@ -23,9 +23,11 @@ import {
   mutate,
   clearChanges,
   putChange,
+  patchStyle,
   type MutateRequest,
   type SurfaceItem,
   type MutateResult,
+  type SurfaceStyle,
 } from '../surface-store.js';
 
 const router = Router();
@@ -116,6 +118,24 @@ router.put('/sessions/:sessionId/surface/changes/:itemId', (req: Request, res: R
   }
   const result = putChange(sessionId, body.dataToken, itemId, body.item);
   maybeNotify(sessionId, 'user', result);
+  res.json(result);
+});
+
+// PATCH /surface/style — set style, customScript, customStyle
+router.patch('/sessions/:sessionId/surface/style', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  if (!ensureSession(sessionId, res)) return;
+  const body = req.body as { dataToken?: string; style?: string; customScript?: string | null; customStyle?: string | null };
+  if (typeof body.dataToken !== 'string') {
+    res.status(400).json({ error: 'dataToken (string) is required' });
+    return;
+  }
+  const result = patchStyle(sessionId, body.dataToken, {
+    style: body.style as SurfaceStyle | undefined,
+    customScript: body.customScript,
+    customStyle: body.customStyle,
+  });
+  maybeNotify(sessionId, 'agent', result);
   res.json(result);
 });
 

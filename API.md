@@ -337,6 +337,7 @@ Two-party collaborative document per session. See `docs/session-surface-applet.m
 - `POST /api/sessions/:id/surface/mutate` - Agent applies `create`/`update`/`delete`, atomically clears `changes`. Requires `dataToken`.
 - `POST /api/sessions/:id/surface/clear-changes` - Agent acknowledges `changes` without writing. Requires `dataToken`.
 - `PUT /api/sessions/:id/surface/changes/:itemId` - Human-side write: store one full post-edit item into `changes`. Requires `dataToken`.
+- `PATCH /api/sessions/:id/surface/style` - Set `style`, `customScript`, `customStyle`. Requires `dataToken`.
 
 All mutating routes return HTTP 200 with either `{ ok: true, dataToken }` or `{ ok: false, reason, currentDataToken?, errors? }`. Protocol-level failures (`stale`, `unknown-item`, `limit`, `invalid`) are not HTTP errors.
 

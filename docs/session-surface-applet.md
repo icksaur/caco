@@ -18,7 +18,7 @@ The applet is the rendering and input surface. The state and protocol exist inde
 
 1. Let the agent push a structured document and have the user manipulate it without prose.
 2. Let the user mutate the document and have the agent read **what changed**, not **what is now**.
-3. Allow the visualization style to be either built-in (V1) or agent-authored (Beta).
+3. The agent provides all rendering and interaction logic via `customScript`/`customStyle`. The applet is a shell.
 4. Stay within Caco's existing applet/tool primitives — no new persistent infrastructure.
 
 ## Non-goals
@@ -168,14 +168,14 @@ System prompts are routinely skipped by long-conversation models. Fallback behav
 
 A more aggressive mechanism (auto-injecting `caco_get_surface_changes` output into the turn preamble) is a candidate Future Extension if the nudge proves unreliable in practice.
 
-## UI styles
+## UI rendering
 
-The applet ships with one built-in style and a free-form Beta style. The shell HTML is constant; the style determines how items render and interact.
+The applet is a **shell** — a container with known DOM anchors. The **agent** provides the rendering logic and interaction handlers via `customScript` and `customStyle` fields on the surface document. There are no built-in styles or baked-in renderers.
 
-### Shell (constant across styles)
+### Shell (constant)
 
 ```html
-<div id="surface-root" data-style="roadmap">
+<div id="surface-root">
   <header id="surface-header">
     <h2 id="surface-title">…</h2>
     <div id="surface-actions"></div>
@@ -186,89 +186,109 @@ The applet ships with one built-in style and a free-form Beta style. The shell H
 </div>
 ```
 
-For every item in `items[]`, the applet renders a `<div id="item-<itemId>" data-type="<type>"></div>`. The style decides what to put inside.
+For every item in `items[]`, the applet renders a `<div id="item-<itemId>" data-type="<type>"></div>`. The agent's `customScript` decides what to put inside each div.
 
-### Style: `roadmap` (V1, MVP)
+### Agent-provided rendering
 
-Built-in. Items represent roadmap steps. Fields recognized:
+The agent supplies `customScript` and optionally `customStyle` via `caco_mutate_surface`. The applet:
 
-| field | required | meaning |
-| --- | --- | --- |
-| `id` | yes | stable ID |
-| `type` | yes | always `"task"` for this style; other types ignored |
-| `label` | yes | short title |
-| `description` | no | longer prose |
-| `status` | yes | one of `"pending" \| "active" \| "done" \| "blocked"` |
-
-Render: a vertical list. Each item is a row with a status badge on the left and the label + (optional collapsed description) to the right. Caco theme classes (`.muted`, `.accent`, `.success`, `.warn`) drive the badge color.
-
-User interactions (V1):
-
-- **Click the status badge** to cycle: `pending → active → done → blocked → pending`.
-- That's it. No reorder, no add/remove, no text editing.
-
-On click, the applet does:
-
-1. Locally updates the in-memory item's `status`.
-2. PUTs `/api/sessions/<id>/surface/changes/<itemId>` with the new full item and the current `dataToken`.
-3. On success, updates its `dataToken`. On stale, GETs `/surface` and retries once.
-
-No other style fields read or rendered in V1. Unknown fields are preserved on round-trips (agent can attach metadata) but invisible.
-
-### Style: `custom` (Beta)
-
-The agent supplies `customScript` and `customStyle`. The applet:
-
-1. Injects `customStyle` into a scoped `<style>` element inside the applet iframe.
+1. Injects `customStyle` into a scoped `<style>` element inside the applet container.
 2. Evaluates `customScript` as the body of an IIFE with the following bindings:
    - `surface` — `{ items, dataToken, style, changes }` (read-only snapshot, refreshed on every state update).
    - `root` — the `#surface-root` element.
-   - `mutateChange(itemId, fullItem)` — wraps the human-side PUT route. Returns a promise resolving to `{ ok, dataToken? }`. Updates the local `surface` snapshot on success before resolving, so the script can read fresh state immediately after `await`. On `stale` or `unknown-item` the helper does the GET-and-refresh internally; the script just sees an updated `surface` on next `render`.
+   - `mutateChange(itemId, fullItem)` — wraps the human-side PUT route. Returns a promise resolving to `{ ok, dataToken? }`. Updates the local `surface` snapshot on success. On `stale` or `unknown-item`, the helper does a GET-and-refresh internally.
    - `appletAPI` — the standard Caco applet API.
 3. Calls a global `render(surface)` function the script must define. `render` is called on initial mount and again on every change (agent push or user PUT response).
 
 The agent is free to:
-
-- Build any DOM inside `<div id="item-<itemId>">`.
+- Build any DOM inside `<div id="item-<itemId>">` or directly in `root`.
 - Attach listeners that call `mutateChange(...)` to send user edits.
-- Use any Caco theme class (`.btn`, `.muted`, `.surface-card`, etc.).
+- Use any Caco theme CSS variables (`var(--color-text)`, `var(--color-accent)`, etc.).
 
 The agent must **not**:
-
-- Make network requests (the applet runs under the same CSP as other applets — no external fetch).
+- Make external network requests (CSP prevents this).
 - Touch global state outside the applet container.
-- Use `eval`, `new Function`, or load remote scripts.
 
-`customScript` is sanitized only by CSP; the agent is trusted, the human approves the surface by viewing it. The script is preserved in `surface.json` and re-evaluated whenever the applet mounts, so it survives session restore.
+`customScript` is preserved in `surface.json` and re-evaluated whenever the applet mounts, so it survives session restore and server restart.
 
-When `style` flips from `custom` back to a built-in style, `customScript` and `customStyle` are NOT discarded — they're parked in the JSON in case the user wants to flip back. The built-in renderer simply ignores them.
+### Fallback rendering (no customScript)
 
-## MVP scope
+When `customScript` is null (agent only populated items without rendering logic), the applet renders a minimal default: each item's `label` or `id` as text inside its div. This is a diagnostic view, not a feature — the agent should provide `customScript` for any interactive surface.
 
-Build, in order:
+### Example: roadmap-style surface
 
-1. Storage: `~/.copilot/session-state/<id>/surface.json`. Schema validator. Token computation (SHA-256 of canonical JSON, truncated).
-2. HTTP routes: GET full, GET changes, POST mutate, POST clear-changes, PUT change. NOT yet: PATCH style, DELETE surface.
-3. Tools: `caco_get_surface`, `caco_get_surface_changes`, `caco_mutate_surface`, `caco_clear_surface_changes`.
-4. Applet directory `applets/session-surface/`: `meta.json`, `content.html`, `script.js`, `style.css`. Roadmap style only.
-5. System-prompt addition teaching the agent the read-changes-then-mutate flow.
+An agent can build a roadmap renderer entirely via `customScript`:
 
-Out of MVP:
+```javascript
+// customScript — agent provides this
+function render(surface) {
+  var statusIcons = { pending: '○', active: '◐', done: '●', blocked: '⊘' };
+  root.innerHTML = '';
+  surface.items.forEach(function(item) {
+    var merged = surface.changes[item.id] || item;
+    var div = document.createElement('div');
+    div.className = 'step step-' + (merged.status || 'pending');
+    div.innerHTML = '<span class="badge">' + (statusIcons[merged.status] || '○') + '</span> ' +
+      '<span>' + (merged.label || merged.id) + '</span>';
+    div.querySelector('.badge').onclick = function() {
+      var order = ['pending', 'active', 'done', 'blocked'];
+      var next = order[(order.indexOf(merged.status || 'pending') + 1) % 4];
+      mutateChange(item.id, Object.assign({}, merged, { status: next }));
+    };
+    root.appendChild(div);
+  });
+}
+```
 
-- `style: "custom"` and its tools (`caco_set_surface_style`, `caco_reset_surface`, PATCH/DELETE routes).
-- Cycling order configuration (status cycle is hardcoded).
-- Mirror to existing `update_roadmap` / `Roadmap` storage (parallel, per user decision — surface is its own document).
-- Drag-to-reorder, add/remove items via UI.
-- Migration tools.
+This replaces what was previously a built-in renderer — it's now just an example agents can adapt.
 
-## Open questions resolved in this revision
+## Scope
+
+### Done (backend — keep as-is)
+
+1. ✅ Storage: `~/.caco/sessions/<id>/surface.json`. Schema validator. Token computation.
+2. ✅ HTTP routes: GET full, GET changes, POST mutate, POST clear-changes, PUT change.
+3. ✅ Tools: `caco_get_surface`, `caco_get_surface_changes`, `caco_mutate_surface`, `caco_clear_surface_changes`.
+4. ✅ System-prompt addition teaching the read-changes-then-mutate flow.
+5. ✅ Tests: `surface-store.test.ts` (249 lines).
+
+### Needs rework (applet — subtractive change)
+
+The current `applets/session-surface/script.js` ships a baked-in roadmap renderer with status cycling. This must be replaced with the agent-driven shell described above.
+
+**Remove:**
+- `statusOrder`, `nextStatus()`, `statusClass()` — hardcoded status cycling
+- `renderItem()` — baked-in badge + label renderer
+- `cycleStatus()` — click handler that cycles status enum
+- Status-badge CSS (`.status-done`, `.status-active`, etc.)
+
+**Add:**
+- `customScript` evaluation: IIFE wrapper with `surface`, `root`, `mutateChange`, `appletAPI` bindings
+- `customStyle` injection: scoped `<style>` element
+- `render(surface)` callback invocation on mount and on every state change
+- Fallback rendering when `customScript` is null (minimal text dump)
+
+**Keep:**
+- `fetchSurface()` — REST client for loading the document
+- `putItem()` — human-side PUT route wrapper (becomes `mutateChange` binding)
+- `onStateBus()` — session change / event listeners
+- Token management / stale handling
+- Toast notifications
+
+**Estimated diff:** ~-120 lines (remove renderer), ~+50 lines (add eval shell). Net subtraction.
+
+### Future
+
+- Multi-document surfaces per session (slug-keyed).
+- WebSocket push instead of polling on agent side.
+- Migration from `update_roadmap` storage into surface.
+
+## Open questions resolved
 
 - **Tool naming**: prefixed `caco_`.
-- **URI shape**: `/api/sessions/:sessionId/surface[...]` — session in path.
-- **Storage of UI style**: `style` field on the document; `customScript` / `customStyle` siblings for Beta.
-- **MVP UI**: `roadmap` style, cycle-status only.
-- **Beta UI**: shell with `<div id="item-<id>">` per item, agent supplies JS + CSS, stored in session disk context (the `surface.json` file).
-- **Relationship to existing roadmap**: parallel. The surface document is independent of `getSessionRoadmap`/`setSessionRoadmap`. Demo populates surface state explicitly via `caco_mutate_surface`.
+- **URI shape**: `/api/sessions/:sessionId/surface[...]`.
+- **Rendering model**: agent-driven via `customScript`/`customStyle`. No built-in styles.
+- **Relationship to existing roadmap**: parallel. Surface is independent of `getSessionRoadmap`.
 
 ## Code analysis
 
@@ -336,12 +356,11 @@ Or it can stay silent. Author's choice per script.
 | --- | --- |
 | Agent ignores `changes` | System-prompt nudge at the top of every turn instructs to call `caco_get_surface_changes`. Failure mode is safe — the document just accumulates dirty entries until the next mutation clears them. |
 | Agent emits invalid schema | Validator runs server-side on every mutation. Reject with explicit error so the agent can self-correct. |
-| Beta `customScript` mis-uses the API | CSP blocks external requests. Errors thrown during render show in the applet's error pane and on next read in `surface.changes` as a synthetic `_error` entry. (Defer this mechanism to Beta implementation.) |
+| `customScript` errors | CSP blocks external requests. Errors thrown during eval/render are caught and shown in the applet as an error pane. |
 | Token collisions | Token is 12-character truncation of SHA-256; collision probability negligible for single-session scope. |
-| Concurrent user clicks | The applet serializes user PUTs locally (queue-based). Each click waits for the previous PUT's response before sending. Stale or `unknown-item` responses trigger a single GET-and-retry; if the item disappeared, the local edit is dropped and a brief toast tells the user "item no longer exists." |
-| Roadmap MVP feels redundant against existing roadmap UI | Document explicitly that MVP surface is parallel to existing roadmap. The demo's job is to validate the protocol, not to replace UX yet. |
+| Concurrent user clicks | The applet serializes user PUTs locally (queue-based). Each click waits for the previous PUT's response before sending. Stale or `unknown-item` responses trigger a single GET-and-retry. |
 | 200-item cap | Surface document is hard-capped at 200 items server-side. Over-limit mutations return `{ ok: false, reason: "limit" }`. |
-| Lost state across server restart | `surface.json` is persistent on disk — survives restart. The in-memory cache rebuilds from disk on first access. |
+| Lost state across server restart | `surface.json` is persistent on disk — survives restart. |
 
 ## Testing
 
@@ -388,19 +407,18 @@ Or it can stay silent. Author's choice per script.
 5. Each tool injects the current session ID into the route URL (auto-`sessionId` behavior).
 6. Each tool surfaces network errors as tool errors (not silent).
 
-### Manual checklist (client-side; no applet test harness today)
+### Manual checklist
 
-- Roadmap style: agent populates 4 items, user cycles statuses on three, agent reads `changes`, calls `mutate` to ack, statuses re-render from agent's writes.
-- Stale tab race: two browser tabs on same session; cycle in tab A; tab B's next cycle gets `stale` and refreshes.
-- Unknown-item race: agent deletes item, user's already-open tab cycles that item — toast appears, item disappears.
-- Restart durability: cycle a few statuses, restart server, refresh page — state preserved on disk.
-- Footer hint: after a cycle, footer shows "Agent will see your changes on its next response"; after the agent calls `mutate` or `clear-changes`, the hint clears.
+- Agent populates items + customScript, applet renders via agent's render() function.
+- User interacts via agent-provided handlers, mutateChange() sends PUTs, agent reads changes.
+- Stale tab race: two browser tabs on same session; edit in tab A; tab B gets `stale` and refreshes.
+- Restart durability: interact, restart server, refresh — state + customScript preserved on disk.
+- Footer hint: after user edit, footer shows unack count; after agent mutate/clear, hint clears.
+- No customScript: applet shows minimal fallback text (item labels only).
 
 ## Future extensions
 
-- Built-in styles: `multi-select`, `parameter-tuner`, `kanban`, `graph`. Each adds a renderer; data model unchanged.
-- Beta `style: "custom"` (described above).
+- Agent-provided example library (common patterns like roadmap, kanban, form) as skill docs.
 - Multi-document surfaces per session (slug-keyed: `/api/sessions/:id/surface/:slug`).
 - WebSocket push of updates instead of polling on the agent side.
-- Optional chat-message-on-submit toggle in the style config.
 - Migration from `update_roadmap` storage into surface document for sessions that opt in.

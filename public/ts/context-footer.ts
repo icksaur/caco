@@ -10,6 +10,7 @@
 
 import { regions } from './dom-regions.js';
 import { formatContextFiles, formatStatusParts, escapeHtml } from './ui-utils.js';
+import { getActiveSessionId } from './app-state.js';
 
 export interface SessionContext {
   files?: string[];
@@ -30,7 +31,11 @@ export function renderContextFooter(context: SessionContext): void {
   const allFiles = context.files ?? [];
   const recentFiles = allFiles.length > 3 ? allFiles.slice(-3) : allFiles;
   const files = formatContextFiles(recentFiles);
-  const sessionPart = activeFooterSessionId ? `session=${encodeURIComponent(activeFooterSessionId)}&` : '';
+  // Read current active session at render time so session switches don't leave
+  // stale IDs baked into file links. Falls back to the captured ID for callers
+  // that render outside an active-session context (transitional states).
+  const sid = getActiveSessionId() ?? activeFooterSessionId;
+  const sessionPart = sid ? `session=${encodeURIComponent(sid)}&` : '';
   const links = files.map(({ name, path }) => {
     const encodedPath = encodeURIComponent(path);
     return `<a href="/?${sessionPart}applet=text-editor&path=${encodedPath}" title="${path}">${name}</a>`;

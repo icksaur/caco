@@ -227,7 +227,7 @@ export function registerPoundProvider(provider: () => PopupItem[]): () => void {
 }
 
 export function tryExecuteSlashCommand(message: string): boolean {
-  const match = message.match(/^\/(\S+)\s*(.*)/);
+  const match = message.match(/^\/(\S+)\s*([\s\S]*)/);
   if (!match) return false;
   const [, name, args] = match;
   const cmd = findCommand(name);

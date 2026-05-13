@@ -18,6 +18,7 @@ const ROUTE_PREFIXES: Record<string, string> = {
   'workspace-api.ts': '/api/mcp',
   'schedule.ts': '/api',
   'shell.ts': '/api',
+  'surface.ts': '/api',
 };
 
 interface Route {

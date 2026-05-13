@@ -1,0 +1,128 @@
+.surface-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--space-md, 12px);
+  gap: var(--space-md, 12px);
+  font-family: var(--font-ui, sans-serif);
+}
+
+.surface-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm, 8px);
+}
+
+.surface-title {
+  margin: 0;
+  font-size: 1.1em;
+  font-weight: 600;
+}
+
+.surface-style-badge {
+  font-size: 0.75em;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.surface-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm, 8px);
+  flex: 1;
+  overflow: auto;
+}
+
+.surface-empty {
+  opacity: 0.6;
+  font-style: italic;
+  padding: var(--space-md, 12px);
+  text-align: center;
+}
+
+.surface-item {
+  display: flex;
+  gap: var(--space-sm, 8px);
+  padding: var(--space-sm, 8px) var(--space-md, 12px);
+  background: var(--bg-raised, rgba(255,255,255,0.04));
+  border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  border-radius: 6px;
+  align-items: flex-start;
+}
+
+.surface-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.surface-item-label {
+  font-weight: 500;
+  word-wrap: break-word;
+}
+
+.surface-item-desc {
+  font-size: 0.85em;
+  opacity: 0.8;
+  margin-top: 4px;
+  word-wrap: break-word;
+}
+
+.status-badge {
+  flex-shrink: 0;
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: white;
+  min-width: 70px;
+  text-align: center;
+}
+
+.status-badge:hover {
+  opacity: 0.85;
+}
+
+.status-pending { background: var(--color-muted, #6b7280); }
+.status-active  { background: var(--color-accent, #3b82f6); }
+.status-done    { background: var(--color-success, #10b981); }
+.status-blocked { background: var(--color-warn, #ef4444); }
+
+.surface-footer {
+  font-size: 0.8em;
+  opacity: 0.7;
+  padding: var(--space-xs, 4px) var(--space-sm, 8px);
+  min-height: 1.2em;
+}
+
+.surface-footer.has-changes {
+  color: var(--color-accent, #3b82f6);
+  opacity: 1;
+}
+
+.surface-toast {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-overlay, #222);
+  color: var(--color-text, #fff);
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  z-index: 1000;
+}
+
+.surface-toast.visible {
+  opacity: 1;
+}

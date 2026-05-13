@@ -7,7 +7,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 const DEV_DOCS = `# Caco Documentation
@@ -154,43 +154,80 @@ export function createDevDocsTool(projectRoot: string) {
 - User asks about Caco's architecture or internals
 - You need to find where a Caco feature is implemented
 - You want to add a new tool, applet, or route to Caco
+- A Caco tool failed in a way that suggests you need its spec
+
+**Sections:**
+- omit \`section\` for the full dev guide
+- \`section: "index"\` for a list of all known doc files (root + docs/)
+- \`section: "<filename>"\` to read a specific doc by name (e.g. \`"session-surface-applet"\`, \`"API"\`, \`"APPLETS"\`). The .md extension is added automatically; root and \`docs/\` are searched.
 
 For general usage and setup, read \`README.md\` at the project root.`,
 
     parameters: z.object({
-      section: z.string().optional().describe('Optional: "docs" to list all doc files, or omit for full dev guide')
+      section: z.string().optional().describe('Optional: "index" lists all doc files. A filename (with or without .md) reads that doc. Omit for the full dev guide.')
     }),
 
     handler: async ({ section }) => {
-      if (section === 'docs') {
-        const rootDocs = ['README.md', 'API.md', 'APPLETS.md', 'EXTENSIONS.md', 'code-quality.md']
+      const rootCandidates = ['README.md', 'API.md', 'APPLETS.md', 'EXTENSIONS.md', 'code-quality.md'];
+      const docsDir = join(projectRoot, 'docs');
+
+      const scanDocs = (): string[] => {
+        if (!existsSync(docsDir)) return [];
+        const results: string[] = [];
+        const walk = (dir: string) => {
+          for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const full = join(dir, entry.name);
+            if (entry.isDirectory()) walk(full);
+            else if (entry.name.endsWith('.md')) results.push(full);
+          }
+        };
+        walk(docsDir);
+        return results;
+      };
+
+      if (section === 'index') {
+        const rootDocs = rootCandidates
           .filter(f => existsSync(join(projectRoot, f)))
           .map(f => `- ${join(projectRoot, f)}`)
           .join('\n');
-
-        // Scan doc/ subdirectories
-        const docDir = join(projectRoot, 'doc');
-        let subDocs = '';
-        if (existsSync(docDir)) {
-          const scanDir = (dir: string, prefix: string): string[] => {
-            const results: string[] = [];
-            for (const entry of readdirSync(dir, { withFileTypes: true })) {
-              const full = join(dir, entry.name);
-              if (entry.isDirectory()) {
-                results.push(...scanDir(full, `${prefix}${entry.name}/`));
-              } else if (entry.name.endsWith('.md')) {
-                results.push(full);
-              }
-            }
-            return results;
-          };
-          subDocs = scanDir(docDir, 'doc/')
-            .map(f => `- ${f}`)
-            .join('\n');
-        }
-
+        const subDocs = scanDocs().map(f => `- ${f}`).join('\n');
         return {
-          textResultForLlm: `# Documentation\n\nAll paths are absolute — use the view tool to read any file.\n\n## Root docs\n${rootDocs}\n\n## doc/ directory\n${subDocs}`
+          textResultForLlm: `# Documentation Index\n\nAll paths are absolute. Read directly with the view tool, or call caco_dev_docs with section="<basename>" to fetch by short name.\n\n## Root docs\n${rootDocs || '(none)'}\n\n## docs/ directory\n${subDocs || '(none)'}`
+        };
+      }
+
+      if (section && section !== 'docs') {
+        const cleaned = section.endsWith('.md') ? section : section + '.md';
+        const candidates = [
+          join(projectRoot, cleaned),
+          join(docsDir, cleaned),
+        ];
+        for (const path of candidates) {
+          if (existsSync(path)) {
+            try {
+              const body = readFileSync(path, 'utf-8');
+              return { textResultForLlm: `# ${path}\n\n${body}` };
+            } catch (err) {
+              return { textResultForLlm: `Failed to read ${path}: ${err instanceof Error ? err.message : String(err)}` };
+            }
+          }
+        }
+        const available = [
+          ...rootCandidates.filter(f => existsSync(join(projectRoot, f))),
+          ...scanDocs().map(f => f.replace(projectRoot + '/', '')),
+        ].join(', ');
+        return { textResultForLlm: `Doc "${section}" not found. Tried: ${candidates.join(', ')}. Available: ${available}` };
+      }
+
+      // section === 'docs' kept for backward compatibility — same as 'index'.
+      if (section === 'docs') {
+        const rootDocs = rootCandidates
+          .filter(f => existsSync(join(projectRoot, f)))
+          .map(f => `- ${join(projectRoot, f)}`)
+          .join('\n');
+        const subDocs = scanDocs().map(f => `- ${f}`).join('\n');
+        return {
+          textResultForLlm: `# Documentation Index\n\n## Root docs\n${rootDocs}\n\n## docs/ directory\n${subDocs}`
         };
       }
 

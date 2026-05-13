@@ -1,0 +1,15 @@
+{
+  "slug": "session-surface",
+  "name": "Session Surface",
+  "description": "Two-party collaborative surface. Agent pushes structured items; user manipulates them.",
+  "params": {},
+  "createdAt": "2026-05-12T22:00:00.000Z",
+  "updatedAt": "2026-05-12T22:00:00.000Z",
+  "agentUsage": {
+    "purpose": "Open after pushing a roadmap-style document via caco_mutate_surface. The user cycles item statuses; you read their edits via caco_get_surface_changes at the start of each turn."
+  },
+  "stateSchema": {
+    "get": null,
+    "set": null
+  }
+}

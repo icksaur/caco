@@ -328,6 +328,18 @@ Returns:
 - `GET /api/applet/state` - Get current applet state (debug)
 - `POST /api/applet/state` - Update applet state
 
+## Session Surface
+
+Two-party collaborative document per session. See `docs/session-surface-applet.md`.
+
+- `GET /api/sessions/:id/surface` - Read full surface document
+- `GET /api/sessions/:id/surface/changes` - Read human-side `changes` map + `dataToken`
+- `POST /api/sessions/:id/surface/mutate` - Agent applies `create`/`update`/`delete`, atomically clears `changes`. Requires `dataToken`.
+- `POST /api/sessions/:id/surface/clear-changes` - Agent acknowledges `changes` without writing. Requires `dataToken`.
+- `PUT /api/sessions/:id/surface/changes/:itemId` - Human-side write: store one full post-edit item into `changes`. Requires `dataToken`.
+
+All mutating routes return HTTP 200 with either `{ ok: true, dataToken }` or `{ ok: false, reason, currentDataToken?, errors? }`. Protocol-level failures (`stale`, `unknown-item`, `limit`, `invalid`) are not HTTP errors.
+
 ## Saved Applets
 
 - `GET /api/applets` - List all saved applets

@@ -26,9 +26,10 @@ import { createPresentationTools } from './src/presentation-tool.js';
 import { createSessionHistoryTool } from './src/session-history-tool.js';
 import { createMemoryTools } from './src/memory-tool.js';
 import { createOfferOptionsTool } from './src/offer-options-tool.js';
+import { createSurfaceTools } from './src/surface-tools.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
-import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes } from './src/routes/index.js';
+import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes } from './src/routes/index.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
@@ -156,6 +157,7 @@ app.use('/api/mcp', workspaceRoutes);
 app.use('/api/mcp/auth', mcpAuthRoutes);
 app.use('/api', scheduleRoutes);
 app.use('/api', shellRoutes);
+app.use('/api', surfaceRoutes);
 
 // Server Lifecycle
 
@@ -201,8 +203,9 @@ async function start(): Promise<void> {
     const sessionHistoryTools = createSessionHistoryTool();
     const memoryTools = createMemoryTools();
     const offerOptionsTools = createOfferOptionsTool(sessionRef);
+    const surfaceTools = createSurfaceTools(sessionRef);
     
-    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools, ...presentationTools, ...sessionHistoryTools, ...memoryTools, ...offerOptionsTools];
+    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools, ...presentationTools, ...sessionHistoryTools, ...memoryTools, ...offerOptionsTools, ...surfaceTools];
   };
   
   await createSessionState({

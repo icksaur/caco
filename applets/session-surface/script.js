@@ -166,14 +166,19 @@ function injectCustomStyle(css) {
 
 // --- Data loading ---
 
+var fetchEpoch = 0;
+
 async function fetchSurface() {
   var sid = sessionId();
+  var epoch = ++fetchEpoch;
   if (!sid) { doc = null; agentRender = null; callRender(); return; }
   try {
     var res = await fetch('/api/sessions/' + encodeURIComponent(sid) + '/surface');
+    if (epoch !== fetchEpoch) return; // session changed while fetch was in-flight
     if (res.status === 404) { doc = null; agentRender = null; callRender(); return; }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var newDoc = await res.json();
+    if (epoch !== fetchEpoch) return; // session changed while parsing
     var scriptChanged = !doc || doc.customScript !== newDoc.customScript;
     var styleChanged = !doc || doc.customStyle !== newDoc.customStyle;
     doc = newDoc;
@@ -194,7 +199,12 @@ function onStateBus() {
   }
   if (window.appletAPI.onSessionEvent) {
     window.appletAPI.onSessionEvent(function (event) {
-      if (event && event.type === 'surface.updated') fetchSurface();
+      if (event && event.type === 'surface.updated') {
+        // Only refresh if the event is for the currently viewed session
+        var sid = sessionId();
+        if (sid && event.data && event.data.sessionId && event.data.sessionId !== sid) return;
+        fetchSurface();
+      }
     });
   }
 }

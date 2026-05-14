@@ -147,12 +147,12 @@ function handleEvent(event: SessionEvent): void {
     }
   }
   
-  // Skip turn_start after session went idle (prevents ghost "Thinking..." indicator)
-  if (eventType === 'assistant.turn_start' && !isLoadingHistory()) {
+  // Skip turn_start during history replay (ephemeral indicator, no value in replay)
+  // and after session went idle (prevents ghost "Thinking..." from late events)
+  if (eventType === 'assistant.turn_start') {
+    if (isLoadingHistory()) return;
     const activeId = getActiveSessionId();
-    if (activeId && !sessionTracker.isBusy(activeId)) {
-      return;
-    }
+    if (activeId && !sessionTracker.isBusy(activeId)) return;
   }
 
   // Render event (create/find elements + set content)

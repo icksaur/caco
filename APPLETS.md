@@ -54,7 +54,9 @@ All methods are on `window.appletAPI`. Subscriptions auto-cleanup on applet dest
 | `getSessionId()` | Returns current active session ID |
 | `getSessionMeta(sessionId?)` | Fetch full session metadata (name, kind, model, intent, busy) |
 | `sendAgentMessage(prompt, opts?)` | Send message to active session (opts: `appletSlug`, `imageData`) |
-| `callMCPTool(name, args)` | Call MCP tool — `read_file`, `write_file`, `list_directory`. Throws on tool error. |
+| `callFileApi(endpoint, params)` | Call Caco's file/workspace HTTP endpoints (`read_file`, `write_file`, `list_directory`). Not MCP, no agent involvement. Throws on error. |
+| `callMCPTool(...)` | **Deprecated alias** of `callFileApi`. Will be removed. |
+| `fetchWithRetry(url, init?, opts?)` | Fetch with retries, timeout, and exponential backoff. Retries on network errors, 5xx, 429. opts: `{ retries, timeoutMs, backoffMs, maxBackoffMs }`. |
 | `navigateAppletUrlParam(k, v)` | Push new URL param (creates browser history entry). Pass `null` to delete. |
 | `updateAppletUrlParam(k, v)` | Replace URL param (no history entry). |
 | `getAppletUrlParams()` | Get current URL params (excluding `applet`) |

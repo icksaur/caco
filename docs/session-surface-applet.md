@@ -416,6 +416,76 @@ Or it can stay silent. Author's choice per script.
 - Footer hint: after user edit, footer shows unack count; after agent mutate/clear, hint clears.
 - No customScript: applet shows minimal fallback text (item labels only).
 
+## Connecting external data sources
+
+The applet's `customScript` runs in the page context with full network access. To populate items from an external API:
+
+1. The script fetches the data on mount, on a timer, or on a refresh button.
+2. It transforms the response into `SurfaceItem[]` and POSTs to `/api/sessions/<id>/surface/mutate`.
+3. The server broadcasts `caco.surface.updated`; the applet re-renders.
+
+This works *without* the agent — no token cost, no round-trip latency. The agent's job was to write the script once.
+
+### Helpers
+
+- `appletAPI.fetchWithRetry(url, init?, options?)` — for flaky external APIs. Retries on network errors, 5xx, 429, and per-attempt timeout. Exponential backoff with jitter. Defaults: 3 retries, 15s per attempt, 500ms→8s backoff.
+- `appletAPI.callFileApi(endpoint, params)` — read/write/list local files via the workspace endpoints.
+- `fetch('/api/shell', { method: 'POST', body: JSON.stringify({ command, args, cwd }) })` — run a local shell command.
+
+### Example: Azure DevOps PRs
+
+```js
+async function refresh() {
+  // Run `az repos pr list` and parse JSON.
+  const res = await fetch('/api/shell', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'az', args: ['repos','pr','list','-o','json'] }),
+  });
+  const { stdout } = await res.json();
+  const prs = JSON.parse(stdout);
+
+  const items = prs.map(pr => ({
+    id: 'pr-' + pr.pullRequestId,
+    type: 'pr',
+    title: pr.title,
+    author: pr.createdBy.displayName,
+    status: pr.status,
+  }));
+  const newIds = new Set(items.map(i => i.id));
+  const deleted = surface.items.filter(i => !newIds.has(i.id)).map(i => i.id);
+
+  await postMutate({ create: items, delete: deleted });
+}
+
+async function postMutate(payload) {
+  const sid = appletAPI.getSessionId();
+  const url = `/api/sessions/${sid}/surface/mutate`;
+  // Note: retry once on stale — the server may have rotated dataToken from
+  // a concurrent human PUT or agent mutate.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dataToken: surface.dataToken, ...payload }),
+    });
+    const body = await res.json();
+    if (body.ok) return body;
+    if (body.reason === 'stale' && body.currentDataToken) {
+      surface.dataToken = body.currentDataToken;
+      continue;
+    }
+    throw new Error('mutate failed: ' + (body.reason || 'unknown'));
+  }
+}
+```
+
+For an API requiring auth (Azure DevOps REST, internal services), substitute `appletAPI.fetchWithRetry(url, { headers })` for the shell call. The retry behavior matters for the external service; surface mutations rarely need more than one retry on stale.
+
+### Where retry belongs
+
+Retry the external call — it's the flaky one. The surface mutation is local and fast; it only needs the stale-retry pattern shown above. Don't wrap surface mutations in `fetchWithRetry`; the retry semantics are different.
+
 ## Future extensions
 
 - Agent-provided example library (common patterns like roadmap, kanban, form) as skill docs.

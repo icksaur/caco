@@ -201,19 +201,31 @@ const { path } = await appletAPI.saveTempFile(canvas.toDataURL('image/png'));
 await appletAPI.sendAgentMessage(\`Analyze image at \${path}\`);
 \`\`\`
 
-\`appletAPI.callMCPTool(toolName, params)\` - Call MCP tools for file operations
+\`appletAPI.callFileApi(endpoint, params)\` - Call Caco's file/workspace HTTP endpoints (not MCP, no agent involvement)
 \`\`\`javascript
 // Read a file
-const result = await appletAPI.callMCPTool('read_file', { path: '/path/to/file.txt' });
+const result = await appletAPI.callFileApi('read_file', { path: '/path/to/file.txt' });
 
 // Write a file
-await appletAPI.callMCPTool('write_file', { 
+await appletAPI.callFileApi('write_file', { 
   path: '/path/to/output.txt', 
   content: 'Hello world' 
 });
 
 // List directory
-const files = await appletAPI.callMCPTool('list_directory', { path: '/home/user' });
+const files = await appletAPI.callFileApi('list_directory', { path: '/home/user' });
+\`\`\`
+
+(Legacy: \`appletAPI.callMCPTool\` is a deprecated alias of \`callFileApi\`.)
+
+\`appletAPI.fetchWithRetry(url, init?, options?)\` - For flaky external APIs
+\`\`\`javascript
+const res = await appletAPI.fetchWithRetry(
+  'https://api.example.com/data',
+  { headers: { 'Authorization': 'Bearer ' + token } },
+  { retries: 3, timeoutMs: 15000 }
+);
+const data = await res.json();
 \`\`\`
 
 **Shell Commands:**

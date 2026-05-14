@@ -13,6 +13,7 @@ import { getActiveSessionId, getCurrentCwd, isLoadingHistory } from './app-state
 import { regions } from './dom-regions.js';
 import { loadApplet } from './router.js';
 import { showToast } from './toast.js';
+import { fetchWithRetry, type FetchWithRetryOptions } from './fetch-retry.js';
 import type { SessionEvent } from './types.js';
 
 interface TempFileResult {
@@ -210,7 +211,10 @@ interface AppletAPI {
   getSessionMeta: typeof getSessionMeta;
   sendAgentMessage: typeof sendAgentMessage;
   saveTempFile: typeof saveTempFile;
-  callMCPTool: typeof callMCPTool;
+  callFileApi: typeof callFileApi;
+  /** @deprecated Use callFileApi. */
+  callMCPTool: typeof callFileApi;
+  fetchWithRetry: typeof appletFetchWithRetry;
   fetch: typeof appletFetch;
   escapeHtml: typeof escapeHtml;
   toast: typeof appletToast;
@@ -249,7 +253,9 @@ export function initAppletRuntime(): void {
     getSessionMeta,
     sendAgentMessage,
     saveTempFile,
-    callMCPTool,
+    callFileApi,
+    callMCPTool: callFileApi,
+    fetchWithRetry: appletFetchWithRetry,
     fetch: appletFetch,
     escapeHtml,
     toast: appletToast,
@@ -475,35 +481,62 @@ async function saveTempFile(
 }
 
 /**
- * Call an MCP tool from applet JS
- * Applets can use MCP tools the agent has access to via HTTP proxy
- * 
- * @param toolName - The MCP tool to call (e.g., "read_file", "write_file", "list_directory")
- * @param params - Tool parameters as key-value object
- * @returns Tool result
+ * Call one of Caco's built-in file/workspace HTTP endpoints from applet JS.
+ *
+ * These are not MCP tools and do not consume agent tokens — they are plain
+ * Caco backend routes under /api/mcp/* exposing read_file, write_file, and
+ * list_directory. Naming is historical; the helper is kept for applets that
+ * just need quick file ops without going through the agent.
+ *
+ * For arbitrary shell commands, use fetch('/api/shell', ...) directly.
+ *
+ * @param endpoint - Endpoint name: "read_file", "write_file", "list_directory"
+ * @param params - Endpoint parameters as key-value object
+ * @returns The JSON response (always shape { ok: true, ... } on success)
  */
-async function callMCPTool(toolName: string, params: Record<string, unknown>): Promise<unknown> {
-  const endpoint = `/api/mcp/${toolName}`;
-  
-  const response = await fetch(endpoint, {
+async function callFileApi(endpoint: string, params: Record<string, unknown>): Promise<unknown> {
+  const url = `/api/mcp/${endpoint}`;
+
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params)
   });
-  
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Unknown error' }));
     throw new Error(error.error || `HTTP ${response.status}`);
   }
-  
+
   const result = await response.json();
-  
-  // Check for tool error
   if (!result.ok) {
-    throw new Error(result.error || 'Tool call failed');
+    throw new Error(result.error || 'callFileApi failed');
   }
-  
   return result;
+}
+
+/** @deprecated Use callFileApi(endpoint, params). callMCPTool is misnamed —
+ *  these are Caco HTTP routes, not MCP tools. Will be removed in a future release.
+ *  Backward-compat alias is wired in initAppletRuntime as callMCPTool: callFileApi. */
+
+/**
+ * Fetch with retries, timeout, and exponential backoff. For applet customScript
+ * to call flaky external APIs (Azure DevOps, internal services, third parties).
+ *
+ * Retries on network errors, HTTP 5xx, and HTTP 429.
+ * Does NOT retry on other 4xx (those won't fix themselves on retry).
+ *
+ * @param url - URL to fetch
+ * @param init - Standard fetch init
+ * @param options - { retries, timeoutMs, backoffMs, maxBackoffMs }
+ * @throws FetchWithRetryError on final failure
+ */
+function appletFetchWithRetry(
+  url: string,
+  init?: RequestInit,
+  options?: FetchWithRetryOptions
+): Promise<Response> {
+  return fetchWithRetry(url, init, options);
 }
 
 /**

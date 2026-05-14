@@ -1072,20 +1072,52 @@ Options:
 - `filename` (string, optional) - Custom filename
 - `mimeType` (string, optional) - MIME type if using raw base64
 
-#### callMCPTool(toolName, params)
+#### callFileApi(endpoint, params)
 
-Call MCP tools directly from applet JavaScript.
+Call one of Caco's built-in file/workspace HTTP endpoints from applet JS. These are not MCP tools and do not consume agent tokens — they are plain Caco backend routes under `/api/mcp/*`.
+
+For arbitrary shell commands, use `fetch('/api/shell', ...)` directly.
 
 ```javascript
-const result = await appletAPI.callMCPTool('read_file', { path: '/path/to/file.txt' });
+const result = await appletAPI.callFileApi('read_file', { path: '/path/to/file.txt' });
 
-await appletAPI.callMCPTool('write_file', {
+await appletAPI.callFileApi('write_file', {
   path: '/path/to/output.txt',
   content: 'Hello world'
 });
 
-const files = await appletAPI.callMCPTool('list_directory', { path: '/home/user' });
+const files = await appletAPI.callFileApi('list_directory', { path: '/home/user' });
 ```
+
+#### callMCPTool(...)
+
+Deprecated alias of `callFileApi`. Misnamed — these endpoints have nothing to do with MCP. Will be removed in a future release.
+
+#### fetchWithRetry(url, init?, options?)
+
+Fetch wrapper with retries, per-attempt timeout, and exponential backoff with jitter. For applet `customScript` to call flaky external APIs (Azure DevOps, internal services, third parties).
+
+Retries on:
+- Network errors (offline, DNS, connection reset)
+- HTTP 5xx
+- HTTP 429
+- Per-attempt timeout
+
+Does NOT retry on other 4xx (won't fix themselves on retry).
+
+```javascript
+const res = await appletAPI.fetchWithRetry('https://api.example.com/data', {
+  headers: { 'Authorization': 'Bearer ' + token }
+}, {
+  retries: 3,         // default 3
+  timeoutMs: 15000,   // default 15s per attempt
+  backoffMs: 500,     // default 500ms, doubles each retry
+  maxBackoffMs: 8000  // default 8s cap
+});
+const data = await res.json();
+```
+
+On final failure, throws `FetchWithRetryError` with `attempts` and `lastStatus`.
 
 ### Function Exposure
 

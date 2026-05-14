@@ -147,6 +147,14 @@ function handleEvent(event: SessionEvent): void {
     }
   }
   
+  // Skip turn_start after session went idle (prevents ghost "Thinking..." indicator)
+  if (eventType === 'assistant.turn_start' && !isLoadingHistory()) {
+    const activeId = getActiveSessionId();
+    if (activeId && !sessionTracker.isBusy(activeId)) {
+      return;
+    }
+  }
+
   // Render event (create/find elements + set content)
   chatRegion.renderEvent(event);
   if (!isLoadingHistory()) scrollToBottom();

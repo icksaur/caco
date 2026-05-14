@@ -97,6 +97,13 @@ class HistoryLoader {
       }
     }
     setFormEnabled(!isBusy);
+
+    // Clean up stale thinking indicator from history replay
+    if (!isBusy) {
+      const chat = regions.chat as { removeThinking?: () => void; removeStreamingCursors?: () => void };
+      chat.removeThinking?.();
+      chat.removeStreamingCursors?.();
+    }
     
     if (regions.chat.el.children.length === 0) {
       loadModels();

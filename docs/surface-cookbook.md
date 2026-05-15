@@ -221,6 +221,16 @@ Surfaces should render *something* when items is empty — silence reads as a bu
 }
 ```
 
+### Shadow-safe list padding
+
+Cards with hover lift (`translateY` + `box-shadow`) clip at the container edge. Add horizontal padding to the list container so shadows render fully — especially visible on light themes:
+
+```css
+.card-list {
+  padding: 0 var(--space-sm);
+}
+```
+
 ---
 
 ## Layout patterns
@@ -285,9 +295,83 @@ For transient "Item no longer exists" / "Saved" feedback:
 
 ---
 
+## Worked example: draggable priority queue
+
+A complete surface with drag-to-reorder. Items have `priority` (int). User drags to reorder; each affected item gets a `mutateChange` call. Agent reads priority mutations via `caco_get_surface_changes`.
+
+### Items
+
+```json
+[
+  { "id": "a", "type": "task", "label": "First thing", "priority": 0 },
+  { "id": "b", "type": "task", "label": "Second thing", "priority": 1 }
+]
+```
+
+### customScript
+
+```js
+var dragSrc = null;
+
+function render(s) {
+  var sorted = s.items.map(function(i) { return s.changes[i.id] || i; })
+    .sort(function(a, b) { return (a.priority||0) - (b.priority||0); });
+  root.innerHTML = '';
+  sorted.forEach(function(item, idx) {
+    var el = document.createElement('div');
+    el.className = 'card';
+    el.draggable = true;
+    el.innerHTML = '<span class="handle">☰</span><span class="name">' +
+      (item.label||item.id) + '</span><span class="num">#' + idx + '</span>';
+    el.addEventListener('dragstart', function(e) {
+      dragSrc = item.id; el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    el.addEventListener('dragend', function() {
+      el.classList.remove('dragging'); dragSrc = null;
+      root.querySelectorAll('.over').forEach(function(x){x.classList.remove('over');});
+    });
+    el.addEventListener('dragover', function(e) { e.preventDefault(); el.classList.add('over'); });
+    el.addEventListener('dragleave', function() { el.classList.remove('over'); });
+    el.addEventListener('drop', function(e) {
+      e.preventDefault(); el.classList.remove('over');
+      if (!dragSrc || dragSrc === item.id) return;
+      var si = sorted.findIndex(function(x){return x.id===dragSrc;});
+      var ti = sorted.findIndex(function(x){return x.id===item.id;});
+      if (si<0||ti<0) return;
+      sorted.splice(ti, 0, sorted.splice(si, 1)[0]);
+      sorted.forEach(function(it, i) {
+        if (it.priority !== i) mutateChange(it.id, Object.assign({}, it, {priority:i}));
+      });
+    });
+    root.appendChild(el);
+  });
+}
+```
+
+### customStyle
+
+```css
+.card {
+  display: flex; align-items: center; gap: var(--space-sm);
+  background: var(--bg-raised); border-radius: var(--radius-lg);
+  padding: var(--space-md) var(--space-lg); cursor: grab; user-select: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: var(--bg-hover); }
+.card.dragging { opacity: 0.4; }
+.card.over { box-shadow: 0 0 0 2px var(--color-accent); }
+.handle { color: var(--color-text-dim); }
+.card:hover .handle { color: var(--color-text-muted); }
+.name { flex: 1; font-weight: 600; color: var(--color-text-bright); font-size: var(--text-lg); }
+.num { font-size: var(--text-xs); color: var(--color-text-muted); font-weight: 700; }
+```
+
+---
+
 ## Functional patterns
 
-> *Placeholder.* This section will document the JavaScript half of session-surface definitions: render entry points, mutation helpers, retry/stale recovery, polling external sources, optimistic UI, and accessibility hooks. See `session-surface-applet.md` for the protocol primitives.
+> Additional patterns for the JavaScript half of surface definitions.
 
 Topics to cover:
 

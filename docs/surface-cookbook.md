@@ -401,21 +401,133 @@ function render(s) {
 
 ## Functional patterns
 
-> Additional patterns for the JavaScript half of surface definitions.
+### External data fetch (shell → surface)
 
-Topics to cover:
+Pattern for surfaces backed by external data (APIs, CLI tools). The agent writes the `customScript` once; the user clicks refresh to pull fresh data. No agent involvement after setup.
 
-- The `render(surface)` entry point — when it fires, what `surface` contains.
-- `mutateChange(itemId, fullItem)` — local PUT helper, optimistic update.
-- Stale-token retry loop for direct `fetch` to `/api/sessions/<id>/surface/mutate`.
-- `appletAPI.fetchWithRetry` for flaky external sources (Azure DevOps, internal APIs).
-- Pulling external data: `fetch('/api/shell', ...)` + parse + mutate.
-- Listening to `caco.surface.updated` events vs full re-render.
-- Keyboard nav (Alt+↑/↓ for reorder) and ARIA hints.
-- DOMPurify for any HTML the agent passes through items (descriptions, tooltips).
-- The agent's reading discipline: call `caco_get_surface_changes` at turn start, integrate edits, then mutate.
+**Architecture:**
+```
+User clicks Refresh → customScript calls /api/shell → parses output → mutateChange → render
+```
 
-Add a worked example per topic. Keep snippets short and runnable.
+**Key decisions:**
+- Store all external data in a **single surface item** (e.g., `id: "data"`, `type: "data-store"`). The `render()` function reads from this item and builds the UI. This keeps the surface item list clean — one data blob, not N items per external record.
+- Track `_isRefreshing` and `_error` as **module-level variables**, not surface state. They're ephemeral UI state that shouldn't persist or trigger agent reads.
+- `mutateChange` after the fetch triggers `render()` automatically — no manual re-render needed.
+- Disable the refresh button immediately (optimistic) so the user can't double-fire.
+
+**Skeleton:**
+
+```js
+var _refreshing = false;
+var _error = null;
+
+function render(s) {
+  var di = s.items.find(function(i) { return i.id === 'data'; });
+  var merged = (s.changes && s.changes['data']) || di;
+  var records = merged ? (merged.records || []) : null;
+  root.innerHTML = '';
+
+  // Header with refresh button
+  var hdr = document.createElement('div');
+  hdr.className = 'hdr';
+  var btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.textContent = _refreshing ? 'Loading…' : '↻ Refresh';
+  btn.disabled = _refreshing;
+  btn.onclick = doRefresh;
+  hdr.appendChild(btn);
+  root.appendChild(hdr);
+
+  if (_error) {
+    var err = document.createElement('div');
+    err.className = 'error';
+    err.textContent = _error;
+    root.appendChild(err);
+  }
+
+  if (!records) { root.insertAdjacentHTML('beforeend', '<div class="empty">Click Refresh to load.</div>'); return; }
+  if (records.length === 0) { root.insertAdjacentHTML('beforeend', '<div class="empty">No items.</div>'); return; }
+
+  records.forEach(function(r) {
+    // render each record
+  });
+}
+
+async function doRefresh() {
+  if (_refreshing) return;
+  _refreshing = true; _error = null;
+  // Optimistic button update
+  var btn = root.querySelector('.btn');
+  if (btn) { btn.textContent = 'Loading…'; btn.disabled = true; }
+
+  try {
+    var res = await fetch('/api/shell', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'my-cli', args: ['list', '-o', 'json'] })
+    });
+    var out = await res.json();
+    if (out.code !== 0) throw new Error((out.stderr || '').split('\n')[0]);
+    var data = JSON.parse(out.stdout);
+    await mutateChange('data', {
+      id: 'data', type: 'data-store',
+      records: data.items || data,
+      lastRefresh: new Date().toISOString()
+    });
+  } catch(e) {
+    _error = 'Refresh failed: ' + (e.message || e);
+  }
+  _refreshing = false;
+  // Force button reset (render may not fire on error)
+  var btn2 = root.querySelector('.btn');
+  if (btn2) { btn2.textContent = '↻ Refresh'; btn2.disabled = false; }
+  if (_error) render(surface); // re-render to show error
+}
+```
+
+**Why a single data item?** The agent reads `caco_get_surface_changes` and sees one structured blob — not N individual item mutations. The data item acts as a cache; the `render()` function owns the visual decomposition into cards/rows.
+
+**Why module-level `_refreshing`?** It's transient UI state. If the user switches sessions and comes back, it resets (script re-evaluates). Putting it in the surface would create noise for the agent.
+
+**Error recovery:** After a failed fetch, `_error` is shown inline. The next refresh clears it. No toast needed — the error persists until the user acts.
+
+### Stale-token retry
+
+When `customScript` writes to the surface via REST (not `mutateChange`), the `dataToken` may be stale if the agent wrote concurrently. Retry once with the fresh token from the error response:
+
+```js
+async function postMutate(payload) {
+  var sid = appletAPI.getSessionId();
+  for (var attempt = 0; attempt < 2; attempt++) {
+    var res = await fetch('/api/sessions/' + sid + '/surface/mutate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dataToken: surface.dataToken, ...payload })
+    });
+    var body = await res.json();
+    if (body.ok) { surface.dataToken = body.dataToken; return body; }
+    if (body.reason === 'stale' && body.currentDataToken) {
+      surface.dataToken = body.currentDataToken;
+      continue;
+    }
+    throw new Error('mutate failed: ' + (body.reason || 'unknown'));
+  }
+}
+```
+
+`mutateChange` (the binding from the shell) handles stale internally. This pattern is only needed when calling the REST API directly.
+
+### render() contract
+
+- Called on mount and after every state change (agent push, user PUT, `caco.surface.updated` event).
+- Receives a snapshot: `{ items, changes, dataToken, style }`. The snapshot is read-only.
+- Can mutate `root` directly or return an HTML string (shell catches the return value).
+- Must merge `changes` over `items` for the current view: `var item = s.changes[id] || s.items.find(...)`.
+- Must not call `fetch` for the surface itself — data is already in the snapshot.
+- May call `fetch` for external resources (images, shell commands, etc.).
+
+### Additional topics
 
 ---
 

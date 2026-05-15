@@ -20,8 +20,8 @@ h1 {
   text-decoration: none;
   background: var(--bg-base);
   border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 12px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
@@ -31,25 +31,29 @@ h1 {
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 
+.applet-heading {
+  margin: 0 0 4px 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .applet-name {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--color-text-bright);
-  margin: 0 0 4px 0;
 }
 
 .applet-slug {
   font-size: 12px;
   color: var(--color-text-muted);
-  font-family: monospace;
-  margin: 0 0 8px 0;
 }
 
 .applet-desc {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-text-muted);
   margin: 0;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 .empty-state {

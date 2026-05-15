@@ -13,8 +13,7 @@
     for (var i = 0; i < applets.length; i++) {
       var app = applets[i];
       html += '<a class="applet-card" href="?applet=' + encodeURIComponent(app.slug) + '">';
-      html += '<p class="applet-name">' + app.name + '</p>';
-      html += '<p class="applet-slug">' + app.slug + '</p>';
+      html += '<p class="applet-heading"><span class="applet-name">' + app.name + '</span> <span class="applet-slug">' + app.slug + '</span></p>';
       html += '<p class="applet-desc">' + (app.description || '') + '</p>';
       html += '</a>';
     }

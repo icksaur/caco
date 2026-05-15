@@ -72,11 +72,6 @@ export interface Roadmap {
   steps: RoadmapStep[];
 }
 
-export interface Presentation {
-  title: string;
-  slides: string[];
-}
-
 /**
  * MCP server OAuth state stored in ~/.caco/mcp-auth.json
  * Global across all sessions - authenticate once, use everywhere
@@ -261,14 +256,6 @@ export function getSessionRoadmap(sessionId: string): Roadmap | null {
 
 export function setSessionRoadmap(sessionId: string, roadmap: Roadmap): void {
   setSessionData(sessionId, 'roadmap', roadmap as unknown as Record<string, unknown>);
-}
-
-export function getSessionPresentation(sessionId: string): Presentation | null {
-  return getSessionData(sessionId, 'presentation') as Presentation | null;
-}
-
-export function setSessionPresentation(sessionId: string, presentation: Presentation): void {
-  setSessionData(sessionId, 'presentation', presentation as unknown as Record<string, unknown>);
 }
 
 export function deleteSessionData(sessionId: string, name: string): boolean {

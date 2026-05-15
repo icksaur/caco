@@ -161,31 +161,9 @@ Body (any subset):
 
 Returns updated roadmap.
 
-**GET /api/sessions/:id/presentation** - Get session presentation
-
-Returns presentation JSON or `{}` if none exists.
-
-**PATCH /api/sessions/:id/presentation** - Update session presentation
-
-Body (any subset):
-```json
-{
-  "title": "string",
-  "slides": ["markdown string", "..."],
-  "addSlide": "markdown string",
-  "addSlideIndex": 0,
-  "updateSlideIndex": 0,
-  "updateSlide": "new content",
-  "removeSlideIndex": 0,
-  "removeAll": true
-}
-```
-
-Returns updated presentation, or `{ removed: true }` on removeAll.
-
 **GET /api/sessions/:id/data** - List session data keys
 
-Returns `["roadmap", "presentation", ...]`. Excludes meta.json and notes.
+Returns `["roadmap", ...]`. Excludes meta.json and notes.
 
 **GET /api/sessions/:id/notes** - Get session notes
 
@@ -862,13 +840,11 @@ Creates a new session and optionally sends an initial message. Returns the new s
 
 ### Session Memory Tools
 
-Defined in `src/roadmap-tool.ts` and `src/presentation-tool.ts`:
+Defined in `src/roadmap-tool.ts`:
 
 - `get_roadmap` - Read session roadmap (steps, documents, status)
 - `update_roadmap` - Add/update/remove steps, set title and documents
 - `session_note` - Append or read timestamped notes that survive compaction
-- `get_presentation` - Read session slide deck
-- `update_presentation` - Create/update/remove slides
 
 **get_roadmap** parameters:
 - `sessionId` (string, optional) - Read another session's roadmap
@@ -885,18 +861,6 @@ Defined in `src/roadmap-tool.ts` and `src/presentation-tool.ts`:
 **session_note** parameters:
 - `append` (string, optional) - Add a timestamped note
 - `sessionId` (string, optional) - Read another session's notes
-
-**get_presentation** parameters:
-- `sessionId` (string, optional) - Read another session's presentation
-
-**update_presentation** parameters (all optional):
-- `title` (string) - Set title
-- `slides` (string[]) - Replace entire slide list (max 100)
-- `addSlide` (string) - Append a slide (markdown)
-- `addSlideIndex` (number) - Insert position
-- `updateSlideIndex` (number) + `updateSlide` (string) - Update a slide
-- `removeSlideIndex` (number) - Remove a slide
-- `removeAll` (boolean) - Delete entire presentation
 
 ### Session History Tool
 

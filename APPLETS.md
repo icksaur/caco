@@ -118,7 +118,6 @@ Every CSS rule in `style.css` is automatically prefixed with `.applet-instance[d
 |---|---|
 | `applet-browser` | Browse and load saved applets |
 | `calculator` | Basic calculator with keyboard support and history |
-| `color-hash` | Generate colored square from string hash |
 | `doodle` | Drawing canvas with AI integration |
 | `drum-machine` | 4-track 16-step drum sequencer |
 | `file-finder` | Fuzzy-search files in a directory tree, copy paths to clipboard |

@@ -16,9 +16,8 @@ import { homedir } from 'os';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getSessionRoadmap, setSessionRoadmap, getSessionPresentation, setSessionPresentation, deleteSessionData, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
+import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
 import { readSessionWorkspace, searchSessionEvents, searchSessionNotes, searchSessionRoadmap } from '../sdk-session-store.js';
-import { applyPresentationUpdate, type PresentationUpdateParams } from '../presentation-tool.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
@@ -627,28 +626,6 @@ router.patch('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
   
   setSessionRoadmap(sessionId, existing);
   res.json(existing);
-});
-
-router.get('/sessions/:sessionId/presentation', (req: Request, res: Response) => {
-  res.json(getSessionPresentation(req.params.sessionId as string) || {});
-});
-
-router.patch('/sessions/:sessionId/presentation', (req: Request, res: Response) => {
-  const sessionId = req.params.sessionId as string;
-  const params = req.body as PresentationUpdateParams;
-  const existing = getSessionPresentation(sessionId);
-  try {
-    const result = applyPresentationUpdate(existing, params);
-    if (result === null) {
-      deleteSessionData(sessionId, 'presentation');
-      res.json({ removed: true });
-      return;
-    }
-    setSessionPresentation(sessionId, result);
-    res.json(result);
-  } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-  }
 });
 
 router.get('/sessions/:sessionId/notes', (req: Request, res: Response) => {

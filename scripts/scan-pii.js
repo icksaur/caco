@@ -30,53 +30,84 @@ function git(cmd) {
   catch { return ''; }
 }
 
+// Common short words / programming terms that frequently overlap with names,
+// hostnames, or email usernames. Any identity fragment matching one of these
+// is ignored to avoid false-positive matches against every file in the repo.
+const COMMON_WORD_STOPLIST = new Set([
+  'dev', 'devops', 'prod', 'test', 'tests', 'app', 'web', 'api', 'src',
+  'lib', 'bin', 'tmp', 'log', 'logs', 'home', 'work', 'main', 'master',
+  'admin', 'system', 'service', 'server', 'client', 'desktop', 'laptop',
+  'workstation', 'computer', 'pc', 'mac', 'win', 'linux', 'ubuntu',
+  'fedora', 'arch', 'debian', 'and', 'the', 'for', 'with', 'from',
+  'data', 'user', 'users', 'name', 'host', 'node', 'box',
+]);
+
+// Reject identity fragments that are too short (most false positives) or
+// match a common word. Length floor of 5 covers cases like "dev1" but
+// keeps real names like "carl".
+function isUsableIdentityFragment(text) {
+  if (!text) return false;
+  if (text.length < 5) return false;
+  if (COMMON_WORD_STOPLIST.has(text)) return false;
+  return true;
+}
+
 function collectIdentity() {
   const patterns = new Map(); // pattern → label
+
+  const add = (text, label) => {
+    if (isUsableIdentityFragment(text.toLowerCase())) {
+      patterns.set(text.toLowerCase(), label);
+    }
+  };
+
+  // Full strings (paths, emails, hostnames) always go in — they're specific
+  // enough that a stoplist match would never cover them.
+  const addExact = (text, label) => {
+    if (text && text.length > 0) patterns.set(text.toLowerCase(), label);
+  };
 
   // OS identity
   const user = userInfo().username;
   if (user && user !== 'root' && user !== 'user') {
-    patterns.set(user.toLowerCase(), 'OS username');
+    add(user, 'OS username');
   }
 
   const host = hostname();
   if (host && host !== 'localhost') {
-    patterns.set(host.toLowerCase(), 'hostname');
+    addExact(host, 'hostname');
+    // Also try host components separated by '-' or '.' so that "carl-dev"
+    // contributes "carl" but not "dev".
+    for (const part of host.split(/[-.]/)) {
+      add(part, 'hostname part');
+    }
   }
 
   // Home directory components  (e.g. "/home/name" → match "name")
   const home = userInfo().homedir;
   if (home) {
-    // Full home path
-    patterns.set(home.toLowerCase(), 'home directory');
-    // On Windows: C:\Users\name → name
-    // On Linux:   /home/name   → name
+    addExact(home, 'home directory');
     const parts = home.replace(/\\/g, '/').split('/').filter(Boolean);
     const leaf = parts[parts.length - 1];
-    if (leaf && leaf !== 'root' && leaf !== 'user' && leaf.length > 2) {
-      // Already covered by OS username usually, but captures Windows cases
-      patterns.set(leaf.toLowerCase(), 'home dir username');
+    if (leaf && leaf !== 'root' && leaf !== 'user') {
+      add(leaf, 'home dir username');
     }
   }
 
   // Git identity
   const gitName = git('config user.name');
   if (gitName) {
-    patterns.set(gitName.toLowerCase(), 'git user.name');
-    // Also check individual name parts (first/last name)
+    addExact(gitName, 'git user.name');
     for (const part of gitName.split(/\s+/)) {
-      if (part.length > 2) patterns.set(part.toLowerCase(), 'git name part');
+      add(part, 'git name part');
     }
   }
 
   const gitEmail = git('config user.email');
   if (gitEmail) {
-    patterns.set(gitEmail.toLowerCase(), 'git user.email');
-    // Username part of email
+    addExact(gitEmail, 'git user.email');
     const emailUser = gitEmail.split('@')[0];
-    if (emailUser && emailUser.length > 2) {
-      patterns.set(emailUser.toLowerCase(), 'email username');
-    }
+    if (emailUser) add(emailUser, 'email username');
   }
 
   return patterns;
@@ -133,7 +164,25 @@ function getStagedFiles() {
 
 // ── Scan ────────────────────────────────────────────────────────────
 
-function scanFile(filePath, identityPatterns) {
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Build a word-boundary regex for each identity fragment so "dev" doesn't
+// match "development", and a short surname like "Lee" doesn't match every
+// occurrence of "lee" (e.g. "sleeve"). For path-like fragments containing
+// special characters (slashes, @), we fall back to substring match because
+// they're specific enough not to false-positive.
+function buildIdentityMatcher(pattern) {
+  // Path-ish or email-ish: literal substring is fine.
+  if (/[/\\@.]/.test(pattern)) {
+    return (lower) => lower.includes(pattern);
+  }
+  const re = new RegExp(`\\b${escapeRegex(pattern)}\\b`);
+  return (lower) => re.test(lower);
+}
+
+function scanFile(filePath, identityMatchers) {
   const content = readFileSync(filePath, 'utf8');
   const lines = content.split('\n');
   const rel = relative(root, filePath);
@@ -144,14 +193,14 @@ function scanFile(filePath, identityPatterns) {
     const lower = line.toLowerCase();
     const lineNum = i + 1;
 
-    // Identity matches — search for each collected pattern
-    for (const [pattern, label] of identityPatterns) {
-      if (lower.includes(pattern)) {
+    // Identity matches — word-boundary regex (or substring for path-like).
+    for (const { match, label } of identityMatchers) {
+      if (match(lower)) {
         findings.push({ file: rel, line: lineNum, label, text: line.trimStart() });
       }
     }
 
-    // Secret patterns
+    // Secret patterns — keep substring/regex matching as authored.
     for (const { re, label } of SECRET_PATTERNS) {
       if (re.test(line)) {
         findings.push({ file: rel, line: lineNum, label, text: line.trimStart() });
@@ -174,11 +223,16 @@ for (const [pattern, label] of identity) {
 }
 console.log();
 
+const identityMatchers = Array.from(identity, ([pattern, label]) => ({
+  match: buildIdentityMatcher(pattern),
+  label,
+}));
+
 const files = stagedOnly ? getStagedFiles() : walkFiles(root);
 const allFindings = [];
 
 for (const file of files) {
-  allFindings.push(...scanFile(file, identity));
+  allFindings.push(...scanFile(file, identityMatchers));
 }
 
 // Deduplicate (same file+line can match multiple patterns)

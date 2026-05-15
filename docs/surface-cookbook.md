@@ -221,6 +221,36 @@ Surfaces should render *something* when items is empty — silence reads as a bu
 }
 ```
 
+### Status rail (left border accent)
+
+A colored left stripe indicating item state — used in Caco's session list for busy/unobserved indicators. Good for status-at-a-glance without badges. The transparent default keeps alignment consistent across states.
+
+```css
+.item {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border-left: 3px solid transparent;
+  background: var(--bg-raised);
+  margin: var(--space-xs) var(--space-sm);
+}
+.item.success { border-left-color: var(--color-success-bright); }
+.item.active  { border-left-color: var(--color-accent); }
+.item.warn    { border-left-color: var(--orange); background: rgba(var(--orange-rgb, 230,162,60), 0.06); }
+.item.error   { border-left-color: var(--color-error); background: rgba(var(--color-error-rgb, 245,108,108), 0.06); }
+.item.muted   { border-left-color: var(--color-text-dim); }
+```
+
+Pair with a tinted background on warn/error for extra emphasis. Don't tint success/active — the stripe alone is enough on dark backgrounds.
+
+For selection (not status), use `--color-accent` as the stripe and `--bg-hover` as the background:
+
+```css
+.item.selected {
+  border-left-color: var(--color-accent);
+  background: var(--bg-hover);
+}
+```
+
 ### Shadow-safe list padding
 
 Cards with hover lift (`translateY` + `box-shadow`) clip at the container edge. Add horizontal padding to the list container so shadows render fully — especially visible on light themes:

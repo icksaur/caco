@@ -611,52 +611,78 @@ class SessionManager {
     const sessionRef = { id: sessionId };
     const tools = config.toolFactory(cwd, sessionRef);
     
-    let session: CopilotSessionInstance;
     let repairMessage: string | undefined;
     const memoryContent = formatMemoryForPrompt();
-    try {
-      session = await client.resumeSession(sessionId, {
-        streaming: true,
-        tools,
-        excludedTools: config.excludedTools,
-        onPermissionRequest: approveAll,
-        configDir: join(homedir(), '.copilot'),
-        mcpServers: await loadMcpServers(),
-        workingDirectory: cwd,
-        ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
-      } as ResumeSessionConfig);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('Session file is corrupted')) {
-        console.warn(`[SESSION] Attempting auto-repair for corrupted session ${sessionId}: ${msg}`);
-        const repair = repairSessionEvents(sessionId, msg);
-        if (repair) {
-          repairMessage = repair;
-          // Retry once after repair
-          try {
-            session = await client.resumeSession(sessionId, {
-              streaming: true,
-              tools,
-              excludedTools: config.excludedTools,
-              onPermissionRequest: approveAll,
-              configDir: join(homedir(), '.copilot'),
-              mcpServers: await loadMcpServers(),
-              workingDirectory: cwd,
-              ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
-            } as ResumeSessionConfig);
-          } catch (retryErr) {
-            this.handleClientError(retryErr);
-            throw retryErr;
-          }
-        } else {
+    const resumeArgs = {
+      streaming: true,
+      tools,
+      excludedTools: config.excludedTools,
+      onPermissionRequest: approveAll,
+      configDir: join(homedir(), '.copilot'),
+      mcpServers: await loadMcpServers(),
+      workingDirectory: cwd,
+      ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
+    } as ResumeSessionConfig;
+
+    const MAX_REPAIR_ATTEMPTS = 3;
+    let lastRepairSignature: string | null = null;
+    let attemptedSession: CopilotSessionInstance | null = null;
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
+      try {
+        attemptedSession = await client.resumeSession(sessionId, resumeArgs);
+        lastError = null;
+        break;
+      } catch (e) {
+        lastError = e;
+        const msg = e instanceof Error ? e.message : String(e);
+
+        // Only auto-repair the specific "Session file is corrupted" SDK error.
+        if (!msg.includes('Session file is corrupted')) {
           this.handleClientError(e);
           throw e;
         }
-      } else {
-        this.handleClientError(e);
-        throw e;
+
+        // Stop if we've hit the cap.
+        if (attempt === MAX_REPAIR_ATTEMPTS) {
+          console.error(`[SESSION] Auto-repair exhausted (${MAX_REPAIR_ATTEMPTS} attempts) for ${sessionId}: ${msg}`);
+          this.handleClientError(e);
+          throw e;
+        }
+
+        // Build a signature for the failing line so we can detect "same line
+        // still failing" — if repair didn't move the cursor, give up rather
+        // than loop on a corruption shape we don't know how to fix.
+        const sigMatch = msg.match(/line (\d+)/);
+        const sig = sigMatch ? `line:${sigMatch[1]}` : msg.slice(0, 80);
+        if (sig === lastRepairSignature) {
+          console.error(`[SESSION] Auto-repair stuck on same failure for ${sessionId} (${sig}); giving up`);
+          this.handleClientError(e);
+          throw e;
+        }
+        lastRepairSignature = sig;
+
+        // Quietly attempt to repair; only the final success/failure surfaces.
+        console.warn(`[SESSION] Auto-repair attempt ${attempt + 1} for ${sessionId}: ${msg}`);
+        const repair = repairSessionEvents(sessionId, msg);
+        if (!repair) {
+          this.handleClientError(e);
+          throw e;
+        }
+        // Keep the most recent successful repair description as the final
+        // message returned to the caller.
+        repairMessage = repair;
       }
     }
+
+    if (!attemptedSession) {
+      // Should be unreachable — every code path above either assigns or throws.
+      const err = lastError instanceof Error ? lastError : new Error(String(lastError ?? 'resume failed'));
+      this.handleClientError(err);
+      throw err;
+    }
+    const session: CopilotSessionInstance = attemptedSession;
     
     this.activeSessions.set(sessionId, { cwd, session });
     

@@ -15,16 +15,17 @@ import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import sessionManager from '../session-manager.js';
 import { sessionState } from '../session-state.js';
-import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
+import { setAppletUserState, setAppletNavigation, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
-import { updateUsage } from '../usage-state.js';
 import { broadcastEvent, broadcastGlobalEvent, type SessionEvent } from './websocket.js';
-import { shouldEmitReload } from '../sdk-event-parser.js';
 import { getQueue, isFlushTrigger } from '../caco-event-queue.js';
-import { setSessionIntent, getSessionMeta, setSessionMeta } from '../storage.js';
+import { getSessionMeta, setSessionMeta } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
 import { prefixMessageSource, type MessageSource } from '../message-source.js';
+import { createWatchdog } from '../dispatch-watchdog.js';
+import { retryWithFreshClient } from '../dispatch-retry.js';
+import { applyDispatchEventEffects } from '../dispatch-events.js';
 
 const router = Router();
 
@@ -276,23 +277,17 @@ export async function dispatchMessage(
       messageOptions.attachments = tempFilePaths.map(p => ({ type: 'file', path: p }));
     }
     
-    // Subscribe to SDK events and forward them
     type SDKEventCallback = (event: SessionEvent) => void;
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    
+
     const cleanupAndComplete = (reason: string) => {
       if (dispatchCompleted) return;
       dispatchCompleted = true;
-      
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-        timeoutHandle = undefined;
-      }
-      
+      watchdog.cancel();
+
       // End dispatch - clears busy state and correlation context atomically.
       // restart-manager listens for the 'idle' event from dispatchState.
       sessionManager.endDispatch(sessionId);
-      
+
       broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
       if (tempFilePaths) {
         for (const p of tempFilePaths) unlink(p).catch(() => {});
@@ -300,74 +295,69 @@ export async function dispatchMessage(
       console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
     };
     
-    const INITIAL_TIMEOUT_MS = 45_000;
+    const SWARM_TIMEOUT_MS = 15 * 60 * 1000;
     const meta = getSessionMeta(sessionId);
     const baseTimeout = meta?.kind === 'swarm' || meta?.kind === 'agent'
-      ? 15 * 60 * 1000
+      ? SWARM_TIMEOUT_MS
       : DISPATCH_TIMEOUT_MS;
-    let betweenEventTimeout = baseTimeout;
-    let receivedFirstEvent = false;
-    let toolExecuting = false;
+
     let retried = false;
-    
-    const pauseWatchdog = () => {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-      timeoutHandle = undefined;
-    };
-    
-    const resetWatchdog = () => {
-      if (toolExecuting) return;
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-      const timeout = receivedFirstEvent ? betweenEventTimeout : INITIAL_TIMEOUT_MS;
-      timeoutHandle = setTimeout(() => {
+    let unsubscribe: () => void = () => {};
+
+    const watchdog = createWatchdog({
+      initialTimeoutMs: 45_000,
+      betweenEventTimeoutMs: baseTimeout,
+      longRunningTimeoutMs: SWARM_TIMEOUT_MS,
+      onTimeout: (reason) => {
         if (dispatchCompleted) return;
-        
-        if (!receivedFirstEvent && !retried) {
+
+        if (reason.kind === 'no-first-event' && !retried) {
           retried = true;
-          console.warn(`[DISPATCH:${rid}] No first event after ${INITIAL_TIMEOUT_MS / 1000}s, retrying with fresh client`);
+          console.warn(`[DISPATCH:${rid}] No first event after ${reason.timeoutMs / 1000}s, retrying with fresh client`);
           onEvent({ type: 'session.info', data: { message: 'Reconnecting...' } });
-          unsubscribe();
-          void (async () => {
-            try {
-              sessionManager.dropStaleSession(sessionId);
-              await sessionManager.ensureClientHealthy();
-              await sessionManager.resume(sessionId, sessionState.getSessionConfig());
-              const retrySession = sessionManager.getSession(sessionId);
-              if (!retrySession) throw new Error('No session after retry');
-              unsubscribe = (retrySession as unknown as { on: (cb: SDKEventCallback) => () => void }).on(handleEvent);
-              await (retrySession as unknown as { send: (opts: Record<string, unknown>) => Promise<unknown> }).send(messageOptions);
-              resetWatchdog();
-            } catch (e) {
-              console.error(`[DISPATCH:${rid}] Retry failed:`, e instanceof Error ? e.message : e);
+          void retryWithFreshClient({
+            sessionId,
+            messageOptions,
+            handleEvent,
+            dropStaleSession: (id) => sessionManager.dropStaleSession(id),
+            ensureClientHealthy: () => sessionManager.ensureClientHealthy(),
+            resume: () => sessionManager.resume(sessionId, sessionState.getSessionConfig()).then(() => {}),
+            getSession: (id) => sessionManager.getSession(id),
+            resetWatchdog: () => watchdog.reset(),
+            unsubscribe,
+          }).then((newUnsubscribe) => {
+            if (newUnsubscribe) {
+              unsubscribe = newUnsubscribe;
+            } else {
+              console.error(`[DISPATCH:${rid}] Retry failed`);
               onEvent({ type: 'session.error', data: { message: 'Session not responding after retry', restorePrompt: true } });
               cleanupAndComplete('retry-failed');
             }
-          })();
+          });
           return;
         }
-        
-        const label = receivedFirstEvent ? `${betweenEventTimeout / 1000}s between events` : `${INITIAL_TIMEOUT_MS / 1000}s waiting for first event`;
+
+        const label = reason.kind === 'between-events'
+          ? `${reason.timeoutMs / 1000}s between events`
+          : `${reason.timeoutMs / 1000}s waiting for first event`;
         console.warn(`[DISPATCH:${rid}] Watchdog: ${label}, timing out session ${sessionId}`);
-        onEvent({ type: 'session.error', data: { message: receivedFirstEvent ? `No response for ${betweenEventTimeout / 1000 / 60} minutes` : 'Session not responding (connection may be stale)', restorePrompt: true } });
+        onEvent({
+          type: 'session.error',
+          data: {
+            message: reason.kind === 'between-events'
+              ? `No response for ${reason.timeoutMs / 1000 / 60} minutes`
+              : 'Session not responding (connection may be stale)',
+            restorePrompt: true,
+          },
+        });
         cleanupAndComplete('timeout');
         unsubscribe();
-      }, timeout);
-    };
-    resetWatchdog();
+      },
+    });
     
     const handleEvent = (event: SessionEvent) => {
-      receivedFirstEvent = true;
-      
-      if (event.type === 'tool.execution_start') {
-        toolExecuting = true;
-        pauseWatchdog();
-      } else if (event.type === 'tool.execution_complete') {
-        toolExecuting = false;
-        betweenEventTimeout = 15 * 60 * 1000;
-        resetWatchdog();
-      } else {
-        resetWatchdog();
-      }
+      watchdog.notifyEvent(event.type);
+
       // Flush queued caco events before trigger events (so embeds appear at natural break)
       if (isFlushTrigger(event.type)) {
         const queue = getQueue(sessionId);
@@ -379,50 +369,15 @@ export async function dispatchMessage(
           }
         }
       }
-      
+
       // Forward the SDK event to the client (no transformation — caco.* events
       // are emitted directly by their tool handlers).
       onEvent(event);
-      
-      // Server-side processing
-      const eventData = event.data || {};
-      
-      // Capture intent for session state display
-      if (event.type === 'assistant.intent' && eventData.intent) {
-        setSessionIntent(sessionId, String(eventData.intent));
-      }
-      // Also capture from report_intent tool
-      if (event.type === 'tool.execution_start') {
-        const toolName = eventData.toolName || eventData.name;
-        const args = eventData.arguments as Record<string, unknown> | undefined;
-        if (toolName === 'report_intent' && args?.intent) {
-          setSessionIntent(sessionId, String(args.intent));
-        }
-        
-        // Auto-populate context footer from file-modifying tools only
-        if (args?.path && typeof args.path === 'string') {
-          if (toolName === 'create' || toolName === 'edit') {
-            autoAddFileContext(sessionId, args.path);
-          }
-        }
-      }
-      
-      if (event.type === 'assistant.usage') {
-        const quotaSnapshots = eventData.quotaSnapshots as Record<string, {
-          isUnlimitedEntitlement: boolean;
-          entitlementRequests: number;
-          usedRequests: number;
-          remainingPercentage: number;
-          resetDate?: string;
-        }> | undefined;
-        updateUsage(quotaSnapshots);
-      }
-      
-      // Reload requires external state (consumeReloadSignal), so handled separately
-      if (shouldEmitReload(event) && consumeReloadSignal(sessionId)) {
-        onEvent({ type: 'caco.reload', data: {} });
-      }
-      
+
+      // Server-side side-effects: intent capture, auto-context, usage,
+      // reload signal. Extracted so each event hook stays inspectable.
+      applyDispatchEventEffects(sessionId, event, { autoAddFileContext, onEvent });
+
       if (event.type === 'session.idle' || event.type === 'session.error') {
         if (event.type === 'session.idle' && needsObservation) {
           unobservedTracker.markIdle(sessionId);
@@ -431,8 +386,9 @@ export async function dispatchMessage(
         unsubscribe();
       }
     };
-    
-    let unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on(handleEvent);
+
+    unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on(handleEvent);
+    watchdog.reset();
     
     // Send message — fire-and-forget. The send RPC may outlive the actual
     // session processing (SDK can be slow to ack), so we don't await it.
@@ -443,41 +399,45 @@ export async function dispatchMessage(
     console.log(`[DISPATCH:${rid}] Sending to SDK for session ${sessionId}`);
     try {
       const sendPromise = sessionManager.sendStream(sessionId, prompt, messageOptions);
-      
+
       sendPromise.catch((err: unknown) => {
         if (dispatchCompleted) return;
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[DISPATCH:${rid}] Async send error:`, message);
-        
-        if (message.includes('Session not found') || message.includes('session.send failed')) {
-          sessionManager.dropStaleSession(sessionId);
-          if (!retried) {
-            retried = true;
-            console.log(`[DISPATCH:${rid}] Session lost by SDK, retrying with fresh resume`);
-            onEvent({ type: 'session.info', data: { message: 'Reconnecting...' } });
-            unsubscribe();
-            void (async () => {
-              try {
-                await sessionManager.ensureClientHealthy();
-                await sessionManager.resume(sessionId, sessionState.getSessionConfig());
-                const retrySession = sessionManager.getSession(sessionId);
-                if (!retrySession) throw new Error('No session after retry');
-                unsubscribe = (retrySession as unknown as { on: (cb: SDKEventCallback) => () => void }).on(handleEvent);
-                void (retrySession as unknown as { send: (opts: Record<string, unknown>) => Promise<unknown> }).send(messageOptions).catch(() => {});
-                resetWatchdog();
-              } catch (retryErr) {
-                console.error(`[DISPATCH:${rid}] Retry failed:`, retryErr instanceof Error ? retryErr.message : retryErr);
-                onEvent({ type: 'session.error', data: { message: 'Session not responding after retry', restorePrompt: true } });
-                cleanupAndComplete('retry-failed');
-              }
-            })();
-            return;
-          }
+
+        const isSessionLost = message.includes('Session not found') || message.includes('session.send failed');
+        if (isSessionLost && !retried) {
+          retried = true;
+          console.log(`[DISPATCH:${rid}] Session lost by SDK, retrying with fresh resume`);
+          onEvent({ type: 'session.info', data: { message: 'Reconnecting...' } });
+          void retryWithFreshClient({
+            sessionId,
+            messageOptions,
+            handleEvent,
+            dropStaleSession: (id) => sessionManager.dropStaleSession(id),
+            ensureClientHealthy: () => sessionManager.ensureClientHealthy(),
+            resume: () => sessionManager.resume(sessionId, sessionState.getSessionConfig()).then(() => {}),
+            getSession: (id) => sessionManager.getSession(id),
+            resetWatchdog: () => watchdog.reset(),
+            unsubscribe,
+          }).then((newUnsubscribe) => {
+            if (newUnsubscribe) {
+              unsubscribe = newUnsubscribe;
+            } else {
+              console.error(`[DISPATCH:${rid}] Retry failed`);
+              onEvent({ type: 'session.error', data: { message: 'Session not responding after retry', restorePrompt: true } });
+              cleanupAndComplete('retry-failed');
+            }
+          });
+          return;
+        }
+
+        if (isSessionLost) {
           onEvent({ type: 'session.error', data: { message: 'Session expired - please start a new session', restorePrompt: true } });
         } else {
           onEvent({ type: 'session.error', data: { message, restorePrompt: true } });
         }
-        
+
         cleanupAndComplete('send error');
         unsubscribe();
       });

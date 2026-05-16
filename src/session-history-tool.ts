@@ -4,27 +4,79 @@
  * Provides read-only SQL access to ~/.copilot/session-store.db —
  * the global session history database maintained by the Copilot CLI.
  * 
- * This works around a limitation where SDK-spawned sessions don't get
- * the CLI's built-in session_store SQL routing.
+ * Backed by node:sqlite (Node 22+ built-in). No native dependencies and
+ * no WASM blob — the previous sql.js backend pulled in ~19 MB of WASM
+ * to do exactly this.
  */
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { join } from 'path';
 import { homedir } from 'os';
-import { readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
+import { DatabaseSync } from 'node:sqlite';
 
 const DB_PATH = join(homedir(), '.copilot', 'session-store.db');
 const SELECT_RE = /^\s*(SELECT|WITH|PRAGMA)\b/i;
+const ROW_LIMIT = 500;
 
-let initSqlJs: typeof import('sql.js').default | null = null;
+export interface QueryResult {
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+  truncated?: boolean;
+}
 
-async function loadSqlJs() {
-  if (!initSqlJs) {
-    const mod = await import('sql.js');
-    initSqlJs = mod.default;
+export interface QueryError {
+  error: string;
+}
+
+export type QueryResponse = QueryResult | QueryError;
+
+/** Pure predicate: is this a query we'll allow? */
+export function isReadOnlyQuery(query: string): boolean {
+  return SELECT_RE.test(query);
+}
+
+/**
+ * Run a SELECT-shaped query against a SQLite database file on disk.
+ * Returns either { columns, rows, rowCount, truncated? } or { error }.
+ * The query gate is applied here so tests don't need to spin up a tool.
+ */
+export function runSessionStoreQuery(dbPath: string, query: string): QueryResponse {
+  if (!isReadOnlyQuery(query)) {
+    return { error: 'Only SELECT, WITH, and PRAGMA queries are allowed.' };
   }
-  return initSqlJs();
+
+  if (!existsSync(dbPath)) {
+    return { error: `Session store database not found at ${dbPath}` };
+  }
+
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const stmt = db.prepare(query);
+    // setReadBigInts(false) keeps INTEGER columns as Number (matches the
+    // sql.js shape). Acceptable: session-store IDs are timestamps and
+    // counters that fit safely in a JS number.
+    stmt.setReadBigInts(false);
+    const rawRows = stmt.all() as Array<Record<string, unknown>>;
+    if (rawRows.length === 0) {
+      return { columns: [], rows: [], rowCount: 0 };
+    }
+    const columns = Object.keys(rawRows[0]);
+    const allRows = rawRows.map(row => columns.map(c => row[c]));
+    return {
+      columns,
+      rows: allRows.slice(0, ROW_LIMIT),
+      rowCount: allRows.length,
+      ...(allRows.length > ROW_LIMIT && { truncated: true }),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    db?.close();
+  }
 }
 
 export function createSessionHistoryTool() {
@@ -39,40 +91,7 @@ Example: SELECT s.id, s.summary FROM sessions s ORDER BY s.updated_at DESC LIMIT
     parameters: z.object({
       query: z.string().describe('SQL query (SELECT only). Tables: sessions, turns, checkpoints, session_files, session_refs'),
     }),
-    handler: async ({ query }) => {
-      if (!SELECT_RE.test(query)) {
-        return { error: 'Only SELECT, WITH, and PRAGMA queries are allowed.' };
-      }
-
-      if (!existsSync(DB_PATH)) {
-        return { error: `Session store database not found at ${DB_PATH}` };
-      }
-
-      try {
-        const SQL = await loadSqlJs();
-        const buffer = readFileSync(DB_PATH);
-        const db = new SQL.Database(buffer);
-
-        try {
-          const results = db.exec(query);
-          if (!results.length) {
-            return { columns: [], rows: [], rowCount: 0 };
-          }
-
-          const { columns, values } = results[0];
-          return {
-            columns,
-            rows: values.slice(0, 500),
-            rowCount: values.length,
-            truncated: values.length > 500,
-          };
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        return { error: err instanceof Error ? err.message : String(err) };
-      }
-    }
+    handler: async ({ query }) => runSessionStoreQuery(DB_PATH, query),
   });
 
   return [tool];

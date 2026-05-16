@@ -7,7 +7,6 @@ var sessionNotes = [];
 
 var filesSection = document.getElementById('sc-files');
 var filesList = document.getElementById('sc-files-list');
-var presSection = document.getElementById('sc-pres');
 var roadmapSection = document.getElementById('sc-roadmap');
 var roadmapHeader = document.getElementById('sc-roadmap-header');
 var roadmapDocs = document.getElementById('sc-roadmap-docs');
@@ -256,28 +255,11 @@ async function archiveNote(ts) {
   loadNotes();
 }
 
-// --- Presentation ---
-
-async function checkPresentation() {
-  if (!sessionId) return;
-  try {
-    var res = await fetch('/api/sessions/' + sessionId + '/data');
-    var keys = await res.json();
-    if (Array.isArray(keys) && keys.indexOf('presentation') !== -1) {
-      presSection.innerHTML = '<a class="sc-link" href="?applet=presentation">📊 Presentation</a>';
-      presSection.style.display = '';
-    } else {
-      presSection.style.display = 'none';
-    }
-  } catch { presSection.style.display = 'none'; }
-}
-
 // --- Lifecycle ---
 
 function loadAll() {
   loadRoadmap();
   loadNotes();
-  checkPresentation();
 }
 
 window.appletAPI.onSessionChange(function(_id, info) {

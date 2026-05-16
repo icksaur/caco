@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  dispatchStarted,
-  dispatchComplete,
   getActiveDispatches,
   requestRestart,
   isRestartRequested,
@@ -9,42 +7,50 @@ import {
   _resetForTest,
   _setTestHandlers
 } from '../../src/restart-manager.js';
+import { dispatchState } from '../../src/dispatch-state.js';
+
+// Convenience wrappers: restart-manager no longer counts dispatches itself,
+// it watches dispatchState. Tests drive the source-of-truth directly.
+function start(id: string): void {
+  dispatchState.start(id, `corr-${id}`);
+}
+function end(id: string): void {
+  dispatchState.end(id);
+}
 
 describe('restart-manager', () => {
   beforeEach(() => {
     _resetForTest();
+    // Clear residual dispatchState entries from prior tests.
+    for (const id of Array.from(dispatchState.getAllActive().keys())) {
+      dispatchState.end(id);
+    }
   });
 
-  describe('dispatch counting', () => {
+  describe('dispatch counting (via dispatchState)', () => {
     it('starts at zero', () => {
       expect(getActiveDispatches()).toBe(0);
     });
 
-    it('increments on dispatchStarted', () => {
-      dispatchStarted();
+    it('reflects dispatchState.start', () => {
+      start('s1');
       expect(getActiveDispatches()).toBe(1);
-      dispatchStarted();
+      start('s2');
       expect(getActiveDispatches()).toBe(2);
     });
 
-    it('decrements on dispatchComplete', () => {
-      dispatchStarted();
-      dispatchStarted();
-      dispatchComplete();
+    it('reflects dispatchState.end', () => {
+      start('s1');
+      start('s2');
+      end('s1');
       expect(getActiveDispatches()).toBe(1);
-    });
-
-    it('never goes negative', () => {
-      dispatchComplete();
-      dispatchComplete();
-      expect(getActiveDispatches()).toBe(0);
     });
   });
 
   describe('requestRestart', () => {
     it('sets restart flag', () => {
       _setTestHandlers({ onSpawn: () => {}, onExit: () => {} });
-      
+
       expect(isRestartRequested()).toBe(false);
       requestRestart();
       expect(isRestartRequested()).toBe(true);
@@ -72,10 +78,9 @@ describe('restart-manager', () => {
         onExit: () => { exited = true; }
       });
 
-      dispatchStarted();
+      start('s1');
       requestRestart();
 
-      // Should not restart yet
       expect(spawned).toBe(false);
       expect(exited).toBe(false);
       expect(isRestartRequested()).toBe(true);
@@ -89,19 +94,15 @@ describe('restart-manager', () => {
         onExit: () => { exited = true; }
       });
 
-      dispatchStarted();
-      dispatchStarted();
+      start('s1');
+      start('s2');
       requestRestart();
-
-      // Still active
       expect(spawned).toBe(false);
 
-      dispatchComplete();
-      // Still one active
+      end('s1');
       expect(spawned).toBe(false);
 
-      dispatchComplete();
-      // Now should restart
+      end('s2');
       expect(spawned).toBe(true);
       expect(exited).toBe(true);
     });
@@ -110,7 +111,7 @@ describe('restart-manager', () => {
   describe('onAllIdle callback', () => {
     it('calls cleanup callback before spawn', () => {
       const callOrder: string[] = [];
-      
+
       onAllIdle(() => { callOrder.push('cleanup'); });
       _setTestHandlers({
         onSpawn: () => { callOrder.push('spawn'); },
@@ -124,29 +125,33 @@ describe('restart-manager', () => {
 
     it('continues restart even if callback throws', () => {
       let spawned = false;
-      
+
       onAllIdle(() => { throw new Error('cleanup failed'); });
       _setTestHandlers({
         onSpawn: () => { spawned = true; },
         onExit: () => {}
       });
 
-      // Should not throw
       expect(() => requestRestart()).not.toThrow();
       expect(spawned).toBe(true);
     });
   });
 
   describe('reset', () => {
-    it('clears all state', () => {
-      dispatchStarted();
-      dispatchStarted();
+    it('clears restart flag (dispatchState is the source of truth for count)', () => {
       _setTestHandlers({ onExit: () => {} });
-      
+      start('s1');
+      requestRestart();
+
       _resetForTest();
 
-      expect(getActiveDispatches()).toBe(0);
+      // Restart flag cleared; idle listener removed. Active count is still
+      // governed by dispatchState (it lives on its own).
       expect(isRestartRequested()).toBe(false);
+      expect(getActiveDispatches()).toBe(1);
+
+      // Clean up
+      end('s1');
     });
   });
 });

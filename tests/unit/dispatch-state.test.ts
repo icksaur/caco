@@ -52,6 +52,23 @@ describe('DispatchState', () => {
       state.end('never-started'); // Should not throw
       expect(state.isBusy('never-started')).toBe(false);
     });
+
+    it('getActiveCount tracks the number of in-flight dispatches', () => {
+      expect(state.getActiveCount()).toBe(0);
+      state.start('s1', 'c1');
+      expect(state.getActiveCount()).toBe(1);
+      state.start('s2', 'c2');
+      expect(state.getActiveCount()).toBe(2);
+      // Re-starting an already-busy session does not double-count.
+      state.start('s1', 'c1-again');
+      expect(state.getActiveCount()).toBe(2);
+      state.end('s1');
+      expect(state.getActiveCount()).toBe(1);
+      state.end('s2');
+      expect(state.getActiveCount()).toBe(0);
+      state.end('s2'); // idempotent
+      expect(state.getActiveCount()).toBe(0);
+    });
   });
 
   describe('correlationId tracking', () => {

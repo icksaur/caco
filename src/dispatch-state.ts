@@ -37,6 +37,10 @@ export class DispatchState extends EventEmitter {
     return this.dispatches.has(sessionId);
   }
 
+  getActiveCount(): number {
+    return this.dispatches.size;
+  }
+
   getCorrelationId(sessionId: string): string | undefined {
     return this.dispatches.get(sessionId)?.correlationId;
   }

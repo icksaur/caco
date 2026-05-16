@@ -1,15 +1,19 @@
 /**
  * Graceful Restart Manager
- * 
- * Tracks active dispatches and handles graceful server restart.
- * When restart is requested via tool, waits for all sessions to be idle
- * before spawning new server process and exiting.
+ *
+ * Watches dispatchState for active sessions and handles graceful server restart.
+ * When restart is requested via tool, waits for all sessions to be idle before
+ * spawning the replacement server and exiting.
+ *
+ * Active dispatch tracking lives in dispatchState (single source of truth);
+ * this module only listens for its 'idle' event to drive the restart check.
  */
 
 import { spawn } from 'child_process';
 import { appendFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { dispatchState } from './dispatch-state.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -27,95 +31,72 @@ function log(msg: string): void {
 }
 
 let restartRequested = false;
-let activeDispatches = 0;
 let onAllIdleCallback: (() => void) | null = null;
+let idleListenerInstalled = false;
 
-// Test hooks - allow tests to intercept restart behavior
+// Test hooks
 let exitHandler: (() => void) | null = null;
 let spawnHandler: (() => void) | null = null;
 
-/**
- * Reset state (for testing only)
- */
+/** Reset state (for testing only). */
 export function _resetForTest(): void {
   restartRequested = false;
-  activeDispatches = 0;
   onAllIdleCallback = null;
   exitHandler = null;
   spawnHandler = null;
+  if (idleListenerInstalled) {
+    dispatchState.removeAllListeners('idle');
+    idleListenerInstalled = false;
+  }
 }
 
-/**
- * Set custom handlers for testing (avoids process.exit and spawn)
- */
+/** Set custom handlers for testing (avoids process.exit and spawn). */
 export function _setTestHandlers(handlers: { onExit?: () => void; onSpawn?: () => void }): void {
   exitHandler = handlers.onExit ?? null;
   spawnHandler = handlers.onSpawn ?? null;
 }
 
-/**
- * Request a graceful restart.
- * Server will restart when all active dispatches complete.
- */
+function ensureIdleListener(): void {
+  if (idleListenerInstalled) return;
+  dispatchState.on('idle', () => {
+    log(`Dispatch complete, active: ${dispatchState.getActiveCount()}`);
+    checkAndRestart();
+  });
+  idleListenerInstalled = true;
+}
+
+/** Request a graceful restart. Server will restart when all dispatches complete. */
 export function requestRestart(): void {
   log('Restart requested');
   restartRequested = true;
+  ensureIdleListener();
   checkAndRestart();
 }
 
-/**
- * Check if restart has been requested
- */
 export function isRestartRequested(): boolean {
   return restartRequested;
 }
 
-/**
- * Mark a dispatch as started (increment active count)
- */
-export function dispatchStarted(): void {
-  activeDispatches++;
-  log(`Dispatch started, active: ${activeDispatches}`);
-}
-
-/**
- * Mark a dispatch as complete (decrement active count)
- * Triggers restart check if restart was requested.
- */
-export function dispatchComplete(): void {
-  activeDispatches = Math.max(0, activeDispatches - 1);
-  log(`Dispatch complete, active: ${activeDispatches}`);
-  checkAndRestart();
-}
-
-/**
- * Get current active dispatch count
- */
+/** Number of sessions currently dispatching (a passthrough to dispatchState). */
 export function getActiveDispatches(): number {
-  return activeDispatches;
+  return dispatchState.getActiveCount();
 }
 
-/**
- * Set callback for when all dispatches are idle
- * Used for cleanup before restart
- */
+/** Set a callback to run when all dispatches are idle. Used for cleanup before restart. */
 export function onAllIdle(callback: () => void): void {
   onAllIdleCallback = callback;
 }
 
-/**
- * Check if we should restart and do so
- */
 function checkAndRestart(): void {
   if (!restartRequested) return;
-  if (activeDispatches > 0) {
-    log(`Waiting for ${activeDispatches} active dispatches`);
+  const active = dispatchState.getActiveCount();
+  if (active > 0) {
+    log(`Waiting for ${active} active dispatches`);
     return;
   }
-  
+
   log('All dispatches complete, initiating restart');
-  
-  // Call cleanup callback if set
+
   if (onAllIdleCallback) {
     try {
       onAllIdleCallback();
@@ -123,14 +104,13 @@ function checkAndRestart(): void {
       log(`Cleanup callback error: ${err}`);
     }
   }
-  
-  // Spawn new server (or call test handler)
+
   if (spawnHandler) {
     spawnHandler();
   } else {
     spawnServer();
   }
-  
+
   // Defer exit to let event loop flush WebSocket buffers.
   // Without this, session.idle may not reach the client before
   // process.exit() tears down all connections.
@@ -142,7 +122,7 @@ function checkAndRestart(): void {
       process.exit(0);
     }
   };
-  
+
   if (exitHandler) {
     doExit(); // Tests run synchronously
   } else {
@@ -150,13 +130,8 @@ function checkAndRestart(): void {
   }
 }
 
-/**
- * Spawn the new server process directly.
- * Server has retry logic for port binding.
- */
 function spawnServer(): void {
   log('Spawning new server...');
-  
   try {
     const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
       cwd: PROJECT_ROOT,
@@ -165,7 +140,6 @@ function spawnServer(): void {
       windowsHide: true,
       env: { ...process.env }
     });
-    
     child.unref();
     log(`New server spawned with PID: ${child.pid}`);
   } catch (err) {

@@ -20,7 +20,6 @@ import { parseImageDataUrl } from '../image-utils.js';
 import { updateUsage } from '../usage-state.js';
 import { broadcastEvent, broadcastGlobalEvent, type SessionEvent } from './websocket.js';
 import { shouldEmitReload } from '../sdk-event-parser.js';
-import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
 import { getQueue, isFlushTrigger } from '../caco-event-queue.js';
 import { setSessionIntent, getSessionMeta, setSessionMeta } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
@@ -238,10 +237,14 @@ export async function dispatchMessage(
   const { tempFilePaths, correlationId, requestId, needsObservation } = options || {};
   const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
-  
-  // Track active dispatch for graceful restart
-  dispatchStarted();
-  
+
+  // Register the dispatch with dispatch-state up-front. This is what
+  // restart-manager watches; it must cover the full lifetime of dispatchMessage
+  // so a restart requested during session-resume waits for us. The actual
+  // send-to-SDK happens later but the busy state is already true here.
+  const effectiveCorrelationId = correlationId || randomUUID();
+  sessionManager.startDispatch(sessionId, effectiveCorrelationId);
+
   // Guard against double cleanup (inner cleanupAndComplete vs outer catch)
   let dispatchCompleted = false;
   
@@ -260,7 +263,7 @@ export async function dispatchMessage(
     const session = sessionManager.getSession(sessionId);
     if (!session) {
       onEvent({ type: 'session.error', data: { message: 'No active session' } });
-      dispatchComplete();
+      sessionManager.endDispatch(sessionId);
       return;
     }
     
@@ -286,14 +289,14 @@ export async function dispatchMessage(
         timeoutHandle = undefined;
       }
       
-      // End dispatch - clears busy state and correlation context atomically
+      // End dispatch - clears busy state and correlation context atomically.
+      // restart-manager listens for the 'idle' event from dispatchState.
       sessionManager.endDispatch(sessionId);
       
       broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
       if (tempFilePaths) {
         for (const p of tempFilePaths) unlink(p).catch(() => {});
       }
-      dispatchComplete();
       console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
     };
     
@@ -434,7 +437,7 @@ export async function dispatchMessage(
     // Send message — fire-and-forget. The send RPC may outlive the actual
     // session processing (SDK can be slow to ack), so we don't await it.
     // Events stream via session.on(handleEvent) regardless.
-    sessionManager.startDispatch(sessionId, correlationId!);
+    // Note: startDispatch is already done at the top of this function.
     broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: true } });
     
     console.log(`[DISPATCH:${rid}] Sending to SDK for session ${sessionId}`);
@@ -500,7 +503,6 @@ export async function dispatchMessage(
       if (tempFilePaths) {
         for (const p of tempFilePaths) await unlink(p).catch(() => {});
       }
-      dispatchComplete();
     }
   }
 }

@@ -308,19 +308,4 @@ export async function appletExists(
   }
 }
 
-/**
- * Get applet slugs for system prompt injection
- * @deprecated Use buildSystemMessage() from prompts.ts instead
- */
-export async function getAppletSlugsForPrompt(): Promise<string> {
-  try {
-    const applets = await listApplets();
-    if (applets.length === 0) {
-      return '';
-    }
-    const slugs = applets.map(a => a.slug).join(', ');
-    return `Available applets: ${slugs}. Use list_applets tool for URL params and details.`;
-  } catch {
-    return '';
-  }
-}
+

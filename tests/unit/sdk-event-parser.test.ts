@@ -8,7 +8,6 @@
 import { describe, it, expect } from 'vitest';
 import { 
   extractToolTelemetry, 
-  extractToolName,
   type ToolExecutionCompleteEvent 
 } from '../../src/sdk-event-parser.js';
 
@@ -146,22 +145,5 @@ describe('extractToolTelemetry', () => {
     expect(telemetry?.outputId).toBe('out_1769659224244_jg2lco');
     expect(telemetry?.provider).toBe('YouTube');
     expect(telemetry?.author).toBe('Rick Astley');
-  });
-});
-
-describe('extractToolName', () => {
-  it('prefers toolName over name', () => {
-    const event = { toolName: 'embed_media', name: 'generic' };
-    expect(extractToolName(event)).toBe('embed_media');
-  });
-
-  it('falls back to name if toolName is missing', () => {
-    const event = { name: 'custom_tool' };
-    expect(extractToolName(event)).toBe('custom_tool');
-  });
-
-  it('returns "tool" as default', () => {
-    const event = {};
-    expect(extractToolName(event)).toBe('tool');
   });
 });

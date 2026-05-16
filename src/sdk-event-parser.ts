@@ -66,26 +66,11 @@ export function extractToolTelemetry(eventData: ToolExecutionCompleteEvent): Too
 }
 
 /**
- * Extract the tool name from event data (handles SDK field name variations)
+ * Check if an SDK event is a caco.reload trigger.
+ * Reload requires external state (consumeReloadSignal); this is just the predicate.
  */
-export function extractToolName(eventData: ToolExecutionCompleteEvent): string {
-  // Try standard fields first
-  if (eventData.toolName) return eventData.toolName as string;
-  if (eventData.name) return eventData.name as string;
-  
-  // Fallback: try to extract from result content
-  if (eventData.result?.content) {
-    try {
-      const parsed = JSON.parse(eventData.result.content);
-      if (parsed.textResultForLlm) {
-        // Extract first meaningful word from result
-        const match = parsed.textResultForLlm.match(/^(\w+)/);
-        if (match) return match[1];
-      }
-    } catch {
-      // Not JSON, ignore
-    }
-  }
-  
-  return 'tool';
+export function shouldEmitReload(event: { type: string; [key: string]: unknown }): boolean {
+  if (event.type !== 'tool.execution_complete') return false;
+  const telemetry = extractToolTelemetry(event as unknown as ToolExecutionCompleteEvent);
+  return telemetry?.reloadTriggered === true;
 }

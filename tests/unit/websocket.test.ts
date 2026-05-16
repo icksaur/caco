@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseMessageSource, type MessageSource } from '../../src/prompts.js';
+import { parseMessageSource, type MessageSource } from '../../src/message-source.js';
 
 export interface ParsedMessage {
   source: MessageSource;

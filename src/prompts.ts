@@ -1,18 +1,11 @@
 /**
  * Prompt Building - System message construction.
- * 
- * Message source prefixes live in message-source.ts (re-exported here
- * for backward compatibility).
  */
 
 import { homedir } from 'os';
 import { listApplets } from './applet-store.js';
 import { formatMemoryForPrompt } from './memory-tool.js';
 import type { SystemMessage } from './types.js';
-
-// Re-export message source types and functions for backward compatibility
-export { parseMessageSource, prefixMessageSource } from './message-source.js';
-export type { MessageSource, ParsedMessage } from './message-source.js';
 
 // ============================================================================
 // System Message
@@ -152,9 +145,4 @@ export function resolveSystemMessage(template: SystemMessage, cwd: string): Syst
 // Legacy Exports (for backward compatibility during migration)
 // ============================================================================
 
-/**
- * @deprecated Use buildAppletSection() via buildSystemMessage()
- */
-export async function getAppletSlugsForPrompt(): Promise<string> {
-  return buildAppletSection();
-}
+// (none currently)

@@ -14,11 +14,9 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
-import { createAppletPush } from '../applet-push.js';
 import sessionManager from '../session-manager.js';
 import { readLastTurns } from '../sdk-session-store.js';
 import { shouldFilter } from '../event-filter.js';
-import { transformForClient } from '../event-transformer.js';
 import { parseMessageSource, type MessageSource } from '../message-source.js';
 import { listEmbedOutputs, parseOutputMarkers, getSessionMeta } from '../storage.js';
 import { CacoEventQueue, isFlushTrigger, type CacoEvent } from '../caco-event-queue.js';
@@ -32,8 +30,7 @@ const clientSubscription = new Map<WebSocket, string>();
 const wsAlive = new WeakMap<WebSocket, boolean>();
 const usageCache = new Map<string, { tokenLimit: number; currentTokens: number }>();
 
-// Re-export MessageSource from shared module for backward compatibility
-export type { MessageSource } from '../message-source.js';
+
 
 interface ClientMessage {
   type: 'setState' | 'getState' | 'sendMessage' | 'requestHistory' | 'ping' | 'subscribe';
@@ -77,8 +74,6 @@ interface ServerMessage {
  * Single persistent connection - no session in URL
  */
 export function setupWebSocket(server: Server) {
-  const appletPush = createAppletPush(pushStateToAppletInternal);
-  
   const wss = new WebSocketServer({ 
     server, 
     path: '/ws' 
@@ -144,7 +139,7 @@ export function setupWebSocket(server: Server) {
     }
   });
 
-  return { wss, ...appletPush };
+  return { wss, pushStateToApplet };
 }
 
 /**
@@ -250,14 +245,16 @@ export function broadcastGlobalEvent(event: SessionEvent): void {
   broadcastToAll(msg);
 }
 
+export type StatePushHandler = (sessionId: string | null, state: Record<string, unknown>) => boolean;
+
 /**
- * Push state to applet connections (internal implementation)
- * Broadcasts to all connections (client filters by active session)
+ * Push state to all applet connections. The client filters by active session.
+ * Used by set_applet_state tool and surface mutation events.
  */
-function pushStateToAppletInternal(sessionId: string | null, state: Record<string, unknown>): boolean {
+export function pushStateToApplet(sessionId: string | null, state: Record<string, unknown>): boolean {
   const msg: ServerMessage = { type: 'stateUpdate', sessionId: sessionId || undefined, data: state };
   const data = JSON.stringify(msg);
-  
+
   let sent = 0;
   for (const ws of allConnections) {
     if (ws.readyState === WebSocket.OPEN) {
@@ -265,26 +262,8 @@ function pushStateToAppletInternal(sessionId: string | null, state: Record<strin
       sent++;
     }
   }
-  
+
   return sent > 0;
-}
-
-/**
- * Push state to applet connections
- * @deprecated Import from applet-push.js instead
- */
-export function pushStateToApplet(sessionId: string | null, state: Record<string, unknown>): boolean {
-  return pushStateToAppletInternal(sessionId, state);
-}
-
-/**
- * Check if there are any active connections
- */
-export function hasAppletConnection(_sessionId: string): boolean {
-  for (const ws of allConnections) {
-    if (ws.readyState === WebSocket.OPEN) return true;
-  }
-  return false;
 }
 
 /**
@@ -382,12 +361,10 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
       
       // Send SDK event
       if (!shouldFilter(evt)) {
-        for (const transformed of transformForClient(evt)) {
-          // Parse user.message content for source prefix (from applet/agent/scheduler)
-          const enriched = enrichUserMessageWithSource(transformed);
-          send(ws, { type: 'event', sessionId, event: enriched });
-          sentCount++;
-        }
+        // Parse user.message content for source prefix (from applet/agent/scheduler)
+        const enriched = enrichUserMessageWithSource(evt);
+        send(ws, { type: 'event', sessionId, event: enriched });
+        sentCount++;
       }
       
       // After tool.execution_complete, queue any embeds it created

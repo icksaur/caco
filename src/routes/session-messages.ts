@@ -18,14 +18,14 @@ import { sessionState } from '../session-state.js';
 import { setAppletUserState, setAppletNavigation, consumeReloadSignal, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
 import { updateUsage } from '../usage-state.js';
-import { broadcastEvent, broadcastGlobalEvent, type MessageSource, type SessionEvent } from './websocket.js';
-import { transformForClient, shouldEmitReload } from '../event-transformer.js';
+import { broadcastEvent, broadcastGlobalEvent, type SessionEvent } from './websocket.js';
+import { shouldEmitReload } from '../sdk-event-parser.js';
 import { dispatchStarted, dispatchComplete } from '../restart-manager.js';
 import { getQueue, isFlushTrigger } from '../caco-event-queue.js';
 import { setSessionIntent, getSessionMeta, setSessionMeta } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
-import { prefixMessageSource } from '../message-source.js';
+import { prefixMessageSource, type MessageSource } from '../message-source.js';
 
 const router = Router();
 
@@ -377,10 +377,9 @@ export async function dispatchMessage(
         }
       }
       
-      // Transform event and emit all results (original + synthetic caco.* events)
-      for (const transformed of transformForClient(event)) {
-        onEvent(transformed);
-      }
+      // Forward the SDK event to the client (no transformation — caco.* events
+      // are emitted directly by their tool handlers).
+      onEvent(event);
       
       // Server-side processing
       const eventData = event.data || {};

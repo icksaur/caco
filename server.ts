@@ -35,6 +35,7 @@ import { startScheduleManager, stopScheduleManager } from './src/schedule-manage
 import { getQueue } from './src/caco-event-queue.js';
 import { buildSystemMessage } from './src/prompts.js';
 import { loadServerExtensions } from './src/extension-runtime.js';
+import { onAllIdle } from './src/restart-manager.js';
 import { PORT, HOST } from './src/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -171,6 +172,19 @@ async function start(): Promise<void> {
   const server = createServer(app);
   
   const { pushStateToApplet } = setupWebSocket(server);
+
+  // Close the listening socket before the parent exits during a restart, so
+  // the child server's first bind attempt succeeds rather than racing the
+  // OS-level socket teardown. Best-effort; restart-manager already has a
+  // retry loop downstream.
+  onAllIdle(() => {
+    try {
+      server.close();
+      console.log('[RESTART] HTTP server.close() called for clean port release');
+    } catch (err) {
+      console.error('[RESTART] server.close() failed:', err);
+    }
+  });
   
   const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
     const queueCacoEvent = (event: CacoEmbedEvent) => {

@@ -10,7 +10,7 @@
  */
 
 import { spawn } from 'child_process';
-import { appendFileSync } from 'fs';
+import { appendFileSync, openSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { dispatchState } from './dispatch-state.js';
@@ -133,10 +133,21 @@ function checkAndRestart(): void {
 function spawnServer(): void {
   log('Spawning new server...');
   try {
+    // Capture child startup output to a side-log so silent crashes (port
+    // collisions, tsx loader errors, EADDRINUSE after retry) leave a trace.
+    // The main server.log is held open by the parent process / shell redirect
+    // on some platforms, so we use a distinct file.
+    let outFd: number | 'ignore' = 'ignore';
+    try {
+      outFd = openSync(join(PROJECT_ROOT, 'restart-spawn.log'), 'a');
+    } catch {
+      // Fall through — best effort.
+    }
+
     const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
       cwd: PROJECT_ROOT,
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', outFd, outFd],
       windowsHide: true,
       env: { ...process.env }
     });

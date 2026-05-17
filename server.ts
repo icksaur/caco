@@ -28,7 +28,7 @@ import { createOfferActionTool } from './src/offer-action-tool.js';
 import { createSurfaceTools } from './src/surface-tools.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
-import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes } from './src/routes/index.js';
+import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes } from './src/routes/index.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
@@ -158,6 +158,7 @@ app.use('/api/mcp/auth', mcpAuthRoutes);
 app.use('/api', scheduleRoutes);
 app.use('/api', shellRoutes);
 app.use('/api', surfaceRoutes);
+app.use('/api', watchRoutes);
 
 // Server Lifecycle
 

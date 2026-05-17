@@ -1,4 +1,5 @@
 var currentFilePath = '';
+var currentWatcher = null;
 
 var content = document.getElementById('content');
 var status = document.getElementById('status');
@@ -33,7 +34,7 @@ async function loadFile(path) {
       });
     }
 
-    status.textContent = text.length + ' chars';
+    status.textContent = text.length + ' chars · live';
     window.appletAPI.setAppletState({ path: path, loaded: true, size: text.length });
   } catch (err) {
     content.innerHTML = '<div class="error">Error: ' + err.message + '</div>';
@@ -42,10 +43,27 @@ async function loadFile(path) {
   }
 }
 
+async function setupWatcher(path) {
+  if (currentWatcher) {
+    try { await currentWatcher.close(); } catch (_e) { /* ignore */ }
+    currentWatcher = null;
+  }
+  if (!path) return;
+  try {
+    var w = await window.appletAPI.watchPath(path, { scope: 'file' });
+    w.onChange(function () { loadFile(path); });
+    currentWatcher = w;
+  } catch (err) {
+    // Watch failure is non-fatal; the user still gets the initial render.
+    console.warn('[markdown-viewer] watchPath failed:', err.message || err);
+  }
+}
+
 window.appletAPI.onUrlParamsChange(function(params) {
   var newPath = params.path || '';
   if (newPath !== currentFilePath) {
     currentFilePath = newPath;
     loadFile(currentFilePath);
+    setupWatcher(currentFilePath);
   }
 });

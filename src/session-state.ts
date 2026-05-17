@@ -10,6 +10,10 @@ class SessionState {
   private _clientPendingResume = new Map<string, string | null>();
   private _preferences: UserPreferences;
   private _config: SessionStateConfig;
+  /** Listeners fired after a successful deleteSession() call. Used for
+   *  cleanup of per-session state owned by other modules (file watchers,
+   *  etc.). One-way; listeners cannot veto deletion. */
+  private _sessionEndListeners = new Set<(sessionId: string) => void>();
 
   constructor(config: SessionStateConfig, preferences: UserPreferences, pendingResumeId: string | null) {
     this._config = config;
@@ -204,7 +208,23 @@ class SessionState {
       this.setActiveSessionId(null, clientId);
     }
     
+    // Notify listeners. Errors in listeners don't affect the delete result.
+    for (const cb of this._sessionEndListeners) {
+      try { cb(sessionId); } catch (err) {
+        console.error('[SESSION-END] listener error:', err);
+      }
+    }
+    
     return wasActive;
+  }
+
+  /**
+   * Register a callback to fire after a session is deleted.
+   * Returns an unsubscribe function.
+   */
+  onSessionEnd(cb: (sessionId: string) => void): () => void {
+    this._sessionEndListeners.add(cb);
+    return () => this._sessionEndListeners.delete(cb);
   }
 
   /**

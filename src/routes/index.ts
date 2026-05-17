@@ -12,3 +12,4 @@ export { default as mcpAuthRoutes } from './mcp-auth.js';
 export { default as scheduleRoutes } from './schedule.js';
 export { default as shellRoutes } from './shell.js';
 export { default as surfaceRoutes } from './surface.js';
+export { default as watchRoutes } from './watch.js';

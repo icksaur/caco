@@ -65,6 +65,9 @@ export function notifySessionChange(sessionId: string, info: SessionInfo): void 
  */
 function appletOnSessionEvent(cb: (event: SessionEvent) => void): () => void {
   const wrapper = (event: SessionEvent) => {
+    // caco.fs.changed is delivered through the dedicated watch channel, not
+    // here. Suppress so generic subscribers don't see other applets' watches.
+    if (deliverWatchEvent(event as { type: string; data?: Record<string, unknown> })) return;
     if (!isLoadingHistory()) cb(event);
   };
   const unsub = onEvent(wrapper);
@@ -215,6 +218,7 @@ interface AppletAPI {
   /** @deprecated Use callFileApi. */
   callMCPTool: typeof callFileApi;
   fetchWithRetry: typeof appletFetchWithRetry;
+  watchPath: typeof watchPath;
   fetch: typeof appletFetch;
   escapeHtml: typeof escapeHtml;
   toast: typeof appletToast;
@@ -256,6 +260,7 @@ export function initAppletRuntime(): void {
     callFileApi,
     callMCPTool: callFileApi,
     fetchWithRetry: appletFetchWithRetry,
+    watchPath,
     fetch: appletFetch,
     escapeHtml,
     toast: appletToast,
@@ -537,6 +542,164 @@ function appletFetchWithRetry(
   options?: FetchWithRetryOptions
 ): Promise<Response> {
   return fetchWithRetry(url, init, options);
+}
+
+// ============================================================================
+// File-watch leases
+// See docs/file-watch-leases.md
+// ============================================================================
+
+/** Event delivered to a WatchHandle's onChange callback. */
+export interface WatchChangeEvent {
+  path: string;
+  eventType: 'change' | 'rename';
+  filename?: string;
+}
+
+export interface WatchOptions {
+  /** "file" or "dir". Defaults based on the path's current type. */
+  scope?: 'file' | 'dir';
+}
+
+export interface WatchHandle {
+  /** Set or replace the change handler. */
+  onChange(cb: (event: WatchChangeEvent) => void): void;
+  /** Release the lease and stop receiving events. Idempotent. */
+  close(): Promise<void>;
+}
+
+interface WatchInternal {
+  leaseId: string;
+  callback: ((event: WatchChangeEvent) => void) | null;
+}
+
+/** All active WatchHandles in this page, keyed by leaseId. Used by the
+ *  WebSocket event interceptor to route caco.fs.changed without going through
+ *  the generic onSessionEvent path. */
+const activeWatches = new Map<string, WatchInternal>();
+
+const WATCH_RENEW_INTERVAL_MS = 60_000;
+
+/** Tracks event objects already dispatched, to prevent multi-delivery when
+ *  multiple onSessionEvent subscribers each call deliverWatchEvent. */
+const deliveredEvents = new WeakSet<object>();
+
+/** Called by the WS layer when a caco.fs.changed event arrives.
+ *  Returns true if the event was consumed (dispatched to a known lease)
+ *  and should not propagate to onSessionEvent subscribers. */
+export function deliverWatchEvent(event: { type: string; data?: Record<string, unknown> }): boolean {
+  if (event.type !== 'caco.fs.changed') return false;
+  // Multiple onSessionEvent subscribers each call this for the same event
+  // object; suppress duplicate dispatches.
+  if (deliveredEvents.has(event)) return true;
+  deliveredEvents.add(event);
+
+  const data = event.data || {};
+  const leaseId = data.leaseId as string | undefined;
+  if (!leaseId) return true;
+  const watch = activeWatches.get(leaseId);
+  if (!watch || !watch.callback) {
+    // Lease unknown to this tab (could be from another tab on same session)
+    // or the consumer hasn't installed a callback yet. Drop quietly; do not
+    // forward to onSessionEvent subscribers either way — caco.fs.changed is
+    // an internal channel.
+    return true;
+  }
+  try {
+    watch.callback({
+      path: data.path as string,
+      eventType: data.eventType as 'change' | 'rename',
+      filename: data.filename as string | undefined,
+    });
+  } catch (err) {
+    console.error('[WATCH] onChange callback error:', err);
+  }
+  return true;
+}
+
+/**
+ * Acquire a lease on a file or directory; receive caco.fs.changed events
+ * coalesced to the lease. Auto-renews while the handle is alive.
+ *
+ * Throws on acquire failure. The handle stays open until close() or until
+ * the server-side TTL expires (5 minutes default; renewed every 60s).
+ *
+ * Caco runs as the user; the only access boundary is filesystem permissions.
+ * Watching paths the user can't read returns watch-failed.
+ */
+async function watchPath(path: string, options?: WatchOptions): Promise<WatchHandle> {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) throw new Error('No active session for watchPath');
+
+  const acquireUrl = `/api/sessions/${encodeURIComponent(sessionId)}/watch`;
+  const acquireRes = await fetch(acquireUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, scope: options?.scope }),
+  });
+  if (!acquireRes.ok) {
+    throw new Error(`watchPath HTTP ${acquireRes.status}`);
+  }
+  const body = await acquireRes.json();
+  if (!body.ok) {
+    const err = new Error(`watchPath failed: ${body.reason}${body.error ? ` (${body.error})` : ''}`);
+    (err as Error & { reason?: string }).reason = body.reason;
+    throw err;
+  }
+  const leaseId = body.leaseId as string;
+
+  const watch: WatchInternal = { leaseId, callback: null };
+  activeWatches.set(leaseId, watch);
+
+  // Periodic renewal. setInterval is unref'd in the browser by default
+  // (no equivalent of Node's unref), so we just clear it on close.
+  let renewTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+    void (async () => {
+    try {
+      const renewRes = await fetch(`${acquireUrl}/${encodeURIComponent(leaseId)}/renew`, {
+        method: 'POST',
+      });
+      if (!renewRes.ok) return;
+      const renewBody = await renewRes.json();
+      if (!renewBody.ok && renewBody.reason === 'unknown-lease') {
+        // Server lost the lease (restart, expiry). Stop renewing; the consumer
+        // will discover the watch is dead when no events arrive. They can
+        // close() and re-acquire.
+        if (renewTimer !== null) {
+          clearInterval(renewTimer);
+          renewTimer = null;
+        }
+      }
+    } catch {
+      // Network blip; try again next interval.
+    }
+    })();
+  }, WATCH_RENEW_INTERVAL_MS);
+
+  let closed = false;
+  const handle: WatchHandle = {
+    onChange(cb) {
+      watch.callback = cb;
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      activeWatches.delete(leaseId);
+      if (renewTimer !== null) {
+        clearInterval(renewTimer);
+        renewTimer = null;
+      }
+      try {
+        await fetch(`${acquireUrl}/${encodeURIComponent(leaseId)}`, { method: 'DELETE' });
+      } catch {
+        // Best effort — TTL will expire the lease anyway.
+      }
+    },
+  };
+
+  currentApplet?.cleanupFns.push(() => { void handle.close(); });
+
+  return handle;
 }
 
 /**

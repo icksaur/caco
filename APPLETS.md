@@ -57,6 +57,7 @@ All methods are on `window.appletAPI`. Subscriptions auto-cleanup on applet dest
 | `callFileApi(endpoint, params)` | Call Caco's file/workspace HTTP endpoints (`read_file`, `write_file`, `list_directory`). Not MCP, no agent involvement. Throws on error. |
 | `callMCPTool(...)` | **Deprecated alias** of `callFileApi`. Will be removed. |
 | `fetchWithRetry(url, init?, opts?)` | Fetch with retries, timeout, and exponential backoff. Retries on network errors, 5xx, 429. opts: `{ retries, timeoutMs, backoffMs, maxBackoffMs }`. |
+| `watchPath(path, opts?)` | Acquire a lease to receive `{ path, eventType, filename? }` events when the file or directory changes. Returns a `WatchHandle` with `.onChange(cb)` and `.close()`. Auto-renews. Non-recursive. See `docs/file-watch-leases.md`. |
 | `navigateAppletUrlParam(k, v)` | Push new URL param (creates browser history entry). Pass `null` to delete. |
 | `updateAppletUrlParam(k, v)` | Replace URL param (no history entry). |
 | `getAppletUrlParams()` | Get current URL params (excluding `applet`) |

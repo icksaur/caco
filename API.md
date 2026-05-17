@@ -319,6 +319,19 @@ Two-party collaborative document per session. See `docs/session-surface-applet.m
 
 All mutating routes return HTTP 200 with either `{ ok: true, dataToken }` or `{ ok: false, reason, currentDataToken?, errors? }`. Protocol-level failures (`stale`, `unknown-item`, `limit`, `invalid`) are not HTTP errors.
 
+## File Watch Leases
+
+Time-bounded lease for fs.watch on a single file or directory (non-recursive). See `docs/file-watch-leases.md`. Caco runs as the user — no path whitelist.
+
+- `POST /api/sessions/:id/watch` - Acquire a lease. Body: `{ path, scope?: "file"|"dir" }`. Returns `{ ok, leaseId, ttlMs, path, scope }` or `{ ok: false, reason }` (reasons: `path-not-found`, `lease-cap`, `watch-failed`).
+- `POST /api/sessions/:id/watch/:leaseId/renew` - Reset the TTL. Returns `{ ok, ttlMs, expiresAt }`.
+- `DELETE /api/sessions/:id/watch/:leaseId` - Release the lease. Idempotent.
+- `GET /api/sessions/:id/watch` - List the session's active leases.
+
+Change notifications arrive on the session's WebSocket as `caco.fs.changed` events with `{ leaseId, path, eventType: "change"|"rename", filename? }`. Multiple events for the same lease within 150ms are coalesced.
+
+Process-wide cap: 16 concurrent leases. Default TTL: 5 minutes. Watchers are refcounted by canonical path so multiple leases on the same file share one underlying fs.watch.
+
 ## Saved Applets
 
 - `GET /api/applets` - List all saved applets

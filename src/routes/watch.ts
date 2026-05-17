@@ -27,13 +27,18 @@ const watchStore = createWatchStore({
   },
 });
 
-// Release all of a session's leases when the session is deleted. The listener
-// is registered at module load; createSessionState() runs before this module
-// is first imported on real requests because the server boot sequence builds
-// state before mounting routes (see server.ts).
-sessionState.onSessionEnd((sessionId) => {
-  watchStore.releaseSession(sessionId);
-});
+// Release all of a session's leases when the session is deleted. The hook is
+// registered via initWatchRoutes() after createSessionState() resolves —
+// sessionState is a `let` exported from session-state.ts and is undefined
+// at module load time. Calling it here would crash on server start.
+let listenerRegistered = false;
+export function initWatchRoutes(): void {
+  if (listenerRegistered) return;
+  listenerRegistered = true;
+  sessionState.onSessionEnd((sessionId) => {
+    watchStore.releaseSession(sessionId);
+  });
+}
 
 function ensureSession(sessionId: string, res: Response): boolean {
   if (!sessionManager.getSessionCwd(sessionId)) {

@@ -29,6 +29,7 @@ import { createSurfaceTools } from './src/surface-tools.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes } from './src/routes/index.js';
+import { initWatchRoutes } from './src/routes/watch.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
@@ -225,6 +226,11 @@ async function start(): Promise<void> {
     systemMessage: SYSTEM_MESSAGE,
     toolFactory
   });
+
+  // Register session-end listener now that sessionState exists.
+  // (Route module is imported eagerly; sessionState is `let` and undefined
+  // at module load time, so registration must be deferred to here.)
+  initWatchRoutes();
   
   startScheduleManager();
   

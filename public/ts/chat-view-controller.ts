@@ -185,9 +185,11 @@ class ChatViewController {
       appletPanelVisible?: boolean;
     };
 
-    if (data.repairMessage) {
-      showToast(`Session repaired: ${data.repairMessage}`, { type: 'info', autoHideMs: 8000 });
-    }
+    // repairMessage is intentionally not toasted: auto-repair is opportunistic
+    // recovery from SDK validation drift (e.g. missing displayName) and the
+    // user already sees their session work normally. The server logs the
+    // repair in restart.log / server.log for diagnostics. If repair fails,
+    // resume() throws and the user sees an error toast via the catch path.
 
     if (data.cwdFallback) {
       showToast(`Original directory is gone, using: ${data.cwdFallback}`, { type: 'info', autoHideMs: 5000 });

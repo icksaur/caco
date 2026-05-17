@@ -107,30 +107,54 @@ function repairSessionEvents(sessionId: string, errorMessage?: string): string |
       return 'Fixed missing ephemeral flag on shutdown events';
     }
 
-    // Fix missing displayName on attachments (SDK started requiring it)
+    // Fix missing displayName on attachments (SDK started requiring it).
     if (errorMessage?.includes('displayName')) {
       const lines = content.split('\n');
+      // Parse the failing line number from the SDK error so we can be sure
+      // we're addressing what the SDK is complaining about, not just other
+      // sites that happen to have attachments.
+      const failingLineMatch = errorMessage.match(/line (\d+)/);
+      const failingLineIdx = failingLineMatch ? parseInt(failingLineMatch[1], 10) - 1 : -1;
+
       let fixed = 0;
+      let fixedFailingLine = false;
+
       for (let i = 0; i < lines.length; i++) {
         if (!lines[i].includes('"attachments"')) continue;
         try {
           const obj = JSON.parse(lines[i]);
           const atts = obj?.data?.attachments;
           if (!Array.isArray(atts)) continue;
+          let lineFixed = 0;
           for (const att of atts) {
             if (!att.displayName) {
               att.displayName = att.path ? att.path.split('/').pop() : 'attachment';
-              fixed++;
+              lineFixed++;
             }
           }
-          if (fixed) lines[i] = JSON.stringify(obj);
+          if (lineFixed > 0) {
+            lines[i] = JSON.stringify(obj);
+            fixed += lineFixed;
+            if (i === failingLineIdx) fixedFailingLine = true;
+          }
         } catch { /* skip unparseable lines */ }
       }
-      if (fixed) {
+
+      if (fixed > 0) {
         writeFileSync(eventsPath, lines.join('\n'));
-        console.log(`[SESSION] Repaired ${fixed} attachment(s) missing displayName in ${eventsPath}`);
+        const detail = failingLineIdx >= 0
+          ? (fixedFailingLine ? ` (incl. reported line ${failingLineIdx + 1})` : ` (reported line ${failingLineIdx + 1} NOT fixed — its attachments were already valid)`)
+          : '';
+        console.log(`[SESSION] Repaired ${fixed} attachment(s) missing displayName in ${eventsPath}${detail}`);
+        // If we didn't actually touch the reported line, the SDK will fail
+        // again on it next attempt. Surface that so the outer loop gives up
+        // rather than spinning.
+        if (failingLineIdx >= 0 && !fixedFailingLine) {
+          return null;
+        }
         return `Fixed ${fixed} attachment(s) missing displayName`;
       }
+      // No displayName fixes possible — fall through to truncate.
     }
 
     // For any corruption we couldn't specifically fix: truncate to last session.idle
@@ -625,7 +649,7 @@ class SessionManager {
     } as ResumeSessionConfig;
 
     const MAX_REPAIR_ATTEMPTS = 3;
-    let lastRepairSignature: string | null = null;
+    let lastFailureSignature: string | null = null;
     let attemptedSession: CopilotSessionInstance | null = null;
     let lastError: unknown = null;
 
@@ -652,26 +676,28 @@ class SessionManager {
         }
 
         // Build a signature for the failing line so we can detect "same line
-        // still failing" — if repair didn't move the cursor, give up rather
-        // than loop on a corruption shape we don't know how to fix.
+        // still failing after a no-op repair" — if repair didn't write
+        // anything, retrying won't help.
         const sigMatch = msg.match(/line (\d+)/);
         const sig = sigMatch ? `line:${sigMatch[1]}` : msg.slice(0, 80);
-        if (sig === lastRepairSignature) {
-          console.error(`[SESSION] Auto-repair stuck on same failure for ${sessionId} (${sig}); giving up`);
-          this.handleClientError(e);
-          throw e;
-        }
-        lastRepairSignature = sig;
 
         // Quietly attempt to repair; only the final success/failure surfaces.
         console.warn(`[SESSION] Auto-repair attempt ${attempt + 1} for ${sessionId}: ${msg}`);
         const repair = repairSessionEvents(sessionId, msg);
         if (!repair) {
+          // Repair didn't know what to do. If the previous attempt also failed
+          // on this same line without repair, give up (we'd just loop).
+          if (sig === lastFailureSignature) {
+            console.error(`[SESSION] Auto-repair stuck on ${sig}; no fix available`);
+          }
           this.handleClientError(e);
           throw e;
         }
-        // Keep the most recent successful repair description as the final
-        // message returned to the caller.
+
+        // Repair did something. Note the signature so if the next attempt
+        // fails on the same line AND repair returns null then, we know we
+        // didn't actually fix line N — give up at that point.
+        lastFailureSignature = sig;
         repairMessage = repair;
       }
     }

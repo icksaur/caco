@@ -5,7 +5,7 @@
  * both busy status and correlation context atomically.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DispatchState } from '../../src/dispatch-state.js';
 
 describe('DispatchState', () => {
@@ -54,6 +54,8 @@ describe('DispatchState', () => {
     });
 
     it('getActiveCount tracks the number of in-flight dispatches', () => {
+      // The duplicate-start branch warns intentionally; suppress for this test.
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       expect(state.getActiveCount()).toBe(0);
       state.start('s1', 'c1');
       expect(state.getActiveCount()).toBe(1);
@@ -68,6 +70,7 @@ describe('DispatchState', () => {
       expect(state.getActiveCount()).toBe(0);
       state.end('s2'); // idempotent
       expect(state.getActiveCount()).toBe(0);
+      warnSpy.mockRestore();
     });
   });
 

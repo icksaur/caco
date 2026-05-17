@@ -388,6 +388,8 @@ describe('MCP Auth Routes', () => {
     });
 
     it('sets needsAuth true on refresh failure', async () => {
+      // Source under test logs the refresh failure intentionally via console.warn.
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const serverAuth = {
         url: 'https://api.example.com',
         authorizationEndpoint: 'https://auth.example.com/authorize',
@@ -413,6 +415,7 @@ describe('MCP Auth Routes', () => {
       }));
 
       vi.unstubAllGlobals();
+      warnSpy.mockRestore();
     });
   });
 });

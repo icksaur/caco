@@ -30,8 +30,16 @@ const TEST_META_DIR = join(homedir(), '.caco', 'sessions', TEST_SESSION_ID);
 const TEST_CWD = '/test/workspace';
 
 describe('storeOutput and getOutput (in-memory fallback)', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  // These tests deliberately trigger the unregistered-session warn path.
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    warnSpy.mockRestore();
+  });
 
   it('stores and retrieves content with metadata', () => {
     const id = storeOutput(TEST_CWD, 'test content', { type: 'file' });

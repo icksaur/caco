@@ -127,6 +127,9 @@ describe('SessionStateTracker', () => {
     });
 
     it('handles listener errors gracefully', () => {
+      // The tracker logs the caught error via console.error; suppress that
+      // output for this test (we're verifying the catch-and-continue path).
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const t = createTracker();
       const bad = vi.fn(() => { throw new Error('oops'); });
       const good = vi.fn();
@@ -134,6 +137,7 @@ describe('SessionStateTracker', () => {
       t.onChange(good);
       t.setBusy('s1', true);
       expect(good).toHaveBeenCalled();
+      errSpy.mockRestore();
     });
   });
 });

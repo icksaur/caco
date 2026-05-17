@@ -136,6 +136,8 @@ describe('ChatViewController', () => {
     });
 
     it('shows toast and stays on current view on resume failure', async () => {
+      // Controller logs the failure via console.error intentionally.
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const mockResponse = {
         ok: false,
         status: 500,
@@ -148,6 +150,7 @@ describe('ChatViewController', () => {
 
       expect(showToast).toHaveBeenCalledWith('Session expired');
       expect(cvc.getViewState()).toBe('newChat');
+      errSpy.mockRestore();
     });
 
     it('short-circuits when already showing this session', async () => {

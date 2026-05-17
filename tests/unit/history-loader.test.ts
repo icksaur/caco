@@ -106,6 +106,8 @@ describe('HistoryLoader', () => {
     });
 
     it('times out after 30s', async () => {
+      // Loader logs the timeout via console.warn intentionally.
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       vi.useFakeTimers();
       const promise = loader.load('session-1');
       
@@ -115,6 +117,7 @@ describe('HistoryLoader', () => {
       expect(setLoadingHistory).toHaveBeenCalledWith(false);
       expect(setFormEnabled).toHaveBeenCalledWith(true);
       vi.useRealTimers();
+      warnSpy.mockRestore();
     });
   });
 

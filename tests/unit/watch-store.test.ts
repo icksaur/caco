@@ -12,9 +12,35 @@ import { createWatchStore, type ChangeEvent, type WatchStore } from '../../src/w
 
 function captureBroadcaster() {
   const events: ChangeEvent[] = [];
+  const waiters: Array<{ filter: (e: ChangeEvent) => boolean; resolve: () => void }> = [];
   return {
     events,
-    broadcast: (ev: ChangeEvent) => { events.push(ev); },
+    broadcast: (ev: ChangeEvent) => {
+      events.push(ev);
+      for (let i = waiters.length - 1; i >= 0; i--) {
+        if (waiters[i].filter(ev)) {
+          waiters[i].resolve();
+          waiters.splice(i, 1);
+        }
+      }
+    },
+    /** Wait until at least one event matching `filter` arrives. Times out
+     *  after `timeoutMs` to keep tests from hanging on real failures. */
+    waitFor: (filter: (e: ChangeEvent) => boolean, timeoutMs = 1000): Promise<void> => {
+      // Already there?
+      if (events.some(filter)) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const entry = { filter, resolve };
+        waiters.push(entry);
+        setTimeout(() => {
+          const i = waiters.indexOf(entry);
+          if (i >= 0) {
+            waiters.splice(i, 1);
+            reject(new Error(`waitFor timeout after ${timeoutMs}ms`));
+          }
+        }, timeoutMs);
+      });
+    },
   };
 }
 
@@ -244,15 +270,14 @@ describe('createWatchStore', () => {
   describe('events', () => {
     it('broadcasts a change event when a watched file is written', async () => {
       const cap = captureBroadcaster();
-      store = createWatchStore({ broadcast: cap.broadcast, expiryScanIntervalMs: 0, coalesceMs: 50 });
+      store = createWatchStore({ broadcast: cap.broadcast, expiryScanIntervalMs: 0, coalesceMs: 20 });
       const p = join(tmp, 'w.txt'); writeFileSync(p, 'a');
       const a = store.acquireLease('s', p);
       if (!a.ok) throw new Error('expected ok');
 
       writeFileSync(p, 'b');
-      await sleep(150); // > coalesceMs
+      await cap.waitFor(e => e.leaseId === a.leaseId);
 
-      expect(cap.events.length).toBeGreaterThanOrEqual(1);
       expect(cap.events[0].leaseId).toBe(a.leaseId);
       expect(cap.events[0].path).toBe(p);
       expect(cap.events[0].eventType === 'change' || cap.events[0].eventType === 'rename').toBe(true);
@@ -260,7 +285,7 @@ describe('createWatchStore', () => {
 
     it('coalesces rapid writes into one broadcast per leaseId', async () => {
       const cap = captureBroadcaster();
-      store = createWatchStore({ broadcast: cap.broadcast, expiryScanIntervalMs: 0, coalesceMs: 80 });
+      store = createWatchStore({ broadcast: cap.broadcast, expiryScanIntervalMs: 0, coalesceMs: 30 });
       const p = join(tmp, 'cc.txt'); writeFileSync(p, '');
       const a = store.acquireLease('s', p);
       if (!a.ok) throw new Error('expected ok');
@@ -268,11 +293,11 @@ describe('createWatchStore', () => {
       writeFileSync(p, '1');
       writeFileSync(p, '2');
       writeFileSync(p, '3');
-      await sleep(200); // well past coalesceMs
+      await cap.waitFor(e => e.leaseId === a.leaseId);
+      // Drain any straggler events that arrive within the coalesce window
+      // after the first broadcast (separate write bursts can fire again).
+      await sleep(50);
 
-      // At least one broadcast. Multiple writes within the window should
-      // collapse — accept 1 or 2 to tolerate OS event ordering, but reject
-      // a 3+ broadcast storm.
       expect(cap.events.filter(e => e.leaseId === a.leaseId).length).toBeLessThanOrEqual(2);
     });
   });
@@ -283,8 +308,8 @@ describe('createWatchStore', () => {
       store = createWatchStore({
         broadcast: cap.broadcast,
         expiryScanIntervalMs: 0,
-        coalesceMs: 30,
-        reattachDelayMs: 30,
+        coalesceMs: 15,
+        reattachDelayMs: 15,
       });
       const p = join(tmp, 'sar.txt'); writeFileSync(p, 'v1');
       const a = store.acquireLease('s', p);
@@ -295,15 +320,15 @@ describe('createWatchStore', () => {
       writeFileSync(tmpFile, 'v2');
       renameSync(tmpFile, p);
 
-      await sleep(200); // re-attach + coalesce
+      // Wait for the re-attach to emit its single change event.
+      await cap.waitFor(e => e.leaseId === a.leaseId);
 
       // Trigger a write on the re-attached watcher; if re-attach worked we get
       // a fresh event.
       cap.events.length = 0;
       writeFileSync(p, 'v3');
-      await sleep(150);
+      await cap.waitFor(e => e.leaseId === a.leaseId);
 
-      expect(cap.events.length).toBeGreaterThanOrEqual(1);
       expect(cap.events[0].leaseId).toBe(a.leaseId);
     });
 
@@ -312,20 +337,18 @@ describe('createWatchStore', () => {
       store = createWatchStore({
         broadcast: cap.broadcast,
         expiryScanIntervalMs: 0,
-        coalesceMs: 30,
-        reattachDelayMs: 30,
+        coalesceMs: 15,
+        reattachDelayMs: 15,
       });
       const p = join(tmp, 'del.txt'); writeFileSync(p, '');
       const a = store.acquireLease('s', p);
       if (!a.ok) throw new Error('expected ok');
 
       unlinkSync(p);
-      await sleep(200);
+      // Wait for a rename event (the re-attach branch confirms the file is
+      // gone and emits it).
+      await cap.waitFor(e => e.leaseId === a.leaseId && e.eventType === 'rename');
 
-      // Linux's inotify reports both 'change' (IN_ATTRIB) and 'rename'
-      // (IN_DELETE_SELF) for unlink. We only require that at least one
-      // 'rename' event fires for this lease — the re-attach branch confirms
-      // the file is gone and emits it.
       const ours = cap.events.filter(e => e.leaseId === a.leaseId);
       expect(ours.length).toBeGreaterThan(0);
       expect(ours.some(e => e.eventType === 'rename')).toBe(true);
@@ -335,19 +358,14 @@ describe('createWatchStore', () => {
   describe('dir scope', () => {
     it('broadcasts on child create/delete in the watched directory', async () => {
       const cap = captureBroadcaster();
-      store = createWatchStore({ broadcast: cap.broadcast, expiryScanIntervalMs: 0, coalesceMs: 30 });
+      store = createWatchStore({ broadcast: cap.broadcast, expiryScanIntervalMs: 0, coalesceMs: 20 });
       const sub = join(tmp, 'sub'); mkdirSync(sub);
       const a = store.acquireLease('s', sub);
       if (!a.ok) throw new Error('expected ok');
       expect(a.scope).toBe('dir');
 
       writeFileSync(join(sub, 'new.txt'), '');
-      await sleep(150);
-
-      const ours = cap.events.find(e => e.leaseId === a.leaseId);
-      expect(ours).toBeTruthy();
-      // Linux fires 'rename' for child creation; macOS may report 'change'.
-      // Either is acceptable — the test confirms an event fired.
+      await cap.waitFor(e => e.leaseId === a.leaseId);
     });
   });
 

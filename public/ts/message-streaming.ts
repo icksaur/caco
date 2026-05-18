@@ -70,10 +70,6 @@ function handleEvent(event: SessionEvent): void {
     chatRegion.removeThinking();
   }
   
-  // DEBUG: Log all event types received
-  console.log(`[EVENT] ${eventType}`, data);
-  
-  // Handle context footer updates (no UI element, just footer update)
   if (eventType === 'caco.context') {
     const activeId = getActiveSessionId();
     if (activeId) {

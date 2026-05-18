@@ -84,6 +84,8 @@ On { ok: false, reason: "stale", currentDataToken }: call caco_get_surface, reba
 
 Other failures: "invalid" (bad item shape), "limit" (>200 items). Items must have { id: string, type: string } plus any style-defined fields. 'update' is shallow-merged into existing items by id; 'delete' takes a list of ids.
 
+For ready-made item shapes per layout (list, form, kanban, table), see \`caco_dev_docs section="surface-cookbook"\`.
+
 If you only want to acknowledge the user's changes without writing, call caco_clear_surface_changes instead.`,
     parameters: z.object({
       dataToken: z.string().describe('Current dataToken from caco_get_surface or caco_get_surface_changes'),
@@ -118,6 +120,8 @@ Use when you have read caco_get_surface_changes, decided no structural mutation 
 
   const cacoSetSurfaceStyle = defineTool('caco_set_surface_style', {
     description: `Set the surface document's style, customScript, and/or customStyle. The customScript is JavaScript that the applet evaluates to render items — it must define a render(surface) function. customStyle is CSS scoped to the applet.
+
+**Before writing a customScript / customStyle from scratch, read the cookbook:** \`caco_dev_docs section="surface-cookbook"\`. It contains copy-pasteable layouts (lists, forms, kanban, tables), the canonical \`merged = { ...item, ...changes[id] }\` pattern, and the full list of Caco CSS custom properties (\`--color-*\`, \`--text-*\`, \`--space-*\`, \`--font-sans\`, \`--font-mono\`) so your surface looks native. The protocol spec is \`session-surface-applet\`.
 
 Requires the current dataToken. Returns { ok: true, dataToken } on success or { ok: false, reason: "stale" } on token mismatch.`,
     parameters: z.object({

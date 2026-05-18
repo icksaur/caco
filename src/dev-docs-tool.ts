@@ -159,15 +159,18 @@ export function createDevDocsTool(projectRoot: string) {
 **Sections:**
 - omit \`section\` for the full dev guide
 - \`section: "index"\` for a list of all known doc files (root + docs/)
-- \`section: "<filename>"\` to read a specific doc by name (e.g. \`"session-surface-applet"\`, \`"API"\`, \`"APPLETS"\`). The .md extension is added automatically; root and \`docs/\` are searched.
+- \`section: "<filename>"\` to read a specific doc by name (e.g. \`"session-surface-applet"\`, \`"surface-cookbook"\`, \`"API"\`, \`"APPLETS"\`). The .md extension is added automatically; root and \`docs/\` are searched.
+
+When reading a named section, the response begins with a heading table of contents (H2/H3 with line numbers). Use \`viewRange: [startLine, endLine]\` to paginate large docs (mirrors the \`view\` tool — 1-indexed, inclusive).
 
 For general usage and setup, read \`README.md\` at the project root.`,
 
     parameters: z.object({
-      section: z.string().optional().describe('Optional: "index" lists all doc files. A filename (with or without .md) reads that doc. Omit for the full dev guide.')
+      section: z.string().optional().describe('Optional: "index" lists all doc files. A filename (with or without .md) reads that doc. Omit for the full dev guide.'),
+      viewRange: z.array(z.number()).length(2).optional().describe('Optional [startLine, endLine] (1-indexed, inclusive). Only meaningful with section=<filename>. Mirrors the view tool.')
     }),
 
-    handler: async ({ section }) => {
+    handler: async ({ section, viewRange }) => {
       const rootCandidates = ['README.md', 'API.md', 'APPLETS.md', 'EXTENSIONS.md', 'code-quality.md'];
       const docsDir = join(projectRoot, 'docs');
 
@@ -206,7 +209,27 @@ For general usage and setup, read \`README.md\` at the project root.`,
           if (existsSync(path)) {
             try {
               const body = readFileSync(path, 'utf-8');
-              return { textResultForLlm: `# ${path}\n\n${body}` };
+              const lines = body.split('\n');
+              const tocLines: string[] = [];
+              for (let i = 0; i < lines.length; i++) {
+                const m = /^(#{2,3})\s+(.+?)\s*$/.exec(lines[i]);
+                if (m) tocLines.push(`- L${i + 1}: ${m[1]} ${m[2]}`);
+              }
+              const tocBlock = tocLines.length > 0
+                ? `\n## Headings (line numbers)\n${tocLines.join('\n')}\n`
+                : '';
+              if (viewRange) {
+                const [startRaw, endRaw] = viewRange;
+                const start = Math.max(1, Math.floor(startRaw));
+                const end = Math.min(lines.length, Math.max(start, Math.floor(endRaw)));
+                const slice = lines.slice(start - 1, end).join('\n');
+                return {
+                  textResultForLlm: `# ${path}\n${tocBlock}\n## Lines ${start}–${end} of ${lines.length}\n\n${slice}`
+                };
+              }
+              return {
+                textResultForLlm: `# ${path}\n${tocBlock}\n## Body (${lines.length} lines)\n\n${body}`
+              };
             } catch (err) {
               return { textResultForLlm: `Failed to read ${path}: ${err instanceof Error ? err.message : String(err)}` };
             }

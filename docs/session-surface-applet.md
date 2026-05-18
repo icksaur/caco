@@ -4,6 +4,8 @@ A first-generation rich-interaction surface for Caco. Built on a two-party colla
 
 This document is the design spec for the applet and the protocol it sits on. The underlying data-exchange protocol is described in [`collab-state-spec.md`](./collab-state-spec.md); this document specifies the concrete tool names, HTTP routes, storage layout, UI styles, and MVP scope.
 
+**Writing a custom surface?** Read [`surface-cookbook.md`](./surface-cookbook.md) first. It has copy-pasteable layouts (lists, forms, kanban, tables), the canonical `merged = { ...item, ...changes[id] }` render pattern, and the full list of Caco CSS custom properties so your surface looks native.
+
 ## First principle: two-party mutable state
 
 State has two authors and one document. The protocol must let either party read the other's changes as **structured mutations**, not by diffing.

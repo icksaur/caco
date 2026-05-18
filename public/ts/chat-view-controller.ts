@@ -22,6 +22,7 @@ import { setResponseOptions } from './message-streaming.js';
 import { adHocBar } from './adhoc-bar.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
 import { regions } from './dom-regions.js';
+import { perfFlight } from './perf.js';
 
 const RESUME_TIMEOUT_MS = 30000;
 
@@ -128,20 +129,29 @@ class ChatViewController {
       return;
     }
 
+    const flight = perfFlight(`session.activate(${sessionId.slice(0, 8)})`);
     this.saveDraft();
     setSessionLoading(sessionId, true);
 
     try {
-      const data = await this.resumeAndLoad(sessionId);
+      flight.span('resumeAndLoad');
+      const data = await this.resumeAndLoad(sessionId, flight);
+      flight.end('resumeAndLoad');
+
+      flight.span('showChat');
       this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.sessionId, data.hasIcon, data.kind, data.currentIntent, data.gitBranch);
       setResponseOptions(data.responseOptions?.length ? data.responseOptions : []);
-      void this.restoreApplet(data.activeApplet, data.appletParams, data.appletPanelVisible);
+      flight.end('showChat');
+
+      flight.span('restoreApplet');
+      void this.restoreApplet(data.activeApplet, data.appletParams, data.appletPanelVisible).finally(() => flight.end('restoreApplet'));
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Network error';
       console.error('[CHAT] Error activating session:', msg);
       showToast(msg);
     } finally {
       setSessionLoading(sessionId, false);
+      flight.done();
     }
   }
 
@@ -149,19 +159,23 @@ class ChatViewController {
    * Resume session on server and load history. Single async operation.
    * Throws on failure — caller handles UI recovery.
    */
-  private async resumeAndLoad(sessionId: string): Promise<{
+  private async resumeAndLoad(sessionId: string, flight?: ReturnType<typeof perfFlight>): Promise<{
     cwd?: string; model?: string; cwdFallback?: string; hasGit?: boolean;
     name?: string; sessionId?: string; hasIcon?: boolean; kind?: string;
     currentIntent?: string; gitBranch?: string | null; responseOptions?: string[];
     activeApplet?: string | null; appletParams?: Record<string, string> | null;
     appletPanelVisible?: boolean;
   }> {
+    flight?.span('wsConnect');
     reconnectIfNeeded();
     await waitForConnect();
+    flight?.end('wsConnect');
 
+    flight?.span('resume.fetch');
     const response = await fetchWithTimeout(`/api/sessions/${sessionId}/resume`, {
       method: 'POST'
     }, RESUME_TIMEOUT_MS);
+    flight?.end('resume.fetch');
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
@@ -197,7 +211,9 @@ class ChatViewController {
 
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
     this.footerSessionId = data.sessionId;
+    flight?.span('history.load');
     await historyLoader.load(data.sessionId);
+    flight?.end('history.load');
 
     return data;
   }

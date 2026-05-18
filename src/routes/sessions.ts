@@ -238,9 +238,12 @@ router.post('/sessions', async (req: Request, res: Response) => {
 router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const clientId = req.headers['x-client-id'] as string | undefined;
-  
+  const t0 = performance.now();
+
   try {
+    const tSwitch0 = performance.now();
     const result = await sessionState.switchSession(sessionId, clientId);
+    const tSwitch = performance.now() - tSwitch0;
     const cwd = sessionManager.getSessionCwd(result.sessionId) || sessionState.preferences.lastCwd;
     const isBusy = sessionManager.isBusy(result.sessionId);
     const model = sessionManager.getSessionModel(result.sessionId);
@@ -268,6 +271,8 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       appletParams: meta?.appletParams || null,
       appletPanelVisible: meta?.appletPanelVisible ?? true,
     });
+    const tTotal = performance.now() - t0;
+    console.log(`[PERF] resume ${sessionId.slice(0, 8)} switchSession=${tSwitch.toFixed(1)}ms total=${tTotal.toFixed(1)}ms`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(400).json({ error: message });

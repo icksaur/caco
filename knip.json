@@ -20,6 +20,7 @@
   "ignoreDependencies": [
     "@types/tar",
     "@codemirror/*",
-    "@lezer/*"
+    "@lezer/*",
+    "highlight.js"
   ]
 }

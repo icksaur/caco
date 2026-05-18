@@ -10,7 +10,7 @@
 
 import { getActiveSessionId, setLoadingHistory } from './app-state.js';
 import { setFormEnabled } from './view-controller.js';
-import { onHistoryComplete, getConnectionId, subscribeToSession, requestHistory } from './websocket.js';
+import { onHistoryComplete, getConnectionId, subscribeToSession, requestHistory, onEvent } from './websocket.js';
 import { clearContextFooter, updateContextUsage } from './context-footer.js';
 import { regions } from './dom-regions.js';
 import { scrollToBottom } from './ui-utils.js';
@@ -38,24 +38,41 @@ class HistoryLoader {
    */
   async load(sessionId: string): Promise<void> {
     this.cancel();
-    
+
     setLoadingHistory(true);
     regions.chat.clear();
-    clearContextFooter(); // Direct call OK — historyLoader is composed by chatView, footerSessionId already set
+    clearContextFooter();
     subscribeToSession(sessionId);
+
+    const tRequest = performance.now();
+    let tFirstEvent = 0;
+    let eventCount = 0;
+    const unsubEvent = onEvent(() => {
+      eventCount += 1;
+      if (tFirstEvent === 0) tFirstEvent = performance.now();
+    });
+
     requestHistory(sessionId);
-    
+
     return new Promise<void>(resolve => {
+      const wrappedResolve = () => {
+        unsubEvent();
+        const tComplete = performance.now();
+        const waitMs = (tFirstEvent || tComplete) - tRequest;
+        const streamMs = tFirstEvent ? tComplete - tFirstEvent : 0;
+        console.log(`[PERF] history ${sessionId.slice(0,8)}: ttfe=${waitMs.toFixed(1)}ms stream=${streamMs.toFixed(1)}ms events=${eventCount}`);
+        resolve();
+      };
       const timer = setTimeout(() => {
         console.warn('[HISTORY] Timed out waiting for historyComplete');
-        this.finish(resolve);
+        this.finish(wrappedResolve);
       }, TIMEOUT_MS);
-      
+
       const unsub = onHistoryComplete((data) => {
-        this.finish(resolve, data);
+        this.finish(wrappedResolve, data);
       });
-      
-      this.pending = { sessionId, resolve, timer, unsub };
+
+      this.pending = { sessionId, resolve: wrappedResolve, timer, unsub };
     });
   }
 

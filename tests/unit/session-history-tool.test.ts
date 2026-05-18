@@ -174,8 +174,10 @@ describe('runSessionStoreQuery', () => {
     const local = join(tmp, 'big.db');
     const db = new DatabaseSync(local);
     db.exec('CREATE TABLE big (n INTEGER)');
+    db.exec('BEGIN');
     const stmt = db.prepare('INSERT INTO big (n) VALUES (?)');
     for (let i = 0; i < 600; i++) stmt.run(i);
+    db.exec('COMMIT');
     db.close();
 
     const result = runSessionStoreQuery(local, 'SELECT n FROM big ORDER BY n');

@@ -34,6 +34,7 @@ vi.mock('../../public/ts/websocket.js', () => ({
   getConnectionId: vi.fn(() => connectionId),
   subscribeToSession: vi.fn(),
   requestHistory: vi.fn(),
+  onEvent: vi.fn(() => mockUnsub),
 }));
 
 vi.mock('../../public/ts/dom-regions.js', () => ({

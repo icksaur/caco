@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
@@ -53,10 +53,26 @@ export function readSessionEvents(sessionId: string): SessionEvent[] {
   }
 }
 
+interface LastTurnsCacheEntry {
+  size: number;
+  mtimeMs: number;
+  result: { events: SessionEvent[]; totalLines: number; skipped: number };
+}
+const lastTurnsCache = new Map<string, LastTurnsCacheEntry>();
+const LAST_TURNS_CACHE_LIMIT = 32;
+
 export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: number): { events: SessionEvent[]; totalLines: number; skipped: number } {
   try {
     const eventsPath = sessionPath(sessionId, 'events.jsonl');
     if (!existsSync(eventsPath)) return { events: [], totalLines: 0, skipped: 0 };
+
+    const stat = statSync(eventsPath);
+    const cacheKey = `${sessionId}\u0000${maxTurns}\u0000${maxEvents}`;
+    const cached = lastTurnsCache.get(cacheKey);
+    if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
+      return cached.result;
+    }
+
     const content = readFileSync(eventsPath, 'utf-8');
     const lines = content.split('\n');
     const totalLines = lines.length;
@@ -87,7 +103,15 @@ export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: nu
       if (!lines[i].trim()) continue;
       try { events.push(JSON.parse(lines[i])); } catch { /* skip */ }
     }
-    return { events, totalLines, skipped: startIndex };
+    const result = { events, totalLines, skipped: startIndex };
+
+    if (lastTurnsCache.size >= LAST_TURNS_CACHE_LIMIT) {
+      const firstKey = lastTurnsCache.keys().next().value;
+      if (firstKey !== undefined) lastTurnsCache.delete(firstKey);
+    }
+    lastTurnsCache.set(cacheKey, { size: stat.size, mtimeMs: stat.mtimeMs, result });
+
+    return result;
   } catch {
     return { events: [], totalLines: 0, skipped: 0 };
   }

@@ -1380,11 +1380,17 @@ main {
 
 /* Usage info display */
 .usage-info {
-  margin-bottom: var(--space-md);
-  padding: var(--space-sm) var(--space-md);
+  position: fixed;
+  top: var(--space-lg);
+  right: calc(var(--space-lg) + 40px + var(--space-md));
+  height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-md);
   font-size: var(--text-sm);
   color: var(--color-text-muted);
-  text-align: right;
+  z-index: 200;
+  pointer-events: none;
 }
 
 .usage-info:empty {

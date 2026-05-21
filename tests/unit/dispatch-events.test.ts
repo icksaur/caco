@@ -8,15 +8,21 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const setSessionIntent = vi.fn();
-const updateUsage = vi.fn();
+const updateUsage = vi.fn(() => ({ changed: false }));
+const getUsage = vi.fn((): unknown => null);
 const shouldEmitReload = vi.fn();
 const consumeReloadSignal = vi.fn();
+const broadcastGlobalEvent = vi.fn();
 
 vi.mock('../../src/session-meta-store.js', () => ({
   setSessionIntent: (...args: unknown[]) => setSessionIntent(...args),
 }));
 vi.mock('../../src/usage-state.js', () => ({
-  updateUsage: (...args: unknown[]) => updateUsage(...args),
+  updateUsage: (...args: unknown[]) => updateUsage(...(args as [])),
+  getUsage: (...args: unknown[]) => getUsage(...(args as [])),
+}));
+vi.mock('../../src/routes/websocket.js', () => ({
+  broadcastGlobalEvent: (...args: unknown[]) => broadcastGlobalEvent(...(args as [never])),
 }));
 vi.mock('../../src/sdk-event-parser.js', () => ({
   shouldEmitReload: (...args: unknown[]) => shouldEmitReload(...args),
@@ -39,8 +45,12 @@ function makeDeps() {
 beforeEach(() => {
   setSessionIntent.mockClear();
   updateUsage.mockClear();
+  updateUsage.mockReturnValue({ changed: false });
+  getUsage.mockClear();
+  getUsage.mockReturnValue(null);
   shouldEmitReload.mockReset();
   consumeReloadSignal.mockReset();
+  broadcastGlobalEvent.mockClear();
 });
 
 describe('applyDispatchEventEffects', () => {
@@ -91,6 +101,22 @@ describe('applyDispatchEventEffects', () => {
     const snapshots = { 'claude-sonnet': { isUnlimitedEntitlement: false, entitlementRequests: 100, usedRequests: 10, remainingPercentage: 90 } };
     applyDispatchEventEffects(SID, { type: 'assistant.usage', data: { quotaSnapshots: snapshots } } as never, deps);
     expect(updateUsage).toHaveBeenCalledWith(snapshots);
+  });
+
+  it('broadcasts caco.usage globally when usage changed', () => {
+    const deps = makeDeps();
+    const usage = { remainingPercentage: 90, isUnlimited: false, updatedAt: 'now' };
+    updateUsage.mockReturnValue({ changed: true });
+    getUsage.mockReturnValue(usage as never);
+    applyDispatchEventEffects(SID, { type: 'assistant.usage', data: { quotaSnapshots: {} } } as never, deps);
+    expect(broadcastGlobalEvent).toHaveBeenCalledWith({ type: 'caco.usage', data: { ...usage } });
+  });
+
+  it('does NOT broadcast caco.usage when unchanged', () => {
+    const deps = makeDeps();
+    updateUsage.mockReturnValue({ changed: false });
+    applyDispatchEventEffects(SID, { type: 'assistant.usage', data: { quotaSnapshots: {} } } as never, deps);
+    expect(broadcastGlobalEvent).not.toHaveBeenCalled();
   });
 
   it('emits caco.reload when reload is signalled', () => {

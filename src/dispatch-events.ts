@@ -7,9 +7,10 @@
  */
 
 import { setSessionIntent } from './session-meta-store.js';
-import { updateUsage } from './usage-state.js';
+import { updateUsage, getUsage } from './usage-state.js';
 import { shouldEmitReload } from './sdk-event-parser.js';
 import { consumeReloadSignal } from './applet-state.js';
+import { broadcastGlobalEvent } from './routes/websocket.js';
 import type { SessionEvent } from './routes/websocket.js';
 
 interface QuotaSnapshot {
@@ -59,7 +60,13 @@ export function applyDispatchEventEffects(
 
   if (event.type === 'assistant.usage') {
     const quotaSnapshots = eventData.quotaSnapshots as Record<string, QuotaSnapshot> | undefined;
-    updateUsage(quotaSnapshots);
+    const { changed } = updateUsage(quotaSnapshots);
+    if (changed) {
+      const usage = getUsage();
+      if (usage) {
+        broadcastGlobalEvent({ type: 'caco.usage', data: { ...usage } } as SessionEvent);
+      }
+    }
   }
 
   // Reload requires consuming an external state flag.

@@ -47,7 +47,7 @@
       <!-- Session panel (left side, toggled independently) -->
       <div id="sessionView" class="session-panel hidden">
         <div class="session-content">
-          <div id="usageInfo" class="usage-info"></div>
+          <div id="usageInfo" class="usage-info usage-display" data-usage-display="panel"></div>
           
           <div id="sessionList"></div>
           
@@ -112,7 +112,10 @@
               <span class="context-usage"></span>
               <span class="context-status"></span>
             </div>
-            <div class="context-description"></div>
+            <div class="context-description-row">
+              <span class="usage-display" data-usage-display="footer"></span>
+              <div class="context-description"></div>
+            </div>
           </div>
         </footer>
       </div>

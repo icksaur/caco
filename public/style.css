@@ -1391,12 +1391,42 @@ main {
   display: none;
 }
 
+.usage-display.usage-low {
+  color: var(--color-usage-low);
+}
+
+.usage-display.usage-critical {
+  color: var(--color-usage-critical);
+}
+
 .usage-info.usage-low {
   color: var(--color-usage-low);
 }
 
 .usage-info.usage-critical {
   color: var(--color-usage-critical);
+}
+
+.context-footer .context-description-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.context-footer .context-description-row .context-description {
+  flex: 1;
+  min-width: 0;
+}
+
+.context-footer .usage-display[data-usage-display="footer"] {
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.context-footer .usage-display[data-usage-display="footer"]:empty {
+  display: none;
 }
 
 /* Schedules section */

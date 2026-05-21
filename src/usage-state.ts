@@ -48,30 +48,37 @@ export function loadUsageCache(): void {
 /**
  * Update usage from an assistant.usage event
  */
-export function updateUsage(quotaSnapshots: Record<string, QuotaSnapshot> | undefined): void {
-  if (!quotaSnapshots) return;
-  
-  // Take the first quota snapshot (usually there's just one)
+export function updateUsage(quotaSnapshots: Record<string, QuotaSnapshot> | undefined): { changed: boolean } {
+  if (!quotaSnapshots) return { changed: false };
+
   const keys = Object.keys(quotaSnapshots);
-  if (keys.length === 0) return;
-  
+  if (keys.length === 0) return { changed: false };
+
   const snapshot = quotaSnapshots[keys[0]];
-  currentUsage = {
+  const next: UsageInfo = {
     remainingPercentage: snapshot.remainingPercentage,
     resetDate: snapshot.resetDate,
     isUnlimited: snapshot.isUnlimitedEntitlement,
     updatedAt: new Date().toISOString(),
     fromCache: false
   };
-  
-  
-  // Persist to disk
+
+  const changed = !currentUsage
+    || currentUsage.remainingPercentage !== next.remainingPercentage
+    || currentUsage.resetDate !== next.resetDate
+    || currentUsage.isUnlimited !== next.isUnlimited
+    || currentUsage.fromCache === true;
+
+  currentUsage = next;
+
   try {
     mkdirSync(join(homedir(), '.caco'), { recursive: true });
     writeFileSync(USAGE_FILE, JSON.stringify(currentUsage, null, 2));
   } catch (err) {
     console.error('[USAGE] Failed to persist:', err);
   }
+
+  return { changed };
 }
 
 /**

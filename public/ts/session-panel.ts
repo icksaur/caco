@@ -12,6 +12,7 @@ import { onGlobalEvent } from './websocket.js';
 import { sessionTracker } from './session-state-tracker.js';
 import { showToast } from './toast.js';
 import { buildSessionListModel } from './session-list-model.js';
+import { refreshUsageDisplays } from './usage-display.js';
 import type { SessionListModel, FolderGroup } from './session-list-model.js';
 
 // Module state
@@ -200,7 +201,7 @@ export function showSessionManager(): void {
   showSessionPanel();
   void loadSessions();
   void loadSchedules();
-  void loadUsage();
+  void refreshUsageDisplays();
   
   // Focus search input for keyboard-first navigation
   // Use setTimeout to ensure DOM is updated after view state change
@@ -713,54 +714,6 @@ export async function archiveSession(sessionId: string, displayName?: string): P
     }
   } catch (error) {
     showToast('Archive failed: ' + (error as Error).message);
-  }
-}
-
-/**
- * Fetch and display usage/budget info
- */
-async function loadUsage(): Promise<void> {
-  try {
-    const response = await fetch('/api/usage');
-    if (!response.ok) return;
-
-    const data = await response.json();
-    const usage = data.usage;
-
-    const container = document.getElementById('usageInfo');
-    if (!container) return;
-
-    if (!usage) {
-      container.textContent = '';
-      return;
-    }
-
-    if (usage.isUnlimited) {
-      let text = 'Unlimited usage';
-      if (usage.fromCache) {
-        text += ` (last fetched ${formatAge(usage.updatedAt, true)})`;
-      }
-      container.textContent = text;
-      container.className = 'usage-info';
-      return;
-    }
-
-    const remaining = Math.round(usage.remainingPercentage);
-    let text = `${remaining}% of budget remaining`;
-    if (usage.fromCache) {
-      text += ` (last fetched ${formatAge(usage.updatedAt, true)})`;
-    }
-    container.textContent = text;
-
-    // Add warning classes for low usage
-    container.className = 'usage-info';
-    if (remaining <= 10) {
-      container.classList.add('usage-critical');
-    } else if (remaining <= 25) {
-      container.classList.add('usage-low');
-    }
-  } catch (error) {
-    console.error('Failed to load usage:', error);
   }
 }
 

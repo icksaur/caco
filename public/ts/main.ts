@@ -25,6 +25,7 @@ import { loadClientExtensions, reloadExtension } from './extension-loader.js';
 import { onGlobalEvent } from './websocket.js';
 import { adHocBar } from './adhoc-bar.js';
 import { setupSwarmProgress } from './swarm-progress.js';
+import { initUsageDisplays, refreshUsageDisplays } from './usage-display.js';
 
 declare global {
   interface Window {
@@ -86,6 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
     showSessionPanel();
     void loadSessions();
     void loadSchedules();
+    initUsageDisplays();
     
     registerPoundProvider(() => {
       return getCachedSessions()
@@ -106,6 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       reconnectIfNeeded();
+      void refreshUsageDisplays();
     }
   });
   

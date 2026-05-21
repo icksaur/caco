@@ -1393,6 +1393,10 @@ main {
   pointer-events: none;
 }
 
+body:has(#sessionView.hidden) #usageInfo {
+  display: none;
+}
+
 .usage-info:empty {
   display: none;
 }

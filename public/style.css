@@ -1384,7 +1384,7 @@ main {
   padding: var(--space-sm) var(--space-md);
   font-size: var(--text-sm);
   color: var(--color-text-muted);
-  text-align: center;
+  text-align: right;
 }
 
 .usage-info:empty {

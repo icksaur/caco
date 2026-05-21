@@ -1379,18 +1379,16 @@ main {
    ======================================== */
 
 /* Usage info display */
-.usage-info {
-  position: fixed;
-  top: var(--space-lg);
-  right: calc(var(--space-lg) + 40px + var(--space-md));
-  height: 40px;
-  display: flex;
-  align-items: center;
-  padding: 0 var(--space-md);
+.section-header .usage-info {
+  flex: 1;
+  text-align: center;
   font-size: var(--text-sm);
   color: var(--color-text-muted);
-  z-index: 200;
-  pointer-events: none;
+}
+
+.usage-info {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
 }
 
 body:has(#sessionView.hidden) #usageInfo {

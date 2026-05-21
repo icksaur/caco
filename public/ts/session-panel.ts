@@ -12,7 +12,7 @@ import { onGlobalEvent } from './websocket.js';
 import { sessionTracker } from './session-state-tracker.js';
 import { showToast } from './toast.js';
 import { buildSessionListModel } from './session-list-model.js';
-import { refreshUsageDisplays } from './usage-display.js';
+import { refreshUsageDisplays, repaintUsageDisplays } from './usage-display.js';
 import type { SessionListModel, FolderGroup } from './session-list-model.js';
 
 // Module state
@@ -470,15 +470,22 @@ function renderFromModel(model: SessionListModel): void {
   const heading = document.createElement('div');
   heading.className = 'section-header';
   heading.textContent = 'sessions';
-  
+
+  const usageInfo = document.createElement('div');
+  usageInfo.id = 'usageInfo';
+  usageInfo.className = 'usage-info usage-display';
+  usageInfo.dataset.usageDisplay = 'panel';
+  heading.appendChild(usageInfo);
+
   const addBtn = document.createElement('button');
   addBtn.className = 'session-add-btn';
   addBtn.textContent = '+';
   addBtn.title = 'New session';
   addBtn.onclick = (e) => { e.stopPropagation(); newSessionClick(); };
   heading.appendChild(addBtn);
-  
+
   container.appendChild(heading);
+  repaintUsageDisplays();
   
   if (model.root.length === 0 && model.folders.length === 0) {
     const empty = document.createElement('div');

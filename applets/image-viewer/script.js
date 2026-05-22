@@ -40,7 +40,11 @@ function stepZoom(direction) {
 }
 
 function loadImage(path, force) {
-  if (path === currentPath && !force) return;
+  if (path === currentPath && !force) {
+    // Re-clicked the same path. Reload anyway — the file on disk may have
+    // changed since we last fetched it (common while iterating on graphics).
+    force = true;
+  }
   currentPath = path;
   resetView();
   currentImg = null;
@@ -57,7 +61,7 @@ function loadImage(path, force) {
   container.innerHTML = '<div class="loading">Loading...</div>';
 
   var img = document.createElement('img');
-  img.src = '/api/file?path=' + encodeURIComponent(path) + (force ? '&t=' + Date.now() : '');
+  img.src = '/api/file?path=' + encodeURIComponent(path) + '&t=' + Date.now();
   img.alt = path;
   img.draggable = false;
 

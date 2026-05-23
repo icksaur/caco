@@ -29,6 +29,7 @@
   padding: 12px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  grid-auto-rows: max-content;
   gap: 8px;
   align-content: start;
 }

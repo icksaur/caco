@@ -124,6 +124,7 @@ type ToolResult<T> =
 
 type ErrorReason =
   | 'not_connected'   // CDP unreachable
+  | 'launch_failed'   // helper script failed; diagnostics field has details
   | 'not_found'       // selector / id missed
   | 'not_visible'     // element exists but unclickable
   | 'timeout'         // action did not complete in time
@@ -132,7 +133,8 @@ type ErrorReason =
   | 'eval_disabled'   // caco_browser_eval called with evalEnabled=false
   | 'eval_origin_blocked'
   | 'eval_error'      // expression threw or returned unserializable
-  | 'frame_dialog_open'; // an open JS dialog must be handled first
+  | 'frame_dialog_open'  // an open JS dialog must be handled first
+  | 'invalid_args';   // tool-arg validation failure
 ```
 
 On `not_found` and `not_visible` the result includes a fresh `snapshot` so the agent can recover in one call.
@@ -187,7 +189,7 @@ Idempotent helper. If a CDP-reachable Edge already runs and matches the configur
 
 Parameters: `{ mode?: 'visible' | 'hidden' | 'headless' }`. Defaults to `visible` so first runs allow operator sign-in.
 
-Returns `data: { cdpUrl: string, started: boolean }`. `started: false` means Edge was already up. `started: true` means the helper was just executed.
+Returns `data: { cdpUrl: string, started: boolean, actualMode: 'visible' | 'hidden' | 'headless' | 'unknown', diagnostics: string }`. `started: false` means Edge was already up (`actualMode` reflects the helper's last-recorded mode, or `unknown` if launched outside the helper). `started: true` means the helper was just executed; `diagnostics` is the helper's captured log output (empty on success, useful when `launch_failed`).
 
 Notes:
 - Helper detaches via `Start-Process` (Windows) or `setsid` (Linux); the shell the agent invokes from can exit immediately.

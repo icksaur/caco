@@ -68,6 +68,29 @@ Caco ships `scripts/start-browser.ps1` (primary) and `scripts/start-browser.sh` 
 3. Writes the chosen port to `<STORAGE_ROOT>/browser-config.json`.
 4. Execs Edge.
 
+### Browser visibility modes
+
+The helper takes a `--mode` argument controlling how Edge renders. The dedicated profile is shared across modes — switching modes only changes how the window is presented.
+
+| Mode | Helper flag | Behavior |
+|---|---|---|
+| `visible` (default) | (none) | Full Edge window. Operator can watch and intervene. Required for first-time sign-in and MFA. |
+| `hidden` | `--start-minimized` | Window exists but minimized to taskbar. All capabilities; minimal screen interruption. |
+| `headless` | `--headless=new` | No window. Background process only. Lowest resources; cannot interactively do MFA without switching modes. |
+
+Recommended lifecycle:
+
+```mermaid
+flowchart LR
+    A[First time:<br/>visible bootstrap] --> B[Sign into all<br/>target apps + MFA]
+    B --> C[Switch helper to<br/>headless on Dev Box<br/>or hidden on workstation]
+    C --> D[Steady state:<br/>agent drives browser]
+    D -->|MFA timeout fires:<br/>auth_required| E[Operator relaunches<br/>visible briefly]
+    E --> B
+```
+
+Caco itself is mode-agnostic; the CDP behavior is identical. Only the operator's helper invocation differs.
+
 ### Configuration
 
 Path: `<STORAGE_ROOT>/browser-config.json` where `STORAGE_ROOT = process.env.CACO_HOME || ~/.caco` (matches `src/storage-paths.ts:14`).
@@ -270,6 +293,16 @@ Two sessions share one browser. The mutex (see Design) prevents interleaved CDP 
 - Windows (primary, matches Dev Box use case).
 - Linux/Arch (secondary; `msedge` from `edge-stable` AUR, falls back to chromium).
 - macOS not in v1.
+
+### Visibility modes — UX tradeoffs
+
+| Mode | Intrusiveness | MFA handling | Resource cost | Best for |
+|---|---|---|---|---|
+| `visible` | High — full window on screen | Inline; respond and continue | Full GPU/compositor | Bootstrap, debugging selectors, demos, untrusted flows |
+| `hidden` | Low — minimized to taskbar | Taskbar flash; click to bring forward | Full GPU/compositor (still painting) | Workstation you actively use, daily steady state once trusted |
+| `headless` | None — invisible background process | Blocks; must temporarily switch back to visible | Lowest (no paint) | Dev Box you only ever tunnel to; pure agent operation |
+
+The intrusive-but-can-do-anything option is `visible`. The low-friction option for a Dev Box is `headless`; for a workstation you actively use, `hidden`. The dedicated profile is the same on disk regardless of mode, so switching is free.
 
 ## Code Analysis
 

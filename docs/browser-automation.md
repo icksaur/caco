@@ -14,10 +14,11 @@ Secondary use cases:
 ## Non-Goals
 
 - **Not** an autonomous web crawler. Every tool call is initiated by the agent during a chat turn, observed by the operator.
-- **Not** a Caco-managed browser lifecycle. Caco does not launch, kill, or relaunch Edge. The operator owns the browser process. Caco only connects over CDP.
+- **Not** owning the browser **profile content**. Caco can launch the dedicated Edge process via the helper, but the operator owns sign-in: every interactive auth/MFA happens in the visible browser window with the operator at the keyboard.
 - **Not** profile sandboxing. The whole point is to attach to a real signed-in profile.
 - **Not** the operator's everyday Edge profile. Caco uses a dedicated one and the operator signs into it explicitly.
 - **Not** parallel browser sessions, mobile emulation, network interception, recording flows for replay.
+- **Not** multi-tab orchestration. v1 operates on a single working tab. Pages that open new tabs (`target="_blank"`, `window.open`) leave the new tab unmanaged; agent's snapshot continues to reflect the working tab.
 
 ## Design
 
@@ -180,6 +181,19 @@ Parameters:
 
 Pre-conditions for every action: target is found, target is visible (occluded-by-sticky-header → tool scrolls and retries once, then returns `not_visible`), no open JS dialog (else `frame_dialog_open`).
 
+#### caco_browser_ensure_running
+
+Idempotent helper. If a CDP-reachable Edge already runs and matches the configured `cdpUrl`, no-op. Otherwise spawn the helper script (detached) and wait up to `defaultTimeoutMs` for `cdpUrl` to come up.
+
+Parameters: `{ mode?: 'visible' | 'hidden' | 'headless' }`. Defaults to `visible` so first runs allow operator sign-in.
+
+Returns `data: { cdpUrl: string, started: boolean }`. `started: false` means Edge was already up. `started: true` means the helper was just executed.
+
+Notes:
+- Helper detaches via `Start-Process` (Windows) or `setsid` (Linux); the shell the agent invokes from can exit immediately.
+- If Edge is already up in a different mode (e.g., `visible`) and the agent asks for `headless`, this tool returns the existing connection unchanged. Mode is only honored on first launch; switching modes requires the operator to close Edge first.
+- Agent typically calls this once at the top of a browser flow; subsequent tools tolerate `not_connected` and the agent can call `ensure_running` again as recovery.
+
 #### caco_browser_navigate
 
 Parameters: `{ url: string, waitUntil?: 'load' | 'domcontentloaded' | 'networkidle' }`. Default `waitUntil: 'load'`.
@@ -268,11 +282,14 @@ Heavier; oriented around managed browser lifecycle. Our model — attach to a lo
 
 The DOM is noisy. The a11y tree is exactly the elements the page exposes as interactive, with semantic roles. Most modern browser-automation agents (Playwright trace mode, OpenAI Operator, Anthropic Computer Use) have converged on a11y-tree snapshots for this reason.
 
-### Why no auto-launch?
+### Why agent-launchable but operator-signed-in?
 
-1. Operator must sign into corporate apps interactively the first time. Caco can't do that.
-2. Profile-lock: if Edge is already running on the same `--user-data-dir`, the launch silently fails or attaches in ways that vary by Edge version.
-3. Launching processes from a long-running service can trigger EDR alerts on corporate hardware.
+The agent **can** spawn the browser via `caco_browser_ensure_running` (one detached subprocess); it **cannot** sign in to corporate apps. The split reflects two different boundaries:
+
+1. **Process lifecycle is fine for the agent.** Running a shell command to launch a detached process is something the agent already does via its bash tool; the dedicated helper just makes it idempotent and CDP-aware.
+2. **Authentication must be the operator.** First-time MFA, conditional access compliance prompts, device-bind keys — these require a human at the keyboard. The agent surfaces `auth_required` and stops; the operator handles the prompt.
+
+Profile-lock concerns are real but mitigated by the helper checking `DevToolsActivePort` before launch and picking a fresh port if the existing browser is unrecognized.
 
 ### Security model
 
@@ -350,16 +367,17 @@ The intrusive-but-can-do-anything option is `visible`. The low-friction option f
 
 ## Acceptance
 
-A new fresh chat session, with the operator having run `start-browser` once and signed into a target site, should be able to:
+A new fresh chat session, on a clean install, should be able to:
 
-1. Agent calls `caco_browser_navigate` to a known URL. Returns title + finalUrl.
-2. Agent calls `caco_browser_snapshot`. Returns outline with at least one interactive element. iframe contents present if any.
-3. Agent calls `caco_browser_action` with `click` and an id from snapshot. Returns `{ ok: true }`.
-4. Agent calls `caco_browser_screenshot`. Path returned; operator sees post-click page via image-viewer link.
-5. `not_connected` fires with a useful message when Edge is not running; subsequent call after operator relaunches helper succeeds without restarting Caco.
-6. **Interleaved-call test:** two chat sessions concurrently issue `snapshot`; both succeed, both serialize on the mutex; the second sees `browser_busy` only if the first exceeds `defaultTimeoutMs`.
-7. `caco_browser_eval` returns `eval_disabled` until operator flips config; with origin not in allowlist, returns `eval_origin_blocked`.
-8. Auto-dismissed JS dialog produces a logged event; next tool call succeeds.
+1. Agent calls `caco_browser_ensure_running`. Helper launches Edge detached; tool returns `{ cdpUrl, started: true }`. Caller's shell can exit immediately; Edge keeps running.
+2. Agent calls `caco_browser_navigate` to `https://example.com` (no sign-in needed). Returns title + finalUrl.
+3. Agent calls `caco_browser_snapshot`. Returns outline with at least one interactive element.
+4. Agent calls `caco_browser_action` with `click` and an id from snapshot. Returns `{ ok: true }`.
+5. Agent calls `caco_browser_screenshot`. Path returned; operator sees post-click page via image-viewer link.
+6. `not_connected` fires with useful message when Edge is killed externally; agent calls `ensure_running` again and recovers without Caco restart.
+7. **Interleaved-call test:** two chat sessions concurrently issue `snapshot`; both succeed, both serialize on the mutex; the second sees `browser_busy` only if the first exceeds `defaultTimeoutMs`.
+8. `caco_browser_eval` returns `eval_disabled` until operator flips config; with origin not in allowlist, returns `eval_origin_blocked`.
+9. Auto-dismissed JS dialog produces a logged event; next tool call succeeds.
 
 ## Follow-ups (not v1)
 

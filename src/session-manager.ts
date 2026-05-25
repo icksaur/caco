@@ -306,7 +306,8 @@ interface CopilotClientInstance {
   start(): Promise<void>;
   stop(): Promise<void>;
   forceStop(): Promise<void>;
-  ping(message?: string): Promise<{ message: string; timestamp: number }>;  createSession(config: CreateSessionConfig): Promise<CopilotSessionInstance>;
+  ping(message?: string): Promise<{ message: string; timestamp: string }>;
+  createSession(config: CreateSessionConfig): Promise<CopilotSessionInstance>;
   resumeSession(sessionId: string, config?: ResumeSessionConfig): Promise<CopilotSessionInstance>;
   deleteSession(sessionId: string): Promise<void>;
   listModels(): Promise<SDKModelInfo[]>;
@@ -342,10 +343,18 @@ interface CopilotSessionInstance {
   sessionId: string;
   send(options: SendOptions): Promise<string>;
   sendAndWait(options: SendOptions, timeout?: number): Promise<unknown>;
-  getMessages(): Promise<SessionEvent[]>;
+  getEvents(): Promise<SessionEvent[]>;
   disconnect(): Promise<void>;
   setModel(model: string): Promise<void>;
   abort(): Promise<void>;
+  rpc: {
+    history: {
+      compact(params?: unknown): Promise<{ success: boolean; tokensRemoved: number; messagesRemoved: number }>;
+    };
+    mcp: {
+      list(): Promise<unknown>;
+    };
+  };
 }
 
 interface SendOptions {
@@ -456,7 +465,7 @@ class SessionManager {
     if (this.clientStarting) return this.clientStarting;
     
     this.clientStarting = (async () => {
-      const client = new CopilotClient({ cwd: process.cwd() }) as unknown as CopilotClientInstance;
+      const client = new CopilotClient({ workingDirectory: process.cwd() }) as unknown as CopilotClientInstance;
       await client.start();
       this.sharedClient = client;
       this.startHealthCheck();
@@ -979,7 +988,7 @@ class SessionManager {
     const active = this.activeSessions.get(sessionId);
     if (active) {
       const { session } = active;
-      return await session.getMessages();
+      return await session.getEvents();
     }
     
     // Not active - read from disk
@@ -1168,8 +1177,8 @@ class SessionManager {
     if (!active) {
       throw new Error(`Session ${sessionId} is not active`);
     }
-    const session = active.session as unknown as { rpc: { compaction: { compact: () => Promise<{ success: boolean; tokensRemoved: number; messagesRemoved: number }> } } };
-    const result = await session.rpc.compaction.compact();
+    const session = active.session as unknown as { rpc: { history: { compact: () => Promise<{ success: boolean; tokensRemoved: number; messagesRemoved: number }> } } };
+    const result = await session.rpc.history.compact();
     if (!result.success) {
       throw new Error('Compaction failed');
     }

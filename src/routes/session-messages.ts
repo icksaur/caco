@@ -382,6 +382,9 @@ export async function dispatchMessage(
         if (event.type === 'session.idle' && needsObservation) {
           unobservedTracker.markIdle(sessionId);
         }
+        if (event.type === 'session.idle') {
+          void sessionManager.pollQuota();
+        }
         cleanupAndComplete(event.type);
         unsubscribe();
       }

@@ -10,6 +10,7 @@ import { readSessionWorkspace, readSessionEvents, parseSessionModel, listSession
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
+import { pollQuota } from './quota-poller.js';
 
 import { refreshAccessToken } from './mcp-auth-service.js';
 import { serverIdFromUrl } from './mcp-discovery.js';
@@ -311,6 +312,22 @@ interface CopilotClientInstance {
   resumeSession(sessionId: string, config?: ResumeSessionConfig): Promise<CopilotSessionInstance>;
   deleteSession(sessionId: string): Promise<void>;
   listModels(): Promise<SDKModelInfo[]>;
+  rpc: {
+    account: {
+      getQuota: (params: { gitHubToken?: string }) => Promise<{
+        quotaSnapshots: Record<string, {
+          isUnlimitedEntitlement: boolean;
+          entitlementRequests: number;
+          usedRequests: number;
+          remainingPercentage: number;
+          resetDate?: string;
+        } | undefined>;
+      }>;
+    };
+    tools: {
+      list(params: unknown): Promise<{ tools: unknown[] }>;
+    };
+  };
 }
 
 interface SDKModelInfo {
@@ -470,6 +487,7 @@ class SessionManager {
       this.sharedClient = client;
       this.startHealthCheck();
       console.log('[SDK] Shared client started');
+      void pollQuota(client);
       return client;
     })();
     
@@ -560,6 +578,9 @@ class SessionManager {
         client.ping('health-check'),
         new Promise((_, reject) => setTimeout(() => reject(new Error('ping timeout')), 5000))
       ]);
+      // Piggyback a quota refresh on the health check cadence so usage stays
+      // current even for long-idle sessions with no turns triggering pollQuota.
+      void pollQuota(client);
     } catch (e) {
       console.warn('[SDK] Health check failed, force-stopping client:', e instanceof Error ? e.message : e);
       this.sharedClient = null;
@@ -1184,6 +1205,15 @@ class SessionManager {
     }
     console.log(`[COMPACT] Session ${sessionId.slice(0, 8)}: removed ${result.tokensRemoved} tokens, ${result.messagesRemoved} messages`);
     return { tokensRemoved: result.tokensRemoved, messagesRemoved: result.messagesRemoved };
+  }
+
+  /**
+   * Fetch the current quota via account.getQuota RPC and broadcast caco.usage
+   * if it changed. Safe to call frequently — pollQuota is single-flight.
+   */
+  async pollQuota(): Promise<void> {
+    if (!this.sharedClient) return;
+    await pollQuota(this.sharedClient);
   }
 
   /**

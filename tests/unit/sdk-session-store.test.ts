@@ -13,6 +13,7 @@ vi.mock('os', async (importOriginal) => {
 import {
   readSessionWorkspace,
   readSessionEvents,
+  readLastTurns,
   parseSessionModel,
   listSessionIds,
 } from '../../src/sdk-session-store.js';
@@ -171,6 +172,56 @@ describe('sdk-session-store', () => {
     it('returns empty array when state dir missing', () => {
       testState.homeDir = join(tempDir, 'nonexistent');
       expect(listSessionIds()).toEqual([]);
+    });
+  });
+
+  describe('readLastTurns', () => {
+    function makeTurns(n: number, eventsPerTurn = 3): object[] {
+      const out: object[] = [];
+      for (let i = 0; i < n; i++) {
+        out.push({ type: 'user.message', data: { text: `q${i}` } });
+        for (let j = 0; j < eventsPerTurn - 1; j++) {
+          out.push({ type: 'assistant.message_delta', data: { delta: `r${i}-${j}` } });
+        }
+      }
+      return out;
+    }
+
+    it('returns all events when session has fewer turns than the cap', () => {
+      writeEvents('s1', makeTurns(3));
+      const { events, totalLines, skipped } = readLastTurns('s1', 5, 2000);
+      expect(events.length).toBe(9);  // 3 turns * 3 events
+      expect(skipped).toBe(0);
+      expect(totalLines).toBeGreaterThan(0);
+    });
+
+    it('caps to the last N turns when session has more', () => {
+      writeEvents('s2', makeTurns(10));
+      const { events, skipped } = readLastTurns('s2', 5, 2000);
+      const userMessages = events.filter(e => e.type === 'user.message');
+      expect(userMessages.length).toBe(5);
+      // The most recent 5 user messages: indices 5..9 (text q5..q9)
+      const texts = userMessages.map(e => (e.data as { text: string }).text);
+      expect(texts).toEqual(['q5', 'q6', 'q7', 'q8', 'q9']);
+      expect(skipped).toBeGreaterThan(0);
+    });
+
+    it('respects maxEvents safety cap by reducing turns', () => {
+      // 10 turns at 100 events each = 1000 events. Cap at maxEvents=120
+      // forces the reducer to lower turns from 5 toward 3 (the floor).
+      writeEvents('s3', makeTurns(10, 100));
+      const { events } = readLastTurns('s3', 5, 120);
+      // The reducer stops at turns=3 (300 events still > 120 but turns can't
+      // go lower per `turns > 3`).
+      const userMessages = events.filter(e => e.type === 'user.message');
+      expect(userMessages.length).toBe(3);
+    });
+
+    it('returns empty when session has no events file', () => {
+      const { events, totalLines, skipped } = readLastTurns('no-such-session', 5, 2000);
+      expect(events).toEqual([]);
+      expect(totalLines).toBe(0);
+      expect(skipped).toBe(0);
     });
   });
 });

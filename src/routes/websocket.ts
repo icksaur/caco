@@ -316,7 +316,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
   try {
     const fetchStart = Date.now();
     console.log(`[HISTORY] Reading events from disk for ${shortId}...`);
-    const { events, totalLines, skipped } = readLastTurns(sessionId, 10, 2000);
+    const { events, totalLines, skipped } = readLastTurns(sessionId, 5, 2000);
     console.log(`[HISTORY] Read ${events.length} events (from ${totalLines} total) for ${shortId} in ${Date.now() - fetchStart}ms, ws.readyState=${ws.readyState}`);
     
     if (ws.readyState !== WebSocket.OPEN) {

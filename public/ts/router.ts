@@ -72,7 +72,7 @@ export function initRouter(): void {
     
     event.intercept({
       handler: async () => {
-        await handleNavigation(url);
+        await handleNavigation(url, event.navigationType as NavigationKind);
       }
     });
   });
@@ -96,10 +96,33 @@ export function initRouter(): void {
 }
 
 /**
+ * Decide whether a navigation event should reveal the applet panel.
+ *
+ * Pure, side-effect-free, testable. The discriminator is `navigationType`:
+ *   - 'replace': URL housekeeping by code (e.g. restoreApplet's
+ *     replaceState). Never reveals the panel.
+ *   - 'push': user clicked an applet link, or programmatic nav.navigate()
+ *     (e.g. applet-browser long-press). Reveals the panel if the URL has
+ *     an applet slug.
+ *   - 'traverse': back/forward to a URL with an applet param. Treat as
+ *     "user wants that view back", reveal.
+ *   - 'reload': caller filters this out before reaching us.
+ */
+export type NavigationKind = 'push' | 'replace' | 'traverse' | 'reload';
+export function shouldShowAppletOnNavigation(
+  appletSlug: string | null,
+  navigationType: NavigationKind,
+): boolean {
+  if (!appletSlug) return false;
+  if (navigationType === 'replace') return false;
+  return true;
+}
+
+/**
  * Handle navigation to a URL
  * Called by Navigation API intercept or popstate fallback
  */
-async function handleNavigation(url: URL): Promise<void> {
+async function handleNavigation(url: URL, navigationType: NavigationKind = 'push'): Promise<void> {
   const sessionId = url.searchParams.get('session');
   const appletSlug = url.searchParams.get('applet');
 
@@ -108,9 +131,12 @@ async function handleNavigation(url: URL): Promise<void> {
     await chatView.activateSession(sessionId);
   }
 
-  // Handle applet param — content only. URL is descriptive of the route;
-  // it must NOT prescribe panel visibility. Visibility is owned by the
-  // user's tap on #appletBtn (recorded in the panel state store).
+  // Handle applet param. Content loading and panel visibility are
+  // independent decisions:
+  //   - content: load if slug changed
+  //   - visibility: shouldShowAppletOnNavigation() decides based on
+  //     navigation type. User-initiated nav (push/traverse) shows the
+  //     panel; replaceState housekeeping does not.
   if (appletSlug && appletSlug !== getActiveAppletSlug()) {
     const urlParams: Record<string, string> = {};
     url.searchParams.forEach((value, key) => {
@@ -119,13 +145,16 @@ async function handleNavigation(url: URL): Promise<void> {
     await loadApplet(appletSlug, urlParams);
   } else if (appletSlug && appletSlug === getActiveAppletSlug()) {
     // Same applet, only URL params changed. Notify the applet so it can
-    // react to the new params; do not touch panel visibility.
+    // react to the new params.
     window.dispatchEvent(new PopStateEvent('popstate'));
     void syncAppletParamsToMeta();
   }
-  // !appletSlug case: do nothing. URL has no applet, but the panel state
-  // is unchanged. The applet content remains loaded for re-show if user
-  // taps the toggle.
+
+  if (shouldShowAppletOnNavigation(appletSlug, navigationType)) {
+    getPanelState().set({ applet: true }, 'deep-link');
+  }
+  // !appletSlug case: do nothing on visibility. The applet content
+  // remains loaded for re-show if user taps the toggle.
 }
 
 /**
@@ -153,7 +182,8 @@ async function syncAppletParamsToMeta(): Promise<void> {
  */
 function handlePopState(): void {
   const url = new URL(window.location.href);
-  void handleNavigation(url);
+  // popstate fires for back/forward in browsers without Navigation API.
+  void handleNavigation(url, 'traverse');
 }
 
 /**

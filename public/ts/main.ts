@@ -26,6 +26,8 @@ import { onGlobalEvent } from './websocket.js';
 import { adHocBar } from './adhoc-bar.js';
 import { setupSwarmProgress } from './swarm-progress.js';
 import { initUsageDisplays, refreshUsageDisplays } from './usage-display.js';
+import { getPanelState } from './panel-state.js';
+import { bindPanelStateToDom, readPanelStateFromDom } from './panel-dom-binder.js';
 
 declare global {
   interface Window {
@@ -69,6 +71,14 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize view state from DOM
     initViewState();
+
+    // Wire the panel state store: read current DOM into the store, then
+    // bind so any future store changes flow back to the DOM. During step 1
+    // of the panel-state refactor this is dormant — legacy view-controller
+    // show/hide functions still touch the DOM directly.
+    const panelStore = getPanelState();
+    panelStore.set(readPanelStateFromDom(), 'init');
+    bindPanelStateToDom(panelStore);
     
     // Initialize router (Navigation API handler)
     initRouter();

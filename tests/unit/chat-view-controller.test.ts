@@ -17,8 +17,15 @@ vi.mock('../../public/ts/view-controller.js', () => {
     setViewState: vi.fn((s: string) => { _mockState = s; }),
     getViewState: vi.fn(() => _mockState),
     showSessionPanel: vi.fn(),
+    showAppletPanel: vi.fn(),
+    hideAppletPanel: vi.fn(),
+    isAppletPanelVisible: vi.fn(() => true),
   };
 });
+
+vi.mock('../../public/ts/router.js', () => ({
+  loadApplet: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock('../../public/ts/context-footer.js', () => ({
   renderSessionStatus: vi.fn(),
@@ -269,6 +276,61 @@ describe('ChatViewController', () => {
         modelName: 'Claude Sonnet 4', cwd: '/path', hasGit: true,
         sessionName: 'My Session', sessionId: 'sess-123', hasIcon: false, gitBranch: 'main'
       });
+    });
+  });
+
+  describe('restoreApplet visibility invariant', () => {
+    type RestoreApplet = (
+      activeApplet?: string | null,
+      appletParams?: Record<string, string> | null,
+      panelVisible?: boolean,
+    ) => Promise<void>;
+
+    function restoreApplet(c: ChatViewController): RestoreApplet {
+      return (c as unknown as { restoreApplet: RestoreApplet }).restoreApplet.bind(c);
+    }
+
+    it('never calls showAppletPanel or hideAppletPanel — regardless of panelVisible value', async () => {
+      const view = await import('../../public/ts/view-controller.js');
+      await restoreApplet(cvc)('applet-a', {}, true);
+      await restoreApplet(cvc)('applet-b', {}, false);
+      await restoreApplet(cvc)('applet-c', {}, undefined);
+      expect(view.showAppletPanel).not.toHaveBeenCalled();
+      expect(view.hideAppletPanel).not.toHaveBeenCalled();
+    });
+
+    it('returns early on null applet without touching anything', async () => {
+      const view = await import('../../public/ts/view-controller.js');
+      const router = await import('../../public/ts/router.js');
+      vi.mocked(router.loadApplet).mockClear();
+      await restoreApplet(cvc)(null, {}, true);
+      await restoreApplet(cvc)(undefined, {}, false);
+      expect(router.loadApplet).not.toHaveBeenCalled();
+      expect(view.showAppletPanel).not.toHaveBeenCalled();
+      expect(view.hideAppletPanel).not.toHaveBeenCalled();
+    });
+
+    it('calls loadApplet with restore:true exactly once per call', async () => {
+      const router = await import('../../public/ts/router.js');
+      vi.mocked(router.loadApplet).mockClear();
+      vi.mocked(getActiveSessionId).mockReturnValue('s1');
+      await restoreApplet(cvc)('applet-a', { path: '/x' });
+      expect(router.loadApplet).toHaveBeenCalledTimes(1);
+      expect(router.loadApplet).toHaveBeenCalledWith('applet-a', { path: '/x' }, { restore: true });
+    });
+
+    it('aborts late restore when active session changed mid-flight', async () => {
+      const router = await import('../../public/ts/router.js');
+      vi.mocked(router.loadApplet).mockClear();
+      vi.mocked(getActiveSessionId).mockReturnValue('s1');
+
+      // Start the restore but flip the active session before its imports resolve.
+      const inFlight = restoreApplet(cvc)('applet-a', {});
+      vi.mocked(getActiveSessionId).mockReturnValue('s2');
+      await inFlight;
+
+      // Stale restore must not have called loadApplet.
+      expect(router.loadApplet).not.toHaveBeenCalled();
     });
   });
 });

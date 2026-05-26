@@ -225,32 +225,40 @@ class ChatViewController {
    * Only loads if the session has a saved activeApplet — respects current
    * panel visibility otherwise.
    */
-  private async restoreApplet(activeApplet?: string | null, appletParams?: Record<string, string> | null, panelVisible?: boolean): Promise<void> {
+  private async restoreApplet(activeApplet?: string | null, appletParams?: Record<string, string> | null, _panelVisible?: boolean): Promise<void> {
     if (!activeApplet) return;
+    // Snapshot at fire-time so rapid session switches can abort late restores.
+    const targetSessionId = getActiveSessionId();
     try {
-      const params = new URLSearchParams();
-      const sessionId = getActiveSessionId();
-      if (sessionId) params.set('session', sessionId);
-      params.set('applet', activeApplet);
-      for (const [k, v] of Object.entries(appletParams || {})) {
-        params.set(k, v);
-      }
-      const newUrl = window.location.pathname + '?' + params.toString();
-      if (newUrl !== window.location.pathname + window.location.search) {
-        window.history.replaceState(null, '', newUrl);
-      }
-      // Capture current visibility BEFORE loadApplet so we can inherit it when
-      // the session meta is silent on panelVisible (legacy / never-toggled).
-      const { showAppletPanel, hideAppletPanel, isAppletPanelVisible } =
-        await import('./view-controller.js');
-      const wasVisible = isAppletPanelVisible();
       const { loadApplet } = await import('./router.js');
+      // If the user switched away while imports resolved, bail.
+      if (getActiveSessionId() !== targetSessionId) return;
+
+      // Best-effort URL hygiene. Wrapped separately so a missing window
+      // (unit tests, headless contexts) doesn't block the content swap.
+      try {
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams();
+          if (targetSessionId) params.set('session', targetSessionId);
+          params.set('applet', activeApplet);
+          for (const [k, v] of Object.entries(appletParams || {})) {
+            params.set(k, v);
+          }
+          const newUrl = window.location.pathname + '?' + params.toString();
+          if (newUrl !== window.location.pathname + window.location.search) {
+            window.history.replaceState(null, '', newUrl);
+          }
+        }
+      } catch { /* URL update is presentational; don't block content load */ }
+
       await loadApplet(activeApplet, appletParams || {}, { restore: true });
-      // Explicit preference wins; otherwise inherit the user's current intent.
-      if (panelVisible === true) showAppletPanel();
-      else if (panelVisible === false) hideAppletPanel();
-      else if (!wasVisible) hideAppletPanel();
-      // else: panel was visible and meta is silent — leave it visible.
+
+      // Visibility is intentionally NOT touched here. The applet panel is a
+      // global UI state owned by the user's last tap on #appletBtn. Session
+      // activation swaps content; it must not flip visibility, because that
+      // races with rapid session clicks and surprises the operator. The old
+      // per-session `appletPanelVisible` meta field is no longer applied
+      // (still persisted for backward compat, ignored on restore).
     } catch (e) {
       console.warn('[CHAT] Failed to restore applet:', e);
     }

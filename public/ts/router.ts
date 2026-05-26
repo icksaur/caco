@@ -170,7 +170,16 @@ export function toggleSessions(): void {
  */
 export async function sessionClick(sessionId: string): Promise<void> {
   await chatView.activateSession(sessionId);
-  updateUrl({ session: sessionId }, true);
+  // Write a clean URL containing only session=NEW. We deliberately use
+  // history.pushState (not the Navigation API) so we don't fire
+  // handleNavigation — that intercept would race restoreApplet, see the
+  // stale applet from the previous session, and force-show the panel.
+  // restoreApplet rewrites the URL via replaceState if the new session
+  // has its own applet, so this is the safe baseline.
+  const clean = new URL(window.location.href);
+  clean.search = '';
+  clean.searchParams.set('session', sessionId);
+  history.pushState(null, '', clean.toString());
   hideSessionPanel();
 }
 

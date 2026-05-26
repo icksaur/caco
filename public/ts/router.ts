@@ -180,7 +180,11 @@ export async function sessionClick(sessionId: string): Promise<void> {
   clean.search = '';
   clean.searchParams.set('session', sessionId);
   history.pushState(null, '', clean.toString());
-  hideSessionPanel();
+  // Auto-dismiss the picker only on mobile widths. On desktop, keep the
+  // session list visible so the user can scrub through sessions.
+  if (window.matchMedia('(max-width: 768px)').matches) {
+    hideSessionPanel();
+  }
 }
 
 /**

@@ -7,7 +7,6 @@
  * Navigation is handled by router.ts - this module just renders applets.
  */
 
-import { showAppletPanel } from './view-controller.js';
 import { wsSetState, onStateUpdate, onEvent, onGlobalEvent, isWsConnected } from './websocket.js';
 import { getActiveSessionId, getCurrentCwd, isLoadingHistory } from './app-state.js';
 import { regions } from './dom-regions.js';
@@ -909,7 +908,6 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   if (currentApplet?.slug === slug) {
     console.log(`[APPLET] Already loaded: ${slug}`);
     showInstance(currentApplet);
-    showAppletPanel();
     return;
   }
   
@@ -938,9 +936,9 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   
   // Render content into instance (runs applet JS which may call onUrlParamsChange)
   currentApplet.styleElement = renderAppletToInstance(instanceDiv, content, slug, label);
-  
-  showAppletPanel();
-  
+
+  // Panel visibility is the router's job. pushApplet only loads content.
+
   // WebSocket is already connected on page load - no need to connect here
 }
 

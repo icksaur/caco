@@ -1972,7 +1972,7 @@ html, body {
   .session-panel:not(.hidden) {
     position: absolute;
     inset: 0;
-    z-index: 50;
+    z-index: 51;
     width: 100%;
     border-right: none;
   }
@@ -1983,6 +1983,15 @@ html, body {
   }
   
   .work-area:has(.session-panel:not(.hidden)) .chat-panel {
+    display: none;
+  }
+  
+  /* Session list owns the screen on mobile: hide applet behind it and
+     suppress the applet toggle button so it doesn't sit on top. */
+  .work-area:has(.session-panel:not(.hidden)) .applet-panel {
+    display: none;
+  }
+  body:has(.session-panel:not(.hidden)) #appletBtn {
     display: none;
   }
   

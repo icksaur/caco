@@ -171,6 +171,7 @@ export function toggleSessions(): void {
 export async function sessionClick(sessionId: string): Promise<void> {
   await chatView.activateSession(sessionId);
   updateUrl({ session: sessionId }, true);
+  hideSessionPanel();
 }
 
 /**

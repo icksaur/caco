@@ -239,15 +239,18 @@ class ChatViewController {
       if (newUrl !== window.location.pathname + window.location.search) {
         window.history.replaceState(null, '', newUrl);
       }
+      // Capture current visibility BEFORE loadApplet so we can inherit it when
+      // the session meta is silent on panelVisible (legacy / never-toggled).
+      const { showAppletPanel, hideAppletPanel, isAppletPanelVisible } =
+        await import('./view-controller.js');
+      const wasVisible = isAppletPanelVisible();
       const { loadApplet } = await import('./router.js');
       await loadApplet(activeApplet, appletParams || {}, { restore: true });
-      // Apply per-session visibility. Default to visible if not explicitly false.
-      const { showAppletPanel, hideAppletPanel } = await import('./view-controller.js');
-      if (panelVisible === false) {
-        hideAppletPanel();
-      } else {
-        showAppletPanel();
-      }
+      // Explicit preference wins; otherwise inherit the user's current intent.
+      if (panelVisible === true) showAppletPanel();
+      else if (panelVisible === false) hideAppletPanel();
+      else if (!wasVisible) hideAppletPanel();
+      // else: panel was visible and meta is silent — leave it visible.
     } catch (e) {
       console.warn('[CHAT] Failed to restore applet:', e);
     }

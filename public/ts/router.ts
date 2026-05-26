@@ -12,13 +12,14 @@
  * - Removing them does NOT destroy loaded content
  */
 
-import { showAppletPanel, hideAppletPanel, isAppletPanelVisible, toggleAppletExpanded, hideSessionPanel, isSessionPanelVisible } from './view-controller.js';
+import { toggleAppletExpanded } from './view-controller.js';
 import { getActiveSessionId } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
 import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
 import { showSessionManager } from './session-panel.js';
 import { chatView } from './chat-view-controller.js';
+import { getPanelState, deviceClass } from './panel-state.js';
 
 // Navigation API types (not yet in TypeScript lib)
 interface NavigateEvent extends Event {
@@ -101,13 +102,15 @@ export function initRouter(): void {
 async function handleNavigation(url: URL): Promise<void> {
   const sessionId = url.searchParams.get('session');
   const appletSlug = url.searchParams.get('applet');
-  
+
   // Handle session param
   if (sessionId && sessionId !== getActiveSessionId()) {
     await chatView.activateSession(sessionId);
   }
-  
-  // Handle applet param
+
+  // Handle applet param — content only. URL is descriptive of the route;
+  // it must NOT prescribe panel visibility. Visibility is owned by the
+  // user's tap on #appletBtn (recorded in the panel state store).
   if (appletSlug && appletSlug !== getActiveAppletSlug()) {
     const urlParams: Record<string, string> = {};
     url.searchParams.forEach((value, key) => {
@@ -115,14 +118,14 @@ async function handleNavigation(url: URL): Promise<void> {
     });
     await loadApplet(appletSlug, urlParams);
   } else if (appletSlug && appletSlug === getActiveAppletSlug()) {
-    showAppletPanel();
+    // Same applet, only URL params changed. Notify the applet so it can
+    // react to the new params; do not touch panel visibility.
     window.dispatchEvent(new PopStateEvent('popstate'));
-    // Sync new params to session meta
     void syncAppletParamsToMeta();
-  } else if (!appletSlug && isAppletPanelVisible()) {
-    // URL has no applet param - hide panel (but preserve content)
-    hideAppletPanel();
   }
+  // !appletSlug case: do nothing. URL has no applet, but the panel state
+  // is unchanged. The applet content remains loaded for re-show if user
+  // taps the toggle.
 }
 
 /**
@@ -157,8 +160,9 @@ function handlePopState(): void {
  * Toggle sessions overlay
  */
 export function toggleSessions(): void {
-  if (isSessionPanelVisible()) {
-    hideSessionPanel();
+  const store = getPanelState();
+  if (store.get().session) {
+    store.set({ session: false }, 'user-toggle-session');
   } else {
     showSessionManager();
   }
@@ -182,8 +186,8 @@ export async function sessionClick(sessionId: string): Promise<void> {
   history.pushState(null, '', clean.toString());
   // Auto-dismiss the picker only on mobile widths. On desktop, keep the
   // session list visible so the user can scrub through sessions.
-  if (window.matchMedia('(max-width: 768px)').matches) {
-    hideSessionPanel();
+  if (deviceClass() === 'mobile') {
+    getPanelState().set({ session: false }, 'user-session-pick');
   }
 }
 
@@ -221,27 +225,9 @@ export function toggleApplet(): void {
     }
     return;
   }
-  
-  // Toggle applet panel visibility. Persist preference to session meta.
-  const willShow = !isAppletPanelVisible();
-  if (willShow) {
-    showAppletPanel();
-  } else {
-    hideAppletPanel();
-  }
-  void persistPanelVisibility(willShow);
-}
 
-async function persistPanelVisibility(visible: boolean): Promise<void> {
-  const sessionId = getActiveSessionId();
-  if (!sessionId) return;
-  try {
-    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/applet`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ panelVisible: visible }),
-    });
-  } catch { /* best-effort */ }
+  const store = getPanelState();
+  store.set({ applet: !store.get().applet }, 'user-toggle-applet');
 }
 
 /**
@@ -275,8 +261,9 @@ export async function loadApplet(slug: string, urlParams?: Record<string, string
     };
     
     pushApplet(slug, data.title || slug, content);
-    // On restore, caller controls visibility; don't force-show.
-    if (!options?.restore) showAppletPanel();
+    // Visibility is decoupled from content loading. The applet panel is
+    // shown/hidden only by user gestures (#appletBtn) and the page-load
+    // deep-link rule in main.ts. URL navigation never forces visibility.
     
     console.log(`[ROUTER] Applet loaded: ${data.title || slug}`);
   } catch (error) {

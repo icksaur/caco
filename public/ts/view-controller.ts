@@ -11,6 +11,7 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
+import { getPanelState } from './panel-state.js';
 
 import { resetTextareaHeight } from './multiline-input.js';
 
@@ -103,61 +104,43 @@ export function setViewState(state: ViewState): void {
       break;
   }
   
-  if (isAppletPanelVisible()) {
-    els.expandBtn?.classList.remove('hidden');
-  }
+  // expand-btn visibility is owned by the panel-state DOM binder.
   
   updateTitle();
 }
 
 export function showSessionPanel(): void {
-  const els = getElements();
-  els.sessionView?.classList.remove('hidden');
-  els.menuBtn?.classList.add('active');
+  getPanelState().set({ session: true }, 'user-toggle-session');
 }
 
 export function hideSessionPanel(): void {
-  const els = getElements();
-  els.sessionView?.classList.add('hidden');
-  els.menuBtn?.classList.remove('active');
+  getPanelState().set({ session: false }, 'user-toggle-session');
 }
 
 export function toggleSessionPanel(): void {
-  if (isSessionPanelVisible()) {
-    hideSessionPanel();
-  } else {
-    showSessionPanel();
-  }
+  const store = getPanelState();
+  store.set({ session: !store.get().session }, 'user-toggle-session');
 }
 
 export function isSessionPanelVisible(): boolean {
-  const els = getElements();
-  return !els.sessionView?.classList.contains('hidden');
+  return getPanelState().get().session;
 }
 
 export function showAppletPanel(): void {
-  const els = getElements();
-  els.appletPanel?.classList.remove('hidden');
-  if (appletExpanded) {
-    els.appletPanel?.classList.add('expanded');
-  }
-  els.appletBtn?.classList.remove('hidden');
-  els.appletBtn?.classList.add('active');
-  els.expandBtn?.classList.remove('hidden');
+  getPanelState().set({ applet: true }, 'user-toggle-applet');
+  // expanded class is independent state and lives on the panel itself
+  const panel = document.getElementById('appletPanel');
+  if (appletExpanded) panel?.classList.add('expanded');
   updateTitle();
 }
 
 export function hideAppletPanel(): void {
-  const els = getElements();
-  els.appletPanel?.classList.add('hidden');
-  els.appletBtn?.classList.remove('active');
-  els.expandBtn?.classList.add('hidden');
+  getPanelState().set({ applet: false }, 'user-toggle-applet');
   updateTitle();
 }
 
 export function isAppletPanelVisible(): boolean {
-  const els = getElements();
-  return !els.appletPanel?.classList.contains('hidden');
+  return getPanelState().get().applet;
 }
 
 export function toggleAppletExpanded(): void {

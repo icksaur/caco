@@ -226,7 +226,9 @@ export async function ensureRunning(mode: EnsureMode = 'visible'): Promise<{ cdp
   let diagnostics = '';
   inFlightLaunch = (async () => {
     diagnostics = await spawnHelper(mode);
-    await waitForCdp(config.cdpUrl, config.launchTimeoutMs);
+    // Re-read config: helper script may have picked a different port
+    const updated = loadBrowserConfig();
+    await waitForCdp(updated.cdpUrl, updated.launchTimeoutMs);
   })();
 
   try {
@@ -236,7 +238,8 @@ export async function ensureRunning(mode: EnsureMode = 'visible'): Promise<{ cdp
   }
 
   saveBrowserConfig({ lastLaunchedMode: mode });
-  return { cdpUrl: config.cdpUrl, started: true, actualMode: mode, diagnostics };
+  const final = loadBrowserConfig();
+  return { cdpUrl: final.cdpUrl, started: true, actualMode: mode, diagnostics };
 }
 
 async function isReachable(cdpUrl: string): Promise<boolean> {

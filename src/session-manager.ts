@@ -248,7 +248,7 @@ function repairSessionEvents(sessionId: string, errorMessage?: string): string |
                 toolCallId: inj.callId,
                 toolName: inj.toolName,
                 success: false,
-                resultContent: [{ type: 'text', text: 'Tool execution was cancelled.' }],
+                result: { content: 'Tool execution was cancelled.' },
               },
               id: randomUUID(),
               timestamp: new Date().toISOString(),

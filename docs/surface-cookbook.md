@@ -6,6 +6,21 @@ Audience: an agent (or human) writing a surface that should feel like a native C
 
 ---
 
+## API the applet hands you
+
+Your `customScript` is wrapped as `new Function('surface', 'root', 'mutateChange', 'appletAPI', script + 'if (typeof render === "function") return render;')`. So inside your script you have four globals available — and **only** these four:
+
+- **`surface`** — `{ dataToken, style, items: [...], changes: {...}, customScript, customStyle }`. Read-only snapshot.
+- **`root`** — the DOM element to render into.
+- **`mutateChange(itemId, fullItem)`** — write a human-side change. Takes the item id and the **entire merged item** as second arg. The applet POSTs to the server, handles stale tokens internally, then re-runs `render()` with the fresh snapshot.
+- **`appletAPI`** — Caco's general applet API (toasts, etc).
+
+**Do NOT call `surface.putChange(...)`** — that function does not exist. The mutation API is `mutateChange(id, item)` only.
+
+You must define `function render(surface) { ... }` at the top level. The applet calls it on every state change.
+
+---
+
 ## Visual conventions
 
 Caco is a dark-themed single-page app. Surfaces look "at home" when they reuse Caco's CSS custom properties, sans-serif body type, and modest visual hierarchy. The applet-browser is a good template: rounded card per item, name + slug on one line, muted description below, gentle hover lift.

@@ -12,6 +12,17 @@ import { shouldEmitReload } from './sdk-event-parser.js';
 import { consumeReloadSignal } from './applet-state.js';
 import { broadcastGlobalEvent } from './event-bus.js';
 import type { SessionEvent } from './event-bus.js';
+import type { GitEditPoller } from './git-edit-poller.js';
+
+// Set by server.ts after the poller is constructed. Optional — if absent
+// (e.g. unit tests), the file-edits triggers become no-ops.
+let gitEditPoller: GitEditPoller | null = null;
+export function setGitEditPoller(p: GitEditPoller | null): void {
+  gitEditPoller = p;
+}
+
+/** Tools that mutate files. Triggers a file-edits poll on success. */
+const WRITE_TOOLS = new Set(['edit', 'create', 'write']);
 
 export interface DispatchEventDeps {
   /** Caller-provided file tracker. Updates the session-context list when
@@ -58,6 +69,16 @@ export function applyDispatchEventEffects(
       if (usage) {
         broadcastGlobalEvent({ type: 'caco.usage', data: { ...usage } } as SessionEvent);
       }
+    }
+  }
+
+  // Trigger an immediate file-edits poll when a write tool finishes
+  // successfully. The poller debounces, so multiple completions in flight
+  // collapse into one poll.
+  if (event.type === 'tool.execution_complete' && gitEditPoller) {
+    const toolName = (eventData.toolName || eventData.name) as string | undefined;
+    if (toolName && WRITE_TOOLS.has(toolName) && eventData.success === true) {
+      gitEditPoller.triggerPoll(sessionId, 'event');
     }
   }
 

@@ -29,8 +29,11 @@ import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
-import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes } from './src/routes/index.js';
+import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes } from './src/routes/index.js';
 import { initWatchRoutes } from './src/routes/watch.js';
+import { initFileEditsRoutes } from './src/routes/file-edits.js';
+import { createGitEditPoller } from './src/git-edit-poller.js';
+import { setGitEditPoller } from './src/dispatch-events.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
@@ -161,6 +164,7 @@ app.use('/api', scheduleRoutes);
 app.use('/api', shellRoutes);
 app.use('/api', surfaceRoutes);
 app.use('/api', watchRoutes);
+app.use('/api', fileEditsRoutes);
 
 // Server Lifecycle
 
@@ -233,6 +237,13 @@ async function start(): Promise<void> {
   // (Route module is imported eagerly; sessionState is `let` and undefined
   // at module load time, so registration must be deferred to here.)
   initWatchRoutes();
+
+  // File-edits poller: lazy-attach on first triggerPoll/snapshot.
+  // Detach via sessionState.onSessionEnd.
+  const gitEditPoller = createGitEditPoller();
+  initFileEditsRoutes(gitEditPoller);
+  setGitEditPoller(gitEditPoller);
+  sessionState.onSessionEnd((sid) => gitEditPoller.detachFromSession(sid));
   
   startScheduleManager();
   

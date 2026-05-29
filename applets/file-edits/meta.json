@@ -1,0 +1,11 @@
+{
+  "slug": "file-edits",
+  "name": "File Edits",
+  "description": "Live view of files changed in the working tree. Stacked collapsible diff cards with click-to-expand and X-to-dismiss. Successor to git-status; v1 read-only.",
+  "params": {},
+  "createdAt": "2026-05-29T22:00:00.000Z",
+  "updatedAt": "2026-05-29T22:00:00.000Z",
+  "agentUsage": {
+    "purpose": "Show the user a live, collapsible diff view of every file currently changed in the git working tree. Updates in real time as the agent edits, as shell tools modify files, and as external editors save."
+  }
+}

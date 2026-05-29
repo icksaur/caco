@@ -1,26 +1,28 @@
 # File Edits
 
-> Applet slug: `file-edits`. Successor to `git-status`. Conceptually: **git-status with live updates and inline stacked diffs.** Future versions absorb stage / commit / push and the `git-status` applet retires.
+> Applet slug: `file-edits`. Successor to `git-status`. Conceptually: **git-status with live updates, collapsible per-file cards, and inline diffs.** Future versions absorb stage / commit / push and the `git-status` applet retires.
 
 ## Goal
 
 Let a Caco user watch files change in real-time as the agent (and shell tools, and external editors) modifies them. The motivating use case: VS Code's "agent edits show up as diffs" experience that keeps junior developers in Caco instead of bouncing them to an editor for visibility.
 
-What the user sees: a stacked column of file cards, each with the relative path and an X. Below each filename, a syntax-highlighted unified diff (red/green). One scrollbar for the whole column. Cards appear, update, and dismiss as files change.
+What the user sees: a stacked column of **collapsible** file cards, each with a chevron, the relative path, and an X. By default each card is collapsed — just a header row. Click the chevron to expand and see the diff. Newest at top; new edits auto-scroll the panel into view in v1. One scrollbar for the whole column.
 
 ## Non-Goals (v1)
 
 - **Not a text editor.** This is an observer. Editing happens in the agent or in the user's preferred editor on disk.
-- **Not stage / commit / push.** v1 is read-only; those stay in the existing `git-status` applet during the transition. They land in v2 of this applet.
+- **Not stage / commit / push.** v1 is read-only; those stay in the existing `git-status` applet during the transition. They land in v2.
 - **Not a tab manager.** v1 ships the stacked view only.
 - **Not multi-repo.** v1 scopes to the active session's `cwd`.
 - **Not binary diffs.** Files git treats as binary show "(binary file changed, N bytes)" instead of a diff body.
+- **Not syntax highlighting on diff content.** v1 ships CSS-only red/green. Per-language token highlighting is v2+.
+- **Not full-file textviewer view.** v1 shows `git diff -u` hunk output. The operator wants "full file with diff annotations" (like a text editor that marks changed lines) in v2+ — see §Follow-ups.
 
 ## Use Cases
 
-1. **Agent refactor.** Agent is editing 12 files across a refactor. User opens the panel, watches each diff appear in real time. When a diff looks wrong, user dismisses (X) and asks the agent to revisit. When all looks good, user moves to `git-status` to stage + commit.
-2. **External editor.** User opens vim in another window, edits a file. Within a poll cycle, the card appears with `source: fs`.
-3. **Shell tool edits.** Agent runs `sed -i s/foo/bar/g src/*.ts`. The git poll catches the multi-file diff on the next cycle.
+1. **Agent refactor.** Agent is editing 12 files across a refactor. User opens the panel, watches each card appear as the agent works. Cards are collapsed by default; user clicks the ones they want to inspect. When a diff looks wrong, user dismisses (X) and asks the agent to revisit.
+2. **External editor.** User opens vim in another window, edits a file. Within a poll cycle, the card appears collapsed.
+3. **Shell tool edits.** Agent runs `sed -i s/foo/bar/g src/*.ts`. The git poll catches the multi-file diff on the next cycle; one collapsed card per file.
 4. **Long sessions.** Multi-hour refactor; panel must not OOM or jank.
 
 ## Design
@@ -31,11 +33,36 @@ The user picked git as the source of truth — the right call. Everything that m
 
 Operationally:
 
-- **Detection:** poll `git status --porcelain=v1 -z` (NUL-delimited, robust against pathological filenames). Default cadence: 1.5s when an active edit-event has fired in the last 10s, 5s otherwise (idle backoff). On typical repos this is <20ms per call.
+- **Detection:** poll `git status --porcelain=v1 -z` (NUL-delimited, robust against pathological filenames). Default cadence: **1.5s when an active edit-event has fired in the last 10s, 5s otherwise** (idle backoff). On typical repos this is <20ms per call.
 - **Diff fetch per file:** `git diff --no-color HEAD -- <path>` for tracked changes; for untracked, read the file directly and synthesize a "+all" diff. Each diff fetch is a single subprocess call, ~10-30ms.
-- **Event-accelerated polling:** when the agent emits `tool.execution_complete` for a write tool, OR a file-watch event arrives (if a lease exists), we immediately re-poll instead of waiting for the next tick. This gets the latency under 200ms in the common case without blowing CPU on idle repos.
+- **Event-accelerated polling:** when the agent emits `tool.execution_complete` for a write tool, OR a file-watch event arrives (if a lease exists), we immediately re-poll instead of waiting for the next tick. This gets the latency under 200ms in the common case without blowing CPU on idle repos. **The operator flagged that v2 wants sub-second responsiveness as a hard goal; v1's event-triggered polling is the foundation for that.**
 
 This means we get **agent edits, shell-tool edits, external-editor edits, sed, anything** for free — git sees them all. No pre-image cache. No SDK permission diff parsing. No recursive fs watcher.
+
+### Card collapse — the canonical UI shape
+
+Per operator: *"Files edited must be discoverable in the UI, but diff details do not need to be."* The card shape:
+
+```
+▶ src/foo.ts                              2s   ×
+▼ src/bar.ts                              5s   ×
+   @@ -10,3 +10,4 @@
+   - removed line
+   + added line one
+   + added line two
+     unchanged
+```
+
+- Each card starts **collapsed**: just the chevron (▶ / ▼), the relative path, the time-since, and the X button.
+- Clicking the chevron (or anywhere in the header row that isn't the X) toggles the body.
+- **A re-appearing dismissed-then-revived file appears collapsed.** Sticky dismissal: when the user X's a card and the file is later edited again, the file is silently dropped (sticky). But there's a subtle case: when the user "Reset dismissals" and the file is in the current dirty set, it comes back **collapsed**.
+- The body content for v1 is the `git diff -u` hunk output with `+`/`-` lines red/green. v2 evolves toward "full file with diff annotations" — see §Follow-ups.
+
+### Auto-scroll (v1: always; v2: sticky)
+
+Per operator override: **v1 always auto-scrolls** so the newest card is visible. Simple and easy.
+
+v2 introduces "stick when scrolled away": detect scroll position, suppress auto-scroll when user is reading earlier cards, show a floating "↓ new edits below" button when off-screen content appears. v1 is dumb-but-useful; v2 is smart.
 
 ### Why this is better than the v2 spec
 
@@ -51,7 +78,7 @@ Asking git directly collapses all of that to: poll → diff → emit.
 
 Once `file-edits` reaches feature parity (stage all, unstage, stage hunk, commit, push, pull), the existing `git-status` applet retires. The "active leases block commit" behavior (operator requirement, see below) lives natively here, not bolted on across two applets.
 
-### Filesystem watch as accelerator (optional)
+### Filesystem watch as accelerator (optional, v1)
 
 When the panel is open, acquire a file-watch lease per **distinct directory** that currently has dirty files. Since `git status` already gives us that list cheaply, we know exactly which directories to watch — no recursion needed.
 
@@ -110,18 +137,16 @@ One event type: `caco.edit`. Flat `caco.*` namespace, consistent with `caco.usag
 
 **Sticky until applet restart or "Reset dismissals".** When the user X's a card, the path joins client-side `dismissedPaths: Set<string>`. Future `caco.edit` entries for that path are filtered at the applet level. Server has no idea about dismissals.
 
-This matches the motivating use case: "I told it to stop showing me this file."
-
 Toolbar:
 - **Refresh** — manual poll trigger.
-- **Reset dismissals** — clears the dismiss set.
+- **Reset dismissals** — clears the dismiss set; previously dismissed files reappear (collapsed) if still in the dirty set.
 - **Counts** — N files modified / N dismissed.
 
 ### Resource limits
 
-- **Visible card cap:** 50. Oldest dropped on overflow. (Operator preference from notes: bigger than 30 to handle larger refactors.)
+- **Visible card cap:** 50. Oldest dropped on overflow.
 - **Per-diff line cap:** 1000 lines. Diffs larger show "(truncated — N lines hidden)" with a link to `text-editor` for the full file.
-- **Worst-case DOM:** 50 × 1000 × ~3 spans/line ≈ 150k nodes. Borderline; if jank shows up in testing, drop to 30 visible.
+- **Cards collapsed by default** means the DOM cost is mostly the headers — only expanded cards pay the per-line cost. Worst case (every card expanded with 1000-line diff): 50 × 1000 × ~3 spans ≈ 150k nodes. Realistic case (5 expanded): ~15k nodes. Collapse is the load-bearing optimization.
 - **`git diff` per-file timeout:** 2s. Beyond that, show "(diff timed out)".
 - **No pre-image cache.** Git is the cache.
 
@@ -133,7 +158,7 @@ For repos without git (any session in a non-repo cwd), the panel shows "Not a gi
 
 ### Client: `applets/file-edits/`
 
-Standard Caco applet. Standard structure (meta.json, content.html, script.js, style.css).
+Standard Caco applet (meta.json, content.html, script.js, style.css).
 
 DOM shape:
 
@@ -146,14 +171,14 @@ DOM shape:
     <button class="fe-reset">Reset dismissals</button>
   </div>
   <div class="fe-stream">
-    <article class="fe-card" data-path="src/foo.ts">
-      <header>
-        <span class="fe-status fe-status-modified">M</span>
+    <article class="fe-card" data-path="src/foo.ts" data-expanded="false">
+      <header class="fe-card-head">
+        <button class="fe-chevron" aria-label="Toggle">▶</button>
         <code class="fe-path">src/foo.ts</code>
         <time class="fe-time">2s</time>
         <button class="fe-x" aria-label="Dismiss">×</button>
       </header>
-      <pre class="fe-diff">
+      <pre class="fe-diff" hidden>
         <span class="fe-d-add">+ new line</span>
         <span class="fe-d-del">- old line</span>
         <span class="fe-d-ctx">  unchanged</span>
@@ -165,9 +190,16 @@ DOM shape:
 
 Behavior:
 - Subscribes to `caco.edit` via `appletAPI.onEvent`.
-- Maintains `Map<path, cardElement>`. New path → prepend card (newest at top). Same path → replace diff content in place, bump time. Path in `cleared[]` → remove card.
+- Maintains `Map<path, cardElement>`. New path → prepend card (newest at top), collapsed. Same path → replace diff content in place, bump time, **keep current expand state**. Path in `cleared[]` → remove card.
+- Chevron / header click: toggle `[hidden]` on `.fe-diff`, update chevron glyph.
 - X button: add to `dismissedPaths`, remove card.
-- "↑ N new" floating pill when cards arrive above the viewport.
+- **v1: always scroll-to-top on new card insertion** (operator override).
+
+### Diff styling
+
+Per-line CSS classes driven by leading `+` / `-` / ` ` characters, applied during diff parsing. No reliance on `highlight.js` for the diff structure itself in v1.
+
+Per-language syntax highlighting (e.g. TypeScript inside the diff body) is v2+. Operator explicitly deferred this.
 
 ### Server module: `src/git-edit-poller.ts`
 
@@ -197,7 +229,7 @@ All three converge on `triggerPoll`, which debounces (50ms) so multiple triggers
 ### Lifecycle
 
 - Session created/resumed → poller attaches if `cwd` is a git repo.
-- Applet opens → no special handshake; poller is already running. The applet just subscribes to `caco.edit` and **immediately requests a full snapshot** via `POST /api/sessions/:id/file-edits/snapshot` to populate the panel with current state. (This solves the v2 spec's "no replay on open" problem trivially — git always tells us current state.)
+- Applet opens → no special handshake; poller is already running. The applet **immediately requests a full snapshot** via `POST /api/sessions/:id/file-edits/snapshot` to populate the panel with current state.
 - Applet closes → no server-side change. (Future: drop accelerator leases if no applet is observing.)
 - Session ends → poller detaches; cleanup.
 
@@ -211,8 +243,8 @@ All three converge on `triggerPoll`, which debounces (50ms) so multiple triggers
 | `src/routes/file-edits.ts` | ~50 (snapshot endpoint) |
 | `applets/file-edits/meta.json` | ~30 |
 | `applets/file-edits/content.html` | ~25 |
-| `applets/file-edits/script.js` | ~220 |
-| `applets/file-edits/style.css` | ~140 |
+| `applets/file-edits/script.js` | ~250 |
+| `applets/file-edits/style.css` | ~160 |
 | `tests/unit/git-edit-poller.test.ts` | ~180 |
 
 #### Files modified
@@ -222,9 +254,8 @@ All three converge on `triggerPoll`, which debounces (50ms) so multiple triggers
 | `src/dispatch-events.ts` | On `tool.execution_complete` for write tools, call `gitEditPoller.triggerPoll(sessionId, 'event')`. |
 | `src/routes/index.ts` | Mount new router. |
 | `server.ts` | Instantiate `gitEditPoller`, attach to sessionState lifecycle. |
-| `scripts/build-highlight.js` | Add `'diff'` to LANGUAGES (~5KB). |
 
-No new npm dependencies. `git` is assumed; `child_process.spawn` is built-in.
+No new npm dependencies. `git` is assumed; `child_process.spawn` is built-in. No `highlight.js` change in v1.
 
 ## Considerations
 
@@ -238,7 +269,7 @@ The user said git is the source of truth. Following that literally: ask git. Pol
 
 ### What about `git --watch`?
 
-Doesn't exist. There are git's internal `core.fsmonitor` and watchman integration, but they're opt-in and complex. Skip; the polling cost is fine.
+Doesn't exist. There are git's internal `core.fsmonitor` and watchman integration, but they're opt-in and complex. v1 skips; v2 evaluates if "sub-second responsiveness" demands it.
 
 ### Renames
 
@@ -246,11 +277,11 @@ Doesn't exist. There are git's internal `core.fsmonitor` and watchman integratio
 
 ### Binary files
 
-`git diff` detects binary files and emits "Binary files X and Y differ". We pass `isBinary: true` and skip the diff body; card shows `"(binary file changed — N bytes)"`.
+`git diff` detects binary files and emits "Binary files X and Y differ". We pass `isBinary: true` and skip the diff body; card shows `"(binary file changed — N bytes)"` and the chevron is disabled.
 
 ### Deleted files
 
-Status `D` (deleted from working tree). We show a card with a "deleted" badge and the diff body = the entire previous content as deletions (clip to 1000 lines like any other diff).
+Status `D` (deleted from working tree). We show a card with a "deleted" badge and the diff body = the entire previous content as deletions (clip to 1000 lines).
 
 ### Untracked files
 
@@ -260,7 +291,7 @@ Status `??`. We synthesize the diff: `--- /dev/null` / `+++ <path>` followed by 
 
 `git status` is one process; full diff requires N spawns. We minimize:
 - Only diff the **delta** between snapshots, not every dirty file every tick.
-- Skip diff fetch if `git status` says the file's mtime hasn't changed since last seen (mtime in porcelain v2; v1 doesn't carry it — may upgrade to v2 if needed).
+- Skip diff fetch if `git status` says the file's mtime hasn't changed since last seen.
 - Coalesce: a poll triggered by multiple events in 50ms only runs once.
 
 ### When the agent edits a binary file
@@ -277,18 +308,18 @@ Two sessions with the same cwd → two pollers ticking against the same repo. Wa
 
 ### What if the user runs `git checkout`?
 
-50 files appear dirty, then disappear. We emit one broadcast with 50 new edits, then on the next tick after checkout completes, a broadcast with 50 in `cleared[]`. The applet handles the churn (caps at 50 visible, cards auto-remove on clear). No special handling needed.
+50 files appear dirty, then disappear. We emit one broadcast with 50 new edits, then on the next tick after checkout completes, a broadcast with 50 in `cleared[]`. The applet handles the churn (caps at 50 visible, cards auto-remove on clear). Operator confirmed: "natural churn is fine."
 
 ### Diff styling
 
-CSS-class-driven (`+` → `.fe-d-add`, `-` → `.fe-d-del`, ` ` → `.fe-d-ctx`). Adding `'diff'` to highlight.js gives per-token coloring inside hunks. Both work.
+CSS-class-driven (`+` → `.fe-d-add`, `-` → `.fe-d-del`, ` ` → `.fe-d-ctx`).
 
 ## Risks
 
 | Risk | Likelihood | Mitigation |
 |------|---|---|
 | `git status` slow on huge repo | Low-Medium | Idle backoff (5s when nothing changed); fsmonitor / watchman integration is a v2 lever |
-| 50 cards × 1000 lines = 150k DOM nodes | Medium | Borderline; if jank shows in real use, drop visible cap to 30 |
+| All cards expanded = 150k DOM nodes | Low | Cards default collapsed; user-driven expansion is the throttle. If a real user manages to OOM by expanding 50 cards × 1000 lines, drop visible cap to 30 |
 | Long-running `git diff` blocks the poller | Low | 2s timeout per `git diff`; show "(diff timed out)" in the card |
 | Untracked file is huge | Medium | Same 1000-line truncation; show "(truncated)" |
 | User has commit in flight when poll runs and sees half-applied state | Low | git's index is atomic during commit; worst case is one stale poll |
@@ -296,50 +327,55 @@ CSS-class-driven (`+` → `.fe-d-add`, `-` → `.fe-d-del`, ` ` → `.fe-d-ctx`)
 | Accelerator lease cap (12 dirs) exceeded | Low | Document; falls back to pure timer polling, panel still works |
 | Two sessions both polling the same cwd | Low | Wasted CPU but correct. v2 dedup. |
 | Operator's commit-lease idea not yet implemented | Medium | v2; v1 stubs the tracking so the v2 wiring is trivial |
-| `git rename` heuristic detects spurious renames | Low | Cosmetic; show the badge but the diff is still right |
-| Card pinning to top while user scrolls down | Medium | "↑ N new" pill default; no auto-scroll |
+| Auto-scroll-always disrupts user reading earlier cards | High | Acknowledged tradeoff; operator chose simplicity. v2 sticks when scrolled. |
 | `git status -z` parsing edge cases | Low | NUL-delimited is robust; test with paths containing spaces and quotes |
 
 ## Acceptance (v1)
 
 1. Open session in a git repo with no dirty files. Open `file-edits` applet. Panel shows "No changes." Within 200ms.
-2. Agent calls `edit` on a file. Within ~1.5s (or sooner if event-triggered), card appears with red/green diff.
-3. Agent edits 10 files in 500ms. Next poll batches all 10 into one `caco.edit` broadcast; applet renders 10 cards in one batch.
-4. User runs `vim other-file.ts` outside Caco, saves. Within 1.5-5s (depending on backoff), card appears.
-5. Agent runs `git checkout main` (50 files churn). Panel handles the burst, then 50 cards clear on the next tick.
-6. Click X on a card → card disappears. Subsequent edits to that path do NOT re-add.
-7. Click "Reset dismissals" → dismiss set clears.
-8. Click "Refresh" → manual poll fires immediately.
-9. Open the applet on a non-git cwd → see "Not a git repo" message; no polls run.
-10. Open in a 1000-file dirty repo (e.g. mid-refactor) → snapshot endpoint returns first 50; rest accessible via per-file fetch in v2.
-11. New untracked file → card shows full content as additions, "(untracked)" badge.
-12. File deleted → card shows full content as deletions, "deleted" badge.
-13. Binary file changed → card shows "(binary file changed — N bytes)", no diff body.
+2. Agent calls `edit` on a file. Within ~1.5s (or sooner if event-triggered), a **collapsed** card appears with chevron, path, time, X.
+3. Click the chevron. Diff body expands with red/green styling. Click again to collapse.
+4. Agent edits 10 files in 500ms. Next poll batches all 10 into one `caco.edit` broadcast; applet renders 10 collapsed cards in one batch. Panel auto-scrolls to top.
+5. User runs `vim other-file.ts` outside Caco, saves. Within 1.5-5s (depending on backoff), a collapsed card appears.
+6. Agent runs `git checkout main` (50 files churn). Panel shows 50 collapsed cards, then 50 cards clear on the next tick.
+7. Click X on a card → card disappears. Subsequent edits to that path do NOT re-add.
+8. Click "Reset dismissals" → previously-dismissed files in the current dirty set reappear, collapsed.
+9. Click "Refresh" → manual poll fires immediately.
+10. Open the applet on a non-git cwd → see "Not a git repo" message; no polls run.
+11. New untracked file → collapsed card with "(untracked)" badge; expanded view shows full content as additions.
+12. File deleted → collapsed card with "deleted" badge; expanded view shows previous content as deletions.
+13. Binary file changed → card shows "(binary file changed — N bytes)"; chevron disabled.
 14. Session ends → poller detaches; no leaked subprocesses.
 
-## Follow-ups (not v1, in priority order)
+## Follow-ups (v2 and beyond, in priority order)
 
-1. **v2 = git-status replacement.** Add stage / unstage / commit / push / pull. Retire the existing `git-status` applet.
-2. **Commit lease enforcement.** When the panel is open with active changes, git commit (from anywhere in Caco — the new applet's button, the old applet's button, the agent running `git commit`) checks for active leases and prompts to acknowledge.
-3. **Hunk-level approve / reject.** Per-hunk buttons; reject = `git checkout -p` for that hunk.
-4. **Per-repo poller** (one process tick shared across sessions on same cwd).
-5. **`git fsmonitor` integration** for huge repos.
-6. **Replay buffer** for cards that arrived before applet opened (already partly solved by snapshot endpoint).
-7. **Multi-repo / multi-cwd.**
-8. **Word-level diff.**
-9. **Tabbed view A/B.**
-10. **Image-viewer hand-off** for binary changes that are images.
+1. **Full-file textviewer diff** (operator requirement). v1's `git diff -u` hunk format is line-noisy. v2 shows the whole file with unchanged lines in muted gray, added lines highlighted green, removed lines highlighted red — like a text editor with diff annotations. Implementation: fetch HEAD version + working tree version, render a side-by-side or unified line-by-line view. Bigger UI than v1's hunk view.
+2. **Syntax highlighting** (operator requirement). Per-language token highlighting inside diff bodies. Adds `'diff'` and language detection to highlight.js bundle, or uses tree-sitter.
+3. **Sticky auto-scroll** (operator requirement). v1 always scrolls; v2 detects user-scrolled-away and shows a "↓ new edits below" button.
+4. **Commit-lease enforcement** (operator requirement). When file-edits panel is open with active edits, git-status's commit button is gated.
+5. **v2 = git-status replacement.** Add stage / unstage / commit / push / pull. Retire the existing `git-status` applet.
+6. **Hunk-level approve / reject.** Per-hunk buttons; reject = `git checkout -p` for that hunk.
+7. **Per-repo poller** (one process tick shared across sessions on same cwd).
+8. **`git fsmonitor` integration** for sub-second responsiveness (operator requirement for v2).
+9. **Replay buffer** for cards that arrived before applet opened (already partly solved by snapshot endpoint).
+10. **Multi-repo / multi-cwd.**
+11. **Word-level diff** (intra-line diffs).
+12. **Tabbed view A/B.**
+13. **Image-viewer hand-off** for binary changes that are images.
 
-## Open questions (architectural; will leave in spec until you confirm)
+## Operator-decided defaults (post-questionnaire)
 
-These weren't explicitly answered in the questionnaire (no `changes` were written through the surface):
+All 10 architectural questions answered. Locked-in for v1:
 
-1. **Poll cadence.** 1.5s active / 5s idle proposed. Real-time-ish but not chatty. Tunable.
-2. **Visible card cap.** 50 (was 30 in v2 spec; bumped per intuition that real refactors hit >30). Worth testing.
-3. **Newest position.** Top (notification-style) or bottom (build-log style). Spec proposes top.
-4. **Auto-scroll on new card.** Off by default; "↑ N new" pill at top. Spec proposes that.
-5. **Diff truncation cap.** 1000 lines. Tunable.
-6. **Accelerator-lease cap.** 12 dirs (out of 16 process cap). Tunable.
-7. **Snapshot on open.** Confirmed yes per "git is source of truth" — git tells us current state any time we ask.
+- **Source of truth: git.** Polling-based detection. Confirmed.
+- **Name: `file-edits`.** Successor to git-status.
+- **Commit-lease blocker: v2.** v1 stubs the data model only.
+- **Poll cadence: 1.5s active / 5s idle.** Event-triggered immediate polls. v2 goal: sub-second responsiveness.
+- **Cards: 50 visible × 1000 line truncation.** v2 evolves to full-file textviewer diff with syntax highlighting.
+- **Dismiss: sticky.** Returns collapsed if "Reset dismissals" is clicked.
+- **Newest at top.**
+- **Auto-scroll: v1 always.** v2 adds sticky + reveal button.
+- **Non-git cwd: "Not a git repo" message, no fallback in v1.**
+- **`git checkout` churn: handle naturally.**
 
-Conclude these whenever; safe to ship v1 with the proposed defaults.
+

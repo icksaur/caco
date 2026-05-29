@@ -7,19 +7,11 @@
  */
 
 import { setSessionIntent } from './session-meta-store.js';
-import { updateUsage, getUsage } from './usage-state.js';
+import { updateUsage, getUsage, type QuotaSnapshot } from './usage-state.js';
 import { shouldEmitReload } from './sdk-event-parser.js';
 import { consumeReloadSignal } from './applet-state.js';
 import { broadcastGlobalEvent } from './routes/websocket.js';
 import type { SessionEvent } from './routes/websocket.js';
-
-interface QuotaSnapshot {
-  isUnlimitedEntitlement: boolean;
-  entitlementRequests: number;
-  usedRequests: number;
-  remainingPercentage: number;
-  resetDate?: string;
-}
 
 export interface DispatchEventDeps {
   /** Caller-provided file tracker. Updates the session-context list when

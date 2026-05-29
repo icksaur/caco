@@ -3,6 +3,9 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import { getSessionNotes, getSessionRoadmap } from './storage.js';
+import type { SessionEvent } from './types.js';
+
+export type { SessionEvent };
 
 export const STATE_DIR = join(homedir(), '.copilot', 'session-state');
 
@@ -14,12 +17,6 @@ export interface SessionWorkspace {
   updatedAt?: string;
   summary?: string;
   cwd?: string;
-}
-
-export interface SessionEvent {
-  type: string;
-  data?: Record<string, unknown>;
-  [key: string]: unknown;
 }
 
 export function readSessionWorkspace(sessionId: string): SessionWorkspace | null {

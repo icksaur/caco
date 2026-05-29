@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
-interface QuotaSnapshot {
+export interface QuotaSnapshot {
   isUnlimitedEntitlement: boolean;
   entitlementRequests: number;
   usedRequests: number;

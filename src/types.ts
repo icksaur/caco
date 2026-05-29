@@ -21,12 +21,6 @@ export interface SessionCacheEntry {
   lastActiveAt?: string;
 }
 
-export interface ActiveSession {
-  cwd: string;
-  session: CopilotSession;
-  client: CopilotClient;
-}
-
 export interface OutputEntry {
   content: string;
   language: string;
@@ -126,6 +120,7 @@ export interface Attachment {
 
 export interface SessionEvent {
   type: string;
+  data?: Record<string, unknown>;
   [key: string]: unknown;
 }
 

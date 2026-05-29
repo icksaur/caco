@@ -15,17 +15,9 @@
  * display tolerates stale data.
  */
 
-import { updateUsage, getUsage } from './usage-state.js';
+import { updateUsage, getUsage, type QuotaSnapshot } from './usage-state.js';
 import { broadcastGlobalEvent } from './routes/websocket.js';
 import type { SessionEvent } from './routes/websocket.js';
-
-interface QuotaSnapshot {
-  isUnlimitedEntitlement: boolean;
-  entitlementRequests: number;
-  usedRequests: number;
-  remainingPercentage: number;
-  resetDate?: string;
-}
 
 interface QuotaClient {
   rpc: {

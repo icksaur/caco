@@ -21,6 +21,9 @@ import { parseMessageSource, type MessageSource } from '../message-source.js';
 import { listEmbedOutputs, parseOutputMarkers, getSessionMeta } from '../storage.js';
 import { CacoEventQueue, isFlushTrigger, type CacoEvent } from '../caco-event-queue.js';
 import { normalizeToolComplete, extractToolResultText, type RawSDKEvent } from '../sdk-normalizer.js';
+import type { SessionEvent } from '../types.js';
+
+export type { SessionEvent };
 import { getClientMessageHandler } from '../extension-runtime.js';
 import { watchExtensions } from '../extension-store.js';
 
@@ -52,12 +55,6 @@ export interface UserMessage {
   source: MessageSource;
   appletSlug?: string;
   hasImage: boolean;
-}
-
-export interface SessionEvent {
-  type: string;
-  data?: Record<string, unknown>;
-  [key: string]: unknown;  // Allow additional SDK event properties
 }
 
 interface ServerMessage {

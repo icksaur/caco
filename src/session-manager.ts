@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { getCliOAuthTokens } from './cli-oauth.js';
-import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage } from './types.js';
+import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage, SessionEvent } from './types.js';
 import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, getMcpAuth, setSessionOrder, type SessionKind } from './storage.js';
 import { readSessionWorkspace, readSessionEvents, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
@@ -378,12 +378,6 @@ interface SendOptions {
   prompt: string;
   attachments?: Array<{ type: string; path: string }>;
   mode?: string;
-}
-
-interface SessionEvent {
-  type: string;
-  data?: Record<string, unknown>;
-  [key: string]: unknown;
 }
 
 interface ActiveSession {

@@ -1,5 +1,5 @@
 import { getSessionMeta, setSessionMeta } from './storage.js';
-import { broadcastGlobalEvent } from './routes/websocket.js';
+import { broadcastGlobalEvent } from './event-bus.js';
 
 type BroadcastCallback = (event: {
   type: string;

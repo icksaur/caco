@@ -7,7 +7,7 @@
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { getAppletUserState, getAppletNavigation, getActiveAppletSlug, triggerReload } from './applet-state.js';
-import type { StatePushHandler } from './routes/websocket.js';
+import type { StatePushHandler } from './event-bus.js';
 import { listApplets, type AppletMeta } from './applet-store.js';
 import type { SessionIdRef } from './types.js';
 

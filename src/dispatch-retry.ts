@@ -15,7 +15,7 @@
  * unhandled rejection.
  */
 
-import type { SessionEvent } from './routes/websocket.js';
+import type { SessionEvent } from './event-bus.js';
 
 export interface RetryDeps {
   sessionId: string;

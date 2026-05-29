@@ -10,8 +10,8 @@ import { createJiti } from 'jiti';
 import { join } from 'path';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { listExtensions, type ExtensionInfo } from './extension-store.js';
-import { broadcastGlobalEvent, broadcastEvent } from './routes/websocket.js';
-import type { SessionEvent } from './routes/websocket.js';
+import { broadcastGlobalEvent, broadcastEvent } from './event-bus.js';
+import type { SessionEvent } from './event-bus.js';
 import type { WebSocket } from 'ws';
 
 interface ToolDefinition {

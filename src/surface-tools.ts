@@ -24,7 +24,7 @@ import {
   type MutateResult,
   type SurfaceStyle,
 } from './surface-store.js';
-import { broadcastEvent } from './routes/websocket.js';
+import { broadcastEvent } from './event-bus.js';
 import type { SessionIdRef } from './types.js';
 
 const ITEM_SCHEMA = z.object({

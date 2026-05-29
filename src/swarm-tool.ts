@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { SERVER_URL } from './config.js';
 import type { SessionIdRef } from './types.js';
 import sessionManager from './session-manager.js';
-import { broadcastGlobalEvent } from './routes/websocket.js';
+import { broadcastGlobalEvent } from './event-bus.js';
 import { waitForSessionIdle } from './dispatch-state.js';
 
 const PER_SESSION_TIMEOUT_MS = 15 * 60 * 1000;

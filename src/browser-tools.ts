@@ -20,8 +20,8 @@ import {
 } from './browser-connection.js';
 import { loadBrowserConfig } from './browser-config.js';
 import { formatSnapshot, type AxNode } from './browser-snapshot.js';
-import { broadcastGlobalEvent } from './routes/websocket.js';
-import type { SessionEvent } from './routes/websocket.js';
+import { broadcastGlobalEvent } from './event-bus.js';
+import type { SessionEvent } from './event-bus.js';
 import type { SessionIdRef } from './types.js';
 
 type ErrorReason =

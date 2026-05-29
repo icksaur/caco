@@ -16,7 +16,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import sessionManager from '../session-manager.js';
+import { sessionManager } from '../session-manager.js';
 import { broadcastEvent } from './websocket.js';
 import {
   getSurface,
@@ -133,4 +133,4 @@ router.patch('/sessions/:sessionId/surface/style', (req: Request, res: Response)
   res.json(result);
 });
 
-export default router;
+export { router };

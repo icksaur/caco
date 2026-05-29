@@ -1,4 +1,4 @@
-import sessionManager from './session-manager.js';
+import { sessionManager } from './session-manager.js';
 import { loadPreferences, savePreferences, DEFAULT_MODEL, resolveModelAlias } from './preferences.js';
 import { resolveSystemMessage } from './prompts.js';
 import type { UserPreferences, SessionStateConfig, ResumeResult } from './types.js';

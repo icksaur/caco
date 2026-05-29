@@ -13,7 +13,7 @@ import { Router, Request, Response } from 'express';
 import { existsSync, statSync, createReadStream, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import sessionManager from '../session-manager.js';
+import { sessionManager } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
 import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
@@ -842,4 +842,4 @@ router.post('/sessions/import', async (req: Request, res: Response) => {
   }
 });
 
-export default router;
+export { router };

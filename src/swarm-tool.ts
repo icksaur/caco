@@ -9,7 +9,7 @@ import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { SERVER_URL } from './config.js';
 import type { SessionIdRef } from './types.js';
-import sessionManager from './session-manager.js';
+import { sessionManager } from './session-manager.js';
 import { broadcastGlobalEvent } from './event-bus.js';
 import { waitForSessionIdle } from './dispatch-state.js';
 

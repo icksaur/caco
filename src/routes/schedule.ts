@@ -283,4 +283,4 @@ router.post('/schedule/:slug/run', async (req: Request, res: Response) => {
   }
 });
 
-export default router;
+export { router };

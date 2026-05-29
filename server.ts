@@ -12,7 +12,7 @@ import { dirname, join } from 'path';
 import { hostname } from 'os';
 import { readFileSync } from 'fs';
 import { sessionState, createSessionState } from './src/session-state.js';
-import sessionManager from './src/session-manager.js';
+import { sessionManager } from './src/session-manager.js';
 import { createDisplayTools, type CacoEmbedEvent } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools } from './src/agent-tools.js';

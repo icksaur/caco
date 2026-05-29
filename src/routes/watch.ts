@@ -6,7 +6,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import sessionManager from '../session-manager.js';
+import { sessionManager } from '../session-manager.js';
 import { createWatchStore, type WatchScope, type ChangeEvent } from '../watch-store.js';
 import { broadcastEvent, type SessionEvent } from './websocket.js';
 import { sessionState } from '../session-state.js';
@@ -83,4 +83,4 @@ router.get('/sessions/:sessionId/watch', (req: Request, res: Response) => {
   res.json({ leases: watchStore.listLeases(sessionId) });
 });
 
-export default router;
+export { router };

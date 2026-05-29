@@ -14,7 +14,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
-import sessionManager from '../session-manager.js';
+import { sessionManager } from '../session-manager.js';
 import { readLastTurns } from '../sdk-session-store.js';
 import { shouldFilter } from '../event-filter.js';
 import { parseMessageSource, type MessageSource } from '../message-source.js';

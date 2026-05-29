@@ -13,7 +13,7 @@ import { randomUUID } from 'crypto';
 import { join } from 'path';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
-import sessionManager from '../session-manager.js';
+import { sessionManager } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { setAppletUserState, setAppletNavigation, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
@@ -490,7 +490,7 @@ router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) =
   res.json({ ok: true, forced });
 });
 
-export default router;
+export { router };
 
 const MAX_CONTEXT_FILES = 10;
 

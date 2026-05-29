@@ -11,7 +11,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
-import sessionManager from '../session-manager.js';
+import { sessionManager } from '../session-manager.js';
 
 const router = Router();
 
@@ -193,4 +193,4 @@ router.get('/servers', async (_req: Request, res: Response) => {
   }
 });
 
-export default router;
+export { router };

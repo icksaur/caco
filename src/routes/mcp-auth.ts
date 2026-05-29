@@ -462,4 +462,4 @@ window.close();
 </script></body></html>`;
 }
 
-export default router;
+export { router };

@@ -17,7 +17,7 @@ import { join, dirname, resolve, extname, relative, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import ignore from 'ignore';
-import sessionManager from '../session-manager.js';
+import { sessionManager } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput, getSessionMeta, setSessionMeta } from '../storage.js';
 import { setAppletUserState, getAppletUserState, clearAppletUserState, getActiveAppletSlug, setActiveAppletSlug } from '../applet-state.js';
@@ -695,4 +695,4 @@ router.post('/restart', async (_req: Request, res: Response) => {
   });
 });
 
-export default router;
+export { router };

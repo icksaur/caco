@@ -59,6 +59,15 @@ describe('parsePorcelain', () => {
     expect(result.get('after.ts')?.status).toBe('untracked');
   });
 
+  it('parses copies (status.renames=copies) with the same two-field encoding', () => {
+    // 'C  new\0old\0'
+    const result = _internal.parsePorcelain(buf('C  src/copied.ts\0src/orig.ts\0'));
+    expect(result.size).toBe(1);
+    const entry = result.get('src/copied.ts');
+    expect(entry?.status).toBe('renamed');  // copies bucket under renamed
+    expect(entry?.renamedFrom).toBe('src/orig.ts');
+  });
+
   it('handles paths containing spaces', () => {
     const result = _internal.parsePorcelain(buf(' M src/file with space.ts\0'));
     expect(result.get('src/file with space.ts')?.status).toBe('modified');

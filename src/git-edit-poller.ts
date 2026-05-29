@@ -53,6 +53,29 @@ const DEBOUNCE_MS = 50;
 const DIFF_TIMEOUT_MS = 2000;
 const DIFF_LINE_CAP = 1000;
 const STATUS_TIMEOUT_MS = 5000;
+const DIFF_CONCURRENCY = 8;
+
+/**
+ * Run an array of async jobs with at most `limit` in flight at any time.
+ * Preserves output order. Used to bound `git diff` subprocess fan-out
+ * on bursty events (branch checkout, stash pop, large formatter passes).
+ */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  }
+  const n = Math.min(limit, items.length);
+  const workers: Promise<void>[] = [];
+  for (let k = 0; k < n; k++) workers.push(worker());
+  await Promise.all(workers);
+  return results;
+}
 
 /**
  * Run a git subprocess with a timeout. Returns stdout (binary buffer) and exit code.
@@ -115,9 +138,11 @@ function parsePorcelain(stdout: Buffer): Map<string, { status: FileStatus; renam
       status = 'untracked';
     } else if (xy[0] === 'D' || xy[1] === 'D') {
       status = 'deleted';
-    } else if (xy[0] === 'R' || xy[1] === 'R') {
+    } else if (xy[0] === 'R' || xy[1] === 'R' || xy[0] === 'C' || xy[1] === 'C') {
+      // Rename and copy share the same encoding: 'X  new\0old\0'. We bucket
+      // copies under 'renamed' for v1; the source path is preserved in
+      // renamedFrom either way.
       status = 'renamed';
-      // Rename source is the next NUL-delimited field.
       renamedFrom = parts[i + 1];
       i++;
     } else {
@@ -195,19 +220,8 @@ export function createGitEditPoller(): GitEditPoller {
         return;
       }
       const current = parsePorcelain(result.stdout);
-      const newOrChanged: string[] = [];
+      const newOrChanged: string[] = Array.from(current.keys());
       const cleared: string[] = [];
-
-      for (const [path, info] of current) {
-        const prev = state.lastDirty.get(path);
-        if (!prev || prev.status !== info.status) {
-          newOrChanged.push(path);
-        } else {
-          // Same status, same path — assume content may have changed; fetch fresh diff.
-          // (Optimization: skip if mtime unchanged. v2.)
-          newOrChanged.push(path);
-        }
-      }
       for (const path of state.lastDirty.keys()) {
         if (!current.has(path)) cleared.push(path);
       }
@@ -216,14 +230,15 @@ export function createGitEditPoller(): GitEditPoller {
         return; // No-op; don't broadcast empty.
       }
 
-      // Fetch diffs in parallel, bounded.
+      // Fetch diffs with bounded concurrency to avoid fork-bomb on
+      // large dirty sets (branch checkout, stash pop, formatter runs).
       const edits: EditEntry[] = [];
-      const diffs = await Promise.all(newOrChanged.map(async (path) => {
+      const diffs = await mapWithConcurrency(newOrChanged, DIFF_CONCURRENCY, async (path) => {
         const info = current.get(path);
         if (!info) return null;
         const { diff, isBinary, truncated } = await fetchDiff(state.repoRoot, path, info.status);
         const entry: EditEntry = {
-          path: join(state.repoRoot, info.renamedFrom ?? path),
+          path: join(state.repoRoot, path),
           relativePath: path,
           diff,
           status: info.status,
@@ -233,7 +248,7 @@ export function createGitEditPoller(): GitEditPoller {
         if (isBinary) entry.isBinary = true;
         if (truncated) entry.truncated = truncated;
         return entry;
-      }));
+      });
       for (const e of diffs) { if (e) edits.push(e); }
 
       state.lastDirty = current;
@@ -318,10 +333,11 @@ export function createGitEditPoller(): GitEditPoller {
       const result = await runGit(['status', '--porcelain=v1', '-z', '-u'], state.repoRoot, STATUS_TIMEOUT_MS);
       if (result.code !== 0) return [];
       const current = parsePorcelain(result.stdout);
-      const edits = await Promise.all(Array.from(current.entries()).map(async ([path, info]) => {
+      const entries = Array.from(current.entries());
+      const edits = await mapWithConcurrency(entries, DIFF_CONCURRENCY, async ([path, info]) => {
         const { diff, isBinary, truncated } = await fetchDiff(state.repoRoot, path, info.status);
         const entry: EditEntry = {
-          path: join(state.repoRoot, info.renamedFrom ?? path),
+          path: join(state.repoRoot, path),
           relativePath: path,
           diff,
           status: info.status,
@@ -331,7 +347,7 @@ export function createGitEditPoller(): GitEditPoller {
         if (isBinary) entry.isBinary = true;
         if (truncated) entry.truncated = truncated;
         return entry;
-      }));
+      });
       return edits;
     },
   };

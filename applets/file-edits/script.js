@@ -125,7 +125,7 @@
       body.hidden = !nowExpanded;
       chevron.textContent = nowExpanded ? '▼' : '▶';
       if (nowExpanded && !body.dataset.rendered) {
-        body.innerHTML = renderDiff(edit.diff);
+        body.innerHTML = renderDiff(card._edit.diff);
         body.dataset.rendered = '1';
       }
     }
@@ -228,7 +228,7 @@
       });
     }
     if (!Array.isArray(edits)) edits = [];
-    var addedAny = false;
+    var appliedAny = false;
     edits.forEach(function(edit) {
       if (!edit || !edit.relativePath) return;
       if (dismissed.has(edit.relativePath)) return;
@@ -239,18 +239,20 @@
         if (streamEl.firstChild !== existing) {
           streamEl.insertBefore(existing, streamEl.firstChild);
         }
+        appliedAny = true;
         return;
       }
       var card = makeCard(edit);
       // Newest at top.
       streamEl.insertBefore(card, streamEl.firstChild);
       cards.set(edit.relativePath, card);
-      addedAny = true;
+      appliedAny = true;
     });
     enforceCap();
     updateCounts();
-    // v1: always scroll to top on insertion (operator preference).
-    if (addedAny) {
+    // v1: always scroll to top on any applied edit (operator preference).
+    // v2 evolves to sticky-when-scrolled-away.
+    if (appliedAny) {
       streamEl.scrollTop = 0;
     }
   }

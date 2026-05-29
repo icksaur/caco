@@ -27,6 +27,7 @@ import { getUsage } from '../usage-state.js';
 import { MAX_FILE_SIZE_BYTES, MIME_TYPES } from '../config.js';
 import { apiError } from '../api-error.js';
 import { fuzzyScore } from '../utils/fuzzy-score.js';
+import { requestRestart, getActiveDispatches } from '../restart-manager.js';
 
 const router = Router();
 
@@ -683,7 +684,6 @@ router.get('/extensions/:slug/client.js', async (req: Request, res: Response) =>
 const clientJsCache = new Map<string, { js: string; mtime: number }>();
 
 router.post('/restart', async (_req: Request, res: Response) => {
-  const { requestRestart, getActiveDispatches } = await import('../restart-manager.js');
   requestRestart();
   const active = getActiveDispatches();
   res.json({

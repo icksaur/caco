@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { getAppletUserState, getAppletNavigation, getActiveAppletSlug, triggerReload } from './applet-state.js';
 import type { StatePushHandler } from './event-bus.js';
 import { listApplets, type AppletMeta } from './applet-store.js';
+import { requestRestart, getActiveDispatches } from './restart-manager.js';
 import type { SessionIdRef } from './types.js';
 
 /**
@@ -385,12 +386,9 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
     }),
 
     handler: async () => {
-      // Import dynamically to avoid circular dependency
-      const { requestRestart, getActiveDispatches } = await import('./restart-manager.js');
-      
       requestRestart();
       const active = getActiveDispatches();
-      
+
       return {
         textResultForLlm: active > 0 
           ? `Server restart scheduled. Waiting for ${active} active session(s) to complete. Server will restart when your session and all others are idle.`

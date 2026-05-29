@@ -14,7 +14,8 @@
 
 import { toggleAppletExpanded } from './view-controller.js';
 import { getActiveSessionId } from './app-state.js';
-import { getActiveAppletSlug, hasAppletContent, pushApplet, type AppletContent } from './applet-runtime.js';
+import { getActiveAppletSlug, hasAppletContent } from './applet-runtime.js';
+import { loadApplet } from './applet-loader.js';
 import { initAppletButton } from './applet-button.js';
 import { onButton } from './button-gestures.js';
 import { showSessionManager } from './session-panel.js';
@@ -264,48 +265,6 @@ export function toggleApplet(): void {
 
   const store = getPanelState();
   store.set({ applet: !store.get().applet }, 'user-toggle-applet');
-}
-
-/**
- * Load an applet by slug
- * Does NOT modify URL - caller is responsible for URL state
- * (Navigation API intercept already has correct URL, page load already has param)
- */
-export async function loadApplet(slug: string, urlParams?: Record<string, string>, options?: { restore?: boolean }): Promise<void> {
-  try {
-    console.log(`[ROUTER] Loading applet: ${slug}`);
-    
-    const sessionId = getActiveSessionId();
-    const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urlParams, sessionId, restore: options?.restore ?? false })
-    });
-    
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-      throw new Error(error.error || `HTTP ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    const content: AppletContent = {
-      html: data.html,
-      js: data.js,
-      css: data.css,
-      title: data.title
-    };
-    
-    pushApplet(slug, data.title || slug, content);
-    // Visibility is decoupled from content loading. The applet panel is
-    // shown/hidden only by user gestures (#appletBtn) and the page-load
-    // deep-link rule in main.ts. URL navigation never forces visibility.
-    
-    console.log(`[ROUTER] Applet loaded: ${data.title || slug}`);
-  } catch (error) {
-    console.error(`[ROUTER] Failed to load applet "${slug}":`, error);
-    throw error;
-  }
 }
 
 /**

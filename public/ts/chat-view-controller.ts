@@ -17,6 +17,7 @@ import { historyLoader } from './history-loader.js';
 import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websocket.js';
 import { setSessionLoading, updateMenuIndicators } from './session-panel.js';
 import { notifySessionChange } from './applet-runtime.js';
+import { loadApplet } from './applet-loader.js';
 import { showToast } from './toast.js';
 import { setResponseOptions } from './message-streaming.js';
 import { adHocBar } from './adhoc-bar.js';
@@ -230,8 +231,10 @@ class ChatViewController {
     // Snapshot at fire-time so rapid session switches can abort late restores.
     const targetSessionId = getActiveSessionId();
     try {
-      const { loadApplet } = await import('./router.js');
-      // If the user switched away while imports resolved, bail.
+      // Yield one microtask so a synchronously-following session activation
+      // can land before we commit content/URL writes. This is the same
+      // boundary the previous dynamic import('./router.js') provided.
+      await Promise.resolve();
       if (getActiveSessionId() !== targetSessionId) return;
 
       // Best-effort URL hygiene. Wrapped separately so a missing window

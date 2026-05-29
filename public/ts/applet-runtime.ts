@@ -10,7 +10,7 @@
 import { wsSetState, onStateUpdate, onEvent, onGlobalEvent, isWsConnected } from './websocket.js';
 import { getActiveSessionId, getCurrentCwd, isLoadingHistory } from './app-state.js';
 import { regions } from './dom-regions.js';
-import { loadApplet } from './router.js';
+import { loadApplet } from './applet-loader.js';
 import { showToast } from './toast.js';
 import { fetchWithRetry, type FetchWithRetryOptions } from './fetch-retry.js';
 import type { SessionEvent } from './types.js';

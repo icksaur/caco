@@ -23,7 +23,7 @@ vi.mock('../../public/ts/view-controller.js', () => {
   };
 });
 
-vi.mock('../../public/ts/router.js', () => ({
+vi.mock('../../public/ts/applet-loader.js', () => ({
   loadApplet: vi.fn(() => Promise.resolve()),
 }));
 
@@ -301,7 +301,7 @@ describe('ChatViewController', () => {
 
     it('returns early on null applet without touching anything', async () => {
       const view = await import('../../public/ts/view-controller.js');
-      const router = await import('../../public/ts/router.js');
+      const router = await import('../../public/ts/applet-loader.js');
       vi.mocked(router.loadApplet).mockClear();
       await restoreApplet(cvc)(null, {}, true);
       await restoreApplet(cvc)(undefined, {}, false);
@@ -311,7 +311,7 @@ describe('ChatViewController', () => {
     });
 
     it('calls loadApplet with restore:true exactly once per call', async () => {
-      const router = await import('../../public/ts/router.js');
+      const router = await import('../../public/ts/applet-loader.js');
       vi.mocked(router.loadApplet).mockClear();
       vi.mocked(getActiveSessionId).mockReturnValue('s1');
       await restoreApplet(cvc)('applet-a', { path: '/x' });
@@ -320,7 +320,7 @@ describe('ChatViewController', () => {
     });
 
     it('aborts late restore when active session changed mid-flight', async () => {
-      const router = await import('../../public/ts/router.js');
+      const router = await import('../../public/ts/applet-loader.js');
       vi.mocked(router.loadApplet).mockClear();
       vi.mocked(getActiveSessionId).mockReturnValue('s1');
 

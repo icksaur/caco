@@ -59,14 +59,24 @@
     var html = '';
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
+      // Strip git's structural noise — the user only wants file content.
+      if (line.startsWith('diff --git ')) continue;
+      if (line.startsWith('index ')) continue;
+      if (line === '\\ No newline at end of file') continue;
+      if (line.startsWith('new file mode ')) continue;
+      if (line.startsWith('deleted file mode ')) continue;
+      if (line.startsWith('similarity index ')) continue;
+      if (line.startsWith('rename from ')) continue;
+      if (line.startsWith('rename to ')) continue;
+      if (line.startsWith('--- ') || line.startsWith('+++ ')) continue;
       var cls = 'fe-d-ctx';
-      if (line.startsWith('+++') || line.startsWith('---')) cls = 'fe-d-meta';
-      else if (line.startsWith('@@')) cls = 'fe-d-hunk';
+      if (line.startsWith('@@')) cls = 'fe-d-hunk';
       else if (line.startsWith('+')) cls = 'fe-d-add';
       else if (line.startsWith('-')) cls = 'fe-d-del';
-      else if (line.startsWith('diff ') || line.startsWith('index ')) cls = 'fe-d-meta';
-      html += '<span class="' + cls + '">' + esc(line) + '</span>\n';
+      // Each span is display:block; no trailing \n needed.
+      html += '<span class="' + cls + '">' + esc(line) + '</span>';
     }
+    if (!html) return '<div class="fe-d-empty">(no visible changes)</div>';
     return html;
   }
 

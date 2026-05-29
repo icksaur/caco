@@ -61,6 +61,14 @@ interface LastTurnsCacheEntry {
 const lastTurnsCache = new Map<string, LastTurnsCacheEntry>();
 const LAST_TURNS_CACHE_LIMIT = 32;
 
+function findNthUserMessageFromEnd(lines: string[], n: number): number {
+  let found = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].includes('"user.message"') && ++found >= n) return i;
+  }
+  return 0;
+}
+
 export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: number): { events: SessionEvent[]; totalLines: number; skipped: number } {
   try {
     const eventsPath = sessionPath(sessionId, 'events.jsonl');
@@ -77,25 +85,12 @@ export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: nu
     const lines = content.split('\n');
     const totalLines = lines.length;
 
-    let startIndex = 0;
     let turns = maxTurns;
-    let turnsFound = 0;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].includes('"user.message"')) {
-        turnsFound++;
-        if (turnsFound >= turns) { startIndex = i; break; }
-      }
-    }
+    let startIndex = findNthUserMessageFromEnd(lines, turns);
 
     while (startIndex > 0 && (lines.length - startIndex) > maxEvents && turns > 3) {
       turns--;
-      turnsFound = 0;
-      for (let i = lines.length - 1; i >= 0; i--) {
-        if (lines[i].includes('"user.message"')) {
-          turnsFound++;
-          if (turnsFound >= turns) { startIndex = i; break; }
-        }
-      }
+      startIndex = findNthUserMessageFromEnd(lines, turns);
     }
 
     const events: SessionEvent[] = [];
@@ -106,8 +101,8 @@ export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: nu
     const result = { events, totalLines, skipped: startIndex };
 
     if (lastTurnsCache.size >= LAST_TURNS_CACHE_LIMIT) {
-      const firstKey = lastTurnsCache.keys().next().value;
-      if (firstKey !== undefined) lastTurnsCache.delete(firstKey);
+      const [oldest] = lastTurnsCache.keys();
+      lastTurnsCache.delete(oldest);
     }
     lastTurnsCache.set(cacheKey, { size: stat.size, mtimeMs: stat.mtimeMs, result });
 

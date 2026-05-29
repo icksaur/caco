@@ -131,12 +131,13 @@ export function setupWebSocket(server: Server) {
     clearInterval(heartbeatInterval);
   });
 
+  const EXT_EVENT_TYPE: Record<string, string> = {
+    css: 'extension.cssChanged',
+    client: 'extension.reload',
+  };
   watchExtensions((slug, type) => {
-    if (type === 'css') {
-      broadcastGlobalEvent({ type: 'extension.cssChanged', data: { slug } } as SessionEvent);
-    } else if (type === 'client') {
-      broadcastGlobalEvent({ type: 'extension.reload', data: { slug } } as SessionEvent);
-    }
+    const eventType = EXT_EVENT_TYPE[type];
+    if (eventType) broadcastGlobalEvent({ type: eventType, data: { slug } } as SessionEvent);
   });
 
   return { wss, pushStateToApplet };

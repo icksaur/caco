@@ -45,11 +45,7 @@ const INTENT_HISTORY_LIMIT = 5;
 /** Prefer animated icon.gif over static icon.png. Returns null if neither exists. */
 export function getSessionIconPath(sessionId: string): string | null {
   const dir = getSessionDir(sessionId);
-  const gif = join(dir, 'icon.gif');
-  if (existsSync(gif)) return gif;
-  const png = join(dir, 'icon.png');
-  if (existsSync(png)) return png;
-  return null;
+  return [join(dir, 'icon.gif'), join(dir, 'icon.png')].find(existsSync) ?? null;
 }
 
 // ============================================================================

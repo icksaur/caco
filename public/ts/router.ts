@@ -36,12 +36,18 @@ interface Navigation {
   navigate(url: string, options?: { state?: unknown; history?: 'auto' | 'push' | 'replace' }): { committed: Promise<void>; finished: Promise<void> };
 }
 
+declare global {
+  interface Window {
+    navigation?: Navigation;
+  }
+}
+
 /**
  * Initialize router - set up Navigation API handler
  * Call once at app startup
  */
 export function initRouter(): void {
-  const nav = (window as unknown as { navigation?: Navigation }).navigation;
+  const nav = window.navigation;
   if (!nav) {
     console.warn('[ROUTER] Navigation API not available, falling back to popstate');
     window.addEventListener('popstate', handlePopState);
@@ -247,7 +253,7 @@ export function toggleApplet(): void {
   if (!hasAppletContent()) {
     // No applet loaded - open applet browser
     console.log('[ROUTER] No applet loaded, opening applet-browser');
-    const nav = (window as unknown as { navigation?: Navigation }).navigation;
+    const nav = window.navigation;
     if (nav) {
       nav.navigate('?applet=applet-browser');
     } else {
@@ -326,7 +332,7 @@ function updateUrl(params: { session?: string | null; applet?: string | null }, 
     }
   }
   
-  const nav = (window as unknown as { navigation?: Navigation }).navigation;
+  const nav = window.navigation;
   
   if (push && nav) {
     // Use Navigation API for proper traverse interception

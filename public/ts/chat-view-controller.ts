@@ -139,7 +139,7 @@ class ChatViewController {
       flight.end('resumeAndLoad');
 
       flight.span('showChat');
-      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.sessionId, data.hasIcon, data.kind, data.currentIntent, data.gitBranch);
+      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.hasIcon, data.kind, data.currentIntent, data.gitBranch);
       setResponseOptions(data.responseOptions?.length ? data.responseOptions : []);
       flight.end('showChat');
 
@@ -267,7 +267,7 @@ class ChatViewController {
   /**
    * Transition to chatting view after successful load.
    */
-  private showChat(sessionId: string, cwd: string, model?: string, hasGit = false, name?: string, _sessionId?: string, hasIcon?: boolean, kind?: string, currentIntent?: string, gitBranch?: string | null): void {
+  private showChat(sessionId: string, cwd: string, model?: string, hasGit = false, name?: string, hasIcon?: boolean, kind?: string, currentIntent?: string, gitBranch?: string | null): void {
     this.footerSessionId = sessionId;
     updateMenuIndicators();
     notifySessionChange(sessionId, { sessionId, cwd, name, kind, model, currentIntent });

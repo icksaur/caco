@@ -434,7 +434,7 @@ function syncModelCache(sessionId: string, model?: string): void {
 /**
  * Get model from cache (sync happens on create/resume).
  */
-function _getSessionModel(sessionId: string): string | null {
+function readModelFromEvents(sessionId: string): string | null {
   const meta = getSessionMeta(sessionId);
   return meta?.model ?? null;
 }
@@ -864,7 +864,7 @@ class SessionManager {
     this.activeSessions.set(sessionId, { cwd, session });
     
     // Evict oldest inactive sessions if over the limit
-    this._evictInactiveSessions();
+    this.evictInactiveSessions();
     
     // Register with storage layer for output persistence
     registerSession(cwd, sessionId);
@@ -949,7 +949,7 @@ class SessionManager {
    * Only evicts sessions that are not currently busy (not dispatching).
    * Called after resume() adds a new active session.
    */
-  private _evictInactiveSessions(): void {
+  private evictInactiveSessions(): void {
     if (this.activeSessions.size <= SessionManager.MAX_ACTIVE_SESSIONS) return;
     
     // Find inactive (not busy) sessions to evict
@@ -1176,7 +1176,7 @@ class SessionManager {
   }
 
   getSessionModel(sessionId: string): string | null {
-    return _getSessionModel(sessionId);
+    return readModelFromEvents(sessionId);
   }
 
   /**

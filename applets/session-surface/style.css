@@ -59,6 +59,16 @@
   opacity: 1;
 }
 
+.surface-footer.has-ack {
+  color: var(--color-success-bright, #4caf50);
+  opacity: 1;
+  transition: opacity 0.6s ease 5s;
+}
+.surface-footer.has-ack:hover {
+  opacity: 1;
+  transition: none;
+}
+
 .surface-toast {
   position: absolute;
   bottom: 20px;

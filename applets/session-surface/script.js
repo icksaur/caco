@@ -126,11 +126,14 @@ function updateFooter() {
   if (!doc) { footer.textContent = ''; return; }
   var dirtyCount = doc.changes ? Object.keys(doc.changes).length : 0;
   if (dirtyCount > 0) {
-    footer.textContent = 'Agent will see your changes on its next response. (' + dirtyCount + ' unack)';
-    footer.classList.add('has-changes');
+    footer.textContent = 'Your edits will be visible to the agent on its next response. (' + dirtyCount + ' unsent)';
+    footer.className = 'has-changes';
+  } else if (ackTimer) {
+    footer.textContent = '✓ Agent received your edits.';
+    footer.className = 'has-ack';
   } else {
     footer.textContent = '';
-    footer.classList.remove('has-changes');
+    footer.className = '';
   }
 }
 
@@ -169,6 +172,8 @@ function injectCustomStyle(css) {
 // --- Data loading ---
 
 var fetchEpoch = 0;
+var lastAckAt = 0;
+var ackTimer = null;
 
 async function fetchSurface() {
   var sid = sessionId();
@@ -183,6 +188,16 @@ async function fetchSurface() {
     if (epoch !== fetchEpoch) return; // session changed while parsing
     var scriptChanged = !doc || doc.customScript !== newDoc.customScript;
     var styleChanged = !doc || doc.customStyle !== newDoc.customStyle;
+    var prevDirty = (doc && doc.changes) ? Object.keys(doc.changes).length : 0;
+    var nextDirty = (newDoc.changes) ? Object.keys(newDoc.changes).length : 0;
+    // The agent acknowledged: dirty count dropped from non-zero to zero on a
+    // server-initiated refresh. Show a confirmation so the user doesn't read
+    // their disappearing edits as data loss.
+    if (prevDirty > 0 && nextDirty === 0) {
+      lastAckAt = Date.now();
+      if (ackTimer) clearTimeout(ackTimer);
+      ackTimer = setTimeout(function() { ackTimer = null; updateFooter(); }, 6000);
+    }
     doc = newDoc;
     if (styleChanged) injectCustomStyle(doc.customStyle);
     if (scriptChanged) evalCustomScript(doc.customScript);

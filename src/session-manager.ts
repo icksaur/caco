@@ -11,6 +11,7 @@ import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
 import { pollQuota } from './quota-poller.js';
+import type { QuotaSnapshot } from './usage-state.js';
 
 import { refreshAccessToken } from './mcp-auth-service.js';
 import { serverIdFromUrl } from './mcp-discovery.js';
@@ -303,6 +304,19 @@ function repairSessionEvents(sessionId: string, errorMessage?: string): string |
   }
 }
 
+interface McpServerInfo {
+  name: string;
+  status: string;
+  source?: string;
+  error?: string;
+}
+
+interface ToolInfo {
+  name: string;
+  namespacedName?: string;
+  description: string;
+}
+
 interface CopilotClientInstance {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -315,17 +329,14 @@ interface CopilotClientInstance {
   rpc: {
     account: {
       getQuota: (params: { gitHubToken?: string }) => Promise<{
-        quotaSnapshots: Record<string, {
-          isUnlimitedEntitlement: boolean;
-          entitlementRequests: number;
-          usedRequests: number;
-          remainingPercentage: number;
-          resetDate?: string;
-        } | undefined>;
+        quotaSnapshots: Record<string, QuotaSnapshot | undefined>;
       }>;
     };
     tools: {
-      list(params: unknown): Promise<{ tools: unknown[] }>;
+      list(params: { model?: string }): Promise<{ tools: ToolInfo[] }>;
+    };
+    sessions: {
+      fork(params: { sessionId: string; toEventId?: string }): Promise<{ sessionId: string }>;
     };
   };
 }
@@ -369,7 +380,7 @@ interface CopilotSessionInstance {
       compact(params?: unknown): Promise<{ success: boolean; tokensRemoved: number; messagesRemoved: number }>;
     };
     mcp: {
-      list(): Promise<unknown>;
+      list(): Promise<{ servers: McpServerInfo[] }>;
     };
   };
 }
@@ -1192,8 +1203,7 @@ class SessionManager {
     if (!active) {
       throw new Error(`Session ${sessionId} is not active`);
     }
-    const session = active.session as unknown as { rpc: { history: { compact: () => Promise<{ success: boolean; tokensRemoved: number; messagesRemoved: number }> } } };
-    const result = await session.rpc.history.compact();
+    const result = await active.session.rpc.history.compact();
     if (!result.success) {
       throw new Error('Compaction failed');
     }
@@ -1378,12 +1388,11 @@ class SessionManager {
    * List MCP servers via session RPC. Returns server name, status, source, error.
    * Requires at least one active session. Returns empty array if none available.
    */
-  async listMcpServers(): Promise<Array<{ name: string; status: string; source?: string; error?: string }>> {
+  async listMcpServers(): Promise<McpServerInfo[]> {
     const firstSession = this.activeSessions.values().next().value;
     if (!firstSession) return [];
     try {
-      const session = firstSession.session as unknown as { rpc: { mcp: { list: () => Promise<{ servers: Array<{ name: string; status: string; source?: string; error?: string }> }> } } };
-      const result = await session.rpc.mcp.list();
+      const result = await firstSession.session.rpc.mcp.list();
       return result.servers;
     } catch (e) {
       console.error('[MCP] Failed to list MCP servers:', e instanceof Error ? e.message : e);
@@ -1395,11 +1404,10 @@ class SessionManager {
    * List all tools via client RPC. Returns tool name, namespacedName, description.
    * Requires a running SDK client. Returns empty array if not available.
    */
-  async listAllTools(): Promise<Array<{ name: string; namespacedName?: string; description: string }>> {
+  async listAllTools(): Promise<ToolInfo[]> {
     if (!this.sharedClient) return [];
     try {
-      const client = this.sharedClient as unknown as { rpc: { tools: { list: (params: { model?: string }) => Promise<{ tools: Array<{ name: string; namespacedName?: string; description: string }> }> } } };
-      const result = await client.rpc.tools.list({});
+      const result = await this.sharedClient.rpc.tools.list({});
       return result.tools;
     } catch (e) {
       console.error('[MCP] Failed to list tools:', e instanceof Error ? e.message : e);
@@ -1430,8 +1438,7 @@ class SessionManager {
     }
     const parentCwd = parentRecord.cwd;
     const client = await this.ensureClient();
-    const rpcClient = client as unknown as { rpc: { sessions: { fork: (p: { sessionId: string; toEventId?: string }) => Promise<{ sessionId: string }> } } };
-    const result = await rpcClient.rpc.sessions.fork({ sessionId: parentSessionId, toEventId });
+    const result = await client.rpc.sessions.fork({ sessionId: parentSessionId, toEventId });
     const newId = result.sessionId;
 
     // Mirror what create() does for cache registration

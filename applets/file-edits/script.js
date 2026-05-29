@@ -24,6 +24,10 @@
   var cards = new Map();
   /** Set<relativePath>. Sticky until reset. */
   var dismissed = new Set();
+  /** Set<relativePath>. Paths the user explicitly collapsed; sticky for the
+   *  life of the card. Cleared when the card is removed (e.g. file returns
+   *  to HEAD, then comes back: defaults to expanded again). */
+  var userCollapsed = new Set();
   var VISIBLE_CAP = 50;
   var sessionId = null;
 
@@ -81,10 +85,11 @@
   }
 
   function makeCard(edit) {
+    var startCollapsed = userCollapsed.has(edit.relativePath);
     var card = document.createElement('article');
     card.className = 'fe-card';
     card.dataset.path = edit.relativePath;
-    card.dataset.expanded = 'false';
+    card.dataset.expanded = startCollapsed ? 'false' : 'true';
 
     var head = document.createElement('header');
     head.className = 'fe-head';
@@ -93,7 +98,7 @@
     chevron.className = 'fe-chevron';
     chevron.type = 'button';
     chevron.setAttribute('aria-label', 'Toggle');
-    chevron.textContent = '▶';
+    chevron.textContent = startCollapsed ? '▶' : '▼';
 
     var status = document.createElement('span');
     status.className = 'fe-status fe-s-' + (edit.status || 'modified');
@@ -124,16 +129,25 @@
 
     var body = document.createElement('pre');
     body.className = 'fe-diff';
-    body.hidden = true;
+    body.hidden = startCollapsed;
 
     card.appendChild(head);
     card.appendChild(body);
+
+    // If we start expanded, render the diff body now.
+    if (!startCollapsed) {
+      body.innerHTML = renderDiff(edit.diff);
+      body.dataset.rendered = '1';
+    }
 
     function toggle() {
       var nowExpanded = card.dataset.expanded !== 'true';
       card.dataset.expanded = nowExpanded ? 'true' : 'false';
       body.hidden = !nowExpanded;
       chevron.textContent = nowExpanded ? '▼' : '▶';
+      // Track explicit user collapse so subsequent updates respect it.
+      if (nowExpanded) userCollapsed.delete(edit.relativePath);
+      else userCollapsed.add(edit.relativePath);
       if (nowExpanded && !body.dataset.rendered) {
         body.innerHTML = renderDiff(card._edit.diff);
         body.dataset.rendered = '1';
@@ -191,12 +205,20 @@
 
   function dismissPath(path) {
     dismissed.add(path);
+    removeCard(path);
+    updateCounts();
+  }
+
+  /** Remove a card from the DOM and forget its user-collapse state.
+   *  Use whenever a path leaves the dirty set (cleared, dismissed, cap-evicted).
+   *  When the path returns later, it will default to expanded again. */
+  function removeCard(path) {
     var card = cards.get(path);
     if (card) {
       card.remove();
       cards.delete(path);
     }
-    updateCounts();
+    userCollapsed.delete(path);
   }
 
   function updateCounts() {
@@ -219,23 +241,16 @@
     // Drop oldest: cards Map iteration order is insertion order; oldest first.
     var toRemove = cards.size - VISIBLE_CAP;
     var iter = cards.keys();
+    var paths = [];
     while (toRemove-- > 0) {
-      var path = iter.next().value;
-      var c = cards.get(path);
-      if (c) c.remove();
-      cards.delete(path);
+      paths.push(iter.next().value);
     }
+    paths.forEach(removeCard);
   }
 
   function applyEdits(edits, cleared) {
     if (Array.isArray(cleared)) {
-      cleared.forEach(function(path) {
-        var card = cards.get(path);
-        if (card) {
-          card.remove();
-          cards.delete(path);
-        }
-      });
+      cleared.forEach(removeCard);
     }
     if (!Array.isArray(edits)) edits = [];
     var appliedAny = false;
@@ -340,6 +355,7 @@
       streamEl.innerHTML = '';
       cards.clear();
       dismissed.clear();
+      userCollapsed.clear();
       updateCounts();
       void fetchSnapshot();
     });

@@ -188,6 +188,13 @@
   overflow-x: auto;
 }
 
+/* Specificity defense: .fe-diff[data-mode="fullfile"] sets display:grid
+ * with specificity (0,1,1), which beats the browser's default
+ * [hidden] { display: none } rule (0,1,0). Without this, the chevron
+ * collapse stops working on fullfile cards. Match the attribute selector
+ * to win specificity. */
+.fe-diff[hidden] { display: none; }
+
 .fe-diff[data-mode="fullfile"] .fe-row {
   display: contents;
 }

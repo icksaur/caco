@@ -347,21 +347,52 @@ CSS-class-driven (`+` → `.fe-d-add`, `-` → `.fe-d-del`, ` ` → `.fe-d-ctx`)
 13. Binary file changed → card shows "(binary file changed — N bytes)"; chevron disabled.
 14. Session ends → poller detaches; no leaked subprocesses.
 
-## Follow-ups (v2 and beyond, in priority order)
+## V2 scope (locked)
 
-1. **Full-file textviewer diff** (operator requirement). v1's `git diff -u` hunk format is line-noisy. v2 shows the whole file with unchanged lines in muted gray, added lines highlighted green, removed lines highlighted red — like a text editor with diff annotations. Implementation: fetch HEAD version + working tree version, render a side-by-side or unified line-by-line view. Bigger UI than v1's hunk view.
-2. **Syntax highlighting** (operator requirement). Per-language token highlighting inside diff bodies. Adds `'diff'` and language detection to highlight.js bundle, or uses tree-sitter.
-3. **Sticky auto-scroll** (operator requirement). v1 always scrolls; v2 detects user-scrolled-away and shows a "↓ new edits below" button.
-4. **Commit-lease enforcement** (operator requirement). When file-edits panel is open with active edits, git-status's commit button is gated.
-5. **v2 = git-status replacement.** Add stage / unstage / commit / push / pull. Retire the existing `git-status` applet.
-6. **Hunk-level approve / reject.** Per-hunk buttons; reject = `git checkout -p` for that hunk.
-7. **Per-repo poller** (one process tick shared across sessions on same cwd).
-8. **`git fsmonitor` integration** for sub-second responsiveness (operator requirement for v2).
-9. **Replay buffer** for cards that arrived before applet opened (already partly solved by snapshot endpoint).
-10. **Multi-repo / multi-cwd.**
-11. **Word-level diff** (intra-line diffs).
-12. **Tabbed view A/B.**
-13. **Image-viewer hand-off** for binary changes that are images.
+Five items, ordered by operator priority. Anything not listed here is V3.
+
+1. **Full-file textviewer diff.** Replace v1's hunk-format `git diff -u` with a whole-file view: unchanged lines muted gray, added lines green, removed lines red — like a text editor with diff annotations. Fetch HEAD + working tree, render unified line-by-line. Reachable from card header (e.g. click path = expand to full-file mode); collapsed/hunk view remains default for the stacked feed.
+2. **Per-language syntax highlighting** inside diff bodies. Highlight.js is already vendored — bundle the language pack and `'diff'` mode, detect language from extension, apply to each line span without breaking the per-line red/green class.
+3. **Word-level intra-line diff.** For each `-`/`+` line pair, highlight the changed tokens rather than coloring the whole line. Use a diff-match-patch-style word tokenization; render `<mark>` spans inside the line.
+4. **Sticky auto-scroll.** v1 always pins to top on any change. v2: if the user has scrolled away from top, leave them alone and show a "↓ new edits" affordance; if they're at top, keep following.
+5. **Side-by-side toggle** for files above a size threshold. Split-pane red/green columns. Per-card toggle in the header; remembers preference per session.
+
+### V2 non-goals
+
+Explicit V2 non-goals (deferred to V3 — see backlog below):
+
+- Stage / unstage / commit / push (git-status replacement).
+- Commit-lease enforcement.
+- `git fsmonitor` integration.
+- Server-side per-path hashing / mtime gating.
+- Multi-source signals beyond git.
+- Keyboard navigation, filter bar, file tree sidebar.
+- Editor jump-out (`vscode://`).
+- Image / binary previews.
+- Conflict-marker awareness.
+- Per-repo shared poller, multi-repo views.
+- Replay buffer for pre-open edits beyond the existing snapshot.
+
+## V3 backlog (deferred — do not pull into V2)
+
+Captured for record; no commitment, no ordering until V2 ships.
+
+- v3 becomes the full **git-status replacement** (stage/unstage per file & per hunk, commit composer with co-author toggle, push with ahead/behind, discard hunk/file with confirm). Retires the existing `git-status` applet.
+- **Commit lease**: while file-edits has unread changes, block agent-initiated `git commit`. Surface a "release lease" button.
+- **git fsmonitor** for sub-second updates.
+- **Server-side per-path hash + porcelain v2 mtime gating** to skip diff subprocess on no-op polls.
+- **Combined multi-source signals**: surface agent edit/create/write tool hooks distinctly from git-dirty, with a decay badge for "just touched by agent."
+- **Untracked-ignored toggle** for `.gitignore`'d paths the agent wrote.
+- **Per-card jump-to-editor** (`vscode://file/...`).
+- **Filter bar** — by path glob, by status, by "touched in last N minutes."
+- **Reveal-in-tree sidebar.**
+- **Keyboard navigation** — j/k between cards, e expand, x dismiss.
+- **Truncation "show more"** instead of silent cap.
+- **Binary image preview** (before/after thumbnails).
+- **Conflict-marker awareness** — distinct status for files containing merge markers.
+- **Per-repo shared poller** across sessions on same cwd.
+- **Multi-repo / multi-cwd** stacking.
+- **Replay buffer** for edits prior to applet open beyond what snapshot covers.
 
 ## Operator-decided defaults (post-questionnaire)
 

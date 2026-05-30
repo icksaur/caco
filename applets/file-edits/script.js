@@ -193,7 +193,7 @@
 
   /** Build a fold row element. Click to expand into rendered ctx rows
    *  (with a collapse affordance prepended). */
-  function buildFoldEl(row, lang, body) {
+  function buildFoldEl(row, lang) {
     var div = document.createElement('div');
     div.className = 'fe-row fe-row-fold';
     div.dataset.count = String(row.count);
@@ -206,7 +206,7 @@
     btn.type = 'button';
     btn.textContent = '… ' + row.count + ' unchanged line' + (row.count === 1 ? '' : 's') + ' …';
     btn.addEventListener('click', function() {
-      expandFold(div, row, lang, body);
+      expandFold(div, row, lang);
     });
     div.appendChild(gHead);
     div.appendChild(gWork);
@@ -214,7 +214,7 @@
     return div;
   }
 
-  function expandFold(foldDiv, row, lang, body) {
+  function expandFold(foldDiv, row, lang) {
     var frag = document.createDocumentFragment();
     var collapseRow = document.createElement('div');
     collapseRow.className = 'fe-row fe-row-collapse';
@@ -236,7 +236,7 @@
     }
     foldDiv.parentNode.replaceChild(frag, foldDiv);
     cBtn.addEventListener('click', function() {
-      var newFold = buildFoldEl(row, lang, body);
+      var newFold = buildFoldEl(row, lang);
       collapseRow.parentNode.insertBefore(newFold, collapseRow);
       collapseRow.parentNode.removeChild(collapseRow);
       for (var k = 0; k < expandedRows.length; k++) {
@@ -261,7 +261,7 @@
     var frag = document.createDocumentFragment();
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
-      frag.appendChild(r.kind === 'fold' ? buildFoldEl(r, lang, body) : buildRowEl(r, lang));
+      frag.appendChild(r.kind === 'fold' ? buildFoldEl(r, lang) : buildRowEl(r, lang));
     }
     body.appendChild(frag);
     return true;

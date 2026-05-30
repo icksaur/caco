@@ -77,7 +77,10 @@ const DEBOUNCE_MS = 50;
 const DIFF_TIMEOUT_MS = 2000;
 const DIFF_LINE_CAP = 1000;
 const STATUS_TIMEOUT_MS = 5000;
-const DIFF_CONCURRENCY = 8;
+/** V2: each buildEntry now spawns two git subprocesses (git diff +
+ *  git show HEAD:path for the V2 fullFile payload). Halved from V1's
+ *  8 so the in-flight subprocess count remains bounded at 8. */
+const DIFF_CONCURRENCY = 4;
 /** V2: per-file line cap above which fullFile is omitted (card falls back
  *  to v1 hunk view). Bounds payload + render cost. */
 const FULLFILE_LINE_CAP = 5000;

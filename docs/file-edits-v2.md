@@ -147,32 +147,184 @@ is the escape hatch if real-world payloads bite.
 **Decision:** ship eager (full payload in `caco.edit`) for V2; switch
 to lazy on-expand if payloads exceed 256 KB per poll in practice.
 
+### Truncation harmonization
+
+V1's `DIFF_LINE_CAP = 1000` (`src/git-edit-poller.ts:54`) is unchanged
+in V2 for the raw `diff` field. V2 introduces a separate 5000-line cap
+for `fullFile`. To avoid stale truncation UI:
+
+- When `fullFile` is present on a card, the `truncated` field (which
+  describes `diff`-string truncation) is **ignored** by the renderer.
+  The "↘" header indicator only appears when the card is in
+  fallback hunk-view mode.
+- When `fullFile` is absent (fallback case), `truncated` behaves
+  exactly as in V1.
+
+This keeps the two caps independent without producing contradictory
+indicators on the same card.
+
 ## Render
+
+### Indexing convention
+
+`headStart`, `workStart`, `headLen`, `workLen` are **1-indexed line
+numbers** as they appear in unified diff `@@ -h,hlen +w,wlen @@`
+headers. `headLines[0]` corresponds to HEAD line 1; a hunk with
+`headStart = 1` starts at the first array element. A hunk header
+`@@ -1,3 +5,2 @@` means: starting at HEAD line 1, 3 lines were
+removed; at working-tree line 5, 2 lines were added.
+
+A hunk with `headLen = 0` is a pure addition at HEAD position
+`headStart` (insertion *before* that line); `workLen = 0` is a pure
+deletion. Either field being 0 with the other non-zero is the standard
+case for new/removed regions.
+
+### Merge walk (client-side)
+
+Single pass over hunks (already sorted by `headStart`), building an
+ordered list of rows. Pseudocode:
+
+```ts
+type Row =
+  | { kind: 'ctx',  head: number, work: number, text: string }
+  | { kind: 'del',  head: number, work: null,   text: string }
+  | { kind: 'add',  head: null,   work: number, text: string }
+  | { kind: 'fold', count: number, headStart: number, workStart: number };
+
+function buildRows(headLines, workLines, hunks) {
+  const rows = [];
+  let h = 1, w = 1; // 1-indexed cursors
+  for (const hunk of hunks) {
+    // Emit unchanged context between previous position and this hunk.
+    while (h < hunk.headStart) {
+      rows.push({ kind: 'ctx', head: h, work: w, text: headLines[h - 1] });
+      h++; w++;
+    }
+    // Emit removed lines (from HEAD).
+    for (let i = 0; i < hunk.headLen; i++) {
+      rows.push({ kind: 'del', head: h, work: null, text: headLines[h - 1] });
+      h++;
+    }
+    // Emit added lines (from working tree).
+    for (let i = 0; i < hunk.workLen; i++) {
+      rows.push({ kind: 'add', head: null, work: w, text: workLines[w - 1] });
+      w++;
+    }
+  }
+  // Emit unchanged tail.
+  while (h <= headLines.length) {
+    rows.push({ kind: 'ctx', head: h, work: w, text: headLines[h - 1] });
+    h++; w++;
+  }
+  return rows;
+}
+```
+
+After `buildRows`, a second pass collapses any run of >20 consecutive
+`ctx` rows into a single `fold` row, preserving the rows before/after
+so click-expand can restore them. Default threshold 20, configurable
+per-card via header toggle.
+
+### DOM structure per row
+
+Each non-fold row is a single `<div class="fe-row fe-row-{kind}">`
+containing exactly three children:
+
+```html
+<div class="fe-row fe-row-add">
+  <span class="fe-gutter fe-gutter-head"></span>    <!-- empty for add -->
+  <span class="fe-gutter fe-gutter-work">42</span>
+  <code class="fe-line hljs language-typescript">…tokens…</code>
+</div>
+```
+
+Gutter cells are fixed-width (text-align: right, font-mono, muted
+color). Empty cells render as `&nbsp;` so column alignment is stable.
+The `<code>` child receives the syntax-highlighted token spans; the
+`fe-row-{kind}` class on the parent controls the line-level
+background. Phase 2's word marks live inside the `<code>`.
+
+Fold rows use a distinct structure with a chevron and a click handler:
+
+```html
+<div class="fe-row fe-row-fold" data-head-start="N" data-work-start="M" data-count="K">
+  <span class="fe-gutter fe-gutter-head"></span>
+  <span class="fe-gutter fe-gutter-work"></span>
+  <button class="fe-fold-btn">… K unchanged lines …</button>
+</div>
+```
+
+Clicking `fe-fold-btn` swaps the fold row for K rendered `ctx` rows
+and inserts a small "collapse" affordance at the top of the
+expanded region. Clicking the collapse re-folds the same span.
+
+### Render pipeline (per card body)
 
 Client-side, per card:
 
-1. Render gutter + line rows in a virtualized container *(skip
-   virtualization for V2 — measure first; with 5000-line cap, naive
-   render is probably fine. Add virtualization only if profiling shows
-   need.)*
-2. Apply hljs to each line span individually, **after** assigning
-   the line-level diff class so the line-level color shows through
-   any token background that isn't set.
-3. Folds for unchanged runs: a single clickable row inserted
-   between the last unchanged-line-before and the first unchanged-line
-   inside the fold; rendering on click replaces the row with the
-   collapsed lines.
+1. Run `buildRows` then fold collapse → ordered row list.
+2. For each row, create the DOM structure above. The `<code>` text
+   content is the raw line text initially.
+3. If hljs is available, highlight each `<code>` element
+   individually with the detected language. Per-line highlighting
+   keeps the row-level diff color visible underneath token
+   backgrounds and avoids cross-row token bleed.
+4. *(Phase 2 adds: word-mark injection per add/del pair, between
+    steps 2 and 3 — see Phase 2.)*
+
+Virtualization is intentionally skipped for V2 (measure first; with
+the 5000-line cap, naive render is probably fine). Revisit if a
+single-card render exceeds 50ms in profiling.
+
+## Fallback cases and rationale
+
+`fullFile` is **skipped** (card falls back to v1 raw-hunk view) when:
+
+- **Binary file** — `git diff` produces no line-by-line content; HEAD
+  blob isn't text either.
+- **File >5000 lines** — payload cost and render cost both become
+  unbounded; the hunk view is honest about being a hunk view.
+- **Deleted file** — *V2 design decision:* a deletion has `workLines = []`
+  and complete `headLines`. The full-file view would show every HEAD
+  line as a `del` row, which is the most informative view possible.
+  However, V2 ships fallback here to keep Phase 1 small; deletions
+  using the V1 hunk view remain readable, and a future minor revision
+  can promote deleted files to full-file view once the renderer is
+  proven. Documented gap; not a foundational design choice.
+- **`headLines = null` (untracked)** — file has no HEAD blob;
+  rendered as all-`add` rows with the HEAD gutter blank throughout.
+  *This is a supported full-file case, not a fallback.*
+
+The header shows a small "fallback: hunk view" note when in fallback
+mode so the user knows why the view differs.
+
+## "Changed regions" indicator
+
+The header indicator `viewing N changed regions` uses `N = fullFile.hunks.length`
+— the count of hunk entries returned by `git diff`. Adjacent
+add/delete blocks within a single hunk count as one region.
+Independent edits in different parts of the file are separate hunks
+and count separately.
 
 ## Phase 1 acceptance
 
 - A 200-line file with 3 small changes renders the full file; the
   3 changes are visible without scrolling within the card.
-- Long unchanged runs are folded by default.
+- Long unchanged runs are folded by default. Expanded folds show a
+  "collapse" affordance and re-fold on click.
 - Token highlighting visible for at least .ts, .js, .py, .sh, .md.
+- An **untracked** file renders all lines as `add` rows, HEAD gutter
+  column blank throughout, no `del` rows.
+- A **modified** file with both adds and deletes renders gutter
+  columns correctly: HEAD-only lines have blank work gutter; work-only
+  lines have blank HEAD gutter; unchanged lines have both.
 - Binary, deleted, and files >5000 lines fall back to v1 hunk view
-  with a small "fallback: hunk view" note in the card header.
+  with a "fallback: hunk view" note in the card header.
 - Performance: render of one 1000-line card stays under 50ms on
   Caco's dev machine.
+- hljs bundle failure (network error, CSP block) degrades silently
+  to unhighlighted text with diff coloring intact; no
+  unhandled-rejection.
 
 ---
 
@@ -204,19 +356,45 @@ a `<mark>` background:
 
 ## Interaction with syntax highlighting
 
-Word marks live **inside** highlighted line content. Either:
+Word marks live **inside** highlighted line content. Order chosen:
 
-(a) Highlight first → walk the resulting DOM and inject `<mark>`
-    spans, taking care to split text nodes at token boundaries
-    while preserving the parent hljs spans.
-(b) Run diff first on raw text → highlight afterward, on the
-    text-content with marks recorded as char ranges, then re-apply
-    marks via offsets.
+**(a) Highlight first → walk DOM, split at word boundaries.**
 
-**Pick (a):** highlight.js produces a stable, simple span tree;
-walking it with a text-offset cursor and splitting at word
-boundaries is well-understood. (b) requires re-running hljs on
-fragments and re-mapping offsets, which is fragile.
+Approach (b) — diff-then-highlight — requires re-running hljs on
+fragments and re-mapping char offsets, which is fragile across
+nested spans.
+
+### DOM split algorithm
+
+The line `<code>` after highlighting is a tree of nested
+`<span class="hljs-…">` and raw text nodes. Word marks come as
+`{startOffset, endOffset}` ranges into the line's text content.
+
+For each mark range, walk the line's text nodes in document order
+keeping a running character cursor. When the cursor crosses
+`startOffset`, split the current text node at `startOffset - cursor`.
+The right half of that split is the first character of the mark.
+Continue walking; when the cursor crosses `endOffset`, split again
+and stop. Wrap every text-node fragment between the two split points
+in a `<mark class="fe-w-{add,del}">`.
+
+If a mark spans across a span boundary (e.g., a renamed identifier
+that crosses from a `hljs-keyword` into a `hljs-identifier`), the
+algorithm produces multiple `<mark>` siblings, one per text fragment.
+Each mark preserves its original hljs ancestor: the wrap is applied
+**around** the text fragment without removing or re-parenting the
+enclosing hljs spans. This means a mark may sit inside a hljs span,
+or directly between two hljs spans; either is valid HTML and both
+render correctly.
+
+The walk is implemented with a `TreeWalker` filtering for
+`NodeFilter.SHOW_TEXT`, which gives a flat iteration over text nodes
+inside the highlighted line. No recursive cloning of ancestor spans
+is required; the algorithm only ever splits text nodes and wraps
+the fragments.
+
+Empty `<mark>` elements (mark ranges of zero width) are skipped
+entirely — they produce no DOM output.
 
 ## Library
 
@@ -232,6 +410,12 @@ Use `diff-match-patch` (small, MIT) for the word-level diff. It's
 - A `-` with no paired `+` (pure deletion) stays solid-red, no
   word marks (correct — nothing to compare to).
 - Syntax highlighting still visible underneath word marks.
+- **Nested hljs span case:** a word change that falls inside a nested
+  hljs token (e.g., a renamed identifier inside a `hljs-comment`
+  region, or a change spanning a `hljs-keyword`→`hljs-identifier`
+  boundary) produces correct `<mark>` wrapping with no orphaned spans,
+  no empty marks, and no token-class bleed across the original
+  word boundaries.
 
 ---
 
@@ -271,9 +455,35 @@ stateDiagram-v2
   — v1 has no "open a closed card" gesture; future-proofing only).
 - User clicks the X to dismiss a card.
 
-Note: a scroll generated programmatically by the applet itself must
-NOT enter Sticky. Implementation: set a `programmaticScroll = true`
-flag around any `scrollTop` write and ignore the next `scroll` event.
+Note: scrolls generated programmatically by the applet itself must
+NOT enter Sticky. This is non-trivial because `behavior: 'smooth'`
+emits a continuous stream of `scroll` events through the animation,
+not just one. A single-shot suppress flag is insufficient.
+
+**Adopted strategy: use instant programmatic scrolls + scroll-end
+detection by stable position.**
+
+- All applet-initiated scroll writes use `scrollTop = N` (no
+  `behavior: 'smooth'`), which emits exactly one `scroll` event.
+  This trades visual polish for state-machine simplicity.
+- The applet maintains `pendingProgrammaticScroll: { target: number }
+  | null`. Set immediately before each write. The scroll handler
+  checks: if the event's resulting `scrollTop` equals (within ±1px
+  rounding) the pending target, consume the flag and ignore.
+  Otherwise (real user scroll, or an unexpected interaction) clear
+  the flag and proceed with Sticky-entry logic.
+
+Why instant scrolls: the alternative — tracking the smooth animation
+via the `scrollend` event — has incomplete browser support
+(Firefox shipped it in 109; Safari only added it in 17.4). Falling
+back to rAF polling for `scrollTop` stabilization would be a third
+code path. Instant scrolls produce a single deterministic event and
+are jarring only if the distance is large; the autoscroll target is
+"top of changed card" which is usually within a viewport of the
+current position.
+
+V3 may revisit this with CSS scroll animations or `scrollend` once
+browser support is universal.
 
 ### Autoscroll enters when
 
@@ -299,8 +509,11 @@ When in Autoscroll mode and edits arrive:
   affected card (or, equivalently, the freshest by timestamp at
   the top of the stream).
 
-Always use `behavior: 'smooth'` for autoscroll moves; users tolerate
-motion they initiated, jarring jumps look like a bug.
+All autoscroll moves use **instant** `scrollTop` writes (no
+`behavior: 'smooth'`) for the state-machine reasons documented above.
+The visual jump from a scroll position to the top of a newly-changed
+card is bounded by the stream height; in practice it's <1 viewport
+and not jarring. Tradeoff accepted for V2.
 
 ## Sticky behavior
 
@@ -345,46 +558,84 @@ Browser anchoring misses:
   enter Sticky and ARE allowed to move things).
 
 Fallback strategy: an "anchor save / restore" wrapper around any
-mutation we know will change layout above the viewport:
+mutation we know will change layout above the viewport. The wrapper
+schedules its read/write pair inside a single `requestAnimationFrame`
+so layout is read and written atomically, and the
+`pendingProgrammaticScroll` flag persists until the actual `scroll`
+event fires (not pre-cleared synchronously):
 
 ```ts
 function withAnchor(fn) {
   if (state !== 'sticky') { fn(); return; }
   const stream = streamEl;
-  const anchor = pickAnchor(stream);             // first card whose top >= scrollTop
-  const beforeTop = anchor ? anchor.getBoundingClientRect().top : 0;
-  programmaticScroll = true;
-  fn();                                          // mutate DOM
-  const afterTop = anchor && document.contains(anchor)
-    ? anchor.getBoundingClientRect().top
-    : null;
-  if (afterTop !== null && afterTop !== beforeTop) {
-    stream.scrollTop += (afterTop - beforeTop);
-  }
-  programmaticScroll = false;
+  requestAnimationFrame(() => {
+    const anchor = pickAnchor(stream);
+    const beforeTop = anchor ? anchor.getBoundingClientRect().top : 0;
+    fn();                                          // mutate DOM
+    const afterTop = anchor && document.contains(anchor)
+      ? anchor.getBoundingClientRect().top
+      : null;
+    if (afterTop !== null && afterTop !== beforeTop) {
+      const target = stream.scrollTop + (afterTop - beforeTop);
+      pendingProgrammaticScroll = { target };
+      stream.scrollTop = target;
+      // pendingProgrammaticScroll is NOT cleared here. The scroll
+      // event handler consumes it by matching `scrollTop ≈ target`.
+    }
+  });
 }
 ```
 
-This runs inside a single rAF so layout is read/written atomically.
+`pickAnchor(stream)`:
+
+1. The first card whose `getBoundingClientRect().top >= 0` (i.e. first
+   card whose top is at or below the viewport's top edge).
+2. If no such card exists (every card is scrolled above the viewport),
+   fall back to the **last card in the stream** — the lowest visible
+   boundary. Content inserted above will still displace the user's
+   viewport reference (the bottom of the stream), so anchor restore
+   preserves the bottom of the visible content.
+3. If the stream is empty, return `null`; `withAnchor` no-ops the
+   restore phase.
+
+If `fn()` runs synchronously inside the rAF callback (it does), any
+caller that needs to inspect post-mutation layout must do so inside
+its own next rAF or use callbacks scheduled from `withAnchor`. No
+current caller has that dependency.
 
 ### Newest-on-top vs newest-at-bottom
 
-Operator offered the alternative "new files always at bottom (simpler)."
+> **DECISION REQUIRED before Phase 3 implementation.** Operator must
+> confirm one of the two options below. Default below is a
+> recommendation, not a settled design.
 
-Recommendation: **keep newest-on-top in Autoscroll, append-at-bottom
-in Sticky.** Specifically:
+Operator offered the alternative "new files always at bottom
+(simpler)."
+
+**Option A (recommended): newest-on-top in Autoscroll,
+append-at-bottom in Sticky.**
 
 - In Autoscroll: a new card prepends to the stream (v1 behavior).
 - In Sticky: a new card appends to the stream's end. The user's view
   is unaffected (the new card is below them, off-screen). On exit
-  Sticky, the stream is re-sorted by recency (timestamp desc) and
-  Autoscroll scrolls to the freshest.
+  Sticky, only newly-appended cards (those added during the Sticky
+  session) move to the top of the stream in timestamp order;
+  pre-existing cards do not shuffle even if their timestamps were
+  bumped by in-place updates. This avoids a 15-20 card visual
+  reshuffle on click-Follow.
 
-This dodges the most violent reorder case (a new card pushing
-everything down) without requiring the anchor logic to be perfect
-for that case. It does mean stream order is non-monotonic during
-Sticky — acceptable because the user isn't looking for "what's
-newest" while reading.
+**Option B (simpler): newest-on-top always.**
+
+- New cards always prepend. `withAnchor` + `overflow-anchor` are
+  trusted to handle the displacement.
+- Loses the "no reorder while reading" guarantee for pure card
+  inserts; relies entirely on anchoring for visual stability.
+
+Option A guards against the worst-case (anchoring fails on
+insertion above viewport) at the cost of one extra code path and a
+small re-sort animation on Sticky exit. Option B trusts the
+browser/JS anchor logic across more cases. Recommend A; operator
+confirms.
 
 ### Existing card receives an update
 
@@ -408,28 +659,47 @@ This is a user gesture, so:
 
 ### Smooth transitions
 
+`behavior: 'smooth'` is not used for scroll writes (see state-machine
+note above). However, **CSS height transitions** on the diff body
+during in-place re-render are unaffected by that decision and still
+desirable:
+
 For diff body growth (in-place re-render that changes height): apply
 a CSS height transition on the body so the height change animates
-over ~150ms. Browser anchoring tracks the animation frame-by-frame
-and the user perceives a smooth slide rather than a jump.
+over ~150ms. Browser anchoring (overflow-anchor + the JS fallback)
+tracks the animation frame-by-frame and the user perceives a smooth
+slide rather than a jump.
 
 Tradeoff: animation has cost; if a card grows by 800 lines all at
 once, 150ms transition is noticeable but not bad. Set transition
 duration to scale with delta size, capped at 200ms.
 
+Note: the JS `withAnchor` fallback measures `getBoundingClientRect()`
+in one rAF before/after the mutation. CSS height transitions occur
+*after* the rAF returns, so the measured delta reflects the
+*instantaneous* new height, not the animated intermediate. The
+browser's overflow-anchor handles the per-frame correction during
+the animation; the JS fallback only handles the one-shot delta.
+This split is intentional and correct.
+
 ### Race: user scroll arrives concurrent with poll
 
 Sequence: poll mutation starts → user begins wheel → mutation
-finishes → wheel event fires → our `programmaticScroll` flag is
-already cleared.
+finishes → wheel event fires → `pendingProgrammaticScroll`'s target
+no longer matches actual `scrollTop`.
 
-This is fine: the wheel event correctly enters Sticky and
-captures the anchor based on the post-mutation scrollTop, which
-is what the user is currently looking at.
+This is correctly handled: the wheel-event handler sees
+`scrollTop ≠ pendingProgrammaticScroll.target`, clears the flag,
+enters Sticky, and captures the anchor based on the post-mutation
+scrollTop, which is what the user is currently looking at.
 
 The dangerous race is the reverse: user wheel → poll mutation
 overwrites scrollTop. Prevented by `withAnchor` only setting
-`scrollTop` if we're already in Sticky and the anchor moved.
+`scrollTop` while in Sticky and only by the exact pixel delta
+required to keep the existing anchor stationary. The user's wheel
+event between the rAF read and rAF write is impossible: rAF
+guarantees both happen in the same frame, before the next event
+loop tick.
 
 ### Edge: empty stream
 
@@ -446,8 +716,13 @@ forces Autoscroll and the Follow button is hidden.
 - Label: `↓ Follow edits` (icon + text). If new edits arrived
   while in Sticky, add a count badge: `↓ 3 new edits`. Counter
   resets on click.
-- Click: exit Sticky → re-sort stream (newest first) → smooth-scroll
-  to top of newest card.
+- **Counter semantics:** the badge counts **distinct files** that
+  changed during the current Sticky session (not events, not total
+  diff lines). Multiple polls touching the same file count once.
+  Resets to 0 on Sticky entry and on click.
+- Click: exit Sticky → re-sort newly-appended cards to the top by
+  timestamp (per Option A above) → instant scroll to top of newest
+  card.
 - Optional keyboard shortcut: `End` while focus is in the stream
   triggers the same. Deferred to V3 keyboard nav.
 
@@ -498,6 +773,16 @@ forces Autoscroll and the Follow button is hidden.
   reorder during Autoscroll → Sticky transition could miss an
   anchor. Mitigation: state transitions go through a single function
   that always captures an anchor before mutating.
+- **V1 no-op poll check is incomplete for V2.** V1 compares
+  `prev.diff === edit.diff && prev.status === … && prev.renamedFrom
+  === … && prev.isBinary === …` (`applets/file-edits/script.js:289`).
+  In V2 the canonical rendered content is `fullFile`, not `diff`.
+  Phase 1 must extend the no-op check to also compare `fullFile`:
+  either deep-equal `headLines + workLines + hunks` (cheap with a
+  cached JSON.stringify per edit) or, simpler, compare on a
+  server-computed content hash if added. Without this extension, a
+  server-side `fullFile` update without a `diff` change is silently
+  dropped.
 
 ## Acceptance for V2 overall
 
@@ -520,8 +805,13 @@ forces Autoscroll and the Follow button is hidden.
 4. Auto-exit Sticky on scroll-to-top: pixel threshold (4? 10?
    20?). Mirror chat applet's value — TBD; check
    `public/ts/ui-utils.ts`.
-5. Append-at-bottom-in-Sticky behavior — operator confirm before
-   Phase 3 implementation; this is a visible UX change from v1.
+5. **[DECISION REQUIRED BEFORE PHASE 3 START]** Newest-on-top vs
+   append-at-bottom in Sticky — Option A or Option B from the
+   Phase 3 "Newest-on-top vs newest-at-bottom" section. Operator
+   confirm.
+6. No-op poll check (Cross-phase risks): deep-equal `fullFile` or
+   server-side content hash? Lean deep-equal for V2; server hash is
+   a V3 optimization aligned with porcelain-v2 mtime gating.
 
 ## Document layout
 

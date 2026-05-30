@@ -175,3 +175,89 @@
 .fe-diff .fe-d-meta { color: var(--color-text-muted); display: block; font-style: italic; }
 .fe-diff .fe-d-hunk { color: var(--color-accent); display: block; margin-top: 4px; }
 .fe-diff .fe-d-empty { color: var(--color-text-muted); font-style: italic; }
+
+/* V2 Phase 1: full-file row layout. The body's display switches to grid
+ * via data-mode="fullfile" so the three columns (head-gutter, work-gutter,
+ * code) stay aligned across rows without per-row tables. */
+.fe-diff[data-mode="fullfile"] {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  padding: 0;
+  white-space: normal;
+  word-break: normal;
+  overflow-x: auto;
+}
+
+.fe-diff[data-mode="fullfile"] .fe-row {
+  display: contents;
+}
+
+.fe-diff[data-mode="fullfile"] .fe-gutter {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-align: right;
+  padding: 0 var(--space-sm);
+  user-select: none;
+  white-space: nowrap;
+  min-width: 2ch;
+}
+
+.fe-diff[data-mode="fullfile"] .fe-line {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  padding: 0 var(--space-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Row-level diff backgrounds. Kept subtle so hljs token colors remain
+ * legible on top. */
+.fe-diff[data-mode="fullfile"] .fe-row-add .fe-line,
+.fe-diff[data-mode="fullfile"] .fe-row-add .fe-gutter {
+  background: color-mix(in oklab, var(--color-success-bright) 18%, transparent);
+}
+.fe-diff[data-mode="fullfile"] .fe-row-del .fe-line,
+.fe-diff[data-mode="fullfile"] .fe-row-del .fe-gutter {
+  background: color-mix(in oklab, var(--color-error) 18%, transparent);
+}
+.fe-diff[data-mode="fullfile"] .fe-row-ctx .fe-line {
+  opacity: 0.65;
+}
+
+/* Fold and collapse rows: a single full-width button across the three
+ * grid columns, with a quiet background. */
+.fe-diff[data-mode="fullfile"] .fe-row-fold .fe-fold-btn,
+.fe-diff[data-mode="fullfile"] .fe-row-collapse .fe-fold-btn {
+  grid-column: 1 / -1;
+  background: var(--bg-hover);
+  border: 0;
+  border-top: 1px dashed var(--color-border);
+  border-bottom: 1px dashed var(--color-border);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 2px var(--space-md);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.fe-diff[data-mode="fullfile"] .fe-row-fold .fe-fold-btn:hover,
+.fe-diff[data-mode="fullfile"] .fe-row-collapse .fe-fold-btn:hover {
+  color: var(--color-text);
+}
+.fe-diff[data-mode="fullfile"] .fe-row-fold .fe-gutter,
+.fe-diff[data-mode="fullfile"] .fe-row-collapse .fe-gutter {
+  display: none;
+}
+
+/* Hunk-view fallback indicator pill */
+.fe-fallback {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  flex-shrink: 0;
+}

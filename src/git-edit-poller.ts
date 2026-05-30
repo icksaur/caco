@@ -17,11 +17,32 @@
 
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
+import { readFile, stat } from 'fs/promises';
 import { join } from 'path';
 import { broadcastEvent } from './event-bus.js';
 import type { SessionEvent } from './types.js';
 
 export type FileStatus = 'modified' | 'untracked' | 'deleted' | 'renamed';
+
+export interface DiffHunk {
+  /** 1-indexed HEAD line where removed region starts. */
+  headStart: number;
+  /** Number of removed (HEAD-side) lines. */
+  headLen: number;
+  /** 1-indexed working-tree line where added region starts. */
+  workStart: number;
+  /** Number of added (working-tree) lines. */
+  workLen: number;
+}
+
+export interface FullFile {
+  /** HEAD blob lines. Null when there is no HEAD blob (untracked). */
+  headLines: string[] | null;
+  /** Working-tree file lines. Empty array when working tree absent (deleted). */
+  workLines: string[];
+  /** Parsed unified diff hunks. */
+  hunks: DiffHunk[];
+}
 
 export interface EditEntry {
   path: string;            // absolute
@@ -32,6 +53,9 @@ export interface EditEntry {
   isBinary?: boolean;
   timestamp: string;
   truncated?: { hiddenLines: number };
+  /** V2: full-file diff payload. Absent when fallback to hunk view is required
+   *  (binary, deleted, files exceeding FULLFILE_LINE_CAP). */
+  fullFile?: FullFile;
 }
 
 interface SessionPollerState {
@@ -54,6 +78,9 @@ const DIFF_TIMEOUT_MS = 2000;
 const DIFF_LINE_CAP = 1000;
 const STATUS_TIMEOUT_MS = 5000;
 const DIFF_CONCURRENCY = 8;
+/** V2: per-file line cap above which fullFile is omitted (card falls back
+ *  to v1 hunk view). Bounds payload + render cost. */
+const FULLFILE_LINE_CAP = 5000;
 
 /**
  * Run an array of async jobs with at most `limit` in flight at any time.
@@ -196,6 +223,107 @@ function truncateDiff(diff: string): { diff: string; truncated?: { hiddenLines: 
   };
 }
 
+/**
+ * Parse unified-diff hunk headers from a `git diff` string. Returns the list
+ * of {headStart, headLen, workStart, workLen} entries.
+ *
+ * Header format: `@@ -h,hlen +w,wlen @@` (lengths default to 1 when omitted).
+ * Examples this parser handles:
+ *   `@@ -1,3 +5,2 @@`           → {1, 3, 5, 2}
+ *   `@@ -10 +12 @@`             → {10, 1, 12, 1}  (length omitted = 1)
+ *   `@@ -0,0 +1,5 @@`           → {0, 0, 1, 5}    (pure addition at file start)
+ *   `@@ -1,5 +0,0 @@`           → {1, 5, 0, 0}    (pure deletion of file start)
+ *
+ * Empty diff strings (no hunks) yield [].
+ */
+function parseHunks(diff: string): DiffHunk[] {
+  const out: DiffHunk[] = [];
+  if (!diff) return out;
+  const re = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(diff)) !== null) {
+    out.push({
+      headStart: parseInt(m[1], 10),
+      headLen: m[2] !== undefined ? parseInt(m[2], 10) : 1,
+      workStart: parseInt(m[3], 10),
+      workLen: m[4] !== undefined ? parseInt(m[4], 10) : 1,
+    });
+  }
+  return out;
+}
+
+/**
+ * Split a buffer/string into lines, preserving exactly the line content
+ * (no trailing newline character on each entry). Mirrors how git treats
+ * the final newline: a file with N newline-terminated lines produces N
+ * entries; a file ending without a newline still produces N entries
+ * (the last entry has its content).
+ */
+function toLines(text: string): string[] {
+  if (text === '') return [];
+  const lines = text.split('\n');
+  // Drop a single trailing empty entry produced by a final '\n'.
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+/**
+ * Best-effort read of the HEAD blob for `relPath` as text. Returns null if
+ * the file isn't in HEAD (untracked / newly-added in working tree) or if
+ * the read errors. Binary detection is left to the caller (we still return
+ * the bytes for V2's purposes).
+ */
+async function readHeadBlob(repoRoot: string, relPath: string): Promise<string | null> {
+  const result = await runGit(['show', `HEAD:${relPath}`], repoRoot, DIFF_TIMEOUT_MS);
+  if (result.code !== 0) return null;
+  return result.stdout.toString('utf-8');
+}
+
+/**
+ * Build the V2 fullFile payload for a single path. Returns null for cases the
+ * client must fall back to v1 hunk view: binary, deleted (working tree
+ * absent), or files exceeding FULLFILE_LINE_CAP on either side.
+ *
+ * `originalRelPath` is the HEAD-side path (renamedFrom for renames; same as
+ * relPath otherwise) so the HEAD blob comes from the correct entry.
+ */
+async function computeFullFile(
+  repoRoot: string,
+  relPath: string,
+  originalRelPath: string,
+  status: FileStatus,
+  isBinary: boolean,
+  diffText: string,
+): Promise<FullFile | undefined> {
+  if (isBinary) return undefined;
+  if (status === 'deleted') return undefined;
+
+  let headText: string | null = null;
+  if (status !== 'untracked') {
+    headText = await readHeadBlob(repoRoot, originalRelPath);
+  }
+
+  let workText = '';
+  try {
+    const absPath = join(repoRoot, relPath);
+    const st = await stat(absPath);
+    if (!st.isFile()) return undefined;
+    workText = await readFile(absPath, 'utf-8');
+  } catch {
+    // Working tree file absent or unreadable — treat as fallback case.
+    return undefined;
+  }
+
+  const headLines = headText === null ? null : toLines(headText);
+  const workLines = toLines(workText);
+
+  if ((headLines?.length ?? 0) > FULLFILE_LINE_CAP) return undefined;
+  if (workLines.length > FULLFILE_LINE_CAP) return undefined;
+
+  const hunks = parseHunks(diffText);
+  return { headLines, workLines, hunks };
+}
+
 export interface GitEditPoller {
   /** Attach explicitly; safe to call multiple times. */
   attachToSession(sessionId: string, cwd: string): Promise<void>;
@@ -208,6 +336,25 @@ export interface GitEditPoller {
 
 export function createGitEditPoller(): GitEditPoller {
   const sessions = new Map<string, SessionPollerState>();
+
+  /** Build one EditEntry for a single path. Shared between pollSession and snapshot. */
+  async function buildEntry(repoRoot: string, path: string, info: { status: FileStatus; renamedFrom?: string }): Promise<EditEntry> {
+    const { diff, isBinary, truncated } = await fetchDiff(repoRoot, path, info.status);
+    const originalRelPath = info.renamedFrom ?? path;
+    const fullFile = await computeFullFile(repoRoot, path, originalRelPath, info.status, isBinary, diff);
+    const entry: EditEntry = {
+      path: join(repoRoot, path),
+      relativePath: path,
+      diff,
+      status: info.status,
+      timestamp: new Date().toISOString(),
+    };
+    if (info.renamedFrom) entry.renamedFrom = info.renamedFrom;
+    if (isBinary) entry.isBinary = true;
+    if (truncated) entry.truncated = truncated;
+    if (fullFile) entry.fullFile = fullFile;
+    return entry;
+  }
 
   async function pollSession(sessionId: string, source: 'timer' | 'event' | 'manual-refresh'): Promise<void> {
     const state = sessions.get(sessionId);
@@ -236,18 +383,7 @@ export function createGitEditPoller(): GitEditPoller {
       const diffs = await mapWithConcurrency(newOrChanged, DIFF_CONCURRENCY, async (path) => {
         const info = current.get(path);
         if (!info) return null;
-        const { diff, isBinary, truncated } = await fetchDiff(state.repoRoot, path, info.status);
-        const entry: EditEntry = {
-          path: join(state.repoRoot, path),
-          relativePath: path,
-          diff,
-          status: info.status,
-          timestamp: new Date().toISOString(),
-        };
-        if (info.renamedFrom) entry.renamedFrom = info.renamedFrom;
-        if (isBinary) entry.isBinary = true;
-        if (truncated) entry.truncated = truncated;
-        return entry;
+        return buildEntry(state.repoRoot, path, info);
       });
       for (const e of diffs) { if (e) edits.push(e); }
 
@@ -335,18 +471,7 @@ export function createGitEditPoller(): GitEditPoller {
       const current = parsePorcelain(result.stdout);
       const entries = Array.from(current.entries());
       const edits = await mapWithConcurrency(entries, DIFF_CONCURRENCY, async ([path, info]) => {
-        const { diff, isBinary, truncated } = await fetchDiff(state.repoRoot, path, info.status);
-        const entry: EditEntry = {
-          path: join(state.repoRoot, path),
-          relativePath: path,
-          diff,
-          status: info.status,
-          timestamp: new Date().toISOString(),
-        };
-        if (info.renamedFrom) entry.renamedFrom = info.renamedFrom;
-        if (isBinary) entry.isBinary = true;
-        if (truncated) entry.truncated = truncated;
-        return entry;
+        return buildEntry(state.repoRoot, path, info);
       });
       return edits;
     },
@@ -354,4 +479,4 @@ export function createGitEditPoller(): GitEditPoller {
 }
 
 // Exports for unit tests
-export const _internal = { parsePorcelain, truncateDiff };
+export const _internal = { parsePorcelain, truncateDiff, parseHunks, toLines };

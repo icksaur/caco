@@ -249,35 +249,48 @@
   }
 
   function applyEdits(edits, cleared) {
+    var changedAny = false;
     if (Array.isArray(cleared)) {
-      cleared.forEach(removeCard);
+      cleared.forEach(function(p) {
+        if (cards.has(p)) { removeCard(p); changedAny = true; }
+      });
     }
     if (!Array.isArray(edits)) edits = [];
-    var appliedAny = false;
     edits.forEach(function(edit) {
       if (!edit || !edit.relativePath) return;
       if (dismissed.has(edit.relativePath)) return;
       var existing = cards.get(edit.relativePath);
       if (existing) {
+        // No-op poll: server re-broadcast an entry that's byte-identical to
+        // what we already show. Don't touch the DOM (no re-render, no
+        // re-insert to top), don't bump time, don't count as applied.
+        // This is the load-bearing "don't scroll on idle polls" check.
+        var prev = existing._edit;
+        if (prev
+            && prev.diff === edit.diff
+            && prev.status === edit.status
+            && prev.renamedFrom === edit.renamedFrom
+            && prev.isBinary === edit.isBinary) {
+          return;
+        }
         existing._renderDiff(edit);
-        // Move to top by re-inserting.
         if (streamEl.firstChild !== existing) {
           streamEl.insertBefore(existing, streamEl.firstChild);
         }
-        appliedAny = true;
+        changedAny = true;
         return;
       }
       var card = makeCard(edit);
-      // Newest at top.
       streamEl.insertBefore(card, streamEl.firstChild);
       cards.set(edit.relativePath, card);
-      appliedAny = true;
+      changedAny = true;
     });
     enforceCap();
     updateCounts();
-    // v1: always scroll to top on any applied edit (operator preference).
+    // v1: scroll-to-top on any REAL change (new card, content update, or clear).
+    // No-op polls (same diff bytes for every visible card) don't scroll.
     // v2 evolves to sticky-when-scrolled-away.
-    if (appliedAny) {
+    if (changedAny) {
       streamEl.scrollTop = 0;
     }
   }

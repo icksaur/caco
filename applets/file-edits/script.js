@@ -165,8 +165,294 @@
     return n == null ? '' : String(n);
   }
 
-  /** Build a single non-fold row element. */
-  function buildRowEl(row, lang) {
+  // ── Phase 2: Word-level intra-line diff ──────────────────────────────
+
+  /** Tokenize a line into a sequence of word + non-word tokens. Whitespace
+   *  and punctuation are kept as separate tokens so the diff can identify
+   *  changed words without dragging surrounding context along.
+   *  Pure function. */
+  function tokenize(line) {
+    if (!line) return [];
+    // Match runs of [A-Za-z0-9_] OR runs of whitespace OR single non-word chars.
+    // This keeps multi-char identifiers together while keeping punctuation
+    // splittable. \s+ lumps spaces so a 4-space indent is one token.
+    var re = /[A-Za-z0-9_]+|\s+|[^A-Za-z0-9_\s]/g;
+    var out = [];
+    var m;
+    while ((m = re.exec(line)) !== null) out.push(m[0]);
+    return out;
+  }
+
+  /** Myers O(ND) diff on two token arrays. Returns an array of ops
+   *  [{kind: 'equal'|'del'|'add', tokens: string[]}] in source order.
+   *
+   *  This is the classic Myers algorithm operating on strings (token
+   *  arrays). We compute the V array of furthest-reaching x values per
+   *  diagonal k for each edit-distance d, snapshot V per d, then walk
+   *  back to reconstruct the path.
+   *
+   *  Bounded by line length: per-line token counts are small (typically
+   *  <100), so the worst-case O((N+M)*D) is trivial.
+   *  Pure function. */
+  function myersDiff(a, b) {
+    var n = a.length, m = b.length;
+    if (n === 0 && m === 0) return [];
+    if (n === 0) return [{ kind: 'add', tokens: b.slice() }];
+    if (m === 0) return [{ kind: 'del', tokens: a.slice() }];
+    var max = n + m;
+    var vSize = 2 * max + 1;
+    var offset = max;
+    var v = new Int32Array(vSize);
+    var trace = [];
+    var d, k, x, y, prevK;
+    outer: for (d = 0; d <= max; d++) {
+      var vSnap = new Int32Array(vSize);
+      for (k = -d; k <= d; k += 2) {
+        if (k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])) {
+          x = v[offset + k + 1]; // down (insert from b)
+        } else {
+          x = v[offset + k - 1] + 1; // right (delete from a)
+        }
+        y = x - k;
+        while (x < n && y < m && a[x] === b[y]) { x++; y++; }
+        v[offset + k] = x;
+        if (x >= n && y >= m) {
+          vSnap.set(v);
+          trace.push(vSnap);
+          break outer;
+        }
+      }
+      vSnap.set(v);
+      trace.push(vSnap);
+    }
+    // Backtrack
+    var ops = [];
+    x = n; y = m;
+    for (var dd = trace.length - 1; dd > 0; dd--) {
+      var vPrev = trace[dd - 1];
+      k = x - y;
+      if (k === -dd || (k !== dd && vPrev[offset + k - 1] < vPrev[offset + k + 1])) {
+        prevK = k + 1;
+      } else {
+        prevK = k - 1;
+      }
+      var prevX = vPrev[offset + prevK];
+      var prevY = prevX - prevK;
+      while (x > prevX && y > prevY) {
+        ops.push({ kind: 'equal', token: a[x - 1] });
+        x--; y--;
+      }
+      if (dd > 0) {
+        if (x === prevX) {
+          ops.push({ kind: 'add', token: b[y - 1] });
+          y--;
+        } else {
+          ops.push({ kind: 'del', token: a[x - 1] });
+          x--;
+        }
+      }
+    }
+    while (x > 0 && y > 0) {
+      ops.push({ kind: 'equal', token: a[x - 1] });
+      x--; y--;
+    }
+    while (x > 0) { ops.push({ kind: 'del', token: a[--x] }); }
+    while (y > 0) { ops.push({ kind: 'add', token: b[--y] }); }
+    ops.reverse();
+    // Coalesce adjacent same-kind ops into runs of tokens.
+    var coalesced = [];
+    for (var i = 0; i < ops.length; i++) {
+      var op = ops[i];
+      if (coalesced.length > 0 && coalesced[coalesced.length - 1].kind === op.kind) {
+        coalesced[coalesced.length - 1].tokens.push(op.token);
+      } else {
+        coalesced.push({ kind: op.kind, tokens: [op.token] });
+      }
+    }
+    return coalesced;
+  }
+
+  /** From a diff op stream, compute char ranges on each side that should
+   *  be marked. side='del' wants char ranges into the original (a) string;
+   *  side='add' wants ranges into the new (b) string.
+   *
+   *  Returns { delRanges: [{start, end}], addRanges: [{start, end}] } with
+   *  half-open intervals into the joined token text.
+   *  Pure function. */
+  function rangesFromOps(ops) {
+    var delRanges = [];
+    var addRanges = [];
+    var aPos = 0, bPos = 0;
+    for (var i = 0; i < ops.length; i++) {
+      var op = ops[i];
+      var text = op.tokens.join('');
+      if (op.kind === 'equal') {
+        aPos += text.length;
+        bPos += text.length;
+      } else if (op.kind === 'del') {
+        if (text.length > 0) delRanges.push({ start: aPos, end: aPos + text.length });
+        aPos += text.length;
+      } else { // add
+        if (text.length > 0) addRanges.push({ start: bPos, end: bPos + text.length });
+        bPos += text.length;
+      }
+    }
+    // Drop pure-whitespace ranges — marking the gap between two unchanged
+    // tokens (e.g. one extra space) is noisy and not useful.
+    function dropPureWhitespace(ranges, source) {
+      var out = [];
+      for (var i = 0; i < ranges.length; i++) {
+        var r = ranges[i];
+        var slice = source.substring(r.start, r.end);
+        if (/\S/.test(slice)) out.push(r);
+      }
+      return out;
+    }
+    return {
+      delRanges: delRanges,
+      addRanges: addRanges,
+      filter: function(aText, bText) {
+        return {
+          delRanges: dropPureWhitespace(delRanges, aText),
+          addRanges: dropPureWhitespace(addRanges, bText),
+        };
+      },
+    };
+  }
+
+  /** Compute word-mark ranges for one (delLine, addLine) pair. Returns
+   *  { delRanges, addRanges }. Pure function. */
+  function wordMarksForPair(delText, addText) {
+    var aTok = tokenize(delText);
+    var bTok = tokenize(addText);
+    var ops = myersDiff(aTok, bTok);
+    // If the pair shares no non-whitespace tokens at all (totally rewritten
+    // line), skip word marks — the line-level red/green already conveys
+    // "all changed" and word marks would just light up the entire line.
+    // Shared whitespace doesn't count: two unrelated lines often share
+    // indent or spaces.
+    var hasEqual = false;
+    for (var i = 0; i < ops.length; i++) {
+      if (ops[i].kind === 'equal' && /\S/.test(ops[i].tokens.join(''))) {
+        hasEqual = true;
+        break;
+      }
+    }
+    if (!hasEqual) return { delRanges: [], addRanges: [] };
+    var raw = rangesFromOps(ops);
+    return raw.filter(delText, addText);
+  }
+
+  /** Walk the rows list, group consecutive (del+, add+) blocks, pair lines
+   *  in order up to min(N,M). Returns a Map<rowIndex, { delRanges|addRanges }>
+   *  so the renderer can attach marks per row. Pure function. */
+  function computeAllWordMarks(rows) {
+    var marks = new Map();
+    var i = 0;
+    while (i < rows.length) {
+      if (rows[i].kind !== 'del') { i++; continue; }
+      // Collect run of dels.
+      var delStart = i;
+      while (i < rows.length && rows[i].kind === 'del') i++;
+      var dels = rows.slice(delStart, i);
+      // Adjacent run of adds.
+      var addStart = i;
+      while (i < rows.length && rows[i].kind === 'add') i++;
+      var adds = rows.slice(addStart, i);
+      var pairs = Math.min(dels.length, adds.length);
+      for (var p = 0; p < pairs; p++) {
+        var delIdx = delStart + p;
+        var addIdx = addStart + p;
+        var marksPair = wordMarksForPair(rows[delIdx].text, rows[addIdx].text);
+        if (marksPair.delRanges.length > 0) {
+          marks.set(delIdx, { ranges: marksPair.delRanges, kind: 'del' });
+        }
+        if (marksPair.addRanges.length > 0) {
+          marks.set(addIdx, { ranges: marksPair.addRanges, kind: 'add' });
+        }
+      }
+    }
+    return marks;
+  }
+
+  /** Inject <mark class="fe-w-{kind}"> spans into a code element at the
+   *  given char ranges. Walks text nodes via TreeWalker; splits text nodes
+   *  at range boundaries; wraps each fragment in a <mark>. Preserves any
+   *  nested hljs span structure — the wrap is applied around text fragments
+   *  without re-parenting their ancestor spans.
+   *
+   *  Ranges are half-open intervals into the code element's textContent. */
+  function injectMarks(codeEl, ranges, kind) {
+    if (!ranges || ranges.length === 0) return;
+    // Build a sorted list of cut points (offsets) and a per-range membership
+    // lookup so we know whether the fragment between two cuts is "marked".
+    var cuts = [];
+    for (var i = 0; i < ranges.length; i++) {
+      cuts.push(ranges[i].start);
+      cuts.push(ranges[i].end);
+    }
+    cuts.sort(function(a, b) { return a - b; });
+    function isMarked(offset) {
+      for (var i = 0; i < ranges.length; i++) {
+        if (offset >= ranges[i].start && offset < ranges[i].end) return true;
+      }
+      return false;
+    }
+    // First pass: collect text nodes and their absolute offsets.
+    var walker = document.createTreeWalker(codeEl, NodeFilter.SHOW_TEXT, null);
+    var textNodes = [];
+    var node, cursor = 0;
+    while ((node = walker.nextNode()) !== null) {
+      textNodes.push({ node: node, start: cursor, end: cursor + node.nodeValue.length });
+      cursor += node.nodeValue.length;
+    }
+    // Second pass: for each text node, build a sequence of (offset, marked)
+    // fragments and rewrite the DOM around it.
+    var className = 'fe-w-' + kind;
+    for (var t = 0; t < textNodes.length; t++) {
+      var tn = textNodes[t];
+      var local = []; // offsets inside this node where the marked flag flips
+      local.push(0);
+      for (var c = 0; c < cuts.length; c++) {
+        var rel = cuts[c] - tn.start;
+        if (rel > 0 && rel < (tn.end - tn.start)) local.push(rel);
+      }
+      local.push(tn.end - tn.start);
+      if (local.length === 2) {
+        // No cuts inside this node; wrap whole or skip whole.
+        if (isMarked(tn.start)) {
+          var wholeMark = document.createElement('mark');
+          wholeMark.className = className;
+          wholeMark.textContent = tn.node.nodeValue;
+          tn.node.parentNode.replaceChild(wholeMark, tn.node);
+        }
+        continue;
+      }
+      // Multiple fragments inside this node.
+      var parent = tn.node.parentNode;
+      var anchor = tn.node.nextSibling;
+      parent.removeChild(tn.node);
+      for (var s = 0; s < local.length - 1; s++) {
+        var frag = tn.node.nodeValue.substring(local[s], local[s + 1]);
+        if (frag.length === 0) continue;
+        if (isMarked(tn.start + local[s])) {
+          var mk = document.createElement('mark');
+          mk.className = className;
+          mk.textContent = frag;
+          parent.insertBefore(mk, anchor);
+        } else {
+          parent.insertBefore(document.createTextNode(frag), anchor);
+        }
+      }
+    }
+  }
+
+  // ── End Phase 2 ───────────────────────────────────────────────────────
+
+  /** Build a single non-fold row element. `mark`, if present, is
+   *  { ranges: [{start,end}], kind: 'add'|'del' } and triggers
+   *  word-level <mark> injection after highlighting. */
+  function buildRowEl(row, lang, mark) {
     var div = document.createElement('div');
     div.className = 'fe-row fe-row-' + row.kind;
     var gHead = document.createElement('span');
@@ -184,6 +470,9 @@
         code.innerHTML = hl.value;
         code.classList.add('hljs', 'language-' + lang);
       } catch (_) { /* silent fallback */ }
+    }
+    if (mark && mark.ranges && mark.ranges.length > 0) {
+      injectMarks(code, mark.ranges, mark.kind);
     }
     div.appendChild(gHead);
     div.appendChild(gWork);
@@ -230,7 +519,7 @@
     frag.appendChild(collapseRow);
     var expandedRows = [];
     for (var i = 0; i < row.hidden.length; i++) {
-      var el = buildRowEl(row.hidden[i], lang);
+      var el = buildRowEl(row.hidden[i], lang, row.hidden[i].mark);
       expandedRows.push(el);
       frag.appendChild(el);
     }
@@ -252,7 +541,13 @@
     var ff = edit && edit.fullFile;
     if (!ff || !Array.isArray(ff.workLines)) return false;
     body.innerHTML = '';
-    var rows = collapseFolds(buildRows(ff.headLines, ff.workLines, ff.hunks || []));
+    var rawRows = buildRows(ff.headLines, ff.workLines, ff.hunks || []);
+    // Compute per-row word marks from the raw (pre-fold) rows so adjacent
+    // del/add pairs are paired correctly. Attach the mark to the row
+    // object so fold expansion picks it up transparently.
+    var marks = computeAllWordMarks(rawRows);
+    marks.forEach(function(m, idx) { rawRows[idx].mark = m; });
+    var rows = collapseFolds(rawRows);
     if (rows.length === 0) {
       body.innerHTML = '<div class="fe-d-empty">(no visible changes)</div>';
       return true;
@@ -261,7 +556,7 @@
     var frag = document.createDocumentFragment();
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
-      frag.appendChild(r.kind === 'fold' ? buildFoldEl(r, lang) : buildRowEl(r, lang));
+      frag.appendChild(r.kind === 'fold' ? buildFoldEl(r, lang) : buildRowEl(r, lang, r.mark));
     }
     body.appendChild(frag);
     return true;

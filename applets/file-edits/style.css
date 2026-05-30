@@ -235,6 +235,23 @@
   opacity: 0.65;
 }
 
+/* Phase 2: word-level intra-line marks. Sit on top of the row-level
+ * red/green tint with a darker, fully-saturated highlight so the changed
+ * tokens read distinctly. Inherit the row's text color (the mark is just
+ * a background swap). */
+.fe-diff[data-mode="fullfile"] mark.fe-w-add {
+  background: rgba(0, 200, 100, 0.45);
+  background: color-mix(in oklab, var(--color-success-bright) 50%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+.fe-diff[data-mode="fullfile"] mark.fe-w-del {
+  background: rgba(220, 70, 70, 0.45);
+  background: color-mix(in oklab, var(--color-error) 50%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+
 /* Fold and collapse rows: a single full-width button across the three
  * grid columns, with a quiet background. */
 .fe-diff[data-mode="fullfile"] .fe-row-fold .fe-fold-btn,

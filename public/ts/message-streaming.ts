@@ -23,6 +23,7 @@ import { getAndClearPendingAppletState, getNavigationContext } from './applet-ru
 import { resetTextareaHeight, tryExecuteSlashCommand } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
 import { removeImage } from './image-paste.js';
+import { hasInserter } from './dom-regions.js';
 import { notifySessionComplete } from './notifications.js';
 import { markSessionObserved } from './session-observed.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
@@ -151,9 +152,12 @@ function handleEvent(event: SessionEvent): void {
     if (activeId && !sessionTracker.isBusy(activeId)) return;
   }
 
-  // Render event (create/find elements + set content)
+  // Render event (create/find elements + set content). Only scroll if the
+  // event actually maps to a chat-region inserter — otherwise side-channel
+  // events like caco.edit, caco.usage, caco.fs.changed unnecessarily yank
+  // the chat scrollbar to the bottom on every poll.
   chatRegion.renderEvent(event);
-  if (!isLoadingHistory()) scrollToBottom();
+  if (!isLoadingHistory() && hasInserter(eventType)) scrollToBottom();
 }
 
 function registerWsHandlers(): void {

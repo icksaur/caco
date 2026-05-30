@@ -165,8 +165,6 @@
   white-space: pre-wrap;
   word-break: break-all;
   overflow-x: auto;
-  max-height: 400px;
-  overflow-y: auto;
 }
 
 .fe-diff .fe-d-add  { color: var(--color-success-bright); display: block; }

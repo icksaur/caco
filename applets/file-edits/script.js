@@ -2,13 +2,19 @@
  * File Edits applet.
  *
  * Subscribes to caco.edit events from the server-side git-edit-poller and
- * renders collapsible diff cards. See docs/file-edits.md.
+ * renders collapsible diff cards. See docs/file-edits.md and
+ * docs/file-edits-v2.md.
  *
- * Layout: stacked cards (newest at top), each header shows chevron + path +
- * time + X. Body (the diff) is hidden by default; clicking the header toggles.
+ * Layout: stacked cards (first-touched at top — never reordered), each
+ * header shows chevron + path + time + X. Body (the diff) is expanded by
+ * default; clicking the header toggles.
  *
- * v1 behavior: auto-scroll to top on new card insertion. Sticky dismiss
- * (X path is filtered until "Reset dismissals" or applet reopen).
+ * V1 behavior (current): cards are never reordered after creation; new
+ * cards append to the bottom of the stream. No autoscroll — user controls
+ * scroll. V2 Phase 3 adds a sticky/autoscroll state machine.
+ *
+ * Sticky dismiss: X path is filtered until "Reset dismissals" or applet
+ * reopen.
  */
 
 (function() {
@@ -283,9 +289,9 @@
       var existing = cards.get(edit.relativePath);
       if (existing) {
         // No-op poll: server re-broadcast an entry that's byte-identical to
-        // what we already show. Don't touch the DOM (no re-render, no
-        // re-insert to top), don't bump time, don't count as applied.
-        // This is the load-bearing "don't scroll on idle polls" check.
+        // what we already show. Don't touch the DOM, don't bump time, don't
+        // count as applied. Load-bearing for "don't disturb the user on
+        // idle polls."
         var prev = existing._edit;
         if (prev
             && prev.diff === edit.diff
@@ -294,26 +300,28 @@
             && prev.isBinary === edit.isBinary) {
           return;
         }
+        // Re-render in place. Never reorder; the card's DOM position is
+        // fixed for its lifetime. (V2 Phase 3 will add autoscroll-to-card
+        // when the changed card is off-screen.)
         existing._renderDiff(edit);
-        if (streamEl.firstChild !== existing) {
-          streamEl.insertBefore(existing, streamEl.firstChild);
-        }
         changedAny = true;
         return;
       }
+      // New card: append to bottom. Cards are never reordered (V2 Phase 3
+      // decision applied retroactively to V1). Stream is a stable timeline,
+      // first-touched-first, top-to-bottom.
       var card = makeCard(edit);
-      streamEl.insertBefore(card, streamEl.firstChild);
+      streamEl.appendChild(card);
       cards.set(edit.relativePath, card);
       changedAny = true;
     });
     enforceCap();
     updateCounts();
-    // v1: scroll-to-top on any REAL change (new card, content update, or clear).
-    // No-op polls (same diff bytes for every visible card) don't scroll.
-    // v2 evolves to sticky-when-scrolled-away.
-    if (changedAny) {
-      streamEl.scrollTop = 0;
-    }
+    // V1 used to scrollTop = 0 here. Removed: with append-at-bottom there is
+    // no top-of-stream affordance, and auto-scrolling on every change
+    // disturbs the user reading older context. V2 Phase 3 will reintroduce
+    // a sticky/autoscroll state machine that scrolls to the changed card
+    // only when the user has not scrolled away.
   }
 
   function tickTimestamps() {

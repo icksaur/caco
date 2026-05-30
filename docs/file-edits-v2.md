@@ -498,22 +498,9 @@ browser support is universal.
 
 ## Autoscroll behavior
 
-When in Autoscroll mode and edits arrive:
-
-- If the changed card is **fully visible** in the viewport: do
-  nothing. (No flicker, no unnecessary scroll.)
-- Else: scroll so the **top of the changed card** sits at the
-  top of the visible area (best effort; if the card is taller
-  than the viewport, the top of the diff is what we anchor on).
-- If multiple cards change in one poll: scroll to the topmost
-  affected card (or, equivalently, the freshest by timestamp at
-  the top of the stream).
-
-All autoscroll moves use **instant** `scrollTop` writes (no
-`behavior: 'smooth'`) for the state-machine reasons documented above.
-The visual jump from a scroll position to the top of a newly-changed
-card is bounded by the stream height; in practice it's <1 viewport
-and not jarring. Tradeoff accepted for V2.
+See **Autoscroll behavior under no-reorder** below in §Card ordering.
+The behavior is defined there because it depends on the never-reorder
+rule.
 
 ## Sticky behavior
 
@@ -603,48 +590,52 @@ caller that needs to inspect post-mutation layout must do so inside
 its own next rAF or use callbacks scheduled from `withAnchor`. No
 current caller has that dependency.
 
-### Newest-on-top vs newest-at-bottom
+### Card ordering: never reorder (resolved)
 
-> **DECISION REQUIRED before Phase 3 implementation.** Operator must
-> confirm one of the two options below. Default below is a
-> recommendation, not a settled design.
+> **Resolved by operator decision (2026-05-29).** Option A (append-
+> at-bottom) is adopted in its strongest form: **cards are never
+> reordered**, in either Sticky or Autoscroll mode.
 
-Operator offered the alternative "new files always at bottom
-(simpler)."
+Rules:
 
-**Option A (recommended): newest-on-top in Autoscroll,
-append-at-bottom in Sticky.**
+- **New card:** appended to the end of the stream
+  (`streamEl.appendChild(card)`). Always. No special-case for
+  Autoscroll.
+- **Existing card receives update:** re-rendered in place. The
+  card's DOM position never changes after creation.
+- **No re-sort** on Sticky → Autoscroll transition. No re-sort on
+  "Follow edits" click. The "Follow edits" click scrolls to the
+  topmost card affected by edits arriving during the Sticky session
+  (or to the bottom of the stream if no affected card is identifiable).
+- **Cap eviction:** when the 50-card cap is hit, the **oldest** card
+  by creation order is removed (the topmost in DOM). This is the only
+  position-changing operation other than user X dismiss.
 
-- In Autoscroll: a new card prepends to the stream (v1 behavior).
-- In Sticky: a new card appends to the stream's end. The user's view
-  is unaffected (the new card is below them, off-screen). On exit
-  Sticky, only newly-appended cards (those added during the Sticky
-  session) move to the top of the stream in timestamp order;
-  pre-existing cards do not shuffle even if their timestamps were
-  bumped by in-place updates. This avoids a 15-20 card visual
-  reshuffle on click-Follow.
+Stream order is therefore first-touched-first, top-to-bottom — a
+stable timeline rather than a recency ranking. Trades the "newest at
+top, see what just happened" reading affordance for absolute visual
+stability under polling. Operator priority is stability.
 
-**Option B (simpler): newest-on-top always.**
+### Autoscroll behavior under no-reorder
 
-- New cards always prepend. `withAnchor` + `overflow-anchor` are
-  trusted to handle the displacement.
-- Loses the "no reorder while reading" guarantee for pure card
-  inserts; relies entirely on anchoring for visual stability.
+When in Autoscroll mode and edits arrive (i.e., the user has not
+scrolled away):
 
-Option A guards against the worst-case (anchoring fails on
-insertion above viewport) at the cost of one extra code path and a
-small re-sort animation on Sticky exit. Option B trusts the
-browser/JS anchor logic across more cases. Recommend A; operator
-confirms.
+- If the changed card is **fully visible** in the viewport: do
+  nothing. (No flicker, no unnecessary scroll.)
+- Else: scroll so the **top of the changed card** sits at the top
+  of the visible area. The card may be anywhere in the stream, not
+  just at top.
+- If multiple cards change in one poll: scroll to the topmost
+  affected card in DOM order (i.e., the card that has been in the
+  stream the longest — closest to stream top).
 
-### Existing card receives an update
+The v1 default-on-applet-open behavior of "scroll to top" is
+retained: a fresh applet starts scrolled at top, which is the oldest
+card. The user can scroll down to follow the timeline.
 
-In Sticky: do not move the card. Just re-render its body in place.
-The browser's overflow-anchor handles vertical compensation if the
-diff grew above the viewport. (JS fallback above handles edge cases.)
-
-In Autoscroll: same v1 behavior — move card to top, render diff,
-scroll to top.
+All autoscroll moves use **instant** `scrollTop` writes (no
+`behavior: 'smooth'`) for the state-machine reasons documented above.
 
 ### Card body collapse / expand by user
 
@@ -720,9 +711,11 @@ forces Autoscroll and the Follow button is hidden.
   changed during the current Sticky session (not events, not total
   diff lines). Multiple polls touching the same file count once.
   Resets to 0 on Sticky entry and on click.
-- Click: exit Sticky → re-sort newly-appended cards to the top by
-  timestamp (per Option A above) → instant scroll to top of newest
-  card.
+- Click: exit Sticky → instant-scroll to the topmost-in-DOM card
+  that was affected during the Sticky session. If no affected card
+  is known (e.g. only updates to cards above viewport), scroll to
+  the bottom of the stream (most-recently-created cards live there).
+  **No reorder, ever.**
 - Optional keyboard shortcut: `End` while focus is in the stream
   triggers the same. Deferred to V3 keyboard nav.
 
@@ -805,10 +798,10 @@ forces Autoscroll and the Follow button is hidden.
 4. Auto-exit Sticky on scroll-to-top: pixel threshold (4? 10?
    20?). Mirror chat applet's value — TBD; check
    `public/ts/ui-utils.ts`.
-5. **[DECISION REQUIRED BEFORE PHASE 3 START]** Newest-on-top vs
-   append-at-bottom in Sticky — Option A or Option B from the
-   Phase 3 "Newest-on-top vs newest-at-bottom" section. Operator
-   confirm.
+5. ~~Append-at-bottom-in-Sticky~~ **Resolved**: cards are never
+   reordered, in either mode (operator 2026-05-29). New cards always
+   append to the bottom; existing cards re-render in place. V1 patch
+   shipped separately to remove existing reorder behavior.
 6. No-op poll check (Cross-phase risks): deep-equal `fullFile` or
    server-side content hash? Lean deep-equal for V2; server hash is
    a V3 optimization aligned with porcelain-v2 mtime gating.

@@ -53,6 +53,7 @@
       case 'untracked': return 'U';
       case 'deleted': return 'D';
       case 'renamed': return 'R';
+      case 'clean': return '✓';
       default: return '?';
     }
   }
@@ -90,6 +91,7 @@
     card.className = 'fe-card';
     card.dataset.path = edit.relativePath;
     card.dataset.expanded = startCollapsed ? 'false' : 'true';
+    card.dataset.status = edit.status || 'modified';
 
     var head = document.createElement('header');
     head.className = 'fe-head';
@@ -184,6 +186,7 @@
     card._edit = edit;
     card._renderDiff = function(newEdit) {
       card._edit = newEdit;
+      card.dataset.status = newEdit.status || 'modified';
       time.dataset.iso = newEdit.timestamp;
       time.textContent = timeAgo(newEdit.timestamp);
       path.textContent = newEdit.renamedFrom
@@ -210,8 +213,8 @@
   }
 
   /** Remove a card from the DOM and forget its user-collapse state.
-   *  Use whenever a path leaves the dirty set (cleared, dismissed, cap-evicted).
-   *  When the path returns later, it will default to expanded again. */
+   *  Only called by user dismiss (X) and cap eviction — never by poller-driven
+   *  "file went clean". Clean files keep their card; see markClean. */
   function removeCard(path) {
     var card = cards.get(path);
     if (card) {
@@ -219,6 +222,24 @@
       cards.delete(path);
     }
     userCollapsed.delete(path);
+  }
+
+  /** Mark a card as clean (file no longer in dirty set). Keeps the card so the
+   *  user can dismiss on their own schedule; just shows an empty body and a
+   *  muted status pill. */
+  function markClean(path) {
+    var card = cards.get(path);
+    if (!card) return;
+    var prev = card._edit || {};
+    if (prev.status === 'clean' && !prev.diff) return;
+    card._renderDiff({
+      relativePath: path,
+      status: 'clean',
+      diff: '',
+      timestamp: new Date().toISOString(),
+      isBinary: false,
+      renamedFrom: null,
+    });
   }
 
   function updateCounts() {
@@ -252,7 +273,7 @@
     var changedAny = false;
     if (Array.isArray(cleared)) {
       cleared.forEach(function(p) {
-        if (cards.has(p)) { removeCard(p); changedAny = true; }
+        if (cards.has(p)) { markClean(p); changedAny = true; }
       });
     }
     if (!Array.isArray(edits)) edits = [];
@@ -318,15 +339,16 @@
       }
       var data = await res.json();
       if (Array.isArray(data.edits)) {
-        // Replace current cards with snapshot, preserving dismissed filter.
-        streamEl.innerHTML = '';
-        cards.clear();
-        applyEdits(data.edits, []);
-        if (data.edits.length === 0 && cards.size === 0) {
-          // could be not-a-git-repo; the server returns [] in both cases.
-          // We rely on the first caco.edit broadcast to confirm; v1 keeps
-          // it simple and just shows "no changes" until first event.
-        }
+        // Merge: cards persist across snapshots. Anything currently shown
+        // that isn't in the snapshot becomes "clean" (file went back to
+        // HEAD); only user X or cap eviction actually removes a card.
+        var seen = new Set();
+        data.edits.forEach(function(e) { if (e && e.relativePath) seen.add(e.relativePath); });
+        var cleared = [];
+        cards.forEach(function(_card, path) {
+          if (!seen.has(path)) cleared.push(path);
+        });
+        applyEdits(data.edits, cleared);
       }
     } catch (err) {
       console.warn('[file-edits] snapshot failed:', err);

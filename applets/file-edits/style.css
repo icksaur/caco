@@ -117,6 +117,8 @@
 .fe-s-untracked { background: var(--color-success-bright); }
 .fe-s-deleted   { background: var(--color-error); }
 .fe-s-renamed   { background: var(--orange, #e08000); }
+.fe-s-clean     { background: var(--color-text-muted, #888); }
+.fe-card[data-status="clean"] .fe-path { opacity: 0.55; }
 
 .fe-path {
   flex: 1;

@@ -70,7 +70,8 @@
 
   /** Map of file extension → highlight.js language key. Used by Phase 1
    *  syntax highlighting; entries not present here render without
-   *  highlighting (silent fallback). */
+   *  highlighting (silent fallback). Only keys present in the vendored
+   *  highlight.min.js bundle are listed here; getLanguage() guards anyway. */
   var EXT_TO_LANG = {
     'ts': 'typescript', 'tsx': 'typescript',
     'js': 'javascript', 'jsx': 'javascript', 'mjs': 'javascript', 'cjs': 'javascript',
@@ -78,13 +79,14 @@
     'sh': 'bash', 'bash': 'bash', 'zsh': 'bash',
     'md': 'markdown', 'markdown': 'markdown',
     'json': 'json',
-    'html': 'html', 'htm': 'html', 'xml': 'xml',
-    'css': 'css', 'scss': 'scss',
-    'rs': 'rust',
-    'go': 'go',
+    'css': 'css', 'scss': 'css',
     'yml': 'yaml', 'yaml': 'yaml',
-    'toml': 'ini',
     'sql': 'sql',
+    'c': 'cpp', 'h': 'cpp',
+    'cpp': 'cpp', 'cc': 'cpp', 'cxx': 'cpp', 'hpp': 'cpp', 'hh': 'cpp', 'hxx': 'cpp', 'inl': 'cpp',
+    'cs': 'csharp',
+    'ps1': 'powershell', 'psm1': 'powershell',
+    'glsl': 'glsl', 'vert': 'glsl', 'frag': 'glsl',
   };
 
   function detectLanguage(relativePath) {

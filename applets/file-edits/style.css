@@ -219,6 +219,15 @@
   word-break: break-word;
 }
 
+/* hljs ships with `.hljs { background: #282c34 }` which would clobber
+ * our row-level add/del tint when a line gets syntax highlighting.
+ * Override so the row tint stays visible underneath. Also drop hljs's
+ * code padding so per-line gutters align. */
+.fe-diff[data-mode="fullfile"] .fe-line.hljs {
+  background: transparent;
+  padding: 0 var(--space-sm);
+}
+
 /* Row-level diff backgrounds. Kept subtle so hljs token colors remain
  * legible on top. */
 .fe-diff[data-mode="fullfile"] .fe-row-add .fe-line,

@@ -378,6 +378,8 @@ Explicit V2 non-goals (deferred to V3 — see backlog below):
 Captured for record; no commitment, no ordering until V2 ships.
 
 - v3 becomes the full **git-status replacement** (stage/unstage per file & per hunk, commit composer with co-author toggle, push with ahead/behind, discard hunk/file with confirm). Retires the existing `git-status` applet.
+- **Color/contrast pass on diff rows** — operator-reported (2026-05-31) that some hljs token colors are unreadable on top of the red/green row tint. Need a systematic legibility pass: pick row tints that preserve hljs token contrast across the full hljs-dark palette, or reverse the layering (token color wins).
+- **Side-by-side / split-pane diff view** — operator-deferred from V2. Two columns (HEAD | working tree) for files above a width/size threshold; per-card toggle.
 - **Commit lease**: while file-edits has unread changes, block agent-initiated `git commit`. Surface a "release lease" button.
 - **git fsmonitor** for sub-second updates.
 - **Server-side per-path hash + porcelain v2 mtime gating** to skip diff subprocess on no-op polls.

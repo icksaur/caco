@@ -4,6 +4,8 @@
   height: 100%;
   font-family: var(--font-sans);
   color: var(--color-text);
+  /* Phase 3: positioning context for the Follow-edits floating button. */
+  position: relative;
 }
 
 .fe-toolbar {
@@ -66,6 +68,39 @@
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-sm) var(--space-md);
+  /* Phase 3: tell the browser to preserve the visual position of an
+   * anchor element when content above the viewport changes. Augments
+   * our JS withAnchor fallback. */
+  overflow-anchor: auto;
+}
+
+/* Phase 3: smooth diff body height transitions so anchored growth
+ * animates rather than jumps. Capped at 200ms; scaled by delta size
+ * is overkill for V2 — flat 150ms reads fine. */
+.fe-diff {
+  transition: height 150ms ease-out;
+}
+
+/* Phase 3: "Follow edits" floating button. Positioned bottom-right of the
+ * applet root (sibling of streamEl). Only visible when in Sticky mode. */
+.fe-follow {
+  position: absolute;
+  right: var(--space-md);
+  bottom: var(--space-md);
+  background: var(--color-accent);
+  color: white;
+  border: 0;
+  border-radius: var(--radius-md);
+  padding: 6px 12px;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+.fe-follow:hover {
+  filter: brightness(1.1);
 }
 
 .fe-card {

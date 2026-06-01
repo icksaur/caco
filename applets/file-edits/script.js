@@ -37,6 +37,167 @@
   var VISIBLE_CAP = 50;
   var sessionId = null;
 
+  // ── Phase 3: Sticky / Autoscroll state machine ─────────────────────────
+  //
+  // States: 'autoscroll' (default) and 'sticky'. See docs/file-edits-v2.md
+  // Phase 3. Cards are never reordered; the state machine only governs
+  // scroll-position manipulation.
+  /** 'autoscroll' | 'sticky' */
+  var scrollMode = 'autoscroll';
+  /** When non-null, a programmatic scrollTop write is in flight. The scroll
+   *  handler matches event.target.scrollTop to this value (±1px). If it
+   *  matches, the flag is consumed and Sticky entry is suppressed. Survives
+   *  across rAF boundaries; never pre-cleared synchronously. */
+  var pendingProgrammaticScroll = null;
+  /** Set<relativePath> tracking files changed during the current Sticky
+   *  session. Drives the Follow-edits badge counter. Cleared on Sticky
+   *  entry and on Follow-edits click. */
+  var stickyChangedPaths = new Set();
+  /** The Follow-edits floating button; created lazily on first Sticky entry. */
+  var followBtn = null;
+  /** Threshold (px) for "scroll to top" → exit Sticky. */
+  var TOP_THRESHOLD_PX = 4;
+
+  function enterSticky() {
+    if (scrollMode === 'sticky') return;
+    scrollMode = 'sticky';
+    stickyChangedPaths.clear();
+    updateFollowButton();
+  }
+
+  function enterAutoscroll() {
+    if (scrollMode === 'autoscroll') return;
+    scrollMode = 'autoscroll';
+    stickyChangedPaths.clear();
+    updateFollowButton();
+  }
+
+  /** Pick an anchor card for withAnchor's read/write pair. Per spec
+   *  §pickAnchor: the first card whose top is at or below the viewport's
+   *  top edge; else the last card in the stream; else null. */
+  function pickAnchor() {
+    var streamRect = streamEl.getBoundingClientRect();
+    var children = streamEl.children;
+    var lastVisible = null;
+    for (var i = 0; i < children.length; i++) {
+      var c = children[i];
+      var r = c.getBoundingClientRect();
+      var relTop = r.top - streamRect.top;
+      if (relTop >= 0) return c;
+      lastVisible = c;
+    }
+    return lastVisible;
+  }
+
+  /** Run `fn` and, if we're in Sticky, preserve the visual position of
+   *  the anchor card across the mutation. The flag `pendingProgrammaticScroll`
+   *  is set if a compensating scrollTop write happens; the scroll handler
+   *  consumes it. */
+  function withAnchor(fn) {
+    if (scrollMode !== 'sticky') { fn(); return; }
+    requestAnimationFrame(function() {
+      var anchor = pickAnchor();
+      var beforeTop = anchor ? anchor.getBoundingClientRect().top : 0;
+      fn();
+      var afterTop = anchor && document.contains(anchor)
+        ? anchor.getBoundingClientRect().top
+        : null;
+      if (afterTop !== null && afterTop !== beforeTop) {
+        var target = streamEl.scrollTop + (afterTop - beforeTop);
+        pendingProgrammaticScroll = { target: target };
+        streamEl.scrollTop = target;
+      }
+    });
+  }
+
+  /** Scroll handler. Distinguishes programmatic from user scrolls by
+   *  matching scrollTop against pendingProgrammaticScroll.target (±1px). */
+  function onStreamScroll() {
+    var st = streamEl.scrollTop;
+    if (pendingProgrammaticScroll && Math.abs(st - pendingProgrammaticScroll.target) <= 1) {
+      pendingProgrammaticScroll = null;
+      return;
+    }
+    pendingProgrammaticScroll = null;
+    // Real user scroll. Decide state.
+    if (st < TOP_THRESHOLD_PX) {
+      enterAutoscroll();
+      return;
+    }
+    if (streamEl.scrollHeight <= streamEl.clientHeight) {
+      enterAutoscroll();
+      return;
+    }
+    enterSticky();
+  }
+
+  /** Instant scroll to put `card` at top of stream viewport. No-op if
+   *  the card is fully visible. Used by Autoscroll on incoming edits. */
+  function scrollToCard(card) {
+    if (!card) return;
+    var cr = card.getBoundingClientRect();
+    var sr = streamEl.getBoundingClientRect();
+    var fullyVisible = cr.top >= sr.top && cr.bottom <= sr.bottom;
+    if (fullyVisible) return;
+    var target = streamEl.scrollTop + (cr.top - sr.top);
+    pendingProgrammaticScroll = { target: target };
+    streamEl.scrollTop = target;
+  }
+
+  /** Lazily create the Follow-edits button and bind to the stream's
+   *  parent so it floats over the scroll container. */
+  function ensureFollowButton() {
+    if (followBtn) return followBtn;
+    followBtn = document.createElement('button');
+    followBtn.className = 'fe-follow';
+    followBtn.type = 'button';
+    followBtn.hidden = true;
+    followBtn.addEventListener('click', function() {
+      // Scroll to the topmost-in-DOM card affected this session, then
+      // exit sticky. Never reorder.
+      var target = null;
+      streamChildren().some(function(c) {
+        if (stickyChangedPaths.has(c.dataset.path)) { target = c; return true; }
+        return false;
+      });
+      enterAutoscroll();
+      if (target) {
+        scrollToCard(target);
+      } else {
+        // No identified changed card — scroll to bottom of stream
+        // (most recently created cards live there).
+        var bottom = streamEl.scrollHeight - streamEl.clientHeight;
+        pendingProgrammaticScroll = { target: bottom };
+        streamEl.scrollTop = bottom;
+      }
+    });
+    // Insert as sibling of streamEl inside the same offset parent.
+    streamEl.parentNode.insertBefore(followBtn, streamEl.nextSibling);
+    return followBtn;
+  }
+
+  function streamChildren() {
+    var out = [];
+    var n = streamEl.children;
+    for (var i = 0; i < n.length; i++) out.push(n[i]);
+    return out;
+  }
+
+  function updateFollowButton() {
+    if (scrollMode !== 'sticky') {
+      if (followBtn) followBtn.hidden = true;
+      return;
+    }
+    var btn = ensureFollowButton();
+    btn.hidden = false;
+    var n = stickyChangedPaths.size;
+    btn.textContent = n > 0
+      ? ('↓ ' + n + ' new edit' + (n === 1 ? '' : 's'))
+      : '↓ Follow edits';
+  }
+
+  // ── End Phase 3 state machine ─────────────────────────────────────────
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -661,17 +822,22 @@
     }
 
     function toggle() {
-      var nowExpanded = card.dataset.expanded !== 'true';
-      card.dataset.expanded = nowExpanded ? 'true' : 'false';
-      body.hidden = !nowExpanded;
-      chevron.textContent = nowExpanded ? '▼' : '▶';
-      // Track explicit user collapse so subsequent updates respect it.
-      if (nowExpanded) userCollapsed.delete(edit.relativePath);
-      else userCollapsed.add(edit.relativePath);
-      if (nowExpanded && !body.dataset.rendered) {
-        renderBody(body, card._edit);
-        body.dataset.rendered = '1';
-      }
+      // User gesture: enter Sticky so subsequent polls don't yank the card
+      // out from under the user. Anchor preserves the card's position
+      // across the height change.
+      enterSticky();
+      withAnchor(function() {
+        var nowExpanded = card.dataset.expanded !== 'true';
+        card.dataset.expanded = nowExpanded ? 'true' : 'false';
+        body.hidden = !nowExpanded;
+        chevron.textContent = nowExpanded ? '▼' : '▶';
+        if (nowExpanded) userCollapsed.delete(edit.relativePath);
+        else userCollapsed.add(edit.relativePath);
+        if (nowExpanded && !body.dataset.rendered) {
+          renderBody(body, card._edit);
+          body.dataset.rendered = '1';
+        }
+      });
     }
 
     chevron.addEventListener('click', function(e) { e.stopPropagation(); toggle(); });
@@ -681,7 +847,8 @@
     });
     xBtn.addEventListener('click', function(e) {
       e.stopPropagation();
-      dismissPath(edit.relativePath);
+      enterSticky();
+      withAnchor(function() { dismissPath(edit.relativePath); });
     });
 
     if (edit.isBinary) {
@@ -823,10 +990,23 @@
   }
 
   function applyEdits(edits, cleared) {
-    var changedAny = false;
+    // Collect the actual mutations as closures so we can run them all
+    // inside one withAnchor (rAF) when in Sticky, and identify the
+    // topmost changed card for autoscroll otherwise.
+    var mutations = [];
+    var topmostChangedCard = null;
+    /** Track the relativePath of every file actually changed by this
+     *  apply (new card or in-place update or clean). Used by the
+     *  Follow-edits badge counter. */
+    var changedPathsThisApply = [];
+
     if (Array.isArray(cleared)) {
       cleared.forEach(function(p) {
-        if (cards.has(p)) { markClean(p); changedAny = true; }
+        if (cards.has(p)) {
+          mutations.push(function() { markClean(p); });
+          changedPathsThisApply.push(p);
+          if (!topmostChangedCard) topmostChangedCard = cards.get(p);
+        }
       });
     }
     if (!Array.isArray(edits)) edits = [];
@@ -835,10 +1015,9 @@
       if (dismissed.has(edit.relativePath)) return;
       var existing = cards.get(edit.relativePath);
       if (existing) {
-        // No-op poll: server re-broadcast an entry that's byte-identical to
-        // what we already show. Don't touch the DOM, don't bump time, don't
-        // count as applied. Load-bearing for "don't disturb the user on
-        // idle polls."
+        // No-op poll: server re-broadcast an entry that's byte-identical
+        // to what we already show. Don't touch the DOM. Load-bearing for
+        // "don't disturb the user on idle polls."
         var prev = existing._edit;
         if (prev
             && prev.diff === edit.diff
@@ -848,28 +1027,48 @@
             && fullFileEqual(prev.fullFile, edit.fullFile)) {
           return;
         }
-        // Re-render in place. Never reorder; the card's DOM position is
-        // fixed for its lifetime. (V2 Phase 3 will add autoscroll-to-card
-        // when the changed card is off-screen.)
-        existing._renderDiff(edit);
-        changedAny = true;
+        mutations.push(function() { existing._renderDiff(edit); });
+        changedPathsThisApply.push(edit.relativePath);
+        if (!topmostChangedCard || compareDomOrder(existing, topmostChangedCard) < 0) {
+          topmostChangedCard = existing;
+        }
         return;
       }
-      // New card: append to bottom. Cards are never reordered (V2 Phase 3
-      // decision applied retroactively to V1). Stream is a stable timeline,
-      // first-touched-first, top-to-bottom.
-      var card = makeCard(edit);
-      streamEl.appendChild(card);
-      cards.set(edit.relativePath, card);
-      changedAny = true;
+      // New card: append to bottom. Cards are never reordered.
+      mutations.push(function() {
+        var card = makeCard(edit);
+        streamEl.appendChild(card);
+        cards.set(edit.relativePath, card);
+        if (!topmostChangedCard) topmostChangedCard = card;
+      });
+      changedPathsThisApply.push(edit.relativePath);
     });
-    enforceCap();
-    updateCounts();
-    // V1 used to scrollTop = 0 here. Removed: with append-at-bottom there is
-    // no top-of-stream affordance, and auto-scrolling on every change
-    // disturbs the user reading older context. V2 Phase 3 will reintroduce
-    // a sticky/autoscroll state machine that scrolls to the changed card
-    // only when the user has not scrolled away.
+
+    if (mutations.length === 0) return;
+
+    function applyAll() {
+      for (var i = 0; i < mutations.length; i++) mutations[i]();
+      enforceCap();
+      updateCounts();
+    }
+
+    if (scrollMode === 'sticky') {
+      withAnchor(applyAll);
+      changedPathsThisApply.forEach(function(p) { stickyChangedPaths.add(p); });
+      updateFollowButton();
+    } else {
+      applyAll();
+      if (topmostChangedCard) scrollToCard(topmostChangedCard);
+    }
+  }
+
+  /** Compare two cards by DOM order: returns <0 if `a` precedes `b`,
+   *  0 if same, >0 if `a` follows `b`. */
+  function compareDomOrder(a, b) {
+    if (a === b) return 0;
+    var pos = a.compareDocumentPosition(b);
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+    return 1;
   }
 
   function tickTimestamps() {
@@ -947,6 +1146,7 @@
       cards.clear();
       dismissed.clear();
       userCollapsed.clear();
+      enterAutoscroll();
       updateCounts();
       void fetchSnapshot();
     });
@@ -968,4 +1168,5 @@
   }
 
   updateCounts();
+  streamEl.addEventListener('scroll', onStreamScroll, { passive: true });
 })();

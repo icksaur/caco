@@ -63,22 +63,14 @@
   font-size: var(--text-sm);
 }
 
+/* Phase 3: overflow-anchor: auto is browser default in supported browsers,
+ * but declared explicitly for intent + defense against future global resets. */
 .fe-stream {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-sm) var(--space-md);
-  /* Phase 3: tell the browser to preserve the visual position of an
-   * anchor element when content above the viewport changes. Augments
-   * our JS withAnchor fallback. */
   overflow-anchor: auto;
-}
-
-/* Phase 3: smooth diff body height transitions so anchored growth
- * animates rather than jumps. Capped at 200ms; scaled by delta size
- * is overkill for V2 — flat 150ms reads fine. */
-.fe-diff {
-  transition: height 150ms ease-out;
 }
 
 /* Phase 3: "Follow edits" floating button. Positioned bottom-right of the

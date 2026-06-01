@@ -93,6 +93,18 @@
    *  the anchor card across the mutation. The flag `pendingProgrammaticScroll`
    *  is set if a compensating scrollTop write happens; the scroll handler
    *  consumes it. */
+  /** Set streamEl.scrollTop and arm the programmatic-scroll flag with
+   *  the value the browser will actually settle on (clamped to
+   *  [0, scrollHeight - clientHeight]). Without clamping, the browser
+   *  clamps silently and the scroll handler sees scrollTop != target,
+   *  misclassifying our own write as a user scroll. */
+  function programmaticScrollTo(target) {
+    var maxScroll = Math.max(0, streamEl.scrollHeight - streamEl.clientHeight);
+    var clamped = Math.max(0, Math.min(target, maxScroll));
+    pendingProgrammaticScroll = { target: clamped };
+    streamEl.scrollTop = clamped;
+  }
+
   function withAnchor(fn) {
     if (scrollMode !== 'sticky') { fn(); return; }
     requestAnimationFrame(function() {
@@ -103,9 +115,7 @@
         ? anchor.getBoundingClientRect().top
         : null;
       if (afterTop !== null && afterTop !== beforeTop) {
-        var target = streamEl.scrollTop + (afterTop - beforeTop);
-        pendingProgrammaticScroll = { target: target };
-        streamEl.scrollTop = target;
+        programmaticScrollTo(streamEl.scrollTop + (afterTop - beforeTop));
       }
     });
   }
@@ -139,9 +149,7 @@
     var sr = streamEl.getBoundingClientRect();
     var fullyVisible = cr.top >= sr.top && cr.bottom <= sr.bottom;
     if (fullyVisible) return;
-    var target = streamEl.scrollTop + (cr.top - sr.top);
-    pendingProgrammaticScroll = { target: target };
-    streamEl.scrollTop = target;
+    programmaticScrollTo(streamEl.scrollTop + (cr.top - sr.top));
   }
 
   /** Lazily create the Follow-edits button and bind to the stream's
@@ -166,9 +174,7 @@
       } else {
         // No identified changed card — scroll to bottom of stream
         // (most recently created cards live there).
-        var bottom = streamEl.scrollHeight - streamEl.clientHeight;
-        pendingProgrammaticScroll = { target: bottom };
-        streamEl.scrollTop = bottom;
+        programmaticScrollTo(streamEl.scrollHeight - streamEl.clientHeight);
       }
     });
     // Insert as sibling of streamEl inside the same offset parent.

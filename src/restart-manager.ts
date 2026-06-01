@@ -111,9 +111,12 @@ function checkAndRestart(): void {
     spawnServer();
   }
 
-  // Defer exit to let event loop flush WebSocket buffers.
-  // Without this, session.idle may not reach the client before
-  // process.exit() tears down all connections.
+  // Defer exit to let event loop flush WebSocket buffers AND to keep the
+  // process alive long enough that spawnServer's early-exit diagnostic
+  // listener can log a silent child crash to restart.log. 1s is a tradeoff:
+  // most loader/import crashes fire within ~100ms; longer waits delay the
+  // user's UI reconnect. If a child takes >1s to die we miss the trace —
+  // accept that until we wire a proper child→parent "ready" signal.
   const doExit = () => {
     log('Exiting for restart...');
     if (exitHandler) {
@@ -126,7 +129,7 @@ function checkAndRestart(): void {
   if (exitHandler) {
     doExit(); // Tests run synchronously
   } else {
-    setTimeout(doExit, 250);
+    setTimeout(doExit, 1000);
   }
 }
 
@@ -140,8 +143,8 @@ function spawnServer(): void {
     let outFd: number | 'ignore' = 'ignore';
     try {
       outFd = openSync(join(PROJECT_ROOT, 'restart-spawn.log'), 'a');
-    } catch {
-      // Fall through — best effort.
+    } catch (err) {
+      log(`openSync(restart-spawn.log) failed; child stdio will be discarded: ${(err as Error).message}`);
     }
 
     const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
@@ -151,7 +154,34 @@ function spawnServer(): void {
       windowsHide: true,
       env: { ...process.env }
     });
-    child.unref();
+
+    // Diagnostic: don't unref immediately. Briefly listen for early death so
+    // a silent crash leaves a trace in restart.log (not just restart-spawn.log,
+    // which only sees output the child managed to emit before dying). This
+    // caught a real failure on 2026-05-31 where PID 543311 died with no log
+    // output and we had nothing to debug.
+    let earlyExitLogged = false;
+    const earlyExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (earlyExitLogged) return;
+      earlyExitLogged = true;
+      log(`Spawned child PID ${child.pid} exited early: code=${code} signal=${signal}`);
+    };
+    const earlyError = (err: Error) => {
+      if (earlyExitLogged) return;
+      earlyExitLogged = true;
+      log(`Spawned child PID ${child.pid} emitted error: ${err.message}`);
+    };
+    child.once('exit', earlyExit);
+    child.once('error', earlyError);
+
+    // Detach after a short watch window matching the parent's 1s exit delay.
+    // .unref() on the timer so it doesn't itself hold the event loop open.
+    setTimeout(() => {
+      child.removeListener('exit', earlyExit);
+      child.removeListener('error', earlyError);
+      child.unref();
+    }, 1000).unref();
+
     log(`New server spawned with PID: ${child.pid}`);
   } catch (err) {
     log(`Failed to spawn server: ${err}`);

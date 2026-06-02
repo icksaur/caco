@@ -456,13 +456,18 @@
   }
 
   /** Instant scroll to put `card` at top of stream viewport. No-op if
-   *  the card is fully visible. Used by Autoscroll on incoming edits. */
-  function scrollToCard(card) {
+   *  the card is fully visible (`force=false`, the autoscroll-on-edit
+   *  default). When `force=true` (Follow-edits click), always scroll
+   *  even if the target is already visible — the user explicitly asked
+   *  to be taken there and a silent no-op makes the button look broken. */
+  function scrollToCard(card, force) {
     if (!card) return;
     var cr = card.getBoundingClientRect();
     var sr = streamEl.getBoundingClientRect();
-    var fullyVisible = cr.top >= sr.top && cr.bottom <= sr.bottom;
-    if (fullyVisible) return;
+    if (!force) {
+      var fullyVisible = cr.top >= sr.top && cr.bottom <= sr.bottom;
+      if (fullyVisible) return;
+    }
     programmaticScrollTo(streamEl.scrollTop + (cr.top - sr.top));
   }
 
@@ -484,7 +489,7 @@
       });
       enterAutoscroll();
       if (target) {
-        scrollToCard(target);
+        scrollToCard(target, true);
       } else {
         // No identified changed card — scroll to bottom of stream
         // (most recently created cards live there).

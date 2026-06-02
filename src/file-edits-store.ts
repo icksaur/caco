@@ -82,11 +82,16 @@ export function setCardList(sessionId: string, body: { cards: CardPersist[]; dis
   const existing = pending.get(sessionId);
   if (existing) clearTimeout(existing.timer);
   const timer = setTimeout(() => {
-    pending.delete(sessionId);
+    // Write first, then drop the pending entry. On write failure the
+    // entry is still removed (consistent with prior behavior); a
+    // subsequent mutation will reschedule. Order matters only for
+    // flush-during-write, which is impossible in single-threaded JS.
     try {
       setSessionData(sessionId, STORE_NAME, merged as unknown as Record<string, unknown>);
     } catch (err) {
       console.warn(`[FILE-EDITS-STORE] write failed for ${sessionId.slice(0, 8)}:`, (err as Error).message);
+    } finally {
+      pending.delete(sessionId);
     }
   }, DEBOUNCE_MS);
   pending.set(sessionId, { timer, body: merged });
@@ -98,11 +103,12 @@ export function flushSession(sessionId: string): void {
   const p = pending.get(sessionId);
   if (!p) return;
   clearTimeout(p.timer);
-  pending.delete(sessionId);
   try {
     setSessionData(sessionId, STORE_NAME, p.body as unknown as Record<string, unknown>);
   } catch (err) {
     console.warn(`[FILE-EDITS-STORE] flush write failed for ${sessionId.slice(0, 8)}:`, (err as Error).message);
+  } finally {
+    pending.delete(sessionId);
   }
 }
 

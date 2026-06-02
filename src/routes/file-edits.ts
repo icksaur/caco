@@ -78,7 +78,7 @@ router.get('/sessions/:sessionId/file-edits/cards', (req: Request, res: Response
  * Persists the card list. Body: { schemaVersion, cards, dismissed }.
  * Server sets updatedAt.
  */
-router.put('/sessions/:sessionId/file-edits/cards', (req: Request, res: Response) => {
+function putCardsHandler(req: Request, res: Response): void {
   const sessionId = req.params.sessionId as string;
   if (!ensureSession(sessionId, res)) return;
   const body = req.body;
@@ -100,7 +100,13 @@ router.put('/sessions/:sessionId/file-edits/cards', (req: Request, res: Response
   }
   setCardList(sessionId, { cards: body.cards as CardPersist[], dismissed: body.dismissed as string[] });
   res.json({ ok: true });
-});
+}
+
+router.put('/sessions/:sessionId/file-edits/cards', putCardsHandler);
+// V2.1: POST alias for navigator.sendBeacon, which only supports POST.
+// The beforeunload best-effort flush path uses sendBeacon, so the
+// route must be reachable via POST too.
+router.post('/sessions/:sessionId/file-edits/cards', putCardsHandler);
 
 function isCardPersist(v: unknown): v is CardPersist {
   if (!v || typeof v !== 'object') return false;

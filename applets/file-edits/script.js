@@ -44,9 +44,12 @@
   // See docs/file-edits-v2.1.md §3.
   var PERSIST_DEBOUNCE_MS = 250;
   var persistTimer = null;
-  /** Captured at debounce-schedule time so a session switch during the
-   *  debounce window can flush the write against the *old* session ID. */
+  /** Captured at schedule time so a session switch during the debounce
+   *  window flushes the write against the *old* session ID with the
+   *  *old* body. Reading DOM/cards/dismissed at flush time would race
+   *  with onSessionChange's state clear. */
   var persistPendingSid = null;
+  var persistPendingBody = null;
 
   function buildPersistBody() {
     // Iterate cards in DOM order (insertion order of streamEl.children).
@@ -70,10 +73,11 @@
     if (!persistTimer) return;
     clearTimeout(persistTimer);
     var sid = persistPendingSid;
+    var body = persistPendingBody;
     persistTimer = null;
     persistPendingSid = null;
-    if (!sid) return;
-    var body = buildPersistBody();
+    persistPendingBody = null;
+    if (!sid || !body) return;
     void doPersistPut(sid, body);
   }
 
@@ -81,12 +85,18 @@
     if (!sessionId) return;
     if (persistTimer) clearTimeout(persistTimer);
     persistPendingSid = sessionId;
+    // Capture the body NOW. The debounce timer fires later, possibly
+    // after onSessionChange has wiped state — but the captured snapshot
+    // still reflects the gesture that scheduled it.
+    persistPendingBody = buildPersistBody();
     persistTimer = setTimeout(function() {
       var sid = persistPendingSid;
+      var body = persistPendingBody;
       persistTimer = null;
       persistPendingSid = null;
-      if (!sid) return;
-      void doPersistPut(sid, buildPersistBody());
+      persistPendingBody = null;
+      if (!sid || !body) return;
+      void doPersistPut(sid, body);
     }, PERSIST_DEBOUNCE_MS);
   }
 

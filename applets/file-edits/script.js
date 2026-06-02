@@ -308,16 +308,6 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  function timeAgo(iso) {
-    if (!iso) return '';
-    var diff = (Date.now() - new Date(iso).getTime()) / 1000;
-    if (diff < 1) return 'now';
-    if (diff < 60) return Math.round(diff) + 's';
-    if (diff < 3600) return Math.round(diff / 60) + 'm';
-    if (diff < 86400) return Math.round(diff / 3600) + 'h';
-    return Math.round(diff / 86400) + 'd';
-  }
-
   function statusLabel(status) {
     switch (status) {
       case 'modified': return 'M';
@@ -896,11 +886,6 @@
       ? (edit.renamedFrom + ' → ' + edit.relativePath)
       : edit.relativePath;
 
-    var time = document.createElement('time');
-    time.className = 'fe-time';
-    time.dataset.iso = edit.timestamp;
-    time.textContent = timeAgo(edit.timestamp);
-
     // V3 MVP: open in external editor (vscode://). Absolute `path` is
     // set by the server; if the path is missing we omit the link rather
     // than fabricate one.
@@ -927,7 +912,6 @@
     head.appendChild(status);
     head.appendChild(path);
     if (openBtn) head.appendChild(openBtn);
-    head.appendChild(time);
     head.appendChild(xBtn);
 
     var body = document.createElement('pre');
@@ -944,9 +928,6 @@
     }
 
     function toggle() {
-      // User gesture: enter Sticky so subsequent polls don't yank the card
-      // out from under the user. Anchor preserves the card's position
-      // across the height change.
       enterSticky();
       withAnchor(function() {
         var nowExpanded = card.dataset.expanded !== 'true';
@@ -981,29 +962,27 @@
       var binNote = document.createElement('span');
       binNote.className = 'fe-binary';
       binNote.textContent = '(binary)';
-      head.insertBefore(binNote, time);
+      head.insertBefore(binNote, xBtn);
     }
     if (edit.truncated && !edit.fullFile) {
       var trunc = document.createElement('span');
       trunc.className = 'fe-trunc';
       trunc.title = edit.truncated.hiddenLines + ' lines hidden';
       trunc.textContent = '↘';
-      head.insertBefore(trunc, time);
+      head.insertBefore(trunc, xBtn);
     }
     if (!edit.fullFile && !edit.isBinary && edit.status !== 'clean') {
       var fb = document.createElement('span');
       fb.className = 'fe-fallback';
       fb.title = 'Showing hunk-only view (file too large, deleted, or fallback)';
       fb.textContent = 'hunk view';
-      head.insertBefore(fb, time);
+      head.insertBefore(fb, xBtn);
     }
 
     card._edit = edit;
     card._renderDiff = function(newEdit) {
       card._edit = newEdit;
       card.dataset.status = newEdit.status || 'modified';
-      time.dataset.iso = newEdit.timestamp;
-      time.textContent = timeAgo(newEdit.timestamp);
       path.textContent = newEdit.renamedFrom
         ? (newEdit.renamedFrom + ' → ' + newEdit.relativePath)
         : newEdit.relativePath;
@@ -1024,7 +1003,7 @@
           openBtn.setAttribute('aria-label', 'Open in editor');
           openBtn.textContent = '↗';
           openBtn.addEventListener('click', function(e) { e.stopPropagation(); });
-          head.insertBefore(openBtn, time);
+          head.insertBefore(openBtn, xBtn);
         }
       }
       // If body is currently expanded, re-render the diff to reflect the new content.
@@ -1279,14 +1258,6 @@
     if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
     return 1;
   }
-
-  function tickTimestamps() {
-    cards.forEach(function(card) {
-      var t = card.querySelector('.fe-time');
-      if (t && t.dataset.iso) t.textContent = timeAgo(t.dataset.iso);
-    });
-  }
-  setInterval(tickTimestamps, 5000);
 
   /** V2.1: load persisted cards + dismissed, then fetch snapshot. Initial
    *  card creation order = persisted order. The snapshot's clean entries

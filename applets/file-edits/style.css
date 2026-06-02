@@ -157,12 +157,6 @@
   white-space: nowrap;
 }
 
-.fe-time {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
 .fe-binary, .fe-trunc {
   font-size: var(--text-xs);
   color: var(--color-text-muted);

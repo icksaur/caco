@@ -76,7 +76,11 @@ Asking git directly collapses all of that to: poll → diff → emit.
 
 ### Future: replace `git-status` applet
 
-Once `file-edits` reaches feature parity (stage all, unstage, stage hunk, commit, push, pull), the existing `git-status` applet retires. The "active leases block commit" behavior (operator requirement, see below) lives natively here, not bolted on across two applets.
+**Reversed 2026-06-01.** Originally framed as the successor to
+`git-status`. Operator decided V3 keeps file-edits as a read-only
+viewer; git-status stays as a separate applet for stage/commit/push.
+The "block commit while reviewing" behavior may still ship, but as
+a small server-side lease the git-status applet observes.
 
 ### Filesystem watch as accelerator (optional, v1)
 
@@ -375,11 +379,18 @@ Explicit V2 non-goals (deferred to V3 — see backlog below):
 
 ## V3 backlog (deferred — do not pull into V2)
 
-Captured for record; no commitment, no ordering until V2 ships. Operator
-(2026-06-01) flagged the **file-navigability** theme as the front-runner:
-the applet is "almost a decent read-only text editor" but can't open a
-file without an edit having happened first. That theme leads V3 over the
-git-status replacement, which is deprioritized.
+Captured for record; no commitment, no ordering until V2 ships.
+
+**Direction shift (2026-06-01, operator):**
+
+> "This is useful enough that I'm not sure it should be only for diffs
+> and I don't think I want it to replace the git-status applet."
+
+So the applet's V3 identity is **a stacked read-only file viewer** that
+happens to highlight diffs when present, NOT a git-status replacement.
+git-status stays as a separate applet for stage/commit/push flows.
+file-edits's V3 direction is file navigability + viewer polish; the
+stage/commit/discard items are explicitly removed from this backlog.
 
 ### File navigability (operator priority, 2026-06-01)
 
@@ -444,18 +455,19 @@ Goal: turn it into a competent read-only viewer with persistence.
   uses hardcoded `pt` units. Migrate text-editor onto the same tokens,
   or extract a shared `code.css` referenced by both applets.
 
-### Workflow / git-status replacement (deferred; operator: not yet)
+### Non-goals (V3 explicitly NOT this)
 
-Operator (2026-06-01): "I'm not too keen on git-status replacement yet."
-Move below file-navigability in priority.
+Operator (2026-06-01): the applet stays a read-only viewer. The
+following items are explicitly OUT of scope for V3; they belong to
+git-status or its successor, not here.
 
-- **Stage / unstage / commit / push / discard** per file and per hunk.
-  Retires the existing `git-status` applet.
-- **Commit composer** in-applet — subject + body + `Co-authored-by`
-  toggle.
-- **Commit lease** — while file-edits has unread changes (or an
-  explicit lease), block agent-initiated `git commit`. Surface a
-  "release lease" button.
+- Stage / unstage per file or per hunk.
+- Commit composer (subject/body/co-author toggle).
+- Push, pull, fetch.
+- Discard file or hunk.
+- Commit lease (block agent-initiated `git commit` while reviewing).
+  May still ship as a small server-side helper, but the UI lives in
+  git-status.
 
 ### Input
 

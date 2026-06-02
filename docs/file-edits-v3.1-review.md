@@ -154,9 +154,7 @@ as A, or drop `--no-renames` and handle the rename-source NUL field.
 
 **Spec:** `docs/file-edits-v3.1.md:62-73`
 
-Per `/home/carl/.copilot/skills/review-spec/SKILL.md`: "Ascii art is
-not allowed. Use mermaid in code blocks for diagrams." Replace the
-popup layout box-drawing diagram with mermaid or prose.
+Per the review-spec skill: "Ascii art is not allowed. Use mermaid in code blocks for diagrams." Replace the popup layout box-drawing diagram with mermaid or prose.
 
 ---
 

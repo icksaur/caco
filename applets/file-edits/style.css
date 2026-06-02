@@ -355,3 +355,72 @@
   padding: 1px 6px;
   flex-shrink: 0;
 }
+
+/* V3.1: file picker popup (+ button → fuzzy file list). */
+.fe-picker {
+  position: absolute;
+  top: 42px;
+  left: var(--space-md);
+  right: var(--space-md);
+  max-height: 70%;
+  background: var(--bg-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.fe-picker[hidden] { display: none; }
+.fe-picker-input {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-bright);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-sm) var(--space-md);
+  outline: none;
+  flex-shrink: 0;
+}
+.fe-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.fe-picker-item {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: 4px var(--space-md);
+  color: var(--color-text);
+  cursor: pointer;
+  display: flex;
+  gap: var(--space-sm);
+  align-items: baseline;
+}
+.fe-picker-item.selected {
+  background: var(--color-accent);
+  color: white;
+}
+.fe-picker-item.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.fe-picker-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-picker-suffix {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+}
+.fe-picker-item.selected .fe-picker-suffix {
+  color: rgba(255, 255, 255, 0.8);
+}

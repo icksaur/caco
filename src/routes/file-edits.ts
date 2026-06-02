@@ -5,6 +5,8 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { resolve, join, sep } from 'path';
+import { stat } from 'fs/promises';
 import { sessionManager } from '../session-manager.js';
 import type { GitEditPoller } from '../git-edit-poller.js';
 import {
@@ -61,6 +63,67 @@ router.post('/sessions/:sessionId/file-edits/refresh', (req: Request, res: Respo
   if (!ensureSession(sessionId, res)) return;
   poller?.triggerPoll(sessionId, 'manual-refresh');
   res.json({ ok: true });
+});
+
+/**
+ * POST /api/sessions/:sessionId/file-edits/open
+ * V3.1: materialize an EditEntry for any repo path picked by the user.
+ * Body: { relativePath: string }. Returns { edit: EditEntry } or
+ * 400 / 404 per validation outcome.
+ */
+router.post('/sessions/:sessionId/file-edits/open', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  if (!ensureSession(sessionId, res)) return;
+  if (!poller) { res.status(404).json({ error: 'poller not initialized' }); return; }
+  const body = req.body;
+  if (!body || typeof body !== 'object' || typeof body.relativePath !== 'string' || body.relativePath.length === 0) {
+    res.status(400).json({ error: 'relativePath must be a non-empty string' });
+    return;
+  }
+  const relPath = body.relativePath as string;
+  if (relPath.includes('\0')) {
+    res.status(400).json({ error: 'relativePath contains NUL' });
+    return;
+  }
+  if (relPath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(relPath)) {
+    res.status(400).json({ error: 'relativePath must not be absolute' });
+    return;
+  }
+  if (relPath.split(/[/\\]/).some((seg) => seg === '..')) {
+    res.status(400).json({ error: 'relativePath must not contain ".." segments' });
+    return;
+  }
+  const cwd = sessionManager.getSessionCwd(sessionId);
+  if (!cwd) { res.status(404).json({ error: 'session has no cwd' }); return; }
+  // Best-effort post-join containment check. The poller resolves
+  // repoRoot internally (via findRepoRoot at attach time); for the
+  // route's defense-in-depth we re-check against cwd, which is a
+  // tighter bound than repoRoot for subdirectory sessions.
+  const abs = resolve(join(cwd, relPath));
+  if (!abs.startsWith(cwd + sep) && abs !== cwd) {
+    res.status(400).json({ error: 'relativePath escapes session cwd' });
+    return;
+  }
+  // Reject directories. Allow missing-on-disk files (the poller treats
+  // those as deleted-from-working-tree but still in HEAD — a valid
+  // case for buildCleanEntry to handle via git show.)
+  try {
+    const st = await stat(abs);
+    if (!st.isFile()) {
+      res.status(400).json({ error: 'relativePath is not a file' });
+      return;
+    }
+  } catch { /* missing — let poller decide */ }
+  try {
+    const edit = await poller.openFile(sessionId, relPath);
+    if (!edit) {
+      res.status(404).json({ error: 'path not found in HEAD or working tree' });
+      return;
+    }
+    res.json({ edit });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 /**

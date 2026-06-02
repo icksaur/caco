@@ -22,9 +22,11 @@
   var countsEl = document.getElementById('feCounts');
   var refreshBtn = document.getElementById('feRefresh');
   var resetBtn = document.getElementById('feReset');
+  var openBtn = document.getElementById('feOpen');
   var emptyEl = document.getElementById('feEmpty');
   var notGitEl = document.getElementById('feNotGit');
   var streamEl = document.getElementById('feStream');
+  var rootEl = streamEl.parentNode;
 
   /** Map<relativePath, HTMLElement>. */
   var cards = new Map();
@@ -36,6 +38,11 @@
   var userCollapsed = new Set();
   var VISIBLE_CAP = 50;
   var sessionId = null;
+  /** V3.1: cached repo cwd, used by the file picker for fuzzy queries.
+   *  Set from info.cwd on session change; from session meta on initial
+   *  attach. Cleared on session change before the next session's meta
+   *  arrives. */
+  var cachedCwd = '';
 
   // ── V2.1: Persistence ─────────────────────────────────────────────────
   //
@@ -134,6 +141,216 @@
     } catch (_) { return null; }
   }
   // ── End persistence ───────────────────────────────────────────────────
+
+  // ── V3.1: File picker ─────────────────────────────────────────────────
+  //
+  // Fuzzy picker for adding arbitrary repo files as stacked cards. See
+  // docs/file-edits-v3.1.md. Bottom of the dependency stack: only depends
+  // on sessionId + cachedCwd from outer scope, and applyEdits (defined
+  // below).
+  var PICKER_FETCH_DEBOUNCE_MS = 100;
+  var PICKER_RESULT_CAP = 50;
+  var pickerEl = null;          // root <div>; lazily created
+  var pickerInput = null;
+  var pickerList = null;
+  var pickerOpen = false;
+  var pickerResults = [];
+  var pickerSelectedIdx = 0;
+  var pickerLastQuery = '';
+  var pickerFetchToken = 0;     // later-query-wins for /project-files
+  var pickerFetchTimer = null;
+  var pickerOpenAbort = null;   // for the per-pick /file-edits/open call
+  var pickerOutsideHandler = null;
+
+  function ensurePickerEl() {
+    if (pickerEl) return;
+    pickerEl = document.createElement('div');
+    pickerEl.className = 'fe-picker';
+    pickerEl.hidden = true;
+    pickerInput = document.createElement('input');
+    pickerInput.className = 'fe-picker-input';
+    pickerInput.type = 'text';
+    pickerInput.setAttribute('placeholder', 'Search files…');
+    pickerInput.setAttribute('spellcheck', 'false');
+    pickerInput.setAttribute('autocomplete', 'off');
+    pickerList = document.createElement('ul');
+    pickerList.className = 'fe-picker-list';
+    pickerEl.appendChild(pickerInput);
+    pickerEl.appendChild(pickerList);
+    rootEl.appendChild(pickerEl);
+
+    pickerInput.addEventListener('input', function() {
+      var q = pickerInput.value;
+      pickerLastQuery = q;
+      if (pickerFetchTimer) clearTimeout(pickerFetchTimer);
+      pickerFetchTimer = setTimeout(function() { void runPickerFetch(q); }, PICKER_FETCH_DEBOUNCE_MS);
+    });
+    pickerInput.addEventListener('keydown', function(e) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        movePickerSelection(1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        movePickerSelection(-1);
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        var sel = pickerResults[pickerSelectedIdx];
+        if (sel) pickSelected(sel);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closePicker();
+      } else if (e.key === 'Backspace' && pickerInput.value === '') {
+        e.preventDefault();
+        closePicker();
+      }
+    });
+
+    pickerList.addEventListener('mousedown', function(e) {
+      var target = e.target.closest('.fe-picker-item');
+      if (!target) return;
+      e.preventDefault();
+      if (target.classList.contains('disabled')) return;
+      var idx = Number(target.dataset.idx);
+      var sel = pickerResults[idx];
+      if (sel) pickSelected(sel);
+    });
+  }
+
+  function openPicker() {
+    if (!sessionId || pickerOpen) return;
+    ensurePickerEl();
+    pickerOpen = true;
+    pickerEl.hidden = false;
+    pickerInput.value = '';
+    pickerLastQuery = '';
+    pickerSelectedIdx = 0;
+    pickerResults = [];
+    renderPickerList();
+    void runPickerFetch('');  // initial empty-query fetch → alphabetical
+    setTimeout(function() { pickerInput.focus(); }, 0);
+    // Click-outside dismiss; bind on next tick so this click doesn't
+    // immediately re-close it.
+    setTimeout(function() {
+      pickerOutsideHandler = function(ev) {
+        if (!pickerEl.contains(ev.target) && ev.target !== openBtn) {
+          closePicker();
+        }
+      };
+      document.addEventListener('mousedown', pickerOutsideHandler);
+    }, 0);
+  }
+
+  function closePicker() {
+    if (!pickerOpen) return;
+    pickerOpen = false;
+    if (pickerEl) pickerEl.hidden = true;
+    if (pickerFetchTimer) { clearTimeout(pickerFetchTimer); pickerFetchTimer = null; }
+    if (pickerOutsideHandler) {
+      document.removeEventListener('mousedown', pickerOutsideHandler);
+      pickerOutsideHandler = null;
+    }
+  }
+
+  async function runPickerFetch(q) {
+    if (!sessionId) return;
+    var token = ++pickerFetchToken;
+    var url = '/api/project-files?cwd=' + encodeURIComponent(cachedCwd || '');
+    if (q) url += '&q=' + encodeURIComponent(q);
+    try {
+      var res = await fetch(url);
+      if (!res.ok) return;
+      var data = await res.json();
+      if (token !== pickerFetchToken) return;  // later query won
+      pickerResults = (data.files || []).slice(0, PICKER_RESULT_CAP);
+      pickerSelectedIdx = 0;
+      renderPickerList();
+    } catch (_) { /* network blip; ignore */ }
+  }
+
+  function renderPickerList() {
+    if (!pickerList) return;
+    pickerList.innerHTML = '';
+    for (var i = 0; i < pickerResults.length; i++) {
+      var p = pickerResults[i];
+      var li = document.createElement('li');
+      li.className = 'fe-picker-item';
+      li.dataset.idx = String(i);
+      if (i === pickerSelectedIdx) li.classList.add('selected');
+      var label = document.createElement('span');
+      label.className = 'fe-picker-path';
+      label.textContent = p;
+      li.appendChild(label);
+      if (cards.has(p)) {
+        li.classList.add('disabled');
+        var sfx = document.createElement('span');
+        sfx.className = 'fe-picker-suffix';
+        sfx.textContent = '(open)';
+        li.appendChild(sfx);
+      } else if (dismissed.has(p)) {
+        var sfx2 = document.createElement('span');
+        sfx2.className = 'fe-picker-suffix';
+        sfx2.textContent = '(dismissed)';
+        li.appendChild(sfx2);
+      }
+      pickerList.appendChild(li);
+    }
+  }
+
+  function movePickerSelection(delta) {
+    if (pickerResults.length === 0) return;
+    pickerSelectedIdx = (pickerSelectedIdx + delta + pickerResults.length) % pickerResults.length;
+    var items = pickerList.querySelectorAll('.fe-picker-item');
+    items.forEach(function(el, i) { el.classList.toggle('selected', i === pickerSelectedIdx); });
+    var sel = items[pickerSelectedIdx];
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+
+  function pickSelected(relativePath) {
+    closePicker();
+    void pickFile(relativePath);
+  }
+
+  async function pickFile(relativePath) {
+    if (cards.has(relativePath)) return;
+    if (pickerOpenAbort) pickerOpenAbort.abort();
+    pickerOpenAbort = new AbortController();
+    var sid = sessionId;
+    var edit;
+    try {
+      var res = await fetch(
+        '/api/sessions/' + encodeURIComponent(sid) + '/file-edits/open',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relativePath: relativePath }),
+          signal: pickerOpenAbort.signal,
+        }
+      );
+      if (!res.ok) {
+        console.warn('[file-edits] open failed', res.status, relativePath);
+        return;
+      }
+      var data = await res.json();
+      edit = data.edit;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      console.warn('[file-edits] open error', err, relativePath);
+      return;
+    }
+    if (sid !== sessionId) return;  // session changed mid-fetch
+    if (!edit) return;
+    dismissed.delete(relativePath);
+    applyEdits([edit], [], [], { suppressScroll: true });
+  }
+
+  if (openBtn) {
+    openBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (pickerOpen) closePicker();
+      else openPicker();
+    });
+  }
+  // ── End file picker ───────────────────────────────────────────────────
 
   // ── Phase 3: Sticky / Autoscroll state machine ─────────────────────────
   //
@@ -1136,7 +1353,8 @@
     return true;
   }
 
-  function applyEdits(edits, cleared, cleanedEdits) {
+  function applyEdits(edits, cleared, cleanedEdits, options) {
+    options = options || {};
     // Collect the actual mutations as closures so we can run them all
     // inside one withAnchor (rAF) when in Sticky, and identify the
     // topmost changed card for autoscroll otherwise.
@@ -1246,7 +1464,7 @@
       updateFollowButton();
     } else {
       applyAll();
-      if (topmostChangedCard) scrollToCard(topmostChangedCard);
+      if (topmostChangedCard && !options.suppressScroll) scrollToCard(topmostChangedCard);
     }
   }
 
@@ -1363,10 +1581,16 @@
       // down state. Without this, a dismiss/collapse within 250ms of
       // session-switch is lost.
       flushPersist();
+      // V3.1: close the picker and cancel any in-flight /open call
+      // against the outgoing session.
+      closePicker();
+      if (pickerOpenAbort) { pickerOpenAbort.abort(); pickerOpenAbort = null; }
+      cachedCwd = '';
       sessionId = sid;
       if (info && info.cwd) {
         var parts = info.cwd.split(/[/\\]/);
         repoEl.textContent = parts[parts.length - 1] || info.cwd;
+        cachedCwd = info.cwd;
       }
       streamEl.innerHTML = '';
       cards.clear();
@@ -1386,6 +1610,7 @@
           if (meta && meta.cwd) {
             var parts2 = meta.cwd.split(/[/\\]/);
             repoEl.textContent = parts2[parts2.length - 1] || meta.cwd;
+            cachedCwd = meta.cwd;
           }
         } catch (_) { /* ignore */ }
         await initFromPersistence(existingId);

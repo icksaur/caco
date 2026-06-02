@@ -340,6 +340,11 @@ export interface GitEditPoller {
    *  list. Any persisted path NOT currently dirty gets a clean EditEntry
    *  built from `git show HEAD:<path>` so the client renders its body. */
   snapshot(sessionId: string, cwd?: string, persistedCleanPaths?: string[]): Promise<EditEntry[]>;
+  /** V3.1: materialize an EditEntry for an arbitrary path picked by the
+   *  user. Returns null if the session is unknown, the path is missing
+   *  from both HEAD and the working tree, or git fails. The caller is
+   *  responsible for input validation (no `..`, no NUL, etc.). */
+  openFile(sessionId: string, relPath: string): Promise<EditEntry | null>;
 }
 
 export function createGitEditPoller(): GitEditPoller {
@@ -389,6 +394,40 @@ export function createGitEditPoller(): GitEditPoller {
       status: 'clean',
       timestamp: new Date().toISOString(),
       fullFile: { headLines: lines, workLines: lines, hunks: [] },
+    };
+  }
+
+  /** V3.1: Build an EditEntry for an untracked path picked by the user.
+   *  Reads the working-tree file and synthesizes a single "+all" hunk
+   *  so the client's buildRows produces all-add rows (matching what
+   *  computeFullFile does for status='untracked' via git diff --no-index). */
+  async function buildUntrackedEntry(repoRoot: string, relPath: string): Promise<EditEntry | null> {
+    const absPath = join(repoRoot, relPath);
+    let workText: string;
+    try {
+      workText = await readFile(absPath, 'utf-8');
+    } catch {
+      return null;
+    }
+    const workLines = toLines(workText);
+    if (workLines.length > FULLFILE_LINE_CAP) {
+      return {
+        path: absPath,
+        relativePath: relPath,
+        status: 'untracked',
+        timestamp: new Date().toISOString(),
+      };
+    }
+    return {
+      path: absPath,
+      relativePath: relPath,
+      status: 'untracked',
+      timestamp: new Date().toISOString(),
+      fullFile: {
+        headLines: null,
+        workLines,
+        hunks: [{ headStart: 0, headLen: 0, workStart: 1, workLen: workLines.length }],
+      },
     };
   }
 
@@ -535,6 +574,30 @@ export function createGitEditPoller(): GitEditPoller {
         }
       }
       return edits;
+    },
+
+    async openFile(sessionId: string, relPath: string): Promise<EditEntry | null> {
+      const state = sessions.get(sessionId);
+      if (!state) return null;
+      // Per-path git status: returns at most one or two entries.
+      // No --no-renames so an R/C entry's source-path NUL field is
+      // present for buildEntry to consume.
+      const result = await runGit(
+        ['status', '--porcelain=v1', '-z', '-u', '--', relPath],
+        state.repoRoot,
+        STATUS_TIMEOUT_MS,
+      );
+      if (result.code !== 0) return null;
+      const current = parsePorcelain(result.stdout);
+      const info = current.get(relPath);
+      if (info) {
+        if (info.status === 'untracked') {
+          return buildUntrackedEntry(state.repoRoot, relPath);
+        }
+        return buildEntry(state.repoRoot, relPath, info);
+      }
+      // Path is clean. Verify it exists in HEAD, then build clean entry.
+      return buildCleanEntry(state.repoRoot, relPath);
     },
   };
 }

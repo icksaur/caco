@@ -809,16 +809,13 @@
     if (!ff || !Array.isArray(ff.workLines)) return false;
     body.innerHTML = '';
     var rawRows = buildRows(ff.headLines, ff.workLines, ff.hunks || []);
-    // Compute per-row word marks from the raw (pre-fold) rows so adjacent
-    // del/add pairs are paired correctly. Attach the mark to the row
-    // object so fold expansion picks it up transparently.
+    // Compute per-row word marks from the raw rows so adjacent del/add
+    // pairs are paired correctly.
     var marks = computeAllWordMarks(rawRows);
     marks.forEach(function(m, idx) { rawRows[idx].mark = m; });
-    // V2.1: skip fold collapse when every row is ctx (clean file or any
-    // entirely-unchanged file). Folding an all-ctx file would hide the
-    // entire body, which defeats the "always show the file content" goal.
-    var allCtx = rawRows.every(function(r) { return r.kind === 'ctx'; });
-    var rows = allCtx ? rawRows : collapseFolds(rawRows);
+    // V2.1: never fold. Always render the entire file. Operator gesture:
+    // "always show entire file, no folding, even if no diffs."
+    var rows = rawRows;
     if (rows.length === 0) {
       body.innerHTML = '<div class="fe-d-empty">(no visible changes)</div>';
       return true;

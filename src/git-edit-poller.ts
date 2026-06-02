@@ -4,12 +4,11 @@
  * Polls `git status --porcelain` per session and broadcasts the diff
  * between consecutive snapshots as `caco.edit` events. See docs/file-edits.md.
  *
- * Triggered from three places:
+ * Triggered from two places:
  *   - internal timer (1.5s active / 5s idle)
  *   - dispatch-events on tool.execution_complete for write tools
- *   - manual refresh via the /file-edits/snapshot endpoint
  *
- * All triggers funnel into triggerPoll(), which debounces 50ms.
+ * Both triggers funnel into triggerPoll(), which debounces 50ms.
  *
  * One subprocess per poll for status; one per changed-file path for diff.
  * No pre-image cache: git is the source of truth.
@@ -333,7 +332,7 @@ export interface GitEditPoller {
   /** Attach explicitly; safe to call multiple times. */
   attachToSession(sessionId: string, cwd: string): Promise<void>;
   detachFromSession(sessionId: string): void;
-  triggerPoll(sessionId: string, source: 'event' | 'manual-refresh'): void;
+  triggerPoll(sessionId: string, source: 'event'): void;
   /** Return the current dirty set as edits (used by snapshot endpoint).
    *  Lazy-attaches if the session isn't tracked yet.
    *  V2.1: optional persistedCleanPaths — paths from the persisted card
@@ -431,7 +430,7 @@ export function createGitEditPoller(): GitEditPoller {
     };
   }
 
-  async function pollSession(sessionId: string, source: 'timer' | 'event' | 'manual-refresh'): Promise<void> {
+  async function pollSession(sessionId: string, source: 'timer' | 'event'): Promise<void> {
     const state = sessions.get(sessionId);
     if (!state || state.polling) return;
     state.polling = true;
@@ -533,7 +532,7 @@ export function createGitEditPoller(): GitEditPoller {
       console.log(`[FILE-EDITS] detached from session ${sessionId.slice(0, 8)}`);
     },
 
-    triggerPoll(sessionId: string, source: 'event' | 'manual-refresh'): void {
+    triggerPoll(sessionId: string, source: 'event'): void {
       const state = sessions.get(sessionId);
       if (!state) return;
       state.lastActivityMs = Date.now();

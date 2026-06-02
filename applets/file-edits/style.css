@@ -49,13 +49,6 @@
   cursor: not-allowed;
 }
 
-.fe-spin {
-  animation: fe-spin 0.6s linear infinite;
-}
-@keyframes fe-spin {
-  to { transform: rotate(360deg); }
-}
-
 .fe-empty, .fe-not-git {
   padding: var(--space-xl) var(--space-md);
   text-align: center;

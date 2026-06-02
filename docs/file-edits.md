@@ -130,7 +130,7 @@ For v1, scope: just track the lease; don't actually block commits. We need the d
       truncated?: { hiddenLines: number };
     }>;
     cleared: string[];         // relative paths that returned to HEAD; applet removes their cards
-    pollSource: 'timer' | 'event' | 'manual-refresh';
+    pollSource: 'timer' | 'event';
   }
 }
 ```
@@ -142,7 +142,7 @@ One event type: `caco.edit`. Flat `caco.*` namespace, consistent with `caco.usag
 **Sticky until applet restart or "Reset dismissals".** When the user X's a card, the path joins client-side `dismissedPaths: Set<string>`. Future `caco.edit` entries for that path are filtered at the applet level. Server has no idea about dismissals.
 
 Toolbar:
-- **Refresh** — manual poll trigger.
+- **`+`** — open a fuzzy file picker (V3.1). Adds the picked file as a card.
 - **Reset dismissals** — clears the dismiss set; previously dismissed files reappear (collapsed) if still in the dirty set.
 - **Counts** — N files modified / N dismissed.
 
@@ -171,7 +171,7 @@ DOM shape:
   <div class="fe-toolbar">
     <span class="fe-repo">caco</span>
     <span class="fe-counts">12 files · 0 dismissed</span>
-    <button class="fe-refresh">↻</button>
+    <button class="fe-open" title="Open file">+</button>
     <button class="fe-reset">Reset dismissals</button>
   </div>
   <div class="fe-stream">
@@ -213,7 +213,7 @@ Per-session state (or per-repo-root, shared across sessions on the same cwd):
 interface GitEditPoller {
   attachToSession(sessionId: string, cwd: string): void;
   detachFromSession(sessionId: string): void;
-  triggerPoll(sessionId: string, source: 'event' | 'manual-refresh'): void;
+  triggerPoll(sessionId: string, source: 'event'): void;
 }
 ```
 
@@ -344,7 +344,7 @@ CSS-class-driven (`+` → `.fe-d-add`, `-` → `.fe-d-del`, ` ` → `.fe-d-ctx`)
 6. Agent runs `git checkout main` (50 files churn). Panel shows 50 collapsed cards, then 50 cards clear on the next tick.
 7. Click X on a card → card disappears. Subsequent edits to that path do NOT re-add.
 8. Click "Reset dismissals" → previously-dismissed files in the current dirty set reappear, collapsed.
-9. Click "Refresh" → manual poll fires immediately.
+9. Click `+` → fuzzy file picker opens; pick a file → card appears.
 10. Open the applet on a non-git cwd → see "Not a git repo" message; no polls run.
 11. New untracked file → collapsed card with "(untracked)" badge; expanded view shows full content as additions.
 12. File deleted → collapsed card with "deleted" badge; expanded view shows previous content as deletions.

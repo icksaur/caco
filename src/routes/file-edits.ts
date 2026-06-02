@@ -55,17 +55,6 @@ router.get('/sessions/:sessionId/file-edits/snapshot', async (req: Request, res:
 });
 
 /**
- * POST /api/sessions/:sessionId/file-edits/refresh
- * Manual poll trigger from the applet's Refresh button.
- */
-router.post('/sessions/:sessionId/file-edits/refresh', (req: Request, res: Response) => {
-  const sessionId = req.params.sessionId as string;
-  if (!ensureSession(sessionId, res)) return;
-  poller?.triggerPoll(sessionId, 'manual-refresh');
-  res.json({ ok: true });
-});
-
-/**
  * POST /api/sessions/:sessionId/file-edits/open
  * V3.1: materialize an EditEntry for any repo path picked by the user.
  * Body: { relativePath: string }. Returns { edit: EditEntry } or

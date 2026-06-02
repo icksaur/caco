@@ -20,7 +20,6 @@
 (function() {
   var repoEl = document.getElementById('feRepo');
   var countsEl = document.getElementById('feCounts');
-  var refreshBtn = document.getElementById('feRefresh');
   var resetBtn = document.getElementById('feReset');
   var openBtn = document.getElementById('feOpen');
   var emptyEl = document.getElementById('feEmpty');
@@ -1548,20 +1547,6 @@
       console.warn('[file-edits] snapshot failed:', err);
     }
   }
-
-  refreshBtn.addEventListener('click', async function() {
-    refreshBtn.disabled = true;
-    refreshBtn.classList.add('fe-spin');
-    try {
-      if (sessionId) {
-        await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/refresh', { method: 'POST' });
-      }
-      await fetchSnapshot();
-    } finally {
-      refreshBtn.disabled = false;
-      refreshBtn.classList.remove('fe-spin');
-    }
-  });
 
   resetBtn.addEventListener('click', function() {
     dismissed.clear();

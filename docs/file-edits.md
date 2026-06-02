@@ -375,26 +375,108 @@ Explicit V2 non-goals (deferred to V3 — see backlog below):
 
 ## V3 backlog (deferred — do not pull into V2)
 
-Captured for record; no commitment, no ordering until V2 ships.
+Captured for record; no commitment, no ordering until V2 ships. Operator
+(2026-06-01) flagged the **file-navigability** theme as the front-runner:
+the applet is "almost a decent read-only text editor" but can't open a
+file without an edit having happened first. That theme leads V3 over the
+git-status replacement, which is deprioritized.
 
-- v3 becomes the full **git-status replacement** (stage/unstage per file & per hunk, commit composer with co-author toggle, push with ahead/behind, discard hunk/file with confirm). Retires the existing `git-status` applet.
-- **Color/contrast pass on diff rows** — operator-reported (2026-05-31) that some hljs token colors are unreadable on top of the red/green row tint. Need a systematic legibility pass: pick row tints that preserve hljs token contrast across the full hljs-dark palette, or reverse the layering (token color wins).
-- **Side-by-side / split-pane diff view** — operator-deferred from V2. Two columns (HEAD | working tree) for files above a width/size threshold; per-card toggle.
-- **Commit lease**: while file-edits has unread changes, block agent-initiated `git commit`. Surface a "release lease" button.
-- **git fsmonitor** for sub-second updates.
-- **Server-side per-path hash + porcelain v2 mtime gating** to skip diff subprocess on no-op polls.
-- **Combined multi-source signals**: surface agent edit/create/write tool hooks distinctly from git-dirty, with a decay badge for "just touched by agent."
-- **Untracked-ignored toggle** for `.gitignore`'d paths the agent wrote.
-- **Per-card jump-to-editor** (`vscode://file/...`).
-- **Filter bar** — by path glob, by status, by "touched in last N minutes."
-- **Reveal-in-tree sidebar.**
-- **Keyboard navigation** — j/k between cards, e expand, x dismiss.
-- **Truncation "show more"** instead of silent cap.
-- **Binary image preview** (before/after thumbnails).
-- **Conflict-marker awareness** — distinct status for files containing merge markers.
-- **Per-repo shared poller** across sessions on same cwd.
-- **Multi-repo / multi-cwd** stacking.
-- **Replay buffer** for edits prior to applet open beyond what snapshot covers.
+### File navigability (operator priority, 2026-06-01)
+
+The applet stacks files modified by the agent or by user tools. It does
+not currently support browsing the repo or pinning files of interest.
+Goal: turn it into a competent read-only viewer with persistence.
+
+- **Open arbitrary file (no edit required).** Dropdown / file picker /
+  "+" button that adds any path in the repo to the stacked view as a
+  clean card with full HEAD content. The card persists like any other.
+  This is the largest single feature on the V3 list.
+- **Per-card pin.** Opposite of dismiss; "keep this card even if cap
+  eviction would otherwise drop it." Pinned cards are also exempt from
+  the 50-card cap counting.
+- **Reveal-in-tree sidebar.** File-tree view of the repo (or a filtered
+  view of the dirty set) for click-to-add.
+- **Per-card jump-to-editor** (`vscode://file/...`). Open the path in
+  the user's external editor.
+- **Collapse-all / Expand-all toolbar buttons.** Bulk control once
+  card counts get high.
+- **Filter bar** — by path glob, by status, by "touched in last N
+  minutes."
+- **Stale persisted-card cleanup** — a path persisted from yesterday
+  that's now deleted from HEAD renders an empty-body card forever.
+  Auto-prune or surface a "stale" badge with a one-click dismiss.
+
+### Polling and responsiveness
+
+- **git fsmonitor integration** for sub-second updates. Replaces the
+  1.5s/5s polling loop. The user-facing win is detecting edits made
+  outside the agent (in VSCode, in the shell) in <1s rather than 1.5s.
+- **chokidar fallback / supplement** — simpler than fsmonitor; watch
+  the repo root with `.gitignore` filtering as a stopgap before
+  fsmonitor.
+- **Server-side per-path hash + porcelain v2 mtime gating** to skip
+  `git diff` subprocess on no-op polls. Reduces server load; complements
+  fsmonitor.
+- **Per-repo shared poller** across sessions on the same cwd. Today
+  each session polls independently.
+- **Multi-source signals** — surface agent `edit`/`create`/`write` tool
+  hooks distinctly from git-dirty, with a decay badge for "just touched
+  by agent." Helps spot churn the agent did and immediately reverted.
+
+### Display fidelity
+
+- **Color/contrast pass on diff rows** — operator-reported (2026-05-31).
+  Partially addressed (bright-text fix on word marks, opacity cleanup
+  on ctx rows), but some hljs tokens on the 18% row tint may still need
+  systematic tuning across the full hljs-dark palette.
+- **Side-by-side / split-pane diff view** — operator-deferred from V2.
+  Two columns (HEAD | working tree) for files above a width/size
+  threshold; per-card toggle.
+- **Word-level diff polish** — consider switching to a `<ins>`/`<del>`
+  shape instead of `<mark>` for semantic correctness; current fix is
+  visual-only.
+- **Binary image preview** (before/after thumbnails) for images.
+- **Conflict-marker awareness** — distinct status for files containing
+  `<<<<<<<` merge markers.
+- **Truncation "show more"** instead of silent cap on large diffs.
+- **Cross-applet shared "code body" stylesheet** — file-edits is on
+  Caco design tokens (`--text-sm`, `--font-mono`); text-editor still
+  uses hardcoded `pt` units. Migrate text-editor onto the same tokens,
+  or extract a shared `code.css` referenced by both applets.
+
+### Workflow / git-status replacement (deferred; operator: not yet)
+
+Operator (2026-06-01): "I'm not too keen on git-status replacement yet."
+Move below file-navigability in priority.
+
+- **Stage / unstage / commit / push / discard** per file and per hunk.
+  Retires the existing `git-status` applet.
+- **Commit composer** in-applet — subject + body + `Co-authored-by`
+  toggle.
+- **Commit lease** — while file-edits has unread changes (or an
+  explicit lease), block agent-initiated `git commit`. Surface a
+  "release lease" button.
+
+### Input
+
+- **Keyboard navigation** — j/k between cards, e expand, x dismiss,
+  Enter open-in-text-editor, / focus filter bar.
+
+### Other
+
+- **Untracked-ignored toggle** for `.gitignore`'d paths the agent
+  wrote (build artifacts).
+- **Persistence migration** — schemaVersion 1 only today; future field
+  additions need a forward-compat path beyond "drop unknown."
+- **Persistence reconciliation** — when the JSON file accumulates stale
+  entries (e.g. user dismissed many over a long session), the snapshot
+  slices to the cap and the rest become orphans on disk. Trim on
+  load, or expose a "compact" action.
+- **Replay buffer** for edits prior to applet open beyond what
+  snapshot covers (currently snapshot fills cleanly for persisted-
+  clean, but transient mid-edit states between snapshot and first
+  `caco.edit` are lost).
+
 
 ## Operator-decided defaults (post-questionnaire)
 

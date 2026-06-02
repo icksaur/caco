@@ -901,6 +901,22 @@
     time.dataset.iso = edit.timestamp;
     time.textContent = timeAgo(edit.timestamp);
 
+    // V3 MVP: open in external editor (vscode://). Absolute `path` is
+    // set by the server; if the path is missing we omit the link rather
+    // than fabricate one.
+    var openBtn = null;
+    if (edit.path) {
+      openBtn = document.createElement('a');
+      openBtn.className = 'fe-open';
+      openBtn.href = 'vscode://file/' + encodeURI(edit.path).replace(/#/g, '%23');
+      openBtn.title = 'Open in VS Code';
+      openBtn.setAttribute('aria-label', 'Open in editor');
+      openBtn.textContent = '↗';
+      // Prevent the header click (which toggles collapse) from firing
+      // when the user clicks the link.
+      openBtn.addEventListener('click', function(e) { e.stopPropagation(); });
+    }
+
     var xBtn = document.createElement('button');
     xBtn.className = 'fe-x';
     xBtn.type = 'button';
@@ -910,6 +926,7 @@
     head.appendChild(chevron);
     head.appendChild(status);
     head.appendChild(path);
+    if (openBtn) head.appendChild(openBtn);
     head.appendChild(time);
     head.appendChild(xBtn);
 
@@ -992,6 +1009,24 @@
         : newEdit.relativePath;
       status.className = 'fe-status fe-s-' + (newEdit.status || 'modified');
       status.textContent = statusLabel(newEdit.status);
+      // V3 MVP: keep the open-in-editor link in sync. The link may not
+      // exist on the placeholder created without an absolute path; in
+      // that case lazily insert it the first time we get a real path.
+      if (newEdit.path) {
+        var href = 'vscode://file/' + encodeURI(newEdit.path).replace(/#/g, '%23');
+        if (openBtn) {
+          openBtn.href = href;
+        } else {
+          openBtn = document.createElement('a');
+          openBtn.className = 'fe-open';
+          openBtn.href = href;
+          openBtn.title = 'Open in VS Code';
+          openBtn.setAttribute('aria-label', 'Open in editor');
+          openBtn.textContent = '↗';
+          openBtn.addEventListener('click', function(e) { e.stopPropagation(); });
+          head.insertBefore(openBtn, time);
+        }
+      }
       // If body is currently expanded, re-render the diff to reflect the new content.
       if (card.dataset.expanded === 'true') {
         renderBody(body, newEdit);

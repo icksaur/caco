@@ -183,6 +183,21 @@
   color: var(--color-error);
 }
 
+/* V3 MVP: open-in-editor link to the right of the path. Uses
+ * vscode://file/<absolute>. Quiet by default, accent on hover. */
+.fe-open {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: var(--text-base);
+  line-height: 1;
+  padding: 0 var(--space-xs);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.fe-open:hover {
+  color: var(--color-accent);
+}
+
 .fe-diff {
   margin: 0;
   padding: var(--space-sm) var(--space-md);

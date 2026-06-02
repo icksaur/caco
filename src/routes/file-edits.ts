@@ -98,9 +98,12 @@ router.post('/sessions/:sessionId/file-edits/open', async (req: Request, res: Re
   // Best-effort post-join containment check. The poller resolves
   // repoRoot internally (via findRepoRoot at attach time); for the
   // route's defense-in-depth we re-check against cwd, which is a
-  // tighter bound than repoRoot for subdirectory sessions.
-  const abs = resolve(join(cwd, relPath));
-  if (!abs.startsWith(cwd + sep) && abs !== cwd) {
+  // tighter bound than repoRoot for subdirectory sessions. Normalize
+  // cwd via resolve() so a trailing-slash cwd doesn't break the
+  // startsWith check (cwd + sep would become path//).
+  const normalizedCwd = resolve(cwd);
+  const abs = resolve(join(normalizedCwd, relPath));
+  if (!abs.startsWith(normalizedCwd + sep) && abs !== normalizedCwd) {
     res.status(400).json({ error: 'relativePath escapes session cwd' });
     return;
   }

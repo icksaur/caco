@@ -52,6 +52,11 @@ export interface EditEntry {
   renamedFrom?: string;
   isBinary?: boolean;
   timestamp: string;
+  /** V3.1: working-tree file mtime in ms (Date.now() epoch). Drives
+   *  client-side "most recent edit" picks for the Follow-edits jump
+   *  target. Absent for clean entries with no on-disk file (deleted),
+   *  binary fallback paths that couldn't stat, etc. */
+  mtimeMs?: number;
   truncated?: { hiddenLines: number };
   /** V2: full-file diff payload. Absent when fallback to hunk view is required
    *  (binary, deleted, files exceeding FULLFILE_LINE_CAP). For clean entries
@@ -349,13 +354,27 @@ export interface GitEditPoller {
 export function createGitEditPoller(): GitEditPoller {
   const sessions = new Map<string, SessionPollerState>();
 
+  /** Best-effort file mtime. Returns undefined on stat failure (deleted,
+   *  unreadable). Used to populate EditEntry.mtimeMs so the client can
+   *  pick the freshest edit for the Follow-edits jump target. */
+  async function readMtimeMs(absPath: string): Promise<number | undefined> {
+    try {
+      const st = await stat(absPath);
+      return st.mtimeMs;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Build one EditEntry for a single path. Shared between pollSession and snapshot. */
   async function buildEntry(repoRoot: string, path: string, info: { status: FileStatus; renamedFrom?: string }): Promise<EditEntry> {
     const { diff, isBinary, truncated } = await fetchDiff(repoRoot, path, info.status);
     const originalRelPath = info.renamedFrom ?? path;
+    const absPath = join(repoRoot, path);
     const fullFile = await computeFullFile(repoRoot, path, originalRelPath, info.status, isBinary, diff);
+    const mtimeMs = await readMtimeMs(absPath);
     const entry: EditEntry = {
-      path: join(repoRoot, path),
+      path: absPath,
       relativePath: path,
       diff,
       status: info.status,
@@ -365,6 +384,7 @@ export function createGitEditPoller(): GitEditPoller {
     if (isBinary) entry.isBinary = true;
     if (truncated) entry.truncated = truncated;
     if (fullFile) entry.fullFile = fullFile;
+    if (mtimeMs !== undefined) entry.mtimeMs = mtimeMs;
     return entry;
   }
 
@@ -376,24 +396,21 @@ export function createGitEditPoller(): GitEditPoller {
   async function buildCleanEntry(repoRoot: string, relPath: string): Promise<EditEntry | null> {
     const headText = await readHeadBlob(repoRoot, relPath);
     if (headText === null) return null;
+    const absPath = join(repoRoot, relPath);
     const lines = toLines(headText);
-    if (lines.length > FULLFILE_LINE_CAP) {
-      // Too large for fullFile; emit a clean entry without fullFile so the
-      // client renders the header only.
-      return {
-        path: join(repoRoot, relPath),
-        relativePath: relPath,
-        status: 'clean',
-        timestamp: new Date().toISOString(),
-      };
-    }
-    return {
-      path: join(repoRoot, relPath),
+    const mtimeMs = await readMtimeMs(absPath);
+    const base: EditEntry = {
+      path: absPath,
       relativePath: relPath,
       status: 'clean',
       timestamp: new Date().toISOString(),
-      fullFile: { headLines: lines, workLines: lines, hunks: [] },
     };
+    if (mtimeMs !== undefined) base.mtimeMs = mtimeMs;
+    if (lines.length > FULLFILE_LINE_CAP) {
+      return base;
+    }
+    base.fullFile = { headLines: lines, workLines: lines, hunks: [] };
+    return base;
   }
 
   /** V3.1: Build an EditEntry for an untracked path picked by the user.
@@ -409,25 +426,21 @@ export function createGitEditPoller(): GitEditPoller {
       return null;
     }
     const workLines = toLines(workText);
-    if (workLines.length > FULLFILE_LINE_CAP) {
-      return {
-        path: absPath,
-        relativePath: relPath,
-        status: 'untracked',
-        timestamp: new Date().toISOString(),
-      };
-    }
-    return {
+    const mtimeMs = await readMtimeMs(absPath);
+    const base: EditEntry = {
       path: absPath,
       relativePath: relPath,
       status: 'untracked',
       timestamp: new Date().toISOString(),
-      fullFile: {
-        headLines: null,
-        workLines,
-        hunks: [{ headStart: 0, headLen: 0, workStart: 1, workLen: workLines.length }],
-      },
     };
+    if (mtimeMs !== undefined) base.mtimeMs = mtimeMs;
+    if (workLines.length > FULLFILE_LINE_CAP) return base;
+    base.fullFile = {
+      headLines: null,
+      workLines,
+      hunks: [{ headStart: 0, headLen: 0, workStart: 1, workLen: workLines.length }],
+    };
+    return base;
   }
 
   async function pollSession(sessionId: string, source: 'timer' | 'event'): Promise<void> {

@@ -384,10 +384,10 @@
     if (scrollMode === 'sticky') return;
     scrollMode = 'sticky';
     stickyChangedPaths.clear();
-    // Reset jump target on sticky entry so the user's first Follow
-    // click after a manual sticky-entry (chevron toggle, X dismiss) goes
-    // to the next edit that arrives — not to something stale.
-    lastChangedCard = null;
+    // lastChangedCard is intentionally NOT reset. It tracks the most
+    // recently edited card across the session; Follow-edits jumps to
+    // it. Resetting on enterSticky would mean a user who scrolls into
+    // sticky right after an edit has no Follow target.
     updateFollowButton();
   }
 
@@ -412,16 +412,30 @@
   }
 
   /** Record changed paths from an apply. Updates the sticky badge set
-   *  and the lastChangedCard target. Picks the LAST card in apply order
-   *  whose DOM element still exists (post-eviction). */
+   *  and the lastChangedCard target. Picks the card whose backing edit
+   *  has the highest mtimeMs (most recently modified file on disk) —
+   *  NOT apply order, which is git status / poll order (alphabetical-ish)
+   *  rather than chronological. Falls back to apply order if mtimes
+   *  are absent or tied. */
   function recordChanged(paths) {
     for (var i = 0; i < paths.length; i++) {
       if (scrollMode === 'sticky') stickyChangedPaths.add(paths[i]);
     }
-    for (var j = paths.length - 1; j >= 0; j--) {
-      var c = cards.get(paths[j]);
-      if (c) { lastChangedCard = c; break; }
+    var best = null;
+    var bestMtime = -1;
+    for (var j = 0; j < paths.length; j++) {
+      var card = cards.get(paths[j]);
+      if (!card) continue;
+      var e = card._edit;
+      var m = (e && typeof e.mtimeMs === 'number') ? e.mtimeMs : -1;
+      // Prefer strictly-greater mtime; if no mtime info at all, fall
+      // back to "last in apply order" (j increases, so later wins).
+      if (m > bestMtime || (m === -1 && bestMtime === -1)) {
+        best = card;
+        bestMtime = m;
+      }
     }
+    if (best) lastChangedCard = best;
   }
 
   /** Pick an anchor card for withAnchor's read/write pair. Per spec

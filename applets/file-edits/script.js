@@ -367,6 +367,14 @@
    *  session. Drives the Follow-edits badge counter. Cleared on Sticky
    *  entry and on Follow-edits click. */
   var stickyChangedPaths = new Set();
+  /** Single source of truth for "where to jump on the next scroll
+   *  gesture." Set whenever applyEdits touches a card (autoscroll OR
+   *  sticky). Used by both:
+   *   - autoscroll mode: jumpToLastChanged(false) fires immediately
+   *   - Follow-edits button: jumpToLastChanged(true) on click
+   *  Both share the same target so the autoscroll behavior and the
+   *  Follow button always agree on which card to surface. */
+  var lastChangedCard = null;
   /** The Follow-edits floating button; created lazily on first Sticky entry. */
   var followBtn = null;
   /** Threshold (px) for "scroll to top" → exit Sticky. */
@@ -376,6 +384,10 @@
     if (scrollMode === 'sticky') return;
     scrollMode = 'sticky';
     stickyChangedPaths.clear();
+    // Reset jump target on sticky entry so the user's first Follow
+    // click after a manual sticky-entry (chevron toggle, X dismiss) goes
+    // to the next edit that arrives — not to something stale.
+    lastChangedCard = null;
     updateFollowButton();
   }
 
@@ -384,6 +396,32 @@
     scrollMode = 'autoscroll';
     stickyChangedPaths.clear();
     updateFollowButton();
+  }
+
+  /** Single jump entry point used by BOTH the autoscroll-on-edit path
+   *  and the Follow-edits button click. force=false respects the
+   *  fully-visible no-op (autoscroll on edit); force=true always scrolls
+   *  (user click). */
+  function jumpToLastChanged(force) {
+    if (!lastChangedCard) return;
+    if (!document.contains(lastChangedCard)) {
+      lastChangedCard = null;
+      return;
+    }
+    scrollToCard(lastChangedCard, force);
+  }
+
+  /** Record changed paths from an apply. Updates the sticky badge set
+   *  and the lastChangedCard target. Picks the LAST card in apply order
+   *  whose DOM element still exists (post-eviction). */
+  function recordChanged(paths) {
+    for (var i = 0; i < paths.length; i++) {
+      if (scrollMode === 'sticky') stickyChangedPaths.add(paths[i]);
+    }
+    for (var j = paths.length - 1; j >= 0; j--) {
+      var c = cards.get(paths[j]);
+      if (c) { lastChangedCard = c; break; }
+    }
   }
 
   /** Pick an anchor card for withAnchor's read/write pair. Per spec
@@ -480,32 +518,17 @@
     followBtn.type = 'button';
     followBtn.hidden = true;
     followBtn.addEventListener('click', function() {
-      // Scroll to the topmost-in-DOM card affected this session, then
-      // exit sticky. Never reorder.
-      var target = null;
-      streamChildren().some(function(c) {
-        if (stickyChangedPaths.has(c.dataset.path)) { target = c; return true; }
-        return false;
-      });
+      // Single source of truth: same target the autoscroll path would
+      // have used. enterAutoscroll first so the scroll write isn't
+      // suppressed by the sticky branch. force=true so we always
+      // scroll even if the target is already visible (user explicitly
+      // asked to be taken there).
       enterAutoscroll();
-      if (target) {
-        scrollToCard(target, true);
-      } else {
-        // No identified changed card — scroll to bottom of stream
-        // (most recently created cards live there).
-        programmaticScrollTo(streamEl.scrollHeight - streamEl.clientHeight);
-      }
+      jumpToLastChanged(true);
     });
     // Insert as sibling of streamEl inside the same offset parent.
     streamEl.parentNode.insertBefore(followBtn, streamEl.nextSibling);
     return followBtn;
-  }
-
-  function streamChildren() {
-    var out = [];
-    var n = streamEl.children;
-    for (var i = 0; i < n.length; i++) out.push(n[i]);
-    return out;
   }
 
   function updateFollowButton() {
@@ -1359,14 +1382,13 @@
 
   function applyEdits(edits, cleared, cleanedEdits, options) {
     options = options || {};
-    // Collect the actual mutations as closures so we can run them all
-    // inside one withAnchor (rAF) when in Sticky, and identify the
-    // topmost changed card for autoscroll otherwise.
+    // Collect mutations as closures; recordChanged runs after applyAll
+    // and picks lastChangedCard = last apply-order card that survived.
     var mutations = [];
-    var topmostChangedCard = null;
-    /** Track the relativePath of every file actually changed by this
-     *  apply (new card or in-place update or clean). Used by the
-     *  Follow-edits badge counter. */
+    /** Track relativePath of every file touched by this apply (new card
+     *  or in-place update or clean). Apply order = the order we visit
+     *  cleanedEdits → cleared → edits. recordChanged uses the LAST entry
+     *  (most recently touched in the apply) as the jump target. */
     var changedPathsThisApply = [];
     /** V2.1: paths covered by cleanedEdits should not also be processed
      *  from `cleared` (which would emit a content-less markClean and
@@ -1381,7 +1403,6 @@
         if (cards.has(p)) {
           mutations.push(function() { markClean(p, entry); });
           changedPathsThisApply.push(p);
-          if (!topmostChangedCard) topmostChangedCard = cards.get(p);
         } else if (!dismissed.has(p)) {
           // The path is in cleanedEdits but no card exists locally yet
           // (e.g. snapshot raced with poll). Spawn a clean card.
@@ -1389,7 +1410,6 @@
             var card = makeCard(entry);
             streamEl.appendChild(card);
             cards.set(p, card);
-            if (!topmostChangedCard) topmostChangedCard = card;
           });
           changedPathsThisApply.push(p);
         }
@@ -1402,7 +1422,6 @@
         if (cards.has(p)) {
           mutations.push(function() { markClean(p); });
           changedPathsThisApply.push(p);
-          if (!topmostChangedCard) topmostChangedCard = cards.get(p);
         }
       });
     }
@@ -1426,9 +1445,6 @@
         }
         mutations.push(function() { existing._renderDiff(edit); });
         changedPathsThisApply.push(edit.relativePath);
-        if (!topmostChangedCard || compareDomOrder(existing, topmostChangedCard) < 0) {
-          topmostChangedCard = existing;
-        }
         return;
       }
       // New card: append to bottom. Cards are never reordered.
@@ -1436,7 +1452,6 @@
         var card = makeCard(edit);
         streamEl.appendChild(card);
         cards.set(edit.relativePath, card);
-        if (!topmostChangedCard) topmostChangedCard = card;
       });
       changedPathsThisApply.push(edit.relativePath);
     });
@@ -1464,21 +1479,17 @@
 
     if (scrollMode === 'sticky') {
       withAnchor(applyAll);
-      changedPathsThisApply.forEach(function(p) { stickyChangedPaths.add(p); });
-      updateFollowButton();
+      // recordChanged runs after withAnchor's rAF so the cards Map is
+      // populated for newly-created cards. Use the same rAF tick.
+      requestAnimationFrame(function() {
+        recordChanged(changedPathsThisApply);
+        updateFollowButton();
+      });
     } else {
       applyAll();
-      if (topmostChangedCard && !options.suppressScroll) scrollToCard(topmostChangedCard);
+      recordChanged(changedPathsThisApply);
+      if (!options.suppressScroll) jumpToLastChanged(false);
     }
-  }
-
-  /** Compare two cards by DOM order: returns <0 if `a` precedes `b`,
-   *  0 if same, >0 if `a` follows `b`. */
-  function compareDomOrder(a, b) {
-    if (a === b) return 0;
-    var pos = a.compareDocumentPosition(b);
-    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
-    return 1;
   }
 
   /** V2.1: load persisted cards + dismissed, then fetch snapshot. Initial

@@ -275,16 +275,37 @@
  * red/green tint with a darker, fully-saturated highlight so the changed
  * tokens read distinctly. Inherit the row's text color (the mark is just
  * a background swap). */
+/* Phase 2: word-level intra-line marks. Sit on top of the row-level
+ * red/green tint with a darker, fully-saturated highlight so the changed
+ * tokens read distinctly.
+ *
+ * V2.1: force readable text inside marks. `color: inherit` would keep the
+ * hljs token color, which for comments (low-contrast gray) on a saturated
+ * green/red background is unreadable. The bright row tint already signals
+ * "this token changed"; the foreground must always be the theme's brightest
+ * text color and forceably opaque. !important wins against hljs's per-token
+ * color rules (e.g. .hljs-comment) which would otherwise leak through to
+ * the descendant tokens we wrap. */
+.fe-diff[data-mode="fullfile"] mark.fe-w-add,
+.fe-diff[data-mode="fullfile"] mark.fe-w-add * {
+  color: var(--color-text-bright) !important;
+  font-style: normal !important;
+  opacity: 1 !important;
+}
+.fe-diff[data-mode="fullfile"] mark.fe-w-del,
+.fe-diff[data-mode="fullfile"] mark.fe-w-del * {
+  color: var(--color-text-bright) !important;
+  font-style: normal !important;
+  opacity: 1 !important;
+}
 .fe-diff[data-mode="fullfile"] mark.fe-w-add {
   background: rgba(0, 200, 100, 0.45);
   background: color-mix(in oklab, var(--color-success-bright) 50%, transparent);
-  color: inherit;
   border-radius: 2px;
 }
 .fe-diff[data-mode="fullfile"] mark.fe-w-del {
   background: rgba(220, 70, 70, 0.45);
   background: color-mix(in oklab, var(--color-error) 50%, transparent);
-  color: inherit;
   border-radius: 2px;
 }
 

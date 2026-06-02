@@ -85,7 +85,7 @@ router.post('/sessions/:sessionId/file-edits/open', async (req: Request, res: Re
     res.status(400).json({ error: 'relativePath contains NUL' });
     return;
   }
-  if (relPath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(relPath)) {
+  if (relPath.startsWith('/') || /^[a-zA-Z]:/.test(relPath) || relPath.startsWith('\\\\')) {
     res.status(400).json({ error: 'relativePath must not be absolute' });
     return;
   }

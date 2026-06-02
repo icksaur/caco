@@ -22,7 +22,7 @@ import { join } from 'path';
 import { broadcastEvent } from './event-bus.js';
 import type { SessionEvent } from './types.js';
 
-export type FileStatus = 'modified' | 'untracked' | 'deleted' | 'renamed';
+export type FileStatus = 'modified' | 'untracked' | 'deleted' | 'renamed' | 'clean';
 
 export interface DiffHunk {
   /** 1-indexed HEAD line where removed region starts. */
@@ -47,14 +47,16 @@ export interface FullFile {
 export interface EditEntry {
   path: string;            // absolute
   relativePath: string;
-  diff: string;
+  /** Unified-diff text. Optional: clean entries (status='clean') omit it. */
+  diff?: string;
   status: FileStatus;
   renamedFrom?: string;
   isBinary?: boolean;
   timestamp: string;
   truncated?: { hiddenLines: number };
   /** V2: full-file diff payload. Absent when fallback to hunk view is required
-   *  (binary, deleted, files exceeding FULLFILE_LINE_CAP). */
+   *  (binary, deleted, files exceeding FULLFILE_LINE_CAP). For clean entries
+   *  (V2.1), present with hunks=[] and workLines=headLines. */
   fullFile?: FullFile;
 }
 
@@ -333,8 +335,11 @@ export interface GitEditPoller {
   detachFromSession(sessionId: string): void;
   triggerPoll(sessionId: string, source: 'event' | 'manual-refresh'): void;
   /** Return the current dirty set as edits (used by snapshot endpoint).
-   *  Lazy-attaches if the session isn't tracked yet. */
-  snapshot(sessionId: string, cwd?: string): Promise<EditEntry[]>;
+   *  Lazy-attaches if the session isn't tracked yet.
+   *  V2.1: optional persistedCleanPaths — paths from the persisted card
+   *  list. Any persisted path NOT currently dirty gets a clean EditEntry
+   *  built from `git show HEAD:<path>` so the client renders its body. */
+  snapshot(sessionId: string, cwd?: string, persistedCleanPaths?: string[]): Promise<EditEntry[]>;
 }
 
 export function createGitEditPoller(): GitEditPoller {
@@ -357,6 +362,34 @@ export function createGitEditPoller(): GitEditPoller {
     if (truncated) entry.truncated = truncated;
     if (fullFile) entry.fullFile = fullFile;
     return entry;
+  }
+
+  /** V2.1: Build a clean EditEntry for a path that exists in HEAD but is
+   *  clean in the working tree. Synthesizes fullFile with workLines=headLines
+   *  and hunks=[] so the client renders the full file as all-context rows.
+   *  Returns null if the HEAD blob cannot be read (path missing from HEAD,
+   *  e.g. user committed a deletion). */
+  async function buildCleanEntry(repoRoot: string, relPath: string): Promise<EditEntry | null> {
+    const headText = await readHeadBlob(repoRoot, relPath);
+    if (headText === null) return null;
+    const lines = toLines(headText);
+    if (lines.length > FULLFILE_LINE_CAP) {
+      // Too large for fullFile; emit a clean entry without fullFile so the
+      // client renders the header only.
+      return {
+        path: join(repoRoot, relPath),
+        relativePath: relPath,
+        status: 'clean',
+        timestamp: new Date().toISOString(),
+      };
+    }
+    return {
+      path: join(repoRoot, relPath),
+      relativePath: relPath,
+      status: 'clean',
+      timestamp: new Date().toISOString(),
+      fullFile: { headLines: lines, workLines: lines, hunks: [] },
+    };
   }
 
   async function pollSession(sessionId: string, source: 'timer' | 'event' | 'manual-refresh'): Promise<void> {
@@ -390,11 +423,21 @@ export function createGitEditPoller(): GitEditPoller {
       });
       for (const e of diffs) { if (e) edits.push(e); }
 
+      // V2.1: build clean entries for paths transitioning dirty→clean
+      // so the client can render the full HEAD content immediately.
+      const cleanedEdits: EditEntry[] = [];
+      if (cleared.length > 0) {
+        const cleans = await mapWithConcurrency(cleared, DIFF_CONCURRENCY, async (path) => {
+          return buildCleanEntry(state.repoRoot, path);
+        });
+        for (const c of cleans) { if (c) cleanedEdits.push(c); }
+      }
+
       state.lastDirty = current;
 
       broadcastEvent(sessionId, {
         type: 'caco.edit',
-        data: { edits, cleared, pollSource: source },
+        data: { edits, cleared, cleanedEdits, pollSource: source },
       } as SessionEvent);
     } catch (err) {
       console.warn(`[FILE-EDITS] poll error for ${sessionId.slice(0, 8)}:`, (err as Error).message);
@@ -462,7 +505,7 @@ export function createGitEditPoller(): GitEditPoller {
       }, DEBOUNCE_MS);
     },
 
-    async snapshot(sessionId: string, cwd?: string): Promise<EditEntry[]> {
+    async snapshot(sessionId: string, cwd?: string, persistedCleanPaths?: string[]): Promise<EditEntry[]> {
       let state = sessions.get(sessionId);
       if (!state && cwd) {
         await this.attachToSession(sessionId, cwd);
@@ -476,6 +519,21 @@ export function createGitEditPoller(): GitEditPoller {
       const edits = await mapWithConcurrency(entries, DIFF_CONCURRENCY, async ([path, info]) => {
         return buildEntry(state.repoRoot, path, info);
       });
+      // V2.1: also build clean entries for persisted paths that aren't
+      // currently dirty. Bounded by 50-card cap minus dirty count so the
+      // total snapshot size stays under the client's visible cap.
+      if (persistedCleanPaths && persistedCleanPaths.length > 0) {
+        const slots = Math.max(0, 50 - edits.length);
+        const cleanCandidates = persistedCleanPaths
+          .filter((p) => !current.has(p))
+          .slice(-slots); // tail = most-recently-touched per spec
+        if (cleanCandidates.length > 0) {
+          const cleans = await mapWithConcurrency(cleanCandidates, DIFF_CONCURRENCY, async (path) => {
+            return buildCleanEntry(state.repoRoot, path);
+          });
+          for (const c of cleans) { if (c) edits.push(c); }
+        }
+      }
       return edits;
     },
   };

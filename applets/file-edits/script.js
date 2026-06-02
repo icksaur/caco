@@ -37,6 +37,94 @@
   var VISIBLE_CAP = 50;
   var sessionId = null;
 
+  // ── V2.1: Persistence ─────────────────────────────────────────────────
+  //
+  // Per-session card list persisted via /api/sessions/<id>/file-edits/cards.
+  // Persisted: card relativePath + collapsed flag + dismissed set.
+  // See docs/file-edits-v2.1.md §3.
+  var PERSIST_DEBOUNCE_MS = 250;
+  var persistTimer = null;
+  /** Captured at debounce-schedule time so a session switch during the
+   *  debounce window can flush the write against the *old* session ID. */
+  var persistPendingSid = null;
+
+  function buildPersistBody() {
+    // Iterate cards in DOM order (insertion order of streamEl.children).
+    var list = [];
+    var n = streamEl.children;
+    for (var i = 0; i < n.length; i++) {
+      var c = n[i];
+      var p = c.dataset.path;
+      if (!p) continue;
+      list.push({
+        relativePath: p,
+        collapsed: userCollapsed.has(p),
+      });
+    }
+    var dis = [];
+    dismissed.forEach(function(p) { dis.push(p); });
+    return { schemaVersion: 1, cards: list, dismissed: dis };
+  }
+
+  function flushPersist() {
+    if (!persistTimer) return;
+    clearTimeout(persistTimer);
+    var sid = persistPendingSid;
+    persistTimer = null;
+    persistPendingSid = null;
+    if (!sid) return;
+    var body = buildPersistBody();
+    void doPersistPut(sid, body);
+  }
+
+  function schedulePersist() {
+    if (!sessionId) return;
+    if (persistTimer) clearTimeout(persistTimer);
+    persistPendingSid = sessionId;
+    persistTimer = setTimeout(function() {
+      var sid = persistPendingSid;
+      persistTimer = null;
+      persistPendingSid = null;
+      if (!sid) return;
+      void doPersistPut(sid, buildPersistBody());
+    }, PERSIST_DEBOUNCE_MS);
+  }
+
+  async function doPersistPut(sid, body) {
+    try {
+      await fetch('/api/sessions/' + encodeURIComponent(sid) + '/file-edits/cards', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      console.warn('[file-edits] persist failed:', err);
+    }
+  }
+
+  /** Synchronous best-effort send via sendBeacon for beforeunload. */
+  function flushPersistBeacon() {
+    if (!sessionId) return;
+    try {
+      var body = buildPersistBody();
+      var blob = new Blob([JSON.stringify(body)], { type: 'application/json' });
+      navigator.sendBeacon(
+        '/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/cards',
+        blob
+      );
+    } catch (_) { /* best effort */ }
+  }
+  window.addEventListener('beforeunload', flushPersistBeacon);
+
+  async function loadPersistedCards(sid) {
+    try {
+      var res = await fetch('/api/sessions/' + encodeURIComponent(sid) + '/file-edits/cards');
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (_) { return null; }
+  }
+  // ── End persistence ───────────────────────────────────────────────────
+
   // ── Phase 3: Sticky / Autoscroll state machine ─────────────────────────
   //
   // States: 'autoscroll' (default) and 'sticky'. See docs/file-edits-v2.md
@@ -716,7 +804,11 @@
     // object so fold expansion picks it up transparently.
     var marks = computeAllWordMarks(rawRows);
     marks.forEach(function(m, idx) { rawRows[idx].mark = m; });
-    var rows = collapseFolds(rawRows);
+    // V2.1: skip fold collapse when every row is ctx (clean file or any
+    // entirely-unchanged file). Folding an all-ctx file would hide the
+    // entire body, which defeats the "always show the file content" goal.
+    var allCtx = rawRows.every(function(r) { return r.kind === 'ctx'; });
+    var rows = allCtx ? rawRows : collapseFolds(rawRows);
     if (rows.length === 0) {
       body.innerHTML = '<div class="fe-d-empty">(no visible changes)</div>';
       return true;
@@ -843,6 +935,7 @@
           renderBody(body, card._edit);
           body.dataset.rendered = '1';
         }
+        schedulePersist();
       });
     }
 
@@ -908,6 +1001,7 @@
     dismissed.add(path);
     removeCard(path);
     updateCounts();
+    schedulePersist();
   }
 
   /** Remove a card from the DOM and forget its user-collapse state.
@@ -923,21 +1017,35 @@
   }
 
   /** Mark a card as clean (file no longer in dirty set). Keeps the card so the
-   *  user can dismiss on their own schedule; just shows an empty body and a
-   *  muted status pill. */
-  function markClean(path) {
+   *  user can dismiss on their own schedule.
+   *
+   *  V2.1: when `entry` is provided (from the server's cleanedEdits array),
+   *  the card body fills in with the full HEAD content. When called with
+   *  path only (legacy cleared-path path), the body is empty pending a
+   *  subsequent cleanedEdits arrival. The idempotency guard prevents
+   *  redundant re-render when content is unchanged. */
+  function markClean(path, entry) {
     var card = cards.get(path);
     if (!card) return;
     var prev = card._edit || {};
-    if (prev.status === 'clean' && !prev.diff) return;
-    card._renderDiff({
+    // V2.1: if an entry with fullFile is provided and matches what we
+    // already render, no-op. fullFileEqual is defined later in the file.
+    if (entry && prev.status === 'clean'
+        && fullFileEqual(prev.fullFile, entry.fullFile)) {
+      return;
+    }
+    if (!entry && prev.status === 'clean' && !prev.diff && !prev.fullFile) {
+      return;
+    }
+    var nextEdit = entry || {
       relativePath: path,
       status: 'clean',
       diff: '',
       timestamp: new Date().toISOString(),
       isBinary: false,
       renamedFrom: null,
-    });
+    };
+    card._renderDiff(nextEdit);
   }
 
   function updateCounts() {
@@ -957,14 +1065,26 @@
 
   function enforceCap() {
     if (cards.size <= VISIBLE_CAP) return;
-    // Drop oldest: cards Map iteration order is insertion order; oldest first.
+    // V2.1: evict oldest CLEAN cards first; only fall back to oldest
+    // dirty cards if we still exceed the cap after exhausting clean.
+    // Cards Map iteration order is insertion order; oldest first.
     var toRemove = cards.size - VISIBLE_CAP;
-    var iter = cards.keys();
+    var cleanPaths = [];
+    var dirtyPaths = [];
+    cards.forEach(function(card, path) {
+      var st = card.dataset.status;
+      if (st === 'clean') cleanPaths.push(path);
+      else dirtyPaths.push(path);
+    });
     var paths = [];
-    while (toRemove-- > 0) {
-      paths.push(iter.next().value);
+    for (var i = 0; i < cleanPaths.length && paths.length < toRemove; i++) {
+      paths.push(cleanPaths[i]);
+    }
+    for (var j = 0; j < dirtyPaths.length && paths.length < toRemove; j++) {
+      paths.push(dirtyPaths[j]);
     }
     paths.forEach(removeCard);
+    if (paths.length > 0) schedulePersist();
   }
 
   /** Cheap deep-equality for fullFile payloads, used by the no-op poll
@@ -995,7 +1115,7 @@
     return true;
   }
 
-  function applyEdits(edits, cleared) {
+  function applyEdits(edits, cleared, cleanedEdits) {
     // Collect the actual mutations as closures so we can run them all
     // inside one withAnchor (rAF) when in Sticky, and identify the
     // topmost changed card for autoscroll otherwise.
@@ -1005,9 +1125,37 @@
      *  apply (new card or in-place update or clean). Used by the
      *  Follow-edits badge counter. */
     var changedPathsThisApply = [];
+    /** V2.1: paths covered by cleanedEdits should not also be processed
+     *  from `cleared` (which would emit a content-less markClean and
+     *  trip the idempotency guard). */
+    var cleanedPathsSeen = new Set();
+
+    if (Array.isArray(cleanedEdits)) {
+      cleanedEdits.forEach(function(entry) {
+        if (!entry || !entry.relativePath) return;
+        var p = entry.relativePath;
+        cleanedPathsSeen.add(p);
+        if (cards.has(p)) {
+          mutations.push(function() { markClean(p, entry); });
+          changedPathsThisApply.push(p);
+          if (!topmostChangedCard) topmostChangedCard = cards.get(p);
+        } else if (!dismissed.has(p)) {
+          // The path is in cleanedEdits but no card exists locally yet
+          // (e.g. snapshot raced with poll). Spawn a clean card.
+          mutations.push(function() {
+            var card = makeCard(entry);
+            streamEl.appendChild(card);
+            cards.set(p, card);
+            if (!topmostChangedCard) topmostChangedCard = card;
+          });
+          changedPathsThisApply.push(p);
+        }
+      });
+    }
 
     if (Array.isArray(cleared)) {
       cleared.forEach(function(p) {
+        if (cleanedPathsSeen.has(p)) return;
         if (cards.has(p)) {
           mutations.push(function() { markClean(p); });
           changedPathsThisApply.push(p);
@@ -1053,9 +1201,22 @@
     if (mutations.length === 0) return;
 
     function applyAll() {
+      var beforePaths = [];
+      var c = streamEl.children;
+      for (var k = 0; k < c.length; k++) beforePaths.push(c[k].dataset.path || '');
       for (var i = 0; i < mutations.length; i++) mutations[i]();
       enforceCap();
       updateCounts();
+      // V2.1: only persist when the visible card set (paths in DOM order)
+      // actually changed. Avoids noisy PUTs on every poll that just
+      // re-renders the same card.
+      var afterPaths = [];
+      var c2 = streamEl.children;
+      for (var m = 0; m < c2.length; m++) afterPaths.push(c2[m].dataset.path || '');
+      if (beforePaths.length !== afterPaths.length
+          || beforePaths.some(function(p, idx) { return p !== afterPaths[idx]; })) {
+        schedulePersist();
+      }
     }
 
     if (scrollMode === 'sticky') {
@@ -1084,6 +1245,47 @@
     });
   }
   setInterval(tickTimestamps, 5000);
+
+  /** V2.1: load persisted cards + dismissed, then fetch snapshot. Initial
+   *  card creation order = persisted order. The snapshot's clean entries
+   *  fill in bodies for persisted-clean paths automatically (server now
+   *  includes them in /snapshot). Any snapshot path NOT in persisted is
+   *  appended at the end. */
+  async function initFromPersistence(sid) {
+    var persisted = await loadPersistedCards(sid);
+    if (persisted && Array.isArray(persisted.dismissed)) {
+      persisted.dismissed.forEach(function(p) { dismissed.add(p); });
+    }
+    var collapsedSet = new Set();
+    var persistedOrder = [];
+    if (persisted && Array.isArray(persisted.cards)) {
+      persisted.cards.forEach(function(c) {
+        if (!c || !c.relativePath) return;
+        if (dismissed.has(c.relativePath)) return;
+        persistedOrder.push(c.relativePath);
+        if (c.collapsed) collapsedSet.add(c.relativePath);
+      });
+    }
+    // Seed userCollapsed so makeCard sees the persisted collapse state
+    // when each card is created in the snapshot pass.
+    collapsedSet.forEach(function(p) { userCollapsed.add(p); });
+    // Pre-seed empty cards for persisted-but-not-in-snapshot paths so
+    // they appear in the right order even before the snapshot resolves.
+    // makeCard requires an `edit`; synthesize a minimal clean placeholder.
+    persistedOrder.forEach(function(p) {
+      if (cards.has(p)) return;
+      var placeholder = {
+        relativePath: p,
+        status: 'clean',
+        timestamp: new Date().toISOString(),
+      };
+      var card = makeCard(placeholder);
+      streamEl.appendChild(card);
+      cards.set(p, card);
+    });
+    updateCounts();
+    await fetchSnapshot();
+  }
 
   async function fetchSnapshot() {
     if (!sessionId) return;
@@ -1132,6 +1334,7 @@
 
   resetBtn.addEventListener('click', function() {
     dismissed.clear();
+    schedulePersist();
     void fetchSnapshot();
   });
 
@@ -1139,10 +1342,14 @@
   if (window.appletAPI) {
     window.appletAPI.onSessionEvent(function(event) {
       if (event && event.type === 'caco.edit' && event.data) {
-        applyEdits(event.data.edits, event.data.cleared);
+        applyEdits(event.data.edits, event.data.cleared, event.data.cleanedEdits);
       }
     });
     window.appletAPI.onSessionChange(function(sid, info) {
+      // V2.1: flush pending PUT for the OUTGOING session before tearing
+      // down state. Without this, a dismiss/collapse within 250ms of
+      // session-switch is lost.
+      flushPersist();
       sessionId = sid;
       if (info && info.cwd) {
         var parts = info.cwd.split(/[/\\]/);
@@ -1154,7 +1361,7 @@
       userCollapsed.clear();
       enterAutoscroll();
       updateCounts();
-      void fetchSnapshot();
+      void initFromPersistence(sid);
     });
     // If session was already active when applet opened, kick a snapshot now.
     var existingId = window.appletAPI.getSessionId && window.appletAPI.getSessionId();
@@ -1168,7 +1375,7 @@
             repoEl.textContent = parts2[parts2.length - 1] || meta.cwd;
           }
         } catch (_) { /* ignore */ }
-        await fetchSnapshot();
+        await initFromPersistence(existingId);
       })();
     }
   }

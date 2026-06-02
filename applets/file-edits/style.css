@@ -204,7 +204,7 @@
   background: var(--bg-base);
   border-top: 1px solid var(--color-border);
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
@@ -254,7 +254,7 @@
 
 .fe-diff[data-mode="fullfile"] .fe-line {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: 1.5;
   padding: 0 var(--space-sm);
   white-space: pre-wrap;

@@ -169,38 +169,54 @@ class FileTab {
     this.relativePath = edit.relativePath;
     this.absolutePath = edit.path;
     this.edit = edit;           // current EditEntry; mutated on update
-    this.tabEl = null;          // <button class="fe-tab">
-    this.paneEl = null;         // detached DOM holding rendered content
+    this.tabEl = this.buildTabEl();
+    this.paneEl = null;         // LAZY — built on first activate()
     this.scrollTop = 0;         // saved scroll position
-    this.userCollapsed = false; // unused in V3.2 (no collapse UI)
-    this.render();              // populate paneEl
   }
 
-  /** Build the strip pill element. */
+  /** Build the strip pill element. Always built (cheap; just two spans). */
   buildTabEl() { /* basename + X */ }
 
-  /** Re-render the content pane for the current edit. */
-  render() { /* renderFullFile(this.paneEl, this.edit) or hunk fallback */ }
+  /** Build paneEl from this.edit. Called on first activate() and after
+   *  any content-changing update() if paneEl exists. */
+  render() {
+    if (!this.paneEl) this.paneEl = document.createElement('div');
+    this.paneEl.innerHTML = '';
+    // Mirror v2 renderFullFile / renderDiff dispatch into this.paneEl.
+  }
 
   /** Called when a poll updates the same path. Re-render if content changed. */
   update(newEdit) {
     if (this.contentEqual(newEdit)) return false;
     this.edit = newEdit;
-    this.render();
+    // Lazy: if paneEl hasn't been built yet (inactive tab never activated),
+    // just store the new edit and let activate() render later.
+    if (this.paneEl) this.render();
     return true;
   }
 
   contentEqual(other) {
-    // same fullFileEqual as today; folded into the class
+    // Same fullFileEqual logic from V2.1, folded into the class.
   }
 
-  /** Attach paneEl to the global pane container. */
+  /** Attach paneEl to the global pane container. Builds paneEl on first
+   *  call (lazy). Restores saved scrollTop via rAF after the swap. */
   activate(paneContainer) {
+    if (!this.paneEl) this.render();
+    // Hide-swap-show pattern avoids the innerHTML scroll-side-effect
+    // (clearing children of a scrolled container fires a scroll event
+    // when scrollTop snaps to 0). Hiding the container while swapping
+    // suppresses that event.
+    const wasHidden = paneContainer.style.visibility;
+    paneContainer.style.visibility = 'hidden';
     paneContainer.innerHTML = '';
     paneContainer.appendChild(this.paneEl);
-    // Restore scroll on next rAF (after layout)
+    // Restore scroll on next rAF (after layout). Mark the write as
+    // programmatic so the scroll handler doesn't flip followEdits.
     requestAnimationFrame(() => {
+      programmaticScroll = true;
       paneContainer.scrollTop = this.scrollTop;
+      paneContainer.style.visibility = wasHidden || '';
     });
   }
 
@@ -211,7 +227,7 @@ class FileTab {
 
   /** Destroy: drop tab + pane DOM, release references. */
   destroy() {
-    if (this.tabEl?.parentNode) this.tabEl.parentNode.removeChild(this.tabEl);
+    if (this.tabEl && this.tabEl.parentNode) this.tabEl.parentNode.removeChild(this.tabEl);
     this.paneEl = null;
   }
 }
@@ -219,15 +235,25 @@ class FileTab {
 
 Implementation notes:
 
-- `paneEl` is detached when the tab is inactive. Only the active tab's
-  pane lives in the document tree. This keeps the DOM small even with
-  50 tabs.
-- `scrollTop` is saved on `deactivate` and restored on `activate`. The
-  restore happens in `requestAnimationFrame` so layout settles before
-  the scroll write.
-- `render()` rebuilds the pane DOM from scratch on update. With the
-  V2 full-file renderer + hljs + word marks already producing the
-  whole-file DOM, the cost is acceptable for a single tab at a time.
+- `paneEl` is **lazy** — built on first `activate()`. A persisted-tab
+  restore creates 50 `FileTab` instances synchronously but no
+  `paneEl` is built until the user clicks the tab or an edit
+  auto-activates it. Avoids 50× full-file render on startup.
+- `update()` updates `this.edit` always. It only calls `render()` if
+  `paneEl` already exists (i.e. the tab has been activated at least
+  once). For never-activated tabs, the next `activate()` will render
+  with the most-recent edit.
+- `scrollTop` is saved on `deactivate` and restored on `activate`.
+  The restore happens in `requestAnimationFrame` so layout settles
+  before the scroll write.
+- **Hide-swap-show in `activate`:** `paneContainer.innerHTML = ''`
+  on a scrolled container clamps `scrollTop` to 0 and fires a
+  scroll event. We hide the container before the swap and unhide
+  after the rAF restore. This eliminates the BLOCKER-1 ambiguity
+  (multiple scroll events from one tab switch) without needing the
+  V2 `{target,±1px}` value-comparison guard. The
+  `programmaticScroll` flag still gates the restore rAF write,
+  consumed exactly once.
 
 ---
 
@@ -240,7 +266,9 @@ boolean. Same intent, simpler shape.
 let followEdits = true;           // default ON
 let activeTabId = null;           // relativePath of active tab
 let tabs = new Map();             // Map<relativePath, FileTab>
-let lastEditedTabId = null;       // for jumpToMostRecent
+let lastEditedTabId = null;       // most recent tab to receive an edit
+let badgeCounter = new Set();     // distinct paths edited while followEdits=false
+let programmaticScroll = false;   // single-shot suppression flag for pane scroll
 ```
 
 ### `followEdits` transitions
@@ -248,31 +276,40 @@ let lastEditedTabId = null;       // for jumpToMostRecent
 | Event | followEdits after | Notes |
 |---|---|---|
 | Tab opened by agent edit AND followEdits was true | `true` | Activate the new tab, jump to it |
-| Tab opened by agent edit AND followEdits was false | `false` | Add tab to strip but don't switch; bump badge |
+| Tab opened by agent edit AND followEdits was false | `false` | Add tab to strip but don't switch; `badgeCounter.add(path)` |
 | Tab opened by user pick (+ button) | `false` | User asked for this specific tab; don't auto-follow |
-| User clicks a tab in the strip | `false` | Explicit choice |
+| User clicks a tab in the strip | `false` | Explicit choice. Also: `badgeCounter.delete(clickedPath)` if present (the user has now seen this edit; don't count it). |
 | User scrolls the pane | `false` | Reading something specific |
-| User clicks "Follow edits" button | `true` | Re-engage; jump to most recent |
-| Session change | `true` | Reset to default |
+| User clicks "Follow edits" button | `true` | Re-engage; jump to most recent; `badgeCounter.clear()` |
+| Session change | `true` | Reset to default; `badgeCounter.clear()`; `lastEditedTabId = null` |
 | User dismisses (X) the active tab | `false` | They're not following; they're managing |
+| User dismisses (X) any tab | unchanged | X only affects activation if the closed tab was active; followEdits is otherwise untouched |
 
 ### `jumpToMostRecent()`
 
-The "one function." Both the auto-follow path on incoming edits AND
-the "Follow edits" button call this. Algorithm:
+The single jump function called by both the auto-follow path on
+incoming edits AND the "Follow edits" button. Algorithm:
 
 1. If `tabs.size === 0`, no-op.
-2. Pick the tab with the highest `edit.mtimeMs` across all open
-   tabs. Fall back to most-recently-touched-by-apply if mtimes are
-   absent.
-3. `setActiveTab(targetId)` — if already active, no-op.
-4. Scroll the new active tab's pane to the top (the edit just
-   arrived; user wants to see the diff at the top).
+2. **Primary target: `lastEditedTabId`.** This is set by
+   `openOrUpdateTab` on every actual content change. It represents
+   "the freshest edit we've SEEN since session start." Matches the
+   badge semantics ("distinct files edited while followEdits was
+   off") — both are driven by the same trigger (a content-changing
+   apply).
+3. **Fallback:** if `lastEditedTabId` is null (e.g. restored
+   persisted tabs with no edits yet this session) or no longer in
+   `tabs` (closed/evicted), pick the tab with the highest
+   `edit.mtimeMs` across remaining tabs. Final fallback if all
+   mtimes are absent: pick the rightmost (newest in strip order).
+4. `setActiveTab(targetId)` — no-op if already active.
+5. Scroll the active tab's pane to the top (target rAF +
+   `programmaticScroll = true` so the scroll handler doesn't flip
+   followEdits).
 
-This is intentionally simpler than V3.1's `lastChangedCard`:
-`jumpToMostRecent` always picks across ALL tabs, not just
-this-apply's. That way the Follow button never has "nothing to jump
-to."
+This is intentionally NOT "highest mtimeMs across all tabs." That
+would cause the Follow button to jump to a long-untouched-but-
+recently-stat'd file with no incoming edit, contradicting the badge.
 
 ### `setActiveTab(tabId)`
 
@@ -297,6 +334,15 @@ function setActiveTab(tabId) {
 }
 ```
 
+**Caller contract:** `setActiveTab` does NOT modify `followEdits`.
+Callers that represent USER gestures (tab click, X-on-active, picker
+selection) must set `followEdits = false` themselves before calling
+`setActiveTab`. The auto-follow-on-edit path through
+`openOrUpdateTab` does NOT touch `followEdits`, so the existing value
+(true) is preserved. This split is what allows `initFromPersistence`
+and `fetchSnapshot` to drive `setActiveTab` without flipping the
+default state.
+
 ### Tab open flow
 
 Called from BOTH the `caco.edit` event handler AND the picker:
@@ -306,6 +352,7 @@ function openOrUpdateTab(edit, options = {}) {
   const id = edit.relativePath;
   let tab = tabs.get(id);
   let isNew = false;
+  let contentChanged = false;
   if (!tab) {
     if (tabs.size >= TAB_CAP) {
       evictOldestNonActive();
@@ -314,32 +361,56 @@ function openOrUpdateTab(edit, options = {}) {
     tabs.set(id, tab);
     tabsStripEl.appendChild(tab.tabEl);  // tabs never reorder
     isNew = true;
+    contentChanged = true;
   } else {
-    const changed = tab.update(edit);
-    if (!changed && !options.forceFocus) return;
+    contentChanged = tab.update(edit);
+    if (!contentChanged && !options.forceFocus) return;
   }
-  lastEditedTabId = id;
-  if (followEdits || options.forceFocus) {
+  // Track most-recent for jumpToMostRecent. Only set on actual content
+  // changes (not on forceFocus-without-change picks of an open tab —
+  // that's a re-focus, not a new edit).
+  if (contentChanged) lastEditedTabId = id;
+  if (options.forceFocus) {
+    // Picker path. Caller MUST also have set followEdits=false.
     setActiveTab(id);
-    if (isNew || options.forceFocus) {
-      // New tab or explicit focus: scroll pane to top
+    paneEl.scrollTop = 0;
+    tab.scrollTop = 0;
+  } else if (followEdits) {
+    // Auto-follow path. Activate AND scroll to top.
+    setActiveTab(id);
+    if (isNew) {
       paneEl.scrollTop = 0;
       tab.scrollTop = 0;
     }
   } else {
-    // followEdits is off: just bump the badge
+    // followEdits is off: just bump the badge.
     badgeCounter.add(id);
     updateFollowButton();
   }
   schedulePersist();
 }
+
+/** Remove the oldest non-active tab from the strip + tabs map.
+ *  Called by openOrUpdateTab when tabs.size >= TAB_CAP. Insertion order
+ *  = Map iteration order; "oldest" = first non-active entry. If no
+ *  non-active tab exists (impossible at TAB_CAP=50 with exactly one
+ *  active tab), no-op. */
+function evictOldestNonActive() {
+  for (const [id, tab] of tabs) {
+    if (id !== activeTabId) {
+      tab.destroy();
+      tabs.delete(id);
+      return;
+    }
+  }
+}
 ```
 
-Picker call: `openOrUpdateTab(edit, { forceFocus: true })` —
-forceFocus implies "user asked for this; show it now and turn off
-follow."
+Picker call: caller does `followEdits = false; updateFollowButton();
+openOrUpdateTab(edit, { forceFocus: true })`.
 
-`caco.edit` call: `openOrUpdateTab(edit)` — follow respected.
+`caco.edit` and snapshot call: `openOrUpdateTab(edit)` — follow
+respected.
 
 ### Pane scroll listener
 
@@ -350,17 +421,21 @@ paneEl.addEventListener('scroll', () => {
     followEdits = false;
     updateFollowButton();
   }
-  // Save scroll position for the active tab
+  // Save scroll position for the active tab.
+  // (Redundant with deactivate() — kept as defense-in-depth so a
+  // scroll event during the tab-switch window doesn't lose the new
+  // tab's position. The hide-swap-show pattern in activate() prevents
+  // the spurious innerHTML scroll-to-0 event from firing here.)
   const active = tabs.get(activeTabId);
   if (active) active.scrollTop = paneEl.scrollTop;
 });
 ```
 
-`programmaticScroll` flag handles the case where `setActiveTab` does
-a `scrollTop = 0` (or restores `tab.scrollTop`). Same single-shot
-flag we used in V2 Phase 3, but simpler because we don't have the
-±1px tolerance issue (only auto-scrolls are exactly `scrollTop = 0`
-or `scrollTop = saved`).
+The `programmaticScroll` single-shot flag is consumed exactly once.
+The hide-swap-show pattern in `FileTab.activate()` (see the FileTab
+section) is what makes the single-shot sufficient — it suppresses
+the spurious scroll event from `paneContainer.innerHTML = ''` that
+would otherwise burn the flag before the rAF restore runs.
 
 ---
 
@@ -396,8 +471,9 @@ the client's interpretation of the bytes on disk.
 async function initFromPersistence(sid) {
   const persisted = await loadPersistedTabs(sid);
   // Pre-create placeholder FileTab instances in persisted order so the
-  // strip shows them immediately. Pane stays empty / shows the first
-  // tab as active per the "no auto-activate" rule.
+  // strip shows them immediately. No tab is auto-activated; the pane
+  // stays empty until either the user clicks a tab OR an incoming
+  // edit arrives with followEdits=true (the default).
   for (const { relativePath } of persisted.cards || []) {
     const placeholder = { relativePath, path: '', status: 'clean',
                           timestamp: new Date().toISOString() };
@@ -414,6 +490,43 @@ The snapshot fills each placeholder by calling `tab.update(edit)`. The
 existing server-side snapshot logic (V2.1) that joins the persisted
 list and fetches HEAD blobs continues to work — it sees the same
 `cards[]` and treats them as paths to fetch.
+
+### `fetchSnapshot` in V3.2
+
+The V2.1 `fetchSnapshot` joined snapshot edits + a `cleared` set
+(paths in DOM not in snapshot) and fed both to `applyEdits`. V3.2
+replaces `applyEdits` with `openOrUpdateTab` and there is no
+"cleared" concept (tabs don't disappear unless the user X's them or
+cap eviction triggers).
+
+```js
+async function fetchSnapshot() {
+  if (!sessionId) return;
+  const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/file-edits/snapshot`);
+  if (!res.ok) return;
+  const data = await res.json();
+  if (!Array.isArray(data.edits)) return;
+  // For each snapshot edit: open-or-update the tab. The mutation
+  // arrives via the auto-follow path; if followEdits=true (the default
+  // on init) the LAST edit's tab becomes active via the existing
+  // openOrUpdateTab + setActiveTab chain.
+  for (const edit of data.edits) {
+    openOrUpdateTab(edit);  // no forceFocus: respect followEdits
+  }
+  // Paths in tabs but NOT in the snapshot: silently leave them. They
+  // remain in the strip as placeholders. The user can X to remove,
+  // or pick them via + to fetch fresh content. (No V2.1-style
+  // markClean broadcast — there is no equivalent for tabs because
+  // a clean file is still a valid thing to view.)
+}
+```
+
+`caco.edit` WS event uses the same path: `event.data.edits.forEach(openOrUpdateTab)`.
+The `cleared` array from V2.1 is ignored (a path going clean is just
+a tab whose status transitions; the tab stays open). The
+`cleanedEdits` array IS processed the same way (`openOrUpdateTab`)
+because clean entries with `fullFile` payloads should still update
+the rendered content.
 
 ---
 
@@ -534,12 +647,17 @@ removed entirely. The diff-row CSS (`.fe-row`, `.fe-gutter`,
     <div class="fe-pane-empty" id="fePaneEmpty">
       No files open. Click + to open one, or wait for edits.
     </div>
+    <div class="fe-pane-empty" id="feNotGit" hidden>
+      Not a git repo — file-edits requires git.
+    </div>
   </div>
 </div>
 ```
 
-The "not a git repo" message moves into the empty pane area; the
-stream container is gone.
+The "not a git repo" message lives in the pane area as a sibling of
+the empty-state element. The snapshot endpoint's not-a-git-repo
+signal toggles its `hidden` attribute; tabs strip is also hidden in
+that state (the `+` button is disabled too).
 
 ---
 
@@ -556,9 +674,10 @@ stream container is gone.
   increments. User can click the tab or Follow.
 - **User picks a file that's already open.** No new tab; switch to
   existing; turn off followEdits; pane restores scrollTop.
-- **User Xs the active tab.** Active tab becomes... the next tab in
-  strip order? Or null? Choose: the previous tab in strip order
-  (left neighbor), or null if the closed tab was the leftmost.
+- **User Xs the active tab.** The **left neighbor** in strip order
+  becomes the new active tab. If the closed tab was leftmost, the
+  **right neighbor** becomes active. If it was the only tab,
+  `activeTabId = null` and the empty-pane message reappears.
 - **User Xs an inactive tab.** Tab closes; active unchanged.
 - **Session change.** Persist outgoing session's state; clear
   in-memory; load incoming.
@@ -631,19 +750,25 @@ stream container is gone.
 
 ## Open questions
 
-1. **Lazy `FileTab.render()` or eager?** Eager (render in constructor)
-   means 50-tab restore costs 50× full-file render up front. Lazy
-   (render on first `activate()`) defers cost but causes a one-frame
-   blank when switching to an unvisited tab. **Recommend lazy.**
-2. **What does X on the active tab do?** Left neighbor or right
-   neighbor or null? **Recommend left neighbor; null if no
-   neighbor.** Same as VS Code.
-3. **Should the Follow-edits badge count BE a count, or just a dot?**
-   V2 had per-edit counter. **Recommend keep the count.**
-4. **Tab close animation?** None for V3.2; cleanup. **Skip.**
-5. **Active-tab persistence.** Would require bumping `schemaVersion`
-   to 2 server-side (otherwise the existing validator rejects unknown
-   fields). Deferred: tracked as a small follow-up; not in V3.2.
+1. ~~Lazy `FileTab.render()` or eager?~~ **Resolved: lazy** (BLOCKER 2
+   fix). Constructor builds tabEl only; paneEl is built on first
+   `activate()`. `update()` defers render when paneEl is null.
+2. ~~What does X on the active tab do?~~ **Resolved: left neighbor;
+   right if no left; null if only tab** (normative in Edge cases).
+3. **Follow-edits badge: count vs dot?** **Recommend count.** Backed
+   by `badgeCounter: Set<string>` (distinct paths). Click on a badged
+   tab decrements (set.delete); click on Follow button clears the
+   whole set.
+4. **Tab close animation?** None for V3.2.
+5. **Active-tab persistence.** Would require adding an `activeTabId`
+   field to the server's stored shape. Per the spec review:
+   `src/file-edits-store.ts` constructs the on-disk object explicitly
+   and ignores extra fields, so a v2 bump is optional — but the
+   `setSessionData` call only stores what `setCardList` builds, which
+   means an extra field on PUT is dropped. Adding `activeTabId`
+   therefore requires a server change (extend `setCardList` body
+   type). Deferred to a separate increment to keep V3.2 strictly
+   client-only.
 
 ## Document layout
 

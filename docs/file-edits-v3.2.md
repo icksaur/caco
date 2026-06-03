@@ -364,76 +364,56 @@ or `scrollTop = saved`).
 
 ---
 
-## Persistence
+## Persistence (client-only)
 
-JSON shape changes:
+**No server changes.** The existing `/api/sessions/:id/file-edits/cards`
+GET/PUT/POST endpoints and the `file-edits-cards.json` file shape are
+reused as-is. The server doesn't interpret the field semantics; the
+client repurposes:
 
-```json
-{
-  "schemaVersion": 2,
-  "updatedAt": "...",
-  "tabs": [
-    { "relativePath": "src/foo.ts" },
-    { "relativePath": "src/bar.ts" }
-  ],
-  "activeTab": "src/foo.ts"
-}
-```
+- **`cards[]`** continues to be `Array<{ relativePath, collapsed }>`
+  on disk. V3.2 writes `collapsed: false` for every tab (the field is
+  meaningless in tab UI but kept to satisfy the existing
+  `schemaVersion: 1` validator).
+- **`dismissed[]`** is no longer written. V3.2 always sends an empty
+  array. Any pre-existing dismissed entries from V2.1 sessions are
+  ignored on read (V3.2 has no "filter these out" concept). Operator
+  accepted "no dismiss" — surviving v2.1 dismissed lists are silently
+  dropped on the next write.
+- **Active tab is NOT persisted** in V3.2 because the existing
+  `schemaVersion: 1` shape has no field for it. Acceptable — on
+  applet open, no tab is auto-active until either the user clicks
+  one OR followEdits=true and an edit arrives. (See open question
+  on whether to store active tab via a future schema bump.)
+- **Insertion order** is the persisted `cards[]` array order.
 
-Changes from V2.1 schema:
-
-- `cards[]` → `tabs[]`. Each entry is `{ relativePath }`. The
-  `collapsed` field is dropped (no collapse UI in V3.2).
-- New `activeTab: string | null` — relativePath of the active tab on
-  last close, or null.
-- `dismissed[]` is dropped entirely.
-- `schemaVersion` bumped to **2**.
-
-### Migration
-
-Server (`src/file-edits-store.ts`):
-
-- `getCardList` rewritten as `getTabList`. Returns `{ schemaVersion,
-  updatedAt, tabs, activeTab }`. If the on-disk file has
-  `schemaVersion: 1`, migrate in-memory:
-  - `tabs = cards.map(c => ({ relativePath: c.relativePath }))`
-  - `activeTab = null` (no info)
-  - dismissed entries are silently dropped.
-  - Migration is read-only on the JSON file; the next write happens
-    when the client does its first PUT and produces v2 shape.
-- `setCardList` rewritten as `setTabList`. Accepts the v2 body shape;
-  rejects v1 PUTs with 400.
-- Per-session debounce + flush mechanics unchanged.
-
-Route (`src/routes/file-edits.ts`):
-
-- Endpoint paths unchanged (`/file-edits/cards` GET/PUT/POST). The
-  body shape changes (per above). Validation updates accordingly.
-- Per-session flushSession on session-end remains.
+Server endpoint and store code untouched. The only "schema" change is
+the client's interpretation of the bytes on disk.
 
 ### Initial load
 
 ```js
 async function initFromPersistence(sid) {
   const persisted = await loadPersistedTabs(sid);
-  // Pre-create empty FileTab instances in persisted order so the strip
-  // shows them immediately. activate the persisted activeTab if set.
-  for (const { relativePath } of persisted.tabs || []) {
+  // Pre-create placeholder FileTab instances in persisted order so the
+  // strip shows them immediately. Pane stays empty / shows the first
+  // tab as active per the "no auto-activate" rule.
+  for (const { relativePath } of persisted.cards || []) {
     const placeholder = { relativePath, path: '', status: 'clean',
                           timestamp: new Date().toISOString() };
     const tab = new FileTab(placeholder);
     tabs.set(relativePath, tab);
     tabsStripEl.appendChild(tab.tabEl);
   }
-  if (persisted.activeTab && tabs.has(persisted.activeTab)) {
-    setActiveTab(persisted.activeTab);
-  }
-  // Then fetchSnapshot to fill in real edit content.
+  // Then fetchSnapshot to fill in real edit content via tab.update().
   await fetchSnapshot();
 }
 ```
 
-The snapshot fills each placeholder by calling `tab.update(edit)`.
+The snapshot fills each placeholder by calling `tab.update(edit)`. The
+existing server-side snapshot logic (V2.1) that joins the persisted
+list and fetches HEAD blobs continues to work — it sees the same
+`cards[]` and treats them as paths to fetch.
 
 ---
 
@@ -618,8 +598,9 @@ stream container is gone.
    active. Follow-edits stays off.
 10. X the active tab → previous tab becomes active. (Or empty pane
     if it was the only tab.)
-11. Close applet, reopen → all tabs restored in order; active tab
-    restored.
+11. Close applet, reopen → all tabs restored in order. No tab is
+    auto-active until a user click or an incoming edit (per
+    "active-tab not persisted" rule).
 12. Restart server, reopen → tabs persist (per V2.1 mechanism +
     snapshot fill).
 13. 51st distinct file edited → oldest non-active tab evicted.
@@ -630,19 +611,18 @@ stream container is gone.
 
 ## Risks
 
-- **Persistence schema migration.** V2.1 sessions have v1 cards files
-  with `dismissed[]`. v3.2 silently drops dismissed and ignores the
-  collapsed flag. Operator already accepted "no dismiss" — but if any
-  V2.1 user expected their dismissed list to survive, V3.2 loses it.
-  Acceptable.
+- **Pre-existing `dismissed[]` lists are dropped on first write.** V2.1
+  sessions persisted dismissed paths. V3.2 always writes
+  `dismissed: []`, so on the first save those entries are lost.
+  Operator accepted "no dismiss" so this is intentional.
+- **No active-tab restore.** A user who left the applet on a specific
+  file last session won't return to that file. They'll see the strip
+  but the pane stays empty until they click a tab or an edit arrives
+  (with followEdits=true, which is the default). Future schema bump
+  could fix.
 - **DOM cost of building 50 detached panes.** Each pane holds a full
-  hljs-highlighted file. Estimated <100ms total per applet open; we
-  build lazily on first activation, not on tab creation. (See
-  open question.)
-- **No collapse UI** — V2/V2.1 users could collapse a card to scan
-  the strip. With tabs, the whole pane is one file; there's nothing
-  to collapse. The tab strip itself replaces the "scan headers"
-  affordance.
+  hljs-highlighted file. Mitigated by lazy rendering: each tab's
+  `paneEl` is built on first `activate()`, not on construction.
 - **Word marks + scroll restore.** Scroll position is saved as raw
   pixels. If the file is re-rendered with significantly different
   content (large hunk added near top), the saved pixel position may
@@ -661,6 +641,9 @@ stream container is gone.
 3. **Should the Follow-edits badge count BE a count, or just a dot?**
    V2 had per-edit counter. **Recommend keep the count.**
 4. **Tab close animation?** None for V3.2; cleanup. **Skip.**
+5. **Active-tab persistence.** Would require bumping `schemaVersion`
+   to 2 server-side (otherwise the existing validator rejects unknown
+   fields). Deferred: tracked as a small follow-up; not in V3.2.
 
 ## Document layout
 

@@ -305,15 +305,44 @@
         if (m > bestMtime) { bestMtime = m; targetId = id; }
       });
       if (!targetId) {
-        // No mtimes anywhere — pick rightmost.
         var keys = Array.from(tabs.keys());
         targetId = keys[keys.length - 1];
       }
     }
     if (!targetId) return;
-    var t = tabs.get(targetId);
-    if (t) t.scrollTop = 0;  // set before activate so rAF restores to 0
     setActiveTab(targetId);
+    // After activate's rAF builds the pane, find the first add/del row
+    // and center it. Two rAFs because activate already used the first
+    // frame to swap content + restore scroll.
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        scrollPaneToFirstDiffRow(targetId);
+      });
+    });
+  }
+
+  /** Scroll the pane to center the first add/del row of the given tab.
+   *  Falls back to scroll-to-top when there are no diff rows (e.g.
+   *  a freshly picked clean file). */
+  function scrollPaneToFirstDiffRow(targetId) {
+    var t = tabs.get(targetId);
+    if (!t || !t.paneEl || t.paneEl.parentNode !== paneEl) return;
+    var diffRow = t.paneEl.querySelector('.fe-row-add, .fe-row-del');
+    if (!diffRow) {
+      // No diffs — scroll to top.
+      t.scrollTop = 0;
+      programmaticScrollTo(0);
+      return;
+    }
+    // Compute target so the diff row sits at ~30% from the top of the
+    // visible area (slightly above center reads better than dead center
+    // for code).
+    var rowRect = diffRow.getBoundingClientRect();
+    var paneRect = paneEl.getBoundingClientRect();
+    var offsetWithinPane = rowRect.top - paneRect.top + paneEl.scrollTop;
+    var target = offsetWithinPane - paneEl.clientHeight * 0.3;
+    t.scrollTop = Math.max(0, target);
+    programmaticScrollTo(t.scrollTop);
   }
 
   function updateFollowButton() {

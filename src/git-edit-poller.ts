@@ -23,10 +23,11 @@ import { createFileWatcher } from './file-watcher.js';
 import type { SessionEvent } from './types.js';
 
 /** V3.3: env toggle for the chokidar filesystem watcher. Set to 'off'
- *  to force timer-only mode (use case: NFS / network mounts where
- *  chokidar attaches without error but silently misses events). Read
- *  once at module load. */
-const WATCH_ENABLED = process.env.CACO_FILE_EDITS_WATCH !== 'off';
+ *  (case-insensitive; '0', 'false', 'no' also accepted) to force
+ *  timer-only mode (use case: NFS / network mounts where chokidar
+ *  attaches without error but silently misses events). Read once at
+ *  module load. */
+const WATCH_ENABLED = !(/^(off|0|false|no)$/i.test(String(process.env.CACO_FILE_EDITS_WATCH ?? '')));
 
 export type FileStatus = 'modified' | 'untracked' | 'deleted' | 'renamed' | 'clean';
 
@@ -541,20 +542,33 @@ export function createGitEditPoller(): GitEditPoller {
       // Initial poll to populate state without broadcasting (snapshot endpoint
       // will return the current dirty set on applet open).
       const state = sessions.get(sessionId)!;
+      let initialPollOk = false;
       try {
         const result = await runGit(['status', '--porcelain=v1', '-z', '-u'], state.repoRoot, STATUS_TIMEOUT_MS);
-        if (result.code === 0) state.lastDirty = parsePorcelain(result.stdout);
+        if (result.code === 0) {
+          state.lastDirty = parsePorcelain(result.stdout);
+          initialPollOk = true;
+        }
       } catch { /* poller still scheduled */ }
       // V3.3: attach the chokidar watcher AFTER the initial poll so
       // lastDirty is populated. Otherwise a watcher event firing during
       // the await above would race the inline poll and broadcast every
       // dirty file as "new."
-      if (WATCH_ENABLED) {
+      // If the initial poll FAILED, lastDirty is still empty — attaching
+      // chokidar now would re-create the spurious-broadcast race the
+      // ordering was supposed to eliminate. Skip the attach; the next
+      // timer tick (5s, unwatched cadence) will retry status, and a
+      // future attach attempt could be wired by the operator. For now,
+      // a single failed initial poll degrades us to timer-only mode for
+      // the session's lifetime — rare, acceptable.
+      if (WATCH_ENABLED && initialPollOk) {
         const onChange = (): void => this.triggerPoll(sessionId, 'fs-event');
         const attached = await fileWatcher.attach(sessionId, repoRoot, onChange);
         if (!attached) {
           console.log(`[FILE-EDITS] ${sessionId.slice(0, 8)} chokidar attach failed; using timer-only mode`);
         }
+      } else if (WATCH_ENABLED && !initialPollOk) {
+        console.warn(`[FILE-EDITS] ${sessionId.slice(0, 8)} initial poll failed; skipping chokidar attach (timer-only mode)`);
       }
       scheduleTimer(sessionId);
     },

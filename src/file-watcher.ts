@@ -58,9 +58,13 @@ async function buildIgnoredPredicate(repoRoot: string): Promise<(p: string) => b
     if (rel.startsWith('/') || rel.startsWith('\\')) rel = rel.slice(1);
     if (rel === '') return false;
 
-    // First segment in EXCLUDED_DIRS → always ignore.
-    const firstSeg = rel.split(/[/\\]/, 1)[0];
-    if (EXCLUDED_DIRS.has(firstSeg)) return true;
+    // ANY segment in EXCLUDED_DIRS → ignore. The first-segment-only
+    // check would miss nested cases like 'packages/foo/node_modules'
+    // common in monorepos.
+    const segs = rel.split(/[/\\]/);
+    for (let i = 0; i < segs.length; i++) {
+      if (EXCLUDED_DIRS.has(segs[i])) return true;
+    }
 
     // .gitignore match.
     if (ig && ig.ignores(rel)) return true;

@@ -175,6 +175,16 @@
   overflow-x: auto;
 }
 
+/* V3.2: when the file is entirely unchanged (no add/del rows), the
+ * work-gutter column duplicates the head-gutter for every row.
+ * Collapse to a single line-number column. */
+.fe-diff[data-mode="fullfile"][data-clean-only="true"] {
+  grid-template-columns: auto 1fr;
+}
+.fe-diff[data-mode="fullfile"][data-clean-only="true"] .fe-gutter-work {
+  display: none;
+}
+
 /* Specificity defense: .fe-diff[data-mode="fullfile"] sets display:grid
  * with specificity (0,1,1), which beats the browser's default
  * [hidden] { display: none } rule (0,1,0). Without this, the chevron

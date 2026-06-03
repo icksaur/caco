@@ -1137,13 +1137,18 @@
     if (!ff || !Array.isArray(ff.workLines)) return false;
     body.innerHTML = '';
     var rawRows = buildRows(ff.headLines, ff.workLines, ff.hunks || []);
-    // Compute per-row word marks from the raw rows so adjacent del/add
-    // pairs are paired correctly.
     var marks = computeAllWordMarks(rawRows);
     marks.forEach(function(m, idx) { rawRows[idx].mark = m; });
-    // V2.1: never fold. Always render the entire file. Operator gesture:
-    // "always show entire file, no folding, even if no diffs."
     var rows = rawRows;
+    // V3.2: a "clean" view (no add/del rows) shows a single line-number
+    // column. The work column duplicates head for every ctx row, so the
+    // second column is pure noise. Tag the body so CSS collapses the
+    // grid to two columns.
+    var hasAnyDiff = false;
+    for (var k = 0; k < rows.length; k++) {
+      if (rows[k].kind === 'add' || rows[k].kind === 'del') { hasAnyDiff = true; break; }
+    }
+    body.dataset.cleanOnly = hasAnyDiff ? 'false' : 'true';
     if (rows.length === 0) {
       body.innerHTML = '<div class="fe-d-empty">(no visible changes)</div>';
       return true;

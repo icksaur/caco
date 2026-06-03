@@ -98,6 +98,17 @@
       updateFollowButton();
       setActiveTab(self.relativePath);
     });
+    // Middle-click closes the tab (VS Code convention).
+    btn.addEventListener('auxclick', function(e) {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      closeTab(self.relativePath);
+    });
+    // Suppress the middle-mouse autoscroll cursor / paste primary
+    // selection so the page doesn't react before auxclick fires.
+    btn.addEventListener('mousedown', function(e) {
+      if (e.button === 1) e.preventDefault();
+    });
     return btn;
   };
 

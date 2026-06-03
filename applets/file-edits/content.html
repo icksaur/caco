@@ -1,11 +1,14 @@
 <div class="fe-root">
   <header class="fe-toolbar">
     <span class="fe-repo" id="feRepo">file-edits</span>
-    <span class="fe-counts" id="feCounts">no changes</span>
-    <button class="fe-btn" id="feRefresh" title="Refresh">↻</button>
-    <button class="fe-btn" id="feReset" title="Reset dismissals" hidden>Reset dismissals</button>
+    <button class="fe-follow" id="feFollow" type="button" hidden>↓ Follow edits</button>
+    <span class="fe-actions">
+      <button class="fe-btn" id="feOpen" type="button" title="Open file in viewer">+</button>
+    </span>
   </header>
-  <div class="fe-empty" id="feEmpty">No file changes detected.</div>
-  <div class="fe-not-git" id="feNotGit" hidden>Not a git repo — file-edits requires git for v1.</div>
-  <div class="fe-stream" id="feStream"></div>
+  <div class="fe-tabs" id="feTabs"></div>
+  <div class="fe-pane" id="fePane">
+    <div class="fe-pane-empty" id="fePaneEmpty">No files open. Click + to open one, or wait for edits.</div>
+    <div class="fe-pane-empty" id="feNotGit" hidden>Not a git repo — file-edits requires git.</div>
+  </div>
 </div>

@@ -31,7 +31,8 @@ import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes } from './src/routes/index.js';
 import { initWatchRoutes } from './src/routes/watch.js';
-import { initFileEditsRoutes } from './src/routes/file-edits.js';
+import { flushAll as flushAllFileEditsCardLists } from './src/file-edits-store.js';
+import { initFileEditsRoutes, flushFileEditsCardList } from './src/routes/file-edits.js';
 import { createGitEditPoller } from './src/git-edit-poller.js';
 import { setGitEditPoller } from './src/dispatch-events.js';
 import { setupWebSocket } from './src/routes/websocket.js';
@@ -239,11 +240,16 @@ async function start(): Promise<void> {
   initWatchRoutes();
 
   // File-edits poller: lazy-attach on first triggerPoll/snapshot.
-  // Detach via sessionState.onSessionEnd.
+  // Detach via sessionState.onSessionEnd. Flush any pending PUTs to the
+  // per-session file-edits-cards.json file at the same time so we don't
+  // lose the last gesture.
   const gitEditPoller = createGitEditPoller();
   initFileEditsRoutes(gitEditPoller);
   setGitEditPoller(gitEditPoller);
-  sessionState.onSessionEnd((sid) => gitEditPoller.detachFromSession(sid));
+  sessionState.onSessionEnd((sid) => {
+    gitEditPoller.detachFromSession(sid);
+    flushFileEditsCardList(sid);
+  });
   
   startScheduleManager();
   
@@ -289,6 +295,7 @@ async function start(): Promise<void> {
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n✓ Shutting down gracefully...');
+  flushAllFileEditsCardLists();
   stopScheduleManager();
   sessionState.shutdown()
     .then(() => sessionManager.shutdown())

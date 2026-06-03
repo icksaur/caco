@@ -4,12 +4,11 @@
  * Polls `git status --porcelain` per session and broadcasts the diff
  * between consecutive snapshots as `caco.edit` events. See docs/file-edits.md.
  *
- * Triggered from three places:
+ * Triggered from two places:
  *   - internal timer (1.5s active / 5s idle)
  *   - dispatch-events on tool.execution_complete for write tools
- *   - manual refresh via the /file-edits/snapshot endpoint
  *
- * All triggers funnel into triggerPoll(), which debounces 50ms.
+ * Both triggers funnel into triggerPoll(), which debounces 50ms.
  *
  * One subprocess per poll for status; one per changed-file path for diff.
  * No pre-image cache: git is the source of truth.
@@ -17,21 +16,52 @@
 
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
+import { readFile, stat } from 'fs/promises';
 import { join } from 'path';
 import { broadcastEvent } from './event-bus.js';
 import type { SessionEvent } from './types.js';
 
-export type FileStatus = 'modified' | 'untracked' | 'deleted' | 'renamed';
+export type FileStatus = 'modified' | 'untracked' | 'deleted' | 'renamed' | 'clean';
+
+export interface DiffHunk {
+  /** 1-indexed HEAD line where removed region starts. */
+  headStart: number;
+  /** Number of removed (HEAD-side) lines. */
+  headLen: number;
+  /** 1-indexed working-tree line where added region starts. */
+  workStart: number;
+  /** Number of added (working-tree) lines. */
+  workLen: number;
+}
+
+export interface FullFile {
+  /** HEAD blob lines. Null when there is no HEAD blob (untracked). */
+  headLines: string[] | null;
+  /** Working-tree file lines. Empty array when working tree absent (deleted). */
+  workLines: string[];
+  /** Parsed unified diff hunks. */
+  hunks: DiffHunk[];
+}
 
 export interface EditEntry {
   path: string;            // absolute
   relativePath: string;
-  diff: string;
+  /** Unified-diff text. Optional: clean entries (status='clean') omit it. */
+  diff?: string;
   status: FileStatus;
   renamedFrom?: string;
   isBinary?: boolean;
   timestamp: string;
+  /** V3.1: working-tree file mtime in ms (Date.now() epoch). Drives
+   *  client-side "most recent edit" picks for the Follow-edits jump
+   *  target. Absent for clean entries with no on-disk file (deleted),
+   *  binary fallback paths that couldn't stat, etc. */
+  mtimeMs?: number;
   truncated?: { hiddenLines: number };
+  /** V2: full-file diff payload. Absent when fallback to hunk view is required
+   *  (binary, deleted, files exceeding FULLFILE_LINE_CAP). For clean entries
+   *  (V2.1), present with hunks=[] and workLines=headLines. */
+  fullFile?: FullFile;
 }
 
 interface SessionPollerState {
@@ -53,7 +83,13 @@ const DEBOUNCE_MS = 50;
 const DIFF_TIMEOUT_MS = 2000;
 const DIFF_LINE_CAP = 1000;
 const STATUS_TIMEOUT_MS = 5000;
-const DIFF_CONCURRENCY = 8;
+/** V2: each buildEntry now spawns two git subprocesses (git diff +
+ *  git show HEAD:path for the V2 fullFile payload). Halved from V1's
+ *  8 so the in-flight subprocess count remains bounded at 8. */
+const DIFF_CONCURRENCY = 4;
+/** V2: per-file line cap above which fullFile is omitted (card falls back
+ *  to v1 hunk view). Bounds payload + render cost. */
+const FULLFILE_LINE_CAP = 5000;
 
 /**
  * Run an array of async jobs with at most `limit` in flight at any time.
@@ -196,20 +232,218 @@ function truncateDiff(diff: string): { diff: string; truncated?: { hiddenLines: 
   };
 }
 
+/**
+ * Parse unified-diff hunk headers from a `git diff` string. Returns the list
+ * of {headStart, headLen, workStart, workLen} entries.
+ *
+ * Header format: `@@ -h,hlen +w,wlen @@` (lengths default to 1 when omitted).
+ * Examples this parser handles:
+ *   `@@ -1,3 +5,2 @@`           → {1, 3, 5, 2}
+ *   `@@ -10 +12 @@`             → {10, 1, 12, 1}  (length omitted = 1)
+ *   `@@ -0,0 +1,5 @@`           → {0, 0, 1, 5}    (pure addition at file start)
+ *   `@@ -1,5 +0,0 @@`           → {1, 5, 0, 0}    (pure deletion of file start)
+ *
+ * Empty diff strings (no hunks) yield [].
+ */
+function parseHunks(diff: string): DiffHunk[] {
+  const out: DiffHunk[] = [];
+  if (!diff) return out;
+  const re = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(diff)) !== null) {
+    out.push({
+      headStart: parseInt(m[1], 10),
+      headLen: m[2] !== undefined ? parseInt(m[2], 10) : 1,
+      workStart: parseInt(m[3], 10),
+      workLen: m[4] !== undefined ? parseInt(m[4], 10) : 1,
+    });
+  }
+  return out;
+}
+
+/**
+ * Split a buffer/string into lines, preserving exactly the line content
+ * (no trailing newline character on each entry). Mirrors how git treats
+ * the final newline: a file with N newline-terminated lines produces N
+ * entries; a file ending without a newline still produces N entries
+ * (the last entry has its content).
+ */
+function toLines(text: string): string[] {
+  if (text === '') return [];
+  const lines = text.split('\n');
+  // Drop a single trailing empty entry produced by a final '\n'.
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+/**
+ * Best-effort read of the HEAD blob for `relPath` as text. Returns null if
+ * the file isn't in HEAD (untracked / newly-added in working tree) or if
+ * the read errors. Binary detection is left to the caller (we still return
+ * the bytes for V2's purposes).
+ */
+async function readHeadBlob(repoRoot: string, relPath: string): Promise<string | null> {
+  const result = await runGit(['show', `HEAD:${relPath}`], repoRoot, DIFF_TIMEOUT_MS);
+  if (result.code !== 0) return null;
+  return result.stdout.toString('utf-8');
+}
+
+/**
+ * Build the V2 fullFile payload for a single path. Returns null for cases the
+ * client must fall back to v1 hunk view: binary, deleted (working tree
+ * absent), or files exceeding FULLFILE_LINE_CAP on either side.
+ *
+ * `originalRelPath` is the HEAD-side path (renamedFrom for renames; same as
+ * relPath otherwise) so the HEAD blob comes from the correct entry.
+ */
+async function computeFullFile(
+  repoRoot: string,
+  relPath: string,
+  originalRelPath: string,
+  status: FileStatus,
+  isBinary: boolean,
+  diffText: string,
+): Promise<FullFile | undefined> {
+  if (isBinary) return undefined;
+  if (status === 'deleted') return undefined;
+
+  let headText: string | null = null;
+  if (status !== 'untracked') {
+    headText = await readHeadBlob(repoRoot, originalRelPath);
+  }
+
+  let workText = '';
+  try {
+    const absPath = join(repoRoot, relPath);
+    const st = await stat(absPath);
+    if (!st.isFile()) return undefined;
+    workText = await readFile(absPath, 'utf-8');
+  } catch {
+    // Working tree file absent or unreadable — treat as fallback case.
+    return undefined;
+  }
+
+  const headLines = headText === null ? null : toLines(headText);
+  const workLines = toLines(workText);
+
+  if ((headLines?.length ?? 0) > FULLFILE_LINE_CAP) return undefined;
+  if (workLines.length > FULLFILE_LINE_CAP) return undefined;
+
+  const hunks = parseHunks(diffText);
+  return { headLines, workLines, hunks };
+}
+
 export interface GitEditPoller {
   /** Attach explicitly; safe to call multiple times. */
   attachToSession(sessionId: string, cwd: string): Promise<void>;
   detachFromSession(sessionId: string): void;
-  triggerPoll(sessionId: string, source: 'event' | 'manual-refresh'): void;
+  triggerPoll(sessionId: string, source: 'event'): void;
   /** Return the current dirty set as edits (used by snapshot endpoint).
-   *  Lazy-attaches if the session isn't tracked yet. */
-  snapshot(sessionId: string, cwd?: string): Promise<EditEntry[]>;
+   *  Lazy-attaches if the session isn't tracked yet.
+   *  V2.1: optional persistedCleanPaths — paths from the persisted card
+   *  list. Any persisted path NOT currently dirty gets a clean EditEntry
+   *  built from `git show HEAD:<path>` so the client renders its body. */
+  snapshot(sessionId: string, cwd?: string, persistedCleanPaths?: string[]): Promise<EditEntry[]>;
+  /** V3.1: materialize an EditEntry for an arbitrary path picked by the
+   *  user. Returns null if the session is unknown, the path is missing
+   *  from both HEAD and the working tree, or git fails. The caller is
+   *  responsible for input validation (no `..`, no NUL, etc.). */
+  openFile(sessionId: string, relPath: string): Promise<EditEntry | null>;
 }
 
 export function createGitEditPoller(): GitEditPoller {
   const sessions = new Map<string, SessionPollerState>();
 
-  async function pollSession(sessionId: string, source: 'timer' | 'event' | 'manual-refresh'): Promise<void> {
+  /** Best-effort file mtime. Returns undefined on stat failure (deleted,
+   *  unreadable). Used to populate EditEntry.mtimeMs so the client can
+   *  pick the freshest edit for the Follow-edits jump target. */
+  async function readMtimeMs(absPath: string): Promise<number | undefined> {
+    try {
+      const st = await stat(absPath);
+      return st.mtimeMs;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Build one EditEntry for a single path. Shared between pollSession and snapshot. */
+  async function buildEntry(repoRoot: string, path: string, info: { status: FileStatus; renamedFrom?: string }): Promise<EditEntry> {
+    const { diff, isBinary, truncated } = await fetchDiff(repoRoot, path, info.status);
+    const originalRelPath = info.renamedFrom ?? path;
+    const absPath = join(repoRoot, path);
+    const fullFile = await computeFullFile(repoRoot, path, originalRelPath, info.status, isBinary, diff);
+    const mtimeMs = await readMtimeMs(absPath);
+    const entry: EditEntry = {
+      path: absPath,
+      relativePath: path,
+      diff,
+      status: info.status,
+      timestamp: new Date().toISOString(),
+    };
+    if (info.renamedFrom) entry.renamedFrom = info.renamedFrom;
+    if (isBinary) entry.isBinary = true;
+    if (truncated) entry.truncated = truncated;
+    if (fullFile) entry.fullFile = fullFile;
+    if (mtimeMs !== undefined) entry.mtimeMs = mtimeMs;
+    return entry;
+  }
+
+  /** V2.1: Build a clean EditEntry for a path that exists in HEAD but is
+   *  clean in the working tree. Synthesizes fullFile with workLines=headLines
+   *  and hunks=[] so the client renders the full file as all-context rows.
+   *  Returns null if the HEAD blob cannot be read (path missing from HEAD,
+   *  e.g. user committed a deletion). */
+  async function buildCleanEntry(repoRoot: string, relPath: string): Promise<EditEntry | null> {
+    const headText = await readHeadBlob(repoRoot, relPath);
+    if (headText === null) return null;
+    const absPath = join(repoRoot, relPath);
+    const lines = toLines(headText);
+    const mtimeMs = await readMtimeMs(absPath);
+    const base: EditEntry = {
+      path: absPath,
+      relativePath: relPath,
+      status: 'clean',
+      timestamp: new Date().toISOString(),
+    };
+    if (mtimeMs !== undefined) base.mtimeMs = mtimeMs;
+    if (lines.length > FULLFILE_LINE_CAP) {
+      return base;
+    }
+    base.fullFile = { headLines: lines, workLines: lines, hunks: [] };
+    return base;
+  }
+
+  /** V3.1: Build an EditEntry for an untracked path picked by the user.
+   *  Reads the working-tree file and synthesizes a single "+all" hunk
+   *  so the client's buildRows produces all-add rows (matching what
+   *  computeFullFile does for status='untracked' via git diff --no-index). */
+  async function buildUntrackedEntry(repoRoot: string, relPath: string): Promise<EditEntry | null> {
+    const absPath = join(repoRoot, relPath);
+    let workText: string;
+    try {
+      workText = await readFile(absPath, 'utf-8');
+    } catch {
+      return null;
+    }
+    const workLines = toLines(workText);
+    const mtimeMs = await readMtimeMs(absPath);
+    const base: EditEntry = {
+      path: absPath,
+      relativePath: relPath,
+      status: 'untracked',
+      timestamp: new Date().toISOString(),
+    };
+    if (mtimeMs !== undefined) base.mtimeMs = mtimeMs;
+    if (workLines.length > FULLFILE_LINE_CAP) return base;
+    base.fullFile = {
+      headLines: null,
+      workLines,
+      hunks: [{ headStart: 0, headLen: 0, workStart: 1, workLen: workLines.length }],
+    };
+    return base;
+  }
+
+  async function pollSession(sessionId: string, source: 'timer' | 'event'): Promise<void> {
     const state = sessions.get(sessionId);
     if (!state || state.polling) return;
     state.polling = true;
@@ -236,26 +470,25 @@ export function createGitEditPoller(): GitEditPoller {
       const diffs = await mapWithConcurrency(newOrChanged, DIFF_CONCURRENCY, async (path) => {
         const info = current.get(path);
         if (!info) return null;
-        const { diff, isBinary, truncated } = await fetchDiff(state.repoRoot, path, info.status);
-        const entry: EditEntry = {
-          path: join(state.repoRoot, path),
-          relativePath: path,
-          diff,
-          status: info.status,
-          timestamp: new Date().toISOString(),
-        };
-        if (info.renamedFrom) entry.renamedFrom = info.renamedFrom;
-        if (isBinary) entry.isBinary = true;
-        if (truncated) entry.truncated = truncated;
-        return entry;
+        return buildEntry(state.repoRoot, path, info);
       });
       for (const e of diffs) { if (e) edits.push(e); }
+
+      // V2.1: build clean entries for paths transitioning dirty→clean
+      // so the client can render the full HEAD content immediately.
+      const cleanedEdits: EditEntry[] = [];
+      if (cleared.length > 0) {
+        const cleans = await mapWithConcurrency(cleared, DIFF_CONCURRENCY, async (path) => {
+          return buildCleanEntry(state.repoRoot, path);
+        });
+        for (const c of cleans) { if (c) cleanedEdits.push(c); }
+      }
 
       state.lastDirty = current;
 
       broadcastEvent(sessionId, {
         type: 'caco.edit',
-        data: { edits, cleared, pollSource: source },
+        data: { edits, cleared, cleanedEdits, pollSource: source },
       } as SessionEvent);
     } catch (err) {
       console.warn(`[FILE-EDITS] poll error for ${sessionId.slice(0, 8)}:`, (err as Error).message);
@@ -312,7 +545,7 @@ export function createGitEditPoller(): GitEditPoller {
       console.log(`[FILE-EDITS] detached from session ${sessionId.slice(0, 8)}`);
     },
 
-    triggerPoll(sessionId: string, source: 'event' | 'manual-refresh'): void {
+    triggerPoll(sessionId: string, source: 'event'): void {
       const state = sessions.get(sessionId);
       if (!state) return;
       state.lastActivityMs = Date.now();
@@ -323,7 +556,7 @@ export function createGitEditPoller(): GitEditPoller {
       }, DEBOUNCE_MS);
     },
 
-    async snapshot(sessionId: string, cwd?: string): Promise<EditEntry[]> {
+    async snapshot(sessionId: string, cwd?: string, persistedCleanPaths?: string[]): Promise<EditEntry[]> {
       let state = sessions.get(sessionId);
       if (!state && cwd) {
         await this.attachToSession(sessionId, cwd);
@@ -335,23 +568,51 @@ export function createGitEditPoller(): GitEditPoller {
       const current = parsePorcelain(result.stdout);
       const entries = Array.from(current.entries());
       const edits = await mapWithConcurrency(entries, DIFF_CONCURRENCY, async ([path, info]) => {
-        const { diff, isBinary, truncated } = await fetchDiff(state.repoRoot, path, info.status);
-        const entry: EditEntry = {
-          path: join(state.repoRoot, path),
-          relativePath: path,
-          diff,
-          status: info.status,
-          timestamp: new Date().toISOString(),
-        };
-        if (info.renamedFrom) entry.renamedFrom = info.renamedFrom;
-        if (isBinary) entry.isBinary = true;
-        if (truncated) entry.truncated = truncated;
-        return entry;
+        return buildEntry(state.repoRoot, path, info);
       });
+      // V2.1: also build clean entries for persisted paths that aren't
+      // currently dirty. Bounded by 50-card cap minus dirty count so the
+      // total snapshot size stays under the client's visible cap.
+      if (persistedCleanPaths && persistedCleanPaths.length > 0) {
+        const slots = Math.max(0, 50 - edits.length);
+        const cleanCandidates = persistedCleanPaths
+          .filter((p) => !current.has(p))
+          .slice(-slots); // tail = most-recently-touched per spec
+        if (cleanCandidates.length > 0) {
+          const cleans = await mapWithConcurrency(cleanCandidates, DIFF_CONCURRENCY, async (path) => {
+            return buildCleanEntry(state.repoRoot, path);
+          });
+          for (const c of cleans) { if (c) edits.push(c); }
+        }
+      }
       return edits;
+    },
+
+    async openFile(sessionId: string, relPath: string): Promise<EditEntry | null> {
+      const state = sessions.get(sessionId);
+      if (!state) return null;
+      // Per-path git status: returns at most one or two entries.
+      // No --no-renames so an R/C entry's source-path NUL field is
+      // present for buildEntry to consume.
+      const result = await runGit(
+        ['status', '--porcelain=v1', '-z', '-u', '--', relPath],
+        state.repoRoot,
+        STATUS_TIMEOUT_MS,
+      );
+      if (result.code !== 0) return null;
+      const current = parsePorcelain(result.stdout);
+      const info = current.get(relPath);
+      if (info) {
+        if (info.status === 'untracked') {
+          return buildUntrackedEntry(state.repoRoot, relPath);
+        }
+        return buildEntry(state.repoRoot, relPath, info);
+      }
+      // Path is clean. Verify it exists in HEAD, then build clean entry.
+      return buildCleanEntry(state.repoRoot, relPath);
     },
   };
 }
 
 // Exports for unit tests
-export const _internal = { parsePorcelain, truncateDiff };
+export const _internal = { parsePorcelain, truncateDiff, parseHunks, toLines };

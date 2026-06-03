@@ -1,12 +1,21 @@
 /**
- * File-edits HTTP routes. See docs/file-edits.md.
+ * File-edits HTTP routes. See docs/file-edits.md, docs/file-edits-v2.1.md.
  *
  * Thin wrapper around the GitEditPoller singleton (injected via init).
  */
 
 import { Router, Request, Response } from 'express';
+import { resolve, join, sep } from 'path';
+import { stat } from 'fs/promises';
 import { sessionManager } from '../session-manager.js';
 import type { GitEditPoller } from '../git-edit-poller.js';
+import {
+  getCardList,
+  setCardList,
+  flushSession,
+  SCHEMA_VERSION,
+  type CardPersist,
+} from '../file-edits-store.js';
 
 const router = Router();
 
@@ -26,8 +35,9 @@ function ensureSession(sessionId: string, res: Response): boolean {
 
 /**
  * GET /api/sessions/:sessionId/file-edits/snapshot
- * Returns the current dirty set as an array of EditEntry. Used when the
- * applet opens to populate the panel without waiting for the next poll.
+ * Returns the current dirty set + persisted-clean entries as an array of
+ * EditEntry. Used when the applet opens to populate the panel without
+ * waiting for the next poll.
  */
 router.get('/sessions/:sessionId/file-edits/snapshot', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
@@ -35,7 +45,9 @@ router.get('/sessions/:sessionId/file-edits/snapshot', async (req: Request, res:
   if (!poller) { res.json({ edits: [] }); return; }
   try {
     const cwd = sessionManager.getSessionCwd(sessionId) ?? undefined;
-    const edits = await poller.snapshot(sessionId, cwd);
+    const persisted = getCardList(sessionId);
+    const persistedPaths = persisted.cards.map((c) => c.relativePath);
+    const edits = await poller.snapshot(sessionId, cwd, persistedPaths);
     res.json({ edits });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -43,14 +55,124 @@ router.get('/sessions/:sessionId/file-edits/snapshot', async (req: Request, res:
 });
 
 /**
- * POST /api/sessions/:sessionId/file-edits/refresh
- * Manual poll trigger from the applet's Refresh button.
+ * POST /api/sessions/:sessionId/file-edits/open
+ * V3.1: materialize an EditEntry for any repo path picked by the user.
+ * Body: { relativePath: string }. Returns { edit: EditEntry } or
+ * 400 / 404 per validation outcome.
  */
-router.post('/sessions/:sessionId/file-edits/refresh', (req: Request, res: Response) => {
+router.post('/sessions/:sessionId/file-edits/open', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   if (!ensureSession(sessionId, res)) return;
-  poller?.triggerPoll(sessionId, 'manual-refresh');
-  res.json({ ok: true });
+  if (!poller) { res.status(404).json({ error: 'poller not initialized' }); return; }
+  const body = req.body;
+  if (!body || typeof body !== 'object' || typeof body.relativePath !== 'string' || body.relativePath.length === 0) {
+    res.status(400).json({ error: 'relativePath must be a non-empty string' });
+    return;
+  }
+  const relPath = body.relativePath as string;
+  if (relPath.includes('\0')) {
+    res.status(400).json({ error: 'relativePath contains NUL' });
+    return;
+  }
+  if (relPath.startsWith('/') || /^[a-zA-Z]:/.test(relPath) || relPath.startsWith('\\\\')) {
+    res.status(400).json({ error: 'relativePath must not be absolute' });
+    return;
+  }
+  if (relPath.split(/[/\\]/).some((seg) => seg === '..')) {
+    res.status(400).json({ error: 'relativePath must not contain ".." segments' });
+    return;
+  }
+  const cwd = sessionManager.getSessionCwd(sessionId);
+  if (!cwd) { res.status(404).json({ error: 'session has no cwd' }); return; }
+  // Best-effort post-join containment check. The poller resolves
+  // repoRoot internally (via findRepoRoot at attach time); for the
+  // route's defense-in-depth we re-check against cwd, which is a
+  // tighter bound than repoRoot for subdirectory sessions. Normalize
+  // cwd via resolve() so a trailing-slash cwd doesn't break the
+  // startsWith check (cwd + sep would become path//).
+  const normalizedCwd = resolve(cwd);
+  const abs = resolve(join(normalizedCwd, relPath));
+  if (!abs.startsWith(normalizedCwd + sep) && abs !== normalizedCwd) {
+    res.status(400).json({ error: 'relativePath escapes session cwd' });
+    return;
+  }
+  // Reject directories. Allow missing-on-disk files (the poller treats
+  // those as deleted-from-working-tree but still in HEAD — a valid
+  // case for buildCleanEntry to handle via git show.)
+  try {
+    const st = await stat(abs);
+    if (!st.isFile()) {
+      res.status(400).json({ error: 'relativePath is not a file' });
+      return;
+    }
+  } catch { /* missing — let poller decide */ }
+  try {
+    const edit = await poller.openFile(sessionId, relPath);
+    if (!edit) {
+      res.status(404).json({ error: 'path not found in HEAD or working tree' });
+      return;
+    }
+    res.json({ edit });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
+
+/**
+ * GET /api/sessions/:sessionId/file-edits/cards
+ * Returns the persisted card list (V2.1).
+ */
+router.get('/sessions/:sessionId/file-edits/cards', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  if (!ensureSession(sessionId, res)) return;
+  res.json(getCardList(sessionId));
+});
+
+/**
+ * PUT /api/sessions/:sessionId/file-edits/cards
+ * Persists the card list. Body: { schemaVersion, cards, dismissed }.
+ * Server sets updatedAt.
+ */
+function putCardsHandler(req: Request, res: Response): void {
+  const sessionId = req.params.sessionId as string;
+  if (!ensureSession(sessionId, res)) return;
+  const body = req.body;
+  if (!body || typeof body !== 'object') {
+    res.status(400).json({ error: 'body must be an object' });
+    return;
+  }
+  if (body.schemaVersion !== SCHEMA_VERSION) {
+    res.status(400).json({ error: `unknown schemaVersion: ${body.schemaVersion}` });
+    return;
+  }
+  if (!Array.isArray(body.cards) || !body.cards.every(isCardPersist)) {
+    res.status(400).json({ error: 'cards must be Array<{ relativePath: string, collapsed: boolean }>' });
+    return;
+  }
+  if (!Array.isArray(body.dismissed) || !body.dismissed.every((d: unknown) => typeof d === 'string')) {
+    res.status(400).json({ error: 'dismissed must be string[]' });
+    return;
+  }
+  setCardList(sessionId, { cards: body.cards as CardPersist[], dismissed: body.dismissed as string[] });
+  res.json({ ok: true });
+}
+
+router.put('/sessions/:sessionId/file-edits/cards', putCardsHandler);
+// V2.1: POST alias for navigator.sendBeacon, which only supports POST.
+// The beforeunload best-effort flush path uses sendBeacon, so the
+// route must be reachable via POST too.
+router.post('/sessions/:sessionId/file-edits/cards', putCardsHandler);
+
+function isCardPersist(v: unknown): v is CardPersist {
+  if (!v || typeof v !== 'object') return false;
+  const o = v as Record<string, unknown>;
+  return typeof o.relativePath === 'string' && typeof o.collapsed === 'boolean';
+}
+
+/** Called from server shutdown / session detach so we don't lose the
+ *  last pending PUT. */
+export function flushFileEditsCardList(sessionId: string): void {
+  flushSession(sessionId);
+}
 
 export { router };

@@ -76,7 +76,11 @@ Asking git directly collapses all of that to: poll → diff → emit.
 
 ### Future: replace `git-status` applet
 
-Once `file-edits` reaches feature parity (stage all, unstage, stage hunk, commit, push, pull), the existing `git-status` applet retires. The "active leases block commit" behavior (operator requirement, see below) lives natively here, not bolted on across two applets.
+**Reversed 2026-06-01.** Originally framed as the successor to
+`git-status`. Operator decided V3 keeps file-edits as a read-only
+viewer; git-status stays as a separate applet for stage/commit/push.
+The "block commit while reviewing" behavior may still ship, but as
+a small server-side lease the git-status applet observes.
 
 ### Filesystem watch as accelerator (optional, v1)
 
@@ -126,7 +130,7 @@ For v1, scope: just track the lease; don't actually block commits. We need the d
       truncated?: { hiddenLines: number };
     }>;
     cleared: string[];         // relative paths that returned to HEAD; applet removes their cards
-    pollSource: 'timer' | 'event' | 'manual-refresh';
+    pollSource: 'timer' | 'event';
   }
 }
 ```
@@ -138,7 +142,7 @@ One event type: `caco.edit`. Flat `caco.*` namespace, consistent with `caco.usag
 **Sticky until applet restart or "Reset dismissals".** When the user X's a card, the path joins client-side `dismissedPaths: Set<string>`. Future `caco.edit` entries for that path are filtered at the applet level. Server has no idea about dismissals.
 
 Toolbar:
-- **Refresh** — manual poll trigger.
+- **`+`** — open a fuzzy file picker (V3.1). Adds the picked file as a card.
 - **Reset dismissals** — clears the dismiss set; previously dismissed files reappear (collapsed) if still in the dirty set.
 - **Counts** — N files modified / N dismissed.
 
@@ -167,7 +171,7 @@ DOM shape:
   <div class="fe-toolbar">
     <span class="fe-repo">caco</span>
     <span class="fe-counts">12 files · 0 dismissed</span>
-    <button class="fe-refresh">↻</button>
+    <button class="fe-open" title="Open file">+</button>
     <button class="fe-reset">Reset dismissals</button>
   </div>
   <div class="fe-stream">
@@ -209,7 +213,7 @@ Per-session state (or per-repo-root, shared across sessions on the same cwd):
 interface GitEditPoller {
   attachToSession(sessionId: string, cwd: string): void;
   detachFromSession(sessionId: string): void;
-  triggerPoll(sessionId: string, source: 'event' | 'manual-refresh'): void;
+  triggerPoll(sessionId: string, source: 'event'): void;
 }
 ```
 
@@ -340,7 +344,7 @@ CSS-class-driven (`+` → `.fe-d-add`, `-` → `.fe-d-del`, ` ` → `.fe-d-ctx`)
 6. Agent runs `git checkout main` (50 files churn). Panel shows 50 collapsed cards, then 50 cards clear on the next tick.
 7. Click X on a card → card disappears. Subsequent edits to that path do NOT re-add.
 8. Click "Reset dismissals" → previously-dismissed files in the current dirty set reappear, collapsed.
-9. Click "Refresh" → manual poll fires immediately.
+9. Click `+` → fuzzy file picker opens; pick a file → card appears.
 10. Open the applet on a non-git cwd → see "Not a git repo" message; no polls run.
 11. New untracked file → collapsed card with "(untracked)" badge; expanded view shows full content as additions.
 12. File deleted → collapsed card with "deleted" badge; expanded view shows previous content as deletions.
@@ -377,22 +381,114 @@ Explicit V2 non-goals (deferred to V3 — see backlog below):
 
 Captured for record; no commitment, no ordering until V2 ships.
 
-- v3 becomes the full **git-status replacement** (stage/unstage per file & per hunk, commit composer with co-author toggle, push with ahead/behind, discard hunk/file with confirm). Retires the existing `git-status` applet.
-- **Commit lease**: while file-edits has unread changes, block agent-initiated `git commit`. Surface a "release lease" button.
-- **git fsmonitor** for sub-second updates.
-- **Server-side per-path hash + porcelain v2 mtime gating** to skip diff subprocess on no-op polls.
-- **Combined multi-source signals**: surface agent edit/create/write tool hooks distinctly from git-dirty, with a decay badge for "just touched by agent."
-- **Untracked-ignored toggle** for `.gitignore`'d paths the agent wrote.
-- **Per-card jump-to-editor** (`vscode://file/...`).
-- **Filter bar** — by path glob, by status, by "touched in last N minutes."
-- **Reveal-in-tree sidebar.**
-- **Keyboard navigation** — j/k between cards, e expand, x dismiss.
-- **Truncation "show more"** instead of silent cap.
-- **Binary image preview** (before/after thumbnails).
-- **Conflict-marker awareness** — distinct status for files containing merge markers.
-- **Per-repo shared poller** across sessions on same cwd.
-- **Multi-repo / multi-cwd** stacking.
-- **Replay buffer** for edits prior to applet open beyond what snapshot covers.
+**Direction shift (2026-06-01, operator):**
+
+> "This is useful enough that I'm not sure it should be only for diffs
+> and I don't think I want it to replace the git-status applet."
+
+So the applet's V3 identity is **a stacked read-only file viewer** that
+happens to highlight diffs when present, NOT a git-status replacement.
+git-status stays as a separate applet for stage/commit/push flows.
+file-edits's V3 direction is file navigability + viewer polish; the
+stage/commit/discard items are explicitly removed from this backlog.
+
+### File navigability (operator priority, 2026-06-01)
+
+The applet stacks files modified by the agent or by user tools. It does
+not currently support browsing the repo or pinning files of interest.
+Goal: turn it into a competent read-only viewer with persistence.
+
+- **Open arbitrary file (no edit required).** Dropdown / file picker /
+  "+" button that adds any path in the repo to the stacked view as a
+  clean card with full HEAD content. The card persists like any other.
+  This is the largest single feature on the V3 list.
+- **Per-card pin.** Opposite of dismiss; "keep this card even if cap
+  eviction would otherwise drop it." Pinned cards are also exempt from
+  the 50-card cap counting.
+- **Reveal-in-tree sidebar.** File-tree view of the repo (or a filtered
+  view of the dirty set) for click-to-add.
+- **Per-card jump-to-editor** (`vscode://file/...`). Open the path in
+  the user's external editor.
+- **Collapse-all / Expand-all toolbar buttons.** Bulk control once
+  card counts get high.
+- **Filter bar** — by path glob, by status, by "touched in last N
+  minutes."
+- **Stale persisted-card cleanup** — a path persisted from yesterday
+  that's now deleted from HEAD renders an empty-body card forever.
+  Auto-prune or surface a "stale" badge with a one-click dismiss.
+
+### Polling and responsiveness
+
+- **git fsmonitor integration** for sub-second updates. Replaces the
+  1.5s/5s polling loop. The user-facing win is detecting edits made
+  outside the agent (in VSCode, in the shell) in <1s rather than 1.5s.
+- **chokidar fallback / supplement** — simpler than fsmonitor; watch
+  the repo root with `.gitignore` filtering as a stopgap before
+  fsmonitor.
+- **Server-side per-path hash + porcelain v2 mtime gating** to skip
+  `git diff` subprocess on no-op polls. Reduces server load; complements
+  fsmonitor.
+- **Per-repo shared poller** across sessions on the same cwd. Today
+  each session polls independently.
+- **Multi-source signals** — surface agent `edit`/`create`/`write` tool
+  hooks distinctly from git-dirty, with a decay badge for "just touched
+  by agent." Helps spot churn the agent did and immediately reverted.
+
+### Display fidelity
+
+- **Color/contrast pass on diff rows** — operator-reported (2026-05-31).
+  Partially addressed (bright-text fix on word marks, opacity cleanup
+  on ctx rows), but some hljs tokens on the 18% row tint may still need
+  systematic tuning across the full hljs-dark palette.
+- **Side-by-side / split-pane diff view** — operator-deferred from V2.
+  Two columns (HEAD | working tree) for files above a width/size
+  threshold; per-card toggle.
+- **Word-level diff polish** — consider switching to a `<ins>`/`<del>`
+  shape instead of `<mark>` for semantic correctness; current fix is
+  visual-only.
+- **Binary image preview** (before/after thumbnails) for images.
+- **Conflict-marker awareness** — distinct status for files containing
+  `<<<<<<<` merge markers.
+- **Truncation "show more"** instead of silent cap on large diffs.
+- **Cross-applet shared "code body" stylesheet** — file-edits is on
+  Caco design tokens (`--text-sm`, `--font-mono`); text-editor still
+  uses hardcoded `pt` units. Migrate text-editor onto the same tokens,
+  or extract a shared `code.css` referenced by both applets.
+
+### Non-goals (V3 explicitly NOT this)
+
+Operator (2026-06-01): the applet stays a read-only viewer. The
+following items are explicitly OUT of scope for V3; they belong to
+git-status or its successor, not here.
+
+- Stage / unstage per file or per hunk.
+- Commit composer (subject/body/co-author toggle).
+- Push, pull, fetch.
+- Discard file or hunk.
+- Commit lease (block agent-initiated `git commit` while reviewing).
+  May still ship as a small server-side helper, but the UI lives in
+  git-status.
+
+### Input
+
+- **Keyboard navigation** — j/k between cards, e expand, x dismiss,
+  Enter open-in-text-editor, / focus filter bar.
+
+### Other
+
+- **Untracked-ignored toggle** for `.gitignore`'d paths the agent
+  wrote (build artifacts).
+- **Persistence migration** — schemaVersion 1 only today; future field
+  additions need a forward-compat path beyond "drop unknown."
+- **Persistence reconciliation** — when the JSON file accumulates stale
+  entries (e.g. user dismissed many over a long session), the snapshot
+  slices to the cap and the rest become orphans on disk. Trim on
+  load, or expose a "compact" action.
+- **Replay buffer** for edits prior to applet open beyond what
+  snapshot covers (currently snapshot fills cleanly for persisted-
+  clean, but transient mid-edit states between snapshot and first
+  `caco.edit` are lost).
+
 
 ## Operator-decided defaults (post-questionnaire)
 

@@ -1,78 +1,382 @@
 /**
- * File Edits applet.
+ * File Edits applet — V3.2 (tabs + always-on edits).
  *
- * Subscribes to caco.edit events from the server-side git-edit-poller and
- * renders collapsible diff cards. See docs/file-edits.md and
- * docs/file-edits-v2.md.
+ * See docs/file-edits-v3.2.md. The UI is a tab strip + single content
+ * pane. Tabs auto-open on agent edits (or user pick via +). A
+ * `followEdits` boolean decides whether incoming edits auto-switch
+ * tabs; user gestures (tab click, pane scroll, picker) turn it off;
+ * the top-center "Follow edits" button turns it back on and jumps to
+ * the most recent edit.
  *
- * Layout: stacked cards (first-touched at top — never reordered), each
- * header shows chevron + path + time + X. Body (the diff) is expanded by
- * default; clicking the header toggles.
- *
- * V1 behavior (current): cards are never reordered after creation; new
- * cards append to the bottom of the stream. No autoscroll — user controls
- * scroll. V2 Phase 3 adds a sticky/autoscroll state machine.
- *
- * Sticky dismiss: X path is filtered until "Reset dismissals" or applet
- * reopen.
+ * Persisted state (per session, V2.1 mechanism): tab order. Reuses
+ * the V2.1 cards endpoint and JSON shape; writes empty dismissed[]
+ * and collapsed=false. Active-tab id is NOT persisted in V3.2.
  */
 
 (function() {
   var repoEl = document.getElementById('feRepo');
-  var countsEl = document.getElementById('feCounts');
-  var resetBtn = document.getElementById('feReset');
+  var followBtn = document.getElementById('feFollow');
   var openBtn = document.getElementById('feOpen');
-  var emptyEl = document.getElementById('feEmpty');
+  var tabsEl = document.getElementById('feTabs');
+  var paneEl = document.getElementById('fePane');
+  var paneEmptyEl = document.getElementById('fePaneEmpty');
   var notGitEl = document.getElementById('feNotGit');
-  var streamEl = document.getElementById('feStream');
-  var rootEl = streamEl.parentNode;
+  var rootEl = paneEl.parentNode;
 
-  /** Map<relativePath, HTMLElement>. */
-  var cards = new Map();
-  /** Set<relativePath>. Sticky until reset. */
-  var dismissed = new Set();
-  /** Set<relativePath>. Paths the user explicitly collapsed; sticky for the
-   *  life of the card. Cleared when the card is removed (e.g. file returns
-   *  to HEAD, then comes back: defaults to expanded again). */
-  var userCollapsed = new Set();
-  var VISIBLE_CAP = 50;
+  // ── State machine ─────────────────────────────────────────────────────
+  var followEdits = true;
+  var activeTabId = null;
+  /** Map<relativePath, FileTab>. Map iteration order = insertion order =
+   *  tab strip order (left-to-right). Tabs never reorder after creation. */
+  var tabs = new Map();
+  /** Most recent tab to receive a content-changing edit (not no-op). Drives
+   *  jumpToMostRecent's primary target. */
+  var lastEditedTabId = null;
+  /** Distinct paths edited while followEdits was false. Drives Follow
+   *  button's N-badge. Cleared on Follow-click and session change. */
+  var badgeCounter = new Set();
+  /** Single-shot suppression flag for pane scroll. Set by code that does
+   *  a programmatic scrollTop write; consumed by the scroll handler. The
+   *  hide-swap-show pattern in FileTab.activate prevents spurious scroll
+   *  events from the innerHTML clear from burning this flag. */
+  var programmaticScroll = false;
   var sessionId = null;
-  /** V3.1: cached repo cwd, used by the file picker for fuzzy queries.
-   *  Set from info.cwd on session change; from session meta on initial
-   *  attach. Cleared on session change before the next session's meta
-   *  arrives. */
   var cachedCwd = '';
+  var TAB_CAP = 50;
 
-  // ── V2.1: Persistence ─────────────────────────────────────────────────
-  //
-  // Per-session card list persisted via /api/sessions/<id>/file-edits/cards.
-  // Persisted: card relativePath + collapsed flag + dismissed set.
-  // See docs/file-edits-v2.1.md §3.
+  // ── FileTab class ─────────────────────────────────────────────────────
+  function FileTab(edit) {
+    this.relativePath = edit.relativePath;
+    this.absolutePath = edit.path || '';
+    this.edit = edit;
+    this.paneEl = null;     // lazy: built on first activate()
+    this.scrollTop = 0;
+    this.tabEl = this.buildTabEl();
+  }
+
+  FileTab.prototype.buildTabEl = function() {
+    var self = this;
+    var btn = document.createElement('button');
+    btn.className = 'fe-tab';
+    btn.type = 'button';
+    btn.dataset.path = this.relativePath;
+    btn.title = this.relativePath;
+
+    var name = document.createElement('span');
+    name.className = 'fe-tab-name';
+    name.textContent = basename(this.relativePath);
+    btn.appendChild(name);
+
+    var x = document.createElement('span');
+    x.className = 'fe-tab-x';
+    x.textContent = '×';
+    x.setAttribute('aria-label', 'Close tab');
+    btn.appendChild(x);
+
+    btn.addEventListener('click', function(e) {
+      if (e.target === x || x.contains(e.target)) {
+        e.stopPropagation();
+        closeTab(self.relativePath);
+        return;
+      }
+      // User clicked the tab: turn off follow, decrement badge for this
+      // path (user has now seen it), activate.
+      followEdits = false;
+      badgeCounter.delete(self.relativePath);
+      updateFollowButton();
+      setActiveTab(self.relativePath);
+    });
+    return btn;
+  };
+
+  FileTab.prototype.render = function() {
+    if (!this.paneEl) this.paneEl = document.createElement('pre');
+    this.paneEl.className = 'fe-diff';
+    renderBody(this.paneEl, this.edit);
+  };
+
+  FileTab.prototype.update = function(newEdit) {
+    if (this.contentEqual(newEdit)) {
+      // Even if content didn't change, keep our edit reference fresh —
+      // mtimeMs may have updated server-side without the diff bytes
+      // changing (rare but harmless).
+      this.edit = newEdit;
+      return false;
+    }
+    this.edit = newEdit;
+    if (this.paneEl) this.render();
+    return true;
+  };
+
+  FileTab.prototype.contentEqual = function(other) {
+    var a = this.edit, b = other;
+    return a && b
+      && a.diff === b.diff
+      && a.status === b.status
+      && a.renamedFrom === b.renamedFrom
+      && a.isBinary === b.isBinary
+      && fullFileEqual(a.fullFile, b.fullFile);
+  };
+
+  FileTab.prototype.activate = function() {
+    if (!this.paneEl) this.render();
+    // Hide-swap-show: prevent the innerHTML clear from firing a
+    // spurious scroll-to-0 event that would burn the programmaticScroll
+    // flag before the rAF restore.
+    var prev = paneEl.style.visibility;
+    paneEl.style.visibility = 'hidden';
+    paneEl.innerHTML = '';
+    paneEl.appendChild(this.paneEl);
+    var self = this;
+    requestAnimationFrame(function() {
+      programmaticScroll = true;
+      paneEl.scrollTop = self.scrollTop;
+      paneEl.style.visibility = prev || '';
+    });
+  };
+
+  FileTab.prototype.deactivate = function() {
+    this.scrollTop = paneEl.scrollTop;
+  };
+
+  FileTab.prototype.destroy = function() {
+    if (this.tabEl && this.tabEl.parentNode) {
+      this.tabEl.parentNode.removeChild(this.tabEl);
+    }
+    this.paneEl = null;
+  };
+
+  function basename(p) {
+    var i = p.lastIndexOf('/');
+    if (i < 0) i = p.lastIndexOf('\\');
+    return i < 0 ? p : p.slice(i + 1);
+  }
+
+  // ── Tab orchestration ────────────────────────────────────────────────
+  function setActiveTab(tabId) {
+    // Note: setActiveTab does NOT modify followEdits. Callers that
+    // represent user gestures (tab click, X-on-active, picker selection)
+    // must set followEdits=false themselves before calling.
+    if (tabId === activeTabId) {
+      updateFollowButton();
+      schedulePersist();
+      return;
+    }
+    var prev = activeTabId ? tabs.get(activeTabId) : null;
+    if (prev) {
+      prev.deactivate();
+      prev.tabEl.classList.remove('active');
+    }
+    activeTabId = tabId;
+    var next = tabs.get(tabId);
+    if (next) {
+      next.tabEl.classList.add('active');
+      next.activate();
+      try {
+        next.tabEl.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+      } catch (_) { /* old browsers */ }
+    } else {
+      // Cleared (no tab active)
+      paneEl.innerHTML = '';
+    }
+    updateEmptyState();
+    updateFollowButton();
+    schedulePersist();
+  }
+
+  /** Remove the oldest non-active tab. Called by openOrUpdateTab when
+   *  the cap is hit. No-op if no non-active tab exists. */
+  function evictOldestNonActive() {
+    var iter = tabs.keys();
+    var step;
+    while (!(step = iter.next()).done) {
+      var id = step.value;
+      if (id !== activeTabId) {
+        var t = tabs.get(id);
+        if (t) t.destroy();
+        tabs.delete(id);
+        badgeCounter.delete(id);
+        return;
+      }
+    }
+  }
+
+  function openOrUpdateTab(edit, options) {
+    options = options || {};
+    var id = edit.relativePath;
+    if (!id) return;
+    var tab = tabs.get(id);
+    var isNew = false;
+    var contentChanged = false;
+    if (!tab) {
+      if (tabs.size >= TAB_CAP) evictOldestNonActive();
+      tab = new FileTab(edit);
+      tabs.set(id, tab);
+      tabsEl.appendChild(tab.tabEl);  // append-only, never reorder
+      isNew = true;
+      contentChanged = true;
+    } else {
+      contentChanged = tab.update(edit);
+      if (!contentChanged && !options.forceFocus) return;
+    }
+    if (contentChanged) lastEditedTabId = id;
+
+    if (options.forceFocus) {
+      // Picker path. Caller already set followEdits=false.
+      setActiveTab(id);
+      programmaticScroll = true;
+      paneEl.scrollTop = 0;
+      tab.scrollTop = 0;
+    } else if (followEdits) {
+      setActiveTab(id);
+      if (isNew) {
+        programmaticScroll = true;
+        paneEl.scrollTop = 0;
+        tab.scrollTop = 0;
+      }
+    } else {
+      // Tab is in the strip but inactive. Bump badge if this is a real edit.
+      if (contentChanged) {
+        badgeCounter.add(id);
+        updateFollowButton();
+      }
+    }
+    updateEmptyState();
+    schedulePersist();
+  }
+
+  function closeTab(id) {
+    var tab = tabs.get(id);
+    if (!tab) return;
+    var wasActive = id === activeTabId;
+    // Compute neighbor BEFORE removing — need pre-removal insertion order.
+    var newActive = null;
+    if (wasActive) {
+      var keys = Array.from(tabs.keys());
+      var idx = keys.indexOf(id);
+      if (idx > 0) newActive = keys[idx - 1];          // left neighbor
+      else if (idx < keys.length - 1) newActive = keys[idx + 1]; // right neighbor
+      // else newActive stays null (this was the only tab)
+    }
+    tab.destroy();
+    tabs.delete(id);
+    badgeCounter.delete(id);
+    if (lastEditedTabId === id) lastEditedTabId = null;
+    if (wasActive) {
+      activeTabId = null;
+      if (newActive) {
+        setActiveTab(newActive);
+      } else {
+        paneEl.innerHTML = '';
+        paneEl.appendChild(paneEmptyEl);
+        paneEl.appendChild(notGitEl);
+      }
+    }
+    followEdits = false;  // X is a user gesture
+    updateFollowButton();
+    updateEmptyState();
+    schedulePersist();
+  }
+
+  function jumpToMostRecent() {
+    if (tabs.size === 0) return;
+    // Primary: lastEditedTabId. Fallback: highest mtimeMs across all
+    // tabs. Final fallback: rightmost (newest in strip order).
+    var targetId = null;
+    if (lastEditedTabId && tabs.has(lastEditedTabId)) {
+      targetId = lastEditedTabId;
+    } else {
+      var bestMtime = -1;
+      tabs.forEach(function(t, id) {
+        var m = (t.edit && typeof t.edit.mtimeMs === 'number') ? t.edit.mtimeMs : -1;
+        if (m > bestMtime) { bestMtime = m; targetId = id; }
+      });
+      if (!targetId) {
+        // No mtimes anywhere — pick rightmost.
+        var keys = Array.from(tabs.keys());
+        targetId = keys[keys.length - 1];
+      }
+    }
+    if (!targetId) return;
+    setActiveTab(targetId);
+    programmaticScroll = true;
+    paneEl.scrollTop = 0;
+    var t = tabs.get(targetId);
+    if (t) t.scrollTop = 0;
+  }
+
+  function updateFollowButton() {
+    if (followEdits) {
+      followBtn.hidden = true;
+      return;
+    }
+    followBtn.hidden = false;
+    var n = badgeCounter.size;
+    followBtn.textContent = n > 0
+      ? ('↓ Follow edits · ' + n)
+      : '↓ Follow edits';
+  }
+
+  function updateEmptyState() {
+    var hasTabs = tabs.size > 0;
+    paneEmptyEl.hidden = hasTabs || !notGitEl.hidden;
+    if (!hasTabs && activeTabId === null) {
+      // empty pane: clear any leftover content but keep our message div
+      if (paneEl.firstChild && paneEl.firstChild !== paneEmptyEl && paneEl.firstChild !== notGitEl) {
+        paneEl.innerHTML = '';
+        paneEl.appendChild(paneEmptyEl);
+        paneEl.appendChild(notGitEl);
+      }
+    }
+  }
+
+  followBtn.addEventListener('click', function() {
+    followEdits = true;
+    badgeCounter.clear();
+    jumpToMostRecent();
+    updateFollowButton();
+  });
+
+  // Pane scroll handler
+  paneEl.addEventListener('scroll', function() {
+    if (programmaticScroll) { programmaticScroll = false; return; }
+    if (followEdits) {
+      followEdits = false;
+      updateFollowButton();
+    }
+    var active = activeTabId ? tabs.get(activeTabId) : null;
+    if (active) active.scrollTop = paneEl.scrollTop;
+  }, { passive: true });
+
+  // ── Persistence (V2.1 mechanism; tab list reuse cards[]) ─────────────
   var PERSIST_DEBOUNCE_MS = 250;
   var persistTimer = null;
-  /** Captured at schedule time so a session switch during the debounce
-   *  window flushes the write against the *old* session ID with the
-   *  *old* body. Reading DOM/cards/dismissed at flush time would race
-   *  with onSessionChange's state clear. */
   var persistPendingSid = null;
   var persistPendingBody = null;
 
   function buildPersistBody() {
-    // Iterate cards in DOM order (insertion order of streamEl.children).
     var list = [];
-    var n = streamEl.children;
-    for (var i = 0; i < n.length; i++) {
-      var c = n[i];
-      var p = c.dataset.path;
-      if (!p) continue;
-      list.push({
-        relativePath: p,
-        collapsed: userCollapsed.has(p),
-      });
-    }
-    var dis = [];
-    dismissed.forEach(function(p) { dis.push(p); });
-    return { schemaVersion: 1, cards: list, dismissed: dis };
+    // Iterate tabs strip in DOM order = insertion order.
+    tabs.forEach(function(_t, path) {
+      list.push({ relativePath: path, collapsed: false });
+    });
+    return { schemaVersion: 1, cards: list, dismissed: [] };
+  }
+
+  function schedulePersist() {
+    if (!sessionId) return;
+    if (persistTimer) clearTimeout(persistTimer);
+    persistPendingSid = sessionId;
+    persistPendingBody = buildPersistBody();
+    persistTimer = setTimeout(function() {
+      var sid = persistPendingSid;
+      var body = persistPendingBody;
+      persistTimer = null;
+      persistPendingSid = null;
+      persistPendingBody = null;
+      if (!sid || !body) return;
+      void doPersistPut(sid, body);
+    }, PERSIST_DEBOUNCE_MS);
   }
 
   function flushPersist() {
@@ -87,25 +391,6 @@
     void doPersistPut(sid, body);
   }
 
-  function schedulePersist() {
-    if (!sessionId) return;
-    if (persistTimer) clearTimeout(persistTimer);
-    persistPendingSid = sessionId;
-    // Capture the body NOW. The debounce timer fires later, possibly
-    // after onSessionChange has wiped state — but the captured snapshot
-    // still reflects the gesture that scheduled it.
-    persistPendingBody = buildPersistBody();
-    persistTimer = setTimeout(function() {
-      var sid = persistPendingSid;
-      var body = persistPendingBody;
-      persistTimer = null;
-      persistPendingSid = null;
-      persistPendingBody = null;
-      if (!sid || !body) return;
-      void doPersistPut(sid, body);
-    }, PERSIST_DEBOUNCE_MS);
-  }
-
   async function doPersistPut(sid, body) {
     try {
       await fetch('/api/sessions/' + encodeURIComponent(sid) + '/file-edits/cards', {
@@ -118,16 +403,12 @@
     }
   }
 
-  /** Synchronous best-effort send via sendBeacon for beforeunload. */
   function flushPersistBeacon() {
     if (!sessionId) return;
     try {
       var body = buildPersistBody();
       var blob = new Blob([JSON.stringify(body)], { type: 'application/json' });
-      navigator.sendBeacon(
-        '/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/cards',
-        blob
-      );
+      navigator.sendBeacon('/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/cards', blob);
     } catch (_) { /* best effort */ }
   }
   window.addEventListener('beforeunload', flushPersistBeacon);
@@ -139,26 +420,20 @@
       return await res.json();
     } catch (_) { return null; }
   }
-  // ── End persistence ───────────────────────────────────────────────────
 
-  // ── V3.1: File picker ─────────────────────────────────────────────────
-  //
-  // Fuzzy picker for adding arbitrary repo files as stacked cards. See
-  // docs/file-edits-v3.1.md. Bottom of the dependency stack: only depends
-  // on sessionId + cachedCwd from outer scope, and applyEdits (defined
-  // below).
+  // ── File picker (V3.1, slimmed for V3.2) ─────────────────────────────
   var PICKER_FETCH_DEBOUNCE_MS = 100;
   var PICKER_RESULT_CAP = 50;
-  var pickerEl = null;          // root <div>; lazily created
+  var pickerEl = null;
   var pickerInput = null;
   var pickerList = null;
   var pickerOpen = false;
   var pickerResults = [];
   var pickerSelectedIdx = 0;
   var pickerLastQuery = '';
-  var pickerFetchToken = 0;     // later-query-wins for /project-files
+  var pickerFetchToken = 0;
   var pickerFetchTimer = null;
-  var pickerOpenAbort = null;   // for the per-pick /file-edits/open call
+  var pickerOpenAbort = null;
   var pickerOutsideHandler = null;
 
   function ensurePickerEl() {
@@ -185,13 +460,9 @@
       pickerFetchTimer = setTimeout(function() { void runPickerFetch(q); }, PICKER_FETCH_DEBOUNCE_MS);
     });
     pickerInput.addEventListener('keydown', function(e) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        movePickerSelection(1);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        movePickerSelection(-1);
-      } else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (e.key === 'ArrowDown') { e.preventDefault(); movePickerSelection(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); movePickerSelection(-1); }
+      else if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
         var sel = pickerResults[pickerSelectedIdx];
         if (sel) pickSelected(sel);
@@ -203,7 +474,6 @@
         closePicker();
       }
     });
-
     pickerList.addEventListener('mousedown', function(e) {
       var target = e.target.closest('.fe-picker-item');
       if (!target) return;
@@ -225,15 +495,11 @@
     pickerSelectedIdx = 0;
     pickerResults = [];
     renderPickerList();
-    void runPickerFetch('');  // initial empty-query fetch → alphabetical
+    void runPickerFetch('');
     setTimeout(function() { pickerInput.focus(); }, 0);
-    // Click-outside dismiss; bind on next tick so this click doesn't
-    // immediately re-close it.
     setTimeout(function() {
       pickerOutsideHandler = function(ev) {
-        if (!pickerEl.contains(ev.target) && ev.target !== openBtn) {
-          closePicker();
-        }
+        if (!pickerEl.contains(ev.target) && ev.target !== openBtn) closePicker();
       };
       document.addEventListener('mousedown', pickerOutsideHandler);
     }, 0);
@@ -259,11 +525,11 @@
       var res = await fetch(url);
       if (!res.ok) return;
       var data = await res.json();
-      if (token !== pickerFetchToken) return;  // later query won
+      if (token !== pickerFetchToken) return;
       pickerResults = (data.files || []).slice(0, PICKER_RESULT_CAP);
       pickerSelectedIdx = 0;
       renderPickerList();
-    } catch (_) { /* network blip; ignore */ }
+    } catch (_) { /* ignore */ }
   }
 
   function renderPickerList() {
@@ -279,17 +545,12 @@
       label.className = 'fe-picker-path';
       label.textContent = p;
       li.appendChild(label);
-      if (cards.has(p)) {
+      if (tabs.has(p)) {
         li.classList.add('disabled');
         var sfx = document.createElement('span');
         sfx.className = 'fe-picker-suffix';
         sfx.textContent = '(open)';
         li.appendChild(sfx);
-      } else if (dismissed.has(p)) {
-        var sfx2 = document.createElement('span');
-        sfx2.className = 'fe-picker-suffix';
-        sfx2.textContent = '(dismissed)';
-        li.appendChild(sfx2);
       }
       pickerList.appendChild(li);
     }
@@ -310,7 +571,13 @@
   }
 
   async function pickFile(relativePath) {
-    if (cards.has(relativePath)) return;
+    // If already open, just switch and turn off follow.
+    if (tabs.has(relativePath)) {
+      followEdits = false;
+      updateFollowButton();
+      setActiveTab(relativePath);
+      return;
+    }
     if (pickerOpenAbort) pickerOpenAbort.abort();
     pickerOpenAbort = new AbortController();
     var sid = sessionId;
@@ -336,229 +603,21 @@
       console.warn('[file-edits] open error', err, relativePath);
       return;
     }
-    if (sid !== sessionId) return;  // session changed mid-fetch
+    if (sid !== sessionId) return;
     if (!edit) return;
-    dismissed.delete(relativePath);
-    applyEdits([edit], [], [], { suppressScroll: true });
-  }
-
-  if (openBtn) {
-    openBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      if (pickerOpen) closePicker();
-      else openPicker();
-    });
-  }
-  // ── End file picker ───────────────────────────────────────────────────
-
-  // ── Phase 3: Sticky / Autoscroll state machine ─────────────────────────
-  //
-  // States: 'autoscroll' (default) and 'sticky'. See docs/file-edits-v2.md
-  // Phase 3. Cards are never reordered; the state machine only governs
-  // scroll-position manipulation.
-  /** 'autoscroll' | 'sticky' */
-  var scrollMode = 'autoscroll';
-  /** When non-null, a programmatic scrollTop write is in flight. The scroll
-   *  handler matches event.target.scrollTop to this value (±1px). If it
-   *  matches, the flag is consumed and Sticky entry is suppressed. Survives
-   *  across rAF boundaries; never pre-cleared synchronously. */
-  var pendingProgrammaticScroll = null;
-  /** Set<relativePath> tracking files changed during the current Sticky
-   *  session. Drives the Follow-edits badge counter. Cleared on Sticky
-   *  entry and on Follow-edits click. */
-  var stickyChangedPaths = new Set();
-  /** Single source of truth for "where to jump on the next scroll
-   *  gesture." Set whenever applyEdits touches a card (autoscroll OR
-   *  sticky). Used by both:
-   *   - autoscroll mode: jumpToLastChanged(false) fires immediately
-   *   - Follow-edits button: jumpToLastChanged(true) on click
-   *  Both share the same target so the autoscroll behavior and the
-   *  Follow button always agree on which card to surface. */
-  var lastChangedCard = null;
-  /** The Follow-edits floating button; created lazily on first Sticky entry. */
-  var followBtn = null;
-  /** Threshold (px) for "scroll to top" → exit Sticky. */
-  var TOP_THRESHOLD_PX = 4;
-
-  function enterSticky() {
-    if (scrollMode === 'sticky') return;
-    scrollMode = 'sticky';
-    stickyChangedPaths.clear();
-    // lastChangedCard is intentionally NOT reset. It tracks the most
-    // recently edited card across the session; Follow-edits jumps to
-    // it. Resetting on enterSticky would mean a user who scrolls into
-    // sticky right after an edit has no Follow target.
+    // User gesture: follow off, then forceFocus open.
+    followEdits = false;
     updateFollowButton();
+    openOrUpdateTab(edit, { forceFocus: true });
   }
 
-  function enterAutoscroll() {
-    if (scrollMode === 'autoscroll') return;
-    scrollMode = 'autoscroll';
-    stickyChangedPaths.clear();
-    updateFollowButton();
-  }
+  openBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (pickerOpen) closePicker();
+    else openPicker();
+  });
 
-  /** Single jump entry point used by BOTH the autoscroll-on-edit path
-   *  and the Follow-edits button click. force=false respects the
-   *  fully-visible no-op (autoscroll on edit); force=true always scrolls
-   *  (user click). */
-  function jumpToLastChanged(force) {
-    if (!lastChangedCard) return;
-    if (!document.contains(lastChangedCard)) {
-      lastChangedCard = null;
-      return;
-    }
-    scrollToCard(lastChangedCard, force);
-  }
-
-  /** Record changed paths from an apply. Updates the sticky badge set
-   *  and the lastChangedCard target. Picks the card whose backing edit
-   *  has the highest mtimeMs (most recently modified file on disk) —
-   *  NOT apply order, which is git status / poll order (alphabetical-ish)
-   *  rather than chronological. Falls back to apply order if mtimes
-   *  are absent or tied. */
-  function recordChanged(paths) {
-    for (var i = 0; i < paths.length; i++) {
-      if (scrollMode === 'sticky') stickyChangedPaths.add(paths[i]);
-    }
-    var best = null;
-    var bestMtime = -1;
-    for (var j = 0; j < paths.length; j++) {
-      var card = cards.get(paths[j]);
-      if (!card) continue;
-      var e = card._edit;
-      var m = (e && typeof e.mtimeMs === 'number') ? e.mtimeMs : -1;
-      // Prefer strictly-greater mtime; if no mtime info at all, fall
-      // back to "last in apply order" (j increases, so later wins).
-      if (m > bestMtime || (m === -1 && bestMtime === -1)) {
-        best = card;
-        bestMtime = m;
-      }
-    }
-    if (best) lastChangedCard = best;
-  }
-
-  /** Pick an anchor card for withAnchor's read/write pair. Per spec
-   *  §pickAnchor: the first card whose top is at or below the viewport's
-   *  top edge; else the last card in the stream; else null. */
-  function pickAnchor() {
-    var streamRect = streamEl.getBoundingClientRect();
-    var children = streamEl.children;
-    var lastVisible = null;
-    for (var i = 0; i < children.length; i++) {
-      var c = children[i];
-      var r = c.getBoundingClientRect();
-      var relTop = r.top - streamRect.top;
-      if (relTop >= 0) return c;
-      lastVisible = c;
-    }
-    return lastVisible;
-  }
-
-  /** Run `fn` and, if we're in Sticky, preserve the visual position of
-   *  the anchor card across the mutation. The flag `pendingProgrammaticScroll`
-   *  is set if a compensating scrollTop write happens; the scroll handler
-   *  consumes it. */
-  /** Set streamEl.scrollTop and arm the programmatic-scroll flag with
-   *  the value the browser will actually settle on (clamped to
-   *  [0, scrollHeight - clientHeight]). Without clamping, the browser
-   *  clamps silently and the scroll handler sees scrollTop != target,
-   *  misclassifying our own write as a user scroll. */
-  function programmaticScrollTo(target) {
-    var maxScroll = Math.max(0, streamEl.scrollHeight - streamEl.clientHeight);
-    var clamped = Math.max(0, Math.min(target, maxScroll));
-    pendingProgrammaticScroll = { target: clamped };
-    streamEl.scrollTop = clamped;
-  }
-
-  function withAnchor(fn) {
-    if (scrollMode !== 'sticky') { fn(); return; }
-    requestAnimationFrame(function() {
-      var anchor = pickAnchor();
-      var beforeTop = anchor ? anchor.getBoundingClientRect().top : 0;
-      fn();
-      var afterTop = anchor && document.contains(anchor)
-        ? anchor.getBoundingClientRect().top
-        : null;
-      if (afterTop !== null && afterTop !== beforeTop) {
-        programmaticScrollTo(streamEl.scrollTop + (afterTop - beforeTop));
-      }
-    });
-  }
-
-  /** Scroll handler. Distinguishes programmatic from user scrolls by
-   *  matching scrollTop against pendingProgrammaticScroll.target (±1px). */
-  function onStreamScroll() {
-    var st = streamEl.scrollTop;
-    if (pendingProgrammaticScroll && Math.abs(st - pendingProgrammaticScroll.target) <= 1) {
-      pendingProgrammaticScroll = null;
-      return;
-    }
-    pendingProgrammaticScroll = null;
-    // Real user scroll. Decide state.
-    if (st < TOP_THRESHOLD_PX) {
-      enterAutoscroll();
-      return;
-    }
-    if (streamEl.scrollHeight <= streamEl.clientHeight) {
-      enterAutoscroll();
-      return;
-    }
-    enterSticky();
-  }
-
-  /** Instant scroll to put `card` at top of stream viewport. No-op if
-   *  the card is fully visible (`force=false`, the autoscroll-on-edit
-   *  default). When `force=true` (Follow-edits click), always scroll
-   *  even if the target is already visible — the user explicitly asked
-   *  to be taken there and a silent no-op makes the button look broken. */
-  function scrollToCard(card, force) {
-    if (!card) return;
-    var cr = card.getBoundingClientRect();
-    var sr = streamEl.getBoundingClientRect();
-    if (!force) {
-      var fullyVisible = cr.top >= sr.top && cr.bottom <= sr.bottom;
-      if (fullyVisible) return;
-    }
-    programmaticScrollTo(streamEl.scrollTop + (cr.top - sr.top));
-  }
-
-  /** Lazily create the Follow-edits button and bind to the stream's
-   *  parent so it floats over the scroll container. */
-  function ensureFollowButton() {
-    if (followBtn) return followBtn;
-    followBtn = document.createElement('button');
-    followBtn.className = 'fe-follow';
-    followBtn.type = 'button';
-    followBtn.hidden = true;
-    followBtn.addEventListener('click', function() {
-      // Single source of truth: same target the autoscroll path would
-      // have used. enterAutoscroll first so the scroll write isn't
-      // suppressed by the sticky branch. force=true so we always
-      // scroll even if the target is already visible (user explicitly
-      // asked to be taken there).
-      enterAutoscroll();
-      jumpToLastChanged(true);
-    });
-    // Insert as sibling of streamEl inside the same offset parent.
-    streamEl.parentNode.insertBefore(followBtn, streamEl.nextSibling);
-    return followBtn;
-  }
-
-  function updateFollowButton() {
-    if (scrollMode !== 'sticky') {
-      if (followBtn) followBtn.hidden = true;
-      return;
-    }
-    var btn = ensureFollowButton();
-    btn.hidden = false;
-    var n = stickyChangedPaths.size;
-    btn.textContent = n > 0
-      ? ('↓ ' + n + ' new edit' + (n === 1 ? '' : 's'))
-      : '↓ Follow edits';
-  }
-
-  // ── End Phase 3 state machine ─────────────────────────────────────────
+  // ── Pure utilities (preserved from V2/V2.1/V3.1) ─────────────────────
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -1116,259 +1175,6 @@
     body.innerHTML = renderDiff(edit && edit.diff);
     body.dataset.mode = 'hunk';
   }
-
-  function makeCard(edit) {
-    var startCollapsed = userCollapsed.has(edit.relativePath);
-    var card = document.createElement('article');
-    card.className = 'fe-card';
-    card.dataset.path = edit.relativePath;
-    card.dataset.expanded = startCollapsed ? 'false' : 'true';
-    card.dataset.status = edit.status || 'modified';
-
-    var head = document.createElement('header');
-    head.className = 'fe-head';
-
-    var chevron = document.createElement('button');
-    chevron.className = 'fe-chevron';
-    chevron.type = 'button';
-    chevron.setAttribute('aria-label', 'Toggle');
-    chevron.textContent = startCollapsed ? '▶' : '▼';
-
-    var status = document.createElement('span');
-    status.className = 'fe-status fe-s-' + (edit.status || 'modified');
-    status.textContent = statusLabel(edit.status);
-
-    var path = document.createElement('code');
-    path.className = 'fe-path';
-    path.textContent = edit.renamedFrom
-      ? (edit.renamedFrom + ' → ' + edit.relativePath)
-      : edit.relativePath;
-
-    // V3 MVP: open in external editor (vscode://). Absolute `path` is
-    // set by the server; if the path is missing we omit the link rather
-    // than fabricate one.
-    var openBtn = null;
-    if (edit.path) {
-      openBtn = document.createElement('a');
-      openBtn.className = 'fe-open';
-      openBtn.href = 'vscode://file/' + encodeURI(edit.path).replace(/#/g, '%23');
-      openBtn.title = 'Open in VS Code';
-      openBtn.setAttribute('aria-label', 'Open in editor');
-      openBtn.textContent = '↗';
-      // Prevent the header click (which toggles collapse) from firing
-      // when the user clicks the link.
-      openBtn.addEventListener('click', function(e) { e.stopPropagation(); });
-    }
-
-    var xBtn = document.createElement('button');
-    xBtn.className = 'fe-x';
-    xBtn.type = 'button';
-    xBtn.setAttribute('aria-label', 'Dismiss');
-    xBtn.textContent = '×';
-
-    head.appendChild(chevron);
-    head.appendChild(status);
-    head.appendChild(path);
-    if (openBtn) head.appendChild(openBtn);
-    head.appendChild(xBtn);
-
-    var body = document.createElement('pre');
-    body.className = 'fe-diff';
-    body.hidden = startCollapsed;
-
-    card.appendChild(head);
-    card.appendChild(body);
-
-    // If we start expanded, render the diff body now.
-    if (!startCollapsed) {
-      renderBody(body, edit);
-      body.dataset.rendered = '1';
-    }
-
-    function toggle() {
-      enterSticky();
-      withAnchor(function() {
-        var nowExpanded = card.dataset.expanded !== 'true';
-        card.dataset.expanded = nowExpanded ? 'true' : 'false';
-        body.hidden = !nowExpanded;
-        chevron.textContent = nowExpanded ? '▼' : '▶';
-        if (nowExpanded) userCollapsed.delete(edit.relativePath);
-        else userCollapsed.add(edit.relativePath);
-        if (nowExpanded && !body.dataset.rendered) {
-          renderBody(body, card._edit);
-          body.dataset.rendered = '1';
-        }
-        schedulePersist();
-      });
-    }
-
-    chevron.addEventListener('click', function(e) { e.stopPropagation(); toggle(); });
-    head.addEventListener('click', function(e) {
-      if (e.target === xBtn || xBtn.contains(e.target)) return;
-      toggle();
-    });
-    xBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      enterSticky();
-      withAnchor(function() { dismissPath(edit.relativePath); });
-    });
-
-    if (edit.isBinary) {
-      chevron.disabled = true;
-      chevron.title = 'binary file';
-      body.hidden = true;
-      var binNote = document.createElement('span');
-      binNote.className = 'fe-binary';
-      binNote.textContent = '(binary)';
-      head.insertBefore(binNote, xBtn);
-    }
-    if (edit.truncated && !edit.fullFile) {
-      var trunc = document.createElement('span');
-      trunc.className = 'fe-trunc';
-      trunc.title = edit.truncated.hiddenLines + ' lines hidden';
-      trunc.textContent = '↘';
-      head.insertBefore(trunc, xBtn);
-    }
-    if (!edit.fullFile && !edit.isBinary && edit.status !== 'clean') {
-      var fb = document.createElement('span');
-      fb.className = 'fe-fallback';
-      fb.title = 'Showing hunk-only view (file too large, deleted, or fallback)';
-      fb.textContent = 'hunk view';
-      head.insertBefore(fb, xBtn);
-    }
-
-    card._edit = edit;
-    card._renderDiff = function(newEdit) {
-      card._edit = newEdit;
-      card.dataset.status = newEdit.status || 'modified';
-      path.textContent = newEdit.renamedFrom
-        ? (newEdit.renamedFrom + ' → ' + newEdit.relativePath)
-        : newEdit.relativePath;
-      status.className = 'fe-status fe-s-' + (newEdit.status || 'modified');
-      status.textContent = statusLabel(newEdit.status);
-      // V3 MVP: keep the open-in-editor link in sync. The link may not
-      // exist on the placeholder created without an absolute path; in
-      // that case lazily insert it the first time we get a real path.
-      if (newEdit.path) {
-        var href = 'vscode://file/' + encodeURI(newEdit.path).replace(/#/g, '%23');
-        if (openBtn) {
-          openBtn.href = href;
-        } else {
-          openBtn = document.createElement('a');
-          openBtn.className = 'fe-open';
-          openBtn.href = href;
-          openBtn.title = 'Open in VS Code';
-          openBtn.setAttribute('aria-label', 'Open in editor');
-          openBtn.textContent = '↗';
-          openBtn.addEventListener('click', function(e) { e.stopPropagation(); });
-          head.insertBefore(openBtn, xBtn);
-        }
-      }
-      // If body is currently expanded, re-render the diff to reflect the new content.
-      if (card.dataset.expanded === 'true') {
-        renderBody(body, newEdit);
-        body.dataset.rendered = '1';
-      } else {
-        // Drop the rendered flag so next expand pulls fresh.
-        delete body.dataset.rendered;
-      }
-    };
-    return card;
-  }
-
-  function dismissPath(path) {
-    dismissed.add(path);
-    removeCard(path);
-    updateCounts();
-    schedulePersist();
-  }
-
-  /** Remove a card from the DOM and forget its user-collapse state.
-   *  Only called by user dismiss (X) and cap eviction — never by poller-driven
-   *  "file went clean". Clean files keep their card; see markClean. */
-  function removeCard(path) {
-    var card = cards.get(path);
-    if (card) {
-      card.remove();
-      cards.delete(path);
-    }
-    userCollapsed.delete(path);
-  }
-
-  /** Mark a card as clean (file no longer in dirty set). Keeps the card so the
-   *  user can dismiss on their own schedule.
-   *
-   *  V2.1: when `entry` is provided (from the server's cleanedEdits array),
-   *  the card body fills in with the full HEAD content. When called with
-   *  path only (legacy cleared-path path), the body is empty pending a
-   *  subsequent cleanedEdits arrival. The idempotency guard prevents
-   *  redundant re-render when content is unchanged. */
-  function markClean(path, entry) {
-    var card = cards.get(path);
-    if (!card) return;
-    var prev = card._edit || {};
-    // V2.1: if an entry with fullFile is provided and matches what we
-    // already render, no-op. fullFileEqual is defined later in the file.
-    if (entry && prev.status === 'clean'
-        && fullFileEqual(prev.fullFile, entry.fullFile)) {
-      return;
-    }
-    if (!entry && prev.status === 'clean' && !prev.diff && !prev.fullFile) {
-      return;
-    }
-    var nextEdit = entry || {
-      relativePath: path,
-      status: 'clean',
-      diff: '',
-      timestamp: new Date().toISOString(),
-      isBinary: false,
-      renamedFrom: null,
-    };
-    card._renderDiff(nextEdit);
-  }
-
-  function updateCounts() {
-    var visible = cards.size;
-    var dCount = dismissed.size;
-    if (visible === 0 && dCount === 0) {
-      countsEl.textContent = 'no changes';
-    } else {
-      var parts = [];
-      parts.push(visible + ' file' + (visible === 1 ? '' : 's'));
-      if (dCount > 0) parts.push(dCount + ' dismissed');
-      countsEl.textContent = parts.join(' · ');
-    }
-    emptyEl.hidden = visible > 0 || notGitEl.hidden === false;
-    resetBtn.hidden = dCount === 0;
-  }
-
-  function enforceCap() {
-    if (cards.size <= VISIBLE_CAP) return;
-    // V2.1: evict oldest CLEAN cards first; only fall back to oldest
-    // dirty cards if we still exceed the cap after exhausting clean.
-    // Cards Map iteration order is insertion order; oldest first.
-    var toRemove = cards.size - VISIBLE_CAP;
-    var cleanPaths = [];
-    var dirtyPaths = [];
-    cards.forEach(function(card, path) {
-      var st = card.dataset.status;
-      if (st === 'clean') cleanPaths.push(path);
-      else dirtyPaths.push(path);
-    });
-    var paths = [];
-    for (var i = 0; i < cleanPaths.length && paths.length < toRemove; i++) {
-      paths.push(cleanPaths[i]);
-    }
-    for (var j = 0; j < dirtyPaths.length && paths.length < toRemove; j++) {
-      paths.push(dirtyPaths[j]);
-    }
-    paths.forEach(removeCard);
-    if (paths.length > 0) schedulePersist();
-  }
-
-  /** Cheap deep-equality for fullFile payloads, used by the no-op poll
-   *  guard. Compares hunk metadata and stringified line arrays. Returns
-   *  true if both sides are absent or both are present and equal. */
   function fullFileEqual(a, b) {
     if (!a && !b) return true;
     if (!a || !b) return false;
@@ -1393,229 +1199,94 @@
     }
     return true;
   }
-
-  function applyEdits(edits, cleared, cleanedEdits, options) {
-    options = options || {};
-    // Collect mutations as closures; recordChanged runs after applyAll
-    // and picks lastChangedCard = last apply-order card that survived.
-    var mutations = [];
-    /** Track relativePath of every file touched by this apply (new card
-     *  or in-place update or clean). Apply order = the order we visit
-     *  cleanedEdits → cleared → edits. recordChanged uses the LAST entry
-     *  (most recently touched in the apply) as the jump target. */
-    var changedPathsThisApply = [];
-    /** V2.1: paths covered by cleanedEdits should not also be processed
-     *  from `cleared` (which would emit a content-less markClean and
-     *  trip the idempotency guard). */
-    var cleanedPathsSeen = new Set();
-
-    if (Array.isArray(cleanedEdits)) {
-      cleanedEdits.forEach(function(entry) {
-        if (!entry || !entry.relativePath) return;
-        var p = entry.relativePath;
-        cleanedPathsSeen.add(p);
-        if (cards.has(p)) {
-          mutations.push(function() { markClean(p, entry); });
-          changedPathsThisApply.push(p);
-        } else if (!dismissed.has(p)) {
-          // The path is in cleanedEdits but no card exists locally yet
-          // (e.g. snapshot raced with poll). Spawn a clean card.
-          mutations.push(function() {
-            var card = makeCard(entry);
-            streamEl.appendChild(card);
-            cards.set(p, card);
-          });
-          changedPathsThisApply.push(p);
-        }
-      });
-    }
-
-    if (Array.isArray(cleared)) {
-      cleared.forEach(function(p) {
-        if (cleanedPathsSeen.has(p)) return;
-        if (cards.has(p)) {
-          mutations.push(function() { markClean(p); });
-          changedPathsThisApply.push(p);
-        }
-      });
-    }
-    if (!Array.isArray(edits)) edits = [];
-    edits.forEach(function(edit) {
-      if (!edit || !edit.relativePath) return;
-      if (dismissed.has(edit.relativePath)) return;
-      var existing = cards.get(edit.relativePath);
-      if (existing) {
-        // No-op poll: server re-broadcast an entry that's byte-identical
-        // to what we already show. Don't touch the DOM. Load-bearing for
-        // "don't disturb the user on idle polls."
-        var prev = existing._edit;
-        if (prev
-            && prev.diff === edit.diff
-            && prev.status === edit.status
-            && prev.renamedFrom === edit.renamedFrom
-            && prev.isBinary === edit.isBinary
-            && fullFileEqual(prev.fullFile, edit.fullFile)) {
-          return;
-        }
-        mutations.push(function() { existing._renderDiff(edit); });
-        changedPathsThisApply.push(edit.relativePath);
-        return;
-      }
-      // New card: append to bottom. Cards are never reordered.
-      mutations.push(function() {
-        var card = makeCard(edit);
-        streamEl.appendChild(card);
-        cards.set(edit.relativePath, card);
-      });
-      changedPathsThisApply.push(edit.relativePath);
-    });
-
-    if (mutations.length === 0) return;
-
-    function applyAll() {
-      var beforePaths = [];
-      var c = streamEl.children;
-      for (var k = 0; k < c.length; k++) beforePaths.push(c[k].dataset.path || '');
-      for (var i = 0; i < mutations.length; i++) mutations[i]();
-      enforceCap();
-      updateCounts();
-      // V2.1: only persist when the visible card set (paths in DOM order)
-      // actually changed. Avoids noisy PUTs on every poll that just
-      // re-renders the same card.
-      var afterPaths = [];
-      var c2 = streamEl.children;
-      for (var m = 0; m < c2.length; m++) afterPaths.push(c2[m].dataset.path || '');
-      if (beforePaths.length !== afterPaths.length
-          || beforePaths.some(function(p, idx) { return p !== afterPaths[idx]; })) {
-        schedulePersist();
-      }
-    }
-
-    if (scrollMode === 'sticky') {
-      withAnchor(applyAll);
-      // recordChanged runs after withAnchor's rAF so the cards Map is
-      // populated for newly-created cards. Use the same rAF tick.
-      requestAnimationFrame(function() {
-        recordChanged(changedPathsThisApply);
-        updateFollowButton();
-      });
-    } else {
-      applyAll();
-      recordChanged(changedPathsThisApply);
-      if (!options.suppressScroll) jumpToLastChanged(false);
-    }
-  }
-
-  /** V2.1: load persisted cards + dismissed, then fetch snapshot. Initial
-   *  card creation order = persisted order. The snapshot's clean entries
-   *  fill in bodies for persisted-clean paths automatically (server now
-   *  includes them in /snapshot). Any snapshot path NOT in persisted is
-   *  appended at the end. */
-  async function initFromPersistence(sid) {
-    var persisted = await loadPersistedCards(sid);
-    if (persisted && Array.isArray(persisted.dismissed)) {
-      persisted.dismissed.forEach(function(p) { dismissed.add(p); });
-    }
-    var collapsedSet = new Set();
-    var persistedOrder = [];
-    if (persisted && Array.isArray(persisted.cards)) {
-      persisted.cards.forEach(function(c) {
-        if (!c || !c.relativePath) return;
-        if (dismissed.has(c.relativePath)) return;
-        persistedOrder.push(c.relativePath);
-        if (c.collapsed) collapsedSet.add(c.relativePath);
-      });
-    }
-    // Seed userCollapsed so makeCard sees the persisted collapse state
-    // when each card is created in the snapshot pass.
-    collapsedSet.forEach(function(p) { userCollapsed.add(p); });
-    // Pre-seed empty cards for persisted-but-not-in-snapshot paths so
-    // they appear in the right order even before the snapshot resolves.
-    // makeCard requires an `edit`; synthesize a minimal clean placeholder.
-    persistedOrder.forEach(function(p) {
-      if (cards.has(p)) return;
-      var placeholder = {
-        relativePath: p,
-        status: 'clean',
-        timestamp: new Date().toISOString(),
-      };
-      var card = makeCard(placeholder);
-      streamEl.appendChild(card);
-      cards.set(p, card);
-    });
-    updateCounts();
-    await fetchSnapshot();
-  }
-
+  // ── Snapshot fetcher and session wiring ──────────────────────────────
   async function fetchSnapshot() {
     if (!sessionId) return;
     try {
       var res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/snapshot');
       if (!res.ok) {
         if (res.status === 404) {
-          // Session gone — show neutral.
-          notGitEl.hidden = true;
-          emptyEl.hidden = false;
-          return;
+          notGitEl.hidden = false;
+          paneEmptyEl.hidden = true;
         }
         return;
       }
+      notGitEl.hidden = true;
       var data = await res.json();
       if (Array.isArray(data.edits)) {
-        // Merge: cards persist across snapshots. Anything currently shown
-        // that isn't in the snapshot becomes "clean" (file went back to
-        // HEAD); only user X or cap eviction actually removes a card.
-        var seen = new Set();
-        data.edits.forEach(function(e) { if (e && e.relativePath) seen.add(e.relativePath); });
-        var cleared = [];
-        cards.forEach(function(_card, path) {
-          if (!seen.has(path)) cleared.push(path);
-        });
-        applyEdits(data.edits, cleared);
+        for (var i = 0; i < data.edits.length; i++) {
+          openOrUpdateTab(data.edits[i]);
+        }
       }
+      updateEmptyState();
     } catch (err) {
       console.warn('[file-edits] snapshot failed:', err);
     }
   }
 
-  resetBtn.addEventListener('click', function() {
-    dismissed.clear();
-    schedulePersist();
-    void fetchSnapshot();
-  });
+  async function initFromPersistence(sid) {
+    var persisted = await loadPersistedCards(sid);
+    if (persisted && Array.isArray(persisted.cards)) {
+      persisted.cards.forEach(function(c) {
+        if (!c || !c.relativePath) return;
+        if (tabs.has(c.relativePath)) return;
+        var placeholder = {
+          relativePath: c.relativePath,
+          path: '',
+          status: 'clean',
+          timestamp: new Date().toISOString(),
+        };
+        var tab = new FileTab(placeholder);
+        tabs.set(c.relativePath, tab);
+        tabsEl.appendChild(tab.tabEl);
+      });
+    }
+    updateEmptyState();
+    await fetchSnapshot();
+  }
 
-  // Wire to session events.
   if (window.appletAPI) {
     window.appletAPI.onSessionEvent(function(event) {
       if (event && event.type === 'caco.edit' && event.data) {
-        applyEdits(event.data.edits, event.data.cleared, event.data.cleanedEdits);
+        var d = event.data;
+        if (Array.isArray(d.edits)) {
+          d.edits.forEach(function(e) { openOrUpdateTab(e); });
+        }
+        if (Array.isArray(d.cleanedEdits)) {
+          d.cleanedEdits.forEach(function(e) { openOrUpdateTab(e); });
+        }
+        // d.cleared is ignored in V3.2 (tabs persist; clean is just a status)
       }
     });
     window.appletAPI.onSessionChange(function(sid, info) {
-      // V2.1: flush pending PUT for the OUTGOING session before tearing
-      // down state. Without this, a dismiss/collapse within 250ms of
-      // session-switch is lost.
+      // Flush outgoing session's pending PUT first.
       flushPersist();
-      // V3.1: close the picker and cancel any in-flight /open call
-      // against the outgoing session.
+      // Close picker and abort any in-flight open call.
       closePicker();
       if (pickerOpenAbort) { pickerOpenAbort.abort(); pickerOpenAbort = null; }
+      // Tear down in-memory state.
+      tabs.forEach(function(t) { t.destroy(); });
+      tabs.clear();
+      badgeCounter.clear();
+      lastEditedTabId = null;
+      activeTabId = null;
+      followEdits = true;
       cachedCwd = '';
+      paneEl.innerHTML = '';
+      paneEl.appendChild(paneEmptyEl);
+      paneEl.appendChild(notGitEl);
+      notGitEl.hidden = true;
+      updateFollowButton();
+      updateEmptyState();
       sessionId = sid;
       if (info && info.cwd) {
         var parts = info.cwd.split(/[/\\]/);
         repoEl.textContent = parts[parts.length - 1] || info.cwd;
         cachedCwd = info.cwd;
       }
-      streamEl.innerHTML = '';
-      cards.clear();
-      dismissed.clear();
-      userCollapsed.clear();
-      enterAutoscroll();
-      updateCounts();
       void initFromPersistence(sid);
     });
-    // If session was already active when applet opened, kick a snapshot now.
+
     var existingId = window.appletAPI.getSessionId && window.appletAPI.getSessionId();
     if (existingId) {
       sessionId = existingId;
@@ -1633,6 +1304,6 @@
     }
   }
 
-  updateCounts();
-  streamEl.addEventListener('scroll', onStreamScroll, { passive: true });
+  updateFollowButton();
+  updateEmptyState();
 })();

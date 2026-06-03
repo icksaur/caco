@@ -135,17 +135,19 @@
     // Hide-swap-show: visibility:hidden suppresses the innerHTML-clear
     // scroll event on most browsers. Combined with the value-comparison
     // programmaticScrollTo guard, this works even if a stray scroll
-    // event fires during the swap — the guard tolerates extra events
-    // because it checks the actual scrollTop against the target.
-    var prev = paneEl.style.visibility;
+    // event fires during the swap.
+    //
+    // Note: we always restore to '' (the default visible state) instead
+    // of capturing/restoring prev. Multiple rapid activate() calls
+    // (e.g. init dispatching multiple snapshot edits before the first
+    // rAF fires) would otherwise have the second rAF "restore" to the
+    // first's mid-swap 'hidden' state, leaving the pane invisible.
     paneEl.style.visibility = 'hidden';
     paneEl.innerHTML = '';
     paneEl.appendChild(this.paneEl);
     var self = this;
     requestAnimationFrame(function() {
-      // Restore visibility BEFORE writing scrollTop so the write
-      // happens against a visible (correctly-laid-out) container.
-      paneEl.style.visibility = prev || '';
+      paneEl.style.visibility = '';
       programmaticScrollTo(self.scrollTop);
     });
   };

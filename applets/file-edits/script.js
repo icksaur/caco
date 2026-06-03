@@ -39,7 +39,19 @@
    *  a programmatic scrollTop write; consumed by the scroll handler. The
    *  hide-swap-show pattern in FileTab.activate prevents spurious scroll
    *  events from the innerHTML clear from burning this flag. */
-  var programmaticScroll = false;
+  /** Value-comparison guard for programmatic scroll writes. The bool
+   *  single-shot can be burned by spurious events (visibility flicker,
+   *  rAF ordering, double-write from setActiveTab + caller-set-0).
+   *  Store the target value the writer asked for; consume only when
+   *  the observed scrollTop is within ±1px. Supports any number of
+   *  scroll events firing between write and observation. */
+  var pendingProgrammaticScroll = null;
+  function programmaticScrollTo(target) {
+    var maxScroll = Math.max(0, paneEl.scrollHeight - paneEl.clientHeight);
+    var clamped = Math.max(0, Math.min(target, maxScroll));
+    pendingProgrammaticScroll = { target: clamped };
+    paneEl.scrollTop = clamped;
+  }
   var sessionId = null;
   var cachedCwd = '';
   var TAB_CAP = 50;
@@ -120,18 +132,21 @@
 
   FileTab.prototype.activate = function() {
     if (!this.paneEl) this.render();
-    // Hide-swap-show: prevent the innerHTML clear from firing a
-    // spurious scroll-to-0 event that would burn the programmaticScroll
-    // flag before the rAF restore.
+    // Hide-swap-show: visibility:hidden suppresses the innerHTML-clear
+    // scroll event on most browsers. Combined with the value-comparison
+    // programmaticScrollTo guard, this works even if a stray scroll
+    // event fires during the swap — the guard tolerates extra events
+    // because it checks the actual scrollTop against the target.
     var prev = paneEl.style.visibility;
     paneEl.style.visibility = 'hidden';
     paneEl.innerHTML = '';
     paneEl.appendChild(this.paneEl);
     var self = this;
     requestAnimationFrame(function() {
-      programmaticScroll = true;
-      paneEl.scrollTop = self.scrollTop;
+      // Restore visibility BEFORE writing scrollTop so the write
+      // happens against a visible (correctly-laid-out) container.
       paneEl.style.visibility = prev || '';
+      programmaticScrollTo(self.scrollTop);
     });
   };
 
@@ -223,17 +238,13 @@
 
     if (options.forceFocus) {
       // Picker path. Caller already set followEdits=false.
-      setActiveTab(id);
-      programmaticScroll = true;
-      paneEl.scrollTop = 0;
+      // Set tab.scrollTop BEFORE setActiveTab so activate()'s rAF
+      // restores to 0 — no double-write.
       tab.scrollTop = 0;
-    } else if (followEdits) {
       setActiveTab(id);
-      if (isNew) {
-        programmaticScroll = true;
-        paneEl.scrollTop = 0;
-        tab.scrollTop = 0;
-      }
+    } else if (followEdits) {
+      if (isNew) tab.scrollTop = 0;
+      setActiveTab(id);
     } else {
       // Tab is in the strip but inactive. Bump badge if this is a real edit.
       if (contentChanged) {
@@ -298,11 +309,9 @@
       }
     }
     if (!targetId) return;
-    setActiveTab(targetId);
-    programmaticScroll = true;
-    paneEl.scrollTop = 0;
     var t = tabs.get(targetId);
-    if (t) t.scrollTop = 0;
+    if (t) t.scrollTop = 0;  // set before activate so rAF restores to 0
+    setActiveTab(targetId);
   }
 
   function updateFollowButton() {
@@ -339,13 +348,23 @@
 
   // Pane scroll handler
   paneEl.addEventListener('scroll', function() {
-    if (programmaticScroll) { programmaticScroll = false; return; }
+    var st = paneEl.scrollTop;
+    // Value-comparison: if scrollTop matches our most recent
+    // programmatic-write target (±1px tolerance for sub-pixel rounding),
+    // consume the guard and ignore. Tolerant of multiple events firing
+    // between write and observation.
+    if (pendingProgrammaticScroll && Math.abs(st - pendingProgrammaticScroll.target) <= 1) {
+      pendingProgrammaticScroll = null;
+      return;
+    }
+    // Real user scroll: turn off Follow and save the active tab's position.
+    pendingProgrammaticScroll = null;
     if (followEdits) {
       followEdits = false;
       updateFollowButton();
     }
     var active = activeTabId ? tabs.get(activeTabId) : null;
-    if (active) active.scrollTop = paneEl.scrollTop;
+    if (active) active.scrollTop = st;
   }, { passive: true });
 
   // ── Persistence (V2.1 mechanism; tab list reuse cards[]) ─────────────
@@ -1259,7 +1278,11 @@
       }
     });
     window.appletAPI.onSessionChange(function(sid, info) {
-      // Flush outgoing session's pending PUT first.
+      // Flush outgoing session's pending PUT first. The captured body
+      // (set by schedulePersist's last call) already reflects the
+      // outgoing session's tab list, so this is safe even though we
+      // clear `tabs` immediately below — flushPersist doesn't re-read
+      // tabs, it uses the snapshot it captured.
       flushPersist();
       // Close picker and abort any in-flight open call.
       closePicker();

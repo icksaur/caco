@@ -219,6 +219,58 @@ focused, after render also call the §5 step 4 path to put a fresh
 Range on the new rows. This is a nice-to-have that ensures copy keeps
 working after a content update; flag for V3.6 if perf is fine.
 
+### 7a. Live edits arriving during an active selection
+
+When a `caco.edit` event lands for the active tab while the user has
+a non-null `tab.selection` (and possibly an active native Range or an
+in-progress drag), V3.5 commits to **render-immediately** semantics
+— the freshness of the diff view wins over the smoothness of the
+user's gesture. Concretely:
+
+- `render()` runs and rebuilds the row DOM. `paintSelection` reapplies
+  `.fe-row-selected` to whatever rows now bear the envelope's
+  line numbers.
+- The browser drops the native Range because its container nodes
+  were detached; a `selectionchange` fires with an empty selection,
+  which §1 step 2 ignores (collapsed → no state change).
+- If `_userDragging` was true, the drag is collateral damage: the
+  browser's drag tracking lost its target, no further mousemove
+  events update the selection, `mouseup` fires anywhere (capture-
+  phase handler still clears `_userDragging` and runs the pending-
+  echo flush — which is a no-op because `tab.selection` already
+  matches the last echo).
+- The user sees the line tint hop to the new rows that now carry
+  those line numbers. They re-drag if they wanted character-precise
+  text.
+
+**Line-number drift is explicitly accepted.** The envelope is
+`{start, end}` in *current-file work-line numbers*, not anchored to
+content. If the agent inserts three lines above the user's selection,
+the user's "lines 10-15" envelope now points at *different content*
+sharing those line numbers in the new file. The user notices via the
+visible tint hop; the agent sees the same envelope numbers it always
+has. We do not attempt content-anchored re-mapping — the diff
+machinery has no infra for it and the cost wouldn't pay back. This
+is the same model VSCode and similar editors use when their files
+are edited externally.
+
+**Agent push arriving concurrent with a `caco.edit`.** Both go
+through rAF chains; whichever finalizes last wins (last-write-wins).
+The agent's envelope is interpreted in the post-edit line numbering
+because by the time `finalizeAgentSelection` runs, `render` has
+already executed. If the agent's envelope was computed against the
+pre-edit numbering, it suffers the same drift as the user's
+selection — accepted.
+
+**Why not defer renders while `_userDragging`?** Considered and
+rejected. Deferring would let the user finish a drag against stable
+content, but would (a) silently hold the agent's edit invisible for
+the duration of the drag, (b) compute the envelope against the
+*pre-edit* numbering which would then be applied against post-edit
+content moments later (the same drift, just hidden until mouseup),
+and (c) add complexity (queue, flush-on-mouseup) for a corner case.
+Render-immediately makes the disruption visible, which is honest.
+
 ### 8. Cross-session switch
 
 V3.4 §"Session change with selection" says state resets. V3.5
@@ -383,6 +435,126 @@ Manual:
   tint stays, native selection is gone, no JS errors.
 
 No automated tests added (consistent with V3.4).
+
+## Generalization for reuse
+
+The selection model in §Mental model — *native browser selection is
+the input gesture; a persistent envelope is truth; class-based paint
+reflects the envelope; bidirectional sync with the agent via
+appletState* — is not file-edits-specific. Any applet that displays
+a list/grid/document of items with stable IDs and wants to expose
+"what the user is looking at" to the agent (and let the agent push
+back) faces the same problem. Candidate adopters:
+
+- A grep-results applet (envelope: match indices).
+- A log viewer (envelope: log-line numbers).
+- A folder listing (envelope: file paths).
+- A test-results panel (envelope: test IDs).
+
+### The reusable pattern
+
+A general `SelectionMirror` has these moving parts. None depend on
+file-edits-specific data:
+
+1. **Truth state.** A typed envelope value (line range, ID set,
+   path list — applet's choice). Stored per-context (per-tab in
+   file-edits; per-applet for single-view applets).
+2. **Input listener.** `document.selectionchange` with synchronous
+   inside-our-pane bail, then rAF-coalesce. Translates the native
+   `Selection` into the envelope by walking endpoints to their
+   nearest selectable item via a CSS selector (e.g.
+   `.fe-row[data-work-line]`).
+3. **Drag fence.** `_userDragging` flag set on pane `mousedown`,
+   cleared on document `mouseup` (capture). Echoes deferred until
+   mouseup. Optional but recommended.
+4. **Echo-loop guard.** `_expectedEnvelope` value-comparison token
+   set before any programmatic `addRange`, consumed when the
+   handler observes a matching envelope. Times out after ~250ms.
+5. **Source-ID guard.** Per-page-load UUID included in echo
+   payloads; incoming pushes with matching `sourceId` are ignored.
+   Prevents cross-tab loops in multi-window scenarios. (Already
+   shipped at the applet-state layer in V3.4; reuse as-is.)
+6. **Paint.** A CSS class applied to items whose ID is in the
+   envelope. Single function, runs on render and on envelope change.
+7. **Agent push handler.** Validates the incoming envelope against
+   the rendered item set (`validateSelection` equivalent — clamp /
+   drop). Schedules a finalize after layout. Applies a Range if the
+   pane is focused and the user isn't mid-drag.
+8. **Gutter / sidebar gesture.** Optional explicit "click-to-select"
+   affordance distinct from the body's text-selection drag. Scoped
+   to a separate selector so it doesn't conflict with the body's
+   normal text behavior or with fold/expand controls.
+
+### What a reusable module would look like
+
+A future `public/ts/applet-selection.ts` could expose:
+
+```ts
+interface SelectionMirrorOptions<T> {
+  paneEl: HTMLElement;
+  itemSelector: string;     // e.g. '.fe-row[data-work-line]'
+  itemIdAttr: string;       // e.g. 'data-work-line' (parsed as number for ranges)
+  envelopeFromRange(range: Range): T | null;  // app-specific
+  rangeFromEnvelope(env: T): Range | null;    // app-specific
+  paint(env: T | null): void;                 // app-specific
+  validate(env: T): T | null;                 // app-specific clamp/drop
+  onEnvelopeChanged(env: T | null): void;     // for echo + downstream effects
+  gutterSelector?: string;                    // optional click-to-select gesture
+}
+class SelectionMirror<T> {
+  constructor(opts: SelectionMirrorOptions<T>);
+  setEnvelope(env: T | null, source: 'user' | 'agent'): void;
+  destroy(): void;
+}
+```
+
+The applet supplies the envelope shape and the four type-specific
+hooks (`envelopeFromRange`, `rangeFromEnvelope`, `paint`,
+`validate`). The mirror handles `selectionchange`, `_userDragging`,
+`_expectedEnvelope`, debounce, and the gutter gesture wiring.
+Source-ID guarding stays at the applet-state callsite (each applet
+knows its own state key).
+
+### Don't extract yet
+
+We have one consumer. Extracting now would lock in the wrong API.
+Recipe to follow when a second adopter appears:
+
+1. Implement the second applet using a literal copy of file-edits'
+   selection block (rename the type parameters and selectors).
+2. Diff the two implementations. Anything that didn't need to
+   change is the API. Anything that did is consumer-specific.
+3. Extract the common surface, file-edits and the second adopter
+   both depend on the new module.
+
+This V3.5 spec is the *anchor implementation*. It should be written
+clearly enough that a copy-and-modify is reasonable, even before
+formal extraction. Specifically:
+
+- Selection state lives in a clearly-named object (don't scatter
+  `_userDragging`, `_expectedEnvelope`, etc. across the file).
+  Suggest a `selectionMirror` object held on each FileTab, with
+  documented fields and a single `attach(paneEl)` method.
+- The selectionchange handler's pane-clip and snap-to-item logic is
+  a pure function `envelopeFromSelection(selection, paneEl): T | null`
+  — easy to copy.
+- `validateSelection` and `paintSelection` are already pure functions
+  in V3.4; keep them that way in V3.5.
+
+### What gets reused for free across applets
+
+These pieces ship in V3.4 and don't need to be extracted to be
+reusable, because they already live at the framework layer:
+
+- `appletAPI.setAppletState` / `appletAPI.onStateUpdate` (per-applet
+  state sync via WebSocket).
+- `broadcastToAll(msg, ws)` sender-exclude semantics.
+- The applet-state shallow-merge that lets each applet write its
+  own top-level key without clobbering peers.
+
+So *any* applet that wants bidirectional state with the agent gets
+that layer for free. The V3.5 work is purely about the
+*selection-as-input* gesture on top of it.
 
 ## Open questions
 

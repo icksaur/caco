@@ -385,3 +385,14 @@
 .fe-picker-item.selected .fe-picker-suffix {
   color: rgba(255, 255, 255, 0.8);
 }
+
+/* V3.4 selection highlight */
+.fe-row.fe-row-selected .fe-line {
+  background: rgba(80, 150, 255, 0.30);
+  background: color-mix(in oklab, var(--color-accent) 30%, transparent);
+}
+.fe-row.fe-row-selected .fe-gutter {
+  background: rgba(80, 150, 255, 0.50);
+  background: color-mix(in oklab, var(--color-accent) 50%, transparent);
+  color: var(--color-text-bright);
+}

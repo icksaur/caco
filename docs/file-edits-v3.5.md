@@ -81,8 +81,13 @@ the drag fires 50 events). The coalesce-handler:
 3. If non-empty inside the pane: find each endpoint's enclosing
    `.fe-row[data-work-line]`. If an endpoint is in a row without
    `data-work-line` (pure-del row), snap to the nearest valid row —
-   start snaps DOWN, end snaps UP. If the snapped envelope collapses
-   (start > end), drop the update.
+   start snaps DOWN, end snaps UP. **If an endpoint is outside the
+   pane subtree entirely** (drag started inside the pane and the
+   mouse crossed into chat or header — or vice versa), snap that
+   endpoint to the pane's first/last `.fe-row[data-work-line]`:
+   the start endpoint snaps to the first work-line, the end endpoint
+   snaps to the last. If the snapped envelope collapses (start > end),
+   drop the update.
 4. Compute `{start, end}` envelope.
 5. If `_userDragging` is set (mousedown happened, mouseup hasn't),
    we're mid-drag — update `tab.selection` and repaint, but defer
@@ -91,10 +96,13 @@ the drag fires 50 events). The coalesce-handler:
    on the first non-empty selection of a drag — track via "was
    `tab.selection` null before this update").
 
-The `_userDragging` flag is set on `paneEl mousedown` and cleared on
-the *document's* `mouseup` (capture-phase, to catch mouseups outside
-the pane). Echo on mouseup if any pending. This avoids flooding the
-WebSocket with dozens of echoes during a single drag.
+The `_userDragging` flag is set on `paneEl mousedown` **only when
+the event target is an `.fe-line` or `.fe-row` descendant** (so
+scrollbar drags don't spuriously suppress agent restores). It's
+cleared on the *document's* `mouseup` (capture-phase, to catch
+mouseups outside the pane). Echo on mouseup if any pending. This
+avoids flooding the WebSocket with dozens of echoes during a single
+drag.
 
 Programmatic restores (agent push only — see §5) suppress echo via
 value-comparison, not a timed flag. Before calling `addRange`, store
@@ -236,9 +244,11 @@ user's gesture. Concretely:
 - If `_userDragging` was true, the drag is collateral damage: the
   browser's drag tracking lost its target, no further mousemove
   events update the selection, `mouseup` fires anywhere (capture-
-  phase handler still clears `_userDragging` and runs the pending-
-  echo flush — which is a no-op because `tab.selection` already
-  matches the last echo).
+  phase handler clears `_userDragging` and flushes any pending
+  echo). The flush DOES emit — §1 step 5 deferred the last drag-
+  derived envelope to mouseup — and it carries that envelope
+  reinterpreted against post-edit line numbers, the same drift
+  documented in the next paragraph.
 - The user sees the line tint hop to the new rows that now carry
   those line numbers. They re-drag if they wanted character-precise
   text.
@@ -334,6 +344,8 @@ V3.4 contract preserved.
 | Selection in folded range | Browser can't include folded (off-DOM) rows. Envelope reflects whatever made it into the Range. Expanding fold doesn't auto-extend selection. |
 | Two browser tabs open on same session, A drags, B receives echo | B's `applyAgentState` runs §5; B's pane may not be focused so just paints. SOURCE_ID still guards against self-echo cross-tab loops. |
 | User Ctrl+A inside the pane | Browser selects everything inside the pane (and possibly outside if focus is unclear). selectionchange snaps envelope to whatever's inside the pane via §1. Echo. |
+| Drag started inside pane, mouse leaves pane before release | §1 step 3's outside-endpoint snap rule kicks in — end snaps to the pane's last work-line. Envelope captures from drag-start row to pane bottom. |
+| Right-click on existing selection | Browser shows context menu; no selectionchange fires; `tab.selection` and line tint untouched. No defensive contextmenu handler needed. |
 
 ## Risks
 
@@ -351,6 +363,15 @@ V3.4 contract preserved.
    own focus).
 6. **Native Range lost on DOM rebuild.** Line tint persists; copy is
    gone until re-drag. Documented as acceptable.
+7. **"Collapsed selectionchange does not clear" diverges from VSCode.**
+   §1 step 2's rule (collapsed selections leave `tab.selection`
+   intact) is the load-bearing decision that makes line-tint
+   persistence work across click-out / click-in round trips. The
+   cost is that single-clicking a different position on an already-
+   selected row leaves the tint in place, which differs from VSCode-
+   style "click anywhere collapses." Explicit clears go through
+   Escape, background-click, or agent push of null. This is a
+   deliberate product choice, not a bug.
 
 ## What changes from V3.4
 
@@ -382,9 +403,13 @@ V3.4 contract preserved.
 1. **Add `tabindex="-1"` to `paneEl`** (constructor or static markup).
 2. **Soften `.fe-row-selected` CSS tints** so native blue selection
    reads on top.
-3. **Add `_userDragging` flag**: set on `paneEl mousedown` (any
-   button), clear on `document mouseup` capture-phase. Also clear
-   on `document blur` to be safe.
+3. **Add `_userDragging` flag**: set on `paneEl mousedown` **only
+   when the event target is inside an `.fe-line` or `.fe-row`
+   descendant** (i.e. the user clicked diff content, not the
+   scrollbar pseudo-element or pane padding). Scrollbar drags
+   would otherwise spuriously suppress agent `addRange` for the
+   duration of the scroll. Clear on `document mouseup` capture-
+   phase. Also clear on `document blur` to be safe.
 4. **Add `selectionchange` handler** on `document`. Synchronous
    inside-pane bail. rAF-coalesce. Compute envelope from current
    selection, snap to valid work-lines, update `tab.selection`,
@@ -403,15 +428,16 @@ V3.4 contract preserved.
 8. **Update Escape handler** to also call `removeAllRanges`.
 9. **Update `onSessionChange` handler** to call `removeAllRanges`
    before tearing down tabs.
-10. **Remove `pendingSelection` field and the `_agentRaf1/_agentRaf2`
-    fields' use beyond what's needed**; the new model doesn't have a
-    "selection pending until render" phase because paint always runs
-    on `tab.selection` directly. Actually keep `pendingSelection` /
-    `scheduleAgentFinalize`: the agent-push-to-not-yet-mounted-tab
-    path still needs to wait for the first render to find rendered
-    rows for `validateSelection`'s clamp step. The only change is
-    that `finalizeAgentSelection` no longer reads `pendingSelection`
-    into `tab.selection` differently — it just runs the §5 path.
+10. **Keep `pendingSelection` and `scheduleAgentFinalize`** unchanged
+    from V3.4. They are load-bearing for the agent-push-to-not-yet-
+    mounted-tab path: `validateSelection`'s clamp-to-rendered step
+    needs `paneEl` populated, which only happens after `activate()`
+    runs. `pendingSelection` is purely the raw-unvalidated holding
+    area for deferred validation — not a parallel "selection not yet
+    applied to UI" concept. The new "paint always runs from
+    `tab.selection`" model is unaffected. `finalizeAgentSelection`
+    just runs the §5 step 4 path once `pendingSelection` is
+    available.
 
 ## Tests
 
@@ -540,6 +566,27 @@ formal extraction. Specifically:
   — easy to copy.
 - `validateSelection` and `paintSelection` are already pure functions
   in V3.4; keep them that way in V3.5.
+
+### Deferred concerns for the future extraction
+
+When a second adopter triggers extraction, these known gaps in the
+sketched `SelectionMirrorOptions<T>` need answers. Listed here so
+neither the second adopter nor the eventual extractor has to
+re-discover each one:
+
+- **Focus management ownership.** `tabindex="-1"` on the pane is set
+  by the applet today. The mirror could own it as part of `attach()`.
+- **Escape / background-click clear gestures.** §4 wires these in
+  the applet. They're plausibly a `clearGestures: {esc: true,
+  paneBackground: true}` option on the mirror.
+- **Keyboard extension** (Shift+Arrow to grow the envelope without
+  re-dragging). V3.4 didn't have it; V3.5 doesn't either. Known gap
+  to consider when extracting.
+- **Accessibility.** The persistent paint after focus-out is not
+  exposed via ARIA. Native selection covers AT during the drag
+  gesture itself; the line-tint affordance does not. Treat as
+  out-of-scope for V3.5 and revisit during extraction if any
+  adopter needs AT support.
 
 ### What gets reused for free across applets
 

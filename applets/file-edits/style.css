@@ -386,13 +386,20 @@
   color: rgba(255, 255, 255, 0.8);
 }
 
-/* V3.4 selection highlight */
+/* V3.5 selection highlight — softened from V3.4 so the browser's
+ * native blue selection reads clearly on top when the pane is
+ * focused. After focus moves elsewhere, the native highlight is
+ * gone and these tints are the only visible affordance. */
 .fe-row.fe-row-selected .fe-line {
-  background: rgba(80, 150, 255, 0.30);
-  background: color-mix(in oklab, var(--color-accent) 30%, transparent);
+  background: rgba(80, 150, 255, 0.20);
+  background: color-mix(in oklab, var(--color-accent) 20%, transparent);
 }
 .fe-row.fe-row-selected .fe-gutter {
-  background: rgba(80, 150, 255, 0.50);
-  background: color-mix(in oklab, var(--color-accent) 50%, transparent);
+  background: rgba(80, 150, 255, 0.40);
+  background: color-mix(in oklab, var(--color-accent) 40%, transparent);
   color: var(--color-text-bright);
+}
+.fe-pane:focus,
+.fe-pane:focus-visible {
+  outline: none;
 }

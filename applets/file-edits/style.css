@@ -389,12 +389,16 @@
 /* V3.5 selection highlight — softened from V3.4 so the browser's
  * native blue selection reads clearly on top when the pane is
  * focused. After focus moves elsewhere, the native highlight is
- * gone and these tints are the only visible affordance. */
-.fe-row.fe-row-selected .fe-line {
+ * gone and these tints are the only visible affordance.
+ *
+ * Specificity must match .fe-diff[data-mode="fullfile"] .fe-row-add
+ * (which paints add/del row backgrounds) so the selection tint wins
+ * on untracked/added files where every row is .fe-row-add. */
+.fe-diff[data-mode="fullfile"] .fe-row.fe-row-selected .fe-line {
   background: rgba(80, 150, 255, 0.20);
   background: color-mix(in oklab, var(--color-accent) 20%, transparent);
 }
-.fe-row.fe-row-selected .fe-gutter {
+.fe-diff[data-mode="fullfile"] .fe-row.fe-row-selected .fe-gutter {
   background: rgba(80, 150, 255, 0.40);
   background: color-mix(in oklab, var(--color-accent) 40%, transparent);
   color: var(--color-text-bright);

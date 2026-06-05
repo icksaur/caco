@@ -207,6 +207,14 @@
    *  at OTHER tabs but never itself (broadcastToAll excludes sender);
    *  the OTHER tab sees its peer's sourceId and bails to avoid ping-pong.
    *  Agent pushes have no sourceId; never bail. */
+  /** Random per-page-load ID. Included in applet→agent echoes so
+   *  cross-tab loops are prevented: Tab A's echo reaches Tab B via
+   *  broadcast, but Tab B sees Tab A's sourceId and bails. Agent
+   *  pushes have no sourceId (the server tool omits it), so every tab
+   *  applies them; each tab's resulting echo carries its own sourceId
+   *  which other tabs filter. Single-tab loops can't occur because
+   *  appletAPI.setAppletState sends via WebSocket and the server's
+   *  broadcastToAll excludes the sender connection. */
   var SOURCE_ID = (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
     : 'src-' + Math.random().toString(36).slice(2) + '-' + Date.now();
@@ -252,12 +260,10 @@
     if (!sel || typeof sel.start !== 'number' || typeof sel.end !== 'number') return null;
     var a = sel.start, b = sel.end;
     if (maxLine != null) {
-      // Bounds-check BEFORE normalization (per spec).
-      var aOob = a > maxLine || a < 1;
-      var bOob = b > maxLine || b < 1;
-      if (aOob && bOob) return null;
-      if (aOob) a = Math.max(1, Math.min(a, maxLine));
-      if (bOob) b = Math.max(1, Math.min(b, maxLine));
+      // Bounds-check BEFORE normalization (per spec). Drop if EITHER
+      // endpoint is OOB; clamping a single OOB endpoint then swapping
+      // would silently mask the agent's bug.
+      if (a < 1 || a > maxLine || b < 1 || b > maxLine) return null;
     }
     // Normalize.
     if (a > b) { var t = a; a = b; b = t; }
@@ -337,6 +343,28 @@
     echoState();
   }
 
+  /** IDs that have a /file-edits/open fetch in-flight from
+   *  applyAgentState. Reserved so concurrent caco.edit handlers don't
+   *  push us over TAB_CAP and orphan our pending open. */
+  var pendingOpenIds = new Set();
+
+  /** Schedule finalizeAgentSelection two rAFs from now, cancelling any
+   *  previously-scheduled chain on this tab. This collapses rapid
+   *  agent pushes into a single finalize that reads the latest
+   *  pendingSelection — preventing the race where the first finalize
+   *  nulls pendingSelection before the second push's rAFs fire. */
+  function scheduleAgentFinalize(tab) {
+    if (tab._agentRaf1) cancelAnimationFrame(tab._agentRaf1);
+    if (tab._agentRaf2) cancelAnimationFrame(tab._agentRaf2);
+    tab._agentRaf1 = requestAnimationFrame(function() {
+      tab._agentRaf1 = 0;
+      tab._agentRaf2 = requestAnimationFrame(function() {
+        tab._agentRaf2 = 0;
+        finalizeAgentSelection(tab);
+      });
+    });
+  }
+
   /** Apply agent-pushed state. Opens the tab via POST /open if it
    *  doesn't exist. Selection holds in tab.pendingSelection until the
    *  pane renders. */
@@ -351,64 +379,57 @@
 
     var existing = tabs.get(targetTabId);
     if (!existing) {
-      // Open via POST /file-edits/open (same as the picker).
       if (!sessionId) return;
+      if (pendingOpenIds.has(targetTabId)) return;  // dedupe concurrent opens
+      var openSessionId = sessionId;
+      pendingOpenIds.add(targetTabId);
       try {
-        var res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/open', {
+        var res = await fetch('/api/sessions/' + encodeURIComponent(openSessionId) + '/file-edits/open', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ relativePath: targetTabId }),
         });
+        if (sessionId !== openSessionId) return;
         if (!res.ok) {
           console.warn('[file-edits] agent setState: open failed', res.status, targetTabId);
-          // Echo back the failure: activeTab unchanged, selection null.
           echoState();
           return;
         }
         var data = await res.json();
-        if (!data.edit) {
-          echoState();
+        if (sessionId !== openSessionId) return;
+        if (!data.edit) { echoState(); return; }
+        // A concurrent caco.edit may have created the tab while we
+        // were fetching. Merge rather than clobber.
+        var maybe = tabs.get(targetTabId);
+        if (maybe) {
+          maybe.pendingSelection = rawSel;
+          if (activeTabId !== targetTabId) setActiveTab(targetTabId);
+          scheduleAgentFinalize(maybe);
           return;
         }
-        // Stash pending selection BEFORE the openOrUpdateTab call so
-        // render() picks it up.
         var newTab = new FileTab(data.edit);
-        newTab.pendingSelection = rawSel;  // not validated yet; render-time validation
+        newTab.pendingSelection = rawSel;
         if (tabs.size >= TAB_CAP) evictOldestNonActive();
         tabs.set(targetTabId, newTab);
         tabsEl.appendChild(newTab.tabEl);
-        // setActiveTab WITHOUT flipping followEdits (agent gesture).
-        setActiveTab(targetTabId);
-        // After activate's rAF builds the pane, validate the pending
-        // selection against the rendered rows and paint.
-        requestAnimationFrame(function() {
-          requestAnimationFrame(function() {
-            finalizeAgentSelection(newTab);
-          });
-        });
+        setActiveTab(targetTabId);  // does not flip followEdits
+        scheduleAgentFinalize(newTab);
         schedulePersist();
       } catch (err) {
         console.warn('[file-edits] agent setState: open error', err, targetTabId);
         echoState();
+      } finally {
+        pendingOpenIds.delete(targetTabId);
       }
       return;
     }
     // Tab exists. Switch to it (without flipping followEdits) and apply
     // selection.
-    if (!existing.paneEl) {
-      existing.pendingSelection = rawSel;
-    } else {
-      existing.pendingSelection = rawSel;
-    }
+    existing.pendingSelection = rawSel;
     if (activeTabId !== targetTabId) {
       setActiveTab(targetTabId);
     }
-    // Two rAFs to let activate's swap settle.
-    requestAnimationFrame(function() {
-      requestAnimationFrame(function() {
-        finalizeAgentSelection(existing);
-      });
-    });
+    scheduleAgentFinalize(existing);
   }
 
   function finalizeAgentSelection(tab) {
@@ -430,11 +451,11 @@
   paneEl.addEventListener('click', function(e) {
     var row = e.target.closest && e.target.closest('.fe-row[data-work-line]');
     if (row) {
+      e.preventDefault();  // suppress browser default text-selection on line clicks
       var n = parseInt(row.dataset.workLine, 10);
       if (!isNaN(n)) userSelectLine(n, !!e.shiftKey);
       return;
     }
-    // Click on pane background (not a row) clears selection.
     userClearSelection();
   });
 

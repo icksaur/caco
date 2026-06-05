@@ -461,7 +461,12 @@
   paneEl.addEventListener('click', function(e) {
     var row = e.target.closest && e.target.closest('.fe-row[data-work-line]');
     if (row) {
-      e.preventDefault();  // suppress browser default text-selection on line clicks
+      // If the click is the tail of a drag-to-select-text gesture, do
+      // not treat it as a line-select click — preserve the user's text
+      // selection for copy.
+      var sel = window.getSelection && window.getSelection();
+      if (sel && sel.toString().length > 0) return;
+      e.preventDefault();
       var n = parseInt(row.dataset.workLine, 10);
       if (!isNaN(n)) userSelectLine(n, !!e.shiftKey);
       return;

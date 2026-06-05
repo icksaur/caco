@@ -39,8 +39,9 @@ is large.
   selection.
 - **Applet → agent:** the user's click/drag on rendered lines updates
   the same `fileEdits` key via `appletAPI.setAppletState(...)`.
-- Single-pane selection only (not multi-tab). Selecting in tab A then
-  switching to tab B clears the selection.
+- Single-pane selection only (not multi-tab). Switching away from
+  tab A clears tab A's selection; tab B retains whatever selection it
+  had (null on first activation).
 - Line-range selection only (not character ranges, not column
   selections). Click a line = single-line selection. Click + shift-click
   = multi-line range.
@@ -58,8 +59,9 @@ is large.
   own `fileEdits` state value.
 - Selection on a tab that doesn't exist. If the agent
   `set_applet_state` references a path with no open tab, the applet
-  **silently opens it via the existing pick-or-edit path** and then
-  applies the selection.
+  opens it via `POST /file-edits/open` (same as the picker), then
+  applies the selection once the tab renders. See §Agent → applet
+  flow step 3b.
 - Cross-tab selection (e.g. select lines in 3 different files).
 
 ## Preserved invariants
@@ -97,14 +99,22 @@ Semantics:
 - `activeTab === null` means "no tab active" (empty pane).
 - `selection === null` means "no selection."
 - `start === end` is a single-line selection.
-- `start <= end` always. The applet normalizes if the agent sends
-  `start > end`.
-- Line numbers refer to the **working-tree** column (the right gutter
-  for diff cards, the only gutter for clean cards). Diff `del`/HEAD
-  lines are addressed by their work-side row index where applicable;
-  for pure-deletion lines (no work counterpart), they cannot be the
-  target of a selection — the applet clamps to the nearest add or ctx
-  row.
+- `start <= end` always. **Validation order:** bounds-check BEFORE
+  normalization to avoid masking out-of-range values via swap.
+  - If both `start` and `end` exceed `workLines.length`: drop the
+    selection entirely.
+  - If exactly one of `start`/`end` exceeds the file length: clamp
+    that field to `workLines.length` BEFORE the swap, then normalize.
+  - After clamping and normalizing: ensure `start >= 1` (clamp up to
+    1 if needed).
+- Line numbers refer to the **working-tree** column. Diff `del`/HEAD
+  lines have no work counterpart and cannot be the target of a
+  selection. Clamping rules for selections that overlap del-only
+  ranges:
+  - Clamp `start` UP to the nearest work-line `>= start`.
+  - Clamp `end` DOWN to the nearest work-line `<= end`.
+  - If clamping collapses the range (`start > end` after clamp), drop
+    the selection.
 
 ## Agent → applet flow
 
@@ -127,20 +137,37 @@ Pipeline:
 3. The applet's handler:
    a. Reads `data.fileEdits`. Skips if absent.
    b. If `activeTab` differs from current `activeTabId`:
-      - If a tab exists for that path: `setActiveTab(path)` (the
-        same call user click uses, except followEdits is NOT
-        flipped off — agent setState bypasses the user-gesture rule).
-      - If no tab exists: call `openOrUpdateTab` with a synthetic
-        placeholder edit (the snapshot/poll path will fill in the
-        real content shortly), then activate.
-   c. Apply the selection (paint the marker overlay or row class —
-      see Selection rendering below).
-   d. Scroll the selection's first line into view.
-   e. Echo the resulting state back via
-      `appletAPI.setAppletState({fileEdits: ...})`. This is the
-      "applet is source of truth" pattern the existing tools use —
-      ensures `get_applet_state` returns the actual rendered state,
-      not what the agent asked for.
+      - If a tab exists for that path: `setActiveTab(path)` (same call
+        user click uses, except followEdits is NOT flipped off — agent
+        setState bypasses the user-gesture rule).
+      - **If no tab exists:** call `POST /file-edits/open` (the same
+        path `pickFile()` uses for the picker) to fetch the real
+        EditEntry. On success: `openOrUpdateTab(edit,
+        {forceFocus: true})` to create the tab and activate it. On
+        404 or network error: log + clear the pending selection;
+        echo back `{activeTab: <current>, selection: null}` so the
+        agent sees the failure on its next `get_applet_state`.
+      - Selection application is held until the open round-trip
+        resolves and the new tab's pane is rendered (see step c).
+   c. Apply the selection. **The pane must be rendered first** — if
+      step 3b just opened a tab via `/open`, the FileTab.activate()
+      rAF must have completed before selection rendering finds rows.
+      Stash the pending selection on the FileTab; the render
+      pipeline applies it after the row DOM exists. The
+      "re-apply selection after every re-render" rule (see Risks)
+      handles subsequent updates to the same tab.
+   d. Scroll the selection's first line into view (same recipe as
+      `jumpToMostRecent`: 30% from top).
+   e. **Echo the resulting state back** via
+      `appletAPI.setAppletState({fileEdits: ...})`. **MUST.** The
+      `set_applet_state` tool only pushes via WebSocket; it does
+      NOT write to `appletUserStates`. Without the echo,
+      `get_applet_state` returns the pre-push state.
+
+      If the echo-back fails (applet disconnected mid-flow), the
+      agent sees stale state on its next `get_applet_state`. Agents
+      should treat a missing or stale `fileEdits` key as "applet not
+      ready" and retry.
 
 The agent-initiated activation does NOT update `lastEditedTabId`
 (this is a navigation, not an edit) and does NOT bump `badgeCounter`
@@ -184,6 +211,20 @@ The full-file renderer (`renderFullFile`) already produces one
 that has a working-tree line number (the `row.work` value), so the
 selection painter can locate rows by line number in O(1) via
 `querySelector('.fe-row[data-work-line="N"]')` rather than walking.
+
+**Implementation note:** `buildRowEl` (`applets/file-edits/script.js`
+~line 1090) currently does NOT set this attribute. Add:
+
+```js
+if (row.work != null) div.dataset.workLine = String(row.work);
+```
+
+after the className assignment. **The same change is required in
+`expandFold`** (`script.js` ~line 1141): it calls `buildRowEl` for
+each previously-folded row when the user expands a fold; without the
+attribute on those rows, selections that include folded-then-expanded
+lines silently miss. Since `expandFold` already routes through
+`buildRowEl`, fixing the one site fixes both paths.
 
 CSS (V3.4 addition):
 
@@ -288,9 +329,12 @@ No new HTTP routes, no schema migrations, no new dependencies.
    `get_applet_state` returns `{..., selection: null}`.
 6. User switches tabs → broadcast shows the new tab id + the new
    tab's stored selection (or null).
-7. Agent edit arrives for a different file while user has a
-   selection in the current active tab → followEdits is off (user
-   gesture), no auto-switch.
+7. User has clicked a line (followEdits is now false). Agent edit
+   arrives for a different file → no auto-switch, no badge clear.
+   The user's selection remains visible and intact.
+   (Agent-set selections do NOT turn followEdits off; only user
+   clicks do. If the agent set the selection, followEdits is still
+   on and an incoming edit DOES switch tabs.)
 8. Close active tab → selection clears with it; broadcast sends
    `{activeTab: <neighbor>, selection: null}`.
 
@@ -299,17 +343,33 @@ No new HTTP routes, no schema migrations, no new dependencies.
 - **Selection visuals fight diff coloring.** Accent at 30% mixed
   with the existing 18% red/green row tint may produce muddy
   combinations. Acceptable for V3.4; revisit if operator dislikes.
-- **Echo-back loop.** Agent set_applet_state → applet applies → echo
-  back via setAppletState → applet's own onStateUpdate fires →
-  applet applies again. Prevent by guarding the onStateUpdate
-  handler against echoes (compare incoming state to last-sent
-  state; bail if equal). Standard applet-tools pattern.
-- **Selection-loss on file reload.** If the user has a selection
-  and the file is re-rendered (new edit arrives), the row DOM is
-  rebuilt and the selection class is dropped. Mitigation: after
-  every re-render of the active tab, the applet re-applies the
-  current selection via `data-work-line` lookups. Documented in
-  Selection rendering above.
+- **Multi-tab cross-echo loop.** Single-tab echo is impossible —
+  `broadcastToAll` in `src/routes/websocket.ts` excludes the sender,
+  so the applet never receives its own `setAppletState` writes back.
+  But with two browser tabs open showing the same applet on the same
+  session, Tab A's echo-back triggers Tab B's `onStateUpdate`, which
+  triggers Tab B's own echo-back, which triggers Tab A — ping-pong.
+  Mitigation: assign each page load a random `sourceId` (UUID at IIFE
+  init). Include it in the broadcast as `fileEdits.sourceId`. Bail in
+  `onStateUpdate` if `data.fileEdits.sourceId === myId`. Agent
+  set_applet_state has no sourceId; never bails.
+- **Echo-back failure leaves get_applet_state stale.** If the applet
+  is disconnected between the agent's push and the applet's
+  echo-back, `appletUserStates` never updates. Agent's next
+  `get_applet_state` returns pre-push state. Agents should treat a
+  missing or stale `fileEdits` key as "applet not ready" and retry
+  the push.
+- **Selection-loss on file reload.** If the user has a selection and
+  the file is re-rendered (new edit arrives), the row DOM is rebuilt
+  and the selection class is dropped. Mitigation: after every
+  re-render of the active tab, the applet re-applies the current
+  selection via `data-work-line` lookups. Documented in §Selection
+  rendering above.
+- **Open-failure on agent-referenced tab.** Agent sends
+  `set_applet_state` for an invalid path. `POST /file-edits/open`
+  returns 404. Applet logs + clears selection + echoes
+  `{activeTab: <current>, selection: null}`. Agent sees the failure
+  next `get_applet_state`.
 
 ## Open questions
 
@@ -320,10 +380,9 @@ No new HTTP routes, no schema migrations, no new dependencies.
 2. **Should clearing happen on Escape key while the pane has
    focus?** Useful but adds a keyboard handler. Recommend yes — one
    line, expected behavior.
-3. **What happens if the agent sends `selection.start > workLines.length`
-   AND `selection.end` is valid?** Clamp `start` to 1 (best guess)
-   or drop the selection entirely? Recommend drop — sending
-   nonsense should not silently snap to file start.
+3. ~~What happens if the agent sends start > workLines.length~~
+   **Resolved in §Data model:** if BOTH out-of-bounds → drop. If
+   ONE out-of-bounds → clamp that field before swap. Then normalize.
 
 ## Document layout
 

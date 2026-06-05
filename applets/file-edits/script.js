@@ -448,6 +448,16 @@
   }
 
   // Pane-level click handler: dispatch to row select / background clear.
+  // Shift+click extends the browser's text selection during MOUSEDOWN,
+  // before any click handler runs. Suppress it on row clicks so shift
+  // unambiguously extends the line selection. Non-shift mousedown is
+  // left alone so drag-to-select-text still works inside a single row.
+  paneEl.addEventListener('mousedown', function(e) {
+    if (!e.shiftKey) return;
+    var row = e.target.closest && e.target.closest('.fe-row[data-work-line]');
+    if (row) e.preventDefault();
+  });
+
   paneEl.addEventListener('click', function(e) {
     var row = e.target.closest && e.target.closest('.fe-row[data-work-line]');
     if (row) {

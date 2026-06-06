@@ -33,19 +33,10 @@ import { refreshRoadmapLink } from './context-footer.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
 import { computeFormState } from './form-state.js';
 import { chatView } from './chat-view-controller.js';
+import { formStateStore } from './form-state-store.js';
 
 let chatRegion: ChatRegion;
 let steerCount = 0;
-let currentOptions: string[] = [];
-
-/** Module-scoped reference to the form-state recomputation routine.
- *  Captured by setupFormHandler at init time; called from
- *  setResponseOptions and the session.idle response-option fetch to
- *  refresh the send/stop buttons + options rendering without
- *  dispatching a synthetic input event on the textarea (which had
- *  the side-effect of bleeding into chat-draft routing — see
- *  docs/chat-draft-postmortem.md). No-op until setupFormHandler runs. */
-let refreshFormState: () => void = () => {};
 
 function renderOptions(container: HTMLElement, options: string[], muted: boolean): void {
   if (options.length === 0) { container.style.display = 'none'; return; }
@@ -56,8 +47,7 @@ function renderOptions(container: HTMLElement, options: string[], muted: boolean
 }
 
 export function setResponseOptions(options: string[]): void {
-  currentOptions = options;
-  refreshFormState();
+  formStateStore.set({ options });
 }
 
 /**
@@ -128,8 +118,7 @@ function handleEvent(event: SessionEvent): void {
           steerCount = 0;
           void fetch(`/api/sessions/${sessionId}/state`).then(r => r.json()).then(d => {
             if (d.responseOptions?.length) {
-              currentOptions = d.responseOptions;
-              refreshFormState();
+              formStateStore.set({ options: d.responseOptions });
             }
           }).catch(() => {});
         }
@@ -312,6 +301,7 @@ export function setupFormHandler(): void {
     const sessionId = getActiveSessionId();
     const isBusy = sessionId ? (sessionTracker.get(sessionId)?.busy ?? false) : false;
     const hasText = (input?.value.trim().length ?? 0) > 0;
+    const currentOptions = formStateStore.get().options;
     const state = computeFormState(isBusy, hasText, currentOptions.length > 0);
 
     if (sendBtn) {
@@ -338,7 +328,7 @@ export function setupFormHandler(): void {
 
     if (optionsEl) {
       if (state.optionsVisible || state.optionsMuted) {
-        renderOptions(optionsEl, currentOptions, state.optionsMuted);
+        renderOptions(optionsEl, currentOptions.slice(), state.optionsMuted);
       } else {
         optionsEl.style.display = 'none';
       }
@@ -347,11 +337,18 @@ export function setupFormHandler(): void {
 
   const textarea = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
   if (textarea) {
-    textarea.addEventListener('input', updateButton);
+    textarea.addEventListener('input', () => {
+      formStateStore.set({ hasText: textarea.value.trim().length > 0 });
+      updateButton();  // also direct-call for the listener's other duties; safe since updateButton is idempotent
+    });
   }
-  refreshFormState = updateButton;
+  formStateStore.subscribe(() => updateButton());
 
-  sessionTracker.onChange(() => updateButton());
+  sessionTracker.onChange(() => {
+    const id = getActiveSessionId();
+    const busy = id ? (sessionTracker.get(id)?.busy ?? false) : false;
+    formStateStore.set({ sessionBusy: busy });
+  });
 
   const stopBtn = form.querySelector('.stop-btn') as HTMLButtonElement | null;
   if (stopBtn) {
@@ -368,8 +365,7 @@ export function setupFormHandler(): void {
       if (!btn || btn.classList.contains('muted')) return;
       const prompt = btn.dataset.prompt;
       if (!prompt) return;
-      currentOptions = [];
-      updateButton();
+      formStateStore.set({ options: [] });
       if (textarea) { textarea.value = prompt; textarea.dispatchEvent(new Event('input', { bubbles: true })); }
       form.requestSubmit();
     });
@@ -442,7 +438,7 @@ export function setupFormHandler(): void {
     
     chatView.setFormEnabled(false);
     steerCount = 0;
-    currentOptions = [];
+    formStateStore.set({ options: [] });
     updateButton();
     
     input.value = '';

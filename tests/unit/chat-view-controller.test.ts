@@ -460,12 +460,10 @@ describe('ChatViewController', () => {
         activeBinding: { sessionId: string | null; key: string } | null;
         onDraftInput(): void;
         getTextarea(): { value: string } | null;
-        lastSeenInputValue: string;
       };
       vi.mocked(getActiveSessionId).mockReturnValue('s1');
       internal.activeBinding = { sessionId: 's1', key: 's1' };
       internal.sessionDrafts.set('s1', 'abc');
-      internal.lastSeenInputValue = '';
       internal.getTextarea = () => ({ value: 'abc' });
       mockApi.putDraft.mockClear();
       // Simulate mid-transition: binding nulled, global flipped to null.
@@ -487,10 +485,8 @@ describe('ChatViewController', () => {
         activeBinding: { sessionId: string | null; key: string } | null;
         onDraftInput(): void;
         getTextarea(): { value: string } | null;
-        lastSeenInputValue: string;
       };
       internal.activeBinding = { sessionId: 's1', key: 's1' };
-      internal.lastSeenInputValue = '';
       internal.getTextarea = () => ({ value: 'typed' });
       vi.mocked(getActiveSessionId).mockReturnValue(null);  // global lies
       internal.onDraftInput();

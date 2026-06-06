@@ -29,7 +29,7 @@ import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
-import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes } from './src/routes/index.js';
+import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes, draftRoutes } from './src/routes/index.js';
 import { initWatchRoutes } from './src/routes/watch.js';
 import { flushAll as flushAllFileEditsCardLists } from './src/file-edits-store.js';
 import { initFileEditsRoutes, flushFileEditsCardList } from './src/routes/file-edits.js';
@@ -166,6 +166,7 @@ app.use('/api', shellRoutes);
 app.use('/api', surfaceRoutes);
 app.use('/api', watchRoutes);
 app.use('/api', fileEditsRoutes);
+app.use('/api', draftRoutes);
 
 // Server Lifecycle
 

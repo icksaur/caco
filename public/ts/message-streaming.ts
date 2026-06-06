@@ -38,6 +38,15 @@ let chatRegion: ChatRegion;
 let steerCount = 0;
 let currentOptions: string[] = [];
 
+/** Module-scoped reference to the form-state recomputation routine.
+ *  Captured by setupFormHandler at init time; called from
+ *  setResponseOptions and the session.idle response-option fetch to
+ *  refresh the send/stop buttons + options rendering without
+ *  dispatching a synthetic input event on the textarea (which had
+ *  the side-effect of bleeding into chat-draft routing — see
+ *  docs/chat-draft-postmortem.md). No-op until setupFormHandler runs. */
+let refreshFormState: () => void = () => {};
+
 function renderOptions(container: HTMLElement, options: string[], muted: boolean): void {
   if (options.length === 0) { container.style.display = 'none'; return; }
   container.style.display = '';
@@ -48,9 +57,7 @@ function renderOptions(container: HTMLElement, options: string[], muted: boolean
 
 export function setResponseOptions(options: string[]): void {
   currentOptions = options;
-  if (typeof document === 'undefined') return;
-  const ta = document.querySelector('#chatForm textarea') as HTMLTextAreaElement | null;
-  ta?.dispatchEvent(new Event('input', { bubbles: true }));
+  refreshFormState();
 }
 
 /**
@@ -122,8 +129,7 @@ function handleEvent(event: SessionEvent): void {
           void fetch(`/api/sessions/${sessionId}/state`).then(r => r.json()).then(d => {
             if (d.responseOptions?.length) {
               currentOptions = d.responseOptions;
-              const ta = document.querySelector('#chatForm textarea') as HTMLTextAreaElement | null;
-              ta?.dispatchEvent(new Event('input', { bubbles: true }));
+              refreshFormState();
             }
           }).catch(() => {});
         }
@@ -343,6 +349,7 @@ export function setupFormHandler(): void {
   if (textarea) {
     textarea.addEventListener('input', updateButton);
   }
+  refreshFormState = updateButton;
 
   sessionTracker.onChange(() => updateButton());
 

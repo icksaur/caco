@@ -10,6 +10,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import express from 'express';
 import { existsSync, statSync, createReadStream, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -24,6 +25,7 @@ import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
 import { dispatchMessage } from './session-messages.js';
 import { prefixMessageSource } from '../message-source.js';
+import { getSessionDraft, setSessionDraft, deleteSessionDraft } from '../chat-draft-store.js';
 
 const router = Router();
 
@@ -594,6 +596,30 @@ router.put('/sessions/:sessionId/data/:name', (req: Request, res: Response) => {
     return;
   }
   res.json(req.body);
+});
+
+const DRAFT_TEXT_PARSER = express.text({ type: 'text/plain', limit: '1mb' });
+
+router.get('/sessions/:sessionId/draft', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const text = getSessionDraft(sessionId);
+  if (text === null) { res.status(404).end(); return; }
+  res.type('text/plain; charset=utf-8').send(text);
+});
+
+router.put('/sessions/:sessionId/draft', DRAFT_TEXT_PARSER, (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const text = typeof req.body === 'string' ? req.body : '';
+  const result = setSessionDraft(sessionId, text);
+  if (result === 'missing-session') { res.status(404).end(); return; }
+  res.status(204).end();
+});
+
+router.delete('/sessions/:sessionId/draft', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const result = deleteSessionDraft(sessionId);
+  if (result === 'missing-session') { res.status(404).end(); return; }
+  res.status(204).end();
 });
 
 router.get('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {

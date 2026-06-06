@@ -30,10 +30,10 @@ describe('app-state', () => {
       expect(appState.getCurrentCwd()).toBe('/test/path');
     });
     
-    it('clearActiveSession clears only sessionId, not cwd', () => {
+    it('releaseActiveSessionForNewChat clears only sessionId, not cwd', () => {
       appState.setActiveSession('sess-123', '/my/project');
-      appState.clearActiveSession();
-      
+      appState.releaseActiveSessionForNewChat();
+
       expect(appState.getActiveSessionId()).toBeNull();
       expect(appState.getCurrentCwd()).toBe('/my/project'); // Preserved
     });

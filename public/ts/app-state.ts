@@ -89,9 +89,12 @@ export function setActiveSession(sessionId: string | null, cwd: string): void {
 }
 
 /**
- * Clear active session (for new chat)
+ * Transitional state used by `showNewChat` between view teardown and
+ * the next session binding. Subsequent re-binding happens in
+ * `setActiveSession` (via `onNewSessionCreated` after first message,
+ * or via session activation).
  */
-export function clearActiveSession(): void {
+export function releaseActiveSessionForNewChat(): void {
   state.activeSessionId = null;
   // Note: Don't clear cwd - it's useful as default for next session
 }

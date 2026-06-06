@@ -154,28 +154,15 @@ class ChatViewController {
     this.draftListenerWired = true;
   }
 
-  /** Last textarea value the controller has processed. Lets us
-   *  bail on synthetic input events that don't actually change the
-   *  value — e.g. setResponseOptions in message-streaming, which
-   *  fires `dispatchEvent('input')` for unrelated reasons during
-   *  showNewChat/showChat. Without this, those events would race
-   *  the activeSessionId transition and route the prior-session
-   *  text into NEWCHAT_KEY. */
-  private lastSeenInputValue = '';
-
   private onDraftInput(): void {
     if (this.suppressNextInput) {
       this.suppressNextInput = false;
-      const ta0 = this.getTextarea();
-      if (ta0) this.lastSeenInputValue = ta0.value;
       return;  // synthetic event from restoreDraft/hydrateDraft; not a user gesture
     }
     const ta = this.getTextarea();
     if (!ta) return;
     const val = ta.value;
-    if (val === this.lastSeenInputValue) return;  // unrelated synthetic event; no real change
-    if (!this.activeBinding) return;  // not yet bound; drop without poisoning lastSeenInputValue
-    this.lastSeenInputValue = val;
+    if (!this.activeBinding) return;  // not yet bound; drop
     const { sessionId, key } = this.activeBinding;
 
     // In-memory Map mirrors immediately (so up-arrow recall, session
@@ -614,6 +601,10 @@ class ChatViewController {
       const ta = this.getTextarea();
       if (ta) {
         ta.value = prompt;
+        // Suppress the input-listener echo so onDraftInput does not
+        // schedule a redundant PUT of the value we just restored.
+        // Same rationale as restoreDraft / hydrateDraft.
+        this.suppressNextInput = true;
         ta.dispatchEvent(new Event('input', { bubbles: true }));
       }
     } else {

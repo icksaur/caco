@@ -19,7 +19,15 @@ import { existsSync } from 'fs';
 import { readFile, stat } from 'fs/promises';
 import { join } from 'path';
 import { broadcastEvent } from './event-bus.js';
+import { createFileWatcher } from './file-watcher.js';
 import type { SessionEvent } from './types.js';
+
+/** V3.3: env toggle for the chokidar filesystem watcher. Set to 'off'
+ *  (case-insensitive; '0', 'false', 'no' also accepted) to force
+ *  timer-only mode (use case: NFS / network mounts where chokidar
+ *  attaches without error but silently misses events). Read once at
+ *  module load. */
+const WATCH_ENABLED = !(/^(off|0|false|no)$/i.test(String(process.env.CACO_FILE_EDITS_WATCH ?? '')));
 
 export type FileStatus = 'modified' | 'untracked' | 'deleted' | 'renamed' | 'clean';
 
@@ -71,14 +79,15 @@ interface SessionPollerState {
   lastDirty: Map<string, { status: FileStatus; renamedFrom?: string }>;
   timer: NodeJS.Timeout | null;
   debounceTimer: NodeJS.Timeout | null;
-  lastActivityMs: number;
   /** When true, we're in the middle of a poll; new triggers are no-ops. */
   polling: boolean;
 }
 
-const ACTIVE_CADENCE_MS = 1500;
 const IDLE_CADENCE_MS = 5000;
-const ACTIVITY_WINDOW_MS = 10_000;
+/** V3.3: backstop cadence when chokidar is attached. The fs watcher
+ *  drives polling on every real edit; this tick exists only to catch
+ *  the rare case where chokidar misses (NFS, etc.). */
+const WATCHED_BACKSTOP_MS = 30_000;
 const DEBOUNCE_MS = 50;
 const DIFF_TIMEOUT_MS = 2000;
 const DIFF_LINE_CAP = 1000;
@@ -337,7 +346,7 @@ export interface GitEditPoller {
   /** Attach explicitly; safe to call multiple times. */
   attachToSession(sessionId: string, cwd: string): Promise<void>;
   detachFromSession(sessionId: string): void;
-  triggerPoll(sessionId: string, source: 'event'): void;
+  triggerPoll(sessionId: string, source: 'event' | 'fs-event'): void;
   /** Return the current dirty set as edits (used by snapshot endpoint).
    *  Lazy-attaches if the session isn't tracked yet.
    *  V2.1: optional persistedCleanPaths — paths from the persisted card
@@ -353,6 +362,10 @@ export interface GitEditPoller {
 
 export function createGitEditPoller(): GitEditPoller {
   const sessions = new Map<string, SessionPollerState>();
+  // V3.3: per-session chokidar watcher. attach/detach mirror the
+  // poller's per-session lifecycle. The watcher is a no-op when
+  // WATCH_ENABLED is false (CACO_FILE_EDITS_WATCH=off).
+  const fileWatcher = createFileWatcher();
 
   /** Best-effort file mtime. Returns undefined on stat failure (deleted,
    *  unreadable). Used to populate EditEntry.mtimeMs so the client can
@@ -443,7 +456,7 @@ export function createGitEditPoller(): GitEditPoller {
     return base;
   }
 
-  async function pollSession(sessionId: string, source: 'timer' | 'event'): Promise<void> {
+  async function pollSession(sessionId: string, source: 'timer' | 'event' | 'fs-event'): Promise<void> {
     const state = sessions.get(sessionId);
     if (!state || state.polling) return;
     state.polling = true;
@@ -501,8 +514,9 @@ export function createGitEditPoller(): GitEditPoller {
     const state = sessions.get(sessionId);
     if (!state) return;
     if (state.timer) clearTimeout(state.timer);
-    const idle = (Date.now() - state.lastActivityMs) > ACTIVITY_WINDOW_MS;
-    const cadence = idle ? IDLE_CADENCE_MS : ACTIVE_CADENCE_MS;
+    // V3.3 cadence: 30s when chokidar is attached (backstop only);
+    // 5s when not (the 1.5s active heuristic from V3.2 is dropped).
+    const cadence = fileWatcher.isWatching(sessionId) ? WATCHED_BACKSTOP_MS : IDLE_CADENCE_MS;
     state.timer = setTimeout(() => {
       void pollSession(sessionId, 'timer').then(() => scheduleTimer(sessionId));
     }, cadence);
@@ -522,17 +536,40 @@ export function createGitEditPoller(): GitEditPoller {
         lastDirty: new Map(),
         timer: null,
         debounceTimer: null,
-        lastActivityMs: 0,
         polling: false,
       });
       console.log(`[FILE-EDITS] attached to session ${sessionId.slice(0, 8)} (repo: ${repoRoot})`);
       // Initial poll to populate state without broadcasting (snapshot endpoint
       // will return the current dirty set on applet open).
       const state = sessions.get(sessionId)!;
+      let initialPollOk = false;
       try {
         const result = await runGit(['status', '--porcelain=v1', '-z', '-u'], state.repoRoot, STATUS_TIMEOUT_MS);
-        if (result.code === 0) state.lastDirty = parsePorcelain(result.stdout);
+        if (result.code === 0) {
+          state.lastDirty = parsePorcelain(result.stdout);
+          initialPollOk = true;
+        }
       } catch { /* poller still scheduled */ }
+      // V3.3: attach the chokidar watcher AFTER the initial poll so
+      // lastDirty is populated. Otherwise a watcher event firing during
+      // the await above would race the inline poll and broadcast every
+      // dirty file as "new."
+      // If the initial poll FAILED, lastDirty is still empty — attaching
+      // chokidar now would re-create the spurious-broadcast race the
+      // ordering was supposed to eliminate. Skip the attach; the next
+      // timer tick (5s, unwatched cadence) will retry status, and a
+      // future attach attempt could be wired by the operator. For now,
+      // a single failed initial poll degrades us to timer-only mode for
+      // the session's lifetime — rare, acceptable.
+      if (WATCH_ENABLED && initialPollOk) {
+        const onChange = (): void => this.triggerPoll(sessionId, 'fs-event');
+        const attached = await fileWatcher.attach(sessionId, repoRoot, onChange);
+        if (!attached) {
+          console.log(`[FILE-EDITS] ${sessionId.slice(0, 8)} chokidar attach failed; using timer-only mode`);
+        }
+      } else if (WATCH_ENABLED && !initialPollOk) {
+        console.warn(`[FILE-EDITS] ${sessionId.slice(0, 8)} initial poll failed; skipping chokidar attach (timer-only mode)`);
+      }
       scheduleTimer(sessionId);
     },
 
@@ -541,14 +578,14 @@ export function createGitEditPoller(): GitEditPoller {
       if (!state) return;
       if (state.timer) clearTimeout(state.timer);
       if (state.debounceTimer) clearTimeout(state.debounceTimer);
+      fileWatcher.detach(sessionId);
       sessions.delete(sessionId);
       console.log(`[FILE-EDITS] detached from session ${sessionId.slice(0, 8)}`);
     },
 
-    triggerPoll(sessionId: string, source: 'event'): void {
+    triggerPoll(sessionId: string, source: 'event' | 'fs-event'): void {
       const state = sessions.get(sessionId);
       if (!state) return;
-      state.lastActivityMs = Date.now();
       if (state.debounceTimer) clearTimeout(state.debounceTimer);
       state.debounceTimer = setTimeout(() => {
         state.debounceTimer = null;

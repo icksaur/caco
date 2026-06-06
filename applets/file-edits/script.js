@@ -63,6 +63,12 @@
     this.edit = edit;
     this.paneEl = null;     // lazy: built on first activate()
     this.scrollTop = 0;
+    /** V3.4: per-tab line selection. {start, end} (1-indexed,
+     *  inclusive, working-tree line numbers) or null. */
+    this.selection = null;
+    /** V3.4: pending selection arrived via agent setState before
+     *  paneEl was built. Applied on first activate() after render. */
+    this.pendingSelection = null;
     this.tabEl = this.buildTabEl();
   }
 
@@ -98,6 +104,17 @@
       updateFollowButton();
       setActiveTab(self.relativePath);
     });
+    // Middle-click closes the tab (VS Code convention).
+    btn.addEventListener('auxclick', function(e) {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      closeTab(self.relativePath);
+    });
+    // Suppress the middle-mouse autoscroll cursor / paste primary
+    // selection so the page doesn't react before auxclick fires.
+    btn.addEventListener('mousedown', function(e) {
+      if (e.button === 1) e.preventDefault();
+    });
     return btn;
   };
 
@@ -105,13 +122,13 @@
     if (!this.paneEl) this.paneEl = document.createElement('pre');
     this.paneEl.className = 'fe-diff';
     renderBody(this.paneEl, this.edit);
+    // pendingSelection is consumed by finalizeAgentSelection (post-render);
+    // existing selection is repainted here so updates preserve the highlight.
+    this.paintSelection();
   };
 
   FileTab.prototype.update = function(newEdit) {
     if (this.contentEqual(newEdit)) {
-      // Even if content didn't change, keep our edit reference fresh —
-      // mtimeMs may have updated server-side without the diff bytes
-      // changing (rare but harmless).
       this.edit = newEdit;
       return false;
     }
@@ -130,18 +147,32 @@
       && fullFileEqual(a.fullFile, b.fullFile);
   };
 
+  /** Paint current selection by toggling the .fe-row-selected class
+   *  on rows whose data-work-line falls in [start, end]. Clears all
+   *  selected classes first. */
+  FileTab.prototype.paintSelection = function() {
+    if (!this.paneEl) return;
+    var existing = this.paneEl.querySelectorAll('.fe-row-selected');
+    for (var i = 0; i < existing.length; i++) {
+      existing[i].classList.remove('fe-row-selected');
+    }
+    if (!this.selection) return;
+    var rows = this.paneEl.querySelectorAll('.fe-row[data-work-line]');
+    for (var j = 0; j < rows.length; j++) {
+      var n = parseInt(rows[j].dataset.workLine, 10);
+      if (n >= this.selection.start && n <= this.selection.end) {
+        rows[j].classList.add('fe-row-selected');
+      }
+    }
+  };
+
   FileTab.prototype.activate = function() {
     if (!this.paneEl) this.render();
     // Hide-swap-show: visibility:hidden suppresses the innerHTML-clear
-    // scroll event on most browsers. Combined with the value-comparison
-    // programmaticScrollTo guard, this works even if a stray scroll
-    // event fires during the swap.
-    //
-    // Note: we always restore to '' (the default visible state) instead
-    // of capturing/restoring prev. Multiple rapid activate() calls
-    // (e.g. init dispatching multiple snapshot edits before the first
-    // rAF fires) would otherwise have the second rAF "restore" to the
-    // first's mid-swap 'hidden' state, leaving the pane invisible.
+    // scroll event. Multiple rapid activate() calls (e.g. init dispatching
+    // multiple snapshot edits before the first rAF fires) would otherwise
+    // have the second rAF 'restore' to the first's mid-swap 'hidden'
+    // state, leaving the pane invisible.
     paneEl.style.visibility = 'hidden';
     paneEl.innerHTML = '';
     paneEl.appendChild(this.paneEl);
@@ -168,6 +199,579 @@
     if (i < 0) i = p.lastIndexOf('\\');
     return i < 0 ? p : p.slice(i + 1);
   }
+
+  // ── V3.5: Selection state + agent / user exchange ────────────────────
+  //
+  // V3.5 model: native browser text selection is the input gesture.
+  // tab.selection is the persistent line envelope (truth for the
+  // agent and the .fe-row-selected paint). When the pane loses
+  // focus, the browser drops the native Range; the paint persists.
+  // No attempt is made to restore the native Range on focus-in
+  // (spec §B1: defeated by mousedown→focus→mouseup ordering).
+
+  /** Random per-page-load ID. Included in applet→agent echoes so
+   *  cross-tab loops are prevented: Tab A's echo reaches Tab B via
+   *  broadcast, but Tab B sees Tab A's sourceId and bails. Agent
+   *  pushes have no sourceId (the server tool omits it), so every tab
+   *  applies them; each tab's resulting echo carries its own sourceId
+   *  which other tabs filter. Single-tab loops can't occur because
+   *  appletAPI.setAppletState sends via WebSocket and the server's
+   *  broadcastToAll excludes the sender connection. */
+  var SOURCE_ID = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : 'src-' + Math.random().toString(36).slice(2) + '-' + Date.now();
+
+  /** Build the broadcast shape for the agent. Always reflects the
+   *  currently-active tab + its selection envelope. Includes the
+   *  user-selected text (truncated to TEXT_CAP) when the selection
+   *  was set by a user gesture (drag or gutter click). Agent-pushed
+   *  selections have no captured text. */
+  function buildFileEditsState() {
+    var tab = activeTabId ? tabs.get(activeTabId) : null;
+    if (!tab || !tab.selection) {
+      return { activeTab: activeTabId, selection: null, sourceId: SOURCE_ID };
+    }
+    var s = { start: tab.selection.start, end: tab.selection.end };
+    if (typeof tab.selection.text === 'string') s.text = tab.selection.text;
+    return { activeTab: activeTabId, selection: s, sourceId: SOURCE_ID };
+  }
+
+  /** Echo current state to applet-state store (which both this applet
+   *  and the agent's get_applet_state read from). */
+  function echoState() {
+    if (!window.appletAPI || !window.appletAPI.setAppletState) return;
+    try {
+      window.appletAPI.setAppletState({ fileEdits: buildFileEditsState() });
+    } catch (err) {
+      console.warn('[file-edits] setAppletState failed:', err);
+    }
+  }
+
+  /** Highest working-tree line number for the tab. Used as the
+   *  bounds-check ceiling in validateSelection. */
+  function workLinesOf(tab) {
+    if (!tab || !tab.edit || !tab.edit.fullFile) return null;
+    var ff = tab.edit.fullFile;
+    if (!Array.isArray(ff.workLines)) return null;
+    return ff.workLines.length;
+  }
+
+  /** Validate + normalize + clamp an incoming selection per V3.4 §Data
+   *  model rules. Returns null if invalid (drop). `validWorkLines`
+   *  excludes pure-deletion lines; start clamps UP and end clamps DOWN
+   *  to the nearest member. */
+  function validateSelection(sel, maxLine, validWorkLines) {
+    if (!sel || typeof sel.start !== 'number' || typeof sel.end !== 'number') return null;
+    var a = sel.start, b = sel.end;
+    if (maxLine != null) {
+      if (a < 1 || a > maxLine || b < 1 || b > maxLine) return null;
+    }
+    if (a > b) { var t = a; a = b; b = t; }
+    if (validWorkLines) {
+      var sortedAsc = Array.from(validWorkLines).sort(function(x, y) { return x - y; });
+      var newStart = null, newEnd = null;
+      for (var i = 0; i < sortedAsc.length; i++) {
+        if (sortedAsc[i] >= a) { newStart = sortedAsc[i]; break; }
+      }
+      for (var j = sortedAsc.length - 1; j >= 0; j--) {
+        if (sortedAsc[j] <= b) { newEnd = sortedAsc[j]; break; }
+      }
+      if (newStart == null || newEnd == null || newStart > newEnd) return null;
+      a = newStart; b = newEnd;
+    }
+    return { start: a, end: b };
+  }
+
+  /** Set of work-line numbers actually rendered in a tab's pane. */
+  function renderedWorkLines(tab) {
+    if (!tab || !tab.paneEl) return null;
+    var rows = tab.paneEl.querySelectorAll('.fe-row[data-work-line]');
+    var s = new Set();
+    for (var i = 0; i < rows.length; i++) {
+      s.add(parseInt(rows[i].dataset.workLine, 10));
+    }
+    return s;
+  }
+
+  /** Scroll the active tab's pane so the selection's first line is at
+   *  ~30% from the viewport top. */
+  function scrollPaneToLine(tab, line) {
+    if (!tab || !tab.paneEl || tab.paneEl.parentNode !== paneEl) return;
+    var row = tab.paneEl.querySelector('.fe-row[data-work-line="' + line + '"]');
+    if (!row) return;
+    var rowRect = row.getBoundingClientRect();
+    var paneRect = paneEl.getBoundingClientRect();
+    var offset = rowRect.top - paneRect.top + paneEl.scrollTop;
+    var target = Math.max(0, offset - paneEl.clientHeight * 0.3);
+    tab.scrollTop = target;
+    programmaticScrollTo(target);
+  }
+
+  // ── Native-selection ↔ envelope translation ─────────────────────────
+  //
+  // Endpoint snap rules (spec §1 step 3):
+  //   - In a .fe-row[data-work-line]: use that row's line.
+  //   - In a row without data-work-line (pure-del) or in the pane
+  //     background: snap to nearest rendered work-line — start
+  //     endpoint goes DOWN, end endpoint goes UP. (Same direction
+  //     covers "outside the pane subtree entirely": an endpoint
+  //     above the pane in DOM order snaps DOWN to the first
+  //     work-line; below snaps UP to the last.)
+
+  function endpointToElement(node) {
+    if (!node) return null;
+    return node.nodeType === 1 ? node : node.parentElement;
+  }
+
+  function lineOfRow(row) {
+    var n = parseInt(row.dataset.workLine, 10);
+    return isNaN(n) ? null : n;
+  }
+
+  /** Walk workRows (DOM order) for the first row at or after the
+   *  reference element by document position. Returns its work-line,
+   *  or null if no row qualifies. */
+  function snapStartByDomPos(ref, workRows) {
+    if (!ref || workRows.length === 0) return null;
+    for (var i = 0; i < workRows.length; i++) {
+      var row = workRows[i];
+      if (row === ref || row.contains(ref)) return lineOfRow(row);
+      var pos = ref.compareDocumentPosition(row);
+      if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return lineOfRow(row);
+    }
+    return null;
+  }
+
+  /** Walk workRows (reverse DOM order) for the last row at or before
+   *  the reference element by document position. */
+  function snapEndByDomPos(ref, workRows) {
+    if (!ref || workRows.length === 0) return null;
+    for (var i = workRows.length - 1; i >= 0; i--) {
+      var row = workRows[i];
+      if (row === ref || row.contains(ref)) return lineOfRow(row);
+      var pos = ref.compareDocumentPosition(row);
+      if (pos & Node.DOCUMENT_POSITION_PRECEDING) return lineOfRow(row);
+    }
+    return null;
+  }
+
+  /** Convert a non-collapsed DOM Range to a line envelope by snapping
+   *  each endpoint. Returns null if the resulting envelope is
+   *  invalid (no overlap with any rendered work-line). */
+  function envelopeFromRange(range, paneSubtree) {
+    if (!range || range.collapsed) return null;
+    var workRows = paneSubtree.querySelectorAll('.fe-row[data-work-line]');
+    if (workRows.length === 0) return null;
+
+    function snap(node, isStart) {
+      var el = endpointToElement(node);
+      if (el && paneSubtree.contains(el)) {
+        var row = el.closest('.fe-row[data-work-line]');
+        if (row && paneSubtree.contains(row)) return lineOfRow(row);
+      }
+      return isStart ? snapStartByDomPos(el || node, workRows)
+                     : snapEndByDomPos(el || node, workRows);
+    }
+
+    var startLine = snap(range.startContainer, true);
+    var endLine = snap(range.endContainer, false);
+    if (startLine == null || endLine == null) return null;
+    if (startLine > endLine) return null;
+    return { start: startLine, end: endLine };
+  }
+
+  /** Build a DOM Range spanning the .fe-line content of rows
+   *  [envelope.start..envelope.end] in the given tab. Returns null
+   *  if either bounding row is missing. */
+  function rangeFromEnvelope(tab, envelope) {
+    if (!tab || !tab.paneEl || !envelope) return null;
+    var startRow = tab.paneEl.querySelector('.fe-row[data-work-line="' + envelope.start + '"]');
+    var endRow = tab.paneEl.querySelector('.fe-row[data-work-line="' + envelope.end + '"]');
+    if (!startRow || !endRow) return null;
+    var startLine = startRow.querySelector('.fe-line');
+    var endLine = endRow.querySelector('.fe-line');
+    if (!startLine || !endLine) return null;
+    var range = document.createRange();
+    try {
+      range.setStart(startLine, 0);
+      range.setEnd(endLine, endLine.childNodes.length);
+    } catch (err) {
+      return null;
+    }
+    return range;
+  }
+
+  // ── Echo-loop guard for programmatic addRange ───────────────────────
+  //
+  // Before any programmatic addRange we install an _expectedEnvelope
+  // token. The selectionchange handler consumes the token when it
+  // observes a matching envelope and skips the echo for that one
+  // event. Value-comparison, not a timing flag — selectionchange
+  // dispatches asynchronously and a microtask-clear would race the
+  // dispatch (same lesson as pendingProgrammaticScroll).
+
+  var _expectedEnvelope = null;
+  var _expectedEnvelopeTimer = 0;
+
+  function setExpectedEnvelope(env) {
+    if (_expectedEnvelopeTimer) clearTimeout(_expectedEnvelopeTimer);
+    _expectedEnvelope = env ? { start: env.start, end: env.end } : null;
+    _expectedEnvelopeTimer = setTimeout(function() {
+      _expectedEnvelope = null;
+      _expectedEnvelopeTimer = 0;
+    }, 250);
+  }
+
+  function consumeExpectedEnvelope(observed) {
+    if (!_expectedEnvelope || !observed) return false;
+    if (_expectedEnvelope.start !== observed.start) return false;
+    if (_expectedEnvelope.end !== observed.end) return false;
+    _expectedEnvelope = null;
+    if (_expectedEnvelopeTimer) clearTimeout(_expectedEnvelopeTimer);
+    _expectedEnvelopeTimer = 0;
+    return true;
+  }
+
+  /** Apply an envelope to the native Selection. Sets the expected-
+   *  envelope token first so the resulting selectionchange is
+   *  recognized as a programmatic restore and doesn't echo. Returns
+   *  true if the Range was built and applied. */
+  function applyEnvelopeAsRange(tab, envelope) {
+    var range = rangeFromEnvelope(tab, envelope);
+    if (!range) return false;
+    var sel = window.getSelection && window.getSelection();
+    if (!sel) return false;
+    setExpectedEnvelope(envelope);
+    try {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (err) {
+      return false;
+    }
+    return true;
+  }
+
+  // ── User-drag tracking ──────────────────────────────────────────────
+  //
+  // _userDragging is true between mousedown (on diff content) and
+  // mouseup (anywhere). During the drag, selection-change echoes are
+  // deferred until mouseup to avoid flooding the WebSocket. Scoped
+  // to .fe-line / .fe-row mousedowns so scrollbar drags don't
+  // suppress agent addRange (spec §I-v2-4).
+
+  var _userDragging = false;
+  var _pendingDragEcho = false;
+
+  paneEl.addEventListener('mousedown', function(e) {
+    if (!e.target || !e.target.closest) return;
+    // Scope to .fe-line only: drag-to-select-text inside diff content.
+    // Excludes fold/collapse buttons (in .fe-row but not .fe-line) so
+    // clicking them doesn't suppress agent addRange via _userDragging.
+    // Excludes gutter clicks (the gutter is a separate gesture handled
+    // by the click handler below).
+    var inDiffContent = e.target.closest('.fe-line');
+    if (inDiffContent && paneEl.contains(inDiffContent)) {
+      _userDragging = true;
+    }
+  });
+
+  function endUserDrag() {
+    if (!_userDragging) return;
+    _userDragging = false;
+    if (_pendingDragEcho) {
+      _pendingDragEcho = false;
+      echoState();
+    }
+  }
+
+  document.addEventListener('mouseup', endUserDrag, true);
+  window.addEventListener('blur', endUserDrag, true);
+
+  // ── selectionchange handler (drag → envelope → state) ───────────────
+
+  var _selectionChangeRafScheduled = false;
+
+  document.addEventListener('selectionchange', function() {
+    var sel = window.getSelection && window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    var range = sel.getRangeAt(0);
+    var intersects = false;
+    try { intersects = range.intersectsNode(paneEl); } catch (err) { return; }
+    if (!intersects) return;  // sync bail before rAF schedule
+    if (_selectionChangeRafScheduled) return;
+    _selectionChangeRafScheduled = true;
+    requestAnimationFrame(function() {
+      _selectionChangeRafScheduled = false;
+      handleSelectionChange();
+    });
+  });
+
+  // ── Selection text capture ──────────────────────────────────────────
+  //
+  // The line envelope tells the agent WHICH lines the user cares
+  // about; the captured text tells it EXACTLY what they highlighted
+  // (sub-word precision). Captured at gesture time because the
+  // browser's native Range is lost on focus-out — by the time the
+  // agent reads it via get_applet_state, range.toString() is empty.
+
+  var TEXT_CAP = 4096;
+
+  function capText(s) {
+    if (typeof s !== 'string') return '';
+    if (s.length <= TEXT_CAP) return s;
+    return s.slice(0, TEXT_CAP) + '\u2026';
+  }
+
+  /** Text of the user's actual Range. Trimmed to TEXT_CAP. */
+  function textFromRange(range) {
+    if (!range) return '';
+    try { return capText(range.toString()); } catch (err) { return ''; }
+  }
+
+  /** Concatenated .fe-line textContent for the gutter-click case
+   *  where there's no native Range yet (we're about to install one).
+   *  Joins rows [start..end] with \n. */
+  function textFromEnvelope(tab, envelope) {
+    if (!tab || !tab.paneEl || !envelope) return '';
+    var parts = [];
+    for (var line = envelope.start; line <= envelope.end; line++) {
+      var row = tab.paneEl.querySelector('.fe-row[data-work-line="' + line + '"]');
+      if (!row) continue;
+      var lineEl = row.querySelector('.fe-line');
+      if (lineEl) parts.push(lineEl.textContent || '');
+    }
+    return capText(parts.join('\n'));
+  }
+
+  function handleSelectionChange() {
+    var sel = window.getSelection && window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    var range = sel.getRangeAt(0);
+    if (range.collapsed) return;  // caret placement; do NOT clear tab.selection (spec §1 step 2)
+    try { if (!range.intersectsNode(paneEl)) return; } catch (err) { return; }
+    var tab = activeTabId ? tabs.get(activeTabId) : null;
+    if (!tab || !tab.paneEl || tab.paneEl.parentNode !== paneEl) return;
+
+    var raw = envelopeFromRange(range, tab.paneEl);
+    if (!raw) return;
+    var envelope = validateSelection(raw, workLinesOf(tab), renderedWorkLines(tab));
+    if (!envelope) return;
+
+    var text = textFromRange(range);
+
+    if (consumeExpectedEnvelope(envelope)) {
+      // Programmatic restore (gutter click or agent push). The
+      // envelope itself was already echoed; capture the text now
+      // (the browser has just installed the Range, so toString()
+      // works) and update tab.selection without re-echoing the
+      // envelope-only payload. If text changed, echo to ship it.
+      if (tab.selection && tab.selection.text !== text) {
+        tab.selection = { start: envelope.start, end: envelope.end, text: text };
+        if (_userDragging) _pendingDragEcho = true;
+        else echoState();
+      }
+      return;
+    }
+
+    var wasNull = !tab.selection;
+    var changed = wasNull
+      || tab.selection.start !== envelope.start
+      || tab.selection.end !== envelope.end
+      || tab.selection.text !== text;
+    if (!changed) return;
+
+    tab.selection = { start: envelope.start, end: envelope.end, text: text };
+    tab.paintSelection();
+
+    if (wasNull && followEdits) {
+      followEdits = false;
+      updateFollowButton();
+    }
+
+    if (_userDragging) _pendingDragEcho = true;
+    else echoState();
+  }
+
+  // ── Click handlers: gutter (select line), background (clear) ────────
+
+  paneEl.addEventListener('mousedown', function(e) {
+    if (!e.shiftKey) return;
+    var gutter = e.target.closest && e.target.closest('.fe-row[data-work-line] > .fe-gutter');
+    if (gutter) e.preventDefault();
+  });
+
+  paneEl.addEventListener('click', function(e) {
+    if (!e.target || !e.target.closest) return;
+    var gutter = e.target.closest('.fe-row[data-work-line] > .fe-gutter');
+    if (gutter) {
+      e.preventDefault();
+      var row = gutter.closest('.fe-row[data-work-line]');
+      var line = lineOfRow(row);
+      if (line == null) return;
+      var tab = activeTabId ? tabs.get(activeTabId) : null;
+      if (!tab) return;
+      var raw;
+      if (e.shiftKey && tab.selection) {
+        raw = { start: tab.selection.start, end: line };
+      } else {
+        raw = { start: line, end: line };
+      }
+      var envelope = validateSelection(raw, workLinesOf(tab), renderedWorkLines(tab));
+      if (!envelope) return;
+      var wasNull = !tab.selection;
+      tab.selection = {
+        start: envelope.start,
+        end: envelope.end,
+        text: textFromEnvelope(tab, envelope),
+      };
+      tab.paintSelection();
+      if (wasNull && followEdits) {
+        followEdits = false;
+        updateFollowButton();
+      }
+      applyEnvelopeAsRange(tab, envelope);
+      echoState();
+      return;
+    }
+    // Click landed on .fe-diff content area but not on any .fe-row
+    // (i.e. trailing whitespace below the last line). Clear.
+    var diffEl = e.target.closest('.fe-diff');
+    var anyRow = e.target.closest('.fe-row');
+    if (diffEl && !anyRow) {
+      var tab2 = activeTabId ? tabs.get(activeTabId) : null;
+      if (tab2 && tab2.selection) {
+        tab2.selection = null;
+        tab2.paintSelection();
+        var sel = window.getSelection && window.getSelection();
+        if (sel) sel.removeAllRanges();
+        echoState();
+      }
+    }
+  });
+
+  // ── Escape clears selection ──────────────────────────────────────────
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    if (pickerOpen) return;  // picker handles Escape itself
+    var tab = activeTabId ? tabs.get(activeTabId) : null;
+    if (tab && tab.selection) {
+      e.preventDefault();
+      tab.selection = null;
+      tab.paintSelection();
+      var sel = window.getSelection && window.getSelection();
+      if (sel) sel.removeAllRanges();
+      echoState();
+    }
+  });
+
+  /** IDs that have a /file-edits/open fetch in-flight from
+   *  applyAgentState. Reserved so concurrent caco.edit handlers don't
+   *  push us over TAB_CAP and orphan our pending open. */
+  var pendingOpenIds = new Set();
+
+  /** Schedule finalizeAgentSelection two rAFs from now, cancelling any
+   *  previously-scheduled chain on this tab. Collapses rapid agent
+   *  pushes into a single finalize that reads the latest
+   *  pendingSelection. */
+  function scheduleAgentFinalize(tab) {
+    if (tab._agentRaf1) cancelAnimationFrame(tab._agentRaf1);
+    if (tab._agentRaf2) cancelAnimationFrame(tab._agentRaf2);
+    tab._agentRaf1 = requestAnimationFrame(function() {
+      tab._agentRaf1 = 0;
+      tab._agentRaf2 = requestAnimationFrame(function() {
+        tab._agentRaf2 = 0;
+        finalizeAgentSelection(tab);
+      });
+    });
+  }
+
+  /** Apply agent-pushed state. Opens the tab via POST /open if it
+   *  doesn't exist. Validation against the rendered DOM happens in
+   *  finalizeAgentSelection two rAFs later. */
+  async function applyAgentState(fileEdits) {
+    if (!fileEdits || typeof fileEdits !== 'object') return;
+    if (fileEdits.sourceId === SOURCE_ID) return;
+    var targetTabId = fileEdits.activeTab;
+    var rawSel = fileEdits.selection || null;
+
+    if (!targetTabId) return;
+
+    var existing = tabs.get(targetTabId);
+    if (!existing) {
+      if (!sessionId) return;
+      if (pendingOpenIds.has(targetTabId)) return;
+      var openSessionId = sessionId;
+      pendingOpenIds.add(targetTabId);
+      try {
+        var res = await fetch('/api/sessions/' + encodeURIComponent(openSessionId) + '/file-edits/open', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relativePath: targetTabId }),
+        });
+        if (sessionId !== openSessionId) return;
+        if (!res.ok) {
+          console.warn('[file-edits] agent setState: open failed', res.status, targetTabId);
+          echoState();
+          return;
+        }
+        var data = await res.json();
+        if (sessionId !== openSessionId) return;
+        if (!data.edit) { echoState(); return; }
+        var maybe = tabs.get(targetTabId);
+        if (maybe) {
+          maybe.pendingSelection = rawSel;
+          if (activeTabId !== targetTabId) setActiveTab(targetTabId);
+          scheduleAgentFinalize(maybe);
+          return;
+        }
+        var newTab = new FileTab(data.edit);
+        newTab.pendingSelection = rawSel;
+        if (tabs.size >= TAB_CAP) evictOldestNonActive();
+        tabs.set(targetTabId, newTab);
+        tabsEl.appendChild(newTab.tabEl);
+        setActiveTab(targetTabId);
+        scheduleAgentFinalize(newTab);
+        schedulePersist();
+      } catch (err) {
+        console.warn('[file-edits] agent setState: open error', err, targetTabId);
+        echoState();
+      } finally {
+        pendingOpenIds.delete(targetTabId);
+      }
+      return;
+    }
+    existing.pendingSelection = rawSel;
+    if (activeTabId !== targetTabId) setActiveTab(targetTabId);
+    scheduleAgentFinalize(existing);
+  }
+
+  /** Validate the pending agent selection against rendered DOM, write
+   *  to tab.selection, paint, scroll, and (if pane focused and user
+   *  isn't mid-drag) apply as a native Range so copy works. Echo. */
+  function finalizeAgentSelection(tab) {
+    var raw = tab.pendingSelection;
+    tab.pendingSelection = null;
+    if (!raw) {
+      tab.selection = null;
+    } else {
+      tab.selection = validateSelection(raw, workLinesOf(tab), renderedWorkLines(tab));
+    }
+    tab.paintSelection();
+    if (tab.selection) {
+      // Order matters: scroll FIRST so startLine is visible, THEN
+      // addRange. With startLine already on-screen, the browser's
+      // addRange autoscroll is a no-op and doesn't race the
+      // pendingProgrammaticScroll guard set by scrollPaneToLine.
+      scrollPaneToLine(tab, tab.selection.start);
+      var paneFocused = document.activeElement === paneEl || paneEl.contains(document.activeElement);
+      if (paneFocused && !_userDragging) {
+        applyEnvelopeAsRange(tab, tab.selection);
+      }
+    }
+    echoState();
+  }
+
+  // ── End V3.5 selection ───────────────────────────────────────────────
 
   // ── Tab orchestration ────────────────────────────────────────────────
   function setActiveTab(tabId) {
@@ -199,6 +803,7 @@
     updateEmptyState();
     updateFollowButton();
     schedulePersist();
+    echoState();
   }
 
   /** Remove the oldest non-active tab. Called by openOrUpdateTab when
@@ -289,24 +894,36 @@
     updateFollowButton();
     updateEmptyState();
     schedulePersist();
+    echoState();
   }
 
   function jumpToMostRecent() {
     if (tabs.size === 0) return;
-    // Primary: lastEditedTabId. Fallback: highest mtimeMs across all
-    // tabs. Final fallback: rightmost (newest in strip order).
+    // Primary: lastEditedTabId IF it's still dirty. An edit that flips
+    // a file clean is still a "content-changing edit" by the bookkeeping
+    // rule, but jumping to a now-clean file isn't useful — fall through.
+    // Fallback: highest mtimeMs among dirty tabs. Final: rightmost dirty.
+    // No dirty tab → no-op.
     var targetId = null;
-    if (lastEditedTabId && tabs.has(lastEditedTabId)) {
+    var primary = lastEditedTabId && tabs.get(lastEditedTabId);
+    if (primary && primary.edit && primary.edit.status !== 'clean') {
       targetId = lastEditedTabId;
     } else {
       var bestMtime = -1;
       tabs.forEach(function(t, id) {
-        var m = (t.edit && typeof t.edit.mtimeMs === 'number') ? t.edit.mtimeMs : -1;
+        if (!t.edit || t.edit.status === 'clean') return;
+        var m = (typeof t.edit.mtimeMs === 'number') ? t.edit.mtimeMs : -1;
         if (m > bestMtime) { bestMtime = m; targetId = id; }
       });
       if (!targetId) {
         var keys = Array.from(tabs.keys());
-        targetId = keys[keys.length - 1];
+        for (var i = keys.length - 1; i >= 0; i--) {
+          var t2 = tabs.get(keys[i]);
+          if (t2 && t2.edit && t2.edit.status !== 'clean') {
+            targetId = keys[i];
+            break;
+          }
+        }
       }
     }
     if (!targetId) return;
@@ -1079,6 +1696,7 @@
   function buildRowEl(row, lang, mark) {
     var div = document.createElement('div');
     div.className = 'fe-row fe-row-' + row.kind;
+    if (row.work != null) div.dataset.workLine = String(row.work);
     var gHead = document.createElement('span');
     gHead.className = 'fe-gutter fe-gutter-head';
     gHead.textContent = gutterText(row.head);
@@ -1301,6 +1919,11 @@
   }
 
   if (window.appletAPI) {
+    if (typeof window.appletAPI.onStateUpdate === 'function') {
+      window.appletAPI.onStateUpdate(function(state) {
+        if (state && state.fileEdits) void applyAgentState(state.fileEdits);
+      });
+    }
     window.appletAPI.onSessionEvent(function(event) {
       if (event && event.type === 'caco.edit' && event.data) {
         var d = event.data;
@@ -1323,6 +1946,11 @@
       // Close picker and abort any in-flight open call.
       closePicker();
       if (pickerOpenAbort) { pickerOpenAbort.abort(); pickerOpenAbort = null; }
+      // Drop any native Selection range pointing at rows we're about
+      // to tear down; otherwise the browser's global Selection would
+      // hold dangling references.
+      var browserSel = window.getSelection && window.getSelection();
+      if (browserSel) browserSel.removeAllRanges();
       // Tear down in-memory state.
       tabs.forEach(function(t) { t.destroy(); });
       tabs.clear();

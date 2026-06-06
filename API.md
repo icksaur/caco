@@ -144,6 +144,30 @@ Returns the named JSON document from `~/.caco/sessions/<id>/<name>.json`, or `{}
 
 Body: any JSON object. Replaces the entire document. Returns 403 for reserved names.
 
+**GET /api/sessions/:id/draft** - Get chat input draft
+
+Returns the persisted chat input draft as `text/plain; charset=utf-8`. 404 if the session directory or draft file is missing.
+
+**PUT /api/sessions/:id/draft** - Write chat input draft
+
+Body: `text/plain`, max 1 MiB. Replaces the file. Returns 204 on success, 404 if the session directory does not exist (no ghost-dir creation), 413 if the body exceeds the cap.
+
+**DELETE /api/sessions/:id/draft** - Delete chat input draft
+
+Returns 204 on success or already-absent, 404 if the session directory does not exist.
+
+**GET /api/draft/newchat** - Get pre-session new-chat draft
+
+Returns the global new-chat textarea draft as `text/plain`. 404 if absent. Stored at `~/.caco/drafts/newchat.txt`.
+
+**PUT /api/draft/newchat** - Write pre-session new-chat draft
+
+Body: `text/plain`, max 1 MiB. Returns 204 / 413.
+
+**DELETE /api/draft/newchat** - Delete pre-session new-chat draft
+
+Returns 204.
+
 **GET /api/sessions/:id/roadmap** - Get session roadmap
 
 Returns roadmap JSON or `{}` if none exists.

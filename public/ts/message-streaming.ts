@@ -289,15 +289,26 @@ export function setupFormHandler(): void {
   chatRegion = new ChatRegion(regions.chat);
   chatRegion.setupClickHandler();
   registerWsHandlers();
-  
-  const form = document.getElementById('chatForm') as HTMLFormElement;
-  if (!form) return;
+
+  // R3 V1: the form changes per view-switch. setupFormHandler queries
+  // chatView.getActiveForm() at every event time instead of capturing
+  // a `form` const at setup time. Submit handler / response-option
+  // click handler / stop button / store subscriber all use the active
+  // form. Per-form input listeners (hasText sync, autoresize, etc.)
+  // are installed by ChatFormController and setupMultilineInput.
 
   const updateButton = (): void => {
-    const input = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
+    // R3 V1 guard: the singleton formStateStore is chatting-scoped.
+    // When the user is in newChat view, the store may hold stale
+    // hasText / sessionBusy / options from the chatting form. We
+    // must not apply that state to the newChat form's DOM.
+    if (!isViewState('chatting')) return;
+    const form = chatView.getActiveForm()?.form;
+    if (!form) return;
+    const input = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement | null;
     const sendBtn = form.querySelector('.send-btn') as HTMLButtonElement | null;
     const stopBtn = form.querySelector('.stop-btn') as HTMLButtonElement | null;
-    const optionsEl = document.getElementById('responseOptions');
+    const optionsEl = form.querySelector('#responseOptions') as HTMLElement | null;
     const sessionId = getActiveSessionId();
     const isBusy = sessionId ? (sessionTracker.get(sessionId)?.busy ?? false) : false;
     const hasText = (input?.value.trim().length ?? 0) > 0;
@@ -335,13 +346,6 @@ export function setupFormHandler(): void {
     }
   };
 
-  const textarea = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
-  if (textarea) {
-    textarea.addEventListener('input', () => {
-      formStateStore.set({ hasText: textarea.value.trim().length > 0 });
-      updateButton();  // also direct-call for the listener's other duties; safe since updateButton is idempotent
-    });
-  }
   formStateStore.subscribe(() => updateButton());
 
   sessionTracker.onChange(() => {
@@ -350,6 +354,23 @@ export function setupFormHandler(): void {
     formStateStore.set({ sessionBusy: busy });
   });
 
+  // Wire submit + stop + response-option-click on BOTH forms. The
+  // forms have independent submit lifecycles but share this module's
+  // submit handler logic.
+  for (const formId of ['newChatForm', 'chattingForm']) {
+    const form = document.getElementById(formId) as HTMLFormElement | null;
+    if (!form) continue;
+    wireFormSubmit(form, updateButton);
+  }
+}
+
+/** Per-form submit + stop-button + response-option wiring. Each form
+ *  gets its own handler that queries its own textarea / buttons. The
+ *  shared submit-handler body still lives here so all the dispatch /
+ *  steer / streamResponse logic stays module-scoped (R3.5 will move
+ *  it into a per-form helper). */
+function wireFormSubmit(form: HTMLFormElement, updateButton: () => void): void {
+  const textarea = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement | null;
   const stopBtn = form.querySelector('.stop-btn') as HTMLButtonElement | null;
   if (stopBtn) {
     stopBtn.addEventListener('click', () => {
@@ -358,15 +379,16 @@ export function setupFormHandler(): void {
     });
   }
 
-  const optionsContainer = document.getElementById('responseOptions');
-  if (optionsContainer) {
+  const optionsContainer = form.querySelector('#responseOptions') as HTMLElement | null;
+  if (optionsContainer && textarea) {
     optionsContainer.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('.response-option-btn') as HTMLElement | null;
       if (!btn || btn.classList.contains('muted')) return;
       const prompt = btn.dataset.prompt;
       if (!prompt) return;
       formStateStore.set({ options: [] });
-      if (textarea) { textarea.value = prompt; textarea.dispatchEvent(new Event('input', { bubbles: true })); }
+      textarea.value = prompt;
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
       form.requestSubmit();
     });
   }
@@ -376,7 +398,7 @@ export function setupFormHandler(): void {
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     if (submitting) return;
-    
+
     const input = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
     const message = input.value.trim();
     const sessionId = getActiveSessionId();
@@ -427,24 +449,29 @@ export function setupFormHandler(): void {
     }
 
     const model = getSelectedModel();
-    const imageData = (document.getElementById('imageData') as HTMLInputElement).value;
+    // imageData input lives only in the chatting form. Query within
+    // the SUBMITTING form: newChat queries get null → empty (correct;
+    // image-paste is chatting-only); chatting queries find its input
+    // and read the staged image data.
+    const imageDataEl = form.querySelector('input[name="imageData"]') as HTMLInputElement | null;
+    const imageData = imageDataEl?.value ?? '';
     const cwd = getNewChatCwd();
     const isNewChat = isViewState('newChat');
-    
+
     if (isNewChat && !cwd) {
       showNewChatError('Please enter a working directory');
       return;
     }
-    
+
     chatView.setFormEnabled(false);
     steerCount = 0;
     formStateStore.set({ options: [] });
     updateButton();
-    
+
     input.value = '';
     resetTextareaHeight();
     removeImage();
-    
+
     void streamResponse(message, model, imageData, isNewChat, cwd);
   });
 }

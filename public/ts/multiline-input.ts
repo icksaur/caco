@@ -41,10 +41,6 @@ async function fetchProjectFiles(cwd: string): Promise<string[]> {
   return cachedFiles;
 }
 
-function getAnchor(): HTMLElement {
-  return document.querySelector('#chatForm .input-bar') as HTMLElement;
-}
-
 function findPoundTrigger(text: string, cursorPos: number): { start: number; query: string } | null {
   for (let i = cursorPos - 1; i >= 0; i--) {
     const ch = text[i];
@@ -59,12 +55,7 @@ function findPoundTrigger(text: string, cursorPos: number): { start: number; que
   return null;
 }
 
-export function setupMultilineInput(): void {
-  const textarea = document.querySelector('#chatForm textarea[name="message"]') as HTMLTextAreaElement;
-  if (!textarea) return;
-
-  const anchor = getAnchor();
-
+export function setupMultilineInput(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
   textarea.addEventListener('input', () => {
     autoResize(textarea);
     handleSlash(textarea, anchor);
@@ -211,7 +202,7 @@ function autoResize(textarea: HTMLTextAreaElement): void {
 }
 
 export function resetTextareaHeight(): void {
-  const textarea = document.querySelector('#chatForm textarea[name="message"]') as HTMLTextAreaElement;
+  const textarea = chatView.getActiveForm()?.textarea;
   if (textarea) {
     textarea.style.height = 'auto';
     textarea.style.overflowY = 'hidden';
@@ -234,8 +225,9 @@ export function tryExecuteSlashCommand(message: string): boolean {
   if (!cmd) return false;
 
   if (cmd.picker && !args.trim()) {
-    const textarea = document.querySelector('#chatForm textarea[name="message"]') as HTMLTextAreaElement;
-    const anchor = document.querySelector('#chatForm .input-bar') as HTMLElement;
+    const activeForm = chatView.getActiveForm();
+    const textarea = activeForm?.textarea;
+    const anchor = activeForm?.form.querySelector('.input-bar') as HTMLElement | null;
     if (!textarea || !anchor) return false;
 
     _pendingPickerCmd = name;

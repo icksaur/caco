@@ -14,6 +14,8 @@ import { initViewState, setViewState, showSessionPanel } from './view-controller
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { initInputRouter } from './input-router.js';
 import { setupMultilineInput, registerPoundProvider } from './multiline-input.js';
+import { ChatFormController } from './chat-form-controller.js';
+import { chatView } from './chat-view-controller.js';
 import { connectWs, waitForConnect, reconnectIfNeeded } from './websocket.js';
 import { hideToast } from './toast.js';
 import { initHostnameHash } from './hostname-hash.js';
@@ -138,9 +140,20 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Set up event handlers
   setupImagePaste();
-  setupFormHandler();
+  // Per-view chat-input form controllers. Each form has its own
+  // binding + debounce timer; the bleed bug is structurally
+  // impossible because no two views share a textarea.
+  const newChatFormEl = document.getElementById('newChatForm') as HTMLFormElement;
+  const chattingFormEl = document.getElementById('chattingForm') as HTMLFormElement;
+  const newChatForm = new ChatFormController(newChatFormEl, 'newChat', chatView);
+  const chattingForm = new ChatFormController(chattingFormEl, 'chatting', chatView);
+  chatView.bindForms({ newChat: newChatForm, chatting: chattingForm });
+  newChatForm.attach();
+  chattingForm.attach();
+  setupFormHandler();          // module-scope handler queries chatView.getActiveForm()
   setupMarkdownRenderer();
-  setupMultilineInput();
+  setupMultilineInput(newChatForm.textarea, newChatFormEl.querySelector('.input-bar') as HTMLElement);
+  setupMultilineInput(chattingForm.textarea, chattingFormEl.querySelector('.input-bar') as HTMLElement);
   
   // Load prompt templates as slash commands
   try {
@@ -156,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const resp = await fetch(`/api/prompts/${encodeURIComponent(p.name)}`);
             if (!resp.ok) return;
             const { content } = await resp.json();
-            const textarea = document.querySelector('#chatForm textarea[name="message"]') as HTMLTextAreaElement;
+            const textarea = chatView.getActiveForm()?.textarea;
             if (textarea) {
               textarea.value = content;
               textarea.dispatchEvent(new Event('input', { bubbles: true }));

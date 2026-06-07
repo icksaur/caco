@@ -63,17 +63,22 @@ export function getViewState(): ViewState {
 }
 
 export function setFormEnabled(enabled: boolean): void {
-  const form = document.getElementById('chatForm');
+  // R3 V1: two forms exist; only one is visible at a time. Apply
+  // enable/disable to whichever is currently active by id; fallback
+  // to whichever exists.
+  const newChat = document.getElementById('newChatForm');
+  const chatting = document.getElementById('chattingForm');
   const cursor = document.getElementById('workingCursor');
-  if (!form) return;
-  
+  const visible = currentState === 'chatting' ? chatting : newChat;
+  if (!visible) return;
+
   if (enabled) {
-    form.classList.remove('busy');
+    visible.classList.remove('busy');
     cursor?.classList.add('hidden');
-    const input = form.querySelector('textarea') as HTMLTextAreaElement;
+    const input = visible.querySelector('textarea') as HTMLTextAreaElement | null;
     input?.focus();
   } else {
-    form.classList.add('busy');
+    visible.classList.add('busy');
     cursor?.classList.remove('hidden');
   }
 }
@@ -87,18 +92,28 @@ export function setViewState(state: ViewState): void {
   els.newChat?.classList.add('hidden');
   els.footer?.classList.add('hidden');
 
+  // R3 V1: two chat-input forms live in the footer. Show the right
+  // one per view; hide the other. Use `hidden` attribute instead of
+  // class so default-HTML state (chattingForm hidden) interoperates.
+  const newChatForm = document.getElementById('newChatForm') as HTMLElement | null;
+  const chattingForm = document.getElementById('chattingForm') as HTMLElement | null;
+
   switch (state) {
     case 'newChat':
       els.newChat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
+      if (newChatForm) newChatForm.hidden = false;
+      if (chattingForm) chattingForm.hidden = true;
       setFormEnabled(true);
       resetTextareaHeight();
       els.appletBtn?.classList.remove('hidden');
       break;
-      
+
     case 'chatting':
       els.chat?.classList.remove('hidden');
       els.footer?.classList.remove('hidden');
+      if (newChatForm) newChatForm.hidden = true;
+      if (chattingForm) chattingForm.hidden = false;
       requestAnimationFrame(() => scrollToBottom());
       els.appletBtn?.classList.remove('hidden');
       break;

@@ -202,7 +202,7 @@ input[type="text"]:focus {
 }
 
 /* Chat input textarea */
-#chatForm .input-text {
+.chat-form .input-text {
   flex: 1;
   min-height: 1lh;
   height: auto;
@@ -243,7 +243,7 @@ input[type="text"]:focus {
 .response-option-btn.muted { opacity: 0.3; cursor: default; pointer-events: none; }
 
 /* Input bar - horizontal flex container */
-#chatForm .input-bar {
+.chat-form .input-bar {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
@@ -254,7 +254,7 @@ input[type="text"]:focus {
   width: 100%;
 }
 
-#chatForm .input-bar:focus-within {
+.chat-form .input-bar:focus-within {
   border-color: var(--color-accent);
 }
 
@@ -468,7 +468,7 @@ form {
 }
 
 /* Send button */
-#chatForm .send-btn {
+.chat-form .send-btn {
   align-self: auto;
   display: flex;
   align-items: center;
@@ -488,17 +488,17 @@ form {
   transition: opacity 0.2s, transform 0.1s, background 0.2s;
 }
 
-#chatForm .send-btn:hover {
+.chat-form .send-btn:hover {
   opacity: 0.9;
   transform: scale(1.02);
 }
 
-#chatForm .send-btn:active {
+.chat-form .send-btn:active {
   transform: scale(0.98);
 }
 
 /* Stop button */
-#chatForm .stop-btn {
+.chat-form .stop-btn {
   display: none;
   padding: 6px 12px;
   border-radius: var(--radius-md);
@@ -509,17 +509,17 @@ form {
   transition: opacity 0.2s, transform 0.1s;
 }
 
-#chatForm .stop-btn:hover {
+.chat-form .stop-btn:hover {
   opacity: 0.9;
   transform: scale(1.02);
 }
 
-#chatForm .stop-btn:active {
+.chat-form .stop-btn:active {
   transform: scale(0.98);
 }
 
 /* Busy state - textarea stays editable but muted */
-#chatForm.busy textarea { opacity: 0.6; }
+.chat-form.busy textarea { opacity: 0.6; }
 
 /* ========================================
    MAIN CONTENT AREA

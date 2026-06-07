@@ -87,17 +87,38 @@
         <footer id="chatFooter">
           <div id="adHocBar" class="adhoc-bar">
           </div>
-          <form id="chatForm" novalidate>
-            <input type="hidden" id="imageData" name="imageData">
-
-            <div id="responseOptions" class="response-options" style="display:none"></div>
+          <!-- Two forms, one per view. Both physically live in the
+               footer so they retain sticky-bottom layout; the view
+               controller toggles `hidden` on the inactive one. Each
+               form has its own ChatFormController with its own
+               binding + debounce timer, so the chat-draft bleed bug
+               is structurally impossible. See
+               docs/chat-form-refactor.md §"Phase R3". -->
+          <form id="newChatForm" class="chat-form" data-view="newChat" novalidate>
             <div class="input-bar">
-              <textarea 
+              <textarea
                 class="input-text"
-                name="message" 
-                placeholder="Ask anything..." 
+                name="message"
+                placeholder="Ask anything..."
                 required
                 autofocus
+                rows="1"
+              ></textarea>
+              <button type="submit" class="send-btn">Send</button>
+              <button type="button" class="stop-btn">Stop</button>
+            </div>
+          </form>
+          <form id="chattingForm" class="chat-form" data-view="chatting" novalidate hidden>
+            <input type="hidden" id="imageData" name="imageData">
+            <!-- responseOptions is chatting-only — new-chat has no
+                 session to emit them. -->
+            <div id="responseOptions" class="response-options" style="display:none"></div>
+            <div class="input-bar">
+              <textarea
+                class="input-text"
+                name="message"
+                placeholder="Ask anything..."
+                required
                 rows="1"
               ></textarea>
               <button type="submit" class="send-btn">Send</button>

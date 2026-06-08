@@ -461,10 +461,13 @@ footer.hidden { display: none; }
   }
 }
 
-form {
+.chat-form {
   display: flex;
   gap: var(--space-sm);
   align-items: flex-end;
+}
+.chat-form[hidden] {
+  display: none;
 }
 
 /* Send button */

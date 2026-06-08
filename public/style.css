@@ -371,7 +371,7 @@ h1 {
   font-weight: 500;
 }
 
-footer {
+#chatFooter {
   position: relative;
   background: var(--bg-surface);
   padding: var(--space-lg) 0;
@@ -381,7 +381,7 @@ footer {
   align-items: center;
 }
 
-footer form {
+#chatFooter .chat-form {
   max-width: 800px;
   width: 100%;
   display: flex;
@@ -389,7 +389,11 @@ footer form {
   gap: 4px;
 }
 
-footer.hidden { display: none; }
+#chatFooter .chat-form[hidden] {
+  display: none;
+}
+
+#chatFooter.hidden { display: none; }
 
 /* ========================================
    TOAST NOTIFICATIONS
@@ -459,15 +463,6 @@ footer.hidden { display: none; }
     opacity: 1;
     transform: translateX(-50%) translateY(0);
   }
-}
-
-.chat-form {
-  display: flex;
-  gap: var(--space-sm);
-  align-items: flex-end;
-}
-.chat-form[hidden] {
-  display: none;
 }
 
 /* Send button */

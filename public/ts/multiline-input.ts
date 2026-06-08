@@ -19,6 +19,15 @@ const FILE_CACHE_TTL_MS = 30_000;
 let slashPopup: InputPopup | null = null;
 let poundPopup: InputPopup | null = null;
 let poundAnchorPos = -1;
+/** Textarea the popups are currently bound to. R3 V1 calls
+ *  setupMultilineInput twice (once per form), so handlePound /
+ *  handleSlash can be invoked with either textarea. The popups
+ *  capture their target textarea in onSelect/onDismiss closures;
+ *  when the active textarea changes (user switches view between
+ *  triggers) we hide and rebuild so insertion lands in the right
+ *  textarea. */
+let poundPopupBoundTo: HTMLTextAreaElement | null = null;
+let slashPopupBoundTo: HTMLTextAreaElement | null = null;
 
 let cachedFiles: string[] = [];
 let cacheTimestamp = 0;
@@ -120,7 +129,8 @@ function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
     return;
   }
 
-  if (!slashPopup) {
+  if (!slashPopup || slashPopupBoundTo !== textarea) {
+    if (slashPopup) slashPopup.hide();
     slashPopup = new InputPopup({
       anchor,
       onSelect: (item) => {
@@ -131,6 +141,7 @@ function handleSlash(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
       },
       onDismiss: () => slashPopup!.hide()
     });
+    slashPopupBoundTo = textarea;
   }
 
   if (!slashPopup.isVisible()) {
@@ -157,7 +168,8 @@ function handlePound(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
     return;
   }
 
-  if (!poundPopup) {
+  if (!poundPopup || poundPopupBoundTo !== textarea) {
+    if (poundPopup) poundPopup.hide();
     poundPopup = new InputPopup({
       anchor,
       onSelect: (item) => {
@@ -177,6 +189,7 @@ function handlePound(textarea: HTMLTextAreaElement, anchor: HTMLElement): void {
         poundAnchorPos = -1;
       }
     });
+    poundPopupBoundTo = textarea;
   }
 
   poundAnchorPos = trigger.start;

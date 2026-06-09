@@ -28,7 +28,7 @@ import { chatView } from './chat-view-controller.js';
 import { computeFormState } from './form-state.js';
 import { formStateStore } from './form-state-store.js';
 import { sessionTracker } from './session-state-tracker.js';
-import { getActiveSessionId, getNewChatCwd } from './app-state.js';
+import { getActiveSessionId, getNewChatCwd, notifyMessageSent } from './app-state.js';
 import { isViewState } from './view-controller.js';
 import { dispatchPrompt, dispatchSteer } from './message-streaming.js';
 import { showNewChatError } from './model-selector.js';
@@ -228,6 +228,11 @@ export class ChatFormController {
     if (!message) return;
 
     if (state.buttonAction === 'steer' && sessionId) {
+      // L2 fix: snapshot the binding at dispatch time. The user may
+      // switch sessions during the await; if restoreFailedInput runs
+      // after a rebind, the text must go to the launch session's
+      // cache, not bleed into whatever session is now bound.
+      const launchBinding = this.binding;
       this.textarea.value = '';
       this.resetTextareaHeight();
       this.clearDraft();
@@ -237,16 +242,18 @@ export class ChatFormController {
       void (async () => {
         try {
           const res = await dispatchSteer(sessionId, message);
-          if (!res.ok) {
+          if (res.ok) {
+            notifyMessageSent(sessionId);
+          } else {
             const data = await res.json().catch(() => ({ error: 'Steer failed' }));
             showToast(data.error || 'Steer failed');
-            this.restoreFailedInput(message);
+            this.restoreFailedInput(message, launchBinding);
             this.steerCount = Math.max(0, this.steerCount - 1);
             this.refreshButton();
           }
         } catch {
           showToast('Steer failed');
-          this.restoreFailedInput(message);
+          this.restoreFailedInput(message, launchBinding);
           this.steerCount = Math.max(0, this.steerCount - 1);
           this.refreshButton();
         } finally {
@@ -286,15 +293,35 @@ export class ChatFormController {
     this.textarea.style.overflowY = 'hidden';
   }
 
-  /** Restore an input string after a failed dispatch. Only restores
-   *  if the user hasn't started typing something new. Dispatches a
-   *  real input event so the draft cache + debounced disk PUT
-   *  re-persist the value. */
-  private restoreFailedInput(message: string): void {
-    if (this.textarea.value.trim()) return;
-    this.textarea.value = message;
-    this.resetTextareaHeight();
-    this.textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  /** Restore an input string after a failed dispatch.
+   *
+   *  If the form's binding is still the one in effect at dispatch
+   *  time (`launchBinding`), restore via the normal textarea +
+   *  input-event path so the user sees the recovered text and the
+   *  draft cache + debounced PUT re-persist it.
+   *
+   *  If the binding has changed (user switched sessions during the
+   *  async wait), the restored text MUST go to the launch session's
+   *  cache, not the currently-bound session's textarea. Otherwise
+   *  the failed steer for session A would bleed into session B.
+   *  Route directly through the cache + disk PUT. */
+  private restoreFailedInput(message: string, launchBinding: Binding | null): void {
+    if (!launchBinding) return;
+
+    const sameBinding = this.binding?.key === launchBinding.key;
+    if (sameBinding) {
+      if (this.textarea.value.trim()) return;
+      this.textarea.value = message;
+      this.resetTextareaHeight();
+      this.textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
+
+    // Cross-binding restore: write to the launch session's cache +
+    // disk directly. Don't touch the textarea (it belongs to a
+    // different session now).
+    this.cache.setDraftCache(launchBinding.key, message);
+    void putDraft(launchBinding.sessionId, message);
   }
 
   /** Try to execute a leading slash-command in the given message.

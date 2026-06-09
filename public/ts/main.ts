@@ -55,6 +55,43 @@ window.stopStreaming = stopStreaming;
 window.toggleApplet = toggleApplet;
 window.hideToast = hideToast;
 
+// LIFECYCLE: prompt-template registrations. Each call replaces the
+// prior batch entirely — disposers from the last load are run before
+// the new fetch. Lets us hot-reload templates without leaking
+// orphan slash commands when a template is server-side deleted.
+const promptTemplateDisposers: Array<() => void> = [];
+
+async function loadPromptTemplates(): Promise<void> {
+  for (const dispose of promptTemplateDisposers.splice(0)) {
+    try { dispose(); } catch { /* ignore */ }
+  }
+  try {
+    const promptResp = await fetch('/api/prompts');
+    if (!promptResp.ok) return;
+    const { prompts } = await promptResp.json();
+    for (const p of prompts) {
+      const dispose = registerCommand({
+        name: p.name,
+        description: p.description,
+        source: 'template',
+        handler: async () => {
+          const resp = await fetch(`/api/prompts/${encodeURIComponent(p.name)}`);
+          if (!resp.ok) return;
+          const { content } = await resp.json();
+          const textarea = chatView.getActiveForm()?.textarea;
+          if (textarea) {
+            textarea.value = content;
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
+      });
+      promptTemplateDisposers.push(dispose);
+    }
+  } catch (e) {
+    console.warn('Failed to load prompt templates:', e);
+  }
+}
+
 // Wrap async init in void to satisfy eslint no-misused-promises
 document.addEventListener('DOMContentLoaded', () => {
   // Load saved theme before rendering
@@ -165,32 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
   await waitForConnect();
   setupMarkdownRenderer();
   
-  // Load prompt templates as slash commands
-  try {
-    const promptResp = await fetch('/api/prompts');
-    if (promptResp.ok) {
-      const { prompts } = await promptResp.json();
-      for (const p of prompts) {
-        registerCommand({
-          name: p.name,
-          description: p.description,
-          source: 'template',
-          handler: async () => {
-            const resp = await fetch(`/api/prompts/${encodeURIComponent(p.name)}`);
-            if (!resp.ok) return;
-            const { content } = await resp.json();
-            const textarea = chatView.getActiveForm()?.textarea;
-            if (textarea) {
-              textarea.value = content;
-              textarea.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-          }
-        });
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to load prompt templates:', e);
-  }
+  await loadPromptTemplates();
   
   // Load extensions (CSS injection + client extensions)
   try {

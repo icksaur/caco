@@ -62,18 +62,34 @@ function addSlot(
   return () => wrapper.remove();
 }
 
-export function createExtensionAPI(slug: string): ClientExtensionAPI {
-  return {
+/** Auto-tracked extension API: every disposer returned by an API
+ *  method is also captured in `autoDispose`. The loader composes
+ *  this with the extension's own dispose fn at reload time so that
+ *  registrations (commands, providers, listeners, slots) are
+ *  guaranteed to be torn down, even if the extension forgot to
+ *  return its own dispose or registered something it doesn't track.
+ *
+ *  L3 fix (docs/global-leak-audit.md): prior to this, the
+ *  registerCommand wrapper returned a no-op disposer, so a reloaded
+ *  extension that removed a command left the orphan command in the
+ *  registry running stale closure-captured code. */
+export function createExtensionAPI(slug: string): { api: ClientExtensionAPI; autoDispose: () => void } {
+  const tracked: Array<() => void> = [];
+  const track = <T extends () => void>(fn: T): T => {
+    tracked.push(fn);
+    return fn;
+  };
+  const api: ClientExtensionAPI = {
     footer: {
       addLeft(id, render) {
         const container = regions.footer.query('.context-links');
         if (!container) return () => {};
-        return addSlot(container, slug, id, render, 'last');
+        return track(addSlot(container, slug, id, render, 'last'));
       },
       addRight(id, render) {
         const container = regions.footer.query('.context-status');
         if (!container) return () => {};
-        return addSlot(container, slug, id, render, 'last');
+        return track(addSlot(container, slug, id, render, 'last'));
       },
       update(id, content) {
         const el = regions.footer.query(`[data-ext-slot="${slug}:${id}"]`);
@@ -84,18 +100,18 @@ export function createExtensionAPI(slug: string): ClientExtensionAPI {
       addLeft(id, render) {
         const bar = document.querySelector('.header-bar') as HTMLElement | null;
         if (!bar) return () => {};
-        return addSlot(bar, slug, id, render, 'first');
+        return track(addSlot(bar, slug, id, render, 'first'));
       },
       addRight(id, render) {
         const bar = document.querySelector('.header-bar') as HTMLElement | null;
         if (!bar) return () => {};
-        return addSlot(bar, slug, id, render, 'last');
+        return track(addSlot(bar, slug, id, render, 'last'));
       },
     },
     on(event, handler) {
-      return onGlobalEvent((e) => {
+      return track(onGlobalEvent((e) => {
         if (e.type === event) handler(e);
-      });
+      }));
     },
     registerShortcut(combo, handler) {
       const parts = combo.toLowerCase().split('+');
@@ -110,7 +126,7 @@ export function createExtensionAPI(slug: string): ClientExtensionAPI {
         handler();
       };
       document.addEventListener('keydown', listener);
-      return () => document.removeEventListener('keydown', listener);
+      return track(() => document.removeEventListener('keydown', listener));
     },
     switchSession(index) {
       const items = document.querySelectorAll('.session-item[data-session-id]');
@@ -142,18 +158,23 @@ export function createExtensionAPI(slug: string): ClientExtensionAPI {
         source: 'built-in' as const,
         handler: opts.handler,
       };
-      registerCommand(cmd);
-      return () => {};
+      return track(registerCommand(cmd));
     },
     registerPoundItems(provider) {
-      return registerPoundProvider(() =>
+      return track(registerPoundProvider(() =>
         provider().map((item): PopupItem => ({
           id: `${slug}:${item.label}`,
           label: item.label,
           description: item.description,
           value: item.value,
         }))
-      );
+      ));
     },
   };
+  const autoDispose = (): void => {
+    for (const fn of tracked.splice(0)) {
+      try { fn(); } catch (err) { console.error(`[EXT:${slug}] auto-dispose error:`, err); }
+    }
+  };
+  return { api, autoDispose };
 }

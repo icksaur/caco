@@ -4,7 +4,7 @@
 
 import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge, formatStatusParts } from './ui-utils.js';
-import { getActiveSessionId, getAvailableModels } from './app-state.js';
+import { getActiveSessionId, getAvailableModels, notifySessionArchived } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { showSessionPanel } from './view-controller.js';
 import { sessionClick, newSessionClick } from './router.js';
@@ -711,6 +711,7 @@ export async function archiveSession(sessionId: string, displayName?: string): P
     if (response.ok) {
       const data = await response.json();
       showToast(`Archived "${name}" → ${data.archivePath}`, { type: 'success', autoHideMs: 5000 });
+      notifySessionArchived(sessionId);
       void loadSessions();
       if (data.wasActive) {
         newSessionClick();

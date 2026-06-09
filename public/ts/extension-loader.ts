@@ -43,11 +43,20 @@ async function loadOne(slug: string, cacheBust?: string): Promise<void> {
       console.warn(`[EXT:${slug}] client.js has no default export`);
       return;
     }
-    const api = createExtensionAPI(slug);
-    const dispose = mod.default(api);
-    if (typeof dispose === 'function') {
-      disposeFns.set(slug, dispose);
-    }
+    const { api, autoDispose } = createExtensionAPI(slug);
+    const userDispose = mod.default(api);
+    // L3 fix: compose autoDispose (every disposer returned by API
+    // methods is auto-tracked) with the extension's own dispose
+    // fn. Guarantees commands/providers/listeners/slots registered
+    // by THIS load are torn down at reload, even if the extension
+    // forgot to return a dispose or registered something it didn't
+    // track itself.
+    disposeFns.set(slug, () => {
+      if (typeof userDispose === 'function') {
+        try { userDispose(); } catch (err) { console.error(`[EXT:${slug}] user dispose error:`, err); }
+      }
+      autoDispose();
+    });
   } catch (err) {
     console.error(`[EXT:${slug}]`, err);
     showToast(`Extension "${slug}" failed to load`);

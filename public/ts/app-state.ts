@@ -112,6 +112,57 @@ function notifyActiveSessionChange(prev: string | null, next: string | null): vo
   }
 }
 
+// ── Lifecycle events ────────────────────────────────────────────
+//
+// Canonical hooks for session-scoped state. Any module holding
+// state that is logically scoped to a session (drafts, applet
+// state, staged images, swarm progress, etc.) should subscribe to
+// the relevant hook here to clear/prune at the right boundary.
+//
+// See `docs/global-leak-audit.md` for the audit that motivated
+// this consolidation and `docs/code-quality.md` for the rule that
+// any module-level `let`/Map keyed by session id MUST declare its
+// LIFECYCLE in a comment and subscribe to one of these events.
+
+const messageSentListeners: Array<(sessionId: string) => void> = [];
+const sessionArchivedListeners: Array<(sessionId: string) => void> = [];
+
+/** Fires when the user successfully consumes input via send / steer
+ *  / slash-command for a specific session. Subscribers: anything
+ *  with per-action transient state that should be discarded on
+ *  send (pendingAppletState, staged input lookups, etc.). */
+export function onMessageSent(fn: (sessionId: string) => void): () => void {
+  messageSentListeners.push(fn);
+  return () => {
+    const idx = messageSentListeners.indexOf(fn);
+    if (idx >= 0) messageSentListeners.splice(idx, 1);
+  };
+}
+
+export function notifyMessageSent(sessionId: string): void {
+  for (const fn of messageSentListeners) {
+    try { fn(sessionId); } catch (e) { console.error('[app-state] message-sent listener:', e); }
+  }
+}
+
+/** Fires when a session is archived/deleted and will not return.
+ *  Subscribers: Map<sessionId,…> caches that should prune on
+ *  removal (sessionDrafts, sessionPrompts, usageCache, swarm
+ *  progress, hydrated set). */
+export function onSessionArchived(fn: (sessionId: string) => void): () => void {
+  sessionArchivedListeners.push(fn);
+  return () => {
+    const idx = sessionArchivedListeners.indexOf(fn);
+    if (idx >= 0) sessionArchivedListeners.splice(idx, 1);
+  };
+}
+
+export function notifySessionArchived(sessionId: string): void {
+  for (const fn of sessionArchivedListeners) {
+    try { fn(sessionId); } catch (e) { console.error('[app-state] session-archived listener:', e); }
+  }
+}
+
 /**
  * Transitional state used by `showNewChat` between view teardown and
  * the next session binding. Subsequent re-binding happens in

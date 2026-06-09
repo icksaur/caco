@@ -14,7 +14,7 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { getActiveSessionId, isLoadingHistory, getSelectedModel } from './app-state.js';
+import { getActiveSessionId, isLoadingHistory, getSelectedModel, notifyMessageSent } from './app-state.js';
 import { isViewState } from './view-controller.js';
 import { onEvent, onReconnect, type SessionEvent } from './websocket.js';
 import { showToast } from './toast.js';
@@ -212,6 +212,7 @@ const SESSION_CREATE_TIMEOUT_MS = 30000;
 export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
   const currentId = getActiveSessionId();
   chatView.savePrompt(prompt, currentId || '');
+  if (currentId) notifyMessageSent(currentId);
   
   if (currentId) {
     sessionTracker.setBusy(currentId, true);
@@ -245,6 +246,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       const data = await res.json();
       sessionId = data.sessionId;
       chatView.savePrompt(prompt, sessionId || '');
+      if (sessionId) notifyMessageSent(sessionId);
       console.log('[SEND] Session created:', sessionId);
       chatView.onNewSessionCreated(sessionId || '', data.cwd);
       sessionTracker.setBusy(sessionId!, true);

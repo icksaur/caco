@@ -84,8 +84,32 @@ export function hasImage(): boolean {
  * Callers should also call websocket.subscribeToSession() for WS sync
  */
 export function setActiveSession(sessionId: string | null, cwd: string): void {
+  const prev = state.activeSessionId;
   state.activeSessionId = sessionId;
   state.currentCwd = cwd;
+  if (prev !== sessionId) notifyActiveSessionChange(prev, sessionId);
+}
+
+const activeSessionListeners: Array<(prev: string | null, next: string | null) => void> = [];
+
+/** Register a listener for active-session-pointer changes. Fires
+ *  whenever setActiveSession or releaseActiveSessionForNewChat
+ *  changes the active id. Used by image-paste to clear staged
+ *  images on session switch. Returns an unsubscribe fn. */
+export function onActiveSessionChange(
+  fn: (prev: string | null, next: string | null) => void
+): () => void {
+  activeSessionListeners.push(fn);
+  return () => {
+    const idx = activeSessionListeners.indexOf(fn);
+    if (idx >= 0) activeSessionListeners.splice(idx, 1);
+  };
+}
+
+function notifyActiveSessionChange(prev: string | null, next: string | null): void {
+  for (const fn of activeSessionListeners) {
+    try { fn(prev, next); } catch (e) { console.error('[app-state] active-session listener:', e); }
+  }
 }
 
 /**
@@ -95,8 +119,10 @@ export function setActiveSession(sessionId: string | null, cwd: string): void {
  * or via session activation).
  */
 export function releaseActiveSessionForNewChat(): void {
+  const prev = state.activeSessionId;
   state.activeSessionId = null;
   // Note: Don't clear cwd - it's useful as default for next session
+  if (prev !== null) notifyActiveSessionChange(prev, null);
 }
 
 /**

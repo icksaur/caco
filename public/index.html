@@ -95,6 +95,7 @@
                is structurally impossible. See
                docs/chat-form-refactor.md §"Phase R3". -->
           <form id="newChatForm" class="chat-form" data-view="newChat" novalidate>
+            <input type="hidden" name="imageData">
             <div class="input-bar">
               <textarea
                 class="input-text"
@@ -109,7 +110,7 @@
             </div>
           </form>
           <form id="chattingForm" class="chat-form" data-view="chatting" novalidate hidden>
-            <input type="hidden" id="imageData" name="imageData">
+            <input type="hidden" name="imageData">
             <!-- responseOptions is chatting-only — new-chat has no
                  session to emit them. -->
             <div id="responseOptions" class="response-options" style="display:none"></div>

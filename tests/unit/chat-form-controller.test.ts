@@ -20,6 +20,17 @@ vi.mock('../../public/ts/toast.js', () => ({
   showToast: vi.fn(),
 }));
 
+vi.mock('../../public/ts/chat-form-popups.js', () => ({
+  FormPopups: class { constructor(_ta: unknown, _anchor: unknown) {} attach() {} handleKey() { return false; } isAnyVisible() { return false; } },
+  autoResize: vi.fn(),
+}));
+vi.mock('../../public/ts/command-registry.js', () => ({
+  findCommand: vi.fn(() => null),
+}));
+vi.mock('../../public/ts/chat-view-controller.js', () => ({
+  chatView: { getActiveForm: () => null, getLastInput: () => '' },
+}));
+
 import { ChatFormController, type DraftCache } from '../../public/ts/chat-form-controller.js';
 import * as draftApi from '../../public/ts/chat-draft-api.js';
 import { showToast } from '../../public/ts/toast.js';
@@ -29,11 +40,21 @@ function makeForm(): HTMLFormElement {
   // that exposes the surface ChatFormController uses.
   const ta = {
     value: '',
+    style: {} as CSSStyleDeclaration,
     addEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
+    setSelectionRange: vi.fn(),
   } as unknown as HTMLTextAreaElement;
+  const anchor = {} as unknown as HTMLElement;
   const form = {
-    querySelector: (sel: string) => sel === 'textarea[name="message"]' ? ta : null,
+    querySelector: (sel: string) => {
+      if (sel === 'textarea[name="message"]') return ta;
+      if (sel === '.input-bar') return anchor;
+      if (sel === 'input[name="imageData"]') return { value: '' } as HTMLInputElement;
+      return null;
+    },
+    addEventListener: vi.fn(),
+    requestSubmit: vi.fn(),
   } as unknown as HTMLFormElement;
   // Expose textarea so tests can read/write its value.
   (form as unknown as { _ta: HTMLTextAreaElement })._ta = ta;

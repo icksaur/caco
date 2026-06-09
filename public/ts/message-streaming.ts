@@ -14,15 +14,12 @@
  */
 
 import { scrollToBottom } from './ui-utils.js';
-import { getActiveSessionId, isLoadingHistory, getSelectedModel, getNewChatCwd } from './app-state.js';
-import { showNewChatError } from './model-selector.js';
+import { getActiveSessionId, isLoadingHistory, getSelectedModel } from './app-state.js';
 import { isViewState } from './view-controller.js';
 import { onEvent, onReconnect, type SessionEvent } from './websocket.js';
 import { showToast } from './toast.js';
 import { getAndClearPendingAppletState, getNavigationContext } from './applet-runtime.js';
-import { resetTextareaHeight, tryExecuteSlashCommand } from './multiline-input.js';
 import { isTerminalEvent } from './terminal-events.js';
-import { removeImage } from './image-paste.js';
 import { hasInserter } from './dom-regions.js';
 import { notifySessionComplete } from './notifications.js';
 import { markSessionObserved } from './session-observed.js';
@@ -31,23 +28,35 @@ import { sessionTracker } from './session-state-tracker.js';
 import { adHocBar } from './adhoc-bar.js';
 import { refreshRoadmapLink } from './context-footer.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
-import { computeFormState } from './form-state.js';
 import { chatView } from './chat-view-controller.js';
 import { formStateStore } from './form-state-store.js';
 
 let chatRegion: ChatRegion;
-let steerCount = 0;
-
-function renderOptions(container: HTMLElement, options: string[], muted: boolean): void {
-  if (options.length === 0) { container.style.display = 'none'; return; }
-  container.style.display = '';
-  container.innerHTML = options.map(o =>
-    `<button class="response-option-btn${muted ? ' muted' : ''}" data-prompt="${o.replace(/"/g, '&quot;')}">${o.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</button>`
-  ).join('');
-}
 
 export function setResponseOptions(options: string[]): void {
   formStateStore.set({ options });
+}
+
+/** Dispatch a prompt via the streaming pipeline. Used by
+ *  ChatFormController.handleSubmit. */
+export function dispatchPrompt(args: {
+  message: string;
+  imageData: string;
+  newChat: boolean;
+  cwd?: string;
+}): void {
+  const model = getSelectedModel();
+  void streamResponse(args.message, model, args.imageData, args.newChat, args.cwd);
+}
+
+/** POST a steer to a busy session. Used by
+ *  ChatFormController.handleSubmit. */
+export function dispatchSteer(sessionId: string, message: string): Promise<Response> {
+  return fetch(`/api/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: message, mode: 'immediate' }),
+  });
 }
 
 /**
@@ -115,7 +124,7 @@ function handleEvent(event: SessionEvent): void {
           adHocBar.clearSession(sessionId);
           notifySessionComplete(sessionTracker.getIntent(sessionId) || '');
           refreshRoadmapLink();
-          steerCount = 0;
+          chatView.getChattingForm()?.resetSteerCount();
           void fetch(`/api/sessions/${sessionId}/state`).then(r => r.json()).then(d => {
             if (d.responseOptions?.length) {
               formStateStore.set({ options: d.responseOptions });
@@ -283,195 +292,16 @@ export async function streamResponse(prompt: string, model: string, imageData: s
 // Setup
 
 /**
- * Set up form submission handler
+ * Initialize WS-driven message streaming.
+ *
+ * R3.5: This used to be `setupFormHandler` and also wired all the
+ * per-form submit/stop/options listeners — those are now owned by
+ * ChatFormController.attach(). What remains here is the chatRegion
+ * setup and WS handler registration, which are application-scoped
+ * (one chat surface, one WS connection).
  */
-export function setupFormHandler(): void {
+export function initMessageStreaming(): void {
   chatRegion = new ChatRegion(regions.chat);
   chatRegion.setupClickHandler();
   registerWsHandlers();
-
-  // R3 V1: the form changes per view-switch. setupFormHandler queries
-  // chatView.getActiveForm() at every event time instead of capturing
-  // a `form` const at setup time. Submit handler / response-option
-  // click handler / stop button / store subscriber all use the active
-  // form. Per-form input listeners (hasText sync, autoresize, etc.)
-  // are installed by ChatFormController and setupMultilineInput.
-
-  const updateButton = (): void => {
-    // R3 V1 guard: the singleton formStateStore is chatting-scoped.
-    // When the user is in newChat view, the store may hold stale
-    // hasText / sessionBusy / options from the chatting form. We
-    // must not apply that state to the newChat form's DOM.
-    if (!isViewState('chatting')) return;
-    const form = chatView.getActiveForm()?.form;
-    if (!form) return;
-    const input = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement | null;
-    const sendBtn = form.querySelector('.send-btn') as HTMLButtonElement | null;
-    const stopBtn = form.querySelector('.stop-btn') as HTMLButtonElement | null;
-    const optionsEl = form.querySelector('#responseOptions') as HTMLElement | null;
-    const sessionId = getActiveSessionId();
-    const isBusy = sessionId ? (sessionTracker.get(sessionId)?.busy ?? false) : false;
-    const hasText = (input?.value.trim().length ?? 0) > 0;
-    const currentOptions = formStateStore.get().options;
-    const state = computeFormState(isBusy, hasText, currentOptions.length > 0);
-
-    if (sendBtn) {
-      if (state.buttonLabel === 'send') {
-        sendBtn.style.display = '';
-        sendBtn.textContent = 'Send';
-      } else if (state.buttonLabel === 'steer') {
-        sendBtn.style.display = '';
-        sendBtn.textContent = 'Steer';
-      } else {
-        sendBtn.style.display = 'none';
-      }
-    }
-    if (stopBtn) {
-      if (state.buttonLabel === 'stop') {
-        stopBtn.style.display = 'flex';
-        stopBtn.textContent = steerCount > 0 ? `Stop (${steerCount})` : 'Stop';
-      } else {
-        stopBtn.style.display = 'none';
-      }
-    }
-    if (input) input.placeholder = state.placeholder;
-    form.classList.toggle('busy', isBusy);
-
-    if (optionsEl) {
-      if (state.optionsVisible || state.optionsMuted) {
-        renderOptions(optionsEl, currentOptions.slice(), state.optionsMuted);
-      } else {
-        optionsEl.style.display = 'none';
-      }
-    }
-  };
-
-  formStateStore.subscribe(() => updateButton());
-
-  sessionTracker.onChange(() => {
-    const id = getActiveSessionId();
-    const busy = id ? (sessionTracker.get(id)?.busy ?? false) : false;
-    formStateStore.set({ sessionBusy: busy });
-  });
-
-  // Wire submit + stop + response-option-click on BOTH forms. The
-  // forms have independent submit lifecycles but share this module's
-  // submit handler logic.
-  for (const formId of ['newChatForm', 'chattingForm']) {
-    const form = document.getElementById(formId) as HTMLFormElement | null;
-    if (!form) continue;
-    wireFormSubmit(form, updateButton);
-  }
-}
-
-/** Per-form submit + stop-button + response-option wiring. Each form
- *  gets its own handler that queries its own textarea / buttons. The
- *  shared submit-handler body still lives here so all the dispatch /
- *  steer / streamResponse logic stays module-scoped (R3.5 will move
- *  it into a per-form helper). */
-function wireFormSubmit(form: HTMLFormElement, updateButton: () => void): void {
-  const textarea = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement | null;
-  const stopBtn = form.querySelector('.stop-btn') as HTMLButtonElement | null;
-  if (stopBtn) {
-    stopBtn.addEventListener('click', () => {
-      const sessionId = getActiveSessionId();
-      if (sessionId) void fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' });
-    });
-  }
-
-  const optionsContainer = form.querySelector('#responseOptions') as HTMLElement | null;
-  if (optionsContainer && textarea) {
-    optionsContainer.addEventListener('click', (e) => {
-      const btn = (e.target as HTMLElement).closest('.response-option-btn') as HTMLElement | null;
-      if (!btn || btn.classList.contains('muted')) return;
-      const prompt = btn.dataset.prompt;
-      if (!prompt) return;
-      formStateStore.set({ options: [] });
-      textarea.value = prompt;
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      form.requestSubmit();
-    });
-  }
-
-  let submitting = false;
-
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    if (submitting) return;
-
-    const input = form.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
-    const message = input.value.trim();
-    const sessionId = getActiveSessionId();
-    const isBusy = sessionId ? (sessionTracker.get(sessionId)?.busy ?? false) : false;
-    const state = computeFormState(isBusy, !!message);
-
-    if (message.startsWith('/')) {
-      if (tryExecuteSlashCommand(message)) {
-        input.value = '';
-        resetTextareaHeight();
-        updateButton();
-        return;
-      }
-    }
-
-    if (!message) return;
-
-    if (state.buttonAction === 'steer' && sessionId) {
-      input.value = '';
-      resetTextareaHeight();
-      steerCount++;
-      submitting = true;
-      updateButton();
-      void (async () => {
-        try {
-          const res = await fetch(`/api/sessions/${sessionId}/messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: message, mode: 'immediate' })
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({ error: 'Steer failed' }));
-            showToast(data.error || 'Steer failed');
-            if (!input.value.trim()) { input.value = message; resetTextareaHeight(); }
-            steerCount = Math.max(0, steerCount - 1);
-            updateButton();
-          }
-        } catch {
-          showToast('Steer failed');
-          if (!input.value.trim()) { input.value = message; resetTextareaHeight(); }
-          steerCount = Math.max(0, steerCount - 1);
-          updateButton();
-        } finally {
-          submitting = false;
-        }
-      })();
-      return;
-    }
-
-    const model = getSelectedModel();
-    // imageData input lives only in the chatting form. Query within
-    // the SUBMITTING form: newChat queries get null → empty (correct;
-    // image-paste is chatting-only); chatting queries find its input
-    // and read the staged image data.
-    const imageDataEl = form.querySelector('input[name="imageData"]') as HTMLInputElement | null;
-    const imageData = imageDataEl?.value ?? '';
-    const cwd = getNewChatCwd();
-    const isNewChat = isViewState('newChat');
-
-    if (isNewChat && !cwd) {
-      showNewChatError('Please enter a working directory');
-      return;
-    }
-
-    chatView.setFormEnabled(false);
-    steerCount = 0;
-    formStateStore.set({ options: [] });
-    updateButton();
-
-    input.value = '';
-    resetTextareaHeight();
-    removeImage();
-
-    void streamResponse(message, model, imageData, isNewChat, cwd);
-  });
 }

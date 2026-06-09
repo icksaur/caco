@@ -7,13 +7,13 @@ import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences } from './history.js';
 import { archiveSession, initSessionPanel, loadSessions, loadSchedules, getCachedSessions } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
-import { setupFormHandler, stopStreaming } from './message-streaming.js';
+import { initMessageStreaming, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initRegions } from './dom-regions.js';
 import { initViewState, setViewState, showSessionPanel } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { initInputRouter } from './input-router.js';
-import { setupMultilineInput, registerPoundProvider } from './multiline-input.js';
+import { registerPoundProvider } from './multiline-input.js';
 import { ChatFormController } from './chat-form-controller.js';
 import { chatView } from './chat-view-controller.js';
 import { connectWs, waitForConnect, reconnectIfNeeded } from './websocket.js';
@@ -112,9 +112,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
     });
     
-    // Connect WebSocket once on page load
-    connectWs();
-    await waitForConnect();
+    // Connect WebSocket — MUST run AFTER initMessageStreaming()
+    // registers the WS event handlers AND AFTER chattingForm.attach()
+    // installs the sessionTracker.onChange listener that pushes
+    // sessionBusy into formStateStore; otherwise the first WS event
+    // can arrive before handlers are wired or before the busy state
+    // pump is active. Moved here from pre-attach in R3.5 Step 3.4.
   
   // Reconnect WS when page becomes visible (e.g., returning from another tab)
   document.addEventListener('visibilitychange', () => {
@@ -148,12 +151,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const newChatForm = new ChatFormController(newChatFormEl, 'newChat', chatView);
   const chattingForm = new ChatFormController(chattingFormEl, 'chatting', chatView);
   chatView.bindForms({ newChat: newChatForm, chatting: chattingForm });
+  // R3.5 boot order (DO NOT REORDER):
+  //   1. initMessageStreaming() — registers WS handlers + chatRegion.
+  //   2. chattingForm.attach() — installs the sessionTracker.onChange
+  //      → formStateStore pump that drives Send/Stop button state.
+  //   3. connectWs() — first WS event MUST arrive after handlers and
+  //      pump are wired, or session.idle on the first event misses
+  //      the formStateStore update and the Send button stays "Stop".
+  initMessageStreaming();
   newChatForm.attach();
   chattingForm.attach();
-  setupFormHandler();          // module-scope handler queries chatView.getActiveForm()
+  connectWs();
+  await waitForConnect();
   setupMarkdownRenderer();
-  setupMultilineInput(newChatForm.textarea, newChatFormEl.querySelector('.input-bar') as HTMLElement);
-  setupMultilineInput(chattingForm.textarea, chattingFormEl.querySelector('.input-bar') as HTMLElement);
   
   // Load prompt templates as slash commands
   try {

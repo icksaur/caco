@@ -13,8 +13,6 @@
 import { scrollToBottom } from './ui-utils.js';
 import { getPanelState } from './panel-state.js';
 
-import { resetTextareaHeight } from './multiline-input.js';
-
 export type ViewState = 'newChat' | 'chatting';
 
 let currentState: ViewState = 'newChat';
@@ -105,7 +103,12 @@ export function setViewState(state: ViewState): void {
       if (newChatForm) newChatForm.hidden = false;
       if (chattingForm) chattingForm.hidden = true;
       setFormEnabled(true);
-      resetTextareaHeight();
+      // Reset newchat textarea to single-line height on view enter.
+      // Direct DOM access here avoids importing chatView (circular).
+      {
+        const ta = newChatForm?.querySelector('textarea[name="message"]') as HTMLTextAreaElement | null;
+        if (ta) { ta.style.height = 'auto'; ta.style.overflowY = 'hidden'; }
+      }
       els.appletBtn?.classList.remove('hidden');
       break;
 

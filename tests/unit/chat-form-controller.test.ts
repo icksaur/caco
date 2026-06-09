@@ -194,4 +194,45 @@ describe('ChatFormController', () => {
     expect(cache._map.has('__newchat__')).toBe(false);
     expect(b.binding).toEqual({ sessionId: null, key: '__newchat__' });
   });
+
+  it('clearDraft removes in-memory cache entry, cancels timer, deletes from disk', () => {
+    const form = makeForm();
+    const ta = (form as unknown as { _ta: HTMLTextAreaElement })._ta;
+    const cache = makeCache();
+    const c = new ChatFormController(form, 'chatting', cache);
+    c.attach();
+    c.bind('s1');
+    ta.value = 'msg';
+    const handler = vi.mocked(ta.addEventListener).mock.calls.find(c => c[0] === 'input')?.[1] as () => void;
+    handler();
+    expect(cache._map.get('s1')).toBe('msg');
+
+    c.clearDraft();
+
+    expect(cache._map.has('s1')).toBe(false);
+    expect(draftApi.deleteDraft).toHaveBeenCalledWith('s1');
+
+    // Pending PUT must have been cancelled: advancing past debounce
+    // must not fire a putDraft for the cleared draft.
+    vi.advanceTimersByTime(2000);
+    expect(draftApi.putDraft).not.toHaveBeenCalled();
+  });
+
+  it('clearDraft on newchat-bound form clears the __newchat__ key', () => {
+    const form = makeForm();
+    const ta = (form as unknown as { _ta: HTMLTextAreaElement })._ta;
+    const cache = makeCache();
+    const c = new ChatFormController(form, 'newChat', cache);
+    c.attach();
+    c.bind(null);
+    ta.value = '/restart';
+    const handler = vi.mocked(ta.addEventListener).mock.calls.find(c => c[0] === 'input')?.[1] as () => void;
+    handler();
+    expect(cache._map.get('__newchat__')).toBe('/restart');
+
+    c.clearDraft();
+
+    expect(cache._map.has('__newchat__')).toBe(false);
+    expect(draftApi.deleteDraft).toHaveBeenCalledWith(null);
+  });
 });

@@ -219,6 +219,7 @@ export class ChatFormController {
       if (this.tryExecuteSlashCommand(message)) {
         this.textarea.value = '';
         this.resetTextareaHeight();
+        this.clearDraft();
         this.refreshButton();
         return;
       }
@@ -229,6 +230,7 @@ export class ChatFormController {
     if (state.buttonAction === 'steer' && sessionId) {
       this.textarea.value = '';
       this.resetTextareaHeight();
+      this.clearDraft();
       this.steerCount++;
       this.submitting = true;
       this.refreshButton();
@@ -238,13 +240,13 @@ export class ChatFormController {
           if (!res.ok) {
             const data = await res.json().catch(() => ({ error: 'Steer failed' }));
             showToast(data.error || 'Steer failed');
-            if (!this.textarea.value.trim()) { this.textarea.value = message; this.resetTextareaHeight(); }
+            this.restoreFailedInput(message);
             this.steerCount = Math.max(0, this.steerCount - 1);
             this.refreshButton();
           }
         } catch {
           showToast('Steer failed');
-          if (!this.textarea.value.trim()) { this.textarea.value = message; this.resetTextareaHeight(); }
+          this.restoreFailedInput(message);
           this.steerCount = Math.max(0, this.steerCount - 1);
           this.refreshButton();
         } finally {
@@ -270,6 +272,7 @@ export class ChatFormController {
 
     this.textarea.value = '';
     this.resetTextareaHeight();
+    this.clearDraft();
     removeImage();
 
     dispatchPrompt({ message, imageData, newChat: isNewChat, cwd });
@@ -281,6 +284,17 @@ export class ChatFormController {
   resetTextareaHeight(): void {
     this.textarea.style.height = 'auto';
     this.textarea.style.overflowY = 'hidden';
+  }
+
+  /** Restore an input string after a failed dispatch. Only restores
+   *  if the user hasn't started typing something new. Dispatches a
+   *  real input event so the draft cache + debounced disk PUT
+   *  re-persist the value. */
+  private restoreFailedInput(message: string): void {
+    if (this.textarea.value.trim()) return;
+    this.textarea.value = message;
+    this.resetTextareaHeight();
+    this.textarea.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   /** Try to execute a leading slash-command in the given message.
@@ -355,13 +369,27 @@ export class ChatFormController {
     // If over-cap and non-empty: skip (consistent with onInput).
   }
 
-  /** Send-time: cancel any pending PUT, enqueue DELETE. The per-key
+  /** Send-time: cancel any pending PUT, clear in-memory cache for
+   *  this form's current binding, enqueue disk DELETE. The per-key
    *  queue in chat-draft-api guarantees DELETE observes any in-flight
-   *  PUT for the same key (it runs after). */
-  clearOnSend(): void {
+   *  PUT for the same key (it runs after). Idempotent.
+   *
+   *  Called by handleSubmit on every path that consumes the user's
+   *  input: regular send, steer, and slash-command. The form owns
+   *  its own draft lifecycle — clearing on its own consume action,
+   *  instead of relying on downstream code (streamResponse,
+   *  savePrompt) to clear the right key. */
+  clearDraft(): void {
     if (!this.binding) return;
+    const { sessionId, key } = this.binding;
     this.cancelTimer();
-    void deleteDraft(this.binding.sessionId);
+    this.cache.setDraftCache(key, '');
+    void deleteDraft(sessionId);
+  }
+
+  /** @deprecated Use clearDraft. Retained as alias for any external caller. */
+  clearOnSend(): void {
+    this.clearDraft();
   }
 
   private cancelTimer(): void {

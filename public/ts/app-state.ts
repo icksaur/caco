@@ -84,8 +84,83 @@ export function hasImage(): boolean {
  * Callers should also call websocket.subscribeToSession() for WS sync
  */
 export function setActiveSession(sessionId: string | null, cwd: string): void {
+  const prev = state.activeSessionId;
   state.activeSessionId = sessionId;
   state.currentCwd = cwd;
+  if (prev !== sessionId) notifyActiveSessionChange(prev, sessionId);
+}
+
+const activeSessionListeners: Array<(prev: string | null, next: string | null) => void> = [];
+
+/** Register a listener for active-session-pointer changes. Fires
+ *  whenever setActiveSession or releaseActiveSessionForNewChat
+ *  changes the active id. Used by image-paste to clear staged
+ *  images on session switch. Returns an unsubscribe fn. */
+export function onActiveSessionChange(
+  fn: (prev: string | null, next: string | null) => void
+): () => void {
+  activeSessionListeners.push(fn);
+  return () => {
+    const idx = activeSessionListeners.indexOf(fn);
+    if (idx >= 0) activeSessionListeners.splice(idx, 1);
+  };
+}
+
+function notifyActiveSessionChange(prev: string | null, next: string | null): void {
+  for (const fn of activeSessionListeners) {
+    try { fn(prev, next); } catch (e) { console.error('[app-state] active-session listener:', e); }
+  }
+}
+
+// ── Lifecycle events ────────────────────────────────────────────
+//
+// Canonical hooks for session-scoped state. Any module holding
+// state that is logically scoped to a session (drafts, applet
+// state, staged images, swarm progress, etc.) should subscribe to
+// the relevant hook here to clear/prune at the right boundary.
+//
+// See `docs/global-leak-audit.md` for the audit that motivated
+// this consolidation and `docs/code-quality.md` for the rule that
+// any module-level `let`/Map keyed by session id MUST declare its
+// LIFECYCLE in a comment and subscribe to one of these events.
+
+const messageSentListeners: Array<(sessionId: string) => void> = [];
+const sessionArchivedListeners: Array<(sessionId: string) => void> = [];
+
+/** Fires when the user successfully consumes input via send / steer
+ *  / slash-command for a specific session. Subscribers: anything
+ *  with per-action transient state that should be discarded on
+ *  send (pendingAppletState, staged input lookups, etc.). */
+export function onMessageSent(fn: (sessionId: string) => void): () => void {
+  messageSentListeners.push(fn);
+  return () => {
+    const idx = messageSentListeners.indexOf(fn);
+    if (idx >= 0) messageSentListeners.splice(idx, 1);
+  };
+}
+
+export function notifyMessageSent(sessionId: string): void {
+  for (const fn of messageSentListeners) {
+    try { fn(sessionId); } catch (e) { console.error('[app-state] message-sent listener:', e); }
+  }
+}
+
+/** Fires when a session is archived/deleted and will not return.
+ *  Subscribers: Map<sessionId,…> caches that should prune on
+ *  removal (sessionDrafts, sessionPrompts, usageCache, swarm
+ *  progress, hydrated set). */
+export function onSessionArchived(fn: (sessionId: string) => void): () => void {
+  sessionArchivedListeners.push(fn);
+  return () => {
+    const idx = sessionArchivedListeners.indexOf(fn);
+    if (idx >= 0) sessionArchivedListeners.splice(idx, 1);
+  };
+}
+
+export function notifySessionArchived(sessionId: string): void {
+  for (const fn of sessionArchivedListeners) {
+    try { fn(sessionId); } catch (e) { console.error('[app-state] session-archived listener:', e); }
+  }
 }
 
 /**
@@ -95,8 +170,10 @@ export function setActiveSession(sessionId: string | null, cwd: string): void {
  * or via session activation).
  */
 export function releaseActiveSessionForNewChat(): void {
+  const prev = state.activeSessionId;
   state.activeSessionId = null;
   // Note: Don't clear cwd - it's useful as default for next session
+  if (prev !== null) notifyActiveSessionChange(prev, null);
 }
 
 /**

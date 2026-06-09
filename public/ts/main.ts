@@ -7,13 +7,13 @@ import { scrollToBottom } from './ui-utils.js';
 import { loadPreferences } from './history.js';
 import { archiveSession, initSessionPanel, loadSessions, loadSchedules, getCachedSessions } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
-import { setupFormHandler, stopStreaming } from './message-streaming.js';
+import { initMessageStreaming, stopStreaming } from './message-streaming.js';
 import { setupMarkdownRenderer } from './markdown-renderer.js';
 import { initRegions } from './dom-regions.js';
 import { initViewState, setViewState, showSessionPanel } from './view-controller.js';
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { initInputRouter } from './input-router.js';
-import { setupMultilineInput, registerPoundProvider } from './multiline-input.js';
+import { registerPoundProvider } from './multiline-input.js';
 import { ChatFormController } from './chat-form-controller.js';
 import { chatView } from './chat-view-controller.js';
 import { connectWs, waitForConnect, reconnectIfNeeded } from './websocket.js';
@@ -54,6 +54,43 @@ window.loadModels = loadModels;
 window.stopStreaming = stopStreaming;
 window.toggleApplet = toggleApplet;
 window.hideToast = hideToast;
+
+// LIFECYCLE: prompt-template registrations. Each call replaces the
+// prior batch entirely — disposers from the last load are run before
+// the new fetch. Lets us hot-reload templates without leaking
+// orphan slash commands when a template is server-side deleted.
+const promptTemplateDisposers: Array<() => void> = [];
+
+async function loadPromptTemplates(): Promise<void> {
+  for (const dispose of promptTemplateDisposers.splice(0)) {
+    try { dispose(); } catch { /* ignore */ }
+  }
+  try {
+    const promptResp = await fetch('/api/prompts');
+    if (!promptResp.ok) return;
+    const { prompts } = await promptResp.json();
+    for (const p of prompts) {
+      const dispose = registerCommand({
+        name: p.name,
+        description: p.description,
+        source: 'template',
+        handler: async () => {
+          const resp = await fetch(`/api/prompts/${encodeURIComponent(p.name)}`);
+          if (!resp.ok) return;
+          const { content } = await resp.json();
+          const textarea = chatView.getActiveForm()?.textarea;
+          if (textarea) {
+            textarea.value = content;
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
+      });
+      promptTemplateDisposers.push(dispose);
+    }
+  } catch (e) {
+    console.warn('Failed to load prompt templates:', e);
+  }
+}
 
 // Wrap async init in void to satisfy eslint no-misused-promises
 document.addEventListener('DOMContentLoaded', () => {
@@ -112,9 +149,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
     });
     
-    // Connect WebSocket once on page load
-    connectWs();
-    await waitForConnect();
+    // Connect WebSocket — MUST run AFTER initMessageStreaming()
+    // registers the WS event handlers AND AFTER chattingForm.attach()
+    // installs the sessionTracker.onChange listener that pushes
+    // sessionBusy into formStateStore; otherwise the first WS event
+    // can arrive before handlers are wired or before the busy state
+    // pump is active. Moved here from pre-attach in R3.5 Step 3.4.
   
   // Reconnect WS when page becomes visible (e.g., returning from another tab)
   document.addEventListener('visibilitychange', () => {
@@ -148,39 +188,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const newChatForm = new ChatFormController(newChatFormEl, 'newChat', chatView);
   const chattingForm = new ChatFormController(chattingFormEl, 'chatting', chatView);
   chatView.bindForms({ newChat: newChatForm, chatting: chattingForm });
+  // R3.5 boot order (DO NOT REORDER):
+  //   1. initMessageStreaming() — registers WS handlers + chatRegion.
+  //   2. chattingForm.attach() — installs the sessionTracker.onChange
+  //      → formStateStore pump that drives Send/Stop button state.
+  //   3. connectWs() — first WS event MUST arrive after handlers and
+  //      pump are wired, or session.idle on the first event misses
+  //      the formStateStore update and the Send button stays "Stop".
+  initMessageStreaming();
   newChatForm.attach();
   chattingForm.attach();
-  setupFormHandler();          // module-scope handler queries chatView.getActiveForm()
+  connectWs();
+  await waitForConnect();
   setupMarkdownRenderer();
-  setupMultilineInput(newChatForm.textarea, newChatFormEl.querySelector('.input-bar') as HTMLElement);
-  setupMultilineInput(chattingForm.textarea, chattingFormEl.querySelector('.input-bar') as HTMLElement);
   
-  // Load prompt templates as slash commands
-  try {
-    const promptResp = await fetch('/api/prompts');
-    if (promptResp.ok) {
-      const { prompts } = await promptResp.json();
-      for (const p of prompts) {
-        registerCommand({
-          name: p.name,
-          description: p.description,
-          source: 'template',
-          handler: async () => {
-            const resp = await fetch(`/api/prompts/${encodeURIComponent(p.name)}`);
-            if (!resp.ok) return;
-            const { content } = await resp.json();
-            const textarea = chatView.getActiveForm()?.textarea;
-            if (textarea) {
-              textarea.value = content;
-              textarea.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-          }
-        });
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to load prompt templates:', e);
-  }
+  await loadPromptTemplates();
   
   // Load extensions (CSS injection + client extensions)
   try {

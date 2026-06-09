@@ -73,6 +73,12 @@ class ChatViewController {
     return this.activeForm;
   }
 
+  /** The chatting-view form controller. Used by image-paste (which
+   *  is chatting-only) so it doesn't have to query the DOM by id. */
+  getChattingForm(): ChatFormController | null {
+    return this.chattingForm;
+  }
+
   // ── Draft cache helpers (used by ChatFormController) ─────────────────
 
   getDraftCache(key: string): string | undefined {

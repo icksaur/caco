@@ -5,9 +5,10 @@
  * Still owns the images array and hidden input sync.
  */
 
-import { setHasImage, getActiveSessionId } from './app-state.js';
+import { setHasImage, getActiveSessionId, onActiveSessionChange } from './app-state.js';
 import { adHocBar } from './adhoc-bar.js';
 import type { AdHocWidgetHandle } from './adhoc-bar.js';
+import { chatView } from './chat-view-controller.js';
 
 const MAX_IMAGES = 3;
 const images: string[] = [];
@@ -38,6 +39,16 @@ export function setupImagePaste(): void {
       reader.onerror = (error) => console.error('FileReader error:', error);
       reader.readAsDataURL(blob);
     }
+  });
+
+  // R3.5 Step 4.5 (post-review fix): clear staged images when the
+  // active session pointer changes. Uses the dedicated
+  // onActiveSessionChange hook (added in app-state.ts) — the prior
+  // sessionTracker.onChange listener never fired on pure session
+  // switches because that tracker only emits on per-session state
+  // changes (busy/intent/unobserved).
+  onActiveSessionChange((prev, next) => {
+    if (prev !== null && prev !== next && images.length > 0) removeImage();
   });
 }
 
@@ -117,7 +128,7 @@ function syncWidget(): void {
 }
 
 function syncHiddenInput(): void {
-  const input = document.getElementById('imageData') as HTMLInputElement;
+  const input = chatView.getChattingForm()?.imageDataInput;
   if (input) input.value = images.join('\n');
 }
 

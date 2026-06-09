@@ -20,6 +20,17 @@ vi.mock('../../public/ts/toast.js', () => ({
   showToast: vi.fn(),
 }));
 
+vi.mock('../../public/ts/chat-form-popups.js', () => ({
+  FormPopups: class { constructor(_ta: unknown, _anchor: unknown) {} attach() {} handleKey() { return false; } isAnyVisible() { return false; } },
+  autoResize: vi.fn(),
+}));
+vi.mock('../../public/ts/command-registry.js', () => ({
+  findCommand: vi.fn(() => null),
+}));
+vi.mock('../../public/ts/chat-view-controller.js', () => ({
+  chatView: { getActiveForm: () => null, getLastInput: () => '' },
+}));
+
 import { ChatFormController, type DraftCache } from '../../public/ts/chat-form-controller.js';
 import * as draftApi from '../../public/ts/chat-draft-api.js';
 import { showToast } from '../../public/ts/toast.js';
@@ -29,11 +40,21 @@ function makeForm(): HTMLFormElement {
   // that exposes the surface ChatFormController uses.
   const ta = {
     value: '',
+    style: {} as CSSStyleDeclaration,
     addEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
+    setSelectionRange: vi.fn(),
   } as unknown as HTMLTextAreaElement;
+  const anchor = {} as unknown as HTMLElement;
   const form = {
-    querySelector: (sel: string) => sel === 'textarea[name="message"]' ? ta : null,
+    querySelector: (sel: string) => {
+      if (sel === 'textarea[name="message"]') return ta;
+      if (sel === '.input-bar') return anchor;
+      if (sel === 'input[name="imageData"]') return { value: '' } as HTMLInputElement;
+      return null;
+    },
+    addEventListener: vi.fn(),
+    requestSubmit: vi.fn(),
   } as unknown as HTMLFormElement;
   // Expose textarea so tests can read/write its value.
   (form as unknown as { _ta: HTMLTextAreaElement })._ta = ta;
@@ -172,5 +193,46 @@ describe('ChatFormController', () => {
     expect(cache._map.get('s1')).toBe('in A');
     expect(cache._map.has('__newchat__')).toBe(false);
     expect(b.binding).toEqual({ sessionId: null, key: '__newchat__' });
+  });
+
+  it('clearDraft removes in-memory cache entry, cancels timer, deletes from disk', () => {
+    const form = makeForm();
+    const ta = (form as unknown as { _ta: HTMLTextAreaElement })._ta;
+    const cache = makeCache();
+    const c = new ChatFormController(form, 'chatting', cache);
+    c.attach();
+    c.bind('s1');
+    ta.value = 'msg';
+    const handler = vi.mocked(ta.addEventListener).mock.calls.find(c => c[0] === 'input')?.[1] as () => void;
+    handler();
+    expect(cache._map.get('s1')).toBe('msg');
+
+    c.clearDraft();
+
+    expect(cache._map.has('s1')).toBe(false);
+    expect(draftApi.deleteDraft).toHaveBeenCalledWith('s1');
+
+    // Pending PUT must have been cancelled: advancing past debounce
+    // must not fire a putDraft for the cleared draft.
+    vi.advanceTimersByTime(2000);
+    expect(draftApi.putDraft).not.toHaveBeenCalled();
+  });
+
+  it('clearDraft on newchat-bound form clears the __newchat__ key', () => {
+    const form = makeForm();
+    const ta = (form as unknown as { _ta: HTMLTextAreaElement })._ta;
+    const cache = makeCache();
+    const c = new ChatFormController(form, 'newChat', cache);
+    c.attach();
+    c.bind(null);
+    ta.value = '/restart';
+    const handler = vi.mocked(ta.addEventListener).mock.calls.find(c => c[0] === 'input')?.[1] as () => void;
+    handler();
+    expect(cache._map.get('__newchat__')).toBe('/restart');
+
+    c.clearDraft();
+
+    expect(cache._map.has('__newchat__')).toBe(false);
+    expect(draftApi.deleteDraft).toHaveBeenCalledWith(null);
   });
 });

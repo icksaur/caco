@@ -8,7 +8,7 @@
  */
 
 import { wsSetState, onStateUpdate, onEvent, onGlobalEvent, isWsConnected } from './websocket.js';
-import { getActiveSessionId, getCurrentCwd, isLoadingHistory } from './app-state.js';
+import { getActiveSessionId, getCurrentCwd, isLoadingHistory, onActiveSessionChange } from './app-state.js';
 import { regions } from './dom-regions.js';
 import { loadApplet } from './applet-loader.js';
 import { showToast } from './toast.js';
@@ -37,6 +37,12 @@ interface AppletInstance {
 }
 
 let currentApplet: AppletInstance | null = null;
+// LIFECYCLE: pendingAppletState is staged by setAppletState() and
+// consumed at message-send via getAndClearPendingAppletState().
+// Also cleared on: destroyInstance() (applet swap) and
+// onActiveSessionChange (session switch without send). Without
+// those clears, the state would leak across applet/session
+// switches into the next session's send POST.
 let pendingAppletState: Record<string, unknown> | null = null;
 
 export interface SessionInfo {
@@ -270,6 +276,12 @@ export function initAppletRuntime(): void {
   // Legacy globals (for backward compatibility with existing applets)
   window.expose = expose;
   window.setAppletState = setAppletState;
+
+  // L1 fix: pendingAppletState was leaking when the user switched
+  // applets/sessions without sending. Clear it on session-pointer
+  // change so the next session doesn't inherit the prior applet's
+  // staged state.
+  onActiveSessionChange(() => { pendingAppletState = null; });
 }
 
 /**
@@ -784,6 +796,10 @@ function destroyInstance(instance: AppletInstance): void {
     window.removeEventListener('popstate', instance.popstateHandler);
     instance.popstateHandler = null;
   }
+  // L1 fix: any staged setAppletState() from this applet belongs to
+  // this instance only; do not carry it to whatever applet (or no
+  // applet) comes next.
+  pendingAppletState = null;
 }
 
 /**

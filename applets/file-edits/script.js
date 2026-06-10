@@ -85,6 +85,32 @@
   var cachedCwd = '';
   var TAB_CAP = 50;
 
+  // V3.y.1: deep-link queue. cold-load fires onUrlParamsChange
+  // before cachedCwd is set; queue the openPath and drain when
+  // cachedCwd arrives. See docs/files-applet-v3.y.md §4.1.B.
+  var _pendingOpenPath = null;
+  function _handleOpenPath(p) {
+    if (!p) return;
+    var relPath = _relativizePath(p);
+    void routeOpen(relPath);
+  }
+  function _relativizePath(absOrRel) {
+    if (!absOrRel) return '';
+    if (absOrRel.charAt(0) !== '/') return absOrRel;
+    if (!cachedCwd) return absOrRel;
+    if (absOrRel === cachedCwd) return '';
+    var prefix = cachedCwd.replace(/\/+$/, '') + '/';
+    if (absOrRel.indexOf(prefix) === 0) return absOrRel.slice(prefix.length);
+    return absOrRel;
+  }
+  function _drainPendingOpenPath() {
+    if (_pendingOpenPath && cachedCwd) {
+      var p = _pendingOpenPath;
+      _pendingOpenPath = null;
+      _handleOpenPath(p);
+    }
+  }
+
   // ── DiffViewer + MarkdownViewer (loaded by sibling .js files) ────────
   // Concatenated by applet-store.ts before this script. Exposed at
   // window.__filesApplet.DiffViewer / .MarkdownViewer.
@@ -1763,6 +1789,10 @@
   var pickerOpen = false;
   var pickerResults = [];
   var pickerSelectedIdx = 0;
+  // V3.y.2 fix: flat ordered list of all selectable picker items
+  // (recents + results). Each entry is { rel: string, recent: bool }.
+  // Used by keyboard nav so selection covers the entire visible list.
+  var pickerVisible = [];
   var pickerLastQuery = '';
   var pickerFetchToken = 0;
   var pickerFetchTimer = null;
@@ -1795,12 +1825,15 @@
     pickerInput.addEventListener('keydown', function(e) {
       if (e.key === 'ArrowDown') { e.preventDefault(); movePickerSelection(1); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); movePickerSelection(-1); }
-      else if (e.key === 'Enter' || e.key === 'Tab') {
+      else if (e.key === 'Enter') {
         e.preventDefault();
-        var sel = pickerResults[pickerSelectedIdx];
-        if (sel) pickSelected(sel);
+        var entry = pickerVisible[pickerSelectedIdx];
+        if (entry) pickSelected(entry.rel);
       } else if (e.key === 'Escape') {
+        // Stop propagation so the input-router's Escape leader
+        // timer doesn't arm when the picker eats the keystroke.
         e.preventDefault();
+        e.stopPropagation();
         closePicker();
       } else if (e.key === 'Backspace' && pickerInput.value === '') {
         e.preventDefault();
@@ -1812,14 +1845,88 @@
       if (!target) return;
       e.preventDefault();
       if (target.classList.contains('disabled')) return;
-      var idx = Number(target.dataset.idx);
-      var sel = pickerResults[idx];
-      if (sel) pickSelected(sel);
+      var flatIdx = Number(target.dataset.flatIdx);
+      var entry = pickerVisible[flatIdx];
+      if (entry) pickSelected(entry.rel);
     });
   }
 
-  function openPicker() {
+  // ── V3.y.2 finder enhancements ────────────────────────────────────────
+  // Recent files: last RECENT_FILES_CAP opens, persisted in
+  // localStorage. See docs/files-applet-v3.y.md §4.2.D.
+  var RECENT_FILES_KEY = 'caco:files-applet:recentPaths';
+  var RECENT_FILES_CAP = 20;
+  function _loadRecentFiles() {
+    try {
+      var raw = window.localStorage && window.localStorage.getItem(RECENT_FILES_KEY);
+      if (!raw) return [];
+      var arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter(function(x) { return typeof x === 'string'; }) : [];
+    } catch (_e) { return []; }
+  }
+  function _pushRecentFile(absOrRel) {
+    if (!absOrRel) return;
+    try {
+      var abs = absOrRel.charAt(0) === '/' ? absOrRel : absPathOf(absOrRel);
+      var list = _loadRecentFiles();
+      var idx = list.indexOf(abs);
+      if (idx >= 0) list.splice(idx, 1);
+      list.unshift(abs);
+      if (list.length > RECENT_FILES_CAP) list.length = RECENT_FILES_CAP;
+      window.localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(list));
+    } catch (_e) { /* ignore */ }
+  }
+  /** Fuzzy score, ported from applets/file-finder/script.js. */
+  function _fuzzyScore(query, target) {
+    var q = query.toLowerCase();
+    var t = target.toLowerCase();
+    if (t.indexOf(q) !== -1) return 100 + (q.length / t.length) * 50;
+    var qi = 0;
+    var score = 0;
+    var lastMatch = -1;
+    for (var ti = 0; ti < t.length && qi < q.length; ti++) {
+      if (t[ti] === q[qi]) {
+        score += 10;
+        if (lastMatch === ti - 1) score += 5;
+        if (ti === 0 || t[ti - 1] === '/' || t[ti - 1] === '.') score += 8;
+        lastMatch = ti;
+        qi++;
+      }
+    }
+    return qi === q.length ? score : 0;
+  }
+  /** Extension membership in a type-filter group. */
+  function _matchesTypeFilter(rel, filter) {
+    if (!filter) return true;
+    var ext = (rel.split('.').pop() || '').toLowerCase();
+    if (filter === 'img') return /^(png|jpg|jpeg|gif|webp|svg|ico)$/.test(ext);
+    if (filter === 'md')  return /^(md|markdown|mdx)$/.test(ext);
+    if (filter === 'html') return /^(html|htm)$/.test(ext);
+    if (filter === 'diff') return !/^(png|jpg|jpeg|gif|webp|svg|ico|md|markdown|mdx|html|htm)$/.test(ext);
+    return true;
+  }
+  /** Parse the type-filter prefix from a query. Returns
+   *  { filter: string|null, rest: string } where filter is one of
+   *  img/md/html/diff or null. */
+  function _parseTypeFilter(q) {
+    var m = (q || '').match(/^>(img|md|html|diff|any)(?:\s+|$)(.*)$/);
+    if (!m) return { filter: null, rest: q || '' };
+    return { filter: m[1] === 'any' ? null : m[1], rest: m[2] || '' };
+  }
+
+  /** Picker state — kept here so V3.y.2's openPicker(opts) can
+   *  cooperate with the existing closePicker / runPickerFetch. */
+  var _pickerSource = null;
+  var _pickerPriorFocus = null;
+  var _pickerTypeFilter = null;
+
+  function openPicker(opts) {
     if (!sessionId || pickerOpen) return;
+    opts = opts || {};
+    _pickerSource = opts.source || 'button';
+    if (_pickerSource === 'shortcut') {
+      _pickerPriorFocus = document.activeElement;
+    }
     ensurePickerEl();
     pickerOpen = true;
     pickerEl.hidden = false;
@@ -1827,6 +1934,8 @@
     pickerLastQuery = '';
     pickerSelectedIdx = 0;
     pickerResults = [];
+    pickerVisible = [];
+    _pickerTypeFilter = null;
     renderPickerList();
     void runPickerFetch('');
     setTimeout(function() { pickerInput.focus(); }, 0);
@@ -1847,19 +1956,45 @@
       document.removeEventListener('mousedown', pickerOutsideHandler);
       pickerOutsideHandler = null;
     }
+    // V3.y.2: restore prior focus on shortcut-opened picker so
+    // Ctrl+P → Esc lands the user back where they started.
+    if (_pickerPriorFocus && typeof _pickerPriorFocus.focus === 'function') {
+      try { _pickerPriorFocus.focus(); } catch (_e) { /* ignore */ }
+    }
+    _pickerPriorFocus = null;
+    _pickerSource = null;
+    _pickerTypeFilter = null;
   }
 
   async function runPickerFetch(q) {
     if (!sessionId) return;
+    // V3.y.2: parse type-filter prefix; fetch with the post-filter
+    // query string so the server's substring match is unaffected.
+    var parsed = _parseTypeFilter(q);
+    _pickerTypeFilter = parsed.filter;
+    var fetchQ = parsed.rest;
     var token = ++pickerFetchToken;
     var url = '/api/project-files?cwd=' + encodeURIComponent(cachedCwd || '');
-    if (q) url += '&q=' + encodeURIComponent(q);
+    if (fetchQ) url += '&q=' + encodeURIComponent(fetchQ);
     try {
       var res = await fetch(url);
       if (!res.ok) return;
       var data = await res.json();
       if (token !== pickerFetchToken) return;
-      pickerResults = (data.files || []).slice(0, PICKER_RESULT_CAP);
+      var files = data.files || [];
+      // Type filter.
+      if (_pickerTypeFilter) {
+        files = files.filter(function(p) { return _matchesTypeFilter(p, _pickerTypeFilter); });
+      }
+      // Fuzzy rank when there's a query; preserve server order otherwise.
+      if (fetchQ) {
+        files = files
+          .map(function(p) { return { p: p, s: _fuzzyScore(fetchQ, p) }; })
+          .filter(function(o) { return o.s > 0; })
+          .sort(function(a, b) { return b.s - a.s; })
+          .map(function(o) { return o.p; });
+      }
+      pickerResults = files.slice(0, PICKER_RESULT_CAP);
       pickerSelectedIdx = 0;
       renderPickerList();
     } catch (_) { /* ignore */ }
@@ -1868,12 +2003,67 @@
   function renderPickerList() {
     if (!pickerList) return;
     pickerList.innerHTML = '';
+    pickerVisible = [];
+
+    // V3.y.2: filter chip when an active type-filter is set.
+    if (_pickerTypeFilter) {
+      var chip = document.createElement('li');
+      chip.className = 'fe-picker-chip';
+      chip.textContent = 'filter:' + _pickerTypeFilter + ' ✕';
+      chip.title = 'Click to clear filter';
+      chip.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        pickerInput.value = pickerInput.value.replace(/^>(img|md|html|diff|any)(?:\s+|$)/, '');
+        pickerLastQuery = pickerInput.value;
+        if (pickerFetchTimer) clearTimeout(pickerFetchTimer);
+        void runPickerFetch(pickerInput.value);
+      });
+      pickerList.appendChild(chip);
+    }
+
+    // V3.y.2: recent files (when query is empty).
+    var hasQuery = pickerLastQuery && pickerLastQuery.length > 0;
+    if (!hasQuery) {
+      var recents = _loadRecentFiles();
+      if (recents.length > 0) {
+        var rh = document.createElement('li');
+        rh.className = 'fe-picker-section';
+        rh.textContent = 'Recent';
+        pickerList.appendChild(rh);
+        var shown = recents.slice(0, 10);
+        for (var ri = 0; ri < shown.length; ri++) {
+          var rp = shown[ri];
+          var rli = document.createElement('li');
+          rli.className = 'fe-picker-item fe-picker-recent';
+          var rRel = _relativizePath(rp);
+          var rFlat = pickerVisible.length;
+          pickerVisible.push({ rel: rRel, recent: true });
+          rli.dataset.flatIdx = String(rFlat);
+          if (rFlat === pickerSelectedIdx) rli.classList.add('selected');
+          var rlabel = document.createElement('span');
+          rlabel.className = 'fe-picker-path';
+          rlabel.textContent = rp;
+          rli.appendChild(rlabel);
+          pickerList.appendChild(rli);
+        }
+        if (pickerResults.length > 0) {
+          var fh = document.createElement('li');
+          fh.className = 'fe-picker-section';
+          fh.textContent = 'Files';
+          pickerList.appendChild(fh);
+        }
+      }
+    }
+
     for (var i = 0; i < pickerResults.length; i++) {
       var p = pickerResults[i];
       var li = document.createElement('li');
       li.className = 'fe-picker-item';
-      li.dataset.idx = String(i);
-      if (i === pickerSelectedIdx) li.classList.add('selected');
+      var flat = pickerVisible.length;
+      pickerVisible.push({ rel: p, recent: false });
+      li.dataset.flatIdx = String(flat);
+      if (flat === pickerSelectedIdx) li.classList.add('selected');
       var label = document.createElement('span');
       label.className = 'fe-picker-path';
       label.textContent = p;
@@ -1887,15 +2077,24 @@
       }
       pickerList.appendChild(li);
     }
+
+    if (pickerSelectedIdx >= pickerVisible.length) pickerSelectedIdx = 0;
   }
 
   function movePickerSelection(delta) {
-    if (pickerResults.length === 0) return;
-    pickerSelectedIdx = (pickerSelectedIdx + delta + pickerResults.length) % pickerResults.length;
+    if (pickerVisible.length === 0) return;
+    pickerSelectedIdx = (pickerSelectedIdx + delta + pickerVisible.length) % pickerVisible.length;
     var items = pickerList.querySelectorAll('.fe-picker-item');
-    items.forEach(function(el, i) { el.classList.toggle('selected', i === pickerSelectedIdx); });
-    var sel = items[pickerSelectedIdx];
-    if (sel) sel.scrollIntoView({ block: 'nearest' });
+    items.forEach(function(el) {
+      var fi = Number(el.dataset.flatIdx);
+      el.classList.toggle('selected', fi === pickerSelectedIdx);
+    });
+    for (var i = 0; i < items.length; i++) {
+      if (Number(items[i].dataset.flatIdx) === pickerSelectedIdx) {
+        items[i].scrollIntoView({ block: 'nearest' });
+        break;
+      }
+    }
   }
 
   function pickSelected(relativePath) {
@@ -1923,6 +2122,7 @@
       followEdits = false;
       updateFollowButton();
       setActiveTab(existing.id);
+      _pushRecentFile(abs);
       return;
     }
     var desc = defaultViewer(abs, relativePath);
@@ -1947,6 +2147,7 @@
     updateFollowButton();
     setActiveTab(container.id);
     updateEmptyState();
+    _pushRecentFile(abs);
   }
 
   // ── Viewer registration ──────────────────────────────────────────────
@@ -2706,6 +2907,38 @@
         if (state && state.fileEdits) void applyAgentState(state.fileEdits);
       });
     }
+    // V3.y.1: deep-link `?applet=file-edits&openPath=/abs` opens
+    // the file as a new TabContainer. The cold-load case races
+    // onSessionChange (which sets cachedCwd); queue and drain.
+    // See docs/files-applet-v3.y.md §4.1.B.
+    if (typeof window.appletAPI.onUrlParamsChange === 'function') {
+      window.appletAPI.onUrlParamsChange(function(params) {
+        if (!params) return;
+        if (params.openPath) {
+          if (cachedCwd) {
+            _handleOpenPath(params.openPath);
+          } else {
+            _pendingOpenPath = params.openPath;
+          }
+          if (typeof window.appletAPI.navigateAppletUrlParam === 'function') {
+            // Consume the param so back-traversal doesn't re-fire.
+            // Use '' (not null) — the applet-runtime signature is
+            // (key: string, value: string) with falsy=delete.
+            window.appletAPI.navigateAppletUrlParam('openPath', '');
+          }
+        }
+        if (params.openFinder) {
+          // V3.y.2: Ctrl+P-triggered finder open. Picker function
+          // is defined later in this IIFE; check before calling.
+          if (typeof openPicker === 'function') {
+            openPicker({ source: 'shortcut' });
+          }
+          if (typeof window.appletAPI.navigateAppletUrlParam === 'function') {
+            window.appletAPI.navigateAppletUrlParam('openFinder', '');
+          }
+        }
+      });
+    }
     window.appletAPI.onSessionEvent(function(event) {
       if (event && event.type === 'caco.edit' && event.data) {
         var d = event.data;
@@ -2764,6 +2997,7 @@
         repoEl.textContent = parts[parts.length - 1] || info.cwd;
         cachedCwd = info.cwd;
       }
+      _drainPendingOpenPath();   // V3.y.1: cwd is now set; deep-link may have queued
       void initFromPersistence(sid);
     });
 
@@ -2779,6 +3013,7 @@
             cachedCwd = meta.cwd;
           }
         } catch (_) { /* ignore */ }
+        _drainPendingOpenPath();   // V3.y.1: cwd loaded from session meta
         await initFromPersistence(existingId);
       })();
     }

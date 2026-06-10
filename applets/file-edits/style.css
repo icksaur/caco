@@ -396,6 +396,31 @@
 .fe-picker-item.selected .fe-picker-suffix {
   color: rgba(255, 255, 255, 0.8);
 }
+.fe-picker-section {
+  padding: 4px 12px 2px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: default;
+}
+.fe-picker-chip {
+  margin: 4px 8px;
+  padding: 2px 8px;
+  background: var(--color-surface-2, #2a2a2a);
+  border: 1px solid var(--color-border, #444);
+  border-radius: 4px;
+  font-size: var(--text-xs);
+  display: inline-block;
+  cursor: pointer;
+  list-style: none;
+}
+.fe-picker-chip:hover {
+  background: var(--color-surface-3, #333);
+}
+.fe-picker-recent .fe-picker-path {
+  opacity: 0.85;
+}
 
 /* V3.5 selection highlight — softened from V3.4 so the browser's
  * native blue selection reads clearly on top when the pane is

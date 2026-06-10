@@ -7,6 +7,21 @@
  *   ?path=/path/to/repo - Repository path (required)
  */
 
+/** V6: join a repo base path with a relative file path. Preserves
+ *  Windows separator if the base uses backslashes only; otherwise
+ *  POSIX-joins. Strips trailing separators from base and leading
+ *  separators from rel so neither side's edge case produces a
+ *  doubled separator. */
+function joinPath(base, rel) {
+  if (!base) return rel;
+  if (!rel) return base;
+  const trimmedBase = base.replace(/[/\\]+$/, '');
+  const trimmedRel = rel.replace(/^[/\\]+/, '');
+  const sep = trimmedBase.indexOf('\\') >= 0 && trimmedBase.indexOf('/') < 0
+    ? '\\' : '/';
+  return trimmedBase + sep + trimmedRel;
+}
+
 // Current repository path from URL
 let repoPath = '';
 
@@ -151,17 +166,16 @@ function getStatusClass(status) {
 }
 
 /**
- * Navigate to git-diff applet for a file
+ * V6: Navigate to the files applet's diff tab. The staged toggle
+ * becomes ?diffMode=staged. Uses joinPath so the absolute openPath
+ * is robust to base/rel separator quirks.
  */
 function viewDiff(filePath, staged) {
-  const url = new URL(window.location.href);
-  url.searchParams.set('applet', 'git-diff');
-  url.searchParams.set('file', filePath);
-  if (staged) {
-    url.searchParams.set('staged', '1');
-  } else {
-    url.searchParams.delete('staged');
-  }
+  const url = new URL('/', window.location.origin);
+  const sp = url.searchParams;
+  sp.set('applet', 'files');
+  sp.set('openPath', joinPath(repoPath, filePath));
+  if (staged) sp.set('diffMode', 'staged');
   window.location.href = url.toString();
 }
 
@@ -514,18 +528,17 @@ async function showLastCommit() {
       }
     }
     
-    const diffUrl = commitCount >= 2
-      ? `/?applet=git-diff&path=${encodeURIComponent(repoPath)}&ref=HEAD~1..HEAD`
-      : '';
-    const diffLink = diffUrl
-      ? ` · <a href="${diffUrl}" class="commit-diff-link">View diff</a>`
-      : '';
-    
-    cleanMessage.innerHTML = 
+    // V6: removed multi-file "View diff" link (it pointed at
+    // git-diff with a ref-range and no file param — a multi-file
+    // view that doesn't fit the files-applet one-file-per-tab
+    // model). Per-file commit diffs are reachable from the
+    // unstaged file rows. See docs/files-applet-v6.md §6.5.
+
+    cleanMessage.innerHTML =
       `<div class="last-commit">` +
       `<span class="commit-hash">${hash}</span> ` +
       `<span class="commit-subject">${escapeHtml(subject)}</span><br>` +
-      `<span class="commit-meta">${escapeHtml(author)} · ${age}</span>${diffLink}` +
+      `<span class="commit-meta">${escapeHtml(author)} · ${age}</span>` +
       `${statHtml}` +
       `</div>`;
   } catch {

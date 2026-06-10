@@ -1582,8 +1582,30 @@
     followEdits = false;
     updateFollowButton();
     updateEmptyState();
+    reconcileTabDom();
     schedulePersist();
     echoState();
+  }
+
+  /** Self-heal stale tab DOMs that are no longer in the tabs map.
+   *  These should never exist (closeTab/destroy keep them in sync),
+   *  but a routeOpen race or a buggy future code path could leak one.
+   *  Removing them here keeps ghost tabs from accumulating. Called
+   *  after every structural tab change. */
+  function reconcileTabDom() {
+    if (!tabsEl) return;
+    var validIds = new Set();
+    tabs.forEach(function(c) {
+      if (c && c.tabEl) validIds.add(c.tabEl);
+    });
+    var children = Array.prototype.slice.call(tabsEl.children);
+    for (var i = 0; i < children.length; i++) {
+      var el = children[i];
+      if (!validIds.has(el)) {
+        console.warn('[files-applet] removing orphan tab DOM', el.dataset && el.dataset.path);
+        try { el.parentNode.removeChild(el); } catch (_e) { /* ignore */ }
+      }
+    }
   }
 
   function jumpToMostRecent() {
@@ -2125,19 +2147,46 @@
       _pushRecentFile(abs);
       return;
     }
+    // Idempotency guard: if a concurrent routeOpen is already in
+    // flight for this relPath (e.g. cold-load race between
+    // initFromPersistence and onUrlParamsChange, or rapid double-
+    // click), short-circuit. Otherwise the async desc.open() in two
+    // calls races and produces two tabEls in the strip — only one
+    // of which is reachable through the tabs map, leaving the
+    // other as an unclickable ghost. See plan.md "ghost-tab-fix".
+    if (pendingOpenIds.has(relativePath)) return;
+    pendingOpenIds.add(relativePath);
     var desc = defaultViewer(abs, relativePath);
-    if (!desc) { console.warn('[files-applet] no viewer for', relativePath); return; }
+    if (!desc) {
+      console.warn('[files-applet] no viewer for', relativePath);
+      pendingOpenIds.delete(relativePath);
+      return;
+    }
     if (tabs.size >= TAB_CAP) evictOldestNonActive();
     var container = new TabContainer(shell, desc, abs, relativePath);
     try {
       var viewer = await desc.open(shell, container, abs, relativePath);
-      if (!viewer) return;
+      // Re-check after await: another caller may have created the
+      // tab while we were suspended. Discard our container if so.
+      var raceCheck = findContainerByRelPath(relativePath);
+      if (raceCheck) {
+        if (viewer && typeof viewer.destroy === 'function') {
+          try { viewer.destroy(); } catch (_e) { /* ignore */ }
+        }
+        container.destroy();
+        setActiveTab(raceCheck.id);
+        _pushRecentFile(abs);
+        return;
+      }
+      if (!viewer) { container.destroy(); return; }
       container.viewers.set(desc.viewerType, viewer);
     } catch (err) {
-      if (err && err.name === 'AbortError') return;
+      if (err && err.name === 'AbortError') { container.destroy(); return; }
       console.warn('[files-applet] routeOpen failed', relativePath, err);
       container.destroy();
       return;
+    } finally {
+      pendingOpenIds.delete(relativePath);
     }
     tabs.set(container.id, container);
     tabsEl.appendChild(container.tabEl);

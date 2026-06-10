@@ -61,16 +61,16 @@ export function initInputRouter(): void {
       return;
     }
     
-    // Global Ctrl+P: open file finder. V3.y.2 — for active
-    // sessions, route to file-edits applet (the unified files
-    // applet). For newChat (no session, no cwd), fall back to
-    // the standalone file-finder. See docs/files-applet-v3.y.md
-    // §4.2.A.
+    // Global Ctrl+P: open the files-applet picker. V5 — point
+    // both new-chat and active-session branches directly at
+    // `files` (avoid stub flash) and pass cwd via
+    // openFinderRoot so new-chat works without an active
+    // session. See docs/files-applet-v5.md §4.7.
     if ((e.ctrlKey || e.metaKey) && e.key === 'p' && !e.altKey && !e.shiftKey) {
       e.preventDefault();
       if (getViewState() === 'newChat') {
         const cwd = getNewChatCwd() || getCurrentCwd() || '~';
-        window.location.href = '/?applet=file-finder&root=' + encodeURIComponent(cwd);
+        window.location.href = '/?applet=files&openFinder=1&openFinderRoot=' + encodeURIComponent(cwd);
         return;
       }
       // SPA navigate so panel + applet state survive.
@@ -79,7 +79,7 @@ export function initInputRouter(): void {
       let navigated = false;
       if (nav && typeof nav.navigate === 'function') {
         try {
-          nav.navigate('?applet=file-edits&openFinder=1');
+          nav.navigate('?applet=files&openFinder=1');
           navigated = true;
         } catch {
           // Navigation API can throw (e.g. during a prior
@@ -87,7 +87,7 @@ export function initInputRouter(): void {
         }
       }
       if (!navigated) {
-        window.location.href = '/?applet=file-edits&openFinder=1';
+        window.location.href = '/?applet=files&openFinder=1';
       }
       return;
     }

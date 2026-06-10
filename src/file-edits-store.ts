@@ -32,6 +32,14 @@ export interface CardPersist {
   collapsed?: boolean;             // V1: required. V2: optional (vestigial).
   defaultViewerType?: string;      // V2.c: 'diff' | 'markdown' | 'image' | 'html' | future
   activeViewerType?: string;       // V2.c: defaults to defaultViewerType
+  /** V6: diff sub-mode. Absent or 'unstaged' = working-tree (V1
+   *  behavior). 'staged' = index vs HEAD snapshot. 'range' uses
+   *  diffRef as a git revision range. Non-diff tabs always
+   *  omit. Additive on schemaVersion 2 (V5 readers ignore). */
+  diffMode?: 'unstaged' | 'staged' | 'range';
+  /** V6: required when diffMode === 'range'. Validated by route
+   *  REF_PATTERN on use. */
+  diffRef?: string;
 }
 
 export interface CardList {
@@ -87,6 +95,11 @@ function isCardPersist(v: unknown): v is CardPersist {
   if (o.collapsed !== undefined && typeof o.collapsed !== 'boolean') return false;
   if (o.defaultViewerType !== undefined && typeof o.defaultViewerType !== 'string') return false;
   if (o.activeViewerType !== undefined && typeof o.activeViewerType !== 'string') return false;
+  if (o.diffMode !== undefined
+      && o.diffMode !== 'unstaged'
+      && o.diffMode !== 'staged'
+      && o.diffMode !== 'range') return false;
+  if (o.diffRef !== undefined && typeof o.diffRef !== 'string') return false;
   return true;
 }
 

@@ -1810,12 +1810,19 @@
     // user's tabs (and viewer-mode) survive applet close+reopen.
     // The Map iteration order is insertion order so tab-strip order
     // is preserved across reload. See docs/files-applet-v2.md §4.3.
+    // V6: additive diffMode/diffRef on the same schema. Older
+    // readers ignore unknown fields.
     tabs.forEach(function(container) {
-      list.push({
+      var card = {
         relativePath: container.relPath,
         defaultViewerType: container.defaultViewerType,
         activeViewerType: container.activeViewerType,
-      });
+      };
+      if (container.diffMode && container.diffMode !== 'unstaged') {
+        card.diffMode = container.diffMode;
+        if (container.diffRef) card.diffRef = container.diffRef;
+      }
+      list.push(card);
     });
     return { schemaVersion: 2, cards: list, dismissed: [] };
   }
@@ -3100,7 +3107,14 @@
       var isV2 = persisted.schemaVersion === 2;
       persisted.cards.forEach(function(c) {
         if (!c || !c.relativePath) return;
-        if (tabs.has(c.relativePath)) return;
+        // V6: check by the computed id, not just relPath — a staged
+        // tab for the same file would collide on the relPath check.
+        var cardMode = c.diffMode || 'unstaged';
+        var cardRef = c.diffRef || null;
+        var candidateId = cardMode === 'unstaged' && !cardRef
+          ? c.relativePath
+          : diffTabId({ mode: cardMode, ref: cardRef, relPath: c.relativePath });
+        if (tabs.has(candidateId)) return;
         var abs = absPathOf(c.relativePath);
         var desc = defaultViewer(abs, c.relativePath);
         if (!desc) {
@@ -3118,10 +3132,21 @@
             }
           }
         }
+        // V6: thread persisted diffMode/diffRef into the descriptor
+        // so TabContainer's diffTabId produces the matching id and
+        // the async rehydrate path knows to call DiffViewer.open with
+        // mode/ref. cardMode/cardRef were resolved above for the
+        // dedup check.
+        if (defaultType === 'diff' && (cardMode !== 'unstaged' || cardRef)) {
+          desc = Object.assign({}, desc, {
+            diffMode: cardMode,
+            diffRef: cardRef,
+          });
+        }
         var container = new TabContainer(shell, desc, abs, c.relativePath);
-        if (defaultType === 'diff') {
-          // Synchronous fast path with placeholder edit; fetchSnapshot
-          // below will update it.
+        if (defaultType === 'diff' && cardMode === 'unstaged') {
+          // V1-V5 fast path: placeholder + fetchSnapshot updates with
+          // working-tree state. Only valid for unstaged tabs.
           var placeholder = {
             relativePath: c.relativePath,
             path: '',
@@ -3135,9 +3160,10 @@
           paneEl.appendChild(container.contentEl);
           container.updateToggle();
         } else {
-          // Async factory path (image, html, markdown). Insert into
-          // tabs synchronously so caco.edit dedup works; mark
-          // rehydrating; the factory completes asynchronously.
+          // Async factory path (image, html, markdown, OR V6 staged /
+          // range diff). Insert into tabs synchronously so caco.edit
+          // dedup works; mark rehydrating; the factory completes
+          // asynchronously.
           container.rehydrating = true;
           tabs.set(container.id, container);
           tabsEl.appendChild(container.tabEl);
@@ -3147,7 +3173,10 @@
             var factoryContainer = container;
             var factoryDesc = desc;
             var factoryActive = activeType;
-            desc.open(shell, container, abs, c.relativePath).then(function(v) {
+            var openOpts = (factoryDesc.viewerType === 'diff' && cardMode !== 'unstaged')
+              ? { diffMode: cardMode, ref: cardRef }
+              : undefined;
+            desc.open(shell, container, abs, c.relativePath, openOpts).then(function(v) {
               if (factoryContainer.destroyed) {
                 try { v.destroy(); } catch (_e) { /* ignore */ }
                 return;

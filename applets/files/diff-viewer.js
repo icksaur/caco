@@ -139,14 +139,20 @@
 
   /** Factory: V1.1 routeOpen path. Fetches the edit, constructs,
    *  attaches contentEl to container.contentEl. */
-  DiffViewer.open = async function(shell, container, absPath, relativePath) {
+  DiffViewer.open = async function(shell, container, absPath, relativePath, opts) {
+    opts = opts || {};
     var sid = shell.sessionId;
+    var body = { relativePath: relativePath };
+    if (opts.diffMode && opts.diffMode !== 'unstaged') {
+      body.diffMode = opts.diffMode;
+      if (opts.diffMode === 'range') body.ref = opts.ref || '';
+    }
     var res = await fetch(
       '/api/sessions/' + encodeURIComponent(sid) + '/file-edits/open',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ relativePath: relativePath }),
+        body: JSON.stringify(body),
       }
     );
     if (!res.ok) throw new Error('open failed: HTTP ' + res.status);

@@ -148,8 +148,19 @@
     this._saveInFlight = true;
     this.shell.echoState();   // surfaces busy state via isDirty + activeMode
     try {
+      // The server's PUT /api/files/*path route treats the captured
+      // path as relative unless it begins with `/`. Express's
+      // wildcard collapses the empty segment between `/files/` and
+      // an absolute path's leading `/`, so we have to ensure the
+      // URL keeps both slashes (`/api/files//home/...`). Without
+      // this, an absolute path would land at programCwd-relative
+      // and writeFile would mkdir a nested ghost tree.
+      var encodedAbs = this.absPath.split('/').map(encodeURIComponent).join('/');
+      var url = '/api/files'
+        + (this.absPath.charAt(0) === '/' ? '/' : '')
+        + encodedAbs;
       var res = await fetch(
-        '/api/files' + this.absPath.split('/').map(encodeURIComponent).join('/'),
+        url,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'text/plain' },

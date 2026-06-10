@@ -13,6 +13,7 @@
 import { Router, Request, Response } from 'express';
 import express from 'express';
 import { readdir, readFile, stat, writeFile, mkdir, access } from 'fs/promises';
+import { existsSync } from 'fs';
 import { join, dirname, resolve, extname, relative, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
@@ -456,11 +457,23 @@ router.put('/files/*path', express.text({ type: '*/*', limit: '10mb' }), async (
     const resolvedPath = isAbsolute(requestedPath)
       ? resolve(requestedPath)
       : resolve(programCwd, requestedPath);
-    
-    // Ensure parent directory exists
+
+    // Refuse to mkdir new directories. The previous `mkdir(...,
+    // { recursive: true })` silently created arbitrarily deep
+    // ghost trees when a client misbuilt the URL (e.g. an absolute
+    // path that lost its leading `/` became relative and resolved
+    // under programCwd, producing /home/x/repo/home/x/repo/...).
+    // Editing existing files is the expected workflow; new-file
+    // creation in a new directory should be an explicit action,
+    // not a typo's side-effect.
     const parentDir = dirname(resolvedPath);
-    await mkdir(parentDir, { recursive: true });
-    
+    if (!existsSync(parentDir)) {
+      return apiError.badRequest(
+        res,
+        `Parent directory does not exist: ${parentDir}. Create the directory first or use an absolute path.`,
+      );
+    }
+
     await writeFile(resolvedPath, content, 'utf-8');
     res.json({ ok: true, path: resolvedPath, size: content.length });
   } catch (error) {

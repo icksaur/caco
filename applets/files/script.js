@@ -1446,6 +1446,14 @@
     var isNew = false;
     var contentChanged = false;
     if (!container) {
+      // V5 fix: routeOpen guards itself with pendingOpenIds and only
+      // calls tabs.set() AFTER awaiting the viewer factory. If the
+      // poll fires between routeOpen's begin and its tabs.set, we'd
+      // create a second container here for the same relPath — leaving
+      // an orphan tab in the strip. Skip; routeOpen will produce
+      // (or already has produced) the tab. The next caco.edit will
+      // find it via findContainerByRelPath and update normally.
+      if (pendingOpenIds.has(relPath)) return;
       if (tabs.size >= TAB_CAP) evictOldestNonActive();
       var abs = absPathOf(relPath);
       var desc = defaultViewer(abs, relPath);
@@ -1536,6 +1544,7 @@
       }
     }
     updateEmptyState();
+    if (isNew) reconcileTabDom();
     schedulePersist();
   }
 
@@ -2310,6 +2319,7 @@
     updateFollowButton();
     setActiveTab(container.id);
     updateEmptyState();
+    reconcileTabDom();
     _pushRecentFile(abs);
   }
 

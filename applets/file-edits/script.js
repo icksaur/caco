@@ -92,9 +92,11 @@
   var DiffViewer = window.__filesApplet && window.__filesApplet.DiffViewer;
   var MarkdownViewer = window.__filesApplet && window.__filesApplet.MarkdownViewer;
   var ImageViewer = window.__filesApplet && window.__filesApplet.ImageViewer;
+  var HtmlViewer = window.__filesApplet && window.__filesApplet.HtmlViewer;
   if (!DiffViewer) console.error('[files-applet] diff-viewer.js did not load');
   if (!MarkdownViewer) console.error('[files-applet] markdown-viewer.js did not load');
   if (!ImageViewer) console.warn('[files-applet] image-viewer.js did not load');
+  if (!HtmlViewer) console.warn('[files-applet] html-viewer.js did not load');
 
   function basename(p) {
     var i = p.lastIndexOf('/');
@@ -1657,6 +1659,15 @@
         return /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(rel || '');
       },
       open: function(s, c, a, r) { return ImageViewer.open(s, c, a, r); },
+    });
+  }
+  if (HtmlViewer) {
+    registerViewer({
+      viewerType: 'html',
+      label: 'HTML',
+      canHandle: function(_a, rel) { return /\.html?$/i.test(rel || ''); },
+      isDefault: function(_a, rel) { return /\.html?$/i.test(rel || ''); },
+      open: function(s, c, a, r) { return HtmlViewer.open(s, c, a, r); },
     });
   }
   if (DiffViewer) {

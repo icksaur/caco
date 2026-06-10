@@ -116,8 +116,8 @@
       this._editEl.value = this._diskText;
       this._diskChangedWhileEditing = false;
       this._diskIndEl.hidden = true;
-      if (this.container && typeof this.container._clearSaveError === 'function') {
-        this.container._clearSaveError();
+      if (this.container && typeof this.container._clearChromeError === 'function') {
+        this.container._clearChromeError();
       }
     }
     this.mode = modeId;
@@ -255,6 +255,29 @@
       size: this.bytes,
       mode: this.mode,
     };
+  };
+
+  /** V3.x.1: declare chrome buttons. Returns the same cached
+   *  array reference across calls (spec §4.1.A cache invariant).
+   *  The visible/disabled predicates re-evaluate on each call.
+   *  The error label "Save" prefixes any error rendered by the
+   *  shell, so save() throws messages without the prefix. */
+  MarkdownViewer.prototype.getChromeButtons = function() {
+    var self = this;
+    if (!this._chromeButtonsCache) {
+      this._chromeButtonsCache = [
+        {
+          id: 'save',
+          label: 'Save',
+          title: 'Save (Ctrl+S)',
+          className: 'primary',
+          visible: function() { return self.isDirty(); },
+          disabled: function() { return self._saveInFlight; },
+          onClick: function() { return self.save(); },
+        },
+      ];
+    }
+    return this._chromeButtonsCache;
   };
 
   MarkdownViewer.prototype.activate = function() {

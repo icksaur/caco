@@ -146,6 +146,18 @@
   }
 
   // ── Shell object — see docs/files-applet-v1.1.md §4.0.3 + §4.6 ───────
+  /** V3.x.2 eviction config. Read from localStorage at init; null
+   *  means disabled. See docs/files-applet-v3.x.md §4.2.A. */
+  var _evictionTimeoutMs = null;
+  try {
+    var _evictRaw = window.localStorage && window.localStorage.getItem(
+      'caco:files-applet:inactiveViewerTimeoutMs');
+    if (_evictRaw != null) {
+      var _evictParsed = parseInt(_evictRaw, 10);
+      if (!isNaN(_evictParsed) && _evictParsed > 0) _evictionTimeoutMs = _evictParsed;
+    }
+  } catch (_e) { /* localStorage may be blocked */ }
+
   var shell = {
     api: window.appletAPI,
     paneEl: paneEl,
@@ -157,6 +169,8 @@
     closeTab: function(id) { closeTab(id); },
     setActiveTab: function(id) { setActiveTab(id); },
     echoState: function() { echoState(); },
+    // V3.x.2: opt-in inactive-viewer eviction. Default null (off).
+    getEvictionTimeoutMs: function() { return _evictionTimeoutMs; },
     // Element-keyed programmatic-scroll API (V1.1 — scrolling moved
     // from .fe-pane to per-viewer contentEls):
     programmaticScrollTo: programmaticScrollTo,
@@ -185,6 +199,8 @@
     this.viewers = new Map();
     this.switching = false;
     this.destroyed = false;
+    /** V3.x.2: per-viewerType eviction setTimeout ids. */
+    this._evictionTimers = new Map();
 
     var self = this;
 
@@ -267,32 +283,22 @@
     pane.appendChild(modeBtn);
     this.modeBtn = modeBtn;
 
-    // V2.d: Save button. Shown when active viewer.isDirty() returns
-    // true. Stacked below the mode toggle.
-    var saveBtn = document.createElement('button');
-    saveBtn.className = 'files-save-btn';
-    saveBtn.type = 'button';
-    saveBtn.textContent = 'Save';
-    saveBtn.hidden = true;
-    saveBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      var v = self.viewers.get(self.activeViewerType);
-      if (!v || typeof v.save !== 'function') return;
-      saveBtn.disabled = true;
-      Promise.resolve(v.save()).then(function() {
-        self._clearSaveError();
-        self.updateSaveButton();
-      }, function(err) {
-        self._showSaveError((err && err.message) || String(err));
-        self.updateSaveButton();
-      }).then(function() { saveBtn.disabled = false; });
-    });
-    pane.appendChild(saveBtn);
-    this.saveBtn = saveBtn;
+    // V3.x.1: chrome buttons container. Anchor for per-viewer
+    // buttons declared via getChromeButtons(). Position is set
+    // per-button at render time so the count + the mode-toggle
+    // visibility together determine the stack offset. See spec
+    // §4.1.A / §4.1.C.
+    var chromeEl = document.createElement('div');
+    chromeEl.className = 'files-chrome-buttons';
+    pane.appendChild(chromeEl);
+    this.chromeButtonsEl = chromeEl;
+    /** Map<id, { el: HTMLButtonElement, desc: ChromeButton }>.
+     *  Reconciled by updateChromeButtons. */
+    this._chromeButtonsState = new Map();
 
-    // V2.d: per-tab error surface (save failures, etc.). Hidden
-    // until populated; auto-cleared on next successful save or
-    // mode change.
+    // V2.d: per-tab error surface (chrome-button failures, etc.).
+    // Hidden until populated; auto-cleared on next successful
+    // chrome-button action or mode change.
     var errEl = document.createElement('div');
     errEl.className = 'files-tab-error';
     errEl.hidden = true;
@@ -336,6 +342,13 @@
     if (this.destroyed) return;
     this.destroyed = true;
     var self = this;
+    // V3.x.2: cancel all pending eviction timers before tearing
+    // down viewers (eviction would no-op on a destroyed container
+    // but explicit clear keeps the timer table tidy).
+    if (this._evictionTimers) {
+      this._evictionTimers.forEach(function(id) { clearTimeout(id); });
+      this._evictionTimers.clear();
+    }
     this.viewers.forEach(function(v) {
       try { v.destroy(); } catch (err) { console.warn('[files-applet] viewer destroy:', err); }
     });
@@ -396,7 +409,7 @@
     if (!modes || modes.length < 2) {
       this.modeBtn.hidden = true;
       this.contentEl.classList.remove('has-modes');
-      this.updateSaveButton();
+      this.updateChromeButtons();
       return;
     }
     this.contentEl.classList.add('has-modes');
@@ -406,31 +419,175 @@
     for (var i = 0; i < modes.length; i++) {
       if (modes[i].id !== active) { other = modes[i]; break; }
     }
-    if (!other) { this.modeBtn.hidden = true; this.contentEl.classList.remove('has-modes'); return; }
+    if (!other) {
+      this.modeBtn.hidden = true;
+      this.contentEl.classList.remove('has-modes');
+      this.updateChromeButtons();
+      return;
+    }
     this.modeBtn.textContent = '→ ' + other.label;
     this.modeBtn.dataset.target = other.id;
-    this.updateSaveButton();
+    // Tail-call (spec §4.1.A): chrome buttons read post-update
+    // mode-toggle state when computing their base offset.
+    this.updateChromeButtons();
   };
 
-  /** V2.d: show/hide Save button based on active viewer.isDirty(). */
-  TabContainer.prototype.updateSaveButton = function() {
-    if (!this.saveBtn || !this.contentEl) return;
+  /** V3.x.1: reconcile chrome buttons against active viewer's
+   *  getChromeButtons(). See spec §4.1.B.
+   *  - Stable id identifies each button across calls.
+   *  - visible/disabled predicates re-evaluated each tick.
+   *  - Position computed per visible button: base offset
+   *    depends on mode-toggle visibility (40 vs 72), each
+   *    visible button advances by 40px (32 button + 8 gap). */
+  TabContainer.prototype.updateChromeButtons = function() {
+    if (!this.chromeButtonsEl || !this.contentEl) return;
     var v = this.viewers.get(this.activeViewerType);
-    var dirty = !!(v && typeof v.isDirty === 'function' && v.isDirty()
-                   && typeof v.save === 'function');
-    this.saveBtn.hidden = !dirty;
+    var desired = (v && typeof v.getChromeButtons === 'function') ? v.getChromeButtons() : [];
+    if (!Array.isArray(desired)) desired = [];
+
+    var self = this;
+    var seen = new Set();
+    var dups = new Set();
+
+    desired.forEach(function(desc) {
+      if (!desc || !desc.id) return;
+      if (seen.has(desc.id)) {
+        if (!dups.has(desc.id)) {
+          console.warn('[files-applet] duplicate chrome-button id:', desc.id);
+          dups.add(desc.id);
+        }
+        return;
+      }
+      seen.add(desc.id);
+
+      var entry = self._chromeButtonsState.get(desc.id);
+      var btn;
+      if (entry) {
+        btn = entry.el;
+        entry.desc = desc;
+      } else {
+        btn = document.createElement('button');
+        btn.type = 'button';
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var current = self._chromeButtonsState.get(desc.id);
+          if (!current) return;
+          var d = current.desc;
+          var label = d.label;
+          btn.disabled = true;
+          Promise.resolve().then(function() { return d.onClick(); })
+            .then(function() {
+              self._clearChromeError();
+            }, function(err) {
+              var msg = (err && err.message) ? err.message : String(err);
+              self._showChromeError(label + ': ' + msg);
+            })
+            .then(function() {
+              var cur2 = self._chromeButtonsState.get(desc.id);
+              var d2 = cur2 ? cur2.desc : d;
+              if (typeof d2.disabled === 'function') btn.disabled = !!d2.disabled();
+              else btn.disabled = false;
+            });
+        });
+        self.chromeButtonsEl.appendChild(btn);
+        entry = { el: btn, desc: desc };
+        self._chromeButtonsState.set(desc.id, entry);
+      }
+      // Update mutable visual state.
+      var cls = 'files-chrome-btn';
+      if (desc.className) cls += ' ' + desc.className;
+      btn.className = cls;
+      btn.textContent = desc.label;
+      if (desc.title) btn.title = desc.title; else btn.removeAttribute('title');
+      var visible = (typeof desc.visible === 'function') ? !!desc.visible() : true;
+      btn.hidden = !visible;
+      // Update disabled state from the predicate. Viewers MUST keep
+      // their disabled predicate accurate during async operations
+      // (e.g. MarkdownViewer flips _saveInFlight true before the
+      // first await, so updateChromeButtons during the await sees
+      // disabled=true). The click handler also re-applies after
+      // its Promise settles for the case where there is no
+      // accurate predicate.
+      if (typeof desc.disabled === 'function') btn.disabled = !!desc.disabled();
+    });
+
+    // Remove orphan state entries (buttons gone from desired).
+    var toRemove = [];
+    self._chromeButtonsState.forEach(function(entry, id) {
+      if (!seen.has(id)) toRemove.push(id);
+    });
+    toRemove.forEach(function(id) {
+      var entry = self._chromeButtonsState.get(id);
+      if (entry && entry.el && entry.el.parentNode) {
+        entry.el.parentNode.removeChild(entry.el);
+      }
+      self._chromeButtonsState.delete(id);
+    });
+
+    // Compute base offset from current mode-toggle visibility
+    // (spec §4.1.A trigger ordering: tail-call from updateModeToggle
+    // means modeBtn.hidden reflects the new state).
+    var base = (this.modeBtn && !this.modeBtn.hidden) ? 72 : 40;
+    var idx = 0;
+    // Layout VISIBLE buttons in desired order.
+    desired.forEach(function(desc) {
+      if (!desc || !desc.id) return;
+      var entry = self._chromeButtonsState.get(desc.id);
+      if (!entry || entry.el.hidden) return;
+      entry.el.style.top = (base + idx * 40) + 'px';
+      idx += 1;
+    });
+
+    // Keep the is-dirty class on contentEl for back-compat with
+    // existing CSS (V2.d). It tracks the active viewer's isDirty.
+    var dirty = !!(v && typeof v.isDirty === 'function' && v.isDirty());
     this.contentEl.classList.toggle('is-dirty', dirty);
   };
 
-  TabContainer.prototype._showSaveError = function(msg) {
+  TabContainer.prototype._showChromeError = function(msg) {
     if (!this.errEl) return;
-    this.errEl.textContent = 'Save failed: ' + msg;
+    this.errEl.textContent = msg;
     this.errEl.hidden = false;
   };
-  TabContainer.prototype._clearSaveError = function() {
+  TabContainer.prototype._clearChromeError = function() {
     if (!this.errEl) return;
     this.errEl.hidden = true;
     this.errEl.textContent = '';
+  };
+
+  /** V3.x.2: schedule eviction for an inactive viewer.
+   *  No-op when shell config is null/disabled. The next
+   *  switchViewer is the only arming entrypoint (spec §4.2.A). */
+  TabContainer.prototype._scheduleEviction = function(viewerType) {
+    if (this.destroyed) return;
+    var ms = this.shell.getEvictionTimeoutMs && this.shell.getEvictionTimeoutMs();
+    if (!ms) return;
+    this._cancelEviction(viewerType);
+    var self = this;
+    var id = setTimeout(function() { self._evictViewer(viewerType); }, ms);
+    this._evictionTimers.set(viewerType, id);
+  };
+
+  TabContainer.prototype._cancelEviction = function(viewerType) {
+    var id = this._evictionTimers.get(viewerType);
+    if (id != null) clearTimeout(id);
+    this._evictionTimers.delete(viewerType);
+  };
+
+  TabContainer.prototype._evictViewer = function(viewerType) {
+    if (this.destroyed) return;
+    if (viewerType === this.activeViewerType) return;
+    if (!this.viewers.has(viewerType)) return;
+    var v = this.viewers.get(viewerType);
+    if (v && typeof v.isDirty === 'function' && v.isDirty()) {
+      // Dirty veto (spec §4.2.A policy A): do NOT evict, do NOT
+      // re-arm. The next switchViewer re-arms naturally.
+      return;
+    }
+    try { v.destroy(); } catch (e) { console.warn('[files-applet] eviction destroy:', e); }
+    this.viewers.delete(viewerType);
+    this._evictionTimers.delete(viewerType);
+    this.shell.echoState();
   };
 
   /** Switch to a different viewer type. Lazy-constructs the viewer
@@ -470,6 +627,14 @@
       }
       this.viewers.get(viewerType).activate();
       this.activeViewerType = viewerType;
+      // V3.x.2 eviction arming: the incoming viewer is now active
+      // (cancel any pending eviction for it); the outgoing viewer
+      // becomes a candidate (schedule eviction). switchViewer is
+      // the only arming entrypoint (spec §4.2.A).
+      this._cancelEviction(viewerType);
+      if (prior && priorType !== viewerType) {
+        this._scheduleEviction(priorType);
+      }
       this.updateToggle();
       this.updateModeToggle();
       this.shell.echoState();
@@ -562,8 +727,8 @@
       // before pushing state, so the button visibility tracks
       // isDirty changes (textarea input fires echoState).
       var active = activeTabId ? tabs.get(activeTabId) : null;
-      if (active && typeof active.updateSaveButton === 'function') {
-        active.updateSaveButton();
+      if (active && typeof active.updateChromeButtons === 'function') {
+        active.updateChromeButtons();
       }
       if (active && typeof active.updateModeToggle === 'function') {
         active.updateModeToggle();
@@ -1173,7 +1338,7 @@
       next.activate();
       // V2.d: re-evaluate mode/save buttons for the new active viewer.
       if (typeof next.updateModeToggle === 'function') next.updateModeToggle();
-      if (typeof next.updateSaveButton === 'function') next.updateSaveButton();
+      if (typeof next.updateChromeButtons === 'function') next.updateChromeButtons();
       try {
         next.tabEl.scrollIntoView({ inline: 'nearest', block: 'nearest' });
       } catch (_) { /* old browsers */ }

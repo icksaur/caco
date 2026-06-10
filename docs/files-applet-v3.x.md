@@ -82,13 +82,33 @@ interface ViewerInstance {
 }
 ```
 
+**Cache invariant** (resolves review I2): `getChromeButtons()`
+MUST return the same array reference across calls within a
+viewer instance. To change set membership (button
+appears/disappears), declare the button in the array and gate
+it via the `visible` predicate; do NOT mutate the array or
+return a new one. The shell's reconciliation uses `id` for
+identity but assumes array length is stable as a fast-path;
+per-tick reallocation is wasted work. If a future viewer truly
+needs structural change, a `invalidateChromeButtons()` callback
+on the contract is a V4 extension.
+
 The shell renders chrome buttons stacked below the mode toggle,
 in the order returned by `getChromeButtons()`. Stacking math:
 
 - Viewer toggle: `top: 8px` (V1.1)
 - Mode toggle: `top: 40px` (V2.d, when present)
-- Chrome buttons: stacked starting at `top: 72px` (or `top: 40px`
-  when no mode toggle), each button 32px tall with 8px gap.
+- Chrome buttons: stacked starting at `top: 72px` when the
+  mode toggle is visible, or `top: 40px` when no mode toggle is
+  present. Each button is 32px tall with 8px gap below; the
+  shell sets `style.top` per-button at render time.
+
+**Trigger ordering** (resolves review I1): `updateChromeButtons`
+MUST be tail-called from `updateModeToggle` after the mode
+toggle's `hidden` attribute is set, so the chrome buttons read
+the post-update mode-toggle state when computing their base
+offset. Without this, the first chrome button after a mode-
+count change is off-by-32px for one frame.
 
 #### 4.1.B V2.d Save migration
 
@@ -122,6 +142,19 @@ Shell removes:
 - `updateSaveButton` calls from setActiveTab + echoState
   microtask + saveBtn click handler.
 
+Shell renames + extends (resolves review I3 — "Save failed:"
+is baked into a now-generic surface):
+- `TabContainer._showSaveError(msg)` → `_showChromeError(msg)`.
+- `TabContainer._clearSaveError()` → `_clearChromeError()`.
+- The rendered prefix changes from `'Save failed: ' + msg` to
+  `<button-label> + ': ' + msg`. The shell knows which button
+  produced the error (the click handler captured the ChromeButton
+  reference) and uses that label. MarkdownViewer's call site in
+  `setMode` ("clear save error on discard") becomes
+  `_clearChromeError`. The migrated Save button's `onClick`
+  throws `new Error(message)` with whatever message; the shell
+  composes the surface text from button label + the message.
+
 Shell adds:
 - `TabContainer.chromeButtonsEl` (a div containing N dynamically-
   managed buttons).
@@ -131,8 +164,10 @@ Shell adds:
     remove gone ones, update label/title/className/disabled/
     visible state.
   - Re-evaluates visible+disabled predicates on each call.
-  - Called from setActiveTab + echoState microtask + after
-    switchViewer (same trigger surface as updateSaveButton was).
+  - Computes per-button `style.top` based on the post-update
+    mode-toggle visibility (see §4.1.A trigger ordering).
+  - Called from setActiveTab + echoState microtask + tail-call
+    from updateModeToggle.
 
 The per-tab error surface (`TabContainer.errEl`) stays. The
 ChromeButton's `onClick` Promise rejection surfaces there
@@ -215,16 +250,24 @@ if (prior && prior !== this.viewers.get(viewerType)) {
   became active again; should not happen since switchViewer
   reschedules, but defensive).
 - If `!this.viewers.has(viewerType)`: already gone.
-- If the viewer reports `isDirty() === true` (V2.d): DO NOT
-  evict — the editor has unsaved content. Re-schedule for
-  another timeout.
+- If the viewer reports `isDirty() === true` (V2.d): SKIP
+  (do NOT evict — the editor has unsaved content). **Do not
+  re-arm the timer** (resolves review I4 — policy A): the next
+  `switchViewer` is the only entry point that arms eviction,
+  so a dirty viewer that the user never re-visits is never
+  evicted. Acceptable — the user has unsaved changes and we
+  refuse to discard them.
 - Else: `viewer.destroy()`, `this.viewers.delete(viewerType)`,
   `shell.echoState()`.
 
-`switchViewer(targetType)` for a target that was previously
-evicted: the viewer is not in `viewers` → factory runs again →
-behaves like first-time activation. No code change beyond what
-V2.d already does for the not-yet-constructed case.
+`switchViewer(targetType)`:
+- Cancel any eviction timer for `targetType` (it's becoming
+  active; do not evict).
+- Schedule eviction for the OUTGOING `priorType` after the
+  switch resolves.
+- Both timer operations live in `_scheduleEviction(viewerType)`
+  / `_cancelEviction(viewerType)`; switchViewer is the only
+  arming entrypoint.
 
 Eviction timers are cleared in TabContainer.destroy (alongside
 the viewers iteration).
@@ -309,6 +352,7 @@ The dirty viewer is preserved. Once they toggle back and save
 | Eviction enabled + user toggles rapidly between viewers — thrashing reload cost. | The eviction timer is reset on activation. Rapid toggles within the timeout never evict. Default-off ships without this risk. |
 | Eviction destroys an in-flight save's viewer mid-PUT. | isDirty veto: a viewer with a save in flight has _saveInFlight=true which sets _editorText !== _diskText (the editor hasn't won yet) → isDirty returns true → eviction skipped. |
 | Two chrome buttons with the same id — DOM gets confused. | Shell logs a warning and uses the first one. Document in the contract. |
+| Eviction destroys the viewer's watcher; reactivation re-acquires it. Server watcher-lease churn scales with eviction rate. | Default-off ships without churn. When enabled, prefer `inactiveViewerTimeoutMs >= 60_000` in production. Document in §4.2.A that values below ~30s are smoke-test only. |
 
 ### 7.6 Open questions (answered)
 

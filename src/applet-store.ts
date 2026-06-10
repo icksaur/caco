@@ -225,6 +225,32 @@ export async function loadApplet(
     } catch {
       // No JS file
     }
+
+    // Multi-file applets: sibling *.js files (other than script.js)
+    // in the applet's root dir are concatenated BEFORE script.js so
+    // shared classes / helpers are available to it. Loaded in
+    // alphabetical order for determinism. See docs/files-applet-v1.md
+    // §4.0.1.
+    try {
+      const entries = await readdir(paths.root);
+      const extraJs: string[] = [];
+      for (const name of entries.sort()) {
+        if (!name.endsWith('.js') || name === 'script.js') continue;
+        try {
+          const content = await readFile(join(paths.root, name), 'utf-8');
+          extraJs.push(`// ─── ${name} ──────────────────────────────────────\n${content}`);
+        } catch {
+          // ignore individual file read failures
+        }
+      }
+      if (extraJs.length > 0) {
+        const prefix = extraJs.join('\n\n');
+        js = js ? `${prefix}\n\n// ─── script.js ─────────────────────────────────────\n${js}` : prefix;
+      }
+    } catch {
+      // Directory read failure is non-fatal; the applet just won't
+      // get its sibling .js files.
+    }
     
     try {
       css = await readFile(paths.css, 'utf-8');

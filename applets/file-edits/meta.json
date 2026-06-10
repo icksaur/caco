@@ -1,11 +1,11 @@
 {
   "slug": "file-edits",
   "name": "File Edits",
-  "description": "Live view of files changed in the working tree. Stacked collapsible diff cards with click-to-expand and X-to-dismiss. Successor to git-status; v1 read-only.",
+  "description": "Tabbed file viewer with multiple tab types (diff, markdown). V1 of the files-applet generalization (docs/files-applet-v1.md). Successor to file-edits / markdown-viewer.",
   "params": {},
   "createdAt": "2026-05-29T22:00:00.000Z",
-  "updatedAt": "2026-05-29T22:00:00.000Z",
+  "updatedAt": "2026-06-09T22:00:00.000Z",
   "agentUsage": {
-    "purpose": "Show the user a live, collapsible diff view of every file currently changed in the git working tree. Updates in real time as the agent edits, as shell tools modify files, and as external editors save."
+    "purpose": "Tabbed file viewer. Diff tabs (the original file-edits behavior) auto-open on agent edits and show live diff cards. Markdown tabs render .md files with live re-render on external edit. Open files via the + button; the chevron (▾) offers a type override."
   }
 }

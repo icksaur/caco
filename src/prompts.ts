@@ -17,7 +17,7 @@ import type { SystemMessage } from './types.js';
  */
 async function buildAppletSection(): Promise<string> {
   try {
-    const applets = await listApplets();
+    const applets = (await listApplets()).filter(a => !a.deprecated);
     if (applets.length === 0) {
       return 'No applets installed.';
     }
@@ -71,7 +71,7 @@ Use embed_media when users want to watch or listen to media inline.
 ## Applets
 Interactive panels. Provide markdown links to open for users.
 ${appletPrompt}
-Examples: \`[View file](/?applet=file-edits&openPath=/file)\` | \`[Git status](/?applet=git-status&path=/repo)\`
+Examples: \`[View file](/?applet=files&openPath=/file)\` | \`[Git status](/?applet=git-status&path=/repo)\`
 Call \`caco_applet_usage\` for all applet URL patterns. Call \`caco_applet_howto\` to create new applets.
 
 **Context awareness**: The user may be viewing an applet while chatting. Call \`get_applet_state\` on your first turn to understand what they're looking at — it returns the active applet slug, URL params, and any state the applet has pushed.

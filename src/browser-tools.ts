@@ -174,7 +174,7 @@ export function createBrowserTools(sessionRef: SessionIdRef | undefined) {
   });
 
   const screenshot = defineTool('caco_browser_screenshot', {
-    description: 'Capture a PNG screenshot of the working tab. Writes to <STORAGE_ROOT>/browser-screenshots/<sessionId>-<unix-ms>.png and returns the absolute path. Wrap the path in an image-viewer applet link in your chat reply so the operator can see it.',
+    description: 'Capture a PNG screenshot of the working tab. Writes to <STORAGE_ROOT>/browser-screenshots/<sessionId>-<unix-ms>.png and returns the absolute path. Wrap the path in a files applet link (?applet=files&openPath=<path>) in your chat reply so the operator can see it.',
     parameters: z.object({
       fullPage: z.boolean().optional().describe('Default false (viewport only). Set true to capture the full scrollable page.'),
       clipSelector: z.string().optional().describe('CSS selector; clip to this element\'s bounding box.'),

@@ -1,3 +1,24 @@
+(function() {
+  // V5: deprecated applet. When a session exists, redirect to
+  // the unified "files" applet. Otherwise fall through to the
+  // standalone behavior so direct deep-link URLs without a
+  // session still render. See docs/files-applet-v5.md §4.2.
+  var api = window.appletAPI;
+  if (api && typeof api.getSessionId === 'function' && api.getSessionId()) {
+    var p = new URLSearchParams(window.location.search);
+    var target = new URLSearchParams(p);
+    target.set('applet', 'files');
+    var srcPath = p.get("path") || "";
+    target.delete("path");
+    if (srcPath) target.set("openPath", srcPath);
+    var url = '?' + target.toString();
+    if (window.navigation && typeof window.navigation.navigate === 'function') {
+      try { window.navigation.navigate(url); return; } catch (_e) {}
+    }
+    window.location.href = '/' + url;
+    return;
+  }
+
 var currentPath = '';
 var frame = document.getElementById('hvFrame');
 var pathEl = document.getElementById('filePath');
@@ -42,3 +63,4 @@ window.appletAPI.onUrlParamsChange(function(params) {
   var newPath = params.path || '';
   if (newPath !== currentPath) loadFile(newPath, false);
 });
+})();

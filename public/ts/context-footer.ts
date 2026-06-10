@@ -120,7 +120,7 @@ function renderDescription(sessionId: string, sessionName?: string, hasGit = fal
     appletLinks.push(`<a href="/?session=${encodedSession}&applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);
   }
   if (encodedCwd) {
-    appletLinks.push(`<a href="/?session=${encodedSession}&applet=file-finder&root=${encodedCwd}" class="footer-applet-link">files</a>`);
+    appletLinks.push(`<a href="/?session=${encodedSession}&applet=files&openFinder=1&openFinderRoot=${encodedCwd}" class="footer-applet-link">files</a>`);
   }
   
   descEl.innerHTML = descParts.join('') + (appletLinks.length ? ' ' + appletLinks.join(' ') : '');

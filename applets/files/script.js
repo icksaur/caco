@@ -1970,6 +1970,13 @@
   var _pickerSource = null;
   var _pickerPriorFocus = null;
   var _pickerTypeFilter = null;
+  /** V5: one-shot directory root override for the picker. Set by
+   *  openPicker({ rootOverride }); cleared by closePicker. When
+   *  set, runPickerFetch uses it in place of cachedCwd, and
+   *  _pickerAbsPathOf resolves picked rels against it. Enables
+   *  ?applet=files&openFinder=1&openFinderRoot=ABS for new-chat
+   *  Ctrl+P and the file-finder stub redirect. */
+  var _pickerRootOverride = null;
 
   // V4: per-type icons + hover copy-path. Deliberate verbatim copy
   // of applets/file-finder/script.js fileIcons (parity, not shared
@@ -2010,8 +2017,13 @@
   }
 
   function openPicker(opts) {
-    if (!sessionId || pickerOpen) return;
     opts = opts || {};
+    if ((!sessionId && !opts.rootOverride) || pickerOpen) return;
+    if (typeof opts.rootOverride === 'string' && opts.rootOverride) {
+      _pickerRootOverride = opts.rootOverride;
+    } else {
+      _pickerRootOverride = null;
+    }
     _pickerSource = opts.source || 'button';
     if (_pickerSource === 'shortcut') {
       _pickerPriorFocus = document.activeElement;
@@ -2053,17 +2065,19 @@
     _pickerPriorFocus = null;
     _pickerSource = null;
     _pickerTypeFilter = null;
+    _pickerRootOverride = null;
   }
 
   async function runPickerFetch(q) {
-    if (!sessionId) return;
+    if (!sessionId && !_pickerRootOverride) return;
     // V3.y.2: parse type-filter prefix; fetch with the post-filter
     // query string so the server's substring match is unaffected.
     var parsed = _parseTypeFilter(q);
     _pickerTypeFilter = parsed.filter;
     var fetchQ = parsed.rest;
     var token = ++pickerFetchToken;
-    var url = '/api/project-files?cwd=' + encodeURIComponent(cachedCwd || '');
+    var rootForFetch = _pickerRootOverride || cachedCwd || '';
+    var url = '/api/project-files?cwd=' + encodeURIComponent(rootForFetch);
     if (fetchQ) url += '&q=' + encodeURIComponent(fetchQ);
     try {
       var res = await fetch(url);
@@ -2182,7 +2196,7 @@
       copy.className = 'fe-picker-copy';
       copy.textContent = '📋';
       copy.title = 'Copy absolute path';
-      copy.dataset.path = absPathOf(p);
+      copy.dataset.path = _pickerAbsPathOf(p);
       li.appendChild(copy);
       pickerList.appendChild(li);
     }
@@ -2220,11 +2234,24 @@
     return trimmed + sep + relativePath;
   }
 
+  /** V5: resolve a picker-relative path against _pickerRootOverride
+   *  when set, else fall back to absPathOf (which uses cachedCwd).
+   *  Used by routeOpen and the picker copy button so a no-session
+   *  ?openFinderRoot=ABS picker opens / copies the correct file. */
+  function _pickerAbsPathOf(relativePath) {
+    if (_pickerRootOverride) {
+      var trimmed = _pickerRootOverride.replace(/[\/\\]+$/, '');
+      var sep = trimmed.indexOf('\\') >= 0 && trimmed.indexOf('/') < 0 ? '\\' : '/';
+      return trimmed + sep + relativePath;
+    }
+    return absPathOf(relativePath);
+  }
+
   /** Route a picked relative path: build a TabContainer with the
    *  file's default viewer, attach DOM, activate. See spec
    *  §4.0.B / §4.1. */
   async function routeOpen(relativePath) {
-    var abs = absPathOf(relativePath);
+    var abs = _pickerAbsPathOf(relativePath);
     // If a container already exists for this relPath, just activate.
     var existing = findContainerByRelPath(relativePath);
     if (existing) {
@@ -3074,11 +3101,19 @@
         if (params.openFinder) {
           // V3.y.2: Ctrl+P-triggered finder open. Picker function
           // is defined later in this IIFE; check before calling.
+          // V5: openFinderRoot (optional) overrides cachedCwd for
+          // the picker; supports new-chat and file-finder stub.
           if (typeof openPicker === 'function') {
-            openPicker({ source: 'shortcut' });
+            var rootOverride = params.openFinderRoot
+              ? String(params.openFinderRoot)
+              : undefined;
+            openPicker({ source: 'shortcut', rootOverride: rootOverride });
           }
           if (typeof window.appletAPI.navigateAppletUrlParam === 'function') {
             window.appletAPI.navigateAppletUrlParam('openFinder', '');
+            if (params.openFinderRoot) {
+              window.appletAPI.navigateAppletUrlParam('openFinderRoot', '');
+            }
           }
         }
       });

@@ -233,7 +233,9 @@ router.get('/applets', async (_req: Request, res: Response) => {
         description: a.description || null,
         params: a.params || {},
         updatedAt: a.updatedAt,
-        paths: a.paths
+        paths: a.paths,
+        deprecated: a.deprecated || false,
+        replacedBy: a.replacedBy || null
       }))
     });
   } catch (error) {

@@ -743,6 +743,8 @@ async function listSavedApplets(): Promise<Array<{
   name: string;
   description: string | null;
   updatedAt: string;
+  deprecated?: boolean;
+  replacedBy?: string | null;
 }>> {
   const response = await fetch('/api/applets');
   if (!response.ok) {

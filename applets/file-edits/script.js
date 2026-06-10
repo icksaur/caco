@@ -1882,6 +1882,16 @@
       }
     });
     pickerList.addEventListener('mousedown', function(e) {
+      // V4: copy-button branch FIRST so the click does not advance
+      // selection, close the picker, or be eaten by the disabled
+      // early-return on (open) rows. See spec §5.3 / §6.6.
+      var copyEl = e.target.closest('.fe-picker-copy');
+      if (copyEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        void _pickerCopyPath(copyEl.dataset.path || '', copyEl);
+        return;
+      }
       var target = e.target.closest('.fe-picker-item');
       if (!target) return;
       e.preventDefault();
@@ -1960,6 +1970,44 @@
   var _pickerSource = null;
   var _pickerPriorFocus = null;
   var _pickerTypeFilter = null;
+
+  // V4: per-type icons + hover copy-path. Deliberate verbatim copy
+  // of applets/file-finder/script.js fileIcons (parity, not shared
+  // state). Roadmap V5+ consolidates. See docs/files-applet-v4.md.
+  var _PICKER_FILE_ICONS = {
+    js: '📜', ts: '📜', jsx: '📜', tsx: '📜',
+    json: '📋', md: '📝', txt: '📝',
+    html: '🌐', css: '🎨',
+    png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', svg: '🖼️',
+    sh: '⚙️', bash: '⚙️'
+  };
+  function _pickerIconFor(rel) {
+    var ext = String(rel || '').split('.').pop().toLowerCase();
+    return _PICKER_FILE_ICONS[ext] || '📄';
+  }
+  /** Copy `abs` to clipboard; flash ✓ / ✗ on `btn` with an 800 ms
+   *  restore. `dataset.busy` lifecycle per spec §6.7 prevents
+   *  concurrent clicks racing the restore timer. */
+  async function _pickerCopyPath(abs, btn) {
+    if (!abs || !btn) return;
+    if (btn.dataset.busy === '1') return;
+    btn.dataset.busy = '1';
+    var row = btn.closest('.fe-picker-item');
+    var ok = false;
+    try {
+      await navigator.clipboard.writeText(abs);
+      ok = true;
+    } catch (_e) { ok = false; }
+    btn.textContent = ok ? '✓' : '✗';
+    if (row) row.classList.add('copied');
+    var timer = setTimeout(function() {
+      btn.textContent = '📋';
+      if (row) row.classList.remove('copied');
+      delete btn.dataset.busy;
+      delete btn.dataset.restoreTimer;
+    }, 800);
+    btn.dataset.restoreTimer = String(timer);
+  }
 
   function openPicker(opts) {
     if (!sessionId || pickerOpen) return;
@@ -2082,10 +2130,20 @@
           pickerVisible.push({ rel: rRel, recent: true });
           rli.dataset.flatIdx = String(rFlat);
           if (rFlat === pickerSelectedIdx) rli.classList.add('selected');
+          var ricon = document.createElement('span');
+          ricon.className = 'fe-picker-icon';
+          ricon.textContent = _pickerIconFor(rp);
+          rli.appendChild(ricon);
           var rlabel = document.createElement('span');
           rlabel.className = 'fe-picker-path';
           rlabel.textContent = rp;
           rli.appendChild(rlabel);
+          var rcopy = document.createElement('span');
+          rcopy.className = 'fe-picker-copy';
+          rcopy.textContent = '📋';
+          rcopy.title = 'Copy absolute path';
+          rcopy.dataset.path = rp;
+          rli.appendChild(rcopy);
           pickerList.appendChild(rli);
         }
         if (pickerResults.length > 0) {
@@ -2105,6 +2163,10 @@
       pickerVisible.push({ rel: p, recent: false });
       li.dataset.flatIdx = String(flat);
       if (flat === pickerSelectedIdx) li.classList.add('selected');
+      var icon = document.createElement('span');
+      icon.className = 'fe-picker-icon';
+      icon.textContent = _pickerIconFor(p);
+      li.appendChild(icon);
       var label = document.createElement('span');
       label.className = 'fe-picker-path';
       label.textContent = p;
@@ -2116,6 +2178,12 @@
         sfx.textContent = '(open)';
         li.appendChild(sfx);
       }
+      var copy = document.createElement('span');
+      copy.className = 'fe-picker-copy';
+      copy.textContent = '📋';
+      copy.title = 'Copy absolute path';
+      copy.dataset.path = absPathOf(p);
+      li.appendChild(copy);
       pickerList.appendChild(li);
     }
 

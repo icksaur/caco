@@ -17,7 +17,8 @@ detail — only intent + status.
 | V2.d | shipped | merged into master @ 0e85d5a | `docs/files-applet-v2.md` §4.4 |
 | V3.x | shipped | merged into master @ 1a68f18 | `docs/files-applet-v3.x.md` |
 | V3.y | shipped | merged into master | `docs/files-applet-v3.y.md` |
-| V4 | not started | — | `docs/files-applet-v4.md` (to be written) |
+| V4 | spec'd | branch `files-applet-v4` (pending) | `docs/files-applet-v4.md` |
+| V5 | not started | — | (to be spec'd) |
 
 ## V1 — shipped
 
@@ -103,7 +104,19 @@ further during spec.
    would-be tab type in a side pane). Type-specific filtering
    ("only show images").
 
-## V4 — proposed scope (deferred from earlier + V3 deferrals)
+## V4 — proposed scope (file-finder fidelity)
+
+V4 is intentionally small: bring the Ctrl+P picker in the file-edits
+applet to parity with the standalone `file-finder` applet on the two
+affordances users notice as missing — per-type icons on each row, and
+a hover copy-path button. See `docs/files-applet-v4.md`.
+
+The previously-listed V4 bucket items (slug rename, deprecating
+standalone viewers, global shortcuts, visual refresh, autosave,
+dirty-prompt) move to V5+ below. They are NOT abandoned, only
+re-bucketed so V4 ships small.
+
+## V5+ — proposed buckets (formerly V4 scope)
 
 9. **Rename slug `file-edits` → `files`.** Old slug kept as a
    redirect for one release. Updates `agentUsage.purpose` and any
@@ -113,14 +126,16 @@ further during spec.
     `image-viewer`, `html-viewer` marked deprecated; their
     entries in `applets/` keep a stub that redirects to the
     files applet (`?applet=files&openType=markdown&path=...`).
+    May also retire `file-finder` once V4 parity ships and a
+    period of dual-availability passes.
 
-11. **Global keyboard shortcuts.** Ctrl+P opens the files
-    applet's finder (after V3.y §7). Other shortcuts: next/prev
-    tab, close tab.
+11. **Global keyboard shortcuts.** Ctrl+P already opens the
+    files applet's finder as of V3.y.2; remaining shortcuts:
+    next/prev tab, close tab.
 
 12. **Visual refresh.** Tab-type icon glyphs (V1 used ◇ and ¶
-    as placeholders), toggle button styling, picker UX get a
-    consistent treatment with Caco's broader visual style.
+    as placeholders), toggle button styling, broader picker UX
+    get a consistent treatment with Caco's broader visual style.
 
 13. **Autosave for write-capable viewers** (deferred from V2).
     Debounced 1s after last keystroke; in-memory "last failed
@@ -128,10 +143,15 @@ further during spec.
     surface to the user.
 
 14. **Dirty-prompt on session-switch** (deferred from V2 §7.5;
-    superseded by V4 §13 autosave). When autosave makes "unsaved
+    superseded by §13 autosave). When autosave makes "unsaved
     changes" rare, this becomes belt-and-suspenders. May ship as
     a small Caco-side `onBeforeSessionChange` hook or be dropped
     if autosave proves sufficient.
+
+15. **Consolidate duplicated icon mapping.** V4 deliberately
+    duplicates the file-finder `fileIcons` map into the picker.
+    Whichever V5+ work absorbs/retires the standalone file-finder
+    should fold the map into a single source of truth.
 
 ## Out of scope (parking lot)
 

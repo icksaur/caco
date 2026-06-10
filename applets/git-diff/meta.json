@@ -28,5 +28,7 @@
       "staged": "boolean"
     },
     "set": null
-  }
+  },
+  "deprecated": true,
+  "replacedBy": "files"
 }

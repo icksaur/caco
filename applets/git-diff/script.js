@@ -1,4 +1,63 @@
 /**
+ * Git Diff applet — V6: conditional redirect stub.
+ *
+ * When a session exists, redirect to the unified `files` applet
+ * (which now supports diffMode=unstaged|staged|range and diffRef).
+ * Otherwise fall through to the standalone behavior so direct
+ * deep-link URLs without a session still render.
+ *
+ * See docs/files-applet-v6.md §4.5 / §7.
+ */
+
+(function() {
+  var api = window.appletAPI;
+  if (api && typeof api.getSessionId === 'function' && api.getSessionId()) {
+    var p = new URLSearchParams(window.location.search);
+    var repoPath = p.get('path') || '';
+    var file = p.get('file') || '';
+    var staged = p.get('staged') === '1' || p.get('staged') === 'true';
+    var ref = p.get('ref') || '';
+
+    // Pass-through any params we don't recognize.
+    var target = new URLSearchParams(p);
+    target.delete('path');
+    target.delete('file');
+    target.delete('staged');
+    target.delete('ref');
+
+    if (!file && ref) {
+      // Multi-file ref-range — V6 routes this to git-status with
+      // the repo path preserved (the files applet is per-file).
+      target.set('applet', 'git-status');
+      if (repoPath) target.set('path', repoPath);
+    } else {
+      target.set('applet', 'files');
+      if (file) {
+        // joinPath equivalent inline (avoid sharing across applets).
+        var trimmedBase = repoPath.replace(/[\/\\]+$/, '');
+        var trimmedRel = file.replace(/^[\/\\]+/, '');
+        var sep = trimmedBase.indexOf('\\') >= 0 && trimmedBase.indexOf('/') < 0
+          ? '\\' : '/';
+        target.set('openPath', trimmedBase ? (trimmedBase + sep + trimmedRel) : trimmedRel);
+      }
+      if (ref) {
+        target.set('diffMode', 'range');
+        target.set('diffRef', ref);
+      } else if (staged) {
+        target.set('diffMode', 'staged');
+      }
+    }
+
+    var url = '?' + target.toString();
+    if (window.navigation && typeof window.navigation.navigate === 'function') {
+      try { window.navigation.navigate(url); return; } catch (_e) { /* fall through */ }
+    }
+    window.location.href = '/' + url;
+    return;
+  }
+
+  // === No session: fall through to the standalone behavior. ===
+/**
  * Git Diff Applet - View file diffs
  * 
  * URL params:
@@ -178,3 +237,4 @@ window.appletAPI.onUrlParamsChange((params) => {
     }
   }
 });
+})();

@@ -18,7 +18,8 @@
     var staged = p.get('staged') === '1' || p.get('staged') === 'true';
     var ref = p.get('ref') || '';
 
-    // Pass-through any params we don't recognize.
+    // Pass through any params we don't recognize (applet is
+    // replaced below; path/file/staged/ref are translated).
     var target = new URLSearchParams(p);
     target.delete('path');
     target.delete('file');

@@ -185,7 +185,10 @@
       if (!data.edit) throw new Error('no edit returned');
       this.edit = data.edit;
       if (this.rendered) this._render();
-      this.shell.echoState();
+      // Single echoState in the finally block — _reloading is still
+      // true here, so an intermediate echo would broadcast the same
+      // disabled state as the entry echo. The finally echo
+      // broadcasts the re-enabled state after the guard releases.
     } finally {
       this._reloading = false;
       this.shell.echoState();

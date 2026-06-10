@@ -190,13 +190,17 @@
    */
   function findContainerByRelPath(relPath, opts) {
     opts = opts || {};
-    var wantMode = opts.mode || null;
-    var wantRef = opts.ref != null ? opts.ref : null;
+    // V6: symmetric filter — null means "don't filter on this
+    // field", non-null (including any specific string like
+    // 'unstaged' or '') means "must match exactly". Asymmetric
+    // form was a footgun even though no V6 caller hits it.
+    var wantMode = opts.mode !== undefined ? opts.mode : null;
+    var wantRef = opts.ref !== undefined ? opts.ref : null;
     var found = null;
     tabs.forEach(function(c) {
       if (found) return;
       if (c.relPath !== relPath) return;
-      if (wantMode && c.diffMode !== wantMode) return;
+      if (wantMode !== null && c.diffMode !== wantMode) return;
       if (wantRef !== null && c.diffRef !== wantRef) return;
       found = c;
     });

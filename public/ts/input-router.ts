@@ -76,11 +76,17 @@ export function initInputRouter(): void {
       // SPA navigate so panel + applet state survive.
       getPanelState().set({ applet: true }, 'deep-link');
       const nav = window.navigation;
+      let navigated = false;
       if (nav && typeof nav.navigate === 'function') {
-        nav.navigate('?applet=file-edits&openFinder=1');
-      } else {
-        // Older browsers without Navigation API: fall back to
-        // full-page nav.
+        try {
+          nav.navigate('?applet=file-edits&openFinder=1');
+          navigated = true;
+        } catch {
+          // Navigation API can throw (e.g. during a prior
+          // navigation). Fall through to full-page nav.
+        }
+      }
+      if (!navigated) {
         window.location.href = '/?applet=file-edits&openFinder=1';
       }
       return;

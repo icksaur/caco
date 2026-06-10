@@ -1789,6 +1789,10 @@
   var pickerOpen = false;
   var pickerResults = [];
   var pickerSelectedIdx = 0;
+  // V3.y.2 fix: flat ordered list of all selectable picker items
+  // (recents + results). Each entry is { rel: string, recent: bool }.
+  // Used by keyboard nav so selection covers the entire visible list.
+  var pickerVisible = [];
   var pickerLastQuery = '';
   var pickerFetchToken = 0;
   var pickerFetchTimer = null;
@@ -1821,12 +1825,15 @@
     pickerInput.addEventListener('keydown', function(e) {
       if (e.key === 'ArrowDown') { e.preventDefault(); movePickerSelection(1); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); movePickerSelection(-1); }
-      else if (e.key === 'Enter' || e.key === 'Tab') {
+      else if (e.key === 'Enter') {
         e.preventDefault();
-        var sel = pickerResults[pickerSelectedIdx];
-        if (sel) pickSelected(sel);
+        var entry = pickerVisible[pickerSelectedIdx];
+        if (entry) pickSelected(entry.rel);
       } else if (e.key === 'Escape') {
+        // Stop propagation so the input-router's Escape leader
+        // timer doesn't arm when the picker eats the keystroke.
         e.preventDefault();
+        e.stopPropagation();
         closePicker();
       } else if (e.key === 'Backspace' && pickerInput.value === '') {
         e.preventDefault();
@@ -1838,14 +1845,9 @@
       if (!target) return;
       e.preventDefault();
       if (target.classList.contains('disabled')) return;
-      if (target.classList.contains('fe-picker-recent') && target.dataset.path) {
-        var rel = _relativizePath(target.dataset.path);
-        pickSelected(rel);
-        return;
-      }
-      var idx = Number(target.dataset.idx);
-      var sel = pickerResults[idx];
-      if (sel) pickSelected(sel);
+      var flatIdx = Number(target.dataset.flatIdx);
+      var entry = pickerVisible[flatIdx];
+      if (entry) pickSelected(entry.rel);
     });
   }
 
@@ -1932,6 +1934,7 @@
     pickerLastQuery = '';
     pickerSelectedIdx = 0;
     pickerResults = [];
+    pickerVisible = [];
     _pickerTypeFilter = null;
     renderPickerList();
     void runPickerFetch('');
@@ -2000,6 +2003,7 @@
   function renderPickerList() {
     if (!pickerList) return;
     pickerList.innerHTML = '';
+    pickerVisible = [];
 
     // V3.y.2: filter chip when an active type-filter is set.
     if (_pickerTypeFilter) {
@@ -2032,8 +2036,11 @@
           var rp = shown[ri];
           var rli = document.createElement('li');
           rli.className = 'fe-picker-item fe-picker-recent';
-          rli.dataset.idx = 'recent:' + ri;
-          rli.dataset.path = rp;
+          var rRel = _relativizePath(rp);
+          var rFlat = pickerVisible.length;
+          pickerVisible.push({ rel: rRel, recent: true });
+          rli.dataset.flatIdx = String(rFlat);
+          if (rFlat === pickerSelectedIdx) rli.classList.add('selected');
           var rlabel = document.createElement('span');
           rlabel.className = 'fe-picker-path';
           rlabel.textContent = rp;
@@ -2053,8 +2060,10 @@
       var p = pickerResults[i];
       var li = document.createElement('li');
       li.className = 'fe-picker-item';
-      li.dataset.idx = String(i);
-      if (i === pickerSelectedIdx) li.classList.add('selected');
+      var flat = pickerVisible.length;
+      pickerVisible.push({ rel: p, recent: false });
+      li.dataset.flatIdx = String(flat);
+      if (flat === pickerSelectedIdx) li.classList.add('selected');
       var label = document.createElement('span');
       label.className = 'fe-picker-path';
       label.textContent = p;
@@ -2068,15 +2077,24 @@
       }
       pickerList.appendChild(li);
     }
+
+    if (pickerSelectedIdx >= pickerVisible.length) pickerSelectedIdx = 0;
   }
 
   function movePickerSelection(delta) {
-    if (pickerResults.length === 0) return;
-    pickerSelectedIdx = (pickerSelectedIdx + delta + pickerResults.length) % pickerResults.length;
+    if (pickerVisible.length === 0) return;
+    pickerSelectedIdx = (pickerSelectedIdx + delta + pickerVisible.length) % pickerVisible.length;
     var items = pickerList.querySelectorAll('.fe-picker-item');
-    items.forEach(function(el, i) { el.classList.toggle('selected', i === pickerSelectedIdx); });
-    var sel = items[pickerSelectedIdx];
-    if (sel) sel.scrollIntoView({ block: 'nearest' });
+    items.forEach(function(el) {
+      var fi = Number(el.dataset.flatIdx);
+      el.classList.toggle('selected', fi === pickerSelectedIdx);
+    });
+    for (var i = 0; i < items.length; i++) {
+      if (Number(items[i].dataset.flatIdx) === pickerSelectedIdx) {
+        items[i].scrollIntoView({ block: 'nearest' });
+        break;
+      }
+    }
   }
 
   function pickSelected(relativePath) {

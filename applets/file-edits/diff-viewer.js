@@ -153,6 +153,9 @@
     var data = await res.json();
     if (!data.edit) throw new Error('no edit returned');
     if (sid !== shell.sessionId) throw new Error('session changed');
+    if (container.destroyed || !container.contentEl) {
+      throw new Error('container destroyed during open');
+    }
     var inst = new DiffViewer(shell, container, data.edit);
     container.contentEl.appendChild(inst.contentEl);
     return inst;

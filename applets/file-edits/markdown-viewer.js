@@ -131,6 +131,10 @@
       inst.destroy();
       throw err;
     }
+    if (container.destroyed || !container.contentEl) {
+      inst.destroy();
+      throw new Error('container destroyed during open');
+    }
     container.contentEl.appendChild(inst.contentEl);
     return inst;
   };

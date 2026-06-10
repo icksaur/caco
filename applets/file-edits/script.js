@@ -91,13 +91,23 @@
   // See docs/files-applet-v1.1.md §4.0.B.
   var DiffViewer = window.__filesApplet && window.__filesApplet.DiffViewer;
   var MarkdownViewer = window.__filesApplet && window.__filesApplet.MarkdownViewer;
+  var ImageViewer = window.__filesApplet && window.__filesApplet.ImageViewer;
   if (!DiffViewer) console.error('[files-applet] diff-viewer.js did not load');
   if (!MarkdownViewer) console.error('[files-applet] markdown-viewer.js did not load');
+  if (!ImageViewer) console.warn('[files-applet] image-viewer.js did not load');
 
   function basename(p) {
     var i = p.lastIndexOf('/');
     if (i < 0) i = p.lastIndexOf('\\');
     return i < 0 ? p : p.slice(i + 1);
+  }
+
+  /** V2.a (spec §4.0.A): file extensions DiffViewer refuses to
+   *  handle. Binary content (and SVG, whose diff is line-noise)
+   *  routes to ImageViewer / HtmlViewer / future viewers instead.
+   *  See spec §7.7 Q7 for why SVG is listed. */
+  function isBinaryExtension(rel) {
+    return /\.(png|jpg|jpeg|gif|webp|svg|ico|pdf|zip|gz|tar|bin|exe|class|jar)$/i.test(rel || '');
   }
 
   // ── Viewer registry ──────────────────────────────────────────────────
@@ -1100,34 +1110,76 @@
     var isNew = false;
     var contentChanged = false;
     if (!container) {
-      // Create a diff-default container with the edit pre-loaded.
       if (tabs.size >= TAB_CAP) evictOldestNonActive();
-      var diffDesc = null;
-      for (var i = 0; i < viewerRegistry.length; i++) {
-        if (viewerRegistry[i].viewerType === 'diff') { diffDesc = viewerRegistry[i]; break; }
-      }
       var abs = absPathOf(relPath);
-      container = new TabContainer(shell, diffDesc, abs, relPath);
-      var viewer = DiffViewer.fromEdit(shell, container, edit);
-      container.viewers.set('diff', viewer);
-      tabs.set(container.id, container);
-      tabsEl.appendChild(container.tabEl);
-      paneEl.appendChild(container.contentEl);
-      container.updateToggle();
-      isNew = true;
-      contentChanged = true;
+      var desc = defaultViewer(abs, relPath);
+      if (!desc) {
+        // No viewer applies (rare: a binary that no viewer handles).
+        // Drop the edit silently — there's nothing useful to show.
+        console.warn('[files-applet] caco.edit for path with no default viewer:', relPath);
+        return;
+      }
+      container = new TabContainer(shell, desc, abs, relPath);
+      if (desc.viewerType === 'diff') {
+        // Synchronous fast path: poller already gave us the edit.
+        var diffViewer = DiffViewer.fromEdit(shell, container, edit);
+        container.viewers.set('diff', diffViewer);
+        tabs.set(container.id, container);
+        tabsEl.appendChild(container.tabEl);
+        paneEl.appendChild(container.contentEl);
+        container.updateToggle();
+        isNew = true;
+        contentChanged = true;
+      } else {
+        // Async factory path (image, html, markdown). The `edit`
+        // payload is ignored — only the path matters. Mark
+        // rehydrating so concurrent caco.edit / setActiveTab gets
+        // a clean no-op on the not-yet-constructed viewer. See spec
+        // §4.1 / §4.3.2.
+        container.rehydrating = true;
+        tabs.set(container.id, container);
+        tabsEl.appendChild(container.tabEl);
+        paneEl.appendChild(container.contentEl);
+        container.updateToggle();
+        lastEditedTabId = container.id;
+        if (followEdits) setActiveTab(container.id);
+        (function() {
+          var factoryDesc = desc;
+          var factoryContainer = container;
+          desc.open(shell, container, abs, relPath).then(function(v) {
+            if (factoryContainer.destroyed) {
+              try { v.destroy(); } catch (_e) { /* ignore */ }
+              return;
+            }
+            factoryContainer.viewers.set(factoryDesc.viewerType, v);
+            factoryContainer.rehydrating = false;
+            // If this tab is currently active (followEdits set it
+            // earlier), call activate now so the viewer renders.
+            if (activeTabId === factoryContainer.id) {
+              try { v.activate(); } catch (_e) { /* ignore */ }
+            }
+            schedulePersist();
+            shell.echoState();
+          }, function(err) {
+            console.warn('[files-applet] non-diff factory failed', relPath, err);
+            tabs.delete(factoryContainer.id);
+            factoryContainer.destroy();
+          });
+        })();
+        updateEmptyState();
+        schedulePersist();
+        return;
+      }
     } else {
       // Container exists. Update its DiffViewer if constructed; if
-      // the container is markdown-default with no DiffViewer, the
-      // MarkdownViewer's own watcher refreshes its content (spec
-      // §4.3 — no lazy diff construction just for a poll update).
+      // the container has no DiffViewer (e.g. markdown-default
+      // without a toggle yet, or image-default), the viewer's own
+      // watcher refreshes — no lazy diff construction.
       var dv = container.viewers.get('diff');
       if (dv) {
         contentChanged = dv.update(edit);
         if (!contentChanged && !options.forceFocus) return;
       } else {
-        // No diff viewer; the markdown viewer keeps itself fresh.
-        // forceFocus is meaningful (picker re-pick): activate it.
         if (!options.forceFocus) return;
       }
     }
@@ -1171,21 +1223,23 @@
     if (lastEditedTabId === id) lastEditedTabId = null;
     // Record dismissal so the next poll-driven caco.edit (which
     // re-broadcasts every currently-dirty file) does NOT re-create
-    // this tab. KEYED BY relPath (spec §4.7). Markdown-default tabs
-    // without a constructed DiffViewer get a path-only entry (no
-    // snapshot → always-suppress until session-switch or clean).
+    // this tab. KEYED BY relPath (spec §4.7).
+    //
+    // - If a DiffViewer with an edit is constructed: snapshot it for
+    //   content-aware suppression (a genuinely-new edit re-opens).
+    // - Otherwise (markdown / image / html default with no diff
+    //   constructed): path-only entry, always-suppress until clean
+    //   or session-switch.
     var dvForSnap = container.viewers.get('diff');
+    dismissedPaths.add(container.relPath);
     if (dvForSnap && dvForSnap.edit) {
-      dismissedPaths.add(container.relPath);
       dismissedSnapshots.set(container.relPath, {
         diff: dvForSnap.edit.diff,
         status: dvForSnap.edit.status,
         isBinary: dvForSnap.edit.isBinary,
       });
-    } else if (container.defaultViewerType === 'markdown') {
-      dismissedPaths.add(container.relPath);
-      // no snapshot: see spec §4.7 — always-suppress semantics.
     }
+    // No-snapshot case: leave dismissedSnapshots untouched. spec §4.7.
     if (wasActive) {
       // Hide the closing container's contentEl BEFORE setActiveTab
       // (which would otherwise see prev=null and skip deactivate).
@@ -1575,7 +1629,10 @@
   }
 
   // ── Viewer registration ──────────────────────────────────────────────
-  // Markdown registered first so isDefault wins for .md/.markdown/.mdx.
+  // Order matters: isDefault is checked in registration order, first
+  // match wins. Markdown/image registered before Diff so they win for
+  // their respective extensions; Diff is the universal fallback for
+  // non-binary files.
   if (MarkdownViewer) {
     registerViewer({
       viewerType: 'markdown',
@@ -1589,12 +1646,25 @@
       open: function(s, c, a, r) { return MarkdownViewer.open(s, c, a, r); },
     });
   }
+  if (ImageViewer) {
+    registerViewer({
+      viewerType: 'image',
+      label: 'Image',
+      canHandle: function(_a, rel) {
+        return /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(rel || '');
+      },
+      isDefault: function(_a, rel) {
+        return /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(rel || '');
+      },
+      open: function(s, c, a, r) { return ImageViewer.open(s, c, a, r); },
+    });
+  }
   if (DiffViewer) {
     registerViewer({
       viewerType: 'diff',
       label: 'Diff',
-      canHandle: function() { return true; },
-      isDefault: function() { return true; },  // fallback default — checked after markdown
+      canHandle: function(_a, rel) { return !isBinaryExtension(rel); },
+      isDefault: function(_a, rel) { return !isBinaryExtension(rel); },
       open: function(s, c, a, r) { return DiffViewer.open(s, c, a, r); },
     });
   }

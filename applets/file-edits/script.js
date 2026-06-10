@@ -28,8 +28,10 @@
   var activeTabId = null;
   /** Map<tabId, TabInstance>. Map iteration order = insertion order =
    *  tab strip order (left-to-right). Tabs never reorder after creation.
-   *  V1: TabInstance is DiffTab (id == relativePath) or MarkdownTab
-   *  (id == 'markdown:' + absPath). See docs/files-applet-v1.md §4.0.2. */
+   *  V1.1: TabInstance is a TabContainer wrapping one or more
+   *  ViewerInstances. id == relativePath for diff-default
+   *  containers; 'markdown:'+absPath for markdown-default.
+   *  See docs/files-applet-v1.1.md §4.0.C. */
   var tabs = new Map();
   /** Most recent tab to receive a content-changing edit (not no-op). Drives
    *  jumpToMostRecent's primary target. */
@@ -59,27 +61,38 @@
    *  rAF ordering, double-write from setActiveTab + caller-set-0).
    *  Store the target value the writer asked for; consume only when
    *  the observed scrollTop is within ±1px. Supports any number of
-   *  scroll events firing between write and observation. */
-  var pendingProgrammaticScroll = null;
-  function programmaticScrollTo(target) {
-    var maxScroll = Math.max(0, paneEl.scrollHeight - paneEl.clientHeight);
+   *  scroll events firing between write and observation.
+   *
+   *  V1.1: scrolling moved from .fe-pane to per-viewer contentEls,
+   *  so the guard is now keyed by element. */
+  var pendingProgrammaticScrolls = new WeakMap();   // element → { target }
+  function programmaticScrollTo(element, target) {
+    if (!element) return;
+    var maxScroll = Math.max(0, element.scrollHeight - element.clientHeight);
     var clamped = Math.max(0, Math.min(target, maxScroll));
-    pendingProgrammaticScroll = { target: clamped };
-    paneEl.scrollTop = clamped;
+    pendingProgrammaticScrolls.set(element, { target: clamped });
+    element.scrollTop = clamped;
+  }
+  function consumeProgrammaticScroll(element, observedTop) {
+    var pending = pendingProgrammaticScrolls.get(element);
+    if (pending && Math.abs(observedTop - pending.target) <= 1) {
+      pendingProgrammaticScrolls.delete(element);
+      return true;
+    }
+    return false;
   }
   var sessionId = null;
   var cachedCwd = '';
   var TAB_CAP = 50;
 
-  // ── DiffTab + MarkdownTab ─────────────────────────────────────────────
-  // The classes themselves live in diff-tab.js and markdown-tab.js
-  // (loaded by content.html before this file). They're exposed at
-  // window.__filesApplet.DiffTab / .MarkdownTab. See
-  // docs/files-applet-v1.md §4.0.1 and §4.5 / §4.6.
-  var DiffTab = window.__filesApplet && window.__filesApplet.DiffTab;
-  var MarkdownTab = window.__filesApplet && window.__filesApplet.MarkdownTab;
-  if (!DiffTab) console.error('[file-edits] diff-tab.js did not load');
-  if (!MarkdownTab) console.error('[file-edits] markdown-tab.js did not load');
+  // ── DiffViewer + MarkdownViewer (loaded by sibling .js files) ────────
+  // Concatenated by applet-store.ts before this script. Exposed at
+  // window.__filesApplet.DiffViewer / .MarkdownViewer.
+  // See docs/files-applet-v1.1.md §4.0.B.
+  var DiffViewer = window.__filesApplet && window.__filesApplet.DiffViewer;
+  var MarkdownViewer = window.__filesApplet && window.__filesApplet.MarkdownViewer;
+  if (!DiffViewer) console.error('[files-applet] diff-viewer.js did not load');
+  if (!MarkdownViewer) console.error('[files-applet] markdown-viewer.js did not load');
 
   function basename(p) {
     var i = p.lastIndexOf('/');
@@ -87,33 +100,279 @@
     return i < 0 ? p : p.slice(i + 1);
   }
 
-  // ── Tab-type registry ────────────────────────────────────────────────
-  // Populated below after the helper functions are defined; iterated
-  // by routeOpen(). Append-only after init.
-  var tabTypes = [];
-  function registerTabType(desc) { tabTypes.push(desc); }
+  // ── Viewer registry ──────────────────────────────────────────────────
+  // V1.1: replaces V1's tabTypes registry. Each ViewerDescriptor adds
+  // isDefault(abs, rel) on top of canHandle. See spec §4.0.B.
+  var viewerRegistry = [];
+  function registerViewer(desc) { viewerRegistry.push(desc); }
 
-  // ── Shell object — see docs/files-applet-v1.md §4.0.3 ────────────────
-  // Every tab-type `open(shell, ...)` factory and every tab class
-  // constructor receives this reference. Tabs MUST NOT reach into
-  // shell-private state by any other means (no closures, no globals).
-  // The reference is created ONCE at IIFE start and never reassigned.
+  /** Pick the default viewer for a path: first isDefault match, else
+   *  first canHandle match, else null. */
+  function defaultViewer(absPath, relPath) {
+    for (var i = 0; i < viewerRegistry.length; i++) {
+      if (viewerRegistry[i].isDefault(absPath, relPath)) return viewerRegistry[i];
+    }
+    for (var j = 0; j < viewerRegistry.length; j++) {
+      if (viewerRegistry[j].canHandle(absPath, relPath)) return viewerRegistry[j];
+    }
+    return null;
+  }
+
+  /** Find a container by its relPath, regardless of default viewer
+   *  type. Resolves the caco.edit dedup hazard (spec §4.3 B2 fix). */
+  function findContainerByRelPath(relPath) {
+    var found = null;
+    tabs.forEach(function(c) { if (!found && c.relPath === relPath) found = c; });
+    return found;
+  }
+
+  /** Active diff viewer of a container, or null. Used by the V3.5
+   *  selection-code adaptation (spec §4.6). */
+  function activeDiffViewer(container) {
+    if (!container || container.activeViewerType !== 'diff') return null;
+    return container.viewers.get('diff') || null;
+  }
+
+  // ── Shell object — see docs/files-applet-v1.1.md §4.0.3 + §4.6 ───────
   var shell = {
     api: window.appletAPI,
     paneEl: paneEl,
     tabStripEl: tabsEl,
     basename: basename,
     badgeCounter: badgeCounter,
+    viewers: viewerRegistry,
     get sessionId() { return sessionId; },
     closeTab: function(id) { closeTab(id); },
     setActiveTab: function(id) { setActiveTab(id); },
     echoState: function() { echoState(); },
-    // DiffTab-only helpers (see §4.0.3 last row):
+    // Element-keyed programmatic-scroll API (V1.1 — scrolling moved
+    // from .fe-pane to per-viewer contentEls):
     programmaticScrollTo: programmaticScrollTo,
+    consumeProgrammaticScroll: consumeProgrammaticScroll,
+    // DiffViewer-only helpers (see §4.0.3 last row):
     updateFollowButton: function() { updateFollowButton(); },
     renderBody: function(body, edit) { renderBody(body, edit); },
     getFollowEdits: function() { return followEdits; },
     setFollowEdits: function(v) { followEdits = v; },
+  };
+
+  // ── TabContainer ─────────────────────────────────────────────────────
+  // A tab in the strip + its content pane root. Holds a map of viewers
+  // (lazy-constructed). Owns tabEl + outer contentEl + toggle button.
+  // See spec §4.0.C.
+  function TabContainer(shellRef, descriptor, absPath, relPath) {
+    this.shell = shellRef;
+    this.absPath = absPath;
+    this.relPath = relPath;
+    this.defaultViewerType = descriptor.viewerType;
+    this.activeViewerType = descriptor.viewerType;
+    // Stable id: relPath for diff-default (matches V1 cards-endpoint
+    // schema); 'markdown:'+absPath for markdown-default.
+    this.id = descriptor.viewerType === 'markdown' ? 'markdown:' + absPath : relPath;
+    this.label = basename(relPath || absPath);
+    this.viewers = new Map();
+    this.switching = false;
+    this.destroyed = false;
+
+    var self = this;
+
+    // Tab button (in the strip).
+    var btn = document.createElement('button');
+    btn.className = 'fe-tab fe-tab-' + descriptor.viewerType;
+    btn.type = 'button';
+    btn.dataset.path = this.id;
+    btn.title = relPath;
+    var name = document.createElement('span');
+    name.className = 'fe-tab-name';
+    name.textContent = this.label;
+    btn.appendChild(name);
+    var x = document.createElement('span');
+    x.className = 'fe-tab-x';
+    x.textContent = '×';
+    x.setAttribute('aria-label', 'Close tab');
+    btn.appendChild(x);
+    btn.addEventListener('click', function(e) {
+      if (e.target === x || x.contains(e.target)) {
+        e.stopPropagation();
+        shellRef.closeTab(self.id);
+        return;
+      }
+      // §4.8: always disable follow + clear badge, regardless of default type.
+      shellRef.setFollowEdits(false);
+      shellRef.badgeCounter.delete(self.relPath);
+      shellRef.updateFollowButton();
+      shellRef.setActiveTab(self.id);
+    });
+    btn.addEventListener('auxclick', function(e) {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      shellRef.closeTab(self.id);
+    });
+    btn.addEventListener('mousedown', function(e) {
+      if (e.button === 1) e.preventDefault();
+    });
+    this.tabEl = btn;
+
+    // Outer content pane (per-tab). Position: relative so the toggle
+    // can absolutely-anchor to its viewport. overflow: hidden so the
+    // viewer's own scrollbar is the only scroll surface.
+    var pane = document.createElement('div');
+    pane.className = 'files-tab-pane';
+    pane.style.display = 'none';   // §4.0.H invariant
+    this.contentEl = pane;
+
+    // Toggle button (top-right floating). Visibility controlled by
+    // updateToggle().
+    var toggle = document.createElement('button');
+    toggle.className = 'files-viewer-toggle';
+    toggle.type = 'button';
+    toggle.hidden = true;
+    toggle.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var target = toggle.dataset.target;
+      if (target) void self.switchViewer(target);
+    });
+    pane.appendChild(toggle);
+    this.toggleBtn = toggle;
+  }
+
+  // type getter (compat for buildPersistBody / jumpToMostRecent which
+  // filter `t.type === 'diff'`). Returns the default viewer type so a
+  // markdown-default tab toggled to diff still persists as markdown-
+  // default (correct: cards schema represents which file you opened,
+  // not which viewer you're currently looking at).
+  Object.defineProperty(TabContainer.prototype, 'type', {
+    get: function() { return this.defaultViewerType; },
+  });
+
+  // For diff-default tabs, expose the diff viewer's `edit` so V1's
+  // jumpToMostRecent / dismissed-snapshot logic that reads `tab.edit`
+  // continues to work. For markdown-default tabs whose diff viewer
+  // isn't constructed, returns null.
+  Object.defineProperty(TabContainer.prototype, 'edit', {
+    get: function() {
+      var d = this.viewers.get('diff');
+      return d ? d.edit : null;
+    },
+  });
+
+  TabContainer.prototype.activate = function() {
+    this.contentEl.style.display = '';
+    var v = this.viewers.get(this.activeViewerType);
+    if (v) v.activate();
+  };
+
+  TabContainer.prototype.deactivate = function() {
+    var v = this.viewers.get(this.activeViewerType);
+    if (v) v.deactivate();
+    this.contentEl.style.display = 'none';
+  };
+
+  TabContainer.prototype.destroy = function() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    var self = this;
+    this.viewers.forEach(function(v) {
+      try { v.destroy(); } catch (err) { console.warn('[files-applet] viewer destroy:', err); }
+    });
+    this.viewers.clear();
+    if (this.tabEl && this.tabEl.parentNode) this.tabEl.parentNode.removeChild(this.tabEl);
+    if (this.contentEl && this.contentEl.parentNode) this.contentEl.parentNode.removeChild(this.contentEl);
+    this.toggleBtn = null;
+    this.tabEl = null;
+    this.contentEl = null;
+  };
+
+  TabContainer.prototype.echoState = function() {
+    var v = this.viewers.get(this.activeViewerType);
+    var frag = (v && typeof v.echoState === 'function') ? v.echoState() : {};
+    var out = {
+      id: this.id,
+      label: this.label,
+      activeViewer: this.activeViewerType,
+      defaultViewer: this.defaultViewerType,
+    };
+    for (var k in frag) {
+      if (Object.prototype.hasOwnProperty.call(frag, k)) out[k] = frag[k];
+    }
+    return out;
+  };
+
+  /** Update the floating toggle's visibility and label. Called at
+   *  construction (post-mount) and after every switchViewer. */
+  TabContainer.prototype.updateToggle = function() {
+    if (!this.toggleBtn) return;
+    var available = [];
+    for (var i = 0; i < this.shell.viewers.length; i++) {
+      var d = this.shell.viewers[i];
+      if (d.canHandle(this.absPath, this.relPath)) available.push(d);
+    }
+    if (available.length < 2) { this.toggleBtn.hidden = true; return; }
+    this.toggleBtn.hidden = false;
+    var self = this;
+    var other = null;
+    for (var j = 0; j < available.length; j++) {
+      if (available[j].viewerType !== self.activeViewerType) { other = available[j]; break; }
+    }
+    if (!other) { this.toggleBtn.hidden = true; return; }
+    this.toggleBtn.textContent = '→ ' + other.label;
+    this.toggleBtn.dataset.target = other.viewerType;
+  };
+
+  /** Switch to a different viewer type. Lazy-constructs the viewer
+   *  on first switch. See spec §4.0.5 rules 9-10 + spec §4.0.C. */
+  TabContainer.prototype.switchViewer = async function(viewerType) {
+    if (this.destroyed) return;
+    if (viewerType === this.activeViewerType) return;
+    if (this.switching) return;
+    var desc = null;
+    for (var i = 0; i < this.shell.viewers.length; i++) {
+      if (this.shell.viewers[i].viewerType === viewerType) { desc = this.shell.viewers[i]; break; }
+    }
+    if (!desc) { console.warn('[files-applet] unknown viewer type', viewerType); return; }
+
+    this.switching = true;
+    if (this.toggleBtn) this.toggleBtn.disabled = true;
+    var priorType = this.activeViewerType;
+    var prior = this.viewers.get(priorType);
+
+    try {
+      if (prior) prior.deactivate();
+      if (!this.viewers.has(viewerType)) {
+        var v = await desc.open(this.shell, this, this.absPath, this.relPath);
+        if (this.destroyed) {
+          try { v.destroy(); } catch (_e) { /* ignore */ }
+          return;
+        }
+        this.viewers.set(viewerType, v);
+      }
+      this.viewers.get(viewerType).activate();
+      this.activeViewerType = viewerType;
+      this.updateToggle();
+      this.shell.echoState();
+    } catch (err) {
+      console.warn('[files-applet] switchViewer failed:', err);
+      // Recovery: re-activate prior viewer if still around AND
+      // restore activeViewerType so the §4.0.H invariant holds.
+      // Without the assignment, container.activate()'s
+      // viewers.get(activeViewerType) would return undefined.
+      if (prior && !prior.destroyed) {
+        this.activeViewerType = priorType;
+        try { prior.activate(); } catch (_e) { /* ignore */ }
+      }
+    } finally {
+      this.switching = false;
+      if (this.toggleBtn) this.toggleBtn.disabled = false;
+    }
+  };
+
+  /** Set the diff viewer's pendingSelection (used by applyAgentState)
+   *  — ensures the viewer is constructed first. Returns a Promise that
+   *  resolves with the diff viewer. */
+  TabContainer.prototype.ensureDiffViewer = async function() {
+    if (this.viewers.has('diff')) return this.viewers.get('diff');
+    await this.switchViewer('diff');
+    return this.viewers.get('diff') || null;
   };
 
   // ── V3.5: Selection state + agent / user exchange ────────────────────
@@ -143,41 +402,29 @@
    *  was set by a user gesture (drag or gutter click). Agent-pushed
    *  selections have no captured text. */
   function buildFileEditsLegacyState() {
-    var tab = activeTabId ? tabs.get(activeTabId) : null;
-    // Only diff tabs participate in the legacy envelope (selection
-    // belongs to the diff card). When a non-diff tab is active, the
-    // envelope reports null selection but still echoes activeTab so
-    // agents see SOMETHING change. sourceId is always present.
-    if (!tab || tab.type !== 'diff' || !tab.selection) {
+    var container = activeTabId ? tabs.get(activeTabId) : null;
+    var diff = activeDiffViewer(container);
+    if (!diff || !diff.selection) {
       return { activeTab: activeTabId, selection: null, sourceId: SOURCE_ID };
     }
-    var s = { start: tab.selection.start, end: tab.selection.end };
-    if (typeof tab.selection.text === 'string') s.text = tab.selection.text;
+    var s = { start: diff.selection.start, end: diff.selection.end };
+    if (typeof diff.selection.text === 'string') s.text = diff.selection.text;
     return { activeTab: activeTabId, selection: s, sourceId: SOURCE_ID };
   }
 
-  /** Per-tab fragment for the new V1 `files` envelope. Each tab
-   *  may opt in via `echoState()`; the shell decorates with id,
-   *  type, label. */
+  /** Per-tab fragment for the V1.1 `files` envelope. The container's
+   *  echoState already composes its own active-viewer fragment. */
   function buildFilesState() {
     var arr = [];
     tabs.forEach(function(t) {
       var frag = (typeof t.echoState === 'function') ? t.echoState() : null;
       if (frag == null) return;
-      var entry = { id: t.id, type: t.type, label: t.label || basename(t.relativePath || t.absPath || t.id) };
-      for (var k in frag) {
-        if (Object.prototype.hasOwnProperty.call(frag, k)) entry[k] = frag[k];
-      }
-      arr.push(entry);
+      arr.push(frag);
     });
     return { tabs: arr, activeTabId: activeTabId };
   }
 
-  // Coalesced echo via queueMicrotask: many calls per tick collapse
-  // into one setAppletState push. See docs/files-applet-v1.md §4.0.5
-  // rule 7. The coalescer also catches the case where MarkdownTab's
-  // load() and a caco.edit handler both want to echo in the same
-  // task.
+  // Coalesced echo via queueMicrotask:
   var echoPending = false;
   function echoState() {
     if (echoPending) return;
@@ -245,18 +492,20 @@
     return s;
   }
 
-  /** Scroll the active tab's pane so the selection's first line is at
-   *  ~30% from the viewport top. */
+  /** Scroll the diff viewer's contentEl so the selection's first line
+   *  is at ~30% from the viewport top. `tab` here is a DiffViewer
+   *  (V1.1: per-viewer scroll containers, see spec §4.0.E). */
   function scrollPaneToLine(tab, line) {
-    if (!tab || !tab.paneEl || tab.paneEl.parentNode !== paneEl) return;
+    if (!tab || !tab.paneEl) return;
     var row = tab.paneEl.querySelector('.fe-row[data-work-line="' + line + '"]');
     if (!row) return;
+    var scrollEl = tab.contentEl;
     var rowRect = row.getBoundingClientRect();
-    var paneRect = paneEl.getBoundingClientRect();
-    var offset = rowRect.top - paneRect.top + paneEl.scrollTop;
-    var target = Math.max(0, offset - paneEl.clientHeight * 0.3);
+    var paneRect = scrollEl.getBoundingClientRect();
+    var offset = rowRect.top - paneRect.top + scrollEl.scrollTop;
+    var target = Math.max(0, offset - scrollEl.clientHeight * 0.3);
     tab.scrollTop = target;
-    programmaticScrollTo(target);
+    programmaticScrollTo(scrollEl, target);
   }
 
   // ── Native-selection ↔ envelope translation ─────────────────────────
@@ -501,8 +750,9 @@
     var range = sel.getRangeAt(0);
     if (range.collapsed) return;  // caret placement; do NOT clear tab.selection (spec §1 step 2)
     try { if (!range.intersectsNode(paneEl)) return; } catch (err) { return; }
-    var tab = activeTabId ? tabs.get(activeTabId) : null;
-    if (!tab || !tab.paneEl || tab.paneEl.parentNode !== paneEl) return;
+    var container = activeTabId ? tabs.get(activeTabId) : null;
+    var tab = activeDiffViewer(container);
+    if (!tab || !tab.paneEl || tab.paneEl.parentNode !== container.contentEl) return;
 
     var raw = envelopeFromRange(range, tab.paneEl);
     if (!raw) return;
@@ -560,7 +810,8 @@
       var row = gutter.closest('.fe-row[data-work-line]');
       var line = lineOfRow(row);
       if (line == null) return;
-      var tab = activeTabId ? tabs.get(activeTabId) : null;
+      var container = activeTabId ? tabs.get(activeTabId) : null;
+      var tab = activeDiffViewer(container);
       if (!tab) return;
       var raw;
       if (e.shiftKey && tab.selection) {
@@ -590,7 +841,8 @@
     var diffEl = e.target.closest('.fe-diff');
     var anyRow = e.target.closest('.fe-row');
     if (diffEl && !anyRow) {
-      var tab2 = activeTabId ? tabs.get(activeTabId) : null;
+      var container2 = activeTabId ? tabs.get(activeTabId) : null;
+      var tab2 = activeDiffViewer(container2);
       if (tab2 && tab2.selection) {
         tab2.selection = null;
         tab2.paintSelection();
@@ -605,7 +857,8 @@
   document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape') return;
     if (pickerOpen) return;  // picker handles Escape itself
-    var tab = activeTabId ? tabs.get(activeTabId) : null;
+    var container = activeTabId ? tabs.get(activeTabId) : null;
+    var tab = activeDiffViewer(container);
     if (tab && tab.selection) {
       e.preventDefault();
       tab.selection = null;
@@ -637,65 +890,89 @@
     });
   }
 
-  /** Apply agent-pushed state. Opens the tab via POST /open if it
-   *  doesn't exist. Validation against the rendered DOM happens in
-   *  finalizeAgentSelection two rAFs later. */
+  /** Apply agent-pushed state. Opens the tab via POST /open if no
+   *  container exists for the path. Validation against rendered DOM
+   *  happens in finalizeAgentSelection two rAFs later. Per spec
+   *  §4.3.2, the cases are:
+   *  - Existing container with diff viewer: feed pendingSelection.
+   *  - Existing container WITHOUT diff viewer (markdown-default, no
+   *    toggle): switchViewer('diff') then feed selection.
+   *  - No container: POST /open, then create diff-default container. */
   async function applyAgentState(fileEdits) {
     if (!fileEdits || typeof fileEdits !== 'object') return;
     if (fileEdits.sourceId === SOURCE_ID) return;
-    var targetTabId = fileEdits.activeTab;
+    var targetRelPath = fileEdits.activeTab;
     var rawSel = fileEdits.selection || null;
+    if (!targetRelPath) return;
+    // Legacy envelope uses relPath. Markdown-default tab ids would
+    // not appear here (agent selection is diff-only by design), but
+    // be defensive: strip 'markdown:' prefix if present.
+    if (typeof targetRelPath === 'string' && targetRelPath.indexOf('markdown:') === 0) return;
 
-    if (!targetTabId) return;
-
-    var existing = tabs.get(targetTabId);
-    if (!existing) {
-      if (!sessionId) return;
-      if (pendingOpenIds.has(targetTabId)) return;
-      var openSessionId = sessionId;
-      pendingOpenIds.add(targetTabId);
-      try {
-        var res = await fetch('/api/sessions/' + encodeURIComponent(openSessionId) + '/file-edits/open', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relativePath: targetTabId }),
-        });
-        if (sessionId !== openSessionId) return;
-        if (!res.ok) {
-          console.warn('[file-edits] agent setState: open failed', res.status, targetTabId);
-          echoState();
-          return;
-        }
-        var data = await res.json();
-        if (sessionId !== openSessionId) return;
-        if (!data.edit) { echoState(); return; }
-        var maybe = tabs.get(targetTabId);
-        if (maybe) {
-          maybe.pendingSelection = rawSel;
-          if (activeTabId !== targetTabId) setActiveTab(targetTabId);
-          scheduleAgentFinalize(maybe);
-          return;
-        }
-        var newTab = new DiffTab(shell, data.edit);
-        newTab.pendingSelection = rawSel;
-        if (tabs.size >= TAB_CAP) evictOldestNonActive();
-        tabs.set(targetTabId, newTab);
-        tabsEl.appendChild(newTab.tabEl);
-        paneEl.appendChild(newTab.contentEl);
-        setActiveTab(targetTabId);
-        scheduleAgentFinalize(newTab);
-        schedulePersist();
-      } catch (err) {
-        console.warn('[file-edits] agent setState: open error', err, targetTabId);
-        echoState();
-      } finally {
-        pendingOpenIds.delete(targetTabId);
+    var existing = findContainerByRelPath(targetRelPath);
+    if (existing) {
+      var dv = existing.viewers.get('diff');
+      if (!dv) {
+        // Markdown-default container, no diff viewer yet: switch it in.
+        await existing.switchViewer('diff');
+        dv = existing.viewers.get('diff');
       }
+      if (!dv) return;
+      dv.pendingSelection = rawSel;
+      if (activeTabId !== existing.id) setActiveTab(existing.id);
+      scheduleAgentFinalize(dv);
       return;
     }
-    existing.pendingSelection = rawSel;
-    if (activeTabId !== targetTabId) setActiveTab(targetTabId);
-    scheduleAgentFinalize(existing);
+    if (!sessionId) return;
+    if (pendingOpenIds.has(targetRelPath)) return;
+    var openSessionId = sessionId;
+    pendingOpenIds.add(targetRelPath);
+    try {
+      var res = await fetch('/api/sessions/' + encodeURIComponent(openSessionId) + '/file-edits/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ relativePath: targetRelPath }),
+      });
+      if (sessionId !== openSessionId) return;
+      if (!res.ok) { console.warn('[files-applet] agent setState: open failed', res.status, targetRelPath); echoState(); return; }
+      var data = await res.json();
+      if (sessionId !== openSessionId) return;
+      if (!data.edit) { echoState(); return; }
+      var raceCheck = findContainerByRelPath(targetRelPath);
+      if (raceCheck) {
+        var rdv = raceCheck.viewers.get('diff');
+        if (!rdv) { await raceCheck.switchViewer('diff'); rdv = raceCheck.viewers.get('diff'); }
+        if (rdv) {
+          rdv.pendingSelection = rawSel;
+          if (activeTabId !== raceCheck.id) setActiveTab(raceCheck.id);
+          scheduleAgentFinalize(rdv);
+        }
+        return;
+      }
+      // No container at all: create a diff-default one from the fetched edit.
+      if (tabs.size >= TAB_CAP) evictOldestNonActive();
+      var diffDesc = null;
+      for (var i = 0; i < viewerRegistry.length; i++) {
+        if (viewerRegistry[i].viewerType === 'diff') { diffDesc = viewerRegistry[i]; break; }
+      }
+      var abs = absPathOf(targetRelPath);
+      var container = new TabContainer(shell, diffDesc, abs, targetRelPath);
+      var newDiff = DiffViewer.fromEdit(shell, container, data.edit);
+      newDiff.pendingSelection = rawSel;
+      container.viewers.set('diff', newDiff);
+      tabs.set(container.id, container);
+      tabsEl.appendChild(container.tabEl);
+      paneEl.appendChild(container.contentEl);
+      container.updateToggle();
+      setActiveTab(container.id);
+      scheduleAgentFinalize(newDiff);
+      schedulePersist();
+    } catch (err) {
+      console.warn('[files-applet] agent setState: open error', err, targetRelPath);
+      echoState();
+    } finally {
+      pendingOpenIds.delete(targetRelPath);
+    }
   }
 
   /** Validate the pending agent selection against rendered DOM, write
@@ -793,68 +1070,80 @@
 
   function openOrUpdateTab(edit, options) {
     options = options || {};
-    var id = edit.relativePath;
-    if (!id) return;
-    var tab = tabs.get(id);
-    // Dismissed-path filter: if the user closed this tab and the
-    // incoming edit is just the poller re-broadcasting the same
-    // content we dismissed (same diff/status/binary flag), skip.
-    // A genuine new edit (content differs) clears the dismissal and
-    // re-opens the tab.
-    if (!tab && !options.forceFocus && dismissedPaths.has(id)) {
-      var snap = dismissedSnapshots.get(id);
+    var relPath = edit.relativePath;
+    if (!relPath) return;
+    // V1.1: look up by relPath (not by `id`) so a markdown-default
+    // tab for the same file is found and we don't create a duplicate
+    // container. Resolves spec §4.3 B2 hazard.
+    var container = findContainerByRelPath(relPath);
+    // Dismissed-path filter: only meaningful when no container exists.
+    if (!container && !options.forceFocus && dismissedPaths.has(relPath)) {
+      var snap = dismissedSnapshots.get(relPath);
       var sameContent = snap
         && snap.diff === edit.diff
         && snap.status === edit.status
         && snap.isBinary === edit.isBinary;
-      // Clean status special-case: the poller emits cleanedEdits
-      // when a previously-dirty file goes clean. That's "real news"
-      // worth clearing the dismissal for — but we still don't
-      // auto-reopen, we just stop suppressing future edits.
-      if (sameContent || edit.status === 'clean') {
+      // No-snapshot case: markdown-default tab was closed without
+      // ever opening its diff viewer. Always suppress until session
+      // switch or status==='clean' (spec §4.7).
+      var noSnapshot = !snap;
+      if (sameContent || noSnapshot || edit.status === 'clean') {
         if (edit.status === 'clean') {
-          dismissedPaths.delete(id);
-          dismissedSnapshots.delete(id);
+          dismissedPaths.delete(relPath);
+          dismissedSnapshots.delete(relPath);
         }
         return;
       }
-      // New content for a dismissed path → clear and let the open
-      // proceed (treated as a fresh edit).
-      dismissedPaths.delete(id);
-      dismissedSnapshots.delete(id);
+      dismissedPaths.delete(relPath);
+      dismissedSnapshots.delete(relPath);
     }
     var isNew = false;
     var contentChanged = false;
-    if (!tab) {
+    if (!container) {
+      // Create a diff-default container with the edit pre-loaded.
       if (tabs.size >= TAB_CAP) evictOldestNonActive();
-      tab = new DiffTab(shell, edit);
-      tabs.set(id, tab);
-      // Attach DOM: tabEl into the strip, contentEl into the pane.
-      // contentEl.style.display is 'none' from the constructor; it
-      // becomes visible only when this tab is activated.
-      tabsEl.appendChild(tab.tabEl);
-      paneEl.appendChild(tab.contentEl);
+      var diffDesc = null;
+      for (var i = 0; i < viewerRegistry.length; i++) {
+        if (viewerRegistry[i].viewerType === 'diff') { diffDesc = viewerRegistry[i]; break; }
+      }
+      var abs = absPathOf(relPath);
+      container = new TabContainer(shell, diffDesc, abs, relPath);
+      var viewer = DiffViewer.fromEdit(shell, container, edit);
+      container.viewers.set('diff', viewer);
+      tabs.set(container.id, container);
+      tabsEl.appendChild(container.tabEl);
+      paneEl.appendChild(container.contentEl);
+      container.updateToggle();
       isNew = true;
       contentChanged = true;
     } else {
-      contentChanged = tab.update(edit);
-      if (!contentChanged && !options.forceFocus) return;
+      // Container exists. Update its DiffViewer if constructed; if
+      // the container is markdown-default with no DiffViewer, the
+      // MarkdownViewer's own watcher refreshes its content (spec
+      // §4.3 — no lazy diff construction just for a poll update).
+      var dv = container.viewers.get('diff');
+      if (dv) {
+        contentChanged = dv.update(edit);
+        if (!contentChanged && !options.forceFocus) return;
+      } else {
+        // No diff viewer; the markdown viewer keeps itself fresh.
+        // forceFocus is meaningful (picker re-pick): activate it.
+        if (!options.forceFocus) return;
+      }
     }
-    if (contentChanged) lastEditedTabId = id;
+    if (contentChanged) lastEditedTabId = container.id;
 
     if (options.forceFocus) {
-      // Picker path. Caller already set followEdits=false.
-      // Set tab.scrollTop BEFORE setActiveTab so activate()'s rAF
-      // restores to 0 — no double-write.
-      tab.scrollTop = 0;
-      setActiveTab(id);
+      var dv2 = container.viewers.get('diff');
+      if (dv2) dv2.scrollTop = 0;
+      setActiveTab(container.id);
     } else if (followEdits) {
-      if (isNew) tab.scrollTop = 0;
-      setActiveTab(id);
+      var dv3 = container.viewers.get('diff');
+      if (isNew && dv3) dv3.scrollTop = 0;
+      setActiveTab(container.id);
     } else {
-      // Tab is in the strip but inactive. Bump badge if this is a real edit.
       if (contentChanged) {
-        badgeCounter.add(id);
+        badgeCounter.add(relPath);
         updateFollowButton();
       }
     }
@@ -863,8 +1152,8 @@
   }
 
   function closeTab(id) {
-    var tab = tabs.get(id);
-    if (!tab) return;
+    var container = tabs.get(id);
+    if (!container) return;
     var wasActive = id === activeTabId;
     // Compute neighbour BEFORE deleting — need pre-removal insertion order.
     var newActive = null;
@@ -878,45 +1167,38 @@
     // async callback that re-enters the shell will see no tab at
     // this id and bail.
     tabs.delete(id);
-    badgeCounter.delete(id);
+    badgeCounter.delete(container.relPath);
     if (lastEditedTabId === id) lastEditedTabId = null;
     // Record dismissal so the next poll-driven caco.edit (which
     // re-broadcasts every currently-dirty file) does NOT re-create
-    // this tab. Only diff tabs have content to snapshot; markdown
-    // tabs aren't poller-driven and don't need this guard.
-    if (tab.type === 'diff' && tab.edit) {
-      dismissedPaths.add(id);
-      dismissedSnapshots.set(id, {
-        diff: tab.edit.diff,
-        status: tab.edit.status,
-        isBinary: tab.edit.isBinary,
+    // this tab. KEYED BY relPath (spec §4.7). Markdown-default tabs
+    // without a constructed DiffViewer get a path-only entry (no
+    // snapshot → always-suppress until session-switch or clean).
+    var dvForSnap = container.viewers.get('diff');
+    if (dvForSnap && dvForSnap.edit) {
+      dismissedPaths.add(container.relPath);
+      dismissedSnapshots.set(container.relPath, {
+        diff: dvForSnap.edit.diff,
+        status: dvForSnap.edit.status,
+        isBinary: dvForSnap.edit.isBinary,
       });
+    } else if (container.defaultViewerType === 'markdown') {
+      dismissedPaths.add(container.relPath);
+      // no snapshot: see spec §4.7 — always-suppress semantics.
     }
     if (wasActive) {
-      // BEFORE we activate the neighbour, hide the closing tab's
-      // contentEl. Otherwise setActiveTab(newActive) sees prev=null
-      // (we just removed `id` from the map) and skips the deactivate
-      // step — the closing tab's contentEl stays display:'' until
-      // tab.destroy() runs at the bottom of this function. Result:
-      // for one frame, both contentEls are visible stacked. The
-      // direct deactivate here keeps the §4.0.6 single-visible
-      // invariant intact across the close.
-      try { tab.deactivate(); } catch (_e) { /* ignore */ }
-      if (tab.tabEl) tab.tabEl.classList.remove('active');
+      // Hide the closing container's contentEl BEFORE setActiveTab
+      // (which would otherwise see prev=null and skip deactivate).
+      // Keeps the §4.0.6 single-visible invariant across the close.
+      try { container.deactivate(); } catch (_e) { /* ignore */ }
+      if (container.tabEl) container.tabEl.classList.remove('active');
       activeTabId = null;
       if (newActive) {
-        setActiveTab(newActive);  // sees prev=null, only activates the neighbour
+        setActiveTab(newActive);
       }
-      // No paneEl.innerHTML clear: contentEls of remaining tabs
-      // stay mounted (display:none); paneEmptyEl + notGitEl are
-      // already in the DOM from index.html.
     }
-    // Destroy AFTER the map delete and the optional setActiveTab.
-    // contentEl is already display:none (either always was, or we
-    // just deactivated it above), so the destroy's detach is a clean
-    // takedown.
-    tab.destroy();
-    followEdits = false;  // X is a user gesture
+    container.destroy();
+    followEdits = false;
     updateFollowButton();
     updateEmptyState();
     schedulePersist();
@@ -967,24 +1249,22 @@
    *  Falls back to scroll-to-top when there are no diff rows (e.g.
    *  a freshly picked clean file). */
   function scrollPaneToFirstDiffRow(targetId) {
-    var t = tabs.get(targetId);
-    if (!t || !t.paneEl || t.paneEl.parentNode !== paneEl) return;
+    var container = tabs.get(targetId);
+    var t = activeDiffViewer(container);
+    if (!t || !t.paneEl) return;
+    var scrollEl = t.contentEl;
     var diffRow = t.paneEl.querySelector('.fe-row-add, .fe-row-del');
     if (!diffRow) {
-      // No diffs — scroll to top.
       t.scrollTop = 0;
-      programmaticScrollTo(0);
+      programmaticScrollTo(scrollEl, 0);
       return;
     }
-    // Compute target so the diff row sits at ~30% from the top of the
-    // visible area (slightly above center reads better than dead center
-    // for code).
     var rowRect = diffRow.getBoundingClientRect();
-    var paneRect = paneEl.getBoundingClientRect();
-    var offsetWithinPane = rowRect.top - paneRect.top + paneEl.scrollTop;
-    var target = offsetWithinPane - paneEl.clientHeight * 0.3;
+    var paneRect = scrollEl.getBoundingClientRect();
+    var offsetWithinPane = rowRect.top - paneRect.top + scrollEl.scrollTop;
+    var target = offsetWithinPane - scrollEl.clientHeight * 0.3;
     t.scrollTop = Math.max(0, target);
-    programmaticScrollTo(t.scrollTop);
+    programmaticScrollTo(scrollEl, t.scrollTop);
   }
 
   function updateFollowButton() {
@@ -1019,26 +1299,8 @@
     updateFollowButton();
   });
 
-  // Pane scroll handler
-  paneEl.addEventListener('scroll', function() {
-    var st = paneEl.scrollTop;
-    // Value-comparison: if scrollTop matches our most recent
-    // programmatic-write target (±1px tolerance for sub-pixel rounding),
-    // consume the guard and ignore. Tolerant of multiple events firing
-    // between write and observation.
-    if (pendingProgrammaticScroll && Math.abs(st - pendingProgrammaticScroll.target) <= 1) {
-      pendingProgrammaticScroll = null;
-      return;
-    }
-    // Real user scroll: turn off Follow and save the active tab's position.
-    pendingProgrammaticScroll = null;
-    if (followEdits) {
-      followEdits = false;
-      updateFollowButton();
-    }
-    var active = activeTabId ? tabs.get(activeTabId) : null;
-    if (active) active.scrollTop = st;
-  }, { passive: true });
+  // V1.1: per-viewer scroll handlers (DiffViewer installs its own in
+  // _installScrollHandler). The outer .fe-pane no longer scrolls.
 
   // ── Persistence (V2.1 mechanism; tab list reuse cards[]) ─────────────
   var PERSIST_DEBOUNCE_MS = 250;
@@ -1210,12 +1472,6 @@
       document.removeEventListener('mousedown', pickerOutsideHandler);
       pickerOutsideHandler = null;
     }
-    // Clear any chevron-menu type pin if the user closed the picker
-    // without selecting; otherwise the next routeOpen (which may be
-    // triggered by a different code path, e.g. an agent-driven open)
-    // would inherit the stale pin. Reviewed in
-    // docs/files-applet-v1-impl-review.md NICE-TO-HAVE #2.
-    _pinnedType = null;
   }
 
   async function runPickerFetch(q) {
@@ -1281,181 +1537,65 @@
     return trimmed + sep + relativePath;
   }
 
-  /** Route a picked relative path to the appropriate tab type.
-   *  Order: pinned override (chevron menu) > preferred > fallback.
-   *  See docs/files-applet-v1.md §4.0.7 Flow A. */
-  var _pinnedType = null;
+  /** Route a picked relative path: build a TabContainer with the
+   *  file's default viewer, attach DOM, activate. See spec
+   *  §4.0.B / §4.1. */
   async function routeOpen(relativePath) {
     var abs = absPathOf(relativePath);
-    var pinned = _pinnedType;
-    _pinnedType = null;
-    var chosen = null;
-    if (pinned) {
-      chosen = pinned;
-    } else {
-      var preferred = null, fallback = null;
-      for (var i = 0; i < tabTypes.length; i++) {
-        var c = tabTypes[i].canOpen(abs, relativePath);
-        if (c === 'preferred' && !preferred) preferred = tabTypes[i];
-        else if (c === 'fallback' && !fallback) fallback = tabTypes[i];
-      }
-      chosen = preferred || fallback;
-    }
-    if (!chosen) {
-      console.warn('[file-edits] no tab type accepts', relativePath);
+    // If a container already exists for this relPath, just activate.
+    var existing = findContainerByRelPath(relativePath);
+    if (existing) {
+      followEdits = false;
+      updateFollowButton();
+      setActiveTab(existing.id);
       return;
     }
+    var desc = defaultViewer(abs, relativePath);
+    if (!desc) { console.warn('[files-applet] no viewer for', relativePath); return; }
+    if (tabs.size >= TAB_CAP) evictOldestNonActive();
+    var container = new TabContainer(shell, desc, abs, relativePath);
     try {
-      var inst = await chosen.open(shell, abs, relativePath);
-      if (!inst) return;
-      // Diff tabs handle their own bookkeeping inside openDiffTab
-      // (via openOrUpdateTab); MarkdownTab returns a freshly-mounted
-      // instance that the shell must register in `tabs` and activate.
-      if (inst.type === 'diff') {
-        // openDiffTab already did setActiveTab + tabs.set via openOrUpdateTab.
-        return;
-      }
-      if (tabs.has(inst.id)) {
-        // Race: another open completed for the same id. Destroy the
-        // new one and switch to the existing.
-        inst.destroy();
-        followEdits = false;
-        updateFollowButton();
-        setActiveTab(inst.id);
-        return;
-      }
-      if (tabs.size >= TAB_CAP) evictOldestNonActive();
-      tabs.set(inst.id, inst);
-      followEdits = false;
-      updateFollowButton();
-      setActiveTab(inst.id);
-      updateEmptyState();
+      var viewer = await desc.open(shell, container, abs, relativePath);
+      if (!viewer) return;
+      container.viewers.set(desc.viewerType, viewer);
     } catch (err) {
       if (err && err.name === 'AbortError') return;
-      console.warn('[file-edits] route open error', err, relativePath);
+      console.warn('[files-applet] routeOpen failed', relativePath, err);
+      container.destroy();
+      return;
     }
-  }
-
-  /** Diff-tab factory used by routeOpen and (eventually) cards
-   *  rehydrate. Wraps the existing POST /file-edits/open endpoint
-   *  and dispatches to openOrUpdateTab which handles tab insertion,
-   *  active-switch, and persist scheduling. Returns the DiffTab
-   *  instance on success, or null on cancel/failure. */
-  async function openDiffTab(shellArg, absPath, relativePath) {
-    // If already open, just switch.
-    if (tabs.has(relativePath)) {
-      var existing = tabs.get(relativePath);
-      followEdits = false;
-      updateFollowButton();
-      setActiveTab(relativePath);
-      return existing && existing.type === 'diff' ? existing : null;
-    }
-    if (pickerOpenAbort) pickerOpenAbort.abort();
-    pickerOpenAbort = new AbortController();
-    var sid = sessionId;
-    var edit;
-    try {
-      var res = await fetch(
-        '/api/sessions/' + encodeURIComponent(sid) + '/file-edits/open',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relativePath: relativePath }),
-          signal: pickerOpenAbort.signal,
-        }
-      );
-      if (!res.ok) {
-        console.warn('[file-edits] open failed', res.status, relativePath);
-        return null;
-      }
-      var data = await res.json();
-      edit = data.edit;
-    } catch (err) {
-      if (err && err.name === 'AbortError') return null;
-      console.warn('[file-edits] open error', err, relativePath);
-      return null;
-    }
-    if (sid !== sessionId) return null;
-    if (!edit) return null;
+    tabs.set(container.id, container);
+    tabsEl.appendChild(container.tabEl);
+    paneEl.appendChild(container.contentEl);
+    container.updateToggle();
     followEdits = false;
     updateFollowButton();
-    openOrUpdateTab(edit, { forceFocus: true });
-    var t = tabs.get(relativePath);
-    return (t && t.type === 'diff') ? t : null;
+    setActiveTab(container.id);
+    updateEmptyState();
   }
 
-  // ── Tab-type registration ────────────────────────────────────────────
-  // Order matters: 'preferred' results are scanned in registration
-  // order and the first wins. Register MarkdownTab BEFORE DiffTab so
-  // .md/.markdown/.mdx paths route to markdown by default.
-  if (MarkdownTab) {
-    registerTabType({
-      type: 'markdown',
+  // ── Viewer registration ──────────────────────────────────────────────
+  // Markdown registered first so isDefault wins for .md/.markdown/.mdx.
+  if (MarkdownViewer) {
+    registerViewer({
+      viewerType: 'markdown',
       label: 'Markdown',
-      canOpen: function(_abs, rel) {
-        var dot = rel.lastIndexOf('.');
-        if (dot < 0) return 'no';
-        var ext = rel.slice(dot + 1).toLowerCase();
-        return (ext === 'md' || ext === 'markdown' || ext === 'mdx')
-          ? 'preferred' : 'no';
+      canHandle: function(_a, rel) {
+        return /\.(md|markdown|mdx)$/i.test(rel || '');
       },
-      open: function(shellArg, absPath, relPath) {
-        return MarkdownTab.open(shellArg, absPath, relPath);
+      isDefault: function(_a, rel) {
+        return /\.(md|markdown|mdx)$/i.test(rel || '');
       },
+      open: function(s, c, a, r) { return MarkdownViewer.open(s, c, a, r); },
     });
   }
-  registerTabType({
-    type: 'diff',
-    label: 'Diff',
-    canOpen: function() { return 'fallback'; },
-    open: openDiffTab,
-  });
-
-  // ── Chevron menu (open-as type override) ─────────────────────────────
-  var openMenuBtn = document.getElementById('feOpenMenu');
-  var openMenuPopup = null;
-  function buildOpenMenu() {
-    if (openMenuPopup) return;
-    openMenuPopup = document.createElement('div');
-    openMenuPopup.className = 'fe-menu';
-    openMenuPopup.hidden = true;
-    tabTypes.forEach(function(desc) {
-      var item = document.createElement('button');
-      item.type = 'button';
-      item.className = 'fe-menu-item';
-      item.textContent = 'Open as ' + desc.label;
-      item.addEventListener('click', function(e) {
-        e.stopPropagation();
-        openMenuPopup.hidden = true;
-        _pinnedType = desc;
-        openPicker();
-      });
-      openMenuPopup.appendChild(item);
-    });
-    rootEl.appendChild(openMenuPopup);
-  }
-  if (openMenuBtn) {
-    if (tabTypes.length >= 2) openMenuBtn.hidden = false;
-    openMenuBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      buildOpenMenu();
-      if (!openMenuPopup) return;
-      openMenuPopup.hidden = !openMenuPopup.hidden;
-      if (!openMenuPopup.hidden) {
-        // Position under the chevron.
-        var rect = openMenuBtn.getBoundingClientRect();
-        var rootRect = rootEl.getBoundingClientRect();
-        openMenuPopup.style.position = 'absolute';
-        openMenuPopup.style.top = (rect.bottom - rootRect.top) + 'px';
-        openMenuPopup.style.right = (rootRect.right - rect.right) + 'px';
-        var outsideHandler = function(ev) {
-          if (!openMenuPopup.contains(ev.target) && ev.target !== openMenuBtn) {
-            openMenuPopup.hidden = true;
-            document.removeEventListener('mousedown', outsideHandler);
-          }
-        };
-        setTimeout(function() { document.addEventListener('mousedown', outsideHandler); }, 0);
-      }
+  if (DiffViewer) {
+    registerViewer({
+      viewerType: 'diff',
+      label: 'Diff',
+      canHandle: function() { return true; },
+      isDefault: function() { return true; },  // fallback default — checked after markdown
+      open: function(s, c, a, r) { return DiffViewer.open(s, c, a, r); },
     });
   }
 
@@ -2081,6 +2221,10 @@
   async function initFromPersistence(sid) {
     var persisted = await loadPersistedCards(sid);
     if (persisted && Array.isArray(persisted.cards)) {
+      var diffDesc = null;
+      for (var i = 0; i < viewerRegistry.length; i++) {
+        if (viewerRegistry[i].viewerType === 'diff') { diffDesc = viewerRegistry[i]; break; }
+      }
       persisted.cards.forEach(function(c) {
         if (!c || !c.relativePath) return;
         if (tabs.has(c.relativePath)) return;
@@ -2090,10 +2234,14 @@
           status: 'clean',
           timestamp: new Date().toISOString(),
         };
-        var tab = new DiffTab(shell, placeholder);
-        tabs.set(c.relativePath, tab);
-        tabsEl.appendChild(tab.tabEl);
-        paneEl.appendChild(tab.contentEl);
+        var abs = absPathOf(c.relativePath);
+        var container = new TabContainer(shell, diffDesc, abs, c.relativePath);
+        var viewer = DiffViewer.fromEdit(shell, container, placeholder);
+        container.viewers.set('diff', viewer);
+        tabs.set(container.id, container);
+        tabsEl.appendChild(container.tabEl);
+        paneEl.appendChild(container.contentEl);
+        container.updateToggle();
       });
     }
     updateEmptyState();
@@ -2184,8 +2332,8 @@
     }
   }
 
-  // Expose pure helpers DiffTab needs (avoids duplicating into
-  // diff-tab.js). DiffTab reads via window.__filesApplet._diffHelpers.
+  // Expose pure helpers DiffViewer needs (avoids duplicating into
+  // diff-viewer.js). DiffViewer reads via window.__filesApplet._diffHelpers.
   window.__filesApplet._diffHelpers = { fullFileEqual: fullFileEqual };
 
   updateFollowButton();

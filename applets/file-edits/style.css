@@ -132,15 +132,24 @@
 .fe-pane {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;            /* V1.1 §4.0.E: viewer contentEl owns scroll */
   padding: 0;
-  overflow-anchor: auto;
+  position: relative;
 }
 .fe-pane-empty {
   padding: var(--space-xl) var(--space-md);
   color: var(--color-text-muted);
   text-align: center;
   font-size: var(--text-sm);
+}
+
+/* V1.1: per-tab outer container. Positioning root for the floating
+ * viewer-toggle button. Overflow hidden so the viewer's scrollbar
+ * is the only one and the toggle stays pinned to the viewport. */
+.files-tab-pane {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
 }
 
 .fe-diff {
@@ -154,6 +163,8 @@
   white-space: pre-wrap;
   word-break: break-all;
   overflow-x: auto;
+  overflow-y: auto;            /* V1.1: per-viewer vertical scroll */
+  height: 100%;
 }
 
 .fe-diff .fe-d-add  { color: var(--color-success-bright); display: block; }
@@ -417,16 +428,17 @@
    * declares the participation in the pane's flow. */
 }
 
-/* Markdown tab content. Mirrors styles from applets/markdown-viewer/
- * style.css so the look survives the migration into a tabbed view. */
+/* Markdown viewer content. */
 .files-md-content {
-  padding: 16px 20px;
+  padding: 16px 20px 16px 20px;
+  padding-right: 56px;             /* room for the toggle button + scrollbar */
   overflow-y: auto;
   height: 100%;
   font-family: var(--font-sans, system-ui, sans-serif);
   font-size: 14px;
   line-height: 1.6;
   color: var(--color-text, #d4d4d4);
+  box-sizing: border-box;
 }
 .files-md-content .md-rendered {
   max-width: 80ch;
@@ -438,39 +450,37 @@
   background: rgba(244, 135, 113, 0.08);
 }
 
-/* Tab-type icon glyphs. Small visual differentiator so multiple
- * tab types in the strip don't look identical. */
+/* Tab-type icon glyphs in the strip. */
 .fe-tab.fe-tab-diff .fe-tab-name::before {
   content: '◇ ';
   opacity: 0.6;
 }
+.fe-tab.fe-tab-markdown .fe-tab-name::before,
 .fe-tab.fe-tab-md .fe-tab-name::before {
   content: '¶ ';
   opacity: 0.6;
 }
 
-/* Chevron "open-as" menu. Anchored under #feOpenMenu in JS. */
-.fe-menu {
+/* V1.1: floating viewer-toggle button. Pinned to the top-right of
+ * the per-tab content pane (.files-tab-pane). */
+.files-viewer-toggle {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  z-index: 5;
   background: var(--color-bg, #1e1e1e);
   border: 1px solid var(--color-border, #3c3c3c);
   border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-  min-width: 160px;
-  padding: 4px;
-  z-index: 50;
-}
-.fe-menu-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--color-text, #d4d4d4);
-  padding: 6px 10px;
+  padding: 4px 10px;
   font: inherit;
+  font-size: var(--text-sm, 12px);
+  color: var(--color-text, #d4d4d4);
   cursor: pointer;
-  border-radius: 2px;
 }
-.fe-menu-item:hover {
-  background: var(--color-bg-hover, rgba(255,255,255,0.06));
+.files-viewer-toggle:hover {
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.06));
+}
+.files-viewer-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
 }

@@ -106,6 +106,7 @@ export function getAppletPaths(slug: string): AppletFilePaths {
  */
 const SLUG_ALIASES: Record<string, string> = {
   'roadmap': 'session-context',
+  'file-edits': 'files',
 };
 
 async function resolveAppletDir(slug: string): Promise<AppletFilePaths | null> {

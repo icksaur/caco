@@ -15,7 +15,7 @@ detail — only intent + status.
 | V2.b | shipped | merged into master @ ee40db7 | `docs/files-applet-v2.md` §4.2 |
 | V2.c | shipped | merged into master @ b1b4cae | `docs/files-applet-v2.md` §4.3 |
 | V2.d | shipped | merged into master @ 0e85d5a | `docs/files-applet-v2.md` §4.4 |
-| V3.x | not started | — | `docs/files-applet-v3.x.md` (to be written) |
+| V3.x | shipped | merged into master @ 1a68f18 | `docs/files-applet-v3.x.md` |
 | V3.y | not started | — | `docs/files-applet-v3.y.md` (to be written) |
 | V4 | not started | — | `docs/files-applet-v4.md` (to be written) |
 

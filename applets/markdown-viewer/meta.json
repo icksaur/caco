@@ -20,5 +20,7 @@
       "size": "number"
     },
     "set": null
-  }
+  },
+  "deprecated": true,
+  "replacedBy": "files"
 }

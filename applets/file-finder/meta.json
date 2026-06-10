@@ -11,7 +11,7 @@
   "createdAt": "2026-03-07T03:37:00.000Z",
   "updatedAt": "2026-03-07T04:32:00.000Z",
   "agentUsage": {
-    "purpose": "Browse and fuzzy-search files in a directory tree, copy paths to clipboard. V3.y.1: clicking a file result now opens it in the file-edits applet (which routes to the appropriate viewer — markdown / image / html / diff) instead of the standalone single-purpose applets."
+    "purpose": "Browse and fuzzy-search files in a directory tree, copy paths to clipboard. V3.y.1: clicking a file result now opens it in the file-edits applet (which routes to the appropriate viewer \u2014 markdown / image / html / diff) instead of the standalone single-purpose applets."
   },
   "stateSchema": {
     "get": {
@@ -20,5 +20,7 @@
       "loaded": "boolean"
     },
     "set": null
-  }
+  },
+  "deprecated": true,
+  "replacedBy": "files"
 }

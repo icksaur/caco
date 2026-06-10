@@ -20,5 +20,7 @@
       "dimensions": "{ width, height }"
     },
     "set": null
-  }
+  },
+  "deprecated": true,
+  "replacedBy": "files"
 }

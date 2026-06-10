@@ -18,9 +18,11 @@
  * last gesture (e.g. an X-dismiss that fires moments before SIGINT).
  */
 
-import { getSessionData, setSessionData } from './session-data-store.js';
+import { getSessionData, setSessionData, deleteSessionData } from './session-data-store.js';
 
-const STORE_NAME = 'file-edits-cards';
+const STORE_NAME = 'files-cards';
+/** V5: legacy key written by V1-V4. Migrated on first read. */
+const LEGACY_STORE_NAME = 'file-edits-cards';
 const DEBOUNCE_MS = 500;
 
 export const SCHEMA_VERSION = 2;
@@ -49,7 +51,20 @@ const pending = new Map<string, PendingWrite>();
 /** Get the persisted card list for a session. Returns the empty list
  *  shape if the file is missing or unparseable. */
 export function getCardList(sessionId: string): CardList {
-  const raw = getSessionData(sessionId, STORE_NAME);
+  let raw = getSessionData(sessionId, STORE_NAME);
+  if (!raw) {
+    // V5: one-time migration from the V1-V4 file-edits-cards key.
+    // Only delete the legacy key after a successful write so an
+    // interrupted migration retries on next read.
+    const legacyRaw = getSessionData(sessionId, LEGACY_STORE_NAME);
+    if (legacyRaw) {
+      const wrote = setSessionData(sessionId, STORE_NAME, legacyRaw);
+      if (wrote) {
+        deleteSessionData(sessionId, LEGACY_STORE_NAME);
+      }
+      raw = legacyRaw;
+    }
+  }
   if (raw && typeof raw === 'object') {
     const cards = Array.isArray(raw.cards) ? (raw.cards as unknown[]).filter(isCardPersist) : [];
     const dismissed = Array.isArray(raw.dismissed)

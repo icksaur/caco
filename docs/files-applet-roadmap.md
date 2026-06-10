@@ -18,7 +18,8 @@ detail — only intent + status.
 | V3.x | shipped | merged into master @ 1a68f18 | `docs/files-applet-v3.x.md` |
 | V3.y | shipped | merged into master | `docs/files-applet-v3.y.md` |
 | V4 | shipped | merged into master | `docs/files-applet-v4.md` |
-| V5 | not started | — | (to be spec'd) |
+| V5 | shipped | merged into master | `docs/files-applet-v5.md` |
+| V6 | not started | — | (to be spec'd) |
 
 ## V1 — shipped
 
@@ -116,42 +117,56 @@ standalone viewers, global shortcuts, visual refresh, autosave,
 dirty-prompt) move to V5+ below. They are NOT abandoned, only
 re-bucketed so V4 ships small.
 
-## V5+ — proposed buckets (formerly V4 scope)
+## V5 — shipped (rename + standalone deprecation)
 
-9. **Rename slug `file-edits` → `files`.** Old slug kept as a
-   redirect for one release. Updates `agentUsage.purpose` and any
-   doc references.
+Renamed slug `file-edits` → `files` (with `SLUG_ALIASES`
+back-compat). Soft-deprecated `markdown-viewer`, `image-viewer`,
+`html-viewer`, `file-finder` via `deprecated: true` meta flag +
+conditional redirect stub (redirects to `files` when a session
+exists; falls through to the standalone applet without one).
+Added `?openFinderRoot=ABS` to the picker so `file-finder?root=X`
+flows kept working. Persistence `STORE_NAME` renamed
+`file-edits-cards` → `files-cards` with one-time on-read
+migration. Agent prompt + `caco_applet_usage` + applet-browser
+all filter `deprecated`; applet-browser has a "Show deprecated"
+toggle. See `docs/files-applet-v5.md`.
 
-10. **Deprecate standalone applets.** `markdown-viewer`,
-    `image-viewer`, `html-viewer` marked deprecated; their
-    entries in `applets/` keep a stub that redirects to the
-    files applet (`?applet=files&openType=markdown&path=...`).
-    May also retire `file-finder` once V4 parity ships and a
-    period of dual-availability passes.
+## V6+ — proposed buckets (formerly V5+ scope)
 
-11. **Global keyboard shortcuts.** Ctrl+P already opens the
+10. **Delete the deprecated stub directories outright.** V5
+    kept them on disk for back-compat. Whenever enough turns
+    have passed that old chat-link URLs have aged out, remove
+    them. This is the change that finally collapses the
+    duplicated `fileIcons` map (V5 §10 above).
+
+11. **Grow the `files` applet to support no-session mode** so
+    the conditional redirect can become unconditional and the
+    standalone viewers can finally be deleted.
+
+12. **Rename TS routes / files** (`src/routes/file-edits.ts` →
+    `files.ts`, `src/file-edits-store.ts` → `files-store.ts`).
+    One-shot rename + import fix; no behavior change. Defer.
+
+13. **Update the long-tail of in-applet links**
+    (`text-editor`, `image-gallery`, `session-context`,
+    `git-status`, `html-viewer`) to point at `files` directly
+    instead of relying on the stub redirect.
+
+14. **Global keyboard shortcuts.** Ctrl+P already opens the
     files applet's finder as of V3.y.2; remaining shortcuts:
     next/prev tab, close tab.
 
-12. **Visual refresh.** Tab-type icon glyphs (V1 used ◇ and ¶
+15. **Visual refresh.** Tab-type icon glyphs (V1 used ◇ and ¶
     as placeholders), toggle button styling, broader picker UX
     get a consistent treatment with Caco's broader visual style.
 
-13. **Autosave for write-capable viewers** (deferred from V2).
+16. **Autosave for write-capable viewers** (deferred from V2).
     Debounced 1s after last keystroke; in-memory "last failed
     save" buffer + small indicator so silent save failures
     surface to the user.
 
-14. **Dirty-prompt on session-switch** (deferred from V2 §7.5;
-    superseded by §13 autosave). When autosave makes "unsaved
-    changes" rare, this becomes belt-and-suspenders. May ship as
-    a small Caco-side `onBeforeSessionChange` hook or be dropped
-    if autosave proves sufficient.
-
-15. **Consolidate duplicated icon mapping.** V4 deliberately
-    duplicates the file-finder `fileIcons` map into the picker.
-    Whichever V5+ work absorbs/retires the standalone file-finder
-    should fold the map into a single source of truth.
+17. **Dirty-prompt on session-switch** (deferred from V2 §7.5;
+    superseded by §16 autosave).
 
 ## Out of scope (parking lot)
 

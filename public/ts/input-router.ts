@@ -9,6 +9,7 @@
 import { getViewState, isAppletPanelVisible, toggleAppletExpanded } from './view-controller.js';
 import { toggleSessions, toggleApplet } from './router.js';
 import { getCurrentCwd, getNewChatCwd } from './app-state.js';
+import { getPanelState } from './panel-state.js';
 
 export type KeyHandler = (e: KeyboardEvent) => void;
 
@@ -60,13 +61,28 @@ export function initInputRouter(): void {
       return;
     }
     
-    // Global Ctrl+P: open file finder (works from any context)
-    if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+    // Global Ctrl+P: open file finder. V3.y.2 — for active
+    // sessions, route to file-edits applet (the unified files
+    // applet). For newChat (no session, no cwd), fall back to
+    // the standalone file-finder. See docs/files-applet-v3.y.md
+    // §4.2.A.
+    if ((e.ctrlKey || e.metaKey) && e.key === 'p' && !e.altKey && !e.shiftKey) {
       e.preventDefault();
-      const cwd = getViewState() === 'newChat'
-        ? (getNewChatCwd() || getCurrentCwd() || '~')
-        : (getCurrentCwd() || '~');
-      window.location.href = '/?applet=file-finder&root=' + encodeURIComponent(cwd);
+      if (getViewState() === 'newChat') {
+        const cwd = getNewChatCwd() || getCurrentCwd() || '~';
+        window.location.href = '/?applet=file-finder&root=' + encodeURIComponent(cwd);
+        return;
+      }
+      // SPA navigate so panel + applet state survive.
+      getPanelState().set({ applet: true }, 'deep-link');
+      const nav = window.navigation;
+      if (nav && typeof nav.navigate === 'function') {
+        nav.navigate('?applet=file-edits&openFinder=1');
+      } else {
+        // Older browsers without Navigation API: fall back to
+        // full-page nav.
+        window.location.href = '/?applet=file-edits&openFinder=1';
+      }
       return;
     }
     

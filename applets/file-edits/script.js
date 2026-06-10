@@ -246,6 +246,58 @@
     });
     pane.appendChild(toggle);
     this.toggleBtn = toggle;
+
+    // V2.d: Mode toggle. Lazy-shown when the active viewer's
+    // getModes() returns ≥2 entries. Stacked below the viewer
+    // toggle. See docs/files-applet-v2.md §4.0.C / §4.4.3.
+    var modeBtn = document.createElement('button');
+    modeBtn.className = 'files-mode-toggle';
+    modeBtn.type = 'button';
+    modeBtn.hidden = true;
+    modeBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var targetMode = modeBtn.dataset.target;
+      if (!targetMode) return;
+      var v = self.viewers.get(self.activeViewerType);
+      if (v && typeof v.setMode === 'function') {
+        v.setMode(targetMode);
+        self.updateModeToggle();
+      }
+    });
+    pane.appendChild(modeBtn);
+    this.modeBtn = modeBtn;
+
+    // V2.d: Save button. Shown when active viewer.isDirty() returns
+    // true. Stacked below the mode toggle.
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'files-save-btn';
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.hidden = true;
+    saveBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var v = self.viewers.get(self.activeViewerType);
+      if (!v || typeof v.save !== 'function') return;
+      saveBtn.disabled = true;
+      Promise.resolve(v.save()).then(function() {
+        self._clearSaveError();
+        self.updateSaveButton();
+      }, function(err) {
+        self._showSaveError((err && err.message) || String(err));
+        self.updateSaveButton();
+      }).then(function() { saveBtn.disabled = false; });
+    });
+    pane.appendChild(saveBtn);
+    this.saveBtn = saveBtn;
+
+    // V2.d: per-tab error surface (save failures, etc.). Hidden
+    // until populated; auto-cleared on next successful save or
+    // mode change.
+    var errEl = document.createElement('div');
+    errEl.className = 'files-tab-error';
+    errEl.hidden = true;
+    pane.appendChild(errEl);
+    this.errEl = errEl;
   }
 
   // type getter (compat for buildPersistBody / jumpToMostRecent which
@@ -303,6 +355,8 @@
       label: this.label,
       activeViewer: this.activeViewerType,
       defaultViewer: this.defaultViewerType,
+      activeMode: (v && typeof v.getActiveMode === 'function') ? v.getActiveMode() : null,
+      isDirty: !!(v && typeof v.isDirty === 'function' && v.isDirty()),
     };
     for (var k in frag) {
       if (Object.prototype.hasOwnProperty.call(frag, k)) out[k] = frag[k];
@@ -331,8 +385,57 @@
     this.toggleBtn.dataset.target = other.viewerType;
   };
 
+  /** V2.d: update the mode toggle button based on the active
+   *  viewer's getModes(). Hides if the viewer has no modes or
+   *  fewer than 2. Adds/removes a `has-modes` class on contentEl
+   *  so CSS can reserve the save-button slot. */
+  TabContainer.prototype.updateModeToggle = function() {
+    if (!this.modeBtn || !this.contentEl) return;
+    var v = this.viewers.get(this.activeViewerType);
+    var modes = (v && typeof v.getModes === 'function') ? v.getModes() : null;
+    if (!modes || modes.length < 2) {
+      this.modeBtn.hidden = true;
+      this.contentEl.classList.remove('has-modes');
+      this.updateSaveButton();
+      return;
+    }
+    this.contentEl.classList.add('has-modes');
+    this.modeBtn.hidden = false;
+    var active = (typeof v.getActiveMode === 'function') ? v.getActiveMode() : null;
+    var other = null;
+    for (var i = 0; i < modes.length; i++) {
+      if (modes[i].id !== active) { other = modes[i]; break; }
+    }
+    if (!other) { this.modeBtn.hidden = true; this.contentEl.classList.remove('has-modes'); return; }
+    this.modeBtn.textContent = '→ ' + other.label;
+    this.modeBtn.dataset.target = other.id;
+    this.updateSaveButton();
+  };
+
+  /** V2.d: show/hide Save button based on active viewer.isDirty(). */
+  TabContainer.prototype.updateSaveButton = function() {
+    if (!this.saveBtn || !this.contentEl) return;
+    var v = this.viewers.get(this.activeViewerType);
+    var dirty = !!(v && typeof v.isDirty === 'function' && v.isDirty()
+                   && typeof v.save === 'function');
+    this.saveBtn.hidden = !dirty;
+    this.contentEl.classList.toggle('is-dirty', dirty);
+  };
+
+  TabContainer.prototype._showSaveError = function(msg) {
+    if (!this.errEl) return;
+    this.errEl.textContent = 'Save failed: ' + msg;
+    this.errEl.hidden = false;
+  };
+  TabContainer.prototype._clearSaveError = function() {
+    if (!this.errEl) return;
+    this.errEl.hidden = true;
+    this.errEl.textContent = '';
+  };
+
   /** Switch to a different viewer type. Lazy-constructs the viewer
-   *  on first switch. See spec §4.0.5 rules 9-10 + spec §4.0.C. */
+   *  on first switch. See spec §4.0.5 rules 9-10 + spec §4.0.C
+   *  + V2 spec §4.0.B (isDirty prompt). */
   TabContainer.prototype.switchViewer = async function(viewerType) {
     if (this.destroyed) return;
     if (viewerType === this.activeViewerType) return;
@@ -342,6 +445,13 @@
       if (this.shell.viewers[i].viewerType === viewerType) { desc = this.shell.viewers[i]; break; }
     }
     if (!desc) { console.warn('[files-applet] unknown viewer type', viewerType); return; }
+
+    // V2.d: isDirty prompt on OUTGOING viewer. If user cancels,
+    // abort the switch.
+    var outgoing = this.viewers.get(this.activeViewerType);
+    if (outgoing && typeof outgoing.isDirty === 'function' && outgoing.isDirty()) {
+      if (!window.confirm('Discard unsaved changes?')) return;
+    }
 
     this.switching = true;
     if (this.toggleBtn) this.toggleBtn.disabled = true;
@@ -361,6 +471,7 @@
       this.viewers.get(viewerType).activate();
       this.activeViewerType = viewerType;
       this.updateToggle();
+      this.updateModeToggle();
       this.shell.echoState();
     } catch (err) {
       console.warn('[files-applet] switchViewer failed:', err);
@@ -447,6 +558,16 @@
       : function(fn) { Promise.resolve().then(fn); };
     schedule(function() {
       echoPending = false;
+      // V2.d: refresh the active container's save-button visibility
+      // before pushing state, so the button visibility tracks
+      // isDirty changes (textarea input fires echoState).
+      var active = activeTabId ? tabs.get(activeTabId) : null;
+      if (active && typeof active.updateSaveButton === 'function') {
+        active.updateSaveButton();
+      }
+      if (active && typeof active.updateModeToggle === 'function') {
+        active.updateModeToggle();
+      }
       try {
         window.appletAPI.setAppletState({
           fileEdits: buildFileEditsLegacyState(),
@@ -1050,6 +1171,9 @@
     if (next) {
       next.tabEl.classList.add('active');
       next.activate();
+      // V2.d: re-evaluate mode/save buttons for the new active viewer.
+      if (typeof next.updateModeToggle === 'function') next.updateModeToggle();
+      if (typeof next.updateSaveButton === 'function') next.updateSaveButton();
       try {
         next.tabEl.scrollIntoView({ inline: 'nearest', block: 'nearest' });
       } catch (_) { /* old browsers */ }
@@ -1208,6 +1332,16 @@
   function closeTab(id) {
     var container = tabs.get(id);
     if (!container) return;
+    // V2.d: isDirty prompt. Check EVERY constructed viewer in the
+    // container (not just active — a markdown viewer toggled-away-
+    // from could still be dirty). One prompt covers all of them.
+    var anyDirty = false;
+    container.viewers.forEach(function(v) {
+      if (v && typeof v.isDirty === 'function' && v.isDirty()) anyDirty = true;
+    });
+    if (anyDirty) {
+      if (!window.confirm('Discard unsaved changes?')) return;
+    }
     var wasActive = id === activeTabId;
     // Compute neighbour BEFORE deleting — need pre-removal insertion order.
     var newActive = null;
@@ -1430,6 +1564,22 @@
     } catch (_) { /* best effort */ }
   }
   window.addEventListener('beforeunload', flushPersistBeacon);
+
+  // V2.d: dirty guard. If any tab has a dirty viewer (unsaved
+  // markdown editor content), trigger the browser's native
+  // "unload confirm" prompt. Spec §4.0.B.
+  window.addEventListener('beforeunload', function(e) {
+    var anyDirty = false;
+    tabs.forEach(function(container) {
+      container.viewers.forEach(function(v) {
+        if (v && typeof v.isDirty === 'function' && v.isDirty()) anyDirty = true;
+      });
+    });
+    if (!anyDirty) return undefined;
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  });
 
   async function loadPersistedCards(sid) {
     try {

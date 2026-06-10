@@ -552,3 +552,96 @@
   content: '⟨⟩ ';
   opacity: 0.6;
 }
+
+/* V2.d: MarkdownViewer edit mode + mode toggle + save button. */
+.files-md-content textarea.md-editor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: var(--color-bg, #1e1e1e);
+  color: var(--color-text, #d4d4d4);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 16px 56px 16px 20px;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+}
+.md-disk-changed {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  z-index: 6;
+  padding: 4px 8px;
+  background: rgba(255, 200, 0, 0.15);
+  border: 1px solid rgba(255, 200, 0, 0.5);
+  border-radius: 3px;
+  color: var(--color-text, #d4d4d4);
+  font: inherit;
+  font-size: var(--text-sm, 12px);
+  pointer-events: none;
+}
+/* Move the disk-changed indicator to the LEFT of the toggle stack
+ * when the toggle is visible — avoid overlap. */
+.files-tab-pane:has(.files-viewer-toggle:not([hidden])) .md-disk-changed {
+  right: 100px;
+}
+
+.files-mode-toggle {
+  position: absolute;
+  top: 40px;
+  right: 16px;
+  z-index: 5;
+  background: var(--color-bg, #1e1e1e);
+  border: 1px solid var(--color-border, #3c3c3c);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm, 12px);
+  color: var(--color-text, #d4d4d4);
+  cursor: pointer;
+}
+.files-mode-toggle:hover {
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.files-save-btn {
+  position: absolute;
+  top: 72px;
+  right: 16px;
+  z-index: 5;
+  background: var(--color-success, #4caf50);
+  border: 1px solid var(--color-success-bright, #66bb6a);
+  border-radius: 4px;
+  padding: 4px 14px;
+  font: inherit;
+  font-size: var(--text-sm, 12px);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+.files-save-btn:hover {
+  background: var(--color-success-bright, #66bb6a);
+}
+.files-save-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.files-tab-error {
+  position: absolute;
+  bottom: 8px;
+  left: 12px;
+  right: 12px;
+  z-index: 7;
+  padding: 8px 12px;
+  background: rgba(244, 135, 113, 0.15);
+  border: 1px solid var(--color-error, #f48771);
+  border-radius: 4px;
+  color: var(--color-error, #f48771);
+  font: inherit;
+  font-size: var(--text-sm, 12px);
+}

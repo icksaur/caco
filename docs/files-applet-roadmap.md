@@ -15,7 +15,8 @@ detail — only intent + status.
 | V2.b | shipped | merged into master @ ee40db7 | `docs/files-applet-v2.md` §4.2 |
 | V2.c | shipped | merged into master @ b1b4cae | `docs/files-applet-v2.md` §4.3 |
 | V2.d | shipped | merged into master @ 0e85d5a | `docs/files-applet-v2.md` §4.4 |
-| V3 | not started | — | `docs/files-applet-v3.md` (to be written) |
+| V3.x | not started | — | `docs/files-applet-v3.x.md` (to be written) |
+| V3.y | not started | — | `docs/files-applet-v3.y.md` (to be written) |
 | V4 | not started | — | `docs/files-applet-v4.md` (to be written) |
 
 ## V1 — shipped
@@ -68,13 +69,26 @@ further during spec.
    reuses an existing one if available. Toggle row likely
    becomes "Mode: View | Edit" alongside the viewer-type toggle.
 
-## V3 — proposed scope (deferred from V2)
+## V3 — split into V3.x (polish) and V3.y (chat-integration + finder)
 
-5. **Eviction policy for inactive viewers** — V1.1 keeps both
-   viewers constructed for a tab's lifetime. V3 may add "destroy
-   inactive viewer after N seconds idle" if profiling shows
-   memory pressure. Likely no-op for typical use; the trigger is
-   memory data, not feature pressure.
+**V3.x** (small, coherent contract polish — spec'd in
+`docs/files-applet-v3.x.md`):
+
+5. **Eviction policy for inactive viewers** — TabContainer
+   destroys non-active viewers after N seconds idle. Memory
+   optimization with no user-visible behavior change beyond
+   reload-cost on toggle-back. The trigger to ship this is
+   memory data, not feature pressure — V3.x lays the design and
+   makes the policy opt-in / configurable, but ships with the
+   default disabled if data doesn't yet justify it.
+
+8. **Per-viewer chrome decoration** — Generalize V2.d's Save
+   button into "viewer may declare extra chrome buttons" hook.
+   Anchored next to the mode toggle. Lets a future viewer add
+   e.g. "Format" / "Lint" / "Reset zoom" without shell
+   changes. Refactor of V2.d's save-button code, not new code.
+
+**V3.y** (large, cross-module — spec'd in `docs/files-applet-v3.y.md`):
 
 6. **Open-from-chat routing** — when chat output contains a link
    to a known file (markdown link, file: URL, etc.), route to a
@@ -89,12 +103,7 @@ further during spec.
    would-be tab type in a side pane). Type-specific filtering
    ("only show images").
 
-8. **Per-viewer chrome decoration** — a viewer may declare a
-   `chromeButton()` (e.g. MarkdownViewer's "Save" in edit mode)
-   that the shell renders adjacent to the viewer toggle. Adds a
-   per-viewer hook to the V1.1 contract.
-
-## V4 — proposed scope (deferred from earlier)
+## V4 — proposed scope (deferred from earlier + V3 deferrals)
 
 9. **Rename slug `file-edits` → `files`.** Old slug kept as a
    redirect for one release. Updates `agentUsage.purpose` and any
@@ -106,12 +115,23 @@ further during spec.
     files applet (`?applet=files&openType=markdown&path=...`).
 
 11. **Global keyboard shortcuts.** Ctrl+P opens the files
-    applet's finder (after V3 §7). Other shortcuts: next/prev
+    applet's finder (after V3.y §7). Other shortcuts: next/prev
     tab, close tab.
 
 12. **Visual refresh.** Tab-type icon glyphs (V1 used ◇ and ¶
     as placeholders), toggle button styling, picker UX get a
     consistent treatment with Caco's broader visual style.
+
+13. **Autosave for write-capable viewers** (deferred from V2).
+    Debounced 1s after last keystroke; in-memory "last failed
+    save" buffer + small indicator so silent save failures
+    surface to the user.
+
+14. **Dirty-prompt on session-switch** (deferred from V2 §7.5;
+    superseded by V4 §13 autosave). When autosave makes "unsaved
+    changes" rare, this becomes belt-and-suspenders. May ship as
+    a small Caco-side `onBeforeSessionChange` hook or be dropped
+    if autosave proves sufficient.
 
 ## Out of scope (parking lot)
 

@@ -412,6 +412,24 @@
       var d = this.shell.viewers[i];
       if (d.canHandle(this.absPath, this.relPath)) available.push(d);
     }
+    // V3.y.3 self-heal: if active is not even in the canHandle set
+    // (corrupted state from older builds), force-switch to the
+    // first valid descriptor. Otherwise the user is stuck on a
+    // viewer that cannot render this file with no toggle out.
+    var activeOk = false;
+    for (var ak = 0; ak < available.length; ak++) {
+      if (available[ak].viewerType === this.activeViewerType) { activeOk = true; break; }
+    }
+    if (!activeOk && available.length > 0) {
+      var rescueType = available[0].viewerType;
+      console.warn('[files-applet] active viewer', this.activeViewerType,
+        'cannot handle', this.relPath, '— switching to', rescueType);
+      var self = this;
+      // Defer to avoid re-entering updateToggle mid-call.
+      setTimeout(function() { void self.switchViewer(rescueType); }, 0);
+      this.toggleBtn.hidden = true;
+      return;
+    }
     if (available.length < 2) { this.toggleBtn.hidden = true; return; }
     this.toggleBtn.hidden = false;
     var self = this;
@@ -2885,14 +2903,30 @@
         for (var i = 0; i < viewerRegistry.length; i++) {
           if (viewerRegistry[i].viewerType === defaultType) { desc = viewerRegistry[i]; break; }
         }
-        if (!desc) {
-          // Persisted viewer type not registered (e.g. user rolled
-          // back V2.a but kept V2.c data). Fall back to diff.
-          for (var j = 0; j < viewerRegistry.length; j++) {
-            if (viewerRegistry[j].viewerType === 'diff') { desc = viewerRegistry[j]; break; }
+        // V3.y.3 self-heal: persisted defaultType must canHandle
+        // the actual file. A V1-era card recording diff-default for
+        // a binary (e.g. caco.png) would otherwise render PNG bytes
+        // in the diff viewer with no toggle out. Fall back to
+        // defaultViewer() — the same picker routeOpen uses.
+        if (!desc || !desc.canHandle(abs, c.relativePath)) {
+          var corrected = defaultViewer(abs, c.relativePath);
+          if (!corrected) {
+            console.warn('[files-applet] no viewer for persisted', c.relativePath);
+            return;
           }
-          defaultType = 'diff';
-          activeType = 'diff';
+          desc = corrected;
+          defaultType = corrected.viewerType;
+          activeType = defaultType;
+        }
+        // Validate activeType too. If unknown or can't handle this
+        // file (corrupted state), drop it; the default viewer will
+        // render and updateToggle gives a normal toggle from there.
+        var activeDesc = null;
+        for (var ai = 0; ai < viewerRegistry.length; ai++) {
+          if (viewerRegistry[ai].viewerType === activeType) { activeDesc = viewerRegistry[ai]; break; }
+        }
+        if (!activeDesc || !activeDesc.canHandle(abs, c.relativePath)) {
+          activeType = defaultType;
         }
         var container = new TabContainer(shell, desc, abs, c.relativePath);
         if (defaultType === 'diff') {

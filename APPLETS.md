@@ -121,8 +121,7 @@ Every CSS rule in `style.css` is automatically prefixed with `.applet-instance[d
 | `calculator` | Basic calculator with keyboard support and history |
 | `doodle` | Drawing canvas with AI integration |
 | `drum-machine` | 4-track 16-step drum sequencer |
-| `files` | Tabbed file viewer — markdown, image, html, diff. Ctrl+P opens a fuzzy file picker. Default landing for `?openPath=ABS` and `?openFinder=1&openFinderRoot=ABS`. |
-| `git-diff` | View file diffs in a git repository |
+| `files` | Tabbed file viewer — markdown, image, html, diff (unstaged / staged / range). Ctrl+P opens a fuzzy file picker. Default landing for `?openPath=ABS[&diffMode=staged\|range&diffRef=<ref>]` and `?openFinder=1&openFinderRoot=ABS`. |
 | `git-status` | Git staging, commits, push/pull — auto-refreshes on file edits |
 | `jobs` | View and manage scheduled jobs |
 | `mcp-servers` | View MCP server status, tools, and OAuth authentication |
@@ -137,6 +136,7 @@ Every CSS rule in `style.css` is automatically prefixed with `.applet-instance[d
 | `markdown-viewer` | `files&openPath=ABS` |
 | `image-viewer` | `files&openPath=ABS` |
 | `html-viewer` | `files&openPath=ABS` |
+| `git-diff` | `files&openPath=ABS[&diffMode=staged\|range&diffRef=<ref>]` (per-file; multi-file `ref=` without a file redirects to `git-status&path=REPO`) |
 
 ## Creating New Applets
 

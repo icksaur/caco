@@ -19,7 +19,8 @@ detail — only intent + status.
 | V3.y | shipped | merged into master | `docs/files-applet-v3.y.md` |
 | V4 | shipped | merged into master | `docs/files-applet-v4.md` |
 | V5 | shipped | merged into master | `docs/files-applet-v5.md` |
-| V6 | not started | — | (to be spec'd) |
+| V6 | shipped | merged into master | `docs/files-applet-v6.md` |
+| V7 | not started | — | (to be spec'd) |
 
 ## V1 — shipped
 
@@ -131,13 +132,29 @@ migration. Agent prompt + `caco_applet_usage` + applet-browser
 all filter `deprecated`; applet-browser has a "Show deprecated"
 toggle. See `docs/files-applet-v5.md`.
 
-## V6+ — proposed buckets (formerly V5+ scope)
+## V6 — shipped (git-diff deprecation)
+
+Extended the `files` applet's DiffViewer to handle three diff
+modes (unstaged, staged, range) — one file per tab; no new tab
+type. `git-diff` became a V5-style conditional redirect stub
+(redirects to `files` when a session exists). `git-status`'s
+per-file diff links switched to `files` directly; the
+multi-file last-commit "View diff" link was removed (single
+regression, mitigated by deferred per-commit file list).
+Added `?diffMode=` and `?diffRef=` URL params, additive
+`diffMode`/`diffRef` on persisted cards (schemaVersion 2 stays
+intact). DiffViewer gained a chrome refresh button for
+staged/range snapshots. See `docs/files-applet-v6.md`.
+
+## V7+ — proposed buckets (formerly V6+ scope)
 
 10. **Delete the deprecated stub directories outright.** V5
-    kept them on disk for back-compat. Whenever enough turns
-    have passed that old chat-link URLs have aged out, remove
-    them. This is the change that finally collapses the
-    duplicated `fileIcons` map (V5 §10 above).
+    kept `markdown-viewer`, `image-viewer`, `html-viewer`,
+    `file-finder` on disk for back-compat; V6 added `git-diff`
+    to that list. Whenever enough turns have passed that old
+    chat-link URLs have aged out, remove them. This is the
+    change that finally collapses the duplicated `fileIcons`
+    map (V5 §10).
 
 11. **Grow the `files` applet to support no-session mode** so
     the conditional redirect can become unconditional and the
@@ -145,28 +162,43 @@ toggle. See `docs/files-applet-v5.md`.
 
 12. **Rename TS routes / files** (`src/routes/file-edits.ts` →
     `files.ts`, `src/file-edits-store.ts` → `files-store.ts`).
-    One-shot rename + import fix; no behavior change. Defer.
+    One-shot rename + import fix; no behavior change.
 
 13. **Update the long-tail of in-applet links**
     (`text-editor`, `image-gallery`, `session-context`,
-    `git-status`, `html-viewer`) to point at `files` directly
-    instead of relying on the stub redirect.
+    `html-viewer`) to point at `files` directly instead of
+    relying on the stub redirect. (`git-status` already
+    targets `files` directly as of V6.)
 
-14. **Global keyboard shortcuts.** Ctrl+P already opens the
+14. **Multi-file ref-range view** in git-status. Per-commit
+    detail row with a file list, each row linking to `files`
+    with `diffMode=range&diffRef=<commit>~..commit`.
+    Replaces the V6-removed "View diff" link with something
+    more useful (per-file clickable).
+
+15. **Live event hook for staged tabs.** Currently V6 staged
+    tabs only refresh via the chrome button. A hook into
+    `git stage` / `git reset` would let the tab auto-update.
+
+16. **Expand `diffRef` grammar** (V6 §5.3 documents a narrow
+    subset). Add reflog `@{...}`, peeling `^{...}`, etc. once
+    use cases emerge.
+
+17. **Global keyboard shortcuts.** Ctrl+P already opens the
     files applet's finder as of V3.y.2; remaining shortcuts:
     next/prev tab, close tab.
 
-15. **Visual refresh.** Tab-type icon glyphs (V1 used ◇ and ¶
+18. **Visual refresh.** Tab-type icon glyphs (V1 used ◇ and ¶
     as placeholders), toggle button styling, broader picker UX
     get a consistent treatment with Caco's broader visual style.
 
-16. **Autosave for write-capable viewers** (deferred from V2).
+19. **Autosave for write-capable viewers** (deferred from V2).
     Debounced 1s after last keystroke; in-memory "last failed
     save" buffer + small indicator so silent save failures
     surface to the user.
 
-17. **Dirty-prompt on session-switch** (deferred from V2 §7.5;
-    superseded by §16 autosave).
+20. **Dirty-prompt on session-switch** (deferred from V2 §7.5;
+    superseded by §19 autosave).
 
 ## Out of scope (parking lot)
 

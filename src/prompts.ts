@@ -17,7 +17,7 @@ import type { SystemMessage } from './types.js';
  */
 async function buildAppletSection(): Promise<string> {
   try {
-    const applets = await listApplets();
+    const applets = (await listApplets()).filter(a => !a.deprecated);
     if (applets.length === 0) {
       return 'No applets installed.';
     }

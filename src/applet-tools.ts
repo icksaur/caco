@@ -436,20 +436,32 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
     }),
 
     handler: async ({ slug }) => {
-      const applets = await listApplets();
-      const filtered = slug 
-        ? applets.filter(a => a.slug === slug)
-        : applets;
-      
+      const allApplets = await listApplets();
+      const visibleApplets = allApplets.filter(a => !a.deprecated);
+
+      if (slug) {
+        const deprecatedHit = allApplets.find(a => a.slug === slug && a.deprecated);
+        if (deprecatedHit) {
+          return {
+            textResultForLlm: `Applet "${slug}" is deprecated. Use "${deprecatedHit.replacedBy || 'files'}" instead.`,
+            resultType: 'success' as const
+          };
+        }
+      }
+
+      const filtered = slug
+        ? visibleApplets.filter(a => a.slug === slug)
+        : visibleApplets;
+
       if (filtered.length === 0) {
         return {
-          textResultForLlm: slug 
-            ? `Applet "${slug}" not found. Available: ${applets.map(a => a.slug).join(', ') || 'none'}`
+          textResultForLlm: slug
+            ? `Applet "${slug}" not found. Available: ${visibleApplets.map(a => a.slug).join(', ') || 'none'}`
             : 'No applets installed. Use caco_applet_howto to create one.',
           resultType: 'success' as const
         };
       }
-      
+
       const usage = filtered.map(formatAppletUsage).join('\n\n');
       return {
         textResultForLlm: `# Applet Usage\n\nProvide markdown links to open applets for users.\n\n${usage}`,

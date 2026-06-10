@@ -356,8 +356,20 @@ export interface GitEditPoller {
   /** V3.1: materialize an EditEntry for an arbitrary path picked by the
    *  user. Returns null if the session is unknown, the path is missing
    *  from both HEAD and the working tree, or git fails. The caller is
-   *  responsible for input validation (no `..`, no NUL, etc.). */
-  openFile(sessionId: string, relPath: string): Promise<EditEntry | null>;
+   *  responsible for input validation (no `..`, no NUL, etc.).
+   *
+   *  V6: opts.diffMode optionally selects an alternate diff source:
+   *    - 'unstaged' (default): existing working-tree behavior.
+   *    - 'staged': `git diff --cached -- <relPath>`.
+   *    - 'range': `git diff <opts.ref> -- <relPath>`.
+   *  For staged and range, the returned EditEntry carries the diff
+   *  text only; FileStatus is 'modified' regardless (the mode is
+   *  carried by the client-side container, not the entry). */
+  openFile(
+    sessionId: string,
+    relPath: string,
+    opts?: { diffMode?: 'unstaged' | 'staged' | 'range'; ref?: string },
+  ): Promise<EditEntry | null>;
 }
 
 export function createGitEditPoller(): GitEditPoller {
@@ -625,9 +637,48 @@ export function createGitEditPoller(): GitEditPoller {
       return edits;
     },
 
-    async openFile(sessionId: string, relPath: string): Promise<EditEntry | null> {
+    async openFile(
+      sessionId: string,
+      relPath: string,
+      opts?: { diffMode?: 'unstaged' | 'staged' | 'range'; ref?: string },
+    ): Promise<EditEntry | null> {
       const state = sessions.get(sessionId);
       if (!state) return null;
+      const diffMode = opts?.diffMode || 'unstaged';
+
+      if (diffMode === 'staged' || diffMode === 'range') {
+        // V6: snapshot diff against the staging area or a ref range.
+        // The poller does not track these (no watcher, no follow-up
+        // poll); the entry is a point-in-time read. Client refreshes
+        // via DiffViewer.reload (spec §4.8).
+        const args = diffMode === 'staged'
+          ? ['diff', '--no-color', '--cached', '--', relPath]
+          : ['diff', '--no-color', String(opts!.ref || ''), '--', relPath];
+        const result = await runGit(args, state.repoRoot, DIFF_TIMEOUT_MS);
+        if (result.code === 124) return null;
+        if (result.code !== 0 && result.code !== 1) {
+          // git diff returns 1 when there are differences; non-0/non-1 = failure.
+          return null;
+        }
+        const text = result.stdout.toString('utf-8');
+        const isBinary = /^Binary files /m.test(text);
+        const { diff, truncated } = truncateDiff(text);
+        const absPath = join(state.repoRoot, relPath);
+        const mtimeMs = await readMtimeMs(absPath);
+        const entry: EditEntry = {
+          path: absPath,
+          relativePath: relPath,
+          diff,
+          status: 'modified',
+          timestamp: new Date().toISOString(),
+        };
+        if (isBinary) entry.isBinary = true;
+        if (truncated) entry.truncated = truncated;
+        if (mtimeMs !== undefined) entry.mtimeMs = mtimeMs;
+        return entry;
+      }
+
+      // diffMode === 'unstaged' (default): existing working-tree path.
       // Per-path git status: returns at most one or two entries.
       // No --no-renames so an R/C entry's source-path NUL field is
       // present for buildEntry to consume.

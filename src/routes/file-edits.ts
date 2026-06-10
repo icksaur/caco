@@ -24,6 +24,22 @@ export function initFileEditsRoutes(p: GitEditPoller): void {
   poller = p;
 }
 
+/** V6: ref grammar for /api/sessions/:sid/file-edits/open
+ *  when diffMode='range'. Documented supported subset in
+ *  docs/files-applet-v6.md §5.3:
+ *  - Branch / tag names: master, v1.2.3, feature/x
+ *  - Hashes
+ *  - HEAD with ancestor shorthand: HEAD, HEAD~3, HEAD^^
+ *  - Ranges: A..B, A...B
+ *  Rejected on purpose for V6 (deferred to V7+ if needed):
+ *  reflog @{...}, peeling ^{...}, pathspec :/regex, spaces. */
+const REF_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_./^~-]*(\.\.\.?[A-Za-z0-9_][A-Za-z0-9_./^~-]*)?$/;
+export function isValidRef(ref: string): boolean {
+  if (typeof ref !== 'string') return false;
+  if (ref.length === 0 || ref.length > 256) return false;
+  return REF_PATTERN.test(ref);
+}
+
 function ensureSession(sessionId: string, res: Response): boolean {
   if (!sessionManager.getSessionCwd(sessionId)) {
     res.status(404).json({ error: `Session not found: ${sessionId}` });
@@ -81,6 +97,20 @@ router.post('/sessions/:sessionId/file-edits/open', async (req: Request, res: Re
     res.status(400).json({ error: 'relativePath must not contain ".." segments' });
     return;
   }
+  // V6: optional diffMode + ref.
+  const diffMode = body.diffMode;
+  if (diffMode !== undefined && diffMode !== 'unstaged' && diffMode !== 'staged' && diffMode !== 'range') {
+    res.status(400).json({ error: 'diffMode must be one of: unstaged, staged, range' });
+    return;
+  }
+  let ref: string | undefined;
+  if (diffMode === 'range') {
+    if (typeof body.ref !== 'string' || !isValidRef(body.ref)) {
+      res.status(400).json({ error: 'invalid ref for diffMode=range (see docs/files-applet-v6.md §5.3)' });
+      return;
+    }
+    ref = body.ref;
+  }
   const cwd = sessionManager.getSessionCwd(sessionId);
   if (!cwd) { res.status(404).json({ error: 'session has no cwd' }); return; }
   // Best-effort post-join containment check. The poller resolves
@@ -98,15 +128,20 @@ router.post('/sessions/:sessionId/file-edits/open', async (req: Request, res: Re
   // Reject directories. Allow missing-on-disk files (the poller treats
   // those as deleted-from-working-tree but still in HEAD — a valid
   // case for buildCleanEntry to handle via git show.)
+  // V6: skip the on-disk check for range mode — the file may not
+  // exist in the working tree but the ref-range diff is still
+  // meaningful (e.g. a deleted-since-A file in `A..B`).
+  if (diffMode !== 'range') {
+    try {
+      const st = await stat(abs);
+      if (!st.isFile()) {
+        res.status(400).json({ error: 'relativePath is not a file' });
+        return;
+      }
+    } catch { /* missing — let poller decide */ }
+  }
   try {
-    const st = await stat(abs);
-    if (!st.isFile()) {
-      res.status(400).json({ error: 'relativePath is not a file' });
-      return;
-    }
-  } catch { /* missing — let poller decide */ }
-  try {
-    const edit = await poller.openFile(sessionId, relPath);
+    const edit = await poller.openFile(sessionId, relPath, { diffMode, ref });
     if (!edit) {
       res.status(404).json({ error: 'path not found in HEAD or working tree' });
       return;

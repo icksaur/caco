@@ -138,6 +138,24 @@
     return /\.(png|jpg|jpeg|gif|webp|svg|ico|pdf|zip|gz|tar|bin|exe|class|jar)$/i.test(rel || '');
   }
 
+  /** V6: collision-safe tab id for diff tabs. NUL sentinels
+   *  cannot appear in real relPaths (API rejects at
+   *  src/routes/file-edits.ts:72), so the prefixed forms
+   *  cannot collide with any user-supplied path. Range form
+   *  length-prefixes the ref to disambiguate (ref, relPath)
+   *  pairs. See docs/files-applet-v6.md §4.3.
+   */
+  function diffTabId(opts) {
+    var mode = (opts && opts.mode) || 'unstaged';
+    var rel = (opts && opts.relPath) || '';
+    if (mode === 'staged') return '\u0000diff-staged\u0000' + rel;
+    if (mode === 'range') {
+      var ref = (opts && opts.ref) || '';
+      return '\u0000diff-range\u0000' + ref.length + '\u0000' + ref + rel;
+    }
+    return rel;
+  }
+
   // ── Viewer registry ──────────────────────────────────────────────────
   // V1.1: replaces V1's tabTypes registry. Each ViewerDescriptor adds
   // isDefault(abs, rel) on top of canHandle. See spec §4.0.B.
@@ -156,11 +174,24 @@
     return null;
   }
 
-  /** Find a container by its relPath, regardless of default viewer
-   *  type. Resolves the caco.edit dedup hazard (spec §4.3 B2 fix). */
-  function findContainerByRelPath(relPath) {
+  /** Find a container by its relPath. V6: accepts an optional
+   *  { mode, ref } filter so the poller's caco.edit lookup never
+   *  matches a staged/range tab, and user-initiated opens find
+   *  the exact requested tab (not whichever same-path tab
+   *  happens to exist first). See docs/files-applet-v6.md §4.3.1.
+   */
+  function findContainerByRelPath(relPath, opts) {
+    opts = opts || {};
+    var wantMode = opts.mode || null;
+    var wantRef = opts.ref != null ? opts.ref : null;
     var found = null;
-    tabs.forEach(function(c) { if (!found && c.relPath === relPath) found = c; });
+    tabs.forEach(function(c) {
+      if (found) return;
+      if (c.relPath !== relPath) return;
+      if (wantMode && c.diffMode !== wantMode) return;
+      if (wantRef !== null && c.diffRef !== wantRef) return;
+      found = c;
+    });
     return found;
   }
 
@@ -218,9 +249,20 @@
     this.relPath = relPath;
     this.defaultViewerType = descriptor.viewerType;
     this.activeViewerType = descriptor.viewerType;
-    // Stable id: relPath for diff-default (matches V1 cards-endpoint
-    // schema); 'markdown:'+absPath for markdown-default.
-    this.id = descriptor.viewerType === 'markdown' ? 'markdown:' + absPath : relPath;
+    // V6: diff tabs carry mode + optional ref so id and lookups
+    // can disambiguate working-tree, staged, and ref-range tabs
+    // for the same file. Non-diff tabs leave these at defaults.
+    this.diffMode = descriptor.diffMode || 'unstaged';
+    this.diffRef = descriptor.diffRef || null;
+    // Stable id:
+    //   - markdown: 'markdown:' + absPath (V1 schema)
+    //   - diff (default): relPath (V1 schema)
+    //   - V6 diff staged/range: diffTabId with NUL sentinels
+    if (descriptor.viewerType === 'markdown') {
+      this.id = 'markdown:' + absPath;
+    } else {
+      this.id = diffTabId({ mode: this.diffMode, ref: this.diffRef, relPath: relPath });
+    }
     this.label = basename(relPath || absPath);
     this.viewers = new Map();
     this.switching = false;
@@ -1252,7 +1294,7 @@
     var absForCheck = absPathOf(targetRelPath);
     if (diffDescForCheck && !diffDescForCheck.canHandle(absForCheck, targetRelPath)) return;
 
-    var existing = findContainerByRelPath(targetRelPath);
+    var existing = findContainerByRelPath(targetRelPath, { mode: 'unstaged' });
     if (existing) {
       var dv = existing.viewers.get('diff');
       if (!dv) {
@@ -1281,7 +1323,7 @@
       var data = await res.json();
       if (sessionId !== openSessionId) return;
       if (!data.edit) { echoState(); return; }
-      var raceCheck = findContainerByRelPath(targetRelPath);
+      var raceCheck = findContainerByRelPath(targetRelPath, { mode: 'unstaged' });
       if (raceCheck) {
         var rdv = raceCheck.viewers.get('diff');
         if (!rdv) { await raceCheck.switchViewer('diff'); rdv = raceCheck.viewers.get('diff'); }
@@ -1421,7 +1463,9 @@
     // V1.1: look up by relPath (not by `id`) so a markdown-default
     // tab for the same file is found and we don't create a duplicate
     // container. Resolves spec §4.3 B2 hazard.
-    var container = findContainerByRelPath(relPath);
+    // V6: explicitly scope to unstaged so the poller's caco.edit
+    // never updates a staged or range tab (those are snapshots).
+    var container = findContainerByRelPath(relPath, { mode: 'unstaged' });
     // Dismissed-path filter: only meaningful when no container exists.
     if (!container && !options.forceFocus && dismissedPaths.has(relPath)) {
       var snap = dismissedSnapshots.get(relPath);

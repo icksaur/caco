@@ -628,6 +628,15 @@
       if (this.shell.viewers[i].viewerType === viewerType) { desc = this.shell.viewers[i]; break; }
     }
     if (!desc) { console.warn('[files-applet] unknown viewer type', viewerType); return; }
+    // Invariant: never switch to a viewer that cannot handle this
+    // file. Without this guard a binary tab can be force-switched
+    // to the diff viewer (e.g. by stale applyAgentState replay
+    // after SOURCE_ID regeneration) and render junk.
+    if (!desc.canHandle(this.absPath, this.relPath)) {
+      console.warn('[files-applet] refusing to switch', this.relPath,
+        '→', viewerType, '(viewer cannot handle this file)');
+      return;
+    }
 
     // V2.d: isDirty prompt on OUTGOING viewer. If user cancels,
     // abort the switch.
@@ -1232,6 +1241,16 @@
     // not appear here (agent selection is diff-only by design), but
     // be defensive: strip 'markdown:' prefix if present.
     if (typeof targetRelPath === 'string' && targetRelPath.indexOf('markdown:') === 0) return;
+    // Agent selection is text-only — only meaningful for files the
+    // diff viewer can render. For binaries (images, etc) the diff
+    // viewer is not applicable and any switch would render garbage.
+    // Skip the whole flow rather than force a bad switchViewer call.
+    var diffDescForCheck = null;
+    for (var di = 0; di < viewerRegistry.length; di++) {
+      if (viewerRegistry[di].viewerType === 'diff') { diffDescForCheck = viewerRegistry[di]; break; }
+    }
+    var absForCheck = absPathOf(targetRelPath);
+    if (diffDescForCheck && !diffDescForCheck.canHandle(absForCheck, targetRelPath)) return;
 
     var existing = findContainerByRelPath(targetRelPath);
     if (existing) {

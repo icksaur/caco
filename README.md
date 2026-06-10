@@ -181,7 +181,7 @@ src/
 ├── routes/        # API endpoints
 └── tools/         # MCP tool implementations
 
-doc/                # Design docs and API reference
+docs/               # Design docs, version specs, API reference
 tests/              # Vitest unit tests
 ```
 

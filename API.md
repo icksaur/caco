@@ -1038,7 +1038,7 @@ Send a message to the agent from applet JS. Creates an "applet" bubble (orange) 
 ```javascript
 await appletAPI.sendAgentMessage('Set the calculator value to 42');
 
-await appletAPI.sendAgentMessage('Load file', { appletSlug: 'image-viewer' });
+await appletAPI.sendAgentMessage('Load file', { appletSlug: 'files' });
 
 const imageData = canvas.toDataURL('image/png');
 await appletAPI.sendAgentMessage('What is this?', { imageData });

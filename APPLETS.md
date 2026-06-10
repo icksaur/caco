@@ -78,8 +78,8 @@ Applets are opened via `?applet=slug`. Additional params are passed through:
 
 ```
 ?applet=git-status&path=/home/user/repo
-?applet=file-finder&root=/home/user/docs
-?applet=image-viewer&path=/tmp/screenshot.png
+?applet=files&openPath=/home/user/docs/notes.md
+?applet=files&openFinder=1&openFinderRoot=/home/user/docs
 ```
 
 Use `onUrlParamsChange(cb)` to react to param changes (including initial load and back/forward navigation). Use `navigateAppletUrlParam` for user-initiated navigation (creates history) or `updateAppletUrlParam` for silent state updates.
@@ -121,16 +121,22 @@ Every CSS rule in `style.css` is automatically prefixed with `.applet-instance[d
 | `calculator` | Basic calculator with keyboard support and history |
 | `doodle` | Drawing canvas with AI integration |
 | `drum-machine` | 4-track 16-step drum sequencer |
-| `file-finder` | Fuzzy-search files in a directory tree, copy paths to clipboard |
+| `files` | Tabbed file viewer — markdown, image, html, diff. Ctrl+P opens a fuzzy file picker. Default landing for `?openPath=ABS` and `?openFinder=1&openFinderRoot=ABS`. |
 | `git-diff` | View file diffs in a git repository |
 | `git-status` | Git staging, commits, push/pull — auto-refreshes on file edits |
-| `image-viewer` | View images with zoom and pan |
-| `html-viewer` | Render HTML files in a sandboxed iframe (interactive but isolated) |
 | `jobs` | View and manage scheduled jobs |
-| `markdown-viewer` | Render markdown with syntax highlighting and mermaid diagrams |
 | `mcp-servers` | View MCP server status, tools, and OAuth authentication |
 | `session-context` | Session context dashboard: edited files, roadmap, activity, notes |
 | `text-editor` | Edit text files with syntax highlighting, Ctrl+S to save |
+
+**Deprecated** (still work via redirect to `files` when a session exists; render standalone in no-session contexts):
+
+| Slug | Replacement |
+|---|---|
+| `file-finder` | `files&openFinder=1&openFinderRoot=ABS` |
+| `markdown-viewer` | `files&openPath=ABS` |
+| `image-viewer` | `files&openPath=ABS` |
+| `html-viewer` | `files&openPath=ABS` |
 
 ## Creating New Applets
 

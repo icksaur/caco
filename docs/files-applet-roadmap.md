@@ -11,7 +11,10 @@ detail — only intent + status.
 |---|---|---|---|
 | V1 | shipped | 2211b71 (merged into master @ 439210e) | `docs/files-applet-v1.md` |
 | V1.1 | shipped | 385cf9a (merged into master @ 6b1e0f2) | `docs/files-applet-v1.1.md` |
-| V2 | not started | — | `docs/files-applet-v2.md` (to be written) |
+| V2.a | shipped | merged into master @ 66e0f17 | `docs/files-applet-v2.md` §4.1 |
+| V2.b | shipped | merged into master @ ee40db7 | `docs/files-applet-v2.md` §4.2 |
+| V2.c | shipped | merged into master @ b1b4cae | `docs/files-applet-v2.md` §4.3 |
+| V2.d | shipped | merged into master @ 0e85d5a | `docs/files-applet-v2.md` §4.4 |
 | V3 | not started | — | `docs/files-applet-v3.md` (to be written) |
 | V4 | not started | — | `docs/files-applet-v4.md` (to be written) |
 

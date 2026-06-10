@@ -85,6 +85,32 @@
   var cachedCwd = '';
   var TAB_CAP = 50;
 
+  // V3.y.1: deep-link queue. cold-load fires onUrlParamsChange
+  // before cachedCwd is set; queue the openPath and drain when
+  // cachedCwd arrives. See docs/files-applet-v3.y.md §4.1.B.
+  var _pendingOpenPath = null;
+  function _handleOpenPath(p) {
+    if (!p) return;
+    var relPath = _relativizePath(p);
+    void routeOpen(relPath);
+  }
+  function _relativizePath(absOrRel) {
+    if (!absOrRel) return '';
+    if (absOrRel.charAt(0) !== '/') return absOrRel;
+    if (!cachedCwd) return absOrRel;
+    if (absOrRel === cachedCwd) return '';
+    var prefix = cachedCwd.replace(/\/+$/, '') + '/';
+    if (absOrRel.indexOf(prefix) === 0) return absOrRel.slice(prefix.length);
+    return absOrRel;
+  }
+  function _drainPendingOpenPath() {
+    if (_pendingOpenPath && cachedCwd) {
+      var p = _pendingOpenPath;
+      _pendingOpenPath = null;
+      _handleOpenPath(p);
+    }
+  }
+
   // ── DiffViewer + MarkdownViewer (loaded by sibling .js files) ────────
   // Concatenated by applet-store.ts before this script. Exposed at
   // window.__filesApplet.DiffViewer / .MarkdownViewer.
@@ -2706,6 +2732,38 @@
         if (state && state.fileEdits) void applyAgentState(state.fileEdits);
       });
     }
+    // V3.y.1: deep-link `?applet=file-edits&openPath=/abs` opens
+    // the file as a new TabContainer. The cold-load case races
+    // onSessionChange (which sets cachedCwd); queue and drain.
+    // See docs/files-applet-v3.y.md §4.1.B.
+    if (typeof window.appletAPI.onUrlParamsChange === 'function') {
+      window.appletAPI.onUrlParamsChange(function(params) {
+        if (!params) return;
+        if (params.openPath) {
+          if (cachedCwd) {
+            _handleOpenPath(params.openPath);
+          } else {
+            _pendingOpenPath = params.openPath;
+          }
+          if (typeof window.appletAPI.navigateAppletUrlParam === 'function') {
+            // Consume the param so back-traversal doesn't re-fire.
+            // Use '' (not null) — the applet-runtime signature is
+            // (key: string, value: string) with falsy=delete.
+            window.appletAPI.navigateAppletUrlParam('openPath', '');
+          }
+        }
+        if (params.openFinder) {
+          // V3.y.2: Ctrl+P-triggered finder open. Picker function
+          // is defined later in this IIFE; check before calling.
+          if (typeof openPicker === 'function') {
+            openPicker({ source: 'shortcut' });
+          }
+          if (typeof window.appletAPI.navigateAppletUrlParam === 'function') {
+            window.appletAPI.navigateAppletUrlParam('openFinder', '');
+          }
+        }
+      });
+    }
     window.appletAPI.onSessionEvent(function(event) {
       if (event && event.type === 'caco.edit' && event.data) {
         var d = event.data;
@@ -2764,6 +2822,7 @@
         repoEl.textContent = parts[parts.length - 1] || info.cwd;
         cachedCwd = info.cwd;
       }
+      _drainPendingOpenPath();   // V3.y.1: cwd is now set; deep-link may have queued
       void initFromPersistence(sid);
     });
 
@@ -2779,6 +2838,7 @@
             cachedCwd = meta.cwd;
           }
         } catch (_) { /* ignore */ }
+        _drainPendingOpenPath();   // V3.y.1: cwd loaded from session meta
         await initFromPersistence(existingId);
       })();
     }

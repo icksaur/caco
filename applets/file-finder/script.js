@@ -26,17 +26,6 @@ function getIcon(name) {
   return fileIcons[ext] || '📄';
 }
 
-function getApplet(name) {
-  var ext = name.split('.').pop().toLowerCase();
-  var imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
-  var mdExts = ['md', 'mdx', 'markdown'];
-  var htmlExts = ['html', 'htm'];
-  if (imageExts.indexOf(ext) !== -1) return 'image-viewer';
-  if (mdExts.indexOf(ext) !== -1) return 'markdown-viewer';
-  if (htmlExts.indexOf(ext) !== -1) return 'html-viewer';
-  return 'text-editor';
-}
-
 function fuzzyScore(query, target) {
   var q = query.toLowerCase();
   var t = target.toLowerCase();
@@ -175,8 +164,7 @@ function render() {
     for (var fi = 0; fi < files.length; fi++) {
       var f = files[fi].name;
       var absPath = absolutePath(f);
-      var applet = getApplet(f);
-      html += '<a class="result-item" href="?applet=' + applet + '&path=' + encodeURIComponent(absPath) + '" data-path="' + esc(absPath) + '">';
+      html += '<a class="result-item" href="?applet=file-edits&openPath=' + encodeURIComponent(absPath) + '" data-path="' + esc(absPath) + '">';
       html += '<span class="result-icon">' + getIcon(f) + '</span>';
       html += '<span class="result-path">' + esc(f) + '</span>';
       html += '<span class="copy-btn" data-copy="' + esc(absPath) + '" title="Copy path">📋</span>';
@@ -199,7 +187,6 @@ function render() {
       var f = shown[i];
       var absPath = absolutePath(f);
       var name = f.split('/').pop();
-      var applet = getApplet(name);
       var cls = 'result-item' + (i === selectedIdx ? ' selected' : '');
 
       var dirPath = f.indexOf('/') !== -1 ? f.substring(0, f.indexOf('/')) : null;
@@ -208,7 +195,7 @@ function render() {
         html += renderDirRow(dirPath);
       }
 
-      html += '<a class="' + cls + '" href="?applet=' + applet + '&path=' + encodeURIComponent(absPath) + '" data-idx="' + i + '" data-path="' + esc(absPath) + '">';
+      html += '<a class="' + cls + '" href="?applet=file-edits&openPath=' + encodeURIComponent(absPath) + '" data-idx="' + i + '" data-path="' + esc(absPath) + '">';
       html += '<span class="result-icon">' + getIcon(name) + '</span>';
       html += '<span class="result-path">' + esc(f) + '</span>';
       html += '<span class="copy-btn" data-copy="' + esc(absPath) + '" title="Copy path">📋</span>';

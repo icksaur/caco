@@ -26,8 +26,10 @@
   // ── State machine ─────────────────────────────────────────────────────
   var followEdits = true;
   var activeTabId = null;
-  /** Map<relativePath, FileTab>. Map iteration order = insertion order =
-   *  tab strip order (left-to-right). Tabs never reorder after creation. */
+  /** Map<tabId, TabInstance>. Map iteration order = insertion order =
+   *  tab strip order (left-to-right). Tabs never reorder after creation.
+   *  V1: TabInstance is DiffTab (id == relativePath) or MarkdownTab
+   *  (id == 'markdown:' + absPath). See docs/files-applet-v1.md §4.0.2. */
   var tabs = new Map();
   /** Most recent tab to receive a content-changing edit (not no-op). Drives
    *  jumpToMostRecent's primary target. */
@@ -35,10 +37,23 @@
   /** Distinct paths edited while followEdits was false. Drives Follow
    *  button's N-badge. Cleared on Follow-click and session change. */
   var badgeCounter = new Set();
+  /** Paths the user has explicitly dismissed via close (X, middle-click).
+   *  Filtered out of incoming caco.edit broadcasts so the poller's
+   *  current-state re-emission doesn't re-create just-closed tabs.
+   *  An entry is removed when the file becomes clean (status==='clean')
+   *  in a subsequent broadcast OR when a NEW edit arrives for it AFTER
+   *  the dismiss (signalled by content changing vs the cached
+   *  snapshot — see dismissedSnapshots below).
+   *
+   *  Cleared on session-switch. */
+  var dismissedPaths = new Set();
+  /** path → { diff, status, isBinary } snapshot at dismiss time.
+   *  Used to detect "new edit happened" so dismissed tabs auto-reopen
+   *  on genuine new agent/user activity but stay closed for the
+   *  poller's redundant re-broadcasts. */
+  var dismissedSnapshots = new Map();
   /** Single-shot suppression flag for pane scroll. Set by code that does
-   *  a programmatic scrollTop write; consumed by the scroll handler. The
-   *  hide-swap-show pattern in FileTab.activate prevents spurious scroll
-   *  events from the innerHTML clear from burning this flag. */
+   *  a programmatic scrollTop write; consumed by the scroll handler. */
   /** Value-comparison guard for programmatic scroll writes. The bool
    *  single-shot can be burned by spurious events (visibility flicker,
    *  rAF ordering, double-write from setActiveTab + caller-set-0).
@@ -56,149 +71,50 @@
   var cachedCwd = '';
   var TAB_CAP = 50;
 
-  // ── FileTab class ─────────────────────────────────────────────────────
-  function FileTab(edit) {
-    this.relativePath = edit.relativePath;
-    this.absolutePath = edit.path || '';
-    this.edit = edit;
-    this.paneEl = null;     // lazy: built on first activate()
-    this.scrollTop = 0;
-    /** V3.4: per-tab line selection. {start, end} (1-indexed,
-     *  inclusive, working-tree line numbers) or null. */
-    this.selection = null;
-    /** V3.4: pending selection arrived via agent setState before
-     *  paneEl was built. Applied on first activate() after render. */
-    this.pendingSelection = null;
-    this.tabEl = this.buildTabEl();
-  }
-
-  FileTab.prototype.buildTabEl = function() {
-    var self = this;
-    var btn = document.createElement('button');
-    btn.className = 'fe-tab';
-    btn.type = 'button';
-    btn.dataset.path = this.relativePath;
-    btn.title = this.relativePath;
-
-    var name = document.createElement('span');
-    name.className = 'fe-tab-name';
-    name.textContent = basename(this.relativePath);
-    btn.appendChild(name);
-
-    var x = document.createElement('span');
-    x.className = 'fe-tab-x';
-    x.textContent = '×';
-    x.setAttribute('aria-label', 'Close tab');
-    btn.appendChild(x);
-
-    btn.addEventListener('click', function(e) {
-      if (e.target === x || x.contains(e.target)) {
-        e.stopPropagation();
-        closeTab(self.relativePath);
-        return;
-      }
-      // User clicked the tab: turn off follow, decrement badge for this
-      // path (user has now seen it), activate.
-      followEdits = false;
-      badgeCounter.delete(self.relativePath);
-      updateFollowButton();
-      setActiveTab(self.relativePath);
-    });
-    // Middle-click closes the tab (VS Code convention).
-    btn.addEventListener('auxclick', function(e) {
-      if (e.button !== 1) return;
-      e.preventDefault();
-      closeTab(self.relativePath);
-    });
-    // Suppress the middle-mouse autoscroll cursor / paste primary
-    // selection so the page doesn't react before auxclick fires.
-    btn.addEventListener('mousedown', function(e) {
-      if (e.button === 1) e.preventDefault();
-    });
-    return btn;
-  };
-
-  FileTab.prototype.render = function() {
-    if (!this.paneEl) this.paneEl = document.createElement('pre');
-    this.paneEl.className = 'fe-diff';
-    renderBody(this.paneEl, this.edit);
-    // pendingSelection is consumed by finalizeAgentSelection (post-render);
-    // existing selection is repainted here so updates preserve the highlight.
-    this.paintSelection();
-  };
-
-  FileTab.prototype.update = function(newEdit) {
-    if (this.contentEqual(newEdit)) {
-      this.edit = newEdit;
-      return false;
-    }
-    this.edit = newEdit;
-    if (this.paneEl) this.render();
-    return true;
-  };
-
-  FileTab.prototype.contentEqual = function(other) {
-    var a = this.edit, b = other;
-    return a && b
-      && a.diff === b.diff
-      && a.status === b.status
-      && a.renamedFrom === b.renamedFrom
-      && a.isBinary === b.isBinary
-      && fullFileEqual(a.fullFile, b.fullFile);
-  };
-
-  /** Paint current selection by toggling the .fe-row-selected class
-   *  on rows whose data-work-line falls in [start, end]. Clears all
-   *  selected classes first. */
-  FileTab.prototype.paintSelection = function() {
-    if (!this.paneEl) return;
-    var existing = this.paneEl.querySelectorAll('.fe-row-selected');
-    for (var i = 0; i < existing.length; i++) {
-      existing[i].classList.remove('fe-row-selected');
-    }
-    if (!this.selection) return;
-    var rows = this.paneEl.querySelectorAll('.fe-row[data-work-line]');
-    for (var j = 0; j < rows.length; j++) {
-      var n = parseInt(rows[j].dataset.workLine, 10);
-      if (n >= this.selection.start && n <= this.selection.end) {
-        rows[j].classList.add('fe-row-selected');
-      }
-    }
-  };
-
-  FileTab.prototype.activate = function() {
-    if (!this.paneEl) this.render();
-    // Hide-swap-show: visibility:hidden suppresses the innerHTML-clear
-    // scroll event. Multiple rapid activate() calls (e.g. init dispatching
-    // multiple snapshot edits before the first rAF fires) would otherwise
-    // have the second rAF 'restore' to the first's mid-swap 'hidden'
-    // state, leaving the pane invisible.
-    paneEl.style.visibility = 'hidden';
-    paneEl.innerHTML = '';
-    paneEl.appendChild(this.paneEl);
-    var self = this;
-    requestAnimationFrame(function() {
-      paneEl.style.visibility = '';
-      programmaticScrollTo(self.scrollTop);
-    });
-  };
-
-  FileTab.prototype.deactivate = function() {
-    this.scrollTop = paneEl.scrollTop;
-  };
-
-  FileTab.prototype.destroy = function() {
-    if (this.tabEl && this.tabEl.parentNode) {
-      this.tabEl.parentNode.removeChild(this.tabEl);
-    }
-    this.paneEl = null;
-  };
+  // ── DiffTab + MarkdownTab ─────────────────────────────────────────────
+  // The classes themselves live in diff-tab.js and markdown-tab.js
+  // (loaded by content.html before this file). They're exposed at
+  // window.__filesApplet.DiffTab / .MarkdownTab. See
+  // docs/files-applet-v1.md §4.0.1 and §4.5 / §4.6.
+  var DiffTab = window.__filesApplet && window.__filesApplet.DiffTab;
+  var MarkdownTab = window.__filesApplet && window.__filesApplet.MarkdownTab;
+  if (!DiffTab) console.error('[file-edits] diff-tab.js did not load');
+  if (!MarkdownTab) console.error('[file-edits] markdown-tab.js did not load');
 
   function basename(p) {
     var i = p.lastIndexOf('/');
     if (i < 0) i = p.lastIndexOf('\\');
     return i < 0 ? p : p.slice(i + 1);
   }
+
+  // ── Tab-type registry ────────────────────────────────────────────────
+  // Populated below after the helper functions are defined; iterated
+  // by routeOpen(). Append-only after init.
+  var tabTypes = [];
+  function registerTabType(desc) { tabTypes.push(desc); }
+
+  // ── Shell object — see docs/files-applet-v1.md §4.0.3 ────────────────
+  // Every tab-type `open(shell, ...)` factory and every tab class
+  // constructor receives this reference. Tabs MUST NOT reach into
+  // shell-private state by any other means (no closures, no globals).
+  // The reference is created ONCE at IIFE start and never reassigned.
+  var shell = {
+    api: window.appletAPI,
+    paneEl: paneEl,
+    tabStripEl: tabsEl,
+    basename: basename,
+    badgeCounter: badgeCounter,
+    get sessionId() { return sessionId; },
+    closeTab: function(id) { closeTab(id); },
+    setActiveTab: function(id) { setActiveTab(id); },
+    echoState: function() { echoState(); },
+    // DiffTab-only helpers (see §4.0.3 last row):
+    programmaticScrollTo: programmaticScrollTo,
+    updateFollowButton: function() { updateFollowButton(); },
+    renderBody: function(body, edit) { renderBody(body, edit); },
+    getFollowEdits: function() { return followEdits; },
+    setFollowEdits: function(v) { followEdits = v; },
+  };
 
   // ── V3.5: Selection state + agent / user exchange ────────────────────
   //
@@ -226,9 +142,13 @@
    *  user-selected text (truncated to TEXT_CAP) when the selection
    *  was set by a user gesture (drag or gutter click). Agent-pushed
    *  selections have no captured text. */
-  function buildFileEditsState() {
+  function buildFileEditsLegacyState() {
     var tab = activeTabId ? tabs.get(activeTabId) : null;
-    if (!tab || !tab.selection) {
+    // Only diff tabs participate in the legacy envelope (selection
+    // belongs to the diff card). When a non-diff tab is active, the
+    // envelope reports null selection but still echoes activeTab so
+    // agents see SOMETHING change. sourceId is always present.
+    if (!tab || tab.type !== 'diff' || !tab.selection) {
       return { activeTab: activeTabId, selection: null, sourceId: SOURCE_ID };
     }
     var s = { start: tab.selection.start, end: tab.selection.end };
@@ -236,15 +156,47 @@
     return { activeTab: activeTabId, selection: s, sourceId: SOURCE_ID };
   }
 
-  /** Echo current state to applet-state store (which both this applet
-   *  and the agent's get_applet_state read from). */
+  /** Per-tab fragment for the new V1 `files` envelope. Each tab
+   *  may opt in via `echoState()`; the shell decorates with id,
+   *  type, label. */
+  function buildFilesState() {
+    var arr = [];
+    tabs.forEach(function(t) {
+      var frag = (typeof t.echoState === 'function') ? t.echoState() : null;
+      if (frag == null) return;
+      var entry = { id: t.id, type: t.type, label: t.label || basename(t.relativePath || t.absPath || t.id) };
+      for (var k in frag) {
+        if (Object.prototype.hasOwnProperty.call(frag, k)) entry[k] = frag[k];
+      }
+      arr.push(entry);
+    });
+    return { tabs: arr, activeTabId: activeTabId };
+  }
+
+  // Coalesced echo via queueMicrotask: many calls per tick collapse
+  // into one setAppletState push. See docs/files-applet-v1.md §4.0.5
+  // rule 7. The coalescer also catches the case where MarkdownTab's
+  // load() and a caco.edit handler both want to echo in the same
+  // task.
+  var echoPending = false;
   function echoState() {
+    if (echoPending) return;
     if (!window.appletAPI || !window.appletAPI.setAppletState) return;
-    try {
-      window.appletAPI.setAppletState({ fileEdits: buildFileEditsState() });
-    } catch (err) {
-      console.warn('[file-edits] setAppletState failed:', err);
-    }
+    echoPending = true;
+    var schedule = (typeof queueMicrotask === 'function')
+      ? queueMicrotask
+      : function(fn) { Promise.resolve().then(fn); };
+    schedule(function() {
+      echoPending = false;
+      try {
+        window.appletAPI.setAppletState({
+          fileEdits: buildFileEditsLegacyState(),
+          files: buildFilesState(),
+        });
+      } catch (err) {
+        console.warn('[file-edits] setAppletState failed:', err);
+      }
+    });
   }
 
   /** Highest working-tree line number for the tab. Used as the
@@ -724,11 +676,12 @@
           scheduleAgentFinalize(maybe);
           return;
         }
-        var newTab = new FileTab(data.edit);
+        var newTab = new DiffTab(shell, data.edit);
         newTab.pendingSelection = rawSel;
         if (tabs.size >= TAB_CAP) evictOldestNonActive();
         tabs.set(targetTabId, newTab);
         tabsEl.appendChild(newTab.tabEl);
+        paneEl.appendChild(newTab.contentEl);
         setActiveTab(targetTabId);
         scheduleAgentFinalize(newTab);
         schedulePersist();
@@ -778,27 +731,39 @@
     // Note: setActiveTab does NOT modify followEdits. Callers that
     // represent user gestures (tab click, X-on-active, picker selection)
     // must set followEdits=false themselves before calling.
+    var next = tabs.get(tabId);
+    // Defensive: enforce the §4.0.6 single-visible-tab invariant on
+    // EVERY call, including the early-return path. If any race or
+    // missing-deactivate ever leaks display:'' onto a non-active tab,
+    // this loop restores the invariant on the next switch.
+    tabs.forEach(function(t) {
+      if (t !== next && t.contentEl && t.contentEl.style.display !== 'none') {
+        t.contentEl.style.display = 'none';
+        if (t.tabEl) t.tabEl.classList.remove('active');
+      }
+    });
     if (tabId === activeTabId) {
+      // Still ensure the active tab IS visible (in case it was wrongly
+      // hidden) and finish.
+      if (next && next.contentEl && next.contentEl.style.display === 'none') {
+        next.activate();
+      }
       updateFollowButton();
       schedulePersist();
       return;
     }
     var prev = activeTabId ? tabs.get(activeTabId) : null;
-    if (prev) {
+    if (prev && prev !== next) {
       prev.deactivate();
       prev.tabEl.classList.remove('active');
     }
     activeTabId = tabId;
-    var next = tabs.get(tabId);
     if (next) {
       next.tabEl.classList.add('active');
       next.activate();
       try {
         next.tabEl.scrollIntoView({ inline: 'nearest', block: 'nearest' });
       } catch (_) { /* old browsers */ }
-    } else {
-      // Cleared (no tab active)
-      paneEl.innerHTML = '';
     }
     updateEmptyState();
     updateFollowButton();
@@ -815,9 +780,12 @@
       var id = step.value;
       if (id !== activeTabId) {
         var t = tabs.get(id);
-        if (t) t.destroy();
-        tabs.delete(id);
+        tabs.delete(id);              // §4.0.5.2: remove from map first
         badgeCounter.delete(id);
+        if (lastEditedTabId === id) lastEditedTabId = null;
+        if (t) {
+          try { t.destroy(); } catch (err) { console.warn('[file-edits] evict destroy:', err); }
+        }
         return;
       }
     }
@@ -828,13 +796,44 @@
     var id = edit.relativePath;
     if (!id) return;
     var tab = tabs.get(id);
+    // Dismissed-path filter: if the user closed this tab and the
+    // incoming edit is just the poller re-broadcasting the same
+    // content we dismissed (same diff/status/binary flag), skip.
+    // A genuine new edit (content differs) clears the dismissal and
+    // re-opens the tab.
+    if (!tab && !options.forceFocus && dismissedPaths.has(id)) {
+      var snap = dismissedSnapshots.get(id);
+      var sameContent = snap
+        && snap.diff === edit.diff
+        && snap.status === edit.status
+        && snap.isBinary === edit.isBinary;
+      // Clean status special-case: the poller emits cleanedEdits
+      // when a previously-dirty file goes clean. That's "real news"
+      // worth clearing the dismissal for — but we still don't
+      // auto-reopen, we just stop suppressing future edits.
+      if (sameContent || edit.status === 'clean') {
+        if (edit.status === 'clean') {
+          dismissedPaths.delete(id);
+          dismissedSnapshots.delete(id);
+        }
+        return;
+      }
+      // New content for a dismissed path → clear and let the open
+      // proceed (treated as a fresh edit).
+      dismissedPaths.delete(id);
+      dismissedSnapshots.delete(id);
+    }
     var isNew = false;
     var contentChanged = false;
     if (!tab) {
       if (tabs.size >= TAB_CAP) evictOldestNonActive();
-      tab = new FileTab(edit);
+      tab = new DiffTab(shell, edit);
       tabs.set(id, tab);
-      tabsEl.appendChild(tab.tabEl);  // append-only, never reorder
+      // Attach DOM: tabEl into the strip, contentEl into the pane.
+      // contentEl.style.display is 'none' from the constructor; it
+      // becomes visible only when this tab is activated.
+      tabsEl.appendChild(tab.tabEl);
+      paneEl.appendChild(tab.contentEl);
       isNew = true;
       contentChanged = true;
     } else {
@@ -867,29 +866,56 @@
     var tab = tabs.get(id);
     if (!tab) return;
     var wasActive = id === activeTabId;
-    // Compute neighbor BEFORE removing — need pre-removal insertion order.
+    // Compute neighbour BEFORE deleting — need pre-removal insertion order.
     var newActive = null;
     if (wasActive) {
       var keys = Array.from(tabs.keys());
       var idx = keys.indexOf(id);
-      if (idx > 0) newActive = keys[idx - 1];          // left neighbor
-      else if (idx < keys.length - 1) newActive = keys[idx + 1]; // right neighbor
-      // else newActive stays null (this was the only tab)
+      if (idx > 0) newActive = keys[idx - 1];                  // left neighbour
+      else if (idx < keys.length - 1) newActive = keys[idx + 1]; // right neighbour
     }
-    tab.destroy();
+    // Rule §4.0.5.2: remove from map BEFORE destroy. Any in-flight
+    // async callback that re-enters the shell will see no tab at
+    // this id and bail.
     tabs.delete(id);
     badgeCounter.delete(id);
     if (lastEditedTabId === id) lastEditedTabId = null;
+    // Record dismissal so the next poll-driven caco.edit (which
+    // re-broadcasts every currently-dirty file) does NOT re-create
+    // this tab. Only diff tabs have content to snapshot; markdown
+    // tabs aren't poller-driven and don't need this guard.
+    if (tab.type === 'diff' && tab.edit) {
+      dismissedPaths.add(id);
+      dismissedSnapshots.set(id, {
+        diff: tab.edit.diff,
+        status: tab.edit.status,
+        isBinary: tab.edit.isBinary,
+      });
+    }
     if (wasActive) {
+      // BEFORE we activate the neighbour, hide the closing tab's
+      // contentEl. Otherwise setActiveTab(newActive) sees prev=null
+      // (we just removed `id` from the map) and skips the deactivate
+      // step — the closing tab's contentEl stays display:'' until
+      // tab.destroy() runs at the bottom of this function. Result:
+      // for one frame, both contentEls are visible stacked. The
+      // direct deactivate here keeps the §4.0.6 single-visible
+      // invariant intact across the close.
+      try { tab.deactivate(); } catch (_e) { /* ignore */ }
+      if (tab.tabEl) tab.tabEl.classList.remove('active');
       activeTabId = null;
       if (newActive) {
-        setActiveTab(newActive);
-      } else {
-        paneEl.innerHTML = '';
-        paneEl.appendChild(paneEmptyEl);
-        paneEl.appendChild(notGitEl);
+        setActiveTab(newActive);  // sees prev=null, only activates the neighbour
       }
+      // No paneEl.innerHTML clear: contentEls of remaining tabs
+      // stay mounted (display:none); paneEmptyEl + notGitEl are
+      // already in the DOM from index.html.
     }
+    // Destroy AFTER the map delete and the optional setActiveTab.
+    // contentEl is already display:none (either always was, or we
+    // just deactivated it above), so the destroy's detach is a clean
+    // takedown.
+    tab.destroy();
     followEdits = false;  // X is a user gesture
     updateFollowButton();
     updateEmptyState();
@@ -899,18 +925,17 @@
 
   function jumpToMostRecent() {
     if (tabs.size === 0) return;
-    // Primary: lastEditedTabId IF it's still dirty. An edit that flips
-    // a file clean is still a "content-changing edit" by the bookkeeping
-    // rule, but jumping to a now-clean file isn't useful — fall through.
-    // Fallback: highest mtimeMs among dirty tabs. Final: rightmost dirty.
-    // No dirty tab → no-op.
+    // Diff-only: this jumps to a file with an unstaged change. Markdown
+    // tabs and future non-diff types have no concept of "dirty" and
+    // are skipped. See docs/files-applet-v1.md Step 8.1.
     var targetId = null;
     var primary = lastEditedTabId && tabs.get(lastEditedTabId);
-    if (primary && primary.edit && primary.edit.status !== 'clean') {
+    if (primary && primary.type === 'diff' && primary.edit && primary.edit.status !== 'clean') {
       targetId = lastEditedTabId;
     } else {
       var bestMtime = -1;
       tabs.forEach(function(t, id) {
+        if (t.type !== 'diff') return;
         if (!t.edit || t.edit.status === 'clean') return;
         var m = (typeof t.edit.mtimeMs === 'number') ? t.edit.mtimeMs : -1;
         if (m > bestMtime) { bestMtime = m; targetId = id; }
@@ -919,7 +944,7 @@
         var keys = Array.from(tabs.keys());
         for (var i = keys.length - 1; i >= 0; i--) {
           var t2 = tabs.get(keys[i]);
-          if (t2 && t2.edit && t2.edit.status !== 'clean') {
+          if (t2 && t2.type === 'diff' && t2.edit && t2.edit.status !== 'clean') {
             targetId = keys[i];
             break;
           }
@@ -1023,8 +1048,12 @@
 
   function buildPersistBody() {
     var list = [];
-    // Iterate tabs strip in DOM order = insertion order.
-    tabs.forEach(function(_t, path) {
+    // V1: only diff tabs are persisted via the cards endpoint. The
+    // server schema is diff-only; markdown tabs are session-memory
+    // only. See docs/files-applet-v1.md §4.0.6 "Markdown card
+    // persistence" invariant and Step 8.2.
+    tabs.forEach(function(t, path) {
+      if (t.type !== 'diff') return;
       list.push({ relativePath: path, collapsed: false });
     });
     return { schemaVersion: 1, cards: list, dismissed: [] };
@@ -1181,6 +1210,12 @@
       document.removeEventListener('mousedown', pickerOutsideHandler);
       pickerOutsideHandler = null;
     }
+    // Clear any chevron-menu type pin if the user closed the picker
+    // without selecting; otherwise the next routeOpen (which may be
+    // triggered by a different code path, e.g. an agent-driven open)
+    // would inherit the stale pin. Reviewed in
+    // docs/files-applet-v1-impl-review.md NICE-TO-HAVE #2.
+    _pinnedType = null;
   }
 
   async function runPickerFetch(q) {
@@ -1234,16 +1269,86 @@
 
   function pickSelected(relativePath) {
     closePicker();
-    void pickFile(relativePath);
+    void routeOpen(relativePath);
   }
 
-  async function pickFile(relativePath) {
-    // If already open, just switch and turn off follow.
+  /** Compute absolute path for a relative path under the session's cwd.
+   *  Light-weight join — does not normalise '..' (the server validates). */
+  function absPathOf(relativePath) {
+    if (!cachedCwd) return relativePath;
+    var sep = cachedCwd.indexOf('\\') >= 0 && cachedCwd.indexOf('/') < 0 ? '\\' : '/';
+    var trimmed = cachedCwd.replace(/[\/\\]+$/, '');
+    return trimmed + sep + relativePath;
+  }
+
+  /** Route a picked relative path to the appropriate tab type.
+   *  Order: pinned override (chevron menu) > preferred > fallback.
+   *  See docs/files-applet-v1.md §4.0.7 Flow A. */
+  var _pinnedType = null;
+  async function routeOpen(relativePath) {
+    var abs = absPathOf(relativePath);
+    var pinned = _pinnedType;
+    _pinnedType = null;
+    var chosen = null;
+    if (pinned) {
+      chosen = pinned;
+    } else {
+      var preferred = null, fallback = null;
+      for (var i = 0; i < tabTypes.length; i++) {
+        var c = tabTypes[i].canOpen(abs, relativePath);
+        if (c === 'preferred' && !preferred) preferred = tabTypes[i];
+        else if (c === 'fallback' && !fallback) fallback = tabTypes[i];
+      }
+      chosen = preferred || fallback;
+    }
+    if (!chosen) {
+      console.warn('[file-edits] no tab type accepts', relativePath);
+      return;
+    }
+    try {
+      var inst = await chosen.open(shell, abs, relativePath);
+      if (!inst) return;
+      // Diff tabs handle their own bookkeeping inside openDiffTab
+      // (via openOrUpdateTab); MarkdownTab returns a freshly-mounted
+      // instance that the shell must register in `tabs` and activate.
+      if (inst.type === 'diff') {
+        // openDiffTab already did setActiveTab + tabs.set via openOrUpdateTab.
+        return;
+      }
+      if (tabs.has(inst.id)) {
+        // Race: another open completed for the same id. Destroy the
+        // new one and switch to the existing.
+        inst.destroy();
+        followEdits = false;
+        updateFollowButton();
+        setActiveTab(inst.id);
+        return;
+      }
+      if (tabs.size >= TAB_CAP) evictOldestNonActive();
+      tabs.set(inst.id, inst);
+      followEdits = false;
+      updateFollowButton();
+      setActiveTab(inst.id);
+      updateEmptyState();
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      console.warn('[file-edits] route open error', err, relativePath);
+    }
+  }
+
+  /** Diff-tab factory used by routeOpen and (eventually) cards
+   *  rehydrate. Wraps the existing POST /file-edits/open endpoint
+   *  and dispatches to openOrUpdateTab which handles tab insertion,
+   *  active-switch, and persist scheduling. Returns the DiffTab
+   *  instance on success, or null on cancel/failure. */
+  async function openDiffTab(shellArg, absPath, relativePath) {
+    // If already open, just switch.
     if (tabs.has(relativePath)) {
+      var existing = tabs.get(relativePath);
       followEdits = false;
       updateFollowButton();
       setActiveTab(relativePath);
-      return;
+      return existing && existing.type === 'diff' ? existing : null;
     }
     if (pickerOpenAbort) pickerOpenAbort.abort();
     pickerOpenAbort = new AbortController();
@@ -1261,21 +1366,97 @@
       );
       if (!res.ok) {
         console.warn('[file-edits] open failed', res.status, relativePath);
-        return;
+        return null;
       }
       var data = await res.json();
       edit = data.edit;
     } catch (err) {
-      if (err && err.name === 'AbortError') return;
+      if (err && err.name === 'AbortError') return null;
       console.warn('[file-edits] open error', err, relativePath);
-      return;
+      return null;
     }
-    if (sid !== sessionId) return;
-    if (!edit) return;
-    // User gesture: follow off, then forceFocus open.
+    if (sid !== sessionId) return null;
+    if (!edit) return null;
     followEdits = false;
     updateFollowButton();
     openOrUpdateTab(edit, { forceFocus: true });
+    var t = tabs.get(relativePath);
+    return (t && t.type === 'diff') ? t : null;
+  }
+
+  // ── Tab-type registration ────────────────────────────────────────────
+  // Order matters: 'preferred' results are scanned in registration
+  // order and the first wins. Register MarkdownTab BEFORE DiffTab so
+  // .md/.markdown/.mdx paths route to markdown by default.
+  if (MarkdownTab) {
+    registerTabType({
+      type: 'markdown',
+      label: 'Markdown',
+      canOpen: function(_abs, rel) {
+        var dot = rel.lastIndexOf('.');
+        if (dot < 0) return 'no';
+        var ext = rel.slice(dot + 1).toLowerCase();
+        return (ext === 'md' || ext === 'markdown' || ext === 'mdx')
+          ? 'preferred' : 'no';
+      },
+      open: function(shellArg, absPath, relPath) {
+        return MarkdownTab.open(shellArg, absPath, relPath);
+      },
+    });
+  }
+  registerTabType({
+    type: 'diff',
+    label: 'Diff',
+    canOpen: function() { return 'fallback'; },
+    open: openDiffTab,
+  });
+
+  // ── Chevron menu (open-as type override) ─────────────────────────────
+  var openMenuBtn = document.getElementById('feOpenMenu');
+  var openMenuPopup = null;
+  function buildOpenMenu() {
+    if (openMenuPopup) return;
+    openMenuPopup = document.createElement('div');
+    openMenuPopup.className = 'fe-menu';
+    openMenuPopup.hidden = true;
+    tabTypes.forEach(function(desc) {
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'fe-menu-item';
+      item.textContent = 'Open as ' + desc.label;
+      item.addEventListener('click', function(e) {
+        e.stopPropagation();
+        openMenuPopup.hidden = true;
+        _pinnedType = desc;
+        openPicker();
+      });
+      openMenuPopup.appendChild(item);
+    });
+    rootEl.appendChild(openMenuPopup);
+  }
+  if (openMenuBtn) {
+    if (tabTypes.length >= 2) openMenuBtn.hidden = false;
+    openMenuBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      buildOpenMenu();
+      if (!openMenuPopup) return;
+      openMenuPopup.hidden = !openMenuPopup.hidden;
+      if (!openMenuPopup.hidden) {
+        // Position under the chevron.
+        var rect = openMenuBtn.getBoundingClientRect();
+        var rootRect = rootEl.getBoundingClientRect();
+        openMenuPopup.style.position = 'absolute';
+        openMenuPopup.style.top = (rect.bottom - rootRect.top) + 'px';
+        openMenuPopup.style.right = (rootRect.right - rect.right) + 'px';
+        var outsideHandler = function(ev) {
+          if (!openMenuPopup.contains(ev.target) && ev.target !== openMenuBtn) {
+            openMenuPopup.hidden = true;
+            document.removeEventListener('mousedown', outsideHandler);
+          }
+        };
+        setTimeout(function() { document.addEventListener('mousedown', outsideHandler); }, 0);
+      }
+    });
   }
 
   openBtn.addEventListener('click', function(e) {
@@ -1909,9 +2090,10 @@
           status: 'clean',
           timestamp: new Date().toISOString(),
         };
-        var tab = new FileTab(placeholder);
+        var tab = new DiffTab(shell, placeholder);
         tabs.set(c.relativePath, tab);
         tabsEl.appendChild(tab.tabEl);
+        paneEl.appendChild(tab.contentEl);
       });
     }
     updateEmptyState();
@@ -1951,17 +2133,28 @@
       // hold dangling references.
       var browserSel = window.getSelection && window.getSelection();
       if (browserSel) browserSel.removeAllRanges();
-      // Tear down in-memory state.
-      tabs.forEach(function(t) { t.destroy(); });
+      // Tear down in-memory state. Rule §4.0.5.6: capture, clear
+      // the map (and pointers), THEN destroy. This way any
+      // tab-callback that re-enters the shell during destroy()
+      // sees an empty map.
+      var captured = Array.from(tabs.values());
       tabs.clear();
       badgeCounter.clear();
       lastEditedTabId = null;
       activeTabId = null;
       followEdits = true;
       cachedCwd = '';
-      paneEl.innerHTML = '';
-      paneEl.appendChild(paneEmptyEl);
-      paneEl.appendChild(notGitEl);
+      captured.forEach(function(t) {
+        try { t.destroy(); } catch (err) { console.warn('[file-edits] destroy on session-switch:', err); }
+      });
+      // Drop dismissed-path state; the new session has its own working tree.
+      dismissedPaths.clear();
+      dismissedSnapshots.clear();
+      // Re-add the persistent placeholder DIVs (they remain in
+      // index.html's pane but the V3.5 code's innerHTML='' clear has
+      // been removed; ensure they're still children defensively).
+      if (paneEmptyEl.parentNode !== paneEl) paneEl.appendChild(paneEmptyEl);
+      if (notGitEl.parentNode !== paneEl) paneEl.appendChild(notGitEl);
       notGitEl.hidden = true;
       updateFollowButton();
       updateEmptyState();
@@ -1990,6 +2183,10 @@
       })();
     }
   }
+
+  // Expose pure helpers DiffTab needs (avoids duplicating into
+  // diff-tab.js). DiffTab reads via window.__filesApplet._diffHelpers.
+  window.__filesApplet._diffHelpers = { fullFileEqual: fullFileEqual };
 
   updateFollowButton();
   updateEmptyState();

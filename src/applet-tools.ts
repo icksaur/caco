@@ -60,9 +60,21 @@ Applets are interactive HTML/JS/CSS components stored on disk and loaded via URL
 ~/.caco/applets/<slug>/
 ├── meta.json      # Required: { name, description, slug, createdAt, updatedAt }
 ├── content.html   # Required: HTML content (no <html>/<body> wrapper)
-├── script.js      # Optional: JavaScript code
+├── script.js      # Optional: JavaScript code (entry point)
+├── *.js           # Optional: additional JS files (concatenated alphabetically BEFORE script.js)
 └── style.css      # Optional: CSS styles
 \`\`\`
+
+## Multi-file applets
+
+If an applet's directory contains additional \`*.js\` files alongside
+\`script.js\`, they are concatenated in alphabetical order and prepended
+to \`script.js\` before injection. This lets large applets split helper
+classes (e.g. \`diff-tab.js\`, \`markdown-tab.js\`) into separate source
+files without a bundler. Files are loaded as a single \`<script>\` tag
+inside the applet's IIFE wrapper; shared globals should be exposed via
+a namespace like \`window.__myApplet\`. Avoid stray \`.js\` files in the
+applet directory if you do NOT want them executed.
 
 ## Creating an Applet
 

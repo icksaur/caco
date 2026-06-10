@@ -1366,15 +1366,19 @@
 
   function buildPersistBody() {
     var list = [];
-    // V1: only diff tabs are persisted via the cards endpoint. The
-    // server schema is diff-only; markdown tabs are session-memory
-    // only. See docs/files-applet-v1.md §4.0.6 "Markdown card
-    // persistence" invariant and Step 8.2.
-    tabs.forEach(function(t, path) {
-      if (t.type !== 'diff') return;
-      list.push({ relativePath: path, collapsed: false });
+    // V2.c: persist ALL containers (not just diff-default). Schema
+    // version 2 carries defaultViewerType + activeViewerType so the
+    // user's tabs (and viewer-mode) survive applet close+reopen.
+    // The Map iteration order is insertion order so tab-strip order
+    // is preserved across reload. See docs/files-applet-v2.md §4.3.
+    tabs.forEach(function(container) {
+      list.push({
+        relativePath: container.relPath,
+        defaultViewerType: container.defaultViewerType,
+        activeViewerType: container.activeViewerType,
+      });
     });
-    return { schemaVersion: 1, cards: list, dismissed: [] };
+    return { schemaVersion: 2, cards: list, dismissed: [] };
   }
 
   function schedulePersist() {
@@ -2302,27 +2306,79 @@
   async function initFromPersistence(sid) {
     var persisted = await loadPersistedCards(sid);
     if (persisted && Array.isArray(persisted.cards)) {
-      var diffDesc = null;
-      for (var i = 0; i < viewerRegistry.length; i++) {
-        if (viewerRegistry[i].viewerType === 'diff') { diffDesc = viewerRegistry[i]; break; }
-      }
+      // V2.c: cards may carry defaultViewerType + activeViewerType.
+      // V1 cards (schemaVersion 1) lack these — treat them as
+      // diff-default per docs/files-applet-v2.md §4.3.1.
+      var isV2 = persisted.schemaVersion === 2;
       persisted.cards.forEach(function(c) {
         if (!c || !c.relativePath) return;
         if (tabs.has(c.relativePath)) return;
-        var placeholder = {
-          relativePath: c.relativePath,
-          path: '',
-          status: 'clean',
-          timestamp: new Date().toISOString(),
-        };
+        var defaultType = isV2 ? (c.defaultViewerType || 'diff') : 'diff';
+        var activeType = isV2 ? (c.activeViewerType || defaultType) : defaultType;
         var abs = absPathOf(c.relativePath);
-        var container = new TabContainer(shell, diffDesc, abs, c.relativePath);
-        var viewer = DiffViewer.fromEdit(shell, container, placeholder);
-        container.viewers.set('diff', viewer);
-        tabs.set(container.id, container);
-        tabsEl.appendChild(container.tabEl);
-        paneEl.appendChild(container.contentEl);
-        container.updateToggle();
+        var desc = null;
+        for (var i = 0; i < viewerRegistry.length; i++) {
+          if (viewerRegistry[i].viewerType === defaultType) { desc = viewerRegistry[i]; break; }
+        }
+        if (!desc) {
+          // Persisted viewer type not registered (e.g. user rolled
+          // back V2.a but kept V2.c data). Fall back to diff.
+          for (var j = 0; j < viewerRegistry.length; j++) {
+            if (viewerRegistry[j].viewerType === 'diff') { desc = viewerRegistry[j]; break; }
+          }
+          defaultType = 'diff';
+          activeType = 'diff';
+        }
+        var container = new TabContainer(shell, desc, abs, c.relativePath);
+        if (defaultType === 'diff') {
+          // Synchronous fast path with placeholder edit; fetchSnapshot
+          // below will update it.
+          var placeholder = {
+            relativePath: c.relativePath,
+            path: '',
+            status: 'clean',
+            timestamp: new Date().toISOString(),
+          };
+          var viewer = DiffViewer.fromEdit(shell, container, placeholder);
+          container.viewers.set('diff', viewer);
+          tabs.set(container.id, container);
+          tabsEl.appendChild(container.tabEl);
+          paneEl.appendChild(container.contentEl);
+          container.updateToggle();
+        } else {
+          // Async factory path (image, html, markdown). Insert into
+          // tabs synchronously so caco.edit dedup works; mark
+          // rehydrating; the factory completes asynchronously.
+          container.rehydrating = true;
+          tabs.set(container.id, container);
+          tabsEl.appendChild(container.tabEl);
+          paneEl.appendChild(container.contentEl);
+          container.updateToggle();
+          (function() {
+            var factoryContainer = container;
+            var factoryDesc = desc;
+            var factoryActive = activeType;
+            desc.open(shell, container, abs, c.relativePath).then(function(v) {
+              if (factoryContainer.destroyed) {
+                try { v.destroy(); } catch (_e) { /* ignore */ }
+                return;
+              }
+              factoryContainer.viewers.set(factoryDesc.viewerType, v);
+              factoryContainer.rehydrating = false;
+              // Secondary viewer (active !== default) — switch in
+              // sequence after the default is constructed. switchViewer
+              // handles the lazy construct + activate.
+              if (factoryActive !== factoryDesc.viewerType && !factoryContainer.destroyed) {
+                void factoryContainer.switchViewer(factoryActive);
+              }
+              shell.echoState();
+            }, function(err) {
+              console.warn('[files-applet] rehydrate factory failed', c.relativePath, err);
+              tabs.delete(factoryContainer.id);
+              factoryContainer.destroy();
+            });
+          })();
+        }
       });
     }
     updateEmptyState();

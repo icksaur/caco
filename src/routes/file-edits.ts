@@ -13,7 +13,6 @@ import {
   getCardList,
   setCardList,
   flushSession,
-  SCHEMA_VERSION,
   type CardPersist,
 } from '../file-edits-store.js';
 
@@ -141,12 +140,14 @@ function putCardsHandler(req: Request, res: Response): void {
     res.status(400).json({ error: 'body must be an object' });
     return;
   }
-  if (body.schemaVersion !== SCHEMA_VERSION) {
+  // V2.c: accept v1 (legacy) AND v2 (current). Version-tolerant
+  // server keeps the rollout window safe. See docs/files-applet-v2.md §5.
+  if (body.schemaVersion !== 1 && body.schemaVersion !== 2) {
     res.status(400).json({ error: `unknown schemaVersion: ${body.schemaVersion}` });
     return;
   }
   if (!Array.isArray(body.cards) || !body.cards.every(isCardPersist)) {
-    res.status(400).json({ error: 'cards must be Array<{ relativePath: string, collapsed: boolean }>' });
+    res.status(400).json({ error: 'cards must be Array<{ relativePath: string, collapsed?: boolean, defaultViewerType?: string, activeViewerType?: string }>' });
     return;
   }
   if (!Array.isArray(body.dismissed) || !body.dismissed.every((d: unknown) => typeof d === 'string')) {
@@ -166,7 +167,11 @@ router.post('/sessions/:sessionId/file-edits/cards', putCardsHandler);
 function isCardPersist(v: unknown): v is CardPersist {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
-  return typeof o.relativePath === 'string' && typeof o.collapsed === 'boolean';
+  if (typeof o.relativePath !== 'string') return false;
+  if (o.collapsed !== undefined && typeof o.collapsed !== 'boolean') return false;
+  if (o.defaultViewerType !== undefined && typeof o.defaultViewerType !== 'string') return false;
+  if (o.activeViewerType !== undefined && typeof o.activeViewerType !== 'string') return false;
+  return true;
 }
 
 /** Called from server shutdown / session detach so we don't lose the

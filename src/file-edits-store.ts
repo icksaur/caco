@@ -23,11 +23,13 @@ import { getSessionData, setSessionData } from './session-data-store.js';
 const STORE_NAME = 'file-edits-cards';
 const DEBOUNCE_MS = 500;
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface CardPersist {
   relativePath: string;
-  collapsed: boolean;
+  collapsed?: boolean;             // V1: required. V2: optional (vestigial).
+  defaultViewerType?: string;      // V2.c: 'diff' | 'markdown' | 'image' | 'html' | future
+  activeViewerType?: string;       // V2.c: defaults to defaultViewerType
 }
 
 export interface CardList {
@@ -66,7 +68,11 @@ export function getCardList(sessionId: string): CardList {
 function isCardPersist(v: unknown): v is CardPersist {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
-  return typeof o.relativePath === 'string' && typeof o.collapsed === 'boolean';
+  if (typeof o.relativePath !== 'string') return false;
+  if (o.collapsed !== undefined && typeof o.collapsed !== 'boolean') return false;
+  if (o.defaultViewerType !== undefined && typeof o.defaultViewerType !== 'string') return false;
+  if (o.activeViewerType !== undefined && typeof o.activeViewerType !== 'string') return false;
+  return true;
 }
 
 /** Schedule a debounced write for `sessionId`. The body is updated each

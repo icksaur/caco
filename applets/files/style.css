@@ -185,8 +185,9 @@
  * via data-mode="fullfile" so the three columns (head-gutter, work-gutter,
  * code) stay aligned across rows without per-row tables. */
 .fe-diff[data-mode="fullfile"] {
+  --fe-gutter-w: 3.5rem;        /* fixed gutter width; fits 4-digit line #s at --text-xs (renderer caps files at 5000 lines) */
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: var(--fe-gutter-w) var(--fe-gutter-w) minmax(max-content, 1fr);
   padding: 0;
   white-space: normal;
   word-break: normal;
@@ -197,7 +198,7 @@
  * work-gutter column duplicates the head-gutter for every row.
  * Collapse to a single line-number column. */
 .fe-diff[data-mode="fullfile"][data-clean-only="true"] {
-  grid-template-columns: auto 1fr;
+  grid-template-columns: var(--fe-gutter-w) minmax(max-content, 1fr);
 }
 .fe-diff[data-mode="fullfile"][data-clean-only="true"] .fe-gutter-work {
   display: none;
@@ -226,6 +227,9 @@
 }
 
 .fe-diff[data-mode="fullfile"] .fe-gutter {
+  position: sticky;
+  z-index: 1;
+  background: var(--bg-base);    /* opaque so code scrolls under, not through */
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
@@ -233,38 +237,52 @@
   padding: 0 var(--space-sm);
   user-select: none;
   white-space: nowrap;
-  min-width: 2ch;
 }
+.fe-diff[data-mode="fullfile"] .fe-gutter-head { left: 0; }
+.fe-diff[data-mode="fullfile"] .fe-gutter-work { left: var(--fe-gutter-w); }
+.fe-diff[data-mode="fullfile"][data-clean-only="true"] .fe-gutter-head { left: 0; }
 
 .fe-diff[data-mode="fullfile"] .fe-line {
   font-family: var(--font-mono);
   font-size: var(--text-base);
   line-height: 1.5;
   padding: 0 var(--space-sm);
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre;              /* no wrap: long lines scroll horizontally (VS Code / GitHub) */
+  overflow: visible;             /* the grid (.fe-diff) owns horizontal scroll, never the line */
 }
 
 /* hljs ships with `.hljs { background: #282c34 }` which would clobber
  * our row-level add/del tint when a line gets syntax highlighting.
  * Override so the row tint stays visible underneath. Also drop hljs's
- * code padding so per-line gutters align. */
+ * code padding so per-line gutters align, and — critically — reset
+ * hljs's `display:block; overflow-x:auto`, which would otherwise make
+ * EACH highlighted line its own horizontal scroll container (lines
+ * "individually scrollable"). The grid (.fe-diff) owns the scroll. */
 .fe-diff[data-mode="fullfile"] .fe-line.hljs {
   background: transparent;
   padding: 0 var(--space-sm);
+  overflow: visible;
 }
 
 /* Row-level diff backgrounds. Kept subtle so hljs token colors remain
- * legible on top. */
-.fe-diff[data-mode="fullfile"] .fe-row-add .fe-line,
-.fe-diff[data-mode="fullfile"] .fe-row-add .fe-gutter {
+ * legible on top. The .fe-line variants stay semi-transparent so hljs
+ * tokens and row layering read through; the .fe-gutter variants are
+ * composited over --bg-base to stay OPAQUE, since the gutters are
+ * position:sticky and code scrolls underneath them on horizontal
+ * scroll (a transparent gutter would show the code bleeding through). */
+.fe-diff[data-mode="fullfile"] .fe-row-add .fe-line {
   background: rgba(0, 200, 100, 0.15);
   background: color-mix(in oklab, var(--color-success-bright) 18%, transparent);
 }
-.fe-diff[data-mode="fullfile"] .fe-row-del .fe-line,
-.fe-diff[data-mode="fullfile"] .fe-row-del .fe-gutter {
+.fe-diff[data-mode="fullfile"] .fe-row-add .fe-gutter {
+  background: color-mix(in oklab, var(--color-success-bright) 18%, var(--bg-base));
+}
+.fe-diff[data-mode="fullfile"] .fe-row-del .fe-line {
   background: rgba(220, 70, 70, 0.15);
   background: color-mix(in oklab, var(--color-error) 18%, transparent);
+}
+.fe-diff[data-mode="fullfile"] .fe-row-del .fe-gutter {
+  background: color-mix(in oklab, var(--color-error) 18%, var(--bg-base));
 }
 
 /* V2.1: unchanged lines render at full opacity. Previously dimmed to
@@ -483,7 +501,7 @@
 }
 .fe-diff[data-mode="fullfile"] .fe-row.fe-row-selected .fe-gutter {
   background: rgba(80, 150, 255, 0.40);
-  background: color-mix(in oklab, var(--color-accent) 40%, transparent);
+  background: color-mix(in oklab, var(--color-accent) 40%, var(--bg-base));
   color: var(--color-text-bright);
 }
 .fe-pane:focus,

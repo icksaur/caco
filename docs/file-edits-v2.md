@@ -244,6 +244,17 @@ The `<code>` child receives the syntax-highlighted token spans; the
 `fe-row-{kind}` class on the parent controls the line-level
 background. Phase 2's word marks live inside the `<code>`.
 
+**Long-line behavior.** Lines do not wrap. `.fe-line` uses
+`white-space: pre`; lines wider than the pane scroll horizontally
+within `.fe-diff` (the code column is `minmax(max-content, 1fr)`, so it
+fills the pane for short files and grows past it for long lines). The
+two gutter columns are fixed-width (`--fe-gutter-w`) and pinned
+(`position: sticky; left`) with opaque backgrounds so line numbers
+remain visible during horizontal scroll. This matches VS Code / GitHub
+diff behavior and keeps every row exactly one line tall (which also
+removes the sub-pixel row-height jitter that `pre-wrap` caused). See
+`files-applet-diff-nowrap.md`.
+
 Fold rows use a distinct structure with a chevron and a click handler:
 
 ```html

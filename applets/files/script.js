@@ -171,7 +171,13 @@
    *  See code-quality.md "implicit coupling" — this helper is the
    *  single owner of the contract. Any new code that needs a row's
    *  pixel position MUST route through here; calling
-   *  getBoundingClientRect() on a .fe-row directly is a bug. */
+   *  getBoundingClientRect() on a .fe-row directly is a bug.
+   *
+   *  NOTE: gutters are `position: sticky; left` (so line numbers stay
+   *  visible during horizontal scroll of long no-wrap lines). The
+   *  returned `.left`/`.width` therefore reflect the sticky-pinned
+   *  position, not the row's layout origin. Only `.top` is meaningful
+   *  for callers (vertical scroll math); do not rely on `.left`. */
   function measureDiffRow(row) {
     if (!row) return { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0 };
     var measureEl = row.querySelector('.fe-gutter')
@@ -1248,6 +1254,15 @@
     var diffEl = e.target.closest('.fe-diff');
     var anyRow = e.target.closest('.fe-row');
     if (diffEl && !anyRow) {
+      // Guard: a multi-line drag-to-select fires a synthetic `click`
+      // whose target is the nearest common ancestor of the mousedown
+      // and mouseup lines. Because rows are `display: contents`, that
+      // ancestor is .fe-diff itself (not a .fe-row) — so this branch
+      // would fire at the END of every multi-line text selection and
+      // wipe it via removeAllRanges. Only treat it as a deselect click
+      // when there is NO active (non-collapsed) selection.
+      var winSel = window.getSelection && window.getSelection();
+      if (winSel && !winSel.isCollapsed) return;
       var container2 = activeTabId ? tabs.get(activeTabId) : null;
       var tab2 = activeDiffViewer(container2);
       if (tab2 && tab2.selection) {

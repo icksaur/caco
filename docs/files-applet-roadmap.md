@@ -134,17 +134,21 @@ toggle. See `docs/files-applet-v5.md`.
 
 ## V6 — shipped (git-diff deprecation)
 
-Extended the `files` applet's DiffViewer to handle three diff
-modes (unstaged, staged, range) — one file per tab; no new tab
-type. `git-diff` became a V5-style conditional redirect stub
+Extended the `files` applet's DiffViewer to handle two diff
+modes (unstaged, staged) — one file per tab; no new tab type.
+`git-diff` became a V5-style conditional redirect stub
 (redirects to `files` when a session exists). `git-status`'s
-per-file diff links switched to `files` directly; the
-multi-file last-commit "View diff" link was removed (single
-regression, mitigated by deferred per-commit file list).
-Added `?diffMode=` and `?diffRef=` URL params, additive
-`diffMode`/`diffRef` on persisted cards (schemaVersion 2 stays
-intact). DiffViewer gained a chrome refresh button for
-staged/range snapshots. See `docs/files-applet-v6.md`.
+per-file diff links switched to `files` directly; the multi-file
+last-commit "View diff" link was removed. Added `?diffMode=`
+URL param, additive `diffMode` on persisted cards
+(schemaVersion 2 stays intact). See `docs/files-applet-v6.md`.
+
+**V6.1 hotfix:** V6 originally also shipped a `range` mode
+(`?diffMode=range&diffRef=...`), ref validation, a chrome
+refresh button, and persistence for ref-range tabs. With no
+natural entry point post-V6 (the multi-file commit-diff link
+was removed), this was overcomplication — ~250 lines deleted.
+Staged-mode value preserved.
 
 ## V7+ — proposed buckets (formerly V6+ scope)
 
@@ -170,35 +174,33 @@ staged/range snapshots. See `docs/files-applet-v6.md`.
     relying on the stub redirect. (`git-status` already
     targets `files` directly as of V6.)
 
-14. **Multi-file ref-range view** in git-status. Per-commit
-    detail row with a file list, each row linking to `files`
-    with `diffMode=range&diffRef=<commit>~..commit`.
-    Replaces the V6-removed "View diff" link with something
-    more useful (per-file clickable).
+14. **Per-commit detail view** in git-status. Replaces the
+    V6-removed "View diff" link with a commit-row that expands
+    to a per-file list. Each row click opens the file's diff
+    at that commit. This is the natural entry point that V6's
+    range mode lacked — when (if) it lands, ref-range diff
+    support in `files` could come back as a focused feature.
 
-15. **Live event hook for staged tabs.** Currently V6 staged
-    tabs only refresh via the chrome button. A hook into
-    `git stage` / `git reset` would let the tab auto-update.
+15. **Live event hook for staged tabs.** Currently staged tabs
+    are snapshots; the user re-clicks the staged file in
+    git-status to refresh. A hook into `git stage` / `git reset`
+    would let the tab auto-update.
 
-16. **Expand `diffRef` grammar** (V6 §5.3 documents a narrow
-    subset). Add reflog `@{...}`, peeling `^{...}`, etc. once
-    use cases emerge.
-
-17. **Global keyboard shortcuts.** Ctrl+P already opens the
+16. **Global keyboard shortcuts.** Ctrl+P already opens the
     files applet's finder as of V3.y.2; remaining shortcuts:
     next/prev tab, close tab.
 
-18. **Visual refresh.** Tab-type icon glyphs (V1 used ◇ and ¶
+17. **Visual refresh.** Tab-type icon glyphs (V1 used ◇ and ¶
     as placeholders), toggle button styling, broader picker UX
     get a consistent treatment with Caco's broader visual style.
 
-19. **Autosave for write-capable viewers** (deferred from V2).
+18. **Autosave for write-capable viewers** (deferred from V2).
     Debounced 1s after last keystroke; in-memory "last failed
     save" buffer + small indicator so silent save failures
     surface to the user.
 
-20. **Dirty-prompt on session-switch** (deferred from V2 §7.5;
-    superseded by §19 autosave).
+19. **Dirty-prompt on session-switch** (deferred from V2 §7.5;
+    superseded by §18 autosave).
 
 ## Out of scope (parking lot)
 

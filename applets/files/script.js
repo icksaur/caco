@@ -88,9 +88,9 @@
   // V3.y.1: deep-link queue. cold-load fires onUrlParamsChange
   // before cachedCwd is set; queue the openPath and drain when
   // cachedCwd arrives. See docs/files-applet-v3.y.md §4.1.B.
-  // V6: pending entry carries optional routeOpen opts (diffMode,
-  // diffRef) so a cold-load ?diffMode=staged URL doesn't lose its
-  // mode when drained after cachedCwd lands.
+  // V6: pending entry carries optional routeOpen opts (diffMode)
+  // so a cold-load ?diffMode=staged URL doesn't lose its mode
+  // when drained after cachedCwd lands.
   var _pendingOpenPath = null;
   function _handleOpenPath(p, opts) {
     if (!p) return;
@@ -148,19 +148,14 @@
 
   /** V6: collision-safe tab id for diff tabs. NUL sentinels
    *  cannot appear in real relPaths (API rejects at
-   *  src/routes/file-edits.ts:72), so the prefixed forms
-   *  cannot collide with any user-supplied path. Range form
-   *  length-prefixes the ref to disambiguate (ref, relPath)
-   *  pairs. See docs/files-applet-v6.md §4.3.
+   *  src/routes/file-edits.ts:72), so the prefixed form cannot
+   *  collide with any user-supplied path.
+   *  V6.1: simplified — only unstaged + staged.
    */
   function diffTabId(opts) {
     var mode = (opts && opts.mode) || 'unstaged';
     var rel = (opts && opts.relPath) || '';
     if (mode === 'staged') return '\u0000diff-staged\u0000' + rel;
-    if (mode === 'range') {
-      var ref = (opts && opts.ref) || '';
-      return '\u0000diff-range\u0000' + ref.length + '\u0000' + ref + rel;
-    }
     return rel;
   }
 
@@ -183,25 +178,21 @@
   }
 
   /** Find a container by its relPath. V6: accepts an optional
-   *  { mode, ref } filter so the poller's caco.edit lookup never
-   *  matches a staged/range tab, and user-initiated opens find
+   *  { mode } filter so the poller's caco.edit lookup never
+   *  matches a staged tab, and user-initiated opens find
    *  the exact requested tab (not whichever same-path tab
    *  happens to exist first). See docs/files-applet-v6.md §4.3.1.
    */
   function findContainerByRelPath(relPath, opts) {
     opts = opts || {};
-    // V6: symmetric filter — null means "don't filter on this
-    // field", non-null (including any specific string like
-    // 'unstaged' or '') means "must match exactly". Asymmetric
-    // form was a footgun even though no V6 caller hits it.
+    // V6.1: simplified to mode-only after range was removed.
+    // null means "don't filter on mode", non-null = exact match.
     var wantMode = opts.mode !== undefined ? opts.mode : null;
-    var wantRef = opts.ref !== undefined ? opts.ref : null;
     var found = null;
     tabs.forEach(function(c) {
       if (found) return;
       if (c.relPath !== relPath) return;
       if (wantMode !== null && c.diffMode !== wantMode) return;
-      if (wantRef !== null && c.diffRef !== wantRef) return;
       found = c;
     });
     return found;
@@ -261,19 +252,18 @@
     this.relPath = relPath;
     this.defaultViewerType = descriptor.viewerType;
     this.activeViewerType = descriptor.viewerType;
-    // V6: diff tabs carry mode + optional ref so id and lookups
-    // can disambiguate working-tree, staged, and ref-range tabs
-    // for the same file. Non-diff tabs leave these at defaults.
+    // V6: diff tabs carry mode so id and lookups can disambiguate
+    // working-tree from staged tabs for the same file. Non-diff
+    // tabs leave it at default. V6.1 removed diffRef.
     this.diffMode = descriptor.diffMode || 'unstaged';
-    this.diffRef = descriptor.diffRef || null;
     // Stable id:
     //   - markdown: 'markdown:' + absPath (V1 schema)
-    //   - diff (default): relPath (V1 schema)
-    //   - V6 diff staged/range: diffTabId with NUL sentinels
+    //   - diff (default unstaged): relPath (V1 schema)
+    //   - V6 diff staged: diffTabId with NUL sentinels
     if (descriptor.viewerType === 'markdown') {
       this.id = 'markdown:' + absPath;
     } else {
-      this.id = diffTabId({ mode: this.diffMode, ref: this.diffRef, relPath: relPath });
+      this.id = diffTabId({ mode: this.diffMode, relPath: relPath });
     }
     this.label = basename(relPath || absPath);
     this.viewers = new Map();
@@ -289,21 +279,18 @@
     btn.className = 'fe-tab fe-tab-' + descriptor.viewerType;
     btn.type = 'button';
     btn.dataset.path = this.id;
-    // V6: title reflects mode so a hover discloses staged/range.
-    if (this.diffMode === 'staged') btn.title = relPath + ' (staged)';
-    else if (this.diffMode === 'range') btn.title = relPath + ' at ' + (this.diffRef || '');
-    else btn.title = relPath;
+    // V6: title reflects mode so a hover discloses staged.
+    btn.title = this.diffMode === 'staged' ? (relPath + ' (staged)') : relPath;
     var name = document.createElement('span');
     name.className = 'fe-tab-name';
     name.textContent = this.label;
     btn.appendChild(name);
-    // V6: dim suffix for staged / range modes so the basename stays
-    // the dominant glyph but the user can tell modes apart at a
-    // glance.
-    if (this.diffMode === 'staged' || this.diffMode === 'range') {
+    // V6: dim ' · staged' suffix so the basename stays the dominant
+    // glyph but the user can tell modes apart at a glance.
+    if (this.diffMode === 'staged') {
       var suffix = document.createElement('span');
       suffix.className = 'fe-tab-mode';
-      suffix.textContent = ' · ' + (this.diffMode === 'staged' ? 'staged' : (this.diffRef || 'range'));
+      suffix.textContent = ' · staged';
       btn.appendChild(suffix);
     }
     var x = document.createElement('span');
@@ -1814,8 +1801,8 @@
     // user's tabs (and viewer-mode) survive applet close+reopen.
     // The Map iteration order is insertion order so tab-strip order
     // is preserved across reload. See docs/files-applet-v2.md §4.3.
-    // V6: additive diffMode/diffRef on the same schema. Older
-    // readers ignore unknown fields.
+    // V6: additive diffMode on the same schema. Older readers
+    // ignore unknown fields. V6.1 dropped diffRef.
     tabs.forEach(function(container) {
       var card = {
         relativePath: container.relPath,
@@ -1824,7 +1811,6 @@
       };
       if (container.diffMode && container.diffMode !== 'unstaged') {
         card.diffMode = container.diffMode;
-        if (container.diffRef) card.diffRef = container.diffRef;
       }
       list.push(card);
     });
@@ -2335,21 +2321,17 @@
    *  file's default viewer, attach DOM, activate. See spec
    *  §4.0.B / §4.1.
    *
-   *  V6: openOpts.diffMode / openOpts.diffRef thread through to
-   *  TabContainer (for diffTabId disambiguation) and to the
-   *  viewer's open call. Mode-aware findContainerByRelPath so a
-   *  staged-mode deep link doesn't focus an existing unstaged tab.
+   *  V6: openOpts.diffMode threads through to TabContainer (for
+   *  diffTabId disambiguation) and to the viewer's open call.
+   *  Mode-aware findContainerByRelPath so a staged-mode deep
+   *  link doesn't focus an existing unstaged tab.
    */
   async function routeOpen(relativePath, openOpts) {
     openOpts = openOpts || {};
     var diffMode = openOpts.diffMode || 'unstaged';
-    var diffRef = openOpts.diffRef || null;
     var abs = _pickerAbsPathOf(relativePath);
-    // If a container already exists for THIS mode/ref, just activate.
-    var existing = findContainerByRelPath(relativePath, {
-      mode: diffMode,
-      ref: diffRef,
-    });
+    // If a container already exists for THIS mode, just activate.
+    var existing = findContainerByRelPath(relativePath, { mode: diffMode });
     if (existing) {
       followEdits = false;
       updateFollowButton();
@@ -2360,15 +2342,12 @@
     // Idempotency guard: if a concurrent routeOpen is already in
     // flight for this relPath (e.g. cold-load race between
     // initFromPersistence and onUrlParamsChange, or rapid double-
-    // click), short-circuit. Otherwise the async desc.open() in two
-    // calls races and produces two tabEls in the strip — only one
-    // of which is reachable through the tabs map, leaving the
-    // other as an unclickable ghost. See plan.md "ghost-tab-fix".
-    // V6 pendingOpenIds key includes mode/ref so opening unstaged
-    // and staged of the same file concurrently doesn't dedup.
-    var pendKey = diffMode === 'unstaged' && !diffRef
+    // click), short-circuit. The pendingOpenIds key includes mode
+    // so opening unstaged + staged of the same file concurrently
+    // doesn't dedup.
+    var pendKey = diffMode === 'unstaged'
       ? relativePath
-      : '\u0000' + diffMode + '\u0000' + (diffRef || '') + '\u0000' + relativePath;
+      : '\u0000' + diffMode + '\u0000' + relativePath;
     if (pendingOpenIds.has(pendKey)) return;
     pendingOpenIds.add(pendKey);
     var desc = defaultViewer(abs, relativePath);
@@ -2377,24 +2356,20 @@
       pendingOpenIds.delete(pendKey);
       return;
     }
-    // V6: thread diffMode/diffRef into the descriptor so the
-    // TabContainer constructor's diffTabId call sees them.
-    if (desc.viewerType === 'diff' && (diffMode !== 'unstaged' || diffRef)) {
-      desc = Object.assign({}, desc, { diffMode: diffMode, diffRef: diffRef });
+    // V6: thread diffMode into the descriptor so the TabContainer
+    // constructor's diffTabId call sees it.
+    if (desc.viewerType === 'diff' && diffMode !== 'unstaged') {
+      desc = Object.assign({}, desc, { diffMode: diffMode });
     }
     if (tabs.size >= TAB_CAP) evictOldestNonActive();
     var container = new TabContainer(shell, desc, abs, relativePath);
     try {
       var viewer = await desc.open(shell, container, abs, relativePath, {
         diffMode: diffMode,
-        ref: diffRef,
       });
       // Re-check after await: another caller may have created the
       // tab while we were suspended. Discard our container if so.
-      var raceCheck = findContainerByRelPath(relativePath, {
-        mode: diffMode,
-        ref: diffRef,
-      });
+      var raceCheck = findContainerByRelPath(relativePath, { mode: diffMode });
       if (raceCheck) {
         if (viewer && typeof viewer.destroy === 'function') {
           try { viewer.destroy(); } catch (_e) { /* ignore */ }
@@ -3114,10 +3089,9 @@
         // V6: check by the computed id, not just relPath — a staged
         // tab for the same file would collide on the relPath check.
         var cardMode = c.diffMode || 'unstaged';
-        var cardRef = c.diffRef || null;
-        var candidateId = cardMode === 'unstaged' && !cardRef
+        var candidateId = cardMode === 'unstaged'
           ? c.relativePath
-          : diffTabId({ mode: cardMode, ref: cardRef, relPath: c.relativePath });
+          : diffTabId({ mode: cardMode, relPath: c.relativePath });
         if (tabs.has(candidateId)) return;
         var abs = absPathOf(c.relativePath);
         var desc = defaultViewer(abs, c.relativePath);
@@ -3136,16 +3110,13 @@
             }
           }
         }
-        // V6: thread persisted diffMode/diffRef into the descriptor
-        // so TabContainer's diffTabId produces the matching id and
-        // the async rehydrate path knows to call DiffViewer.open with
-        // mode/ref. cardMode/cardRef were resolved above for the
-        // dedup check.
-        if (defaultType === 'diff' && (cardMode !== 'unstaged' || cardRef)) {
-          desc = Object.assign({}, desc, {
-            diffMode: cardMode,
-            diffRef: cardRef,
-          });
+        // V6: thread persisted diffMode into the descriptor so
+        // TabContainer's diffTabId produces the matching id and
+        // the async rehydrate path knows to call DiffViewer.open
+        // with the right mode. cardMode was resolved above for the
+        // dedup check. V6.1 removed diffRef / range.
+        if (defaultType === 'diff' && cardMode !== 'unstaged') {
+          desc = Object.assign({}, desc, { diffMode: cardMode });
         }
         var container = new TabContainer(shell, desc, abs, c.relativePath);
         if (defaultType === 'diff' && cardMode === 'unstaged') {
@@ -3164,9 +3135,9 @@
           paneEl.appendChild(container.contentEl);
           container.updateToggle();
         } else {
-          // Async factory path (image, html, markdown, OR V6 staged /
-          // range diff). Insert into tabs synchronously so caco.edit
-          // dedup works; mark rehydrating; the factory completes
+          // Async factory path (image, html, markdown, OR V6 staged
+          // diff). Insert into tabs synchronously so caco.edit dedup
+          // works; mark rehydrating; the factory completes
           // asynchronously.
           container.rehydrating = true;
           tabs.set(container.id, container);
@@ -3178,7 +3149,7 @@
             var factoryDesc = desc;
             var factoryActive = activeType;
             var openOpts = (factoryDesc.viewerType === 'diff' && cardMode !== 'unstaged')
-              ? { diffMode: cardMode, ref: cardRef }
+              ? { diffMode: cardMode }
               : undefined;
             desc.open(shell, container, abs, c.relativePath, openOpts).then(function(v) {
               if (factoryContainer.destroyed) {
@@ -3221,10 +3192,10 @@
       window.appletAPI.onUrlParamsChange(function(params) {
         if (!params) return;
         if (params.openPath) {
-          // V6: optional diffMode / diffRef carried into routeOpen.
+          // V6: optional diffMode (unstaged | staged) carried into
+          // routeOpen. V6.1 removed diffRef.
           var routeOpts = {
             diffMode: params.diffMode || undefined,
-            diffRef: params.diffRef || undefined,
           };
           if (cachedCwd) {
             _handleOpenPath(params.openPath, routeOpts);
@@ -3237,7 +3208,6 @@
             // (key: string, value: string) with falsy=delete.
             window.appletAPI.navigateAppletUrlParam('openPath', '');
             if (params.diffMode) window.appletAPI.navigateAppletUrlParam('diffMode', '');
-            if (params.diffRef) window.appletAPI.navigateAppletUrlParam('diffRef', '');
           }
         }
         if (params.openFinder) {

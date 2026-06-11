@@ -137,73 +137,16 @@
     return { kind: 'diff', path: this.relativePath, selection: s };
   };
 
-  /** V6: chrome refresh button for staged + range tabs (snapshots
-   *  that the poller doesn't auto-update). Unstaged tabs return an
-   *  empty array because caco.edit already keeps them live.
-   *  Contract per applets/files/script.js:461-571. */
-  DiffViewer.prototype.getChromeButtons = function() {
-    var mode = this.container && this.container.diffMode;
-    if (mode !== 'staged' && mode !== 'range') return [];
-    var self = this;
-    return [{
-      id: 'reload',
-      label: '↻',
-      title: 'Refresh snapshot',
-      visible: function() { return true; },
-      disabled: function() { return self._reloading === true; },
-      onClick: function() { return self.reload(); },
-    }];
-  };
-
-  /** V6: re-run the mode-aware DiffViewer.open fetch in place and
-   *  re-render. Used by the refresh chrome button. Safe to call
-   *  while a previous reload is in flight (early-return via
-   *  _reloading guard). */
-  DiffViewer.prototype.reload = async function() {
-    if (this.destroyed || this._reloading) return;
-    this._reloading = true;
-    this.shell.echoState();
-    try {
-      var sid = this.shell.sessionId;
-      var body = { relativePath: this.relativePath };
-      if (this.container.diffMode && this.container.diffMode !== 'unstaged') {
-        body.diffMode = this.container.diffMode;
-        if (this.container.diffMode === 'range') body.ref = this.container.diffRef || '';
-      }
-      var res = await fetch(
-        '/api/sessions/' + encodeURIComponent(sid) + '/file-edits/open',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        }
-      );
-      if (this.destroyed) return;
-      if (!res.ok) throw new Error('reload failed: HTTP ' + res.status);
-      var data = await res.json();
-      if (this.destroyed) return;
-      if (!data.edit) throw new Error('no edit returned');
-      this.edit = data.edit;
-      if (this.rendered) this._render();
-      // Single echoState in the finally block — _reloading is still
-      // true here, so an intermediate echo would broadcast the same
-      // disabled state as the entry echo. The finally echo
-      // broadcasts the re-enabled state after the guard releases.
-    } finally {
-      this._reloading = false;
-      this.shell.echoState();
-    }
-  };
-
   /** Factory: V1.1 routeOpen path. Fetches the edit, constructs,
-   *  attaches contentEl to container.contentEl. */
+   *  attaches contentEl to container.contentEl.
+   *  V6: opts.diffMode (unstaged | staged) carried in the request
+   *  body when non-default. V6.1 dropped range. */
   DiffViewer.open = async function(shell, container, absPath, relativePath, opts) {
     opts = opts || {};
     var sid = shell.sessionId;
     var body = { relativePath: relativePath };
     if (opts.diffMode && opts.diffMode !== 'unstaged') {
       body.diffMode = opts.diffMode;
-      if (opts.diffMode === 'range') body.ref = opts.ref || '';
     }
     var res = await fetch(
       '/api/sessions/' + encodeURIComponent(sid) + '/file-edits/open',

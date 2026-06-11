@@ -2,11 +2,16 @@
  * Git Diff applet — V6: conditional redirect stub.
  *
  * When a session exists, redirect to the unified `files` applet
- * (which now supports diffMode=unstaged|staged|range and diffRef).
+ * (which supports diffMode=unstaged|staged).
  * Otherwise fall through to the standalone behavior so direct
  * deep-link URLs without a session still render.
  *
- * See docs/files-applet-v6.md §4.5 / §7.
+ * V6.1: dropped 'range' mode translation. A ref-bearing URL
+ * (with or without a file) redirects to git-status — git-diff's
+ * read-only multi-file view had no natural entry point and was
+ * removed as overcomplication.
+ *
+ * See docs/files-applet-v6.md §4.5.
  */
 
 (function() {
@@ -19,16 +24,20 @@
     var ref = p.get('ref') || '';
 
     // Pass through any params we don't recognize (applet is
-    // replaced below; path/file/staged/ref are translated).
+    // replaced below; path/file/staged/ref are translated or
+    // dropped).
     var target = new URLSearchParams(p);
     target.delete('path');
     target.delete('file');
     target.delete('staged');
     target.delete('ref');
 
-    if (!file && ref) {
-      // Multi-file ref-range — V6 routes this to git-status with
-      // the repo path preserved (the files applet is per-file).
+    if (ref) {
+      // V6.1: any ref-bearing URL (whether per-file or multi-file)
+      // routes to git-status with the repo path preserved. The
+      // ref param is dropped — git-status doesn't yet have a
+      // commit-detail view (future work). The user lands on the
+      // status view and can click into per-file diffs.
       target.set('applet', 'git-status');
       if (repoPath) target.set('path', repoPath);
     } else {
@@ -41,12 +50,7 @@
           ? '\\' : '/';
         target.set('openPath', trimmedBase ? (trimmedBase + sep + trimmedRel) : trimmedRel);
       }
-      if (ref) {
-        target.set('diffMode', 'range');
-        target.set('diffRef', ref);
-      } else if (staged) {
-        target.set('diffMode', 'staged');
-      }
+      if (staged) target.set('diffMode', 'staged');
     }
 
     var url = '?' + target.toString();

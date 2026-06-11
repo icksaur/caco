@@ -513,8 +513,7 @@
   box-sizing: border-box;
 }
 .files-md-content .md-rendered {
-  max-width: 900px;            /* match standalone markdown-viewer */
-  margin: 0 auto;              /* center within the wider pane */
+  overflow-x: auto;              /* wide tables scroll, don't blow out layout */
 }
 .files-md-content .error {
   color: var(--color-error, #f48771);

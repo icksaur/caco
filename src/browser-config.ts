@@ -49,7 +49,7 @@ export function loadBrowserConfig(): BrowserConfig {
   const d = defaults();
   if (!existsSync(path)) return d;
   try {
-    const raw = JSON.parse(readFileSync(path, 'utf-8')) as Partial<BrowserConfig>;
+    const raw = JSON.parse(readFileSync(path, 'utf-8').replace(/^\uFEFF/, '')) as Partial<BrowserConfig>;
     const merged = { ...d, ...raw };
     if (!isLoopbackUrl(merged.cdpUrl)) {
       throw new Error(`browser-config.json: cdpUrl must point to 127.0.0.1 or localhost, got ${merged.cdpUrl}`);

@@ -66,7 +66,7 @@ $config = @{
   screenshotDir = $screenshotDir
   lastLaunchedMode = $Mode
 }
-$config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configFile -Encoding UTF8
+$config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configFile -Encoding utf8NoBOM
 
 $edgeArgs = @(
   "--remote-debugging-port=$Port",

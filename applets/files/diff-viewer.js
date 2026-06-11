@@ -51,6 +51,20 @@
       if (self.destroyed) return;
       var st = self.contentEl.scrollTop;
       if (shell.consumeProgrammaticScroll(self.contentEl, st)) return;
+      // V6.1: re-render side-effects (innerHTML replacement,
+      // content-shrink-clamp when the file got shorter) fire scroll
+      // events that arrive AFTER our programmatic scroll guard's
+      // pending entry has been consumed but before activate's rAF
+      // can register a new one. Without this suppression window,
+      // those phantom events get treated as user scrolls and
+      // silently disable Follow Edits. _renderTick is set by
+      // _render() right before innerHTML changes; we clear it two
+      // animation frames later (long enough for any post-render
+      // scroll storms to flush).
+      if (self._renderTick) {
+        self.scrollTop = st;
+        return;
+      }
       // Real user scroll: turn off Follow and save position.
       if (shell.getFollowEdits()) {
         shell.setFollowEdits(false);
@@ -61,6 +75,19 @@
   };
 
   DiffViewer.prototype._render = function() {
+    // V6.1: arm the re-render scroll-event suppression window
+    // BEFORE innerHTML changes. The scroll handler skips its
+    // disable-Follow-Edits branch while this is truthy. Cleared
+    // two rAFs later to cover any post-layout scroll events
+    // the browser fires async.
+    var self = this;
+    this._renderTick = (this._renderTick || 0) + 1;
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        if (self.destroyed) return;
+        self._renderTick = Math.max(0, (self._renderTick || 1) - 1);
+      });
+    });
     this.shell.renderBody(this.contentEl, this.edit);
     this.rendered = true;
     this.paintSelection();

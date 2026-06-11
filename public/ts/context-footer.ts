@@ -38,7 +38,7 @@ export function renderContextFooter(context: SessionContext): void {
   const sessionPart = sid ? `session=${encodeURIComponent(sid)}&` : '';
   const links = files.map(({ name, path }) => {
     const encodedPath = encodeURIComponent(path);
-    return `<a href="/?${sessionPart}applet=text-editor&path=${encodedPath}" title="${path}">${name}</a>`;
+    return `<a href="/?${sessionPart}applet=files&openPath=${encodedPath}" title="${path}">${name}</a>`;
   });
   
   linksContainer.innerHTML = links.length

@@ -34,7 +34,7 @@
  */
 
 (function() {
-  function MarkdownViewer(shell, container, absPath) {
+  function MarkdownViewer(shell, container, absPath, opts) {
     this.shell = shell;
     this.container = container;
     this.absPath = absPath;
@@ -43,6 +43,7 @@
     this.destroyed = false;
     this._abort = null;
     this._watcher = null;
+    this._readOnly = !!(opts && opts.readOnly);
 
     // V2.d edit-mode state.
     this.mode = 'view';
@@ -96,6 +97,7 @@
   MarkdownViewer.prototype.viewerType = 'markdown';
 
   MarkdownViewer.prototype.getModes = function() {
+    if (this._readOnly) return [{ id: 'view', label: 'View' }];
     return [
       { id: 'view', label: 'View' },
       { id: 'edit', label: 'Edit' },
@@ -311,8 +313,8 @@
     }
   };
 
-  MarkdownViewer.open = async function(shell, container, absPath, _relPath) {
-    var inst = new MarkdownViewer(shell, container, absPath);
+  MarkdownViewer.open = async function(shell, container, absPath, _relPath, opts) {
+    var inst = new MarkdownViewer(shell, container, absPath, opts);
     try {
       inst._watcher = await shell.api.watchPath(absPath, { scope: 'file' });
       if (inst.destroyed) {

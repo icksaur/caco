@@ -751,3 +751,35 @@
   font: inherit;
   font-size: var(--text-sm, 12px);
 }
+
+/* ── SourceViewer (read-only code/text) ───────────────────────────── */
+.fe-source {
+  white-space: pre;
+  overflow-x: auto;
+  overflow-y: auto;
+  height: 100%;
+  padding: var(--space-sm) var(--space-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--color-text, #d4d4d4);
+  background: var(--bg-base);
+  margin: 0;
+  box-sizing: border-box;
+}
+.fe-source code.hljs,
+.fe-source.hljs {
+  background: transparent;
+  overflow: visible;
+  padding: 0;
+}
+.fe-source-message {
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-family: var(--font-sans);
+  padding: 12px;
+}
+.fe-tab.fe-tab-source .fe-tab-name::before {
+  content: '◈ ';
+  opacity: 0.6;
+}

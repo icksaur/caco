@@ -94,30 +94,68 @@
   var _pendingOpenPath = null;
   function _handleOpenPath(p, opts) {
     if (!p) return;
-    var relPath = _relativizePath(p);
-    void routeOpen(relPath, opts || {});
+    openAnyPath(p, opts || {});
+  }
+  /** True when absOrRel looks like an absolute path (POSIX, Windows
+   *  drive, or UNC). */
+  function _isAbsolutePath(absOrRel) {
+    return absOrRel.charAt(0) === '/'
+      || /^[A-Za-z]:[\\/]/.test(absOrRel)
+      || absOrRel.indexOf('\\\\') === 0;
+  }
+  /** Shared containment check: returns true when normPath (already
+   *  '/'-separated) is contained within normCwd (also '/'-separated,
+   *  no trailing slash). Case-insensitive on Windows. */
+  function _isContainedIn(normPath, normCwd) {
+    var isWin = /^[A-Za-z]:\//.test(normCwd) || normCwd.indexOf('//') === 0;
+    var a = isWin ? normPath.toLowerCase() : normPath;
+    var c = isWin ? normCwd.toLowerCase() : normCwd;
+    if (a === c) return true;
+    var prefix = c + '/';
+    return a.indexOf(prefix) === 0;
   }
   function _relativizePath(absOrRel) {
     if (!absOrRel) return '';
-    // Absolute if: POSIX (/foo), Windows drive (C:\ or C:/), or UNC (\\).
-    var isAbs = absOrRel.charAt(0) === '/'
-      || /^[A-Za-z]:[\\/]/.test(absOrRel)
-      || absOrRel.indexOf('\\\\') === 0;
-    if (!isAbs) return absOrRel;             // already relative
+    if (!_isAbsolutePath(absOrRel)) return absOrRel;  // already relative
     if (!cachedCwd) return absOrRel;
-    // Normalize separators to '/' for comparison. git-derived relative
-    // paths use '/', so returning '/'-form keeps us consistent with the
-    // rest of the applet (and the server splits on [/\\] anyway).
     var normPath = absOrRel.replace(/\\/g, '/');
     var normCwd = cachedCwd.replace(/\\/g, '/').replace(/\/+$/, '');
-    // Windows paths are case-insensitive; match the prefix accordingly.
+    if (!_isContainedIn(normPath, normCwd)) return absOrRel;
+    // Strip cwd prefix → true relative path.
     var isWin = /^[A-Za-z]:\//.test(normCwd) || normCwd.indexOf('//') === 0;
     var a = isWin ? normPath.toLowerCase() : normPath;
     var c = isWin ? normCwd.toLowerCase() : normCwd;
     if (a === c) return '';
-    var prefix = c + '/';
-    if (a.indexOf(prefix) === 0) return normPath.slice(prefix.length);
-    return absOrRel;
+    return normPath.slice(c.length + 1);
+  }
+  /** True when abs is an absolute path NOT contained in cachedCwd.
+   *  When cachedCwd is empty, treats as NOT external (fall back to
+   *  today's behaviour). */
+  function isExternal(abs) {
+    if (!abs || !cachedCwd) return false;
+    if (!_isAbsolutePath(abs)) return false;
+    var normPath = abs.replace(/\\/g, '/');
+    var normCwd = cachedCwd.replace(/\\/g, '/').replace(/\/+$/, '');
+    return !_isContainedIn(normPath, normCwd);
+  }
+  /** Normalize an external abs path for comparison/dedup: forward
+   *  slashes, lowercase on Windows. */
+  function _normalizeExternalAbs(abs) {
+    var norm = abs.replace(/\\/g, '/');
+    var isWin = /^[A-Za-z]:\//.test(norm) || norm.indexOf('//') === 0;
+    return isWin ? norm.toLowerCase() : norm;
+  }
+  /** Single routing chokepoint: resolve input to absolute, dispatch
+   *  to routeOpenExternal (external) or routeOpen (in-cwd). */
+  function openAnyPath(input, opts) {
+    if (!input) return;
+    // If input is already absolute and external, route directly.
+    if (_isAbsolutePath(input) && isExternal(input)) {
+      void routeOpenExternal(input, opts || {});
+    } else {
+      var relPath = _relativizePath(input);
+      void routeOpen(relPath, opts || {});
+    }
   }
   function _drainPendingOpenPath() {
     if (_pendingOpenPath && cachedCwd) {
@@ -140,10 +178,12 @@
   var MarkdownViewer = window.__filesApplet && window.__filesApplet.MarkdownViewer;
   var ImageViewer = window.__filesApplet && window.__filesApplet.ImageViewer;
   var HtmlViewer = window.__filesApplet && window.__filesApplet.HtmlViewer;
+  var SourceViewer = window.__filesApplet && window.__filesApplet.SourceViewer;
   if (!DiffViewer) console.error('[files-applet] diff-viewer.js did not load');
   if (!MarkdownViewer) console.error('[files-applet] markdown-viewer.js did not load');
   if (!ImageViewer) console.warn('[files-applet] image-viewer.js did not load');
   if (!HtmlViewer) console.warn('[files-applet] html-viewer.js did not load');
+  if (!SourceViewer) console.warn('[files-applet] source-viewer.js did not load');
 
   function basename(p) {
     var i = p.lastIndexOf('/');
@@ -238,6 +278,34 @@
     return found;
   }
 
+  /** Find a container by external absolute path. Matches containers
+   *  where external===true and the normalized absPath matches. */
+  function findContainerByExternalAbs(abs) {
+    var normAbs = _normalizeExternalAbs(abs);
+    var found = null;
+    tabs.forEach(function(c) {
+      if (found) return;
+      if (c.external && _normalizeExternalAbs(c.absPath) === normAbs) found = c;
+    });
+    return found;
+  }
+
+  /** Pick the default viewer for an external file. Iterates the
+   *  viewer registry, skips diff, returns first canHandle match;
+   *  falls back to SourceViewer. */
+  function defaultExternalViewer(abs) {
+    for (var i = 0; i < viewerRegistry.length; i++) {
+      var d = viewerRegistry[i];
+      if (d.viewerType === 'diff') continue;
+      if (d.canHandle(abs, abs)) return d;
+    }
+    // Fallback: SourceViewer descriptor (registered below).
+    for (var j = 0; j < viewerRegistry.length; j++) {
+      if (viewerRegistry[j].viewerType === 'source') return viewerRegistry[j];
+    }
+    return null;
+  }
+
   /** Active diff viewer of a container, or null. Used by the V3.5
    *  selection-code adaptation (spec §4.6). */
   function activeDiffViewer(container) {
@@ -286,21 +354,25 @@
   // A tab in the strip + its content pane root. Holds a map of viewers
   // (lazy-constructed). Owns tabEl + outer contentEl + toggle button.
   // See spec §4.0.C.
-  function TabContainer(shellRef, descriptor, absPath, relPath) {
+  function TabContainer(shellRef, descriptor, absPath, relPath, opts) {
     this.shell = shellRef;
     this.absPath = absPath;
     this.relPath = relPath;
     this.defaultViewerType = descriptor.viewerType;
     this.activeViewerType = descriptor.viewerType;
+    this.external = !!(opts && opts.external);
     // V6: diff tabs carry mode so id and lookups can disambiguate
     // working-tree from staged tabs for the same file. Non-diff
     // tabs leave it at default. V6.1 removed diffRef.
     this.diffMode = descriptor.diffMode || 'unstaged';
     // Stable id:
+    //   - external: 'external:' + absPath (never diff)
     //   - markdown: 'markdown:' + absPath (V1 schema)
     //   - diff (default unstaged): relPath (V1 schema)
     //   - V6 diff staged: diffTabId with NUL sentinels
-    if (descriptor.viewerType === 'markdown') {
+    if (this.external) {
+      this.id = 'external:' + absPath;
+    } else if (descriptor.viewerType === 'markdown') {
       this.id = 'markdown:' + absPath;
     } else {
       this.id = diffTabId({ mode: this.diffMode, relPath: relPath });
@@ -320,7 +392,12 @@
     btn.type = 'button';
     btn.dataset.path = this.id;
     // V6: title reflects mode so a hover discloses staged.
-    btn.title = this.diffMode === 'staged' ? (relPath + ' (staged)') : relPath;
+    // External tabs show the full absolute path.
+    if (this.external) {
+      btn.title = absPath + ' (read-only)';
+    } else {
+      btn.title = this.diffMode === 'staged' ? (relPath + ' (staged)') : relPath;
+    }
     var name = document.createElement('span');
     name.className = 'fe-tab-name';
     name.textContent = this.label;
@@ -1343,6 +1420,10 @@
     // not appear here (agent selection is diff-only by design), but
     // be defensive: strip 'markdown:' prefix if present.
     if (typeof targetRelPath === 'string' && targetRelPath.indexOf('markdown:') === 0) return;
+    // External / absolute paths must never reach absPathOf or
+    // /file-edits/open. The agent only diffs in-cwd files.
+    if (typeof targetRelPath === 'string' &&
+        (_isAbsolutePath(targetRelPath) || isExternal(targetRelPath))) return;
     // Agent selection is text-only — only meaningful for files the
     // diff viewer can render. For binaries (images, etc) the diff
     // viewer is not applicable and any switch would render garbage.
@@ -1902,6 +1983,8 @@
     // V6: additive diffMode on the same schema. Older readers
     // ignore unknown fields. V6.1 dropped diffRef.
     tabs.forEach(function(container) {
+      // External tabs are ephemeral; never persist them.
+      if (container.external) return;
       var card = {
         relativePath: container.relPath,
         defaultViewerType: container.defaultViewerType,
@@ -2390,7 +2473,10 @@
 
   function pickSelected(relativePath) {
     closePicker();
-    void routeOpen(relativePath);
+    // Route through openAnyPath so a _pickerRootOverride outside
+    // cwd correctly opens as external.
+    var abs = _pickerAbsPathOf(relativePath);
+    openAnyPath(abs);
   }
 
   /** Compute absolute path for a relative path under the session's cwd.
@@ -2499,6 +2585,65 @@
     _pushRecentFile(abs);
   }
 
+  /** Route an external (out-of-cwd) absolute path: open a read-only
+   *  tab keyed by the absolute path. Never calls /file-edits/open or
+   *  the diff viewer. See docs/files-applet-external.md. */
+  async function routeOpenExternal(abs, openOpts) {
+    openOpts = openOpts || {};
+    var existing = findContainerByExternalAbs(abs);
+    if (existing) {
+      followEdits = false;
+      updateFollowButton();
+      setActiveTab(existing.id);
+      _pushRecentFile(abs);
+      return;
+    }
+    var pendKey = 'external:' + abs;
+    if (pendingOpenIds.has(pendKey)) return;
+    pendingOpenIds.add(pendKey);
+    var desc = defaultExternalViewer(abs);
+    if (!desc) {
+      console.warn('[files-applet] no viewer for external', abs);
+      pendingOpenIds.delete(pendKey);
+      return;
+    }
+    if (tabs.size >= TAB_CAP) evictOldestNonActive();
+    var container = new TabContainer(shell, desc, abs, abs, { external: true });
+    try {
+      var viewer = await desc.open(shell, container, abs, abs, { readOnly: true });
+      // Re-check after await: another caller may have created the tab.
+      var raceCheck = findContainerByExternalAbs(abs);
+      if (raceCheck) {
+        if (viewer && typeof viewer.destroy === 'function') {
+          try { viewer.destroy(); } catch (_e) { /* ignore */ }
+        }
+        container.destroy();
+        setActiveTab(raceCheck.id);
+        _pushRecentFile(abs);
+        return;
+      }
+      if (!viewer) { container.destroy(); return; }
+      container.viewers.set(desc.viewerType, viewer);
+    } catch (err) {
+      if (err && err.name === 'AbortError') { container.destroy(); return; }
+      console.warn('[files-applet] routeOpenExternal failed', abs, err);
+      container.destroy();
+      return;
+    } finally {
+      pendingOpenIds.delete(pendKey);
+    }
+    tabs.set(container.id, container);
+    tabsEl.appendChild(container.tabEl);
+    paneEl.appendChild(container.contentEl);
+    container.updateToggle();
+    followEdits = false;
+    updateFollowButton();
+    setActiveTab(container.id);
+    updateEmptyState();
+    reconcileTabDom();
+    _pushRecentFile(abs);
+  }
+
   // ── Viewer registration ──────────────────────────────────────────────
   // Order matters: isDefault is checked in registration order, first
   // match wins. Markdown/image registered before Diff so they win for
@@ -2514,7 +2659,7 @@
       isDefault: function(_a, rel) {
         return /\.(md|markdown|mdx)$/i.test(rel || '');
       },
-      open: function(s, c, a, r) { return MarkdownViewer.open(s, c, a, r); },
+      open: function(s, c, a, r, opts) { return MarkdownViewer.open(s, c, a, r, opts); },
     });
   }
   if (ImageViewer) {
@@ -2546,6 +2691,16 @@
       canHandle: function(_a, rel) { return !isBinaryExtension(rel); },
       isDefault: function(_a, rel) { return !isBinaryExtension(rel); },
       open: function(s, c, a, r, opts) { return DiffViewer.open(s, c, a, r, opts); },
+    });
+  }
+  if (SourceViewer) {
+    registerViewer({
+      viewerType: 'source',
+      label: 'Source',
+      canHandle: function(_a, rel) { return !isBinaryExtension(rel); },
+      // Never win in-cwd selection; only used via defaultExternalViewer.
+      isDefault: function() { return false; },
+      open: function(s, c, a, r, opts) { return SourceViewer.open(s, c, a, r, opts); },
     });
   }
 

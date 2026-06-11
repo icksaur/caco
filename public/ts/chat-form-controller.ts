@@ -176,13 +176,12 @@ export class ChatFormController {
     const state = computeFormState(isBusy, hasText, currentOptions.length > 0);
 
     if (sendBtn) {
-      if (state.buttonLabel === 'send') {
+      if (state.buttonLabel === 'send' || state.buttonLabel === 'steer') {
         sendBtn.style.display = '';
-        sendBtn.textContent = 'Send';
-      } else if (state.buttonLabel === 'steer') {
-        sendBtn.style.display = '';
-        sendBtn.textContent = 'Steer';
+        sendBtn.textContent = state.buttonLabel === 'send' ? 'Send' : 'Steer';
+        sendBtn.disabled = !state.buttonEnabled;
       } else {
+        // 'stop' state: the Stop button takes over below.
         sendBtn.style.display = 'none';
       }
     }
@@ -431,6 +430,14 @@ export class ChatFormController {
   }
 
   private onInput(): void {
+    // Keep the send/steer/stop button in sync with the live textarea
+    // on EVERY input. Without this the button never updates while
+    // typing: idle+text wouldn't reveal Send, and busy+text wouldn't
+    // flip Stop→Steer (the refactor dropped this sync). Runs first so
+    // programmatic restores (suppressNextInput) still refresh the
+    // button. Chatting-only: newchat's button isn't store-driven.
+    if (this.view === 'chatting') this.refreshButton();
+
     if (this.suppressNextInput) {
       this.suppressNextInput = false;
       return;  // programmatic restore; not a user gesture

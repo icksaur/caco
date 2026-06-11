@@ -2,19 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { computeFormState } from '../../public/ts/form-state.js';
 
 describe('computeFormState', () => {
-  it('idle + empty → hidden, no action', () => {
+  it('idle + empty → send present but disabled, no action', () => {
     const s = computeFormState(false, false);
-    expect(s.buttonLabel).toBe('hidden');
+    expect(s.buttonLabel).toBe('send');
     expect(s.buttonAction).toBe('none');
+    expect(s.buttonEnabled).toBe(false);
     expect(s.placeholder).toBe('Ask anything...');
     expect(s.optionsVisible).toBe(false);
     expect(s.optionsMuted).toBe(false);
   });
 
-  it('idle + has text → send', () => {
+  it('idle + has text → send enabled', () => {
     const s = computeFormState(false, true);
     expect(s.buttonLabel).toBe('send');
     expect(s.buttonAction).toBe('send');
+    expect(s.buttonEnabled).toBe(true);
     expect(s.optionsVisible).toBe(false);
   });
 
@@ -22,6 +24,7 @@ describe('computeFormState', () => {
     const s = computeFormState(true, false);
     expect(s.buttonLabel).toBe('stop');
     expect(s.buttonAction).toBe('abort');
+    expect(s.buttonEnabled).toBe(true);
     expect(s.placeholder).toBe('Steer the agent...');
     expect(s.optionsVisible).toBe(false);
   });
@@ -30,6 +33,7 @@ describe('computeFormState', () => {
     const s = computeFormState(true, true);
     expect(s.buttonLabel).toBe('steer');
     expect(s.buttonAction).toBe('steer');
+    expect(s.buttonEnabled).toBe(true);
     expect(s.optionsVisible).toBe(false);
   });
 
@@ -38,7 +42,8 @@ describe('computeFormState', () => {
       const s = computeFormState(false, false, true);
       expect(s.optionsVisible).toBe(true);
       expect(s.optionsMuted).toBe(false);
-      expect(s.buttonLabel).toBe('hidden');
+      expect(s.buttonLabel).toBe('send');
+      expect(s.buttonEnabled).toBe(false);
     });
 
     it('idle + text + options → options muted, send enabled', () => {
@@ -46,6 +51,7 @@ describe('computeFormState', () => {
       expect(s.optionsVisible).toBe(false);
       expect(s.optionsMuted).toBe(true);
       expect(s.buttonLabel).toBe('send');
+      expect(s.buttonEnabled).toBe(true);
     });
 
     it('busy + options → options hidden', () => {

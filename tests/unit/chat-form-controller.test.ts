@@ -53,6 +53,7 @@ function makeForm(): HTMLFormElement {
       if (sel === 'input[name="imageData"]') return { value: '' } as HTMLInputElement;
       return null;
     },
+    classList: { toggle: vi.fn(), add: vi.fn(), remove: vi.fn() },
     addEventListener: vi.fn(),
     requestSubmit: vi.fn(),
   } as unknown as HTMLFormElement;

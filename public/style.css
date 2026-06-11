@@ -491,6 +491,15 @@ h1 {
   transform: scale(1.02);
 }
 
+.chat-form .send-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.chat-form .send-btn:disabled:hover {
+  opacity: 0.4;
+  transform: none;
+}
+
 .chat-form .send-btn:active {
   transform: scale(0.98);
 }

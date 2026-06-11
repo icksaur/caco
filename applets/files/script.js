@@ -99,11 +99,24 @@
   }
   function _relativizePath(absOrRel) {
     if (!absOrRel) return '';
-    if (absOrRel.charAt(0) !== '/') return absOrRel;
+    // Absolute if: POSIX (/foo), Windows drive (C:\ or C:/), or UNC (\\).
+    var isAbs = absOrRel.charAt(0) === '/'
+      || /^[A-Za-z]:[\\/]/.test(absOrRel)
+      || absOrRel.indexOf('\\\\') === 0;
+    if (!isAbs) return absOrRel;             // already relative
     if (!cachedCwd) return absOrRel;
-    if (absOrRel === cachedCwd) return '';
-    var prefix = cachedCwd.replace(/\/+$/, '') + '/';
-    if (absOrRel.indexOf(prefix) === 0) return absOrRel.slice(prefix.length);
+    // Normalize separators to '/' for comparison. git-derived relative
+    // paths use '/', so returning '/'-form keeps us consistent with the
+    // rest of the applet (and the server splits on [/\\] anyway).
+    var normPath = absOrRel.replace(/\\/g, '/');
+    var normCwd = cachedCwd.replace(/\\/g, '/').replace(/\/+$/, '');
+    // Windows paths are case-insensitive; match the prefix accordingly.
+    var isWin = /^[A-Za-z]:\//.test(normCwd) || normCwd.indexOf('//') === 0;
+    var a = isWin ? normPath.toLowerCase() : normPath;
+    var c = isWin ? normCwd.toLowerCase() : normCwd;
+    if (a === c) return '';
+    var prefix = c + '/';
+    if (a.indexOf(prefix) === 0) return normPath.slice(prefix.length);
     return absOrRel;
   }
   function _drainPendingOpenPath() {

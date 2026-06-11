@@ -210,6 +210,17 @@
  * to win specificity. */
 .fe-diff[hidden] { display: none; }
 
+/* .fe-row uses display:contents so the three child columns
+ * (gutter-head, gutter-work, line) become direct grid items of
+ * .fe-diff. This keeps columns aligned across rows without a
+ * per-row table.
+ *
+ * IMPLICIT CONTRACT: the row element itself has NO box; calling
+ * getBoundingClientRect() on a .fe-row returns {0,0,0,0}. Any JS
+ * that needs a row's pixel position MUST route through the
+ * measureDiffRow() helper in script.js, which measures from the
+ * gutter child. Calling getBoundingClientRect() on a .fe-row
+ * directly is a bug. See code-quality.md "implicit coupling". */
 .fe-diff[data-mode="fullfile"] .fe-row {
   display: contents;
 }

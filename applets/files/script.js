@@ -159,6 +159,27 @@
     return rel;
   }
 
+  /** V6.1: get a .fe-row's pixel position.
+   *
+   *  .fe-row uses `display: contents` so the three column children
+   *  (gutter-head, gutter-work, line) become direct grid items of
+   *  .fe-diff. The row element itself has NO box and
+   *  getBoundingClientRect() returns {0,0,0,0}. Always measure
+   *  from a real boxed descendant; the gutter is the leftmost
+   *  child and is always present on add/del/ctx rows.
+   *
+   *  See code-quality.md "implicit coupling" — this helper is the
+   *  single owner of the contract. Any new code that needs a row's
+   *  pixel position MUST route through here; calling
+   *  getBoundingClientRect() on a .fe-row directly is a bug. */
+  function measureDiffRow(row) {
+    if (!row) return { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0 };
+    var measureEl = row.querySelector('.fe-gutter')
+      || row.querySelector('.fe-line')
+      || row;
+    return measureEl.getBoundingClientRect();
+  }
+
   // ── Viewer registry ──────────────────────────────────────────────────
   // V1.1: replaces V1's tabTypes registry. Each ViewerDescriptor adds
   // isDefault(abs, rel) on top of canHandle. See spec §4.0.B.
@@ -886,7 +907,7 @@
     var row = tab.paneEl.querySelector('.fe-row[data-work-line="' + line + '"]');
     if (!row) return;
     var scrollEl = tab.contentEl;
-    var rowRect = row.getBoundingClientRect();
+    var rowRect = measureDiffRow(row);
     var paneRect = scrollEl.getBoundingClientRect();
     var offset = rowRect.top - paneRect.top + scrollEl.scrollTop;
     var target = Math.max(0, offset - scrollEl.clientHeight * 0.3);
@@ -1770,15 +1791,8 @@
     var v = container.viewers.get(container.activeViewerType);
     var scrollEl = (v && v.contentEl) || container.contentEl;
     if (!scrollEl) return;
-    // Only diff viewers carry .fe-row-add / .fe-row-del rows.
-    // For everything else, fall through to scroll-to-top.
     var diffRow = null;
     if (scrollEl.querySelector) {
-      // V6.1: prefer a NEW row when we have a prev-hunk fingerprint.
-      // Walk all add/del rows in DOM order; pick the first whose
-      // data-work-line is NOT in the prior render's ranges. Falls
-      // back to the topmost row when none is "new" (multi-edit on
-      // the same hunk, or no prev fingerprint).
       var prev = (v && v.viewerType === 'diff') ? v._prevHunkWorkRanges : null;
       var allRows = scrollEl.querySelectorAll('.fe-row-add, .fe-row-del');
       if (prev && prev.length > 0 && allRows.length > 0) {
@@ -1797,7 +1811,10 @@
       programmaticScrollTo(scrollEl, 0);
       return;
     }
-    var rowRect = diffRow.getBoundingClientRect();
+    // .fe-row has display:contents so its own getBoundingClientRect
+    // returns {0,0,0,0}. measureDiffRow routes through the gutter
+    // child — the single owner of this implicit-coupling contract.
+    var rowRect = measureDiffRow(diffRow);
     var paneRect = scrollEl.getBoundingClientRect();
     var offsetWithinPane = rowRect.top - paneRect.top + scrollEl.scrollTop;
     var target = offsetWithinPane - scrollEl.clientHeight * 0.3;

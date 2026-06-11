@@ -2,8 +2,6 @@
 
 ![Caco](caco.png)
 
-TEST
-
 A dangerous solution to any problem.
 
 ## What is this?
@@ -201,3 +199,5 @@ tests/              # Vitest unit tests
 - [API.md](API.md) - Complete API reference
 - [APPLETS.md](APPLETS.md) - Applet authoring guide
 - [EXTENSIONS.md](EXTENSIONS.md) - Extensions and skills
+
+TEST

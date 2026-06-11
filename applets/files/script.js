@@ -1588,10 +1588,31 @@
       var dv2 = container.viewers.get('diff');
       if (dv2) dv2.scrollTop = 0;
       setActiveTab(container.id);
+      // V6.1: forceFocus is an explicit user/agent action — center
+      // on the first diff row so the user sees the edit.
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          scrollPaneToFirstDiffRow(container.id);
+        });
+      });
     } else if (followEdits) {
       var dv3 = container.viewers.get('diff');
       if (isNew && dv3) dv3.scrollTop = 0;
       setActiveTab(container.id);
+      // V6.1: when an edit arrives and follow-edits is on, scroll
+      // to the first add/del row so the user actually sees what
+      // changed. Previously this only happened on explicit
+      // Follow-Edits button clicks, not on edit arrival —
+      // meaning a click-then-edit sequence wouldn't auto-scroll
+      // and the user thought follow-edits was broken.
+      // contentChanged guard: don't scroll on no-op refreshes.
+      if (contentChanged) {
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            scrollPaneToFirstDiffRow(container.id);
+          });
+        });
+      }
     } else {
       if (contentChanged) {
         badgeCounter.add(relPath);

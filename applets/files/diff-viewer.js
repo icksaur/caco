@@ -98,9 +98,40 @@
       this.edit = newEdit;
       return false;
     }
+    // V6.1: remember the old hunks so scrollPaneToFirstDiffRow
+    // can prefer a row that's NEW in this edit. Without this,
+    // multi-hunk files always scroll to the topmost hunk on
+    // every edit — the user's freshly-added bottom hunk stays
+    // off-screen and follow-edits feels broken.
+    this._prevHunkWorkRanges = this._collectWorkRanges(this.edit);
     this.edit = newEdit;
     if (this.rendered) this._render();
     return true;
+  };
+
+  /** Pure: collect [start, end] (inclusive, 1-based) work-line
+   *  ranges from an edit's fullFile hunks. Used to detect which
+   *  hunks are new between renders. */
+  DiffViewer.prototype._collectWorkRanges = function(edit) {
+    var out = [];
+    var ff = edit && edit.fullFile;
+    if (!ff || !Array.isArray(ff.hunks)) return out;
+    for (var i = 0; i < ff.hunks.length; i++) {
+      var h = ff.hunks[i];
+      if (h.workLen > 0) out.push([h.workStart, h.workStart + h.workLen - 1]);
+    }
+    return out;
+  };
+
+  /** Return true if `line` (1-based work line) falls within ANY
+   *  of the previously-rendered work-line ranges. */
+  DiffViewer.prototype._wasInPrevHunks = function(line) {
+    var prev = this._prevHunkWorkRanges;
+    if (!prev || prev.length === 0) return false;
+    for (var i = 0; i < prev.length; i++) {
+      if (line >= prev[i][0] && line <= prev[i][1]) return true;
+    }
+    return false;
   };
 
   DiffViewer.prototype.contentEqual = function(other) {

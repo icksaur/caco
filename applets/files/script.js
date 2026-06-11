@@ -1752,17 +1752,48 @@
     });
   }
 
-  /** Scroll the pane to center the first add/del row of the given tab.
-   *  Falls back to scroll-to-top when there are no diff rows (e.g.
-   *  a freshly picked clean file). */
+  /** Scroll the active viewer's content element to draw attention
+   *  to the freshest edit. For diff viewers, prefer a row that
+   *  is NEW since the previous edit (i.e. a workLine not covered
+   *  by the prior render's hunk ranges). Falls back to the first
+   *  add/del row when no new row exists or no prior render is
+   *  recorded. For non-diff viewers (markdown, image, html),
+   *  scroll to the top — the markdown viewer renders fresh
+   *  content from disk so the user-visible state changed, and
+   *  jumping to the top is a reasonable "look here" cue.
+   *  Pre-V6.1 this returned early for non-diff viewers (silent
+   *  no-op) which is why follow-edits "didn't scroll" on
+   *  markdown-default tabs. */
   function scrollPaneToFirstDiffRow(targetId) {
     var container = tabs.get(targetId);
-    var t = activeDiffViewer(container);
-    if (!t || !t.paneEl) return;
-    var scrollEl = t.contentEl;
-    var diffRow = t.paneEl.querySelector('.fe-row-add, .fe-row-del');
+    if (!container || !container.contentEl) return;
+    var v = container.viewers.get(container.activeViewerType);
+    var scrollEl = (v && v.contentEl) || container.contentEl;
+    if (!scrollEl) return;
+    // Only diff viewers carry .fe-row-add / .fe-row-del rows.
+    // For everything else, fall through to scroll-to-top.
+    var diffRow = null;
+    if (scrollEl.querySelector) {
+      // V6.1: prefer a NEW row when we have a prev-hunk fingerprint.
+      // Walk all add/del rows in DOM order; pick the first whose
+      // data-work-line is NOT in the prior render's ranges. Falls
+      // back to the topmost row when none is "new" (multi-edit on
+      // the same hunk, or no prev fingerprint).
+      var prev = (v && v.viewerType === 'diff') ? v._prevHunkWorkRanges : null;
+      var allRows = scrollEl.querySelectorAll('.fe-row-add, .fe-row-del');
+      if (prev && prev.length > 0 && allRows.length > 0) {
+        for (var i = 0; i < allRows.length; i++) {
+          var r = allRows[i];
+          var lineAttr = r.dataset && (r.dataset.workLine || r.dataset.headLine);
+          var line = lineAttr ? parseInt(lineAttr, 10) : null;
+          if (line == null || isNaN(line)) continue;
+          if (!v._wasInPrevHunks(line)) { diffRow = r; break; }
+        }
+      }
+      if (!diffRow && allRows.length > 0) diffRow = allRows[0];
+    }
     if (!diffRow) {
-      t.scrollTop = 0;
+      if (v && 'scrollTop' in v) v.scrollTop = 0;
       programmaticScrollTo(scrollEl, 0);
       return;
     }
@@ -1770,8 +1801,9 @@
     var paneRect = scrollEl.getBoundingClientRect();
     var offsetWithinPane = rowRect.top - paneRect.top + scrollEl.scrollTop;
     var target = offsetWithinPane - scrollEl.clientHeight * 0.3;
-    t.scrollTop = Math.max(0, target);
-    programmaticScrollTo(scrollEl, t.scrollTop);
+    var clamped = Math.max(0, target);
+    if (v && 'scrollTop' in v) v.scrollTop = clamped;
+    programmaticScrollTo(scrollEl, clamped);
   }
 
   function updateFollowButton() {

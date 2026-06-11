@@ -128,7 +128,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
  */
 function runGit(args: string[], cwd: string, timeoutMs: number): Promise<{ stdout: Buffer; stderr: string; code: number }> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     const chunks: Buffer[] = [];
     let stderr = '';
     const timer = setTimeout(() => {

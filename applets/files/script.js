@@ -3086,19 +3086,37 @@
       var isV2 = persisted.schemaVersion === 2;
       persisted.cards.forEach(function(c) {
         if (!c || !c.relativePath) return;
-        // V6: check by the computed id, not just relPath — a staged
-        // tab for the same file would collide on the relPath check.
-        var cardMode = c.diffMode || 'unstaged';
-        var candidateId = cardMode === 'unstaged'
-          ? c.relativePath
-          : diffTabId({ mode: cardMode, relPath: c.relativePath });
-        if (tabs.has(candidateId)) return;
         var abs = absPathOf(c.relativePath);
         var desc = defaultViewer(abs, c.relativePath);
         if (!desc) {
           console.warn('[files-applet] no viewer for persisted', c.relativePath);
           return;
         }
+        // V6.1 fix: compute candidateId using TabContainer's actual
+        // id formula — markdown-default uses 'markdown:' + absPath,
+        // not relPath. The earlier dedup check by c.relativePath
+        // missed markdown tabs already in the map (e.g. created by
+        // a racing routeOpen for the same path) and created an
+        // orphan tabEl. See V6.1 review followup.
+        var cardMode = c.diffMode || 'unstaged';
+        var candidateId;
+        if (desc.viewerType === 'markdown') {
+          candidateId = 'markdown:' + abs;
+        } else {
+          candidateId = diffTabId({ mode: cardMode, relPath: c.relativePath });
+        }
+        if (tabs.has(candidateId)) return;
+        // V6.1 fix: also skip if a routeOpen for this exact path+mode
+        // is in flight (its tab isn't in the map yet because it's
+        // awaiting desc.open). Without this guard, init creates a
+        // second container with the same id; tabs.set overwrites
+        // the map entry but the orphan tabEl stays in DOM.
+        // pendKey form mirrors routeOpen: bare relPath for unstaged,
+        // NUL-prefixed form for staged.
+        var pendKeyToCheck = cardMode === 'unstaged'
+          ? c.relativePath
+          : '\u0000' + cardMode + '\u0000' + c.relativePath;
+        if (pendingOpenIds.has(pendKeyToCheck)) return;
         var defaultType = desc.viewerType;
         var activeType = defaultType;
         if (isV2 && c.activeViewerType && c.activeViewerType !== defaultType) {

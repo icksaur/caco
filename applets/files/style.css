@@ -216,7 +216,8 @@
 
 .fe-diff[data-mode="fullfile"] .fe-gutter {
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--text-base);
+  line-height: 1.5;
   color: var(--color-text-muted);
   text-align: right;
   padding: 0 var(--space-sm);
@@ -226,12 +227,19 @@
 }
 
 .fe-diff[data-mode="fullfile"] .fe-line {
+  /* <code> is inline by default; force block so the grid cell
+   * height matches its content exactly and stray inline-level
+   * scrolling can't happen on wheel-over-line. */
+  display: block;
   font-family: var(--font-mono);
   font-size: var(--text-base);
   line-height: 1.5;
   padding: 0 var(--space-sm);
   white-space: pre-wrap;
   word-break: break-word;
+  /* Defense in depth: no element-local scrolling. The .fe-diff
+   * container owns the scroll context. */
+  overflow: hidden;
 }
 
 /* hljs ships with `.hljs { background: #282c34 }` which would clobber

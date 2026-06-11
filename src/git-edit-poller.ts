@@ -361,14 +361,16 @@ export interface GitEditPoller {
    *  V6: opts.diffMode optionally selects an alternate diff source:
    *    - 'unstaged' (default): existing working-tree behavior.
    *    - 'staged': `git diff --cached -- <relPath>`.
-   *    - 'range': `git diff <opts.ref> -- <relPath>`.
-   *  For staged and range, the returned EditEntry carries the diff
-   *  text only; FileStatus is 'modified' regardless (the mode is
-   *  carried by the client-side container, not the entry). */
+   *  For staged, the returned EditEntry carries the diff text only;
+   *  FileStatus is 'modified' regardless (the mode is carried by the
+   *  client-side container, not the entry).
+   *
+   *  V6.1: removed 'range' mode (no natural entry point survived V6
+   *  scope; the URL-typing use case wasn't worth the complexity). */
   openFile(
     sessionId: string,
     relPath: string,
-    opts?: { diffMode?: 'unstaged' | 'staged' | 'range'; ref?: string },
+    opts?: { diffMode?: 'unstaged' | 'staged' },
   ): Promise<EditEntry | null>;
 }
 
@@ -640,20 +642,18 @@ export function createGitEditPoller(): GitEditPoller {
     async openFile(
       sessionId: string,
       relPath: string,
-      opts?: { diffMode?: 'unstaged' | 'staged' | 'range'; ref?: string },
+      opts?: { diffMode?: 'unstaged' | 'staged' },
     ): Promise<EditEntry | null> {
       const state = sessions.get(sessionId);
       if (!state) return null;
       const diffMode = opts?.diffMode || 'unstaged';
 
-      if (diffMode === 'staged' || diffMode === 'range') {
-        // V6: snapshot diff against the staging area or a ref range.
-        // The poller does not track these (no watcher, no follow-up
-        // poll); the entry is a point-in-time read. Client refreshes
-        // via DiffViewer.reload (spec §4.8).
-        const args = diffMode === 'staged'
-          ? ['diff', '--no-color', '--cached', '--', relPath]
-          : ['diff', '--no-color', String(opts!.ref || ''), '--', relPath];
+      if (diffMode === 'staged') {
+        // V6: snapshot diff against the staging area. The poller
+        // does not track staged tabs (no watcher, no follow-up
+        // poll); the entry is a point-in-time read. Reopen the
+        // tab (e.g. by re-clicking in git-status) to refresh.
+        const args = ['diff', '--no-color', '--cached', '--', relPath];
         const result = await runGit(args, state.repoRoot, DIFF_TIMEOUT_MS);
         if (result.code === 124) return null;
         if (result.code !== 0 && result.code !== 1) {

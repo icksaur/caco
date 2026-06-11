@@ -1,9 +1,44 @@
 # files-applet V6 — git-diff deprecation
 
-**Status:** spec (not yet implemented)
-**Branch:** `files-applet-v6` (to be created)
+**Status:** shipped (V6 merged; V6.1 hotfix simplification — see §V6.1 below)
+**Branch:** `files-applet-v6.1`
 **Predecessors:** V5 (`docs/files-applet-v5.md`)
 **Roadmap:** `docs/files-applet-roadmap.md`
+
+## V6.1 hotfix — range mode dropped
+
+V6 originally shipped three diff modes (unstaged, staged, range)
+plus a `?diffRef=` URL param, ref validation regex, a chrome
+refresh button, and persistence fields for ref-range tabs. User
+review found the range mode had no natural entry point after
+git-status's multi-file commit-diff link was removed (§4.6) —
+the only way to reach it was hand-typing a URL.
+
+V6.1 keeps **unstaged + staged** modes (staged has real value:
+clicking a staged file in git-status shows the staged diff) and
+deletes:
+
+- `?diffRef=` URL param (the `?diffMode=` param keeps unstaged
+  + staged).
+- `diffRef` field on `CardPersist`.
+- `'range'` value in `diffMode` enum (poller, store, route).
+- `isValidRef` + `REF_PATTERN` ref validation.
+- Poller's range branch in `openFile`.
+- DiffViewer's chrome refresh button + `reload()` (staged is
+  one git command — re-clicking the link re-opens).
+- Length-prefix branch of `diffTabId`.
+- git-diff stub's ref→files translation (ref-bearing URLs
+  redirect to git-status with the path preserved; the ref is
+  dropped because no view consumes it yet).
+- Range-related unit tests; `diffTabId` test simplified.
+
+Net ~250 lines removed. The remaining V6 design (staged-mode
+diff tab + git-diff stub + V5-style deprecation) is unchanged.
+
+The rest of this document describes the original V6 design.
+Where it says "range" or "diffRef", read as removed-in-V6.1.
+
+---
 
 ## 1. Goal
 

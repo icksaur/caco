@@ -19,17 +19,7 @@ var emptyEl = document.getElementById('sc-empty');
 
 var statusIcons = { pending: '○', active: '◐', done: '●', blocked: '⊘' };
 var statusOrder = ['pending', 'active', 'done', 'blocked'];
-var IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
-
 function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-
-function getViewer(path) {
-  var ext = (path.split('.').pop() || '').toLowerCase();
-  if (['md', 'mdx', 'markdown'].indexOf(ext) !== -1) return 'markdown-viewer';
-  if (['html', 'htm'].indexOf(ext) !== -1) return 'html-viewer';
-  if (IMAGE_EXTS.indexOf(ext) !== -1) return 'image-viewer';
-  return 'text-editor';
-}
 
 function isAbsPath(s) { return s.startsWith('/') || /^[A-Za-z]:[/\\]/.test(s); }
 function isUri(s) { return /https?:\/\//.test(s); }
@@ -54,8 +44,7 @@ function renderLink(s) {
   var resolved = resolvePath(s);
   var display = s.split(/[/\\]/).pop() || s;
   if (isAbsPath(resolved)) {
-    var applet = getViewer(resolved);
-    return '<a class="sc-link" href="?applet=' + applet + '&path=' + encodeURIComponent(resolved) + '" title="' + esc(resolved) + '">' + esc(display) + '</a>';
+    return '<a class="sc-link" href="?applet=files&openPath=' + encodeURIComponent(resolved) + '" title="' + esc(resolved) + '">' + esc(display) + '</a>';
   }
   return '<span class="sc-text" title="' + esc(s) + '">' + esc(s) + '</span>';
 }
@@ -90,9 +79,8 @@ function renderFiles() {
     var path = contextFiles[i];
     var resolved = resolvePath(path);
     var display = path.split(/[/\\]/).pop() || path;
-    var applet = getViewer(resolved);
     html += '<div class="sc-file-item">';
-    html += '<a class="sc-link" href="?applet=' + applet + '&path=' + encodeURIComponent(resolved) + '" title="' + esc(resolved) + '">' + esc(display) + '</a>';
+    html += '<a class="sc-link" href="?applet=files&openPath=' + encodeURIComponent(resolved) + '" title="' + esc(resolved) + '">' + esc(display) + '</a>';
     html += '</div>';
   }
   filesList.innerHTML = html;

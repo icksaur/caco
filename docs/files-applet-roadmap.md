@@ -20,7 +20,7 @@ detail — only intent + status.
 | V4 | shipped | merged into master | `docs/files-applet-v4.md` |
 | V5 | shipped | merged into master | `docs/files-applet-v5.md` |
 | V6 | shipped | merged into master | `docs/files-applet-v6.md` |
-| V7 | not started | — | (to be spec'd) |
+| V7 | shipped (pending merge) | — | `docs/files-applet-v7-no-session.md` |
 
 ## V1 — shipped
 
@@ -152,23 +152,15 @@ Staged-mode value preserved.
 
 ## V7+ — proposed buckets (formerly V6+ scope)
 
-10. **Delete the deprecated stub directories outright.** V5
-    kept `markdown-viewer`, `image-viewer`, `html-viewer`,
-    `file-finder` on disk for back-compat; V6 added `git-diff`
-    to that list. Whenever enough turns have passed that old
-    chat-link URLs have aged out, remove them. This is the
-    change that finally collapses the duplicated `fileIcons`
-    map (V5 §10).
+10. **Delete the deprecated stub directories outright.** ✅ Shipped in V7.
 
-11. **Grow the `files` applet to support no-session mode** so
-    the conditional redirect can become unconditional and the
-    standalone viewers can finally be deleted.
+11. **Grow the `files` applet to support no-session mode.** ✅ Shipped in V7.
 
 12. **Rename TS routes / files** (`src/routes/file-edits.ts` →
     `files.ts`, `src/file-edits-store.ts` → `files-store.ts`).
     One-shot rename + import fix; no behavior change.
 
-13. **Update the long-tail of in-applet links**
+13. **Update the long-tail of in-applet links.** ✅ Shipped in V7.
     (`text-editor`, `image-gallery`, `session-context`,
     `html-viewer`) to point at `files` directly instead of
     relying on the stub redirect. (`git-status` already

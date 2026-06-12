@@ -74,11 +74,10 @@
       self.shell.echoState();
     });
     ta.addEventListener('keydown', function(e) {
-      // Ctrl+S / Cmd+S save shortcut.
       var key = (e.key || '').toLowerCase();
       if (key === 's' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault();
-        if (self.isDirty()) void self.save();
+        if (!self._readOnly && self.isDirty()) void self.save();
       }
     });
     this.contentEl.appendChild(ta);
@@ -110,6 +109,7 @@
 
   MarkdownViewer.prototype.setMode = function(modeId) {
     if (this.destroyed) return;
+    if (this._readOnly && modeId === 'edit') return;
     if (modeId === this.mode) return;
     if (modeId === 'view' && this.isDirty()) {
       if (!window.confirm('Discard unsaved changes?')) return;
@@ -143,6 +143,7 @@
   };
 
   MarkdownViewer.prototype.save = async function() {
+    if (this._readOnly) throw new Error('read-only');
     if (this.destroyed) return;
     if (!this.isDirty()) return;
     var pendingText = this._editorText;
@@ -276,6 +277,7 @@
    *  The error label "Save" prefixes any error rendered by the
    *  shell, so save() throws messages without the prefix. */
   MarkdownViewer.prototype.getChromeButtons = function() {
+    if (this._readOnly) return [];
     var self = this;
     if (!this._chromeButtonsCache) {
       this._chromeButtonsCache = [
@@ -316,12 +318,14 @@
   MarkdownViewer.open = async function(shell, container, absPath, _relPath, opts) {
     var inst = new MarkdownViewer(shell, container, absPath, opts);
     try {
-      inst._watcher = await shell.api.watchPath(absPath, { scope: 'file' });
-      if (inst.destroyed) {
-        try { inst._watcher.close(); } catch (_e) { /* ignore */ }
-        throw new Error('aborted');
+      if (!opts || opts.watch !== false) {
+        inst._watcher = await shell.api.watchPath(absPath, { scope: 'file' });
+        if (inst.destroyed) {
+          try { inst._watcher.close(); } catch (_e) { /* ignore */ }
+          throw new Error('aborted');
+        }
+        inst._watcher.onChange(function() { void inst.load(); });
       }
-      inst._watcher.onChange(function() { void inst.load(); });
       await inst.load();
       if (inst.destroyed) throw new Error('aborted');
     } catch (err) {

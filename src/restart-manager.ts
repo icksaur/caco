@@ -10,7 +10,7 @@
  */
 
 import { spawn } from 'child_process';
-import { appendFileSync, openSync } from 'fs';
+import { appendFileSync, openSync, statSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { dispatchState } from './dispatch-state.js';
@@ -142,7 +142,16 @@ function spawnServer(): void {
     // on some platforms, so we use a distinct file.
     let outFd: number | 'ignore' = 'ignore';
     try {
-      outFd = openSync(join(PROJECT_ROOT, 'restart-spawn.log'), 'a');
+      // Size-based rotation: this log appends on every restart and
+      // would otherwise grow unbounded. At 5 MB, roll to
+      // restart-spawn.log.1 (one generation kept) before reopening.
+      const spawnLogPath = join(PROJECT_ROOT, 'restart-spawn.log');
+      try {
+        if (statSync(spawnLogPath).size > 5 * 1024 * 1024) {
+          renameSync(spawnLogPath, join(PROJECT_ROOT, 'restart-spawn.log.1'));
+        }
+      } catch { /* no existing file or rotate failed — proceed */ }
+      outFd = openSync(spawnLogPath, 'a');
     } catch (err) {
       log(`openSync(restart-spawn.log) failed; child stdio will be discarded: ${(err as Error).message}`);
     }

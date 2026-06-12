@@ -17,6 +17,16 @@ export CACO_HOST=${CACO_HOST:-127.0.0.1}
 # Kill any existing server first
 ./stop.sh 2>/dev/null
 
+# Preserve the previous run's log before it gets overwritten below.
+# Crashes often leave their stack trace in server.log; overwriting it
+# on restart destroys post-mortem evidence. Archive into logs/ with a
+# timestamp. Keep the most recent 20 archives.
+if [ -f server.log ]; then
+  mkdir -p logs
+  mv -f server.log "logs/server-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null || true
+  ls -1t logs/server-*.log 2>/dev/null | tail -n +21 | xargs -r rm -f
+fi
+
 # Write port file so stop.sh knows which port to kill
 echo "$PORT" > server.port
 

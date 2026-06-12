@@ -10,7 +10,8 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { hostname } from 'os';
-import { readFileSync } from 'fs';
+import { readFileSync, appendFileSync, mkdirSync, statSync, renameSync } from 'fs';
+import { homedir } from 'os';
 import { sessionState, createSessionState } from './src/session-state.js';
 import { sessionManager } from './src/session-manager.js';
 import { createDisplayTools, type CacoEmbedEvent } from './src/display-tools.js';
@@ -306,6 +307,40 @@ async function start(): Promise<void> {
   throw new Error(`Failed to bind to port ${PORT} after ${MAX_RETRIES} attempts`);
 }
 
+// Crash logging: persist fatal errors to a dedicated dir that start
+// scripts never overwrite (server.log gets clobbered each startup).
+// Writes are synchronous so the record is flushed to disk before the
+// process exits. See start.ps1 / start.sh log archival for the
+// complementary half (preserving the last server.log on restart).
+const CRASH_LOG_DIR = join(process.env.CACO_HOME || join(homedir(), '.caco'), 'logs');
+const CRASH_LOG_MAX_BYTES = 2 * 1024 * 1024;  // rotate at 2 MB
+
+function recordCrash(kind: string, err: unknown): void {
+  try {
+    mkdirSync(CRASH_LOG_DIR, { recursive: true });
+    const crashPath = join(CRASH_LOG_DIR, 'crash.log');
+    // Size-based rotation so the log can't grow unbounded: when it
+    // exceeds the cap, move it to crash.log.1 (one previous generation
+    // kept) and start fresh. Synchronous to stay safe in the exit path.
+    try {
+      if (statSync(crashPath).size > CRASH_LOG_MAX_BYTES) {
+        renameSync(crashPath, join(CRASH_LOG_DIR, 'crash.log.1'));
+      }
+    } catch { /* no existing file, or rotate failed — proceed to append */ }
+    const e = err as Error;
+    const stack = (e && e.stack) ? e.stack : String(err);
+    const entry =
+      `\n===== ${kind} @ ${new Date().toISOString()} (pid ${process.pid}) =====\n` +
+      `${stack}\n`;
+    // Append so multiple crashes across runs accumulate rather than
+    // overwrite. Synchronous: must complete before process.exit().
+    appendFileSync(crashPath, entry);
+  } catch {
+    // Last resort: at least surface to stderr (captured in server.log).
+    console.error(`[CRASH-LOG FAILED] ${kind}:`, err);
+  }
+}
+
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n✓ Shutting down gracefully...');
@@ -321,10 +356,24 @@ process.on('SIGINT', () => {
     });
 });
 
+// Fatal uncaught exceptions: log to disk synchronously, then exit.
+// Without this handler Node prints the stack to stderr (captured in
+// server.log) and exits — but the next startup overwrites server.log,
+// losing the stack. Persisting to ~/.caco/logs/crash.log preserves it.
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]', err);
+  recordCrash('uncaughtException', err);
+  // Best-effort flush of in-memory state before dying.
+  try { flushAllFileEditsCardLists(); } catch { /* ignore */ }
+  process.exit(1);
+});
+
 // Handle unhandled rejections (prevents crash from SDK async errors)
 process.on('unhandledRejection', (reason, _promise) => {
   console.error('[UNHANDLED REJECTION]', reason);
-  // Log but don't crash - SDK sometimes throws async errors we can't catch
+  // Log but don't crash - SDK sometimes throws async errors we can't
+  // catch. Still persist to the crash log for post-mortem.
+  recordCrash('unhandledRejection', reason);
 });
 
 start().catch(console.error);

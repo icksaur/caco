@@ -17,6 +17,20 @@ if (-not $env:CACO_HOST) { $env:CACO_HOST = '127.0.0.1' }
 
 & .\stop.ps1 2>$null
 
+# Preserve the previous run's log before it gets overwritten below.
+# Crashes often leave their stack trace in server.log; overwriting it
+# on restart destroys post-mortem evidence. Archive into logs/ with a
+# timestamp. Keep the most recent 20 archives.
+if (Test-Path "server.log") {
+    $logDir = Join-Path $PSScriptRoot "logs"
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    Move-Item -LiteralPath "server.log" -Destination (Join-Path $logDir "server-$stamp.log") -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $logDir -Filter "server-*.log" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -Skip 20 |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
 # Write port file so stop.ps1 knows which port to kill
 $Port | Out-File "server.port" -NoNewline
 

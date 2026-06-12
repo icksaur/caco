@@ -1,0 +1,29 @@
+{
+  "toolCallId": "toolu_01L3Xwze2LywbYVYbPDBxuoc",
+  "model": "claude-opus-4.8",
+  "interactionId": "9689d03f-4029-4547-ba66-420c58788974",
+  "turnId": "3",
+  "success": true,
+  "result": {
+    "content": "Created file /repo/project/scratch-fixture-test.md with 142 characters",
+    "detailedContent": "\ndiff --git a/repo/project/scratch-fixture-test.md b/repo/project/scratch-fixture-test.md\ncreate file mode 100644\nindex 0000000..0000000\n--- a/dev/null\n+++ b/repo/project/scratch-fixture-test.md\n@@ -1,0 +1,10 @@\n+# Scratch fixture test\n+\n+Throwaway file to exercise the create tool's event shape.\n+\n+- line one\n+- line two\n+- line three\n+- line four\n+- line five\n+\n"
+  },
+  "toolTelemetry": {
+    "properties": {
+      "command": "create",
+      "fileExtension": "[\".md\"]",
+      "codeBlocks": "[{\"fileExt\":\".md\",\"languageId\":\"markdown\",\"linesAdded\":10,\"linesRemoved\":0}]",
+      "languageId": "[\"markdown\"]"
+    },
+    "metrics": {
+      "resultLength": 77,
+      "resultForLlmLength": 77,
+      "responseTokenLimit": 234000,
+      "linesAdded": 10,
+      "linesRemoved": 0
+    },
+    "restrictedProperties": {
+      "filePaths": "[\"/repo/project/scratch-fixture-test.md\"]"
+    }
+  }
+}

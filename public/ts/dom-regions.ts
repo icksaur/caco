@@ -13,6 +13,7 @@
 
 import type { SessionEvent } from './types.js';
 import { handleDelta, finalize } from './streaming-markdown.js';
+import { parseEditResult } from './edit-diff.js';
 
 declare global {
   interface Window {
@@ -184,6 +185,8 @@ export const EVENT_KEY_PROPERTY: Record<string, string> = {
 export const PRE_COLLAPSED_EVENTS = new Set([
   'tool.execution_start',
 ]);
+
+export const EDIT_TOOLS = new Set(['edit', 'create', 'write']);
 
 // ── ElementInserter (private) ───────────────────────────────────
 
@@ -367,6 +370,105 @@ function str(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+function extractToolMeta(element: InserterElement, data: Record<string, unknown>): { toolName: string; path: string; basename: string } {
+  const toolName = str(data.toolName) || str(data.name) || element.dataset.toolName || 'tool';
+  const args = data.arguments as Record<string, unknown> | undefined;
+  const path = str(args?.path) || element.dataset.toolInput || '';
+  const basename = path ? (path.split(/[\\/]/).pop() || path) : '';
+  return { toolName, path, basename };
+}
+
+function makeSpan(className: string, text: string): HTMLElement {
+  const span = document.createElement('span');
+  span.className = className;
+  span.textContent = text;
+  return span;
+}
+
+function makeSpace(): HTMLElement {
+  const span = document.createElement('span');
+  span.textContent = ' ';
+  return span;
+}
+
+function extractErrorText(data: Record<string, unknown>): string {
+  const error = data.error;
+  if (typeof error === 'string' && error) return error;
+  const result = data.result as Record<string, unknown> | undefined;
+  const content = typeof result?.content === 'string' ? result.content.trim() : '';
+  if (content) return content;
+  if (error !== undefined) return JSON.stringify(error);
+  return 'Unknown edit error';
+}
+
+function renderEditEvent(element: InserterElement, data: Record<string, unknown>): boolean {
+  const { toolName, basename } = extractToolMeta(element, data);
+  const el = element as unknown as HTMLElement;
+
+  if (data.success === false) {
+    const errorText = extractErrorText(data);
+    el.textContent = '';
+    const header = document.createElement('p');
+    header.className = 'edit-header';
+    header.appendChild(makeSpan('edit-tool-name', toolName));
+    if (basename) {
+      header.appendChild(makeSpace());
+      header.appendChild(makeSpan('', basename));
+    }
+    header.appendChild(makeSpace());
+    header.appendChild(makeSpan('', 'failed'));
+    el.appendChild(header);
+    const body = document.createElement('pre');
+    body.className = 'edit-error';
+    body.textContent = errorText;
+    el.appendChild(body);
+    element.classList?.add('edit-event');
+    element.classList?.remove('collapsed');
+    return true;
+  }
+
+  const diff = parseEditResult(data);
+  if (!diff) return false;
+
+  el.textContent = '';
+  const header = document.createElement('p');
+  header.className = 'edit-header';
+  header.appendChild(makeSpan('edit-tool-name', toolName));
+  if (basename) {
+    header.appendChild(makeSpace());
+    header.appendChild(makeSpan('', basename));
+  }
+  header.appendChild(makeSpace());
+  header.appendChild(makeSpan('edit-stat-add', `+${diff.stats.added}`));
+  header.appendChild(makeSpace());
+  header.appendChild(makeSpan('edit-stat-rem', `-${diff.stats.removed}`));
+  el.appendChild(header);
+
+  const totalLines = diff.stats.added + diff.stats.removed;
+  if (totalLines > 0) {
+    const body = document.createElement('pre');
+    body.className = 'edit-body';
+    for (const hunk of diff.hunks) {
+      for (const line of hunk.removed) {
+        body.appendChild(makeSpan('edit-line-rem', `-${line}`));
+      }
+      for (const line of hunk.added) {
+        body.appendChild(makeSpan('edit-line-add', `+${line}`));
+      }
+    }
+    el.appendChild(body);
+  }
+
+  element.classList?.add('edit-event');
+  if (totalLines > 6) {
+    element.classList?.add('collapsed');
+  } else {
+    element.classList?.remove('collapsed');
+  }
+
+  return true;
+}
+
 // ── EVENT_INSERTERS table ───────────────────────────────────────
 
 /**
@@ -458,6 +560,9 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   },
 
   'tool.execution_complete': (element, data) => {
+    const { toolName } = extractToolMeta(element, data);
+    if (EDIT_TOOLS.has(toolName) && renderEditEvent(element, data)) return;
+
     const name = element.dataset.toolName || 'tool';
 
     // report_intent keeps its intent display

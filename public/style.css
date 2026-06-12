@@ -947,6 +947,60 @@ main {
   white-space: normal;
 }
 
+/* Edit event — rich diff display */
+.edit-event {
+  background: color-mix(in srgb, var(--color-bg-hover), transparent 60%);
+  border-radius: var(--radius-sm, 4px);
+  padding: 4px 6px;
+}
+
+.edit-header {
+  margin: 0;
+  font-size: var(--text-sm);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.edit-tool-name {
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.edit-stat-add {
+  color: var(--color-success, #2a8);
+}
+
+.edit-stat-rem {
+  color: var(--color-error, #c44);
+}
+
+.edit-body {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.4;
+}
+
+.edit-line-add {
+  display: block;
+  color: var(--color-success, #2a8);
+}
+
+.edit-line-rem {
+  display: block;
+  color: var(--color-error, #c44);
+}
+
+.edit-error {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-error, #c44);
+  white-space: pre-wrap;
+}
+
 /* Thinking indicator - subtle pulse animation */
 .thinking-text {
   color: var(--color-text-muted);

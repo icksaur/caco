@@ -1,0 +1,29 @@
+{
+  "toolCallId": "toolu_01G3mGPqaowVYUekw9GX8vcV",
+  "model": "claude-opus-4.8",
+  "interactionId": "9689d03f-4029-4547-ba66-420c58788974",
+  "turnId": "0",
+  "success": true,
+  "result": {
+    "content": "File /repo/project/README.md updated with changes.",
+    "detailedContent": "\ndiff --git a/repo/project/README.md b/repo/project/README.md\nindex 0000000..0000000 100644\n--- a/repo/project/README.md\n+++ b/repo/project/README.md\n@@ -2,7 +2,7 @@\n \n ![Caco](caco.png)\n \n-A dangerous solution to almost any problem.\n+A dangerous solution to any problem at all.\n \n ## What is this?\n \n"
+  },
+  "toolTelemetry": {
+    "properties": {
+      "command": "edit",
+      "fileExtension": "[\".md\"]",
+      "codeBlocks": "[{\"fileExt\":\".md\",\"languageId\":\"markdown\",\"linesAdded\":1,\"linesRemoved\":1}]",
+      "languageId": "[\"markdown\"]"
+    },
+    "metrics": {
+      "resultLength": 57,
+      "resultForLlmLength": 57,
+      "responseTokenLimit": 234000,
+      "linesAdded": 1,
+      "linesRemoved": 1
+    },
+    "restrictedProperties": {
+      "filePaths": "[\"/repo/project/README.md\"]"
+    }
+  }
+}

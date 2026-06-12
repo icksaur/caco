@@ -1,0 +1,12 @@
+{
+  "toolName": "write",
+  "toolCallId": "tc-write-001",
+  "success": true,
+  "arguments": {
+    "path": "config.json",
+    "content": "{\n  \"version\": \"2.0\",\n  \"debug\": false\n}"
+  },
+  "result": {
+    "content": "File written successfully"
+  }
+}

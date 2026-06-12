@@ -1,0 +1,11 @@
+{
+  "toolName": "edit",
+  "toolCallId": "tc-edit-fail-001",
+  "success": false,
+  "arguments": {
+    "path": "src/locked.ts",
+    "old_string": "old text",
+    "new_string": "new text"
+  },
+  "error": "File not found: src/locked.ts"
+}

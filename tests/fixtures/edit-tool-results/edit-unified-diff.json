@@ -1,0 +1,11 @@
+{
+  "toolName": "edit",
+  "toolCallId": "tc-edit-udiff-001",
+  "success": true,
+  "arguments": {
+    "path": "src/utils.ts"
+  },
+  "result": {
+    "content": "--- a/src/utils.ts\n+++ b/src/utils.ts\n@@ -1,5 +1,6 @@\n function helper() {\n-  return false;\n+  const result = compute();\n+  return result;\n }"
+  }
+}

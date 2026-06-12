@@ -1,0 +1,12 @@
+{
+  "toolName": "create",
+  "toolCallId": "tc-create-001",
+  "success": true,
+  "arguments": {
+    "path": "src/new-feature.ts",
+    "content": "export function newFeature(): void {\n  console.log('hello');\n}"
+  },
+  "result": {
+    "content": "Created file src/new-feature.ts"
+  }
+}

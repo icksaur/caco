@@ -1,0 +1,13 @@
+{
+  "toolName": "edit",
+  "toolCallId": "tc-edit-001",
+  "success": true,
+  "arguments": {
+    "path": "src/parser.ts",
+    "old_string": "function parse(input) {\n  return input;\n}",
+    "new_string": "function parse(input: string): ParsedResult {\n  const tokens = tokenize(input);\n  return buildAST(tokens);\n}"
+  },
+  "result": {
+    "content": "Updated 1 file"
+  }
+}

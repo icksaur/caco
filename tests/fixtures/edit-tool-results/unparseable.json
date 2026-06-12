@@ -1,0 +1,8 @@
+{
+  "toolName": "edit",
+  "toolCallId": "tc-opaque-001",
+  "success": true,
+  "result": {
+    "content": "Updated 1 file successfully"
+  }
+}

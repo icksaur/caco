@@ -2497,8 +2497,11 @@
   }
 
   /** Compute absolute path for a relative path under the session's cwd.
-   *  Light-weight join — does not normalise '..' (the server validates). */
+   *  Light-weight join — does not normalise '..' (the server validates).
+   *  Idempotent: an already-absolute input is returned unchanged so a
+   *  recent-file entry from another cwd isn't double-prefixed. */
   function absPathOf(relativePath) {
+    if (_isAbsolutePath(relativePath)) return relativePath;
     if (!cachedCwd) return relativePath;
     var sep = cachedCwd.indexOf('\\') >= 0 && cachedCwd.indexOf('/') < 0 ? '\\' : '/';
     var trimmed = cachedCwd.replace(/[\/\\]+$/, '');
@@ -2508,8 +2511,10 @@
   /** V5: resolve a picker-relative path against _pickerRootOverride
    *  when set, else fall back to absPathOf (which uses cachedCwd).
    *  Used by routeOpen and the picker copy button so a no-session
-   *  ?openFinderRoot=ABS picker opens / copies the correct file. */
+   *  ?openFinderRoot=ABS picker opens / copies the correct file.
+   *  Idempotent for absolute inputs (recent files from other cwds). */
   function _pickerAbsPathOf(relativePath) {
+    if (_isAbsolutePath(relativePath)) return relativePath;
     if (_pickerRootOverride) {
       var trimmed = _pickerRootOverride.replace(/[\/\\]+$/, '');
       var sep = trimmed.indexOf('\\') >= 0 && trimmed.indexOf('/') < 0 ? '\\' : '/';

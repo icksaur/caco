@@ -70,7 +70,7 @@ function loadGallery(dirPath) {
       for (var i = 0; i < images.length; i++) {
         var f = images[i];
         var absPath = data.path + '/' + f.name;
-        var viewerUrl = '?applet=image-viewer&path=' + encodeURIComponent(absPath);
+        var viewerUrl = '?applet=files&openPath=' + encodeURIComponent(absPath);
         html += '<a class="ig-cell" data-path="' + esc(absPath) + '" data-name="' + esc(f.name) + '" href="' + esc(viewerUrl) + '">';
         html += '<div class="ig-thumb"></div>';
         html += '<div class="ig-name" title="' + esc(f.name) + '">' + esc(f.name) + '</div>';

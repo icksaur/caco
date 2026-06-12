@@ -33,6 +33,7 @@ import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAut
 import { initWatchRoutes } from './src/routes/watch.js';
 import { flushAll as flushAllFileEditsCardLists } from './src/file-edits-store.js';
 import { initFileEditsRoutes, flushFileEditsCardList } from './src/routes/file-edits.js';
+import { legacyAppletRedirectTarget } from './src/legacy-applet-redirects.js';
 import { createGitEditPoller } from './src/git-edit-poller.js';
 import { setGitEditPoller } from './src/dispatch-events.js';
 import { setupWebSocket } from './src/routes/websocket.js';
@@ -101,6 +102,18 @@ app.get('/', (req, res) => {
     const qs = new URLSearchParams(req.query as Record<string, string>).toString();
     res.redirect(`/api/mcp/auth/callback?${qs}`);
     return;
+  }
+  const slug = typeof req.query.applet === 'string' ? req.query.applet : null;
+  if (slug) {
+    const cleanQuery = new URLSearchParams();
+    for (const [k, v] of Object.entries(req.query)) {
+      if (typeof v === 'string') cleanQuery.set(k, v);
+    }
+    const target = legacyAppletRedirectTarget(slug, cleanQuery);
+    if (target) {
+      res.redirect(302, '/?' + target.toString());
+      return;
+    }
   }
   res.type('html').send(cachedIndexHtml);
 });

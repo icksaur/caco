@@ -149,7 +149,10 @@
    *  to routeOpenExternal (external) or routeOpen (in-cwd). */
   function openAnyPath(input, opts) {
     if (!input) return;
-    // If input is already absolute and external, route directly.
+    if (!sessionId) {
+      if (_isAbsolutePath(input)) void routeOpenExternal(input, opts || {});
+      return;
+    }
     if (_isAbsolutePath(input) && isExternal(input)) {
       void routeOpenExternal(input, opts || {});
     } else {
@@ -243,7 +246,6 @@
   // V1.1: replaces V1's tabTypes registry. Each ViewerDescriptor adds
   // isDefault(abs, rel) on top of canHandle. See spec §4.0.B.
   var viewerRegistry = [];
-  function registerViewer(desc) { viewerRegistry.push(desc); }
 
   /** Pick the default viewer for a path: first isDefault match, else
    *  first canHandle match, else null. */
@@ -333,17 +335,14 @@
     basename: basename,
     badgeCounter: badgeCounter,
     viewers: viewerRegistry,
+    capabilities: null,
     get sessionId() { return sessionId; },
     closeTab: function(id) { closeTab(id); },
     setActiveTab: function(id) { setActiveTab(id); },
     echoState: function() { echoState(); },
-    // V3.x.2: opt-in inactive-viewer eviction. Default null (off).
     getEvictionTimeoutMs: function() { return _evictionTimeoutMs; },
-    // Element-keyed programmatic-scroll API (V1.1 — scrolling moved
-    // from .fe-pane to per-viewer contentEls):
     programmaticScrollTo: programmaticScrollTo,
     consumeProgrammaticScroll: consumeProgrammaticScroll,
-    // DiffViewer-only helpers (see §4.0.3 last row):
     updateFollowButton: function() { updateFollowButton(); },
     renderBody: function(body, edit) { renderBody(body, edit); },
     getFollowEdits: function() { return followEdits; },
@@ -823,7 +822,12 @@
     try {
       if (prior) prior.deactivate();
       if (!this.viewers.has(viewerType)) {
-        var v = await desc.open(this.shell, this, this.absPath, this.relPath);
+        var caps = this.shell.capabilities;
+        var switchOpts = {
+          readOnly: !!(caps && caps.canEdit === false),
+          watch: !caps || caps.canWatch !== false,
+        };
+        var v = await desc.open(this.shell, this, this.absPath, this.relPath, switchOpts);
         if (this.destroyed) {
           try { v.destroy(); } catch (_e) { /* ignore */ }
           return;
@@ -1933,6 +1937,10 @@
   }
 
   function updateFollowButton() {
+    if (shell.capabilities && !shell.capabilities.canFollowEdits) {
+      followBtn.hidden = true;
+      return;
+    }
     if (followEdits) {
       followBtn.hidden = true;
       return;
@@ -1942,6 +1950,15 @@
     followBtn.textContent = n > 0
       ? ('↓ Follow edits · ' + n)
       : '↓ Follow edits';
+  }
+
+  function setEmptyPaneError(message) {
+    var div = document.createElement('div');
+    div.className = 'fe-pane-error';
+    div.textContent = message;
+    paneEmptyEl.textContent = '';
+    paneEmptyEl.appendChild(div);
+    paneEmptyEl.hidden = false;
   }
 
   function updateEmptyState() {
@@ -2610,7 +2627,11 @@
     if (tabs.size >= TAB_CAP) evictOldestNonActive();
     var container = new TabContainer(shell, desc, abs, abs, { external: true });
     try {
-      var viewer = await desc.open(shell, container, abs, abs, { readOnly: true });
+      var caps = shell.capabilities;
+      var viewer = await desc.open(shell, container, abs, abs, {
+        readOnly: true,
+        watch: !caps || caps.canWatch !== false,
+      });
       // Re-check after await: another caller may have created the tab.
       var raceCheck = findContainerByExternalAbs(abs);
       if (raceCheck) {
@@ -2627,8 +2648,10 @@
     } catch (err) {
       if (err && err.name === 'AbortError') { container.destroy(); return; }
       console.warn('[files-applet] routeOpenExternal failed', abs, err);
-      container.destroy();
-      return;
+      var errEl = document.createElement('div');
+      errEl.className = 'files-tab-error';
+      errEl.textContent = 'Failed to open ' + abs + ': ' + ((err && err.message) || String(err));
+      container.contentEl.appendChild(errEl);
     } finally {
       pendingOpenIds.delete(pendKey);
     }
@@ -2649,59 +2672,69 @@
   // match wins. Markdown/image registered before Diff so they win for
   // their respective extensions; Diff is the universal fallback for
   // non-binary files.
-  if (MarkdownViewer) {
-    registerViewer({
-      viewerType: 'markdown',
-      label: 'Markdown',
-      canHandle: function(_a, rel) {
-        return /\.(md|markdown|mdx)$/i.test(rel || '');
-      },
-      isDefault: function(_a, rel) {
-        return /\.(md|markdown|mdx)$/i.test(rel || '');
-      },
-      open: function(s, c, a, r, opts) { return MarkdownViewer.open(s, c, a, r, opts); },
-    });
+  function buildViewerRegistry(capabilities) {
+    var reg = [];
+    function add(desc) { reg.push(desc); }
+    if (MarkdownViewer) {
+      add({
+        viewerType: 'markdown',
+        label: 'Markdown',
+        canHandle: function(_a, rel) {
+          return /\.(md|markdown|mdx)$/i.test(rel || '');
+        },
+        isDefault: function(_a, rel) {
+          return /\.(md|markdown|mdx)$/i.test(rel || '');
+        },
+        open: function(s, c, a, r, opts) { return MarkdownViewer.open(s, c, a, r, opts); },
+      });
+    }
+    if (ImageViewer) {
+      add({
+        viewerType: 'image',
+        label: 'Image',
+        canHandle: function(_a, rel) {
+          return /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(rel || '');
+        },
+        isDefault: function(_a, rel) {
+          return /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(rel || '');
+        },
+        open: function(s, c, a, r, opts) { return ImageViewer.open(s, c, a, r, opts); },
+      });
+    }
+    if (HtmlViewer) {
+      add({
+        viewerType: 'html',
+        label: 'HTML',
+        canHandle: function(_a, rel) { return /\.html?$/i.test(rel || ''); },
+        isDefault: function(_a, rel) { return /\.html?$/i.test(rel || ''); },
+        open: function(s, c, a, r, opts) { return HtmlViewer.open(s, c, a, r, opts); },
+      });
+    }
+    if (DiffViewer && capabilities.canDiff) {
+      add({
+        viewerType: 'diff',
+        label: 'Diff',
+        canHandle: function(_a, rel) { return !isBinaryExtension(rel); },
+        isDefault: function(_a, rel) { return !isBinaryExtension(rel); },
+        open: function(s, c, a, r, opts) { return DiffViewer.open(s, c, a, r, opts); },
+      });
+    }
+    if (SourceViewer) {
+      add({
+        viewerType: 'source',
+        label: 'Source',
+        canHandle: function(_a, rel) { return !isBinaryExtension(rel); },
+        isDefault: function() { return false; },
+        open: function(s, c, a, r, opts) { return SourceViewer.open(s, c, a, r, opts); },
+      });
+    }
+    return reg;
   }
-  if (ImageViewer) {
-    registerViewer({
-      viewerType: 'image',
-      label: 'Image',
-      canHandle: function(_a, rel) {
-        return /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(rel || '');
-      },
-      isDefault: function(_a, rel) {
-        return /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(rel || '');
-      },
-      open: function(s, c, a, r) { return ImageViewer.open(s, c, a, r); },
-    });
-  }
-  if (HtmlViewer) {
-    registerViewer({
-      viewerType: 'html',
-      label: 'HTML',
-      canHandle: function(_a, rel) { return /\.html?$/i.test(rel || ''); },
-      isDefault: function(_a, rel) { return /\.html?$/i.test(rel || ''); },
-      open: function(s, c, a, r) { return HtmlViewer.open(s, c, a, r); },
-    });
-  }
-  if (DiffViewer) {
-    registerViewer({
-      viewerType: 'diff',
-      label: 'Diff',
-      canHandle: function(_a, rel) { return !isBinaryExtension(rel); },
-      isDefault: function(_a, rel) { return !isBinaryExtension(rel); },
-      open: function(s, c, a, r, opts) { return DiffViewer.open(s, c, a, r, opts); },
-    });
-  }
-  if (SourceViewer) {
-    registerViewer({
-      viewerType: 'source',
-      label: 'Source',
-      canHandle: function(_a, rel) { return !isBinaryExtension(rel); },
-      // Never win in-cwd selection; only used via defaultExternalViewer.
-      isDefault: function() { return false; },
-      open: function(s, c, a, r, opts) { return SourceViewer.open(s, c, a, r, opts); },
-    });
+
+  function applyCapabilities(capabilities) {
+    if (!capabilities.canFollowEdits && followBtn) followBtn.hidden = true;
+    if (!capabilities.canPersist && openBtn) openBtn.hidden = true;
+    if (!capabilities.canPersist && notGitEl) notGitEl.hidden = true;
   }
 
   openBtn.addEventListener('click', function(e) {
@@ -3449,121 +3482,97 @@
     await fetchSnapshot();
   }
 
-  if (window.appletAPI) {
-    if (typeof window.appletAPI.onStateUpdate === 'function') {
-      window.appletAPI.onStateUpdate(function(state) {
-        if (state && state.fileEdits) void applyAgentState(state.fileEdits);
-      });
-    }
-    // V3.y.1: deep-link `?applet=file-edits&openPath=/abs` opens
-    // the file as a new TabContainer. The cold-load case races
-    // onSessionChange (which sets cachedCwd); queue and drain.
-    // See docs/files-applet-v3.y.md §4.1.B.
-    if (typeof window.appletAPI.onUrlParamsChange === 'function') {
-      window.appletAPI.onUrlParamsChange(function(params) {
-        if (!params) return;
-        if (params.openPath) {
-          // V6: optional diffMode (unstaged | staged) carried into
-          // routeOpen. V6.1 removed diffRef.
-          var routeOpts = {
-            diffMode: params.diffMode || undefined,
-          };
-          if (cachedCwd) {
-            _handleOpenPath(params.openPath, routeOpts);
-          } else {
-            _pendingOpenPath = { path: params.openPath, opts: routeOpts };
-          }
-          if (typeof window.appletAPI.navigateAppletUrlParam === 'function') {
-            // Consume the params so back-traversal doesn't re-fire.
-            // Use '' (not null) — the applet-runtime signature is
-            // (key: string, value: string) with falsy=delete.
-            window.appletAPI.navigateAppletUrlParam('openPath', '');
-            if (params.diffMode) window.appletAPI.navigateAppletUrlParam('diffMode', '');
-          }
-        }
-        if (params.openFinder) {
-          // V3.y.2: Ctrl+P-triggered finder open. Picker function
-          // is defined later in this IIFE; check before calling.
-          // V5: openFinderRoot (optional) overrides cachedCwd for
-          // the picker; supports new-chat and file-finder stub.
-          if (typeof openPicker === 'function') {
-            var rootOverride = params.openFinderRoot
-              ? String(params.openFinderRoot)
-              : undefined;
-            openPicker({ source: 'shortcut', rootOverride: rootOverride });
-          }
-          if (typeof window.appletAPI.navigateAppletUrlParam === 'function') {
-            window.appletAPI.navigateAppletUrlParam('openFinder', '');
-            if (params.openFinderRoot) {
-              window.appletAPI.navigateAppletUrlParam('openFinderRoot', '');
+  function bootSession(existingId) {
+    var capabilities = { canPersist: true, canDiff: true, canEdit: true, canFollowEdits: true, canWatch: true };
+    viewerRegistry = buildViewerRegistry(capabilities);
+    shell.viewers = viewerRegistry;
+    shell.capabilities = capabilities;
+    applyCapabilities(capabilities);
+
+    if (window.appletAPI) {
+      if (typeof window.appletAPI.onStateUpdate === 'function') {
+        window.appletAPI.onStateUpdate(function(state) {
+          if (state && state.fileEdits) void applyAgentState(state.fileEdits);
+        });
+      }
+      if (typeof window.appletAPI.onUrlParamsChange === 'function') {
+        window.appletAPI.onUrlParamsChange(function(params) {
+          if (!params) return;
+          if (params.openPath) {
+            var routeOpts = {
+              diffMode: params.diffMode || undefined,
+            };
+            if (cachedCwd) {
+              _handleOpenPath(params.openPath, routeOpts);
+            } else {
+              _pendingOpenPath = { path: params.openPath, opts: routeOpts };
+            }
+            if (typeof window.appletAPI.navigateAppletUrlParam === 'function') {
+              window.appletAPI.navigateAppletUrlParam('openPath', '');
+              if (params.diffMode) window.appletAPI.navigateAppletUrlParam('diffMode', '');
             }
           }
+          if (params.openFinder) {
+            if (typeof openPicker === 'function') {
+              var rootOverride = params.openFinderRoot
+                ? String(params.openFinderRoot)
+                : undefined;
+              openPicker({ source: 'shortcut', rootOverride: rootOverride });
+            }
+            if (typeof window.appletAPI.navigateAppletUrlParam === 'function') {
+              window.appletAPI.navigateAppletUrlParam('openFinder', '');
+              if (params.openFinderRoot) {
+                window.appletAPI.navigateAppletUrlParam('openFinderRoot', '');
+              }
+            }
+          }
+        });
+      }
+      window.appletAPI.onSessionEvent(function(event) {
+        if (event && event.type === 'caco.edit' && event.data) {
+          var d = event.data;
+          if (Array.isArray(d.edits)) {
+            d.edits.forEach(function(e) { openOrUpdateTab(e); });
+          }
+          if (Array.isArray(d.cleanedEdits)) {
+            d.cleanedEdits.forEach(function(e) { openOrUpdateTab(e); });
+          }
         }
+      });
+      window.appletAPI.onSessionChange(function(sid, info) {
+        flushPersist();
+        closePicker();
+        if (pickerOpenAbort) { pickerOpenAbort.abort(); pickerOpenAbort = null; }
+        var browserSel = window.getSelection && window.getSelection();
+        if (browserSel) browserSel.removeAllRanges();
+        var captured = Array.from(tabs.values());
+        tabs.clear();
+        badgeCounter.clear();
+        lastEditedTabId = null;
+        activeTabId = null;
+        followEdits = true;
+        cachedCwd = '';
+        captured.forEach(function(t) {
+          try { t.destroy(); } catch (err) { console.warn('[file-edits] destroy on session-switch:', err); }
+        });
+        dismissedPaths.clear();
+        dismissedSnapshots.clear();
+        if (paneEmptyEl.parentNode !== paneEl) paneEl.appendChild(paneEmptyEl);
+        if (notGitEl.parentNode !== paneEl) paneEl.appendChild(notGitEl);
+        notGitEl.hidden = true;
+        updateFollowButton();
+        updateEmptyState();
+        sessionId = sid;
+        if (info && info.cwd) {
+          var parts = info.cwd.split(/[/\\]/);
+          repoEl.textContent = parts[parts.length - 1] || info.cwd;
+          cachedCwd = info.cwd;
+        }
+        _drainPendingOpenPath();
+        void initFromPersistence(sid);
       });
     }
-    window.appletAPI.onSessionEvent(function(event) {
-      if (event && event.type === 'caco.edit' && event.data) {
-        var d = event.data;
-        if (Array.isArray(d.edits)) {
-          d.edits.forEach(function(e) { openOrUpdateTab(e); });
-        }
-        if (Array.isArray(d.cleanedEdits)) {
-          d.cleanedEdits.forEach(function(e) { openOrUpdateTab(e); });
-        }
-        // d.cleared is ignored in V3.2 (tabs persist; clean is just a status)
-      }
-    });
-    window.appletAPI.onSessionChange(function(sid, info) {
-      // Flush outgoing session's pending PUT first. The captured body
-      // (set by schedulePersist's last call) already reflects the
-      // outgoing session's tab list, so this is safe even though we
-      // clear `tabs` immediately below — flushPersist doesn't re-read
-      // tabs, it uses the snapshot it captured.
-      flushPersist();
-      // Close picker and abort any in-flight open call.
-      closePicker();
-      if (pickerOpenAbort) { pickerOpenAbort.abort(); pickerOpenAbort = null; }
-      // Drop any native Selection range pointing at rows we're about
-      // to tear down; otherwise the browser's global Selection would
-      // hold dangling references.
-      var browserSel = window.getSelection && window.getSelection();
-      if (browserSel) browserSel.removeAllRanges();
-      // Tear down in-memory state. Rule §4.0.5.6: capture, clear
-      // the map (and pointers), THEN destroy. This way any
-      // tab-callback that re-enters the shell during destroy()
-      // sees an empty map.
-      var captured = Array.from(tabs.values());
-      tabs.clear();
-      badgeCounter.clear();
-      lastEditedTabId = null;
-      activeTabId = null;
-      followEdits = true;
-      cachedCwd = '';
-      captured.forEach(function(t) {
-        try { t.destroy(); } catch (err) { console.warn('[file-edits] destroy on session-switch:', err); }
-      });
-      // Drop dismissed-path state; the new session has its own working tree.
-      dismissedPaths.clear();
-      dismissedSnapshots.clear();
-      // Re-add the persistent placeholder DIVs (they remain in
-      // index.html's pane but the V3.5 code's innerHTML='' clear has
-      // been removed; ensure they're still children defensively).
-      if (paneEmptyEl.parentNode !== paneEl) paneEl.appendChild(paneEmptyEl);
-      if (notGitEl.parentNode !== paneEl) paneEl.appendChild(notGitEl);
-      notGitEl.hidden = true;
-      updateFollowButton();
-      updateEmptyState();
-      sessionId = sid;
-      if (info && info.cwd) {
-        var parts = info.cwd.split(/[/\\]/);
-        repoEl.textContent = parts[parts.length - 1] || info.cwd;
-        cachedCwd = info.cwd;
-      }
-      _drainPendingOpenPath();   // V3.y.1: cwd is now set; deep-link may have queued
-      void initFromPersistence(sid);
-    });
 
-    var existingId = window.appletAPI.getSessionId && window.appletAPI.getSessionId();
     if (existingId) {
       sessionId = existingId;
       void (async function() {
@@ -3575,16 +3584,57 @@
             cachedCwd = meta.cwd;
           }
         } catch (_) { /* ignore */ }
-        _drainPendingOpenPath();   // V3.y.1: cwd loaded from session meta
+        _drainPendingOpenPath();
         await initFromPersistence(existingId);
       })();
     }
+
+    updateFollowButton();
+    updateEmptyState();
+  }
+
+  function bootSessionless(params) {
+    var capabilities = { canPersist: false, canDiff: false, canEdit: false, canFollowEdits: false, canWatch: false };
+    viewerRegistry = buildViewerRegistry(capabilities);
+    shell.viewers = viewerRegistry;
+    shell.capabilities = capabilities;
+    applyCapabilities(capabilities);
+
+    paneEmptyEl.textContent = 'Open a file via ?openPath=ABSOLUTE_PATH or finder via ?openFinder=1&openFinderRoot=ABSOLUTE_DIR';
+
+    if (params.openFinder === '1') {
+      var root = params.openFinderRoot ? String(params.openFinderRoot) : '';
+      if (!root || !_isAbsolutePath(root)) {
+        setEmptyPaneError('Sessionless finder requires openFinderRoot=ABSOLUTE_PATH');
+      } else {
+        openPicker({ source: 'url', rootOverride: root });
+      }
+    } else if (params.openPath) {
+      var openPath = String(params.openPath);
+      if (!_isAbsolutePath(openPath)) {
+        setEmptyPaneError('openPath must be an absolute path: ' + openPath);
+      } else {
+        void routeOpenExternal(openPath, {});
+      }
+    } else {
+      setEmptyPaneError('Open a file via ?openPath=ABSOLUTE_PATH or finder via ?openFinder=1&openFinderRoot=ABSOLUTE_DIR');
+    }
+
+    updateFollowButton();
+    updateEmptyState();
   }
 
   // Expose pure helpers DiffViewer needs (avoids duplicating into
   // diff-viewer.js). DiffViewer reads via window.__filesApplet._diffHelpers.
   window.__filesApplet._diffHelpers = { fullFileEqual: fullFileEqual };
 
-  updateFollowButton();
-  updateEmptyState();
+  var _bootSessionId = window.appletAPI && window.appletAPI.getSessionId && window.appletAPI.getSessionId();
+  if (_bootSessionId) {
+    bootSession(_bootSessionId);
+  } else {
+    var _bootSearch = (window.location && window.location.search) || '';
+    var _bootParams = {};
+    new URLSearchParams(_bootSearch).forEach(function(v, k) { _bootParams[k] = v; });
+    bootSessionless(_bootParams);
+  }
 })();

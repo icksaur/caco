@@ -669,7 +669,7 @@ window.appletAPI.onUrlParamsChange((params) => {
       document.getElementById('noPathMessage').classList.add('hidden');
       if (repoPathLabel) {
         repoPathLabel.textContent = repoPath;
-        repoPathLabel.href = '?applet=file-finder&root=' + encodeURIComponent(repoPath);
+        repoPathLabel.href = '?applet=files&openFinder=1&openFinderRoot=' + encodeURIComponent(repoPath);
       }
       refresh();
     }
@@ -717,7 +717,7 @@ window.appletAPI.onSessionChange((_sessionId, info) => {
   repoPath = info.cwd;
   if (repoPathLabel) {
     repoPathLabel.textContent = repoPath;
-    repoPathLabel.href = '?applet=file-finder&root=' + encodeURIComponent(repoPath);
+    repoPathLabel.href = '?applet=files&openFinder=1&openFinderRoot=' + encodeURIComponent(repoPath);
   }
   refresh();
 });

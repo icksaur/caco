@@ -76,15 +76,17 @@
     return { kind: 'html', path: this.absPath, loaded: this.loaded };
   };
 
-  HtmlViewer.open = async function(shell, container, absPath, _relPath) {
+  HtmlViewer.open = async function(shell, container, absPath, _relPath, opts) {
     var inst = new HtmlViewer(shell, container, absPath);
     try {
-      inst._watcher = await shell.api.watchPath(absPath, { scope: 'file' });
-      if (inst.destroyed) {
-        try { inst._watcher.close(); } catch (_e) { /* ignore */ }
-        throw new Error('aborted');
+      if (!opts || opts.watch !== false) {
+        inst._watcher = await shell.api.watchPath(absPath, { scope: 'file' });
+        if (inst.destroyed) {
+          try { inst._watcher.close(); } catch (_e) { /* ignore */ }
+          throw new Error('aborted');
+        }
+        inst._watcher.onChange(function() { inst.load(); });
       }
-      inst._watcher.onChange(function() { inst.load(); });
       inst.load();
     } catch (err) {
       inst.destroy();

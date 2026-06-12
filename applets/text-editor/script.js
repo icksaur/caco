@@ -22,12 +22,6 @@ function loadCMBundle() {
   });
 }
 
-var viewerMap = {
-  md: 'markdown-viewer', mdx: 'markdown-viewer', markdown: 'markdown-viewer',
-  png: 'image-viewer', jpg: 'image-viewer', jpeg: 'image-viewer',
-  gif: 'image-viewer', webp: 'image-viewer', svg: 'image-viewer',
-};
-
 var extToLang = {
   js: 'javascript', ts: 'javascript', jsx: 'javascript', tsx: 'javascript',
   json: 'json', md: 'markdown', xml: 'xml', html: 'xml', htm: 'xml', svg: 'xml',
@@ -161,7 +155,7 @@ function createEditor(content, langKey) {
 function openFinder() {
   if (!currentFilePath) return;
   var dir = currentFilePath.split('/').slice(0, -1).join('/');
-  window.location.href = '/?applet=file-finder&root=' + encodeURIComponent(dir);
+  window.location.href = '/?applet=files&openFinder=1&openFinderRoot=' + encodeURIComponent(dir);
 }
 
 function updateHeader(path) {
@@ -179,19 +173,11 @@ function updateHeader(path) {
   filePathEl.title = path;
   folderBtn.style.display = '';
 
-  var ext = basename.split('.').pop().toLowerCase();
-  var viewer = viewerMap[ext];
-  if (viewer) {
-    var viewerUrl = '/?applet=' + viewer + '&path=' + encodeURIComponent(path);
-    filePathEl.style.cursor = 'pointer';
-    filePathEl.onclick = function() { window.location.href = viewerUrl; };
-    viewLink.href = viewerUrl;
-    viewLink.style.display = '';
-  } else {
-    filePathEl.style.cursor = '';
-    filePathEl.onclick = null;
-    viewLink.style.display = 'none';
-  }
+  var viewerUrl = '/?applet=files&openPath=' + encodeURIComponent(path);
+  filePathEl.style.cursor = 'pointer';
+  filePathEl.onclick = function() { window.location.href = viewerUrl; };
+  viewLink.href = viewerUrl;
+  viewLink.style.display = '';
 }
 
 async function loadFile(path) {

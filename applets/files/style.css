@@ -149,6 +149,11 @@
   text-align: center;
   font-size: var(--text-sm);
 }
+.fe-pane-error {
+  padding: var(--space-md);
+  color: var(--color-danger, #c0392b);
+  font-size: var(--text-sm);
+}
 
 /* V1.1: per-tab outer container. Positioning root for the floating
  * viewer-toggle button. Overflow hidden so the viewer's scrollbar

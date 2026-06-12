@@ -149,9 +149,8 @@
     };
   };
 
-  SourceViewer.open = async function(shell, container, absPath, _relPath, _opts) {
+  SourceViewer.open = async function(shell, container, absPath, _relPath, opts) {
     var inst = new SourceViewer(shell, container, absPath);
-    // Binary guard: render message immediately, no watcher needed.
     if (BINARY_RE.test(absPath || '')) {
       inst._renderMessage('Binary file — cannot preview');
       if (container.destroyed || !container.contentEl) {
@@ -162,12 +161,14 @@
       return inst;
     }
     try {
-      inst._watcher = await shell.api.watchPath(absPath, { scope: 'file' });
-      if (inst.destroyed) {
-        try { inst._watcher.close(); } catch (_e) { /* ignore */ }
-        throw new Error('aborted');
+      if (!opts || opts.watch !== false) {
+        inst._watcher = await shell.api.watchPath(absPath, { scope: 'file' });
+        if (inst.destroyed) {
+          try { inst._watcher.close(); } catch (_e) { /* ignore */ }
+          throw new Error('aborted');
+        }
+        inst._watcher.onChange(function() { void inst.load(); });
       }
-      inst._watcher.onChange(function() { void inst.load(); });
       await inst.load();
       if (inst.destroyed) throw new Error('aborted');
     } catch (err) {

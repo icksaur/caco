@@ -956,7 +956,6 @@ main {
 
 .edit-header {
   margin: 0;
-  font-size: var(--text-sm);
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -964,12 +963,11 @@ main {
 }
 
 .edit-tool-name {
-  font-weight: 600;
-  font-family: var(--font-mono);
+  font-style: italic;
 }
 
 .edit-stat-add {
-  color: var(--color-success, #2a8);
+  color: var(--color-success-bright, #3fb950);
 }
 
 .edit-stat-rem {
@@ -986,7 +984,7 @@ main {
 
 .edit-line-add {
   display: block;
-  color: var(--color-success, #2a8);
+  color: var(--color-success-bright, #3fb950);
 }
 
 .edit-line-rem {

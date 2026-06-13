@@ -72,23 +72,14 @@ export function loadModels(): void {
     // Cost indicator
     const costSpan = document.createElement('span');
     costSpan.className = 'model-cost';
-    if (model.cost === 0) {
+    if (model.inputPerMtok !== null && model.inputPerMtok !== undefined && model.outputPerMtok !== null && model.outputPerMtok !== undefined) {
+      costSpan.textContent = `${model.inputPerMtok}:${model.outputPerMtok}/Mtok`;
+      if (model.priceCategory) costSpan.classList.add(`tier-${model.priceCategory.replace('_', '-')}`);
+    } else if (model.cost === 0) {
       costSpan.textContent = 'free';
       costSpan.classList.add('free');
-    } else if (model.cost < 1) {
-      costSpan.textContent = `${model.cost}x`;
-      costSpan.classList.add('cheap');
-    } else if (model.cost > 10) {
-      costSpan.textContent = `${model.cost}x`;
-      costSpan.classList.add('ultra');
-    } else if (model.cost > 5) {
-      costSpan.textContent = `${model.cost}x`;
-      costSpan.classList.add('premium');
-    } else if (model.cost > 1) {
-      costSpan.textContent = `${model.cost}x`;
-      costSpan.classList.add('expensive');
     } else {
-      costSpan.textContent = '1x';
+      costSpan.hidden = true;
     }
     item.appendChild(costSpan);
     

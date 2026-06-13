@@ -241,6 +241,7 @@ Returns: `{ ok: true }`
 - `GET /api/preferences` - Get user preferences
 - `POST /api/preferences` - Update preferences
 - `GET /api/models` - List available models from SDK
+- `GET /api/models/raw` - Raw SDK model objects (unfiltered, session-independent)
 - `GET /api/usage` - Get usage statistics
 
 **GET /api/preferences**
@@ -258,8 +259,18 @@ Returns:
 ```json
 {
   "models": [
-    { "id": "claude-sonnet-4.5", "name": "Claude Sonnet 4.5", "multiplier": 1 }
+    { "id": "claude-sonnet-4.5", "name": "Claude Sonnet 4.5", "multiplier": 1, "priceCategory": "medium", "category": "versatile", "inputPerMtok": 300, "outputPerMtok": 1500, "cachePerMtok": 30 }
   ]
+}
+```
+
+**GET /api/models/raw**
+
+Returns the untransformed SDK model array. Session-independent. Used by the model-info applet.
+
+```json
+{
+  "models": [ { "id": "...", "name": "...", "capabilities": {}, "billing": { "tokenPrices": {} }, ... } ]
 }
 ```
 

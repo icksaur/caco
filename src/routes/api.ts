@@ -29,6 +29,7 @@ import { MAX_FILE_SIZE_BYTES, MIME_TYPES } from '../config.js';
 import { apiError } from '../api-error.js';
 import { fuzzyScore } from '../utils/fuzzy-score.js';
 import { requestRestart, getActiveDispatches } from '../restart-manager.js';
+import { modelCostSummary } from '../model-billing.js';
 
 const router = Router();
 
@@ -37,12 +38,12 @@ const TEMP_DIR = join(homedir(), '.caco', 'tmp');
 router.get('/models', (_req: Request, res: Response) => {
   const models = sessionManager.getModels();
   res.json({
-    models: models.map(m => ({
-      id: m.id,
-      name: m.name,
-      multiplier: m.billing?.multiplier ?? 1
-    }))
+    models: models.map(m => ({ id: m.id, name: m.name, ...modelCostSummary(m) }))
   });
+});
+
+router.get('/models/raw', (_req: Request, res: Response) => {
+  res.json({ models: sessionManager.getModels() });
 });
 
 router.get('/usage', (_req: Request, res: Response) => {

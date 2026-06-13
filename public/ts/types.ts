@@ -15,6 +15,11 @@ export interface ModelInfo {
   id: string;
   name: string;
   cost: number;
+  priceCategory?: 'low' | 'medium' | 'high' | 'very_high';
+  category?: 'lightweight' | 'versatile' | 'powerful';
+  inputPerMtok?: number;
+  outputPerMtok?: number;
+  cachePerMtok?: number;
 }
 
 export type SessionKind = 'interactive' | 'agent' | 'swarm' | 'scheduled';

@@ -1,0 +1,8 @@
+{
+  "slug": "model-info",
+  "name": "Model Info",
+  "description": "Inspect all model properties in a table",
+  "agentUsage": {
+    "purpose": "Inspect raw SDK model properties including billing, capabilities, and pricing"
+  }
+}

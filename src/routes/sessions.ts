@@ -26,6 +26,7 @@ import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
 import { dispatchMessage } from './session-messages.js';
 import { prefixMessageSource } from '../message-source.js';
 import { getSessionDraft, setSessionDraft, deleteSessionDraft } from '../chat-draft-store.js';
+import { modelCostSummary } from '../model-billing.js';
 
 const router = Router();
 
@@ -142,11 +143,10 @@ router.get('/sessions', async (_req: Request, res: Response) => {
     sessionOrder: getSessionOrder(),
     unobservedCount,
     peers: peerSessions,
-    models: models.map(m => ({
-      id: m.id,
-      name: m.name,
-      cost: m.billing?.multiplier ?? 1
-    }))
+    models: models.map(m => {
+      const s = modelCostSummary(m);
+      return { id: m.id, name: m.name, cost: s.multiplier, priceCategory: s.priceCategory, category: s.category, inputPerMtok: s.inputPerMtok, outputPerMtok: s.outputPerMtok, cachePerMtok: s.cachePerMtok };
+    })
   });
 });
 

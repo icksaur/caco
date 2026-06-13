@@ -1419,6 +1419,10 @@ main {
 .model-cost.expensive { color: var(--color-cost-expensive); }
 .model-cost.premium { color: var(--color-cost-premium); }
 .model-cost.ultra { color: var(--color-cost-ultra); }
+.model-cost.tier-low { color: var(--color-text-muted); }
+.model-cost.tier-medium { color: var(--color-text); }
+.model-cost.tier-high { color: var(--color-cost-expensive); }
+.model-cost.tier-very-high { color: var(--color-cost-premium); }
 
 /* CWD group headers */
 .cwd-header {

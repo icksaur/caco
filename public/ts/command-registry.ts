@@ -139,8 +139,8 @@ registerBuiltin('session-model', async (modelId) => {
 }, () => {
   const models = getAvailableModels();
   return models.map(m => {
-    const cost = m.cost === 0 ? 'free' : `${m.cost}x`;
-    return { id: m.id, label: m.name, description: cost };
+    const description = m.priceCategory ?? (m.cost === 0 ? 'free' : '');
+    return { id: m.id, label: m.name, description };
   });
 });
 

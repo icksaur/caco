@@ -53,15 +53,29 @@ interface CopilotClientInstance {
   };
 }
 
-interface SDKModelInfo {
+export interface SDKModelInfo {
   id: string;
   name: string;
-  capabilities: {
-    supports: { vision: boolean };
-    limits: { max_context_window_tokens: number };
+  capabilities?: {
+    supports?: { vision?: boolean; reasoningEffort?: boolean };
+    limits?: { max_context_window_tokens?: number; max_prompt_tokens?: number; max_output_tokens?: number };
   };
-  policy?: { state: string; terms: string };
-  billing?: { multiplier: number };
+  policy?: { state: string; terms?: string };
+  billing?: {
+    multiplier?: number;
+    tokenPrices?: {
+      inputPrice?: number;
+      outputPrice?: number;
+      cachePrice?: number;
+      batchSize?: number;
+      contextMax?: number;
+      longContext?: { inputPrice?: number; outputPrice?: number; cachePrice?: number; contextMax?: number };
+    };
+  };
+  modelPickerCategory?: 'lightweight' | 'versatile' | 'powerful';
+  modelPickerPriceCategory?: 'low' | 'medium' | 'high' | 'very_high';
+  supportedReasoningEfforts?: string[];
+  defaultReasoningEffort?: string;
 }
 
 interface CreateSessionConfig {

@@ -45,6 +45,18 @@
     this._zoomHud.textContent = '100%';
     this.contentEl.appendChild(this._zoomHud);
 
+    // Floating folder button (top-right): opens the image-gallery applet
+    // for the image's parent directory.
+    var parentDir = ImageViewer._parentDir(absPath);
+    if (parentDir) {
+      var gallery = document.createElement('a');
+      gallery.className = 'files-image-gallery';
+      gallery.href = '?applet=image-gallery&path=' + encodeURIComponent(parentDir);
+      gallery.title = 'Open folder in image gallery';
+      gallery.textContent = '📁';
+      this.contentEl.appendChild(gallery);
+    }
+
     this._imgWrap = document.createElement('div');
     this._imgWrap.className = 'files-image-wrap';
     this.contentEl.appendChild(this._imgWrap);
@@ -178,6 +190,16 @@
       loaded: this.loaded,
       zoom: this.zoom,
     };
+  };
+
+  /** Parent directory of an absolute path (POSIX or Windows).
+   *  Returns '' when no separator is found. */
+  ImageViewer._parentDir = function(p) {
+    if (!p) return '';
+    var norm = p.replace(/[\\/]+$/, '');
+    var idx = Math.max(norm.lastIndexOf('/'), norm.lastIndexOf('\\'));
+    if (idx <= 0) return idx === 0 ? norm.slice(0, 1) : '';
+    return norm.slice(0, idx);
   };
 
   ImageViewer.open = async function(shell, container, absPath, _relPath, opts) {

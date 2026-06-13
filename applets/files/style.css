@@ -618,6 +618,25 @@
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
+.files-image-gallery {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  z-index: 5;
+  background: var(--color-bg, #1e1e1e);
+  border: 1px solid var(--color-border, #3c3c3c);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 14px;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+  opacity: 0.75;
+}
+.files-image-gallery:hover {
+  opacity: 1;
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.06));
+}
 .files-image-error {
   color: var(--color-error, #f48771);
   text-align: center;

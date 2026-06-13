@@ -377,6 +377,11 @@ class SessionManager {
         const ctx = startEvent.data?.context as Record<string, unknown> | undefined;
         record.cwd = typeof ctx?.cwd === 'string' ? ctx.cwd : null;
       }
+
+      // Caco-side cwd override (from /session-cwd) wins over the immutable
+      // session.start cwd so a changed cwd survives server restart.
+      const metaCwd = getSessionMeta(sessionId)?.cwd;
+      if (metaCwd) record.cwd = metaCwd;
       
       const workspace = readSessionWorkspace(sessionId);
       if (workspace) {
@@ -671,6 +676,12 @@ class SessionManager {
     cached.cwd = newCwd;
     this.sessionCache.set(sessionId, cached);
     registerSession(newCwd, sessionId);
+
+    // Persist the override to Caco meta so it survives restart. The SDK's
+    // session.start event keeps the original cwd; _discoverSessions prefers
+    // this override when rebuilding the cache.
+    const meta = getSessionMeta(sessionId) ?? { name: '' };
+    setSessionMeta(sessionId, { ...meta, cwd: newCwd });
 
     console.log(`✓ Changed CWD for ${sessionId}: ${oldCwd} → ${newCwd}`);
   }

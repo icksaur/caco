@@ -28,6 +28,9 @@ export interface SessionMeta {
   context?: Record<string, string[]>;
   model?: string;
   folder?: string;
+  /** Caco-side cwd override. When set, wins over the SDK session.start
+   *  cwd on cache rebuild (restart) so /session-cwd changes persist. */
+  cwd?: string;
   responseOptions?: string[];
   activeApplet?: string;
   appletParams?: Record<string, string>;

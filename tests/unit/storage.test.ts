@@ -179,6 +179,24 @@ describe('session metadata (ensureSessionMeta, getSessionMeta, setSessionMeta)',
     
     expect(getSessionMeta(TEST_SESSION_ID)?.name).toBe('');
   });
+
+  it('persists a cwd override that survives a fresh read (restart-equivalent)', () => {
+    // Regression: /session-cwd changes were lost on restart because the cwd
+    // override was never persisted to meta. _discoverSessions now prefers
+    // meta.cwd over the immutable session.start cwd.
+    setSessionMeta(TEST_SESSION_ID, { name: 'S', cwd: '/home/carl/repo/hull' });
+    // A fresh getSessionMeta reads from disk, simulating post-restart rebuild.
+    expect(getSessionMeta(TEST_SESSION_ID)?.cwd).toBe('/home/carl/repo/hull');
+  });
+
+  it('cwd override is preserved when other fields are updated', () => {
+    setSessionMeta(TEST_SESSION_ID, { name: 'S', cwd: '/home/carl/repo/hull' });
+    const meta = getSessionMeta(TEST_SESSION_ID) ?? { name: '' };
+    setSessionMeta(TEST_SESSION_ID, { ...meta, model: 'claude-opus-4.8' });
+    const after = getSessionMeta(TEST_SESSION_ID);
+    expect(after?.cwd).toBe('/home/carl/repo/hull');
+    expect(after?.model).toBe('claude-opus-4.8');
+  });
 });
 
 describe('session observation tracking (markSessionObserved, markSessionIdle, isSessionUnobserved)', () => {

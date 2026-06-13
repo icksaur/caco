@@ -37,6 +37,13 @@ class ChatViewController {
   private sessionDrafts = new Map<string, string>();
   private sessionPrompts = new Map<string, string>();
   private footerSessionId: string | null = null;
+  /** Last full session-status params, captured in showChat. Lets
+   *  applyCwdChange re-render the session footer with a new cwd/git
+   *  without losing session identity (name, icon, model). */
+  private lastStatusParams: {
+    modelId?: string; hasGit: boolean; name?: string;
+    sessionId: string; hasIcon?: boolean; gitBranch?: string | null;
+  } | null = null;
 
   /** Per-view form controllers, bound after construction via
    *  bindForms(). main.ts constructs the instances and passes them
@@ -374,10 +381,23 @@ class ChatViewController {
     const model = models.find(m => m.id === id);
     const modelName = model?.name || id?.split('/').pop() || '';
     if (sessionId) {
+      this.lastStatusParams = { modelId: id, hasGit, name, sessionId, hasIcon, gitBranch };
       renderSessionStatus({ modelName, cwd, hasGit, sessionName: name, sessionId, hasIcon, gitBranch });
     } else {
       renderNewChatStatus(modelName, cwd);
     }
+  }
+
+  /**
+   * Re-render the session footer after a cwd change (e.g. /session-cwd).
+   * Reuses the cached session identity (name, icon, model) and applies the
+   * new cwd + recomputed git info. No-op if the footer isn't showing a
+   * session or the change is for a different session.
+   */
+  applyCwdChange(sessionId: string, cwd: string, hasGit: boolean, gitBranch: string | null): void {
+    if (this.footerSessionId !== sessionId || !this.lastStatusParams) return;
+    const p = this.lastStatusParams;
+    this.updateStatus(cwd, p.modelId, hasGit, p.name, sessionId, p.hasIcon, gitBranch);
   }
 
   /**

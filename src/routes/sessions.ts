@@ -517,6 +517,17 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
       data: { reason: folder !== undefined ? 'updated' : 'renamed', sessionId } 
     });
   }
+
+  // When cwd changed, return the new cwd + recomputed git info so the
+  // client can re-render the full session status (the new dir may be a
+  // different git repo than the old one).
+  if (newCwd !== undefined) {
+    const effectiveCwd = sessionManager.getSessionCwd(sessionId) || newCwd;
+    const hasGit = !!(effectiveCwd && existsSync(join(effectiveCwd, '.git')));
+    const gitBranch = hasGit ? readGitBranch(effectiveCwd) : null;
+    res.json({ success: true, cwd: effectiveCwd, hasGit, gitBranch });
+    return;
+  }
   
   res.json({ success: true });
 });

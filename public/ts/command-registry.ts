@@ -70,8 +70,10 @@ registerBuiltin('session-cwd', async (newCwd) => {
       body: JSON.stringify({ cwd: trimmed })
     });
     if (res.ok) {
-      chatView.updateStatus(trimmed);
-      showToast(`CWD → ${trimmed}`, { type: 'success', autoHideMs: 3000 });
+      const data = await res.json().catch(() => ({}));
+      const effectiveCwd = typeof data.cwd === 'string' ? data.cwd : trimmed;
+      chatView.applyCwdChange(sessionId, effectiveCwd, !!data.hasGit, data.gitBranch ?? null);
+      showToast(`CWD → ${effectiveCwd}`, { type: 'success', autoHideMs: 3000 });
     } else {
       const data = await res.json().catch(() => ({ error: 'Unknown error' }));
       showToast(data.error || 'Failed to change CWD');

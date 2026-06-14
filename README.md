@@ -150,6 +150,49 @@ Caco wraps the Copilot SDK which wraps Copilot-CLI. You can configure Copilot-CL
 - Use for custom validation, logging, or environment setup
 - Ask your agent to help create hooks for your project
 
+### Model Providers (BYOK)
+
+By default Caco lists the GitHub Copilot models available to your account. You can additionally bring your own models from any OpenAI-compatible, Anthropic, Azure, or local (Ollama) provider — including gateways like [OpenRouter](https://openrouter.ai) — by creating `~/.caco/providers.json`. BYOK models appear in the new-chat picker and `/session-model` grouped under their provider, alongside GitHub models.
+
+This is a **Caco-owned** file; the Copilot CLI never reads it. With no file present, Caco behaves exactly as before (GitHub-only).
+
+```jsonc
+{
+  "providers": {
+    "openrouter": {
+      "type": "openai",                          // "openai" | "azure" | "anthropic"
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKeyEnv": "OPENROUTER_API_KEY",          // NAME of an env var, never the key itself
+      "models": [
+        {
+          "id": "anthropic/claude-opus-4",         // wire model sent to the provider
+          "name": "Claude Opus 4",                 // display name
+          "contextWindow": 200000,
+          "inputPerMtok": 5, "outputPerMtok": 25, "cachePerMtok": 0.5
+        }
+      ]
+    },
+    "ollama": {
+      "type": "openai",
+      "baseUrl": "http://localhost:11434/v1",      // no key needed for local
+      "models": [
+        { "id": "qwen2.5-coder:32b", "name": "Qwen2.5 Coder 32B", "contextWindow": 32768 }
+      ]
+    }
+  }
+}
+```
+
+**Notes:**
+- **Credentials are env-var *names*, never inline secrets.** Use `apiKeyEnv`, or `bearerTokenEnv` for bearer-token auth (takes precedence), or `headersEnv` (a map of header name → env var) for proxies needing static headers. Both are optional for local providers.
+- The env vars must be set in the **server's** environment before it starts — Caco reads them when a session is created, not from your post-launch shell.
+- BYOK model ids are namespaced `providerId:modelId` (e.g. `openrouter:anthropic/claude-opus-4`); a provider key must not contain `:`.
+- Optional per-model `agentModel` picks the Copilot-known model used for agent configuration (tools/prompts/limits); it defaults to a sane model if omitted.
+- A missing or malformed file, or a model with an unset key, never breaks GitHub models — listing continues and only the affected BYOK model fails (at session start, with a clear message).
+- Editing the file takes effect on the next server restart.
+
+See [docs/multi-provider.md](docs/multi-provider.md) for background and [docs/byok-spec.md](docs/byok-spec.md) for the design.
+
 ## Shortcuts
 
 | Shortcut | Action |
@@ -190,6 +233,7 @@ tests/              # Vitest unit tests
 ```
 ~/.caco/
 ├── applets/       # Saved applets (each: meta.json, content.html, script.js, style.css)
+├── providers.json # Optional: BYOK model providers (see "Model Providers" above)
 ├── sessions/      # Chat session state (UUID dirs with messages, outputs, state)
 └── usage.json     # Token usage tracking
 ```

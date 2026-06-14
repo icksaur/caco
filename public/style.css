@@ -1431,6 +1431,16 @@ main {
   margin-left: var(--space-sm);
 }
 
+.model-group-header {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  padding: var(--space-sm) var(--space-sm) var(--space-xs);
+  margin-top: var(--space-xs);
+  border-top: 1px solid var(--color-border);
+}
+
 .model-cost .cost-in,
 .model-cost .cost-out,
 .model-cost .cost-cache {

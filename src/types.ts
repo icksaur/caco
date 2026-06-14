@@ -60,6 +60,8 @@ export interface CreateConfig {
 export interface ResumeConfig {
   toolFactory: ToolFactory;
   excludedTools?: string[];
+  /** Internal: override the persisted model (used by cross-provider switch recreate). */
+  modelOverride?: string;
 }
 
 export interface ResumeResult {

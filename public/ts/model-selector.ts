@@ -62,57 +62,86 @@ export function loadModels(): void {
   const currentModel = getSelectedModel();
   const models = getModels();
   
+  // Group by provider: GitHub models (bare ids) first with no header, then each
+  // BYOK provider (id prefix before the first ':') under a sub-header.
+  const github: typeof models = [];
+  const byProvider = new Map<string, typeof models>();
   for (const model of models) {
-    const item = document.createElement('div');
-    item.className = 'model-item';
-    if (model.id === currentModel) {
-      item.classList.add('active');
-    }
-    item.dataset.modelId = model.id;
-    item.onclick = () => selectModel(model.id);
-    
-    // Model name + context window (separate spans so ctx isn't clipped by ellipsis)
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'model-name';
-    nameSpan.textContent = model.name;
-    item.appendChild(nameSpan);
-    if (model.contextWindow) {
-      const ctxSpan = document.createElement('span');
-      ctxSpan.className = 'model-context';
-      ctxSpan.textContent = formatContextWindow(model.contextWindow);
-      item.appendChild(ctxSpan);
-    }
-    
-    // Cost breakdown: in / out / cache per MTOK
-    const costSpan = document.createElement('span');
-    costSpan.className = 'model-cost';
-    const hasPrices = model.inputPerMtok !== null && model.inputPerMtok !== undefined
-      && model.outputPerMtok !== null && model.outputPerMtok !== undefined;
-    if (hasPrices) {
-      const fmt = (n: number) => n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(2).replace(/\.?0+$/, '');
-      const parts: string[] = [
-        `<span class="cost-in">${fmt(model.inputPerMtok!)}</span> <span class="cost-label">in</span>`,
-        `<span class="cost-out">${fmt(model.outputPerMtok!)}</span> <span class="cost-label">out</span>`,
-      ];
-      if (model.cachePerMtok !== null && model.cachePerMtok !== undefined) {
-        parts.push(`<span class="cost-cache">${fmt(model.cachePerMtok)}</span> <span class="cost-label">cache</span>`);
-      }
-      costSpan.innerHTML = parts.join(' ');
-      costSpan.title = 'price per million tokens';
-      if (model.priceCategory) costSpan.classList.add(`tier-${model.priceCategory.replace('_', '-')}`);
-    } else if (model.cost === 0) {
-      costSpan.textContent = 'free';
-      costSpan.classList.add('free');
+    const idx = model.id.indexOf(':');
+    if (idx === -1) {
+      github.push(model);
     } else {
-      costSpan.hidden = true;
+      const providerId = model.id.slice(0, idx);
+      const group = byProvider.get(providerId) ?? [];
+      group.push(model);
+      byProvider.set(providerId, group);
     }
-    item.appendChild(costSpan);
-    
-    container.appendChild(item);
+  }
+  
+  for (const model of github) {
+    container.appendChild(renderModelItem(model, currentModel));
+  }
+  for (const [providerId, group] of byProvider) {
+    const header = document.createElement('div');
+    header.className = 'model-group-header';
+    header.textContent = providerId;
+    container.appendChild(header);
+    for (const model of group) {
+      container.appendChild(renderModelItem(model, currentModel));
+    }
   }
   
   // Update footer with model + CWD as user types
   setupCwdFooterSync();
+}
+
+function renderModelItem(model: ModelInfo, currentModel: string | null): HTMLElement {
+  const item = document.createElement('div');
+  item.className = 'model-item';
+  if (model.id === currentModel) {
+    item.classList.add('active');
+  }
+  item.dataset.modelId = model.id;
+  item.onclick = () => selectModel(model.id);
+  
+  // Model name + context window (separate spans so ctx isn't clipped by ellipsis)
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'model-name';
+  nameSpan.textContent = model.name;
+  item.appendChild(nameSpan);
+  if (model.contextWindow) {
+    const ctxSpan = document.createElement('span');
+    ctxSpan.className = 'model-context';
+    ctxSpan.textContent = formatContextWindow(model.contextWindow);
+    item.appendChild(ctxSpan);
+  }
+  
+  // Cost breakdown: in / out / cache per MTOK
+  const costSpan = document.createElement('span');
+  costSpan.className = 'model-cost';
+  const hasPrices = model.inputPerMtok !== null && model.inputPerMtok !== undefined
+    && model.outputPerMtok !== null && model.outputPerMtok !== undefined;
+  if (hasPrices) {
+    const fmt = (n: number) => n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(2).replace(/\.?0+$/, '');
+    const parts: string[] = [
+      `<span class="cost-in">${fmt(model.inputPerMtok!)}</span> <span class="cost-label">in</span>`,
+      `<span class="cost-out">${fmt(model.outputPerMtok!)}</span> <span class="cost-label">out</span>`,
+    ];
+    if (model.cachePerMtok !== null && model.cachePerMtok !== undefined) {
+      parts.push(`<span class="cost-cache">${fmt(model.cachePerMtok)}</span> <span class="cost-label">cache</span>`);
+    }
+    costSpan.innerHTML = parts.join(' ');
+    costSpan.title = 'price per million tokens';
+    if (model.priceCategory) costSpan.classList.add(`tier-${model.priceCategory.replace('_', '-')}`);
+  } else if (model.cost === 0) {
+    costSpan.textContent = 'free';
+    costSpan.classList.add('free');
+  } else {
+    costSpan.hidden = true;
+  }
+  item.appendChild(costSpan);
+  
+  return item;
 }
 
 let cwdSyncInstalled = false;

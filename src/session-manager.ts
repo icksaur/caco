@@ -1,8 +1,9 @@
 import { CopilotClient, approveAll } from '@github/copilot-sdk';
+import type { ProviderConfig } from '@github/copilot-sdk';
 import { existsSync, mkdirSync, cpSync, rmSync, mkdtempSync, createWriteStream } from 'fs';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
-import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage, SessionEvent } from './types.js';
+import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage, SessionEvent, ToolFactory } from './types.js';
 import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
 import { readSessionWorkspace, readSessionEvents, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
@@ -13,6 +14,7 @@ import type { QuotaSnapshot } from './usage-state.js';
 import { loadMcpServers } from './mcp-config-loader.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
 import { clearSession as clearThroughputSession } from './session-throughput.js';
+import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 
@@ -44,6 +46,9 @@ interface CopilotClientInstance {
       getQuota: (params: { gitHubToken?: string }) => Promise<{
         quotaSnapshots: Record<string, QuotaSnapshot | undefined>;
       }>;
+    };
+    models: {
+      list(params: { gitHubToken?: string }): Promise<{ models: SDKModelInfo[] }>;
     };
     tools: {
       list(params: { model?: string }): Promise<{ tools: ToolInfo[] }>;
@@ -85,6 +90,7 @@ interface CreateSessionConfig {
   systemMessage?: SystemMessage;
   tools?: unknown[];
   excludedTools?: string[];
+  provider?: ProviderConfig;
 }
 
 interface ResumeSessionConfig {
@@ -92,6 +98,8 @@ interface ResumeSessionConfig {
   tools?: unknown[];
   excludedTools?: string[];
   systemMessage?: { mode: 'append'; content: string };
+  model?: string;
+  provider?: ProviderConfig;
 }
 
 interface CopilotSessionInstance {
@@ -121,6 +129,9 @@ interface SendOptions {
 interface ActiveSession {
   cwd: string;
   session: CopilotSessionInstance;
+  providerId?: string;
+  toolFactory: ToolFactory;
+  excludedTools?: string[];
 }
 
 interface CachedSession {
@@ -144,6 +155,26 @@ interface SessionListItem {
   scheduleSlug: string | null;
   scheduleNextRun: string | null;
   folder?: string;
+}
+
+/**
+ * Replicate the capability defaulting the SDK applies on its native models.list
+ * path but skips when an onListModels handler is set (client.js). Ensures every
+ * model has capabilities.limits.max_context_window_tokens so downstream reads
+ * don't throw.
+ */
+function normalizeModelCapabilities(model: SDKModelInfo): SDKModelInfo {
+  const caps = model.capabilities ?? {};
+  return {
+    ...model,
+    capabilities: {
+      supports: caps.supports ?? {},
+      limits: {
+        ...caps.limits,
+        max_context_window_tokens: caps.limits?.max_context_window_tokens ?? 0,
+      },
+    },
+  };
 }
 
 // ============================================================================
@@ -214,7 +245,14 @@ class SessionManager {
     if (this.clientStarting) return this.clientStarting;
     
     this.clientStarting = (async () => {
-      const client = new CopilotClient({ workingDirectory: process.cwd() }) as unknown as CopilotClientInstance;
+      const clientOptions: Record<string, unknown> = { workingDirectory: process.cwd() };
+      // Only attach onListModels when BYOK providers are configured. With no
+      // config the handler is never installed, so the SDK uses its native
+      // models.list path unchanged — a no-config user sees zero behavior change.
+      if (hasProviders()) {
+        clientOptions.onListModels = () => this.aggregateModels();
+      }
+      const client = new CopilotClient(clientOptions) as unknown as CopilotClientInstance;
       await client.start();
       this.sharedClient = client;
       this.startHealthCheck();
@@ -362,6 +400,32 @@ class SessionManager {
   }
 
   /**
+   * onListModels handler — installed only when BYOK providers exist. Fetches
+   * GitHub models via the raw RPC (NOT listModels(), which would recurse),
+   * replicates the capability normalization the SDK skips on this path, then
+   * appends BYOK models. A registry fault degrades to GitHub-only.
+   */
+  private async aggregateModels(): Promise<SDKModelInfo[]> {
+    let githubModels: SDKModelInfo[] = [];
+    try {
+      const client = this.sharedClient;
+      if (client) {
+        const result = await client.rpc.models.list({});
+        githubModels = (result.models ?? []).map(normalizeModelCapabilities);
+      }
+    } catch (e) {
+      console.warn('[BYOK] Failed to fetch GitHub models; returning BYOK-only:', e);
+    }
+    let byokModels: SDKModelInfo[] = [];
+    try {
+      byokModels = listByokModels();
+    } catch (e) {
+      console.error('[BYOK] Failed to list BYOK models; returning GitHub-only:', e);
+    }
+    return [...githubModels, ...byokModels];
+  }
+
+  /**
    * Scan ~/.copilot/session-state/ and extract sessionId, cwd, summary
    */
   private _discoverSessions(): void {
@@ -412,13 +476,15 @@ class SessionManager {
     
     const client = await this.ensureClient();
     
+    const resolved = resolveModel(config.model);
+    
     const sessionRef = { id: 'PENDING' };
     const tools = config.toolFactory(cwd, sessionRef);
     
     let session: CopilotSessionInstance;
     try {
       session = await client.createSession({
-        model: config.model,
+        model: resolved.sdkModel,
         streaming: true,
         systemMessage: config.systemMessage,
         tools,
@@ -426,7 +492,8 @@ class SessionManager {
         onPermissionRequest: approveAll,
         configDir: join(homedir(), '.copilot'),
         mcpServers: await loadMcpServers(),
-        workingDirectory: cwd
+        workingDirectory: cwd,
+        ...(resolved.provider && { provider: resolved.provider }),
       } as CreateSessionConfig);
     } catch (e) {
       this.handleClientError(e);
@@ -435,15 +502,21 @@ class SessionManager {
     
     sessionRef.id = session.sessionId;
     
-    this.activeSessions.set(session.sessionId, { cwd, session });
+    this.activeSessions.set(session.sessionId, {
+      cwd,
+      session,
+      providerId: resolved.providerId,
+      toolFactory: config.toolFactory,
+      excludedTools: config.excludedTools,
+    });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
     
     // Register with storage layer for output persistence
     registerSession(cwd, session.sessionId);
     ensureSessionMeta(session.sessionId);
     
-    // Cache model in metadata
-    syncModelCache(session.sessionId, config.model);
+    // Cache model in metadata — store the namespaced Caco id, not the SDK model
+    syncModelCache(session.sessionId, resolved.cacoId);
     
     console.log(`✓ Created session ${session.sessionId} for ${cwd} with model ${config.model}`);
     return session.sessionId;
@@ -523,6 +596,15 @@ class SessionManager {
     const sessionRef = { id: sessionId };
     const tools = config.toolFactory(cwd, sessionRef);
     
+    // Re-derive the provider binding from the persisted Caco model id. For BYOK
+    // sessions the namespaced id (e.g. "openrouter:...") encodes the provider;
+    // the SDK only knows the agent model, so meta is the source of truth. A
+    // modelOverride (cross-provider switch) forces the session onto a new model.
+    const isOverride = config.modelOverride !== undefined;
+    const cacoModel = config.modelOverride ?? readModelFromEvents(sessionId);
+    const resolved = cacoModel ? resolveModel(cacoModel) : null;
+    const applyModel = !!resolved && (!!resolved.provider || isOverride);
+    
     let repairMessage: string | undefined;
     const memoryContent = formatMemoryForPrompt();
     const resumeArgs = {
@@ -534,6 +616,8 @@ class SessionManager {
       mcpServers: await loadMcpServers(),
       workingDirectory: cwd,
       ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
+      ...(applyModel && { model: resolved.sdkModel }),
+      ...(resolved?.provider && { provider: resolved.provider }),
     } as ResumeSessionConfig;
 
     const MAX_REPAIR_ATTEMPTS = 3;
@@ -598,7 +682,13 @@ class SessionManager {
     }
     const session: CopilotSessionInstance = attemptedSession;
     
-    this.activeSessions.set(sessionId, { cwd, session });
+    this.activeSessions.set(sessionId, {
+      cwd,
+      session,
+      providerId: resolved?.providerId,
+      toolFactory: config.toolFactory,
+      excludedTools: config.excludedTools,
+    });
     
     // Evict oldest inactive sessions if over the limit
     this.evictInactiveSessions();
@@ -607,8 +697,14 @@ class SessionManager {
     registerSession(cwd, sessionId);
     ensureSessionMeta(sessionId);
     
-    // Sync model from SDK to cache (may have changed via copilot-cli)
-    syncModelCache(sessionId);
+    // Sync model to cache. For BYOK or an explicit override the SDK only knows
+    // the agent model, so persist the namespaced Caco id; otherwise parse from
+    // SDK (the model may have changed via the external copilot-cli).
+    if (applyModel && resolved.cacoId) {
+      syncModelCache(sessionId, resolved.cacoId);
+    } else {
+      syncModelCache(sessionId);
+    }
     
     console.log(`✓ Resumed session ${sessionId} for ${cwd}${usedFallbackCwd ? ' (fallback)' : ''}${repairMessage ? ' (repaired)' : ''}`);
     return { sessionId, usedFallbackCwd, repairMessage };
@@ -926,16 +1022,64 @@ class SessionManager {
 
   /**
    * Change the model for an active session.
-   * Takes effect on the next message. Conversation history preserved.
+   *
+   * Fast path (GitHub → GitHub): SDK setModel preserves history in-place.
+   * Recreate path (any BYOK side): the SDK binds a provider's wireModel at
+   * create/resume and setModel cannot change it, so switching to/from/between
+   * BYOK providers tears down the SDK session and resumes it under the new
+   * model+provider. History on disk is preserved and replayed.
+   *
+   * resolveModel() runs before any teardown, so missing-credential switches
+   * fail fast with the SDK session untouched. If the recreate resume fails for
+   * another reason (e.g. history error), we roll back to the original model so
+   * the session stays usable rather than orphaned.
    */
   async setSessionModel(sessionId: string, model: string): Promise<void> {
     const active = this.activeSessions.get(sessionId);
     if (!active) {
       throw new Error(`Session ${sessionId} is not active`);
     }
-    await active.session.setModel(model);
-    syncModelCache(sessionId, model);
-    console.log(`[MODEL] Changed session ${sessionId.slice(0, 8)} to ${model}`);
+
+    const resolved = resolveModel(model);
+    const fastPath = !resolved.provider && !active.providerId;
+
+    if (fastPath) {
+      await active.session.setModel(resolved.sdkModel);
+      syncModelCache(sessionId, resolved.cacoId);
+      console.log(`[MODEL] Changed session ${sessionId.slice(0, 8)} to ${model}`);
+      return;
+    }
+
+    // Cross-provider (or BYOK-involving) switch: recreate under the new binding.
+    // Capture the original model first so we can roll back on resume failure.
+    const previousModel = readModelFromEvents(sessionId);
+    const { toolFactory, excludedTools } = active;
+    try {
+      await active.session.disconnect();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`[MODEL] disconnect during provider switch failed: ${msg}`);
+    }
+    dispatchState.end(sessionId);
+    this.activeSessions.delete(sessionId);
+
+    try {
+      await this.resume(sessionId, { toolFactory, excludedTools, modelOverride: model });
+      console.log(`[MODEL] Recreated session ${sessionId.slice(0, 8)} on ${model} (provider switch from ${active.providerId ?? 'github'})`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (previousModel && previousModel !== model) {
+        try {
+          await this.resume(sessionId, { toolFactory, excludedTools, modelOverride: previousModel });
+          console.warn(`[MODEL] Switch to ${model} failed; reverted ${sessionId.slice(0, 8)} to ${previousModel}`);
+          throw new Error(`Model switch to ${model} failed (${msg}); reverted to ${previousModel}`);
+        } catch (rollbackErr) {
+          const rmsg = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+          throw new Error(`Model switch to ${model} failed (${msg}) and rollback to ${previousModel} failed (${rmsg}); session ended`);
+        }
+      }
+      throw e;
+    }
   }
 
   async compactSession(sessionId: string): Promise<{ tokensRemoved: number; messagesRemoved: number }> {

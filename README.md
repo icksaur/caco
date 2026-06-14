@@ -12,23 +12,11 @@ A self-extensible web-based wrapper for the [GitHub Copilot SDK](https://github.
 - self modification and self introspection
 - session-to-session orchestration, delegation, and scatter-gather
 - custom UI elements called "applets" for when chat interface doesn't make sense
+- ad-hoc per-session surface for UI-to-agent collaboration
 - extensibile slash commands, pound-completion, tools, and applets
-- scheduled agentic tasks
+- scheduled tasks
+- BYOK provider support
 - almost everything else Copilot-CLI can do
-
-## Basic Architecture
-
-```
-Browser (localhost:53000)
-    ↓ WebSocket + fetch
-Express Server
-    ↓ JSON-RPC
-Copilot SDK → Copilot-CLI → GitHub Copilot
-```
-
-**Frontend:** TypeScript, bundled with esbuild  
-**Backend:** Node.js + Express + Copilot SDK  
-**Streaming:** WebSocket (real-time events)
 
 ## Requirements
 
@@ -52,7 +40,17 @@ npm install && npm run build && .\start.ps1
 
 Open `http://localhost:53000`
 
-### Autostart on Windows Login
+## Usage
+
+Toggle the session-view UI via the session button.  Scheduled sessions appear here.  You can select and create new sessions here.
+
+Chat sessions started in the browser UI have a prompt explaining features to the agent.  Ask the agent about any features.
+
+**Click-and-hold/long-press on the applet button to load the applet browser.**
+
+Type a forward slash `/` to see all less-common controls, like session archival, model selection, and session renaming.
+
+## Autostart on Windows Login
 
 A VBS wrapper launches Caco in the background with no visible window:
 
@@ -70,15 +68,7 @@ $sc.Save()
 
 To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Caco.lnk"`
 
-## Usage
-
-Toggle the session-view UI via the session button.  Scheduled sessions appear here.  You can select and create new sessions here.
-
-Chat sessions started in the browser UI have a prompt explaining features to the agent.  Ask the agent about any features.
-
-Long-press/click-and-hold on the applet button to load the applet browser.
-
-Type a forward slash `/` to see all less-common controls, like session archival, model selection, and session renaming.
+## Advanced Usage
 
 ### Slash Commands
 
@@ -202,6 +192,20 @@ See [docs/multi-provider.md](docs/multi-provider.md) for background and [docs/by
 | `Escape` `.` | Toggle applet panel |
 | `Escape` `,` | Expand applet panel |
 
+## Basic Architecture
+
+```
+Browser (localhost:53000)
+    ↓ WebSocket + fetch
+Express Server
+    ↓ JSON-RPC
+Copilot SDK → Copilot-CLI → GitHub Copilot
+```
+
+**Frontend:** TypeScript, bundled with esbuild  
+**Backend:** Node.js + Express + Copilot SDK  
+**Streaming:** WebSocket (real-time events)
+
 ## Development
 
 ```bash
@@ -243,5 +247,3 @@ tests/              # Vitest unit tests
 - [API.md](API.md) - Complete API reference
 - [APPLETS.md](APPLETS.md) - Applet authoring guide
 - [EXTENSIONS.md](EXTENSIONS.md) - Extensions and skills
-
-TEST

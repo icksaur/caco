@@ -20,6 +20,7 @@ export interface ModelInfo {
   inputPerMtok?: number;
   outputPerMtok?: number;
   cachePerMtok?: number;
+  contextWindow?: number;
 }
 
 export type SessionKind = 'interactive' | 'agent' | 'swarm' | 'scheduled';

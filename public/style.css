@@ -1302,7 +1302,7 @@ main {
 .session-item.dragging { opacity: 0.5; }
 
 .model-name {
-  flex: 1;
+  flex: 0 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1406,9 +1406,9 @@ main {
 /* Model cost badge */
 .model-cost {
   flex-shrink: 0;
+  margin-left: auto;
   font-size: var(--text-sm);
   color: var(--color-text-muted);
-  margin-left: var(--space-lg);
   padding: 0.15rem 0.4rem;
   background: var(--bg-surface);
   border-radius: var(--radius-md);
@@ -1423,6 +1423,22 @@ main {
 .model-cost.tier-medium { color: var(--color-text); }
 .model-cost.tier-high { color: var(--color-cost-expensive); }
 .model-cost.tier-very-high { color: var(--color-cost-premium); }
+
+.model-context {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin-left: var(--space-sm);
+}
+
+.model-cost .cost-in,
+.model-cost .cost-out,
+.model-cost .cost-cache {
+  color: var(--color-text);
+}
+.model-cost .cost-label {
+  color: var(--color-text-muted);
+}
 
 /* CWD group headers */
 .cwd-header {

@@ -146,7 +146,7 @@ router.get('/sessions', async (_req: Request, res: Response) => {
     peers: peerSessions,
     models: models.map(m => {
       const s = modelCostSummary(m);
-      return { id: m.id, name: m.name, cost: s.multiplier, priceCategory: s.priceCategory, category: s.category, inputPerMtok: s.inputPerMtok, outputPerMtok: s.outputPerMtok, cachePerMtok: s.cachePerMtok };
+      return { id: m.id, name: m.name, cost: s.multiplier, priceCategory: s.priceCategory, category: s.category, inputPerMtok: s.inputPerMtok, outputPerMtok: s.outputPerMtok, cachePerMtok: s.cachePerMtok, contextWindow: s.contextWindow };
     })
   });
 });

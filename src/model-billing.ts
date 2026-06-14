@@ -6,6 +6,7 @@ export interface ModelCostSummary {
   inputPerMtok?: number;
   outputPerMtok?: number;
   cachePerMtok?: number;
+  contextWindow?: number;
   multiplier: number;
 }
 
@@ -17,6 +18,7 @@ function toPerMtok(price: number | undefined, batchSize: number | undefined): nu
 export function modelCostSummary(m: SDKModelInfo): ModelCostSummary {
   const tp = m.billing?.tokenPrices;
   const batchSize = tp?.batchSize;
+  const contextWindow = m.capabilities?.limits?.max_context_window_tokens ?? tp?.contextMax;
   return {
     multiplier: m.billing?.multiplier ?? 1,
     priceCategory: m.modelPickerPriceCategory,
@@ -24,5 +26,6 @@ export function modelCostSummary(m: SDKModelInfo): ModelCostSummary {
     inputPerMtok: toPerMtok(tp?.inputPrice, batchSize),
     outputPerMtok: toPerMtok(tp?.outputPrice, batchSize),
     cachePerMtok: toPerMtok(tp?.cachePrice, batchSize),
+    contextWindow,
   };
 }

@@ -19,6 +19,14 @@ const FALLBACK_MODELS: ModelInfo[] = [
   { id: 'gpt-4.1', name: 'GPT-4.1', cost: 0 },
 ];
 
+function formatContextWindow(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  return `${Math.round(n / 1000)}k`;
+}
+
 /**
  * Set available models from server response
  */
@@ -63,17 +71,34 @@ export function loadModels(): void {
     item.dataset.modelId = model.id;
     item.onclick = () => selectModel(model.id);
     
-    // Model name
+    // Model name + context window (separate spans so ctx isn't clipped by ellipsis)
     const nameSpan = document.createElement('span');
     nameSpan.className = 'model-name';
     nameSpan.textContent = model.name;
     item.appendChild(nameSpan);
+    if (model.contextWindow) {
+      const ctxSpan = document.createElement('span');
+      ctxSpan.className = 'model-context';
+      ctxSpan.textContent = formatContextWindow(model.contextWindow);
+      item.appendChild(ctxSpan);
+    }
     
-    // Cost indicator
+    // Cost breakdown: in / out / cache per MTOK
     const costSpan = document.createElement('span');
     costSpan.className = 'model-cost';
-    if (model.inputPerMtok !== null && model.inputPerMtok !== undefined && model.outputPerMtok !== null && model.outputPerMtok !== undefined) {
-      costSpan.textContent = `${model.inputPerMtok}:${model.outputPerMtok}/Mtok`;
+    const hasPrices = model.inputPerMtok !== null && model.inputPerMtok !== undefined
+      && model.outputPerMtok !== null && model.outputPerMtok !== undefined;
+    if (hasPrices) {
+      const fmt = (n: number) => n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(2).replace(/\.?0+$/, '');
+      const parts: string[] = [
+        `<span class="cost-in">${fmt(model.inputPerMtok!)}</span> <span class="cost-label">in</span>`,
+        `<span class="cost-out">${fmt(model.outputPerMtok!)}</span> <span class="cost-label">out</span>`,
+      ];
+      if (model.cachePerMtok !== null && model.cachePerMtok !== undefined) {
+        parts.push(`<span class="cost-cache">${fmt(model.cachePerMtok)}</span> <span class="cost-label">cache</span>`);
+      }
+      costSpan.innerHTML = parts.join(' ');
+      costSpan.title = 'price per million tokens';
       if (model.priceCategory) costSpan.classList.add(`tier-${model.priceCategory.replace('_', '-')}`);
     } else if (model.cost === 0) {
       costSpan.textContent = 'free';

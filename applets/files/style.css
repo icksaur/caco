@@ -492,6 +492,41 @@
 }
 .fe-picker-item.disabled:hover .fe-picker-copy { opacity: 1; }
 
+.fe-picker-breadcrumb {
+  padding: 4px var(--space-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  min-height: 0;
+}
+.fe-picker-breadcrumb:empty { display: none; }
+.fe-picker-bc-item {
+  color: var(--color-accent, #6cf);
+  cursor: pointer;
+  padding: 1px 2px;
+  border-radius: 2px;
+}
+.fe-picker-bc-item:last-child {
+  color: var(--color-text-bright);
+  cursor: default;
+}
+.fe-picker-bc-item:not(:last-child):hover {
+  background: var(--color-surface-2, #2a2a2a);
+}
+.fe-picker-bc-sep {
+  color: var(--color-text-muted);
+  padding: 0 1px;
+}
+.fe-picker-dir .fe-picker-path {
+  font-weight: 500;
+}
+
 /* V3.5 selection highlight — softened from V3.4 so the browser's
  * native blue selection reads clearly on top when the pane is
  * focused. After focus moves elsewhere, the native highlight is

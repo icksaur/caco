@@ -20,7 +20,6 @@
   var tabsEl = document.getElementById('feTabs');
   var paneEl = document.getElementById('fePane');
   var paneEmptyEl = document.getElementById('fePaneEmpty');
-  var notGitEl = document.getElementById('feNotGit');
   var rootEl = paneEl.parentNode;
 
   // ── State machine ─────────────────────────────────────────────────────
@@ -83,6 +82,11 @@
   }
   var sessionId = null;
   var cachedCwd = '';
+  // True until the snapshot fetch proves the cwd is not a git repo
+  // (404). A non-git cwd can't use the diff/edit path (/file-edits/open
+  // resolves files via git HEAD), so in-cwd opens fall back to the
+  // read-only external viewer. See openAnyPath.
+  var cwdIsGit = true;
   var TAB_CAP = 50;
 
   // V3.y.1: deep-link queue. cold-load fires onUrlParamsChange
@@ -155,6 +159,11 @@
     }
     if (_isAbsolutePath(input) && isExternal(input)) {
       void routeOpenExternal(input, opts || {});
+    } else if (!cwdIsGit) {
+      // In-cwd file but the cwd is not a git repo: the diff path
+      // (/file-edits/open) would 404 on git HEAD resolution. Open
+      // read-only via the external viewer using the absolute path.
+      void routeOpenExternal(absPathOf(input), opts || {});
     } else {
       var relPath = _relativizePath(input);
       void routeOpen(relPath, opts || {});
@@ -1963,13 +1972,12 @@
 
   function updateEmptyState() {
     var hasTabs = tabs.size > 0;
-    paneEmptyEl.hidden = hasTabs || !notGitEl.hidden;
+    paneEmptyEl.hidden = hasTabs;
     if (!hasTabs && activeTabId === null) {
       // empty pane: clear any leftover content but keep our message div
-      if (paneEl.firstChild && paneEl.firstChild !== paneEmptyEl && paneEl.firstChild !== notGitEl) {
+      if (paneEl.firstChild && paneEl.firstChild !== paneEmptyEl) {
         paneEl.innerHTML = '';
         paneEl.appendChild(paneEmptyEl);
-        paneEl.appendChild(notGitEl);
       }
     }
   }
@@ -2108,6 +2116,8 @@
   var pickerOpenAbort = null;
   var pickerOutsideHandler = null;
 
+  var pickerBreadcrumb = null;
+
   function ensurePickerEl() {
     if (pickerEl) return;
     pickerEl = document.createElement('div');
@@ -2119,9 +2129,12 @@
     pickerInput.setAttribute('placeholder', 'Search files…');
     pickerInput.setAttribute('spellcheck', 'false');
     pickerInput.setAttribute('autocomplete', 'off');
+    pickerBreadcrumb = document.createElement('div');
+    pickerBreadcrumb.className = 'fe-picker-breadcrumb';
     pickerList = document.createElement('ul');
     pickerList.className = 'fe-picker-list';
     pickerEl.appendChild(pickerInput);
+    pickerEl.appendChild(pickerBreadcrumb);
     pickerEl.appendChild(pickerList);
     rootEl.appendChild(pickerEl);
 
@@ -2137,7 +2150,7 @@
       else if (e.key === 'Enter') {
         e.preventDefault();
         var entry = pickerVisible[pickerSelectedIdx];
-        if (entry) pickSelected(entry.rel);
+        if (entry) activatePickerEntry(entry);
       } else if (e.key === 'Escape') {
         // Stop propagation so the input-router's Escape leader
         // timer doesn't arm when the picker eats the keystroke.
@@ -2166,7 +2179,7 @@
       if (target.classList.contains('disabled')) return;
       var flatIdx = Number(target.dataset.flatIdx);
       var entry = pickerVisible[flatIdx];
-      if (entry) pickSelected(entry.rel);
+      if (entry) activatePickerEntry(entry);
     });
   }
 
@@ -2240,11 +2253,14 @@
   var _pickerTypeFilter = null;
   /** V5: one-shot directory root override for the picker. Set by
    *  openPicker({ rootOverride }); cleared by closePicker. When
-   *  set, runPickerFetch uses it in place of cachedCwd, and
-   *  _pickerAbsPathOf resolves picked rels against it. Enables
-   *  ?applet=files&openFinder=1&openFinderRoot=ABS for new-chat
-   *  Ctrl+P and the file-finder stub redirect. */
+   *  set, openPicker seeds _browseRoot from it. After open, all
+   *  resolution uses _browseRoot — _pickerRootOverride is not read
+   *  again. Enables ?applet=files&openFinder=1&openFinderRoot=ABS. */
   var _pickerRootOverride = null;
+  /** Nav: the directory the picker is currently listing/searching.
+   *  Initialized from _pickerRootOverride||cachedCwd in openPicker;
+   *  updated by navigateBrowse; reset to null in closePicker. */
+  var _browseRoot = null;
 
   // V4: per-type icons + hover copy-path. Deliberate verbatim copy
   // of applets/file-finder/script.js fileIcons (parity, not shared
@@ -2296,6 +2312,7 @@
     if (_pickerSource === 'shortcut') {
       _pickerPriorFocus = document.activeElement;
     }
+    _browseRoot = _pickerRootOverride || cachedCwd || '';
     ensurePickerEl();
     pickerOpen = true;
     pickerEl.hidden = false;
@@ -2334,18 +2351,46 @@
     _pickerSource = null;
     _pickerTypeFilter = null;
     _pickerRootOverride = null;
+    _browseRoot = null;
   }
 
   async function runPickerFetch(q) {
-    if (!sessionId && !_pickerRootOverride) return;
-    // V3.y.2: parse type-filter prefix; fetch with the post-filter
-    // query string so the server's substring match is unaffected.
+    if (!_browseRoot) return;
     var parsed = _parseTypeFilter(q);
     _pickerTypeFilter = parsed.filter;
     var fetchQ = parsed.rest;
     var token = ++pickerFetchToken;
-    var rootForFetch = _pickerRootOverride || cachedCwd || '';
-    var url = '/api/project-files?cwd=' + encodeURIComponent(rootForFetch);
+
+    if (!q) {
+      var browseUrl = '/api/files?path=' + encodeURIComponent(_browseRoot);
+      try {
+        var browseRes = await fetch(browseUrl);
+        if (token !== pickerFetchToken) return;
+        if (!browseRes.ok) {
+          pickerResults = [{ kind: 'error', abs: _browseRoot, display: 'Cannot read directory' }];
+          pickerSelectedIdx = 0;
+          renderPickerList();
+          return;
+        }
+        var browseData = await browseRes.json();
+        if (token !== pickerFetchToken) return;
+        var entries = browseData.files || [];
+        pickerResults = entries.map(function(e) {
+          var abs = _joinPath(_browseRoot, e.name);
+          return { kind: e.type === 'directory' ? 'dir' : 'file', abs: abs, display: e.name };
+        });
+        pickerSelectedIdx = 0;
+        renderPickerList();
+      } catch (_) {
+        if (token !== pickerFetchToken) return;
+        pickerResults = [{ kind: 'error', abs: _browseRoot, display: 'Failed to read directory' }];
+        pickerSelectedIdx = 0;
+        renderPickerList();
+      }
+      return;
+    }
+
+    var url = '/api/project-files?cwd=' + encodeURIComponent(_browseRoot);
     if (fetchQ) url += '&q=' + encodeURIComponent(fetchQ);
     try {
       var res = await fetch(url);
@@ -2353,11 +2398,9 @@
       var data = await res.json();
       if (token !== pickerFetchToken) return;
       var files = data.files || [];
-      // Type filter.
       if (_pickerTypeFilter) {
         files = files.filter(function(p) { return _matchesTypeFilter(p, _pickerTypeFilter); });
       }
-      // Fuzzy rank when there's a query; preserve server order otherwise.
       if (fetchQ) {
         files = files
           .map(function(p) { return { p: p, s: _fuzzyScore(fetchQ, p) }; })
@@ -2365,7 +2408,9 @@
           .sort(function(a, b) { return b.s - a.s; })
           .map(function(o) { return o.p; });
       }
-      pickerResults = files.slice(0, PICKER_RESULT_CAP);
+      pickerResults = files.slice(0, PICKER_RESULT_CAP).map(function(relPath) {
+        return { kind: 'file', abs: _joinPath(_browseRoot, relPath), display: relPath };
+      });
       pickerSelectedIdx = 0;
       renderPickerList();
     } catch (_) { /* ignore */ }
@@ -2393,7 +2438,8 @@
       pickerList.appendChild(chip);
     }
 
-    // V3.y.2: recent files (when query is empty).
+    renderPickerBreadcrumb();
+
     var hasQuery = pickerLastQuery && pickerLastQuery.length > 0;
     if (!hasQuery) {
       var recents = _loadRecentFiles();
@@ -2407,9 +2453,9 @@
           var rp = shown[ri];
           var rli = document.createElement('li');
           rli.className = 'fe-picker-item fe-picker-recent';
-          var rRel = _relativizePath(rp);
+          var rEntry = { kind: 'file', abs: rp, display: rp, recent: true };
           var rFlat = pickerVisible.length;
-          pickerVisible.push({ rel: rRel, recent: true });
+          pickerVisible.push(rEntry);
           rli.dataset.flatIdx = String(rFlat);
           if (rFlat === pickerSelectedIdx) rli.classList.add('selected');
           var ricon = document.createElement('span');
@@ -2431,42 +2477,74 @@
         if (pickerResults.length > 0) {
           var fh = document.createElement('li');
           fh.className = 'fe-picker-section';
-          fh.textContent = 'Files';
+          fh.textContent = hasQuery ? 'Files' : 'Browse';
           pickerList.appendChild(fh);
         }
       }
     }
 
+    var hasResults = false;
     for (var i = 0; i < pickerResults.length; i++) {
-      var p = pickerResults[i];
-      var li = document.createElement('li');
-      li.className = 'fe-picker-item';
-      var flat = pickerVisible.length;
-      pickerVisible.push({ rel: p, recent: false });
-      li.dataset.flatIdx = String(flat);
-      if (flat === pickerSelectedIdx) li.classList.add('selected');
-      var icon = document.createElement('span');
-      icon.className = 'fe-picker-icon';
-      icon.textContent = _pickerIconFor(p);
-      li.appendChild(icon);
-      var label = document.createElement('span');
-      label.className = 'fe-picker-path';
-      label.textContent = p;
-      li.appendChild(label);
-      if (tabs.has(p)) {
-        li.classList.add('disabled');
-        var sfx = document.createElement('span');
-        sfx.className = 'fe-picker-suffix';
-        sfx.textContent = '(open)';
-        li.appendChild(sfx);
+      var entry = pickerResults[i];
+      if (entry.kind === 'error') {
+        var errLi = document.createElement('li');
+        errLi.className = 'fe-picker-section';
+        errLi.textContent = entry.display;
+        pickerList.appendChild(errLi);
+        continue;
       }
-      var copy = document.createElement('span');
-      copy.className = 'fe-picker-copy';
-      copy.textContent = '📋';
-      copy.title = 'Copy absolute path';
-      copy.dataset.path = _pickerAbsPathOf(p);
-      li.appendChild(copy);
+      hasResults = true;
+      var li = document.createElement('li');
+      if (entry.kind === 'dir') {
+        li.className = 'fe-picker-item fe-picker-dir';
+        var flat = pickerVisible.length;
+        pickerVisible.push(entry);
+        li.dataset.flatIdx = String(flat);
+        if (flat === pickerSelectedIdx) li.classList.add('selected');
+        var icon = document.createElement('span');
+        icon.className = 'fe-picker-icon';
+        icon.textContent = '📁';
+        li.appendChild(icon);
+        var label = document.createElement('span');
+        label.className = 'fe-picker-path';
+        label.textContent = entry.display + '/';
+        li.appendChild(label);
+      } else {
+        li.className = 'fe-picker-item';
+        var flat = pickerVisible.length;
+        pickerVisible.push(entry);
+        li.dataset.flatIdx = String(flat);
+        if (flat === pickerSelectedIdx) li.classList.add('selected');
+        var icon = document.createElement('span');
+        icon.className = 'fe-picker-icon';
+        icon.textContent = _pickerIconFor(entry.display);
+        li.appendChild(icon);
+        var label = document.createElement('span');
+        label.className = 'fe-picker-path';
+        label.textContent = entry.display;
+        li.appendChild(label);
+        if (isPathOpen(entry.abs)) {
+          li.classList.add('disabled');
+          var sfx = document.createElement('span');
+          sfx.className = 'fe-picker-suffix';
+          sfx.textContent = '(open)';
+          li.appendChild(sfx);
+        }
+        var copy = document.createElement('span');
+        copy.className = 'fe-picker-copy';
+        copy.textContent = '📋';
+        copy.title = 'Copy absolute path';
+        copy.dataset.path = entry.abs;
+        li.appendChild(copy);
+      }
       pickerList.appendChild(li);
+    }
+
+    if (!hasQuery && !hasResults && pickerResults.length === 0) {
+      var empty = document.createElement('li');
+      empty.className = 'fe-picker-section';
+      empty.textContent = 'Empty directory';
+      pickerList.appendChild(empty);
     }
 
     if (pickerSelectedIdx >= pickerVisible.length) pickerSelectedIdx = 0;
@@ -2488,14 +2566,6 @@
     }
   }
 
-  function pickSelected(relativePath) {
-    closePicker();
-    // Route through openAnyPath so a _pickerRootOverride outside
-    // cwd correctly opens as external.
-    var abs = _pickerAbsPathOf(relativePath);
-    openAnyPath(abs);
-  }
-
   /** Compute absolute path for a relative path under the session's cwd.
    *  Light-weight join — does not normalise '..' (the server validates).
    *  Idempotent: an already-absolute input is returned unchanged so a
@@ -2508,19 +2578,85 @@
     return trimmed + sep + relativePath;
   }
 
-  /** V5: resolve a picker-relative path against _pickerRootOverride
-   *  when set, else fall back to absPathOf (which uses cachedCwd).
-   *  Used by routeOpen and the picker copy button so a no-session
-   *  ?openFinderRoot=ABS picker opens / copies the correct file.
-   *  Idempotent for absolute inputs (recent files from other cwds). */
-  function _pickerAbsPathOf(relativePath) {
-    if (_isAbsolutePath(relativePath)) return relativePath;
-    if (_pickerRootOverride) {
-      var trimmed = _pickerRootOverride.replace(/[\/\\]+$/, '');
-      var sep = trimmed.indexOf('\\') >= 0 && trimmed.indexOf('/') < 0 ? '\\' : '/';
-      return trimmed + sep + relativePath;
+  /** Join a root directory with a child name using the correct separator.
+   *  Idempotent: an already-absolute name is returned unchanged. */
+  function _joinPath(root, name) {
+    if (_isAbsolutePath(name)) return name;
+    if (!root) return name;
+    var sep = root.indexOf('\\') >= 0 && root.indexOf('/') < 0 ? '\\' : '/';
+    var trimmed = root.replace(/[\/\\]+$/, '');
+    return trimmed + sep + name;
+  }
+
+  /** True if the absolute path has an open tab (checks all tab types). */
+  function isPathOpen(abs) {
+    if (!abs) return false;
+    if (_isAbsolutePath(abs) && isExternal(abs)) {
+      return findContainerByExternalAbs(abs) !== null;
     }
-    return absPathOf(relativePath);
+    var rel = _relativizePath(abs);
+    if (findContainerByRelPath(rel) !== null) return true;
+    return tabs.has('markdown:' + abs);
+  }
+
+  /** Unified picker-row dispatcher: dirs navigate, files open. */
+  function activatePickerEntry(entry) {
+    if (!entry) return;
+    if (entry.kind === 'dir') {
+      navigateBrowse(entry.abs);
+    } else {
+      closePicker();
+      openAnyPath(entry.abs);
+    }
+  }
+
+  /** Navigate the picker browse root to absDir, canceling any pending
+   *  debounced fetch first to prevent stale search results landing. */
+  function navigateBrowse(absDir) {
+    if (!absDir || !_isAbsolutePath(absDir)) return;
+    if (pickerFetchTimer) { clearTimeout(pickerFetchTimer); pickerFetchTimer = null; }
+    _browseRoot = absDir;
+    pickerInput.value = '';
+    pickerLastQuery = '';
+    pickerSelectedIdx = 0;
+    void runPickerFetch('');
+  }
+
+  /** Render the breadcrumb bar for _browseRoot. Handles POSIX (/foo/bar)
+   *  and Windows (C:/foo/bar) path splitting. Mouse-only in V1. */
+  function renderPickerBreadcrumb() {
+    if (!pickerBreadcrumb) return;
+    while (pickerBreadcrumb.firstChild) pickerBreadcrumb.removeChild(pickerBreadcrumb.firstChild);
+    var root = _browseRoot || '';
+    if (!root) return;
+    var parts = root.replace(/\\/g, '/').split('/').filter(Boolean);
+    var isWindows = parts.length > 0 && /^[A-Za-z]:$/.test(parts[0]);
+    var rootLabel = isWindows ? parts[0] + '/' : '/';
+    var rootPath = isWindows ? parts[0] + '/' : '/';
+    var startIdx = isWindows ? 1 : 0;
+
+    function bcItem(label, path) {
+      var span = document.createElement('span');
+      span.className = 'fe-picker-bc-item';
+      span.dataset.path = path;
+      span.textContent = label;
+      span.addEventListener('click', function() { navigateBrowse(span.dataset.path); });
+      return span;
+    }
+    function bcSep() {
+      var s = document.createElement('span');
+      s.className = 'fe-picker-bc-sep';
+      s.textContent = '/';
+      return s;
+    }
+
+    pickerBreadcrumb.appendChild(bcItem(rootLabel, rootPath));
+    var acc = isWindows ? parts[0] : '';
+    for (var i = startIdx; i < parts.length; i++) {
+      acc += '/' + parts[i];
+      pickerBreadcrumb.appendChild(bcSep());
+      pickerBreadcrumb.appendChild(bcItem(parts[i], acc));
+    }
   }
 
   /** Route a picked relative path: build a TabContainer with the
@@ -2535,7 +2671,7 @@
   async function routeOpen(relativePath, openOpts) {
     openOpts = openOpts || {};
     var diffMode = openOpts.diffMode || 'unstaged';
-    var abs = _pickerAbsPathOf(relativePath);
+    var abs = absPathOf(relativePath);
     // If a container already exists for THIS mode, just activate.
     var existing = findContainerByRelPath(relativePath, { mode: diffMode });
     if (existing) {
@@ -2589,8 +2725,19 @@
       container.viewers.set(desc.viewerType, viewer);
     } catch (err) {
       if (err && err.name === 'AbortError') { container.destroy(); return; }
-      console.warn('[files-applet] routeOpen failed', relativePath, err);
       container.destroy();
+      // The diff path 404s when the file isn't resolvable in git (e.g.
+      // the cwd is not a git repo, or a race where cwdIsGit wasn't set
+      // yet). Fall back to the read-only external viewer on the absolute
+      // path. Update cwdIsGit so subsequent in-cwd opens skip the diff
+      // path directly.
+      if (err && err.httpStatus === 404) {
+        cwdIsGit = false;
+        pendingOpenIds.delete(pendKey);
+        void routeOpenExternal(abs, openOpts);
+        return;
+      }
+      console.warn('[files-applet] routeOpen failed', relativePath, err);
       return;
     } finally {
       pendingOpenIds.delete(pendKey);
@@ -2739,7 +2886,6 @@
   function applyCapabilities(capabilities) {
     if (!capabilities.canFollowEdits && followBtn) followBtn.hidden = true;
     if (!capabilities.canPersist && openBtn) openBtn.hidden = true;
-    if (!capabilities.canPersist && notGitEl) notGitEl.hidden = true;
   }
 
   openBtn.addEventListener('click', function(e) {
@@ -3342,14 +3488,15 @@
     try {
       var res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/snapshot');
       if (!res.ok) {
-        if (res.status === 404) {
-          notGitEl.hidden = false;
-          paneEmptyEl.hidden = true;
-        }
+        if (res.status === 404) cwdIsGit = false;
         return;
       }
-      notGitEl.hidden = true;
       var data = await res.json();
+      // V7.x: snapshot reports whether the cwd is a git repo. A non-git
+      // cwd returns 200 with isGit:false (not a 404); this is the
+      // authoritative signal for routing in-cwd opens to the diff path
+      // vs the read-only viewer.
+      cwdIsGit = data.isGit !== false;
       if (Array.isArray(data.edits)) {
         for (var i = 0; i < data.edits.length; i++) {
           openOrUpdateTab(data.edits[i]);
@@ -3557,14 +3704,13 @@
         activeTabId = null;
         followEdits = true;
         cachedCwd = '';
+        cwdIsGit = true;
         captured.forEach(function(t) {
           try { t.destroy(); } catch (err) { console.warn('[file-edits] destroy on session-switch:', err); }
         });
         dismissedPaths.clear();
         dismissedSnapshots.clear();
         if (paneEmptyEl.parentNode !== paneEl) paneEl.appendChild(paneEmptyEl);
-        if (notGitEl.parentNode !== paneEl) paneEl.appendChild(notGitEl);
-        notGitEl.hidden = true;
         updateFollowButton();
         updateEmptyState();
         sessionId = sid;

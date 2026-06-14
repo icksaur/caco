@@ -346,6 +346,10 @@ export interface GitEditPoller {
   /** Attach explicitly; safe to call multiple times. */
   attachToSession(sessionId: string, cwd: string): Promise<void>;
   detachFromSession(sessionId: string): void;
+  /** True when the session is attached (its cwd resolved to a git repo).
+   *  Used by the snapshot endpoint to tell the client whether the diff
+   *  path is usable; a non-git cwd has no repo root and can't diff. */
+  isAttached(sessionId: string): boolean;
   triggerPoll(sessionId: string, source: 'event' | 'fs-event'): void;
   /** Return the current dirty set as edits (used by snapshot endpoint).
    *  Lazy-attaches if the session isn't tracked yet.
@@ -595,6 +599,10 @@ export function createGitEditPoller(): GitEditPoller {
       fileWatcher.detach(sessionId);
       sessions.delete(sessionId);
       console.log(`[FILE-EDITS] detached from session ${sessionId.slice(0, 8)}`);
+    },
+
+    isAttached(sessionId: string): boolean {
+      return sessions.has(sessionId);
     },
 
     triggerPoll(sessionId: string, source: 'event' | 'fs-event'): void {

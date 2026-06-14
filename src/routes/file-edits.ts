@@ -47,7 +47,10 @@ router.get('/sessions/:sessionId/file-edits/snapshot', async (req: Request, res:
     const persisted = getCardList(sessionId);
     const persistedPaths = persisted.cards.map((c) => c.relativePath);
     const edits = await poller.snapshot(sessionId, cwd, persistedPaths);
-    res.json({ edits });
+    // snapshot() lazy-attaches; isAttached reflects whether the cwd
+    // resolved to a git repo. The client uses isGit to decide whether
+    // in-cwd opens go through the diff path or a read-only viewer.
+    res.json({ edits, isGit: poller.isAttached(sessionId) });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }

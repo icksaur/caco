@@ -214,7 +214,11 @@
         body: JSON.stringify(body),
       }
     );
-    if (!res.ok) throw new Error('open failed: HTTP ' + res.status);
+    if (!res.ok) {
+      var err = new Error('open failed: HTTP ' + res.status);
+      err.httpStatus = res.status;
+      throw err;
+    }
     var data = await res.json();
     if (!data.edit) throw new Error('no edit returned');
     if (sid !== shell.sessionId) throw new Error('session changed');

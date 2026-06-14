@@ -1489,7 +1489,7 @@
         return;
       }
       // No container at all: create a diff-default one from the fetched edit.
-      if (tabs.size >= TAB_CAP) evictOldestNonActive();
+      enforceTabCap();
       var diffDesc = null;
       for (var i = 0; i < viewerRegistry.length; i++) {
         if (viewerRegistry[i].viewerType === 'diff') { diffDesc = viewerRegistry[i]; break; }
@@ -1590,8 +1590,8 @@
     echoState();
   }
 
-  /** Remove the oldest non-active tab. Called by openOrUpdateTab when
-   *  the cap is hit. No-op if no non-active tab exists. */
+  /** Remove the oldest non-active tab. Returns true if a tab was evicted,
+   *  false if none was evictable (only the active tab remains). */
   function evictOldestNonActive() {
     var iter = tabs.keys();
     var step;
@@ -1605,8 +1605,21 @@
         if (t) {
           try { t.destroy(); } catch (err) { console.warn('[file-edits] evict destroy:', err); }
         }
-        return;
+        return true;
       }
+    }
+    return false;
+  }
+
+  /** Enforce TAB_CAP by evicting oldest non-active tabs until under the cap.
+   *  Loops (not a single evict) so a count that crept over the cap — via the
+   *  pre-await/post-set race or the uncapped restore path — recovers. Must be
+   *  called immediately before each tabs.set() so the size check and the insert
+   *  are not separated by an await window another open could slip through.
+   *  Reserves one slot for the tab about to be inserted. */
+  function enforceTabCap() {
+    while (tabs.size >= TAB_CAP) {
+      if (!evictOldestNonActive()) break;
     }
   }
 
@@ -1652,7 +1665,7 @@
       // (or already has produced) the tab. The next caco.edit will
       // find it via findContainerByRelPath and update normally.
       if (pendingOpenIds.has(relPath)) return;
-      if (tabs.size >= TAB_CAP) evictOldestNonActive();
+      enforceTabCap();
       var abs = absPathOf(relPath);
       var desc = defaultViewer(abs, relPath);
       if (!desc) {
@@ -2164,8 +2177,7 @@
     });
     pickerList.addEventListener('mousedown', function(e) {
       // V4: copy-button branch FIRST so the click does not advance
-      // selection, close the picker, or be eaten by the disabled
-      // early-return on (open) rows. See spec §5.3 / §6.6.
+      // selection or close the picker. See spec §5.3 / §6.6.
       var copyEl = e.target.closest('.fe-picker-copy');
       if (copyEl) {
         e.preventDefault();
@@ -2176,7 +2188,6 @@
       var target = e.target.closest('.fe-picker-item');
       if (!target) return;
       e.preventDefault();
-      if (target.classList.contains('disabled')) return;
       var flatIdx = Number(target.dataset.flatIdx);
       var entry = pickerVisible[flatIdx];
       if (entry) activatePickerEntry(entry);
@@ -2523,13 +2534,6 @@
         label.className = 'fe-picker-path';
         label.textContent = entry.display;
         li.appendChild(label);
-        if (isPathOpen(entry.abs)) {
-          li.classList.add('disabled');
-          var sfx = document.createElement('span');
-          sfx.className = 'fe-picker-suffix';
-          sfx.textContent = '(open)';
-          li.appendChild(sfx);
-        }
         var copy = document.createElement('span');
         copy.className = 'fe-picker-copy';
         copy.textContent = '📋';
@@ -2588,18 +2592,9 @@
     return trimmed + sep + name;
   }
 
-  /** True if the absolute path has an open tab (checks all tab types). */
-  function isPathOpen(abs) {
-    if (!abs) return false;
-    if (_isAbsolutePath(abs) && isExternal(abs)) {
-      return findContainerByExternalAbs(abs) !== null;
-    }
-    var rel = _relativizePath(abs);
-    if (findContainerByRelPath(rel) !== null) return true;
-    return tabs.has('markdown:' + abs);
-  }
-
-  /** Unified picker-row dispatcher: dirs navigate, files open. */
+  /** Unified picker-row dispatcher: dirs navigate, files open. Opening a
+   *  file that already has a tab is handled by routeOpen/routeOpenExternal,
+   *  which detect the existing container and just activate it. */
   function activatePickerEntry(entry) {
     if (!entry) return;
     if (entry.kind === 'dir') {
@@ -2703,7 +2698,6 @@
     if (desc.viewerType === 'diff' && diffMode !== 'unstaged') {
       desc = Object.assign({}, desc, { diffMode: diffMode });
     }
-    if (tabs.size >= TAB_CAP) evictOldestNonActive();
     var container = new TabContainer(shell, desc, abs, relativePath);
     try {
       var viewer = await desc.open(shell, container, abs, relativePath, {
@@ -2742,6 +2736,7 @@
     } finally {
       pendingOpenIds.delete(pendKey);
     }
+    enforceTabCap();
     tabs.set(container.id, container);
     tabsEl.appendChild(container.tabEl);
     paneEl.appendChild(container.contentEl);
@@ -2776,7 +2771,6 @@
       pendingOpenIds.delete(pendKey);
       return;
     }
-    if (tabs.size >= TAB_CAP) evictOldestNonActive();
     var container = new TabContainer(shell, desc, abs, abs, { external: true });
     try {
       var caps = shell.capabilities;
@@ -2807,6 +2801,7 @@
     } finally {
       pendingOpenIds.delete(pendKey);
     }
+    enforceTabCap();
     tabs.set(container.id, container);
     tabsEl.appendChild(container.tabEl);
     paneEl.appendChild(container.contentEl);
@@ -3574,6 +3569,7 @@
         if (defaultType === 'diff' && cardMode !== 'unstaged') {
           desc = Object.assign({}, desc, { diffMode: cardMode });
         }
+        enforceTabCap();
         var container = new TabContainer(shell, desc, abs, c.relativePath);
         if (defaultType === 'diff' && cardMode === 'unstaged') {
           // V1-V5 fast path: placeholder + fetchSnapshot updates with

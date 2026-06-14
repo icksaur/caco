@@ -419,23 +419,11 @@
   background: var(--color-accent);
   color: white;
 }
-.fe-picker-item.disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
 .fe-picker-path {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.fe-picker-suffix {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
-  flex-shrink: 0;
-}
-.fe-picker-item.selected .fe-picker-suffix {
-  color: rgba(255, 255, 255, 0.8);
 }
 .fe-picker-section {
   padding: 4px 12px 2px;
@@ -484,13 +472,6 @@
 .fe-picker-item.copied {
   box-shadow: inset 0 0 0 1px var(--color-accent, #6cf);
 }
-/* (open) rows still allow copy even though the row is
- * not-allowed for selection. */
-.fe-picker-item.disabled .fe-picker-copy {
-  opacity: 0.6;
-  cursor: pointer;
-}
-.fe-picker-item.disabled:hover .fe-picker-copy { opacity: 1; }
 
 .fe-picker-breadcrumb {
   padding: 4px var(--space-md);

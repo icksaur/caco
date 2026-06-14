@@ -13,6 +13,8 @@ import { consumeReloadSignal } from './applet-state.js';
 import { broadcastGlobalEvent } from './event-bus.js';
 import type { SessionEvent } from './event-bus.js';
 import type { GitEditPoller } from './git-edit-poller.js';
+import { extractProperty } from './sdk-normalizer.js';
+import { recordUsage, recordRateLimit, snapshot } from './session-throughput.js';
 
 // Set by server.ts after the poller is constructed. Optional — if absent
 // (e.g. unit tests), the file-edits triggers become no-ops.
@@ -69,6 +71,19 @@ export function applyDispatchEventEffects(
       if (usage) {
         broadcastGlobalEvent({ type: 'caco.usage', data: { ...usage } } as SessionEvent);
       }
+    }
+    const inputTokens = extractProperty(event, 'inputTokens');
+    const outputTokens = extractProperty(event, 'outputTokens');
+    const cacheReadTokens = extractProperty(event, 'cacheReadTokens');
+    recordUsage(sessionId, { inputTokens, outputTokens, cacheReadTokens });
+    deps.onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> });
+  }
+
+  if (event.type === 'model.call_failure') {
+    const statusCode = extractProperty<number>(event, 'statusCode');
+    if (statusCode === 429) {
+      recordRateLimit(sessionId);
+      deps.onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> });
     }
   }
 

@@ -12,6 +12,7 @@ import { pollQuota } from './quota-poller.js';
 import type { QuotaSnapshot } from './usage-state.js';
 import { loadMcpServers } from './mcp-config-loader.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
+import { clearSession as clearThroughputSession } from './session-throughput.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 
@@ -655,6 +656,7 @@ class SessionManager {
     
     // Unregister from storage layer
     unregisterSession(cwd);
+    clearThroughputSession(sessionId);
     
     console.log(`✓ Stopped session ${sessionId}`);
   }
@@ -784,6 +786,7 @@ class SessionManager {
     }
     
     this.sessionCache.delete(sessionId);
+    clearThroughputSession(sessionId);
   }
 
   async exportToFile(sessionId: string, outputPath: string): Promise<void> {

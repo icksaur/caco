@@ -92,6 +92,14 @@ function handleEvent(event: SessionEvent): void {
     }
     return;
   }
+
+  if (eventType === 'caco.throughput') {
+    const activeId = getActiveSessionId();
+    if (activeId) {
+      chatView.updateThroughputData(activeId, data as Record<string, unknown>);
+    }
+    return;
+  }
   
   // Handle page reload signal from reload_page tool
   if (eventType === 'caco.reload') {

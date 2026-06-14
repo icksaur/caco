@@ -13,6 +13,9 @@ const getUsage = vi.fn((): unknown => null);
 const shouldEmitReload = vi.fn();
 const consumeReloadSignal = vi.fn();
 const broadcastGlobalEvent = vi.fn();
+const recordUsage = vi.fn();
+const recordRateLimit = vi.fn();
+const snapshotMock = vi.fn(() => ({ requestIn: 0, requestCache: 0, requestOut: 0, totalIn: 0, totalCache: 0, totalOut: 0, rateLimitCount: 0, updatedAt: 'now', known: true }));
 
 vi.mock('../../src/session-meta-store.js', () => ({
   setSessionIntent: (...args: unknown[]) => setSessionIntent(...args),
@@ -29,6 +32,11 @@ vi.mock('../../src/sdk-event-parser.js', () => ({
 }));
 vi.mock('../../src/applet-state.js', () => ({
   consumeReloadSignal: (...args: unknown[]) => consumeReloadSignal(...args),
+}));
+vi.mock('../../src/session-throughput.js', () => ({
+  recordUsage: (...args: unknown[]) => recordUsage(...(args as [])),
+  recordRateLimit: (...args: unknown[]) => recordRateLimit(...(args as [])),
+  snapshot: (...args: unknown[]) => snapshotMock(...(args as [])),
 }));
 
 import { applyDispatchEventEffects } from '../../src/dispatch-events.js';
@@ -51,6 +59,9 @@ beforeEach(() => {
   shouldEmitReload.mockReset();
   consumeReloadSignal.mockReset();
   broadcastGlobalEvent.mockClear();
+  recordUsage.mockClear();
+  recordRateLimit.mockClear();
+  snapshotMock.mockClear();
 });
 
 describe('applyDispatchEventEffects', () => {
@@ -151,4 +162,79 @@ describe('applyDispatchEventEffects', () => {
     expect(deps.autoAddFileContext).not.toHaveBeenCalled();
     expect(deps.onEvent).not.toHaveBeenCalled();
   });
+
+  describe('throughput: assistant.usage', () => {
+    it('records token usage from data-wrapped event (history format)', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'assistant.usage',
+        data: { inputTokens: 1000, outputTokens: 500 },
+      } as never, deps);
+      expect(recordUsage).toHaveBeenCalledWith(SID, { inputTokens: 1000, outputTokens: 500 });
+    });
+
+    it('records token usage from root-shaped event (live format)', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'assistant.usage',
+        inputTokens: 800,
+        outputTokens: 300,
+      } as never, deps);
+      expect(recordUsage).toHaveBeenCalledWith(SID, { inputTokens: 800, outputTokens: 300 });
+    });
+
+    it('emits caco.throughput session-scoped on assistant.usage', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'assistant.usage',
+        data: { inputTokens: 10, outputTokens: 5 },
+      } as never, deps);
+      expect(deps.onEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'caco.throughput' })
+      );
+    });
+  });
+
+  describe('throughput: model.call_failure', () => {
+    it('records rate limit when statusCode is 429 (data-wrapped)', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'model.call_failure',
+        data: { statusCode: 429 },
+      } as never, deps);
+      expect(recordRateLimit).toHaveBeenCalledWith(SID);
+      expect(deps.onEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'caco.throughput' })
+      );
+    });
+
+    it('records rate limit when statusCode is 429 (root-shaped)', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'model.call_failure',
+        statusCode: 429,
+      } as never, deps);
+      expect(recordRateLimit).toHaveBeenCalledWith(SID);
+    });
+
+    it('does NOT record rate limit for non-429 status codes', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'model.call_failure',
+        data: { statusCode: 500 },
+      } as never, deps);
+      expect(recordRateLimit).not.toHaveBeenCalled();
+      expect(deps.onEvent).not.toHaveBeenCalled();
+    });
+
+    it('does NOT record rate limit when statusCode is absent', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'model.call_failure',
+        data: {},
+      } as never, deps);
+      expect(recordRateLimit).not.toHaveBeenCalled();
+    });
+  });
+
 });

@@ -11,7 +11,7 @@
 
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, releaseActiveSessionForNewChat, getNewChatCwd } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
-import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage } from './context-footer.js';
+import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, updateThroughput, restoreThroughput, clearThroughput, setActiveThroughputModel } from './context-footer.js';
 import { loadModels } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
 import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websocket.js';
@@ -123,6 +123,7 @@ class ChatViewController {
     clearContextUsage();
     setResponseOptions([]);
     adHocBar.deactivate();
+    clearThroughput();
     setViewState('newChat');
     loadModels();
 
@@ -318,6 +319,7 @@ class ChatViewController {
     notifySessionChange(sessionId, { sessionId, cwd, name, kind, model, currentIntent });
     this.updateStatus(cwd, model, hasGit, name, sessionId, hasIcon, gitBranch);
     restoreContextUsage(sessionId);
+    restoreThroughput(sessionId);
     adHocBar.activateSession(sessionId);
     setViewState('chatting');
   }
@@ -380,6 +382,7 @@ class ChatViewController {
     const models = getAvailableModels();
     const model = models.find(m => m.id === id);
     const modelName = model?.name || id?.split('/').pop() || '';
+    setActiveThroughputModel(id || null);
     if (sessionId) {
       this.lastStatusParams = { modelId: id, hasGit, name, sessionId, hasIcon, gitBranch };
       renderSessionStatus({ modelName, cwd, hasGit, sessionName: name, sessionId, hasIcon, gitBranch });
@@ -407,6 +410,7 @@ class ChatViewController {
     clearStatus();
     clearContextFooter();
     clearContextUsage();
+    clearThroughput();
   }
 
   /**
@@ -425,6 +429,11 @@ class ChatViewController {
   updateUsage(sessionId: string, data: { tokenLimit?: number; currentTokens?: number }): void {
     if (this.footerSessionId !== sessionId) return;
     updateContextUsage(data, sessionId);
+  }
+
+  updateThroughputData(sessionId: string, data: Record<string, unknown>): void {
+    if (this.footerSessionId !== sessionId) return;
+    updateThroughput(data as unknown as Parameters<typeof updateThroughput>[0], sessionId);
   }
 
   /**

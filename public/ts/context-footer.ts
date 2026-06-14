@@ -10,8 +10,7 @@
 
 import { regions } from './dom-regions.js';
 import { formatContextFiles, formatStatusParts, escapeHtml } from './ui-utils.js';
-import { getActiveSessionId } from './app-state.js';
-
+import { getActiveSessionId, getAvailableModels } from './app-state.js';
 export interface SessionContext {
   files?: string[];
   [key: string]: string[] | undefined;
@@ -54,18 +53,20 @@ export function renderContextFooter(context: SessionContext): void {
 export function renderNewChatStatus(modelName: string, cwd: string): void {
   activeFooterSessionId = null;
   const footer = regions.footer.el;
-  const statusEl = footer.querySelector('.context-status') as HTMLElement | null;
-  if (!statusEl) return;
-  
   const { model, dirName, fullCwd } = formatStatusParts(modelName, cwd);
-  const parts: string[] = [];
-  if (model) parts.push(`<span class="context-model">${model}</span>`);
-  if (dirName) parts.push(`<span title="${fullCwd || ''}">${dirName}</span>`);
-  statusEl.innerHTML = parts.join('<span class="context-sep">·</span>');
-  
+
+  // Row 1 right: (no session yet) — clear.
+  const sessionEl = footer.querySelector('.context-session') as HTMLElement | null;
+  if (sessionEl) sessionEl.innerHTML = '';
+
+  // Row 2 left: model name.
+  const modelEl = footer.querySelector('.context-model') as HTMLElement | null;
+  if (modelEl) modelEl.innerHTML = model ? `<span title="${escapeHtml(model)}">${escapeHtml(model)}</span>` : '';
+
+  // Row 2 right: cwd (no links without a session).
   const descEl = footer.querySelector('.context-description') as HTMLElement | null;
-  if (descEl) descEl.innerHTML = '';
-  
+  if (descEl) descEl.innerHTML = dirName ? `<span title="${escapeHtml(fullCwd || '')}">${escapeHtml(dirName)}</span>` : '';
+
   updateFooterVisibility();
 }
 
@@ -85,32 +86,35 @@ interface SessionStatusParams {
 export function renderSessionStatus(params: SessionStatusParams): void {
   const { modelName, cwd, hasGit = false, sessionName, sessionId, hasIcon, gitBranch } = params;
   activeFooterSessionId = sessionId;
-  
+
   const footer = regions.footer.el;
-  const statusEl = footer.querySelector('.context-status') as HTMLElement | null;
-  if (!statusEl) return;
-  
   const { model, dirName, fullCwd } = formatStatusParts(modelName, cwd);
-  const parts: string[] = [];
-  if (model) parts.push(`<span class="context-model">${model}</span>`);
-  if (dirName) parts.push(`<span title="${fullCwd || ''}">${dirName}</span>`);
-  if (hasIcon && sessionId) {
-    parts.push(`<img class="context-icon" src="/api/sessions/${sessionId}/icon" alt="">`);
+
+  // Row 1 right: gif icon + session name.
+  const sessionEl = footer.querySelector('.context-session') as HTMLElement | null;
+  if (sessionEl) {
+    const sParts: string[] = [];
+    if (hasIcon && sessionId) {
+      sParts.push(`<img class="context-icon" src="/api/sessions/${encodeURIComponent(sessionId)}/icon" alt="">`);
+    }
+    if (sessionName) sParts.push(`<span class="context-session-name">${escapeHtml(sessionName)}</span>`);
+    sessionEl.innerHTML = sParts.join(' ');
   }
-  statusEl.innerHTML = parts.join('<span class="context-sep">·</span>');
-  
-  renderDescription(sessionId, sessionName, hasGit, gitBranch, fullCwd);
+
+  // Row 2 left: model name.
+  const modelEl = footer.querySelector('.context-model') as HTMLElement | null;
+  if (modelEl) modelEl.innerHTML = model ? `<span title="${escapeHtml(model)}">${escapeHtml(model)}</span>` : '';
+
+  // Row 2 right: dashboard + git + cwd-as-files-link.
+  renderDescription(sessionId, hasGit, gitBranch, fullCwd, dirName);
   updateFooterVisibility();
 }
 
-function renderDescription(sessionId: string, sessionName?: string, hasGit = false, gitBranch?: string | null, fullCwd?: string): void {
+function renderDescription(sessionId: string, hasGit = false, gitBranch?: string | null, fullCwd?: string, dirName?: string): void {
   const footer = regions.footer.el;
   const descEl = footer.querySelector('.context-description') as HTMLElement | null;
   if (!descEl) return;
 
-  const descParts: string[] = [];
-  if (sessionName) descParts.push(escapeHtml(sessionName));
-  
   const encodedCwd = fullCwd ? encodeURIComponent(fullCwd) : '';
   const encodedSession = encodeURIComponent(sessionId);
   const appletLinks: string[] = [];
@@ -120,11 +124,13 @@ function renderDescription(sessionId: string, sessionName?: string, hasGit = fal
     appletLinks.push(`<a href="/?session=${encodedSession}&applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);
   }
   if (encodedCwd) {
-    appletLinks.push(`<a href="/?session=${encodedSession}&applet=files&openFinder=1&openFinderRoot=${encodedCwd}" class="footer-applet-link">files</a>`);
+    // Files link labeled with the cwd basename (per layout: "cwd string as files link").
+    const label = dirName ? escapeHtml(dirName) : 'files';
+    appletLinks.push(`<a href="/?session=${encodedSession}&applet=files&openFinder=1&openFinderRoot=${encodedCwd}" class="footer-applet-link" title="${escapeHtml(fullCwd || '')}">${label}</a>`);
   }
-  
-  descEl.innerHTML = descParts.join('') + (appletLinks.length ? ' ' + appletLinks.join(' ') : '');
-  
+
+  descEl.innerHTML = appletLinks.join(' ');
+
   checkRoadmap(sessionId);
 }
 
@@ -154,10 +160,10 @@ export function refreshRoadmapLink(): void {
 export function clearStatus(): void {
   activeFooterSessionId = null;
   const footer = regions.footer.el;
-  const statusEl = footer.querySelector('.context-status');
-  const descEl = footer.querySelector('.context-description');
-  if (statusEl) statusEl.innerHTML = '';
-  if (descEl) descEl.innerHTML = '';
+  for (const sel of ['.context-session', '.context-model', '.context-description']) {
+    const el = footer.querySelector(sel);
+    if (el) el.innerHTML = '';
+  }
   updateFooterVisibility();
 }
 
@@ -167,8 +173,12 @@ export function clearStatus(): void {
 function updateFooterVisibility(): void {
   const footer = regions.footer.el;
   const links = footer.querySelector('.context-links');
-  const status = footer.querySelector('.context-status');
-  const hasContent = (links?.innerHTML || '') !== '' || (status?.innerHTML || '') !== '';
+  const session = footer.querySelector('.context-session');
+  const model = footer.querySelector('.context-model');
+  const hasContent =
+    (links?.innerHTML || '') !== '' ||
+    (session?.innerHTML || '') !== '' ||
+    (model?.innerHTML || '') !== '';
   footer.classList.toggle('has-context', hasContent);
 }
 
@@ -239,4 +249,106 @@ function renderUsage(tokenLimit: number, currentTokens: number): void {
   usageEl.textContent = `${glyph} ${pct}%`;
   usageEl.title = tooltip;
   updateFooterVisibility();
+}
+
+export interface ThroughputData {
+  requestIn: number;
+  requestCache: number;
+  requestOut: number;
+  totalIn: number;
+  totalCache: number;
+  totalOut: number;
+  rateLimitCount: number;
+  lastRateLimitAt?: string;
+  updatedAt: string;
+  known?: boolean;
+}
+
+function kAbbrev(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+/** Active session's model id, stashed by updateStatus so renderThroughput
+ *  can price the in/cache/out token classes. */
+let activeModelId: string | null = null;
+export function setActiveThroughputModel(modelId: string | null): void {
+  activeModelId = modelId;
+}
+
+/** Compute approximate cost in AI credits from the model's per-MTOK
+ *  prices. Returns null when prices are unknown (e.g. Auto). */
+function estimateCost(d: ThroughputData): number | null {
+  const model = getAvailableModels().find(m => m.id === activeModelId);
+  if (!model || model.inputPerMtok === undefined || model.outputPerMtok === undefined) return null;
+  const cacheRate = model.cachePerMtok ?? 0;
+  const credits =
+    (d.requestIn * model.inputPerMtok +
+      d.requestCache * cacheRate +
+      d.requestOut * model.outputPerMtok) / 1_000_000;
+  return credits;
+}
+
+const throughputCache = new Map<string, ThroughputData>();
+
+export function updateThroughput(data: ThroughputData, sessionId?: string): void {
+  if (sessionId) {
+    throughputCache.set(sessionId, data);
+  }
+  renderThroughput(data);
+}
+
+export function restoreThroughput(sessionId: string): void {
+  const cached = throughputCache.get(sessionId);
+  if (cached) {
+    renderThroughput(cached);
+  } else {
+    clearThroughput();
+  }
+  fetch(`/api/sessions/${sessionId}/throughput`)
+    .then(r => r.json())
+    .then((data: ThroughputData) => {
+      if (getActiveSessionId() !== sessionId) return;
+      throughputCache.set(sessionId, data);
+      renderThroughput(data);
+    })
+    .catch(() => {});
+}
+
+export function clearThroughput(): void {
+  const footer = regions.footer.el;
+  const el = footer.querySelector('.context-throughput');
+  if (el) el.innerHTML = '';
+}
+
+function renderThroughput(data: ThroughputData): void {
+  const footer = regions.footer.el;
+  const el = footer.querySelector('.context-throughput') as HTMLElement | null;
+  if (!el) return;
+
+  const tooltip =
+    `request: ${data.requestIn.toLocaleString()} in · ${data.requestCache.toLocaleString()} cache · ${data.requestOut.toLocaleString()} out` +
+    `\nsession: ${data.totalIn.toLocaleString()} in · ${data.totalCache.toLocaleString()} cache · ${data.totalOut.toLocaleString()} out`;
+
+  const parts =
+    `${escapeHtml(kAbbrev(data.requestIn))} in ` +
+    `${escapeHtml(kAbbrev(data.requestCache))} cache ` +
+    `${escapeHtml(kAbbrev(data.requestOut))} out`;
+
+  const cost = estimateCost(data);
+  const costHtml = cost !== null
+    ? ` <span class="tp-cost">≈${cost < 10 ? cost.toFixed(2) : Math.round(cost).toLocaleString()}cr</span>`
+    : '';
+
+  const tokenHtml = `<span title="${escapeHtml(tooltip)}">${parts}${costHtml}</span>`;
+
+  let rateLimitHtml = '';
+  if (data.rateLimitCount > 0) {
+    const lastAt = data.lastRateLimitAt ? ` (last ${new Date(data.lastRateLimitAt).toLocaleTimeString()})` : '';
+    const rlTooltip = `${data.rateLimitCount} rate-limited call${data.rateLimitCount !== 1 ? 's' : ''}${lastAt}`;
+    rateLimitHtml = ` <span class="ratelimit" title="${escapeHtml(rlTooltip)}">⚠${data.rateLimitCount}</span>`;
+  }
+
+  el.innerHTML = tokenHtml + rateLimitHtml;
 }

@@ -27,6 +27,7 @@ import { dispatchMessage } from './session-messages.js';
 import { prefixMessageSource } from '../message-source.js';
 import { getSessionDraft, setSessionDraft, deleteSessionDraft } from '../chat-draft-store.js';
 import { modelCostSummary } from '../model-billing.js';
+import { snapshot as throughputSnapshot } from '../session-throughput.js';
 
 const router = Router();
 
@@ -584,6 +585,10 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
     isActive,
     isBusy
   });
+});
+
+router.get('/sessions/:sessionId/throughput', (req: Request, res: Response) => {
+  res.json(throughputSnapshot(req.params.sessionId as string));
 });
 
 router.get('/sessions/:sessionId/data', (req: Request, res: Response) => {

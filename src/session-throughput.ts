@@ -1,0 +1,127 @@
+/**
+ * Per-session throughput accumulator.
+ *
+ * "Request" = one user send through its full multi-turn lifetime
+ * (send -> idle). Request counters are reset by resetRequest() at the
+ * start of a fresh dispatch (see dispatchMessage); they accumulate
+ * across every assistant turn + subagent call within the request and
+ * persist after the session goes idle, until the next send. Steering
+ * (sendStream, not dispatchMessage) does NOT reset -- it adds to the
+ * ongoing request.
+ *
+ * Token classes match the model billing JSON (in / out / cache):
+ *  - `in`    = fresh (non-cached) input  = inputTokens - cacheReadTokens
+ *  - `cache` = cached input read         = cacheReadTokens
+ *  - `out`   = output                    = outputTokens
+ * `inputTokens` from the SDK is the TOTAL prompt; cacheReadTokens is a
+ * subset of it (verified: cacheRead + cacheWrite ~= inputTokens). So the
+ * billing-correct split charges (input - cacheRead) at the input rate and
+ * cacheRead at the cache rate.
+ *
+ * `total*` counters accumulate for the session's whole server lifetime
+ * (footer tooltip). Nothing is persisted across restart.
+ */
+
+interface SessionThroughput {
+  requestIn: number;
+  requestCache: number;
+  requestOut: number;
+  totalIn: number;
+  totalCache: number;
+  totalOut: number;
+  rateLimitCount: number;
+  lastRateLimitAt?: string;
+  updatedAt: string;
+}
+
+export interface ThroughputSnapshot extends SessionThroughput {
+  known: boolean;
+}
+
+const sessions = new Map<string, SessionThroughput>();
+
+function now(): string {
+  return new Date().toISOString();
+}
+
+function safeInt(value: unknown): number {
+  return typeof value === 'number' && isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+function blank(): SessionThroughput {
+  return {
+    requestIn: 0,
+    requestCache: 0,
+    requestOut: 0,
+    totalIn: 0,
+    totalCache: 0,
+    totalOut: 0,
+    rateLimitCount: 0,
+    updatedAt: now(),
+  };
+}
+
+function getOrCreate(sessionId: string): SessionThroughput {
+  let entry = sessions.get(sessionId);
+  if (!entry) {
+    entry = blank();
+    sessions.set(sessionId, entry);
+  }
+  return entry;
+}
+
+export function recordUsage(
+  sessionId: string,
+  tokens: { inputTokens?: unknown; outputTokens?: unknown; cacheReadTokens?: unknown },
+): void {
+  const entry = getOrCreate(sessionId);
+  const input = safeInt(tokens.inputTokens);
+  const cache = safeInt(tokens.cacheReadTokens);
+  const out = safeInt(tokens.outputTokens);
+  const fresh = Math.max(0, input - cache);
+  entry.requestIn += fresh;
+  entry.requestCache += cache;
+  entry.requestOut += out;
+  entry.totalIn += fresh;
+  entry.totalCache += cache;
+  entry.totalOut += out;
+  entry.updatedAt = now();
+}
+
+export function recordRateLimit(sessionId: string): void {
+  const entry = getOrCreate(sessionId);
+  entry.rateLimitCount += 1;
+  entry.lastRateLimitAt = now();
+  entry.updatedAt = now();
+}
+
+/**
+ * Reset request-scoped counters at the start of a fresh user send.
+ * Clears request in/cache/out + the 429 count (these describe "the
+ * current request"); preserves session-lifetime totals.
+ */
+export function resetRequest(sessionId: string): void {
+  const entry = getOrCreate(sessionId);
+  entry.requestIn = 0;
+  entry.requestCache = 0;
+  entry.requestOut = 0;
+  entry.rateLimitCount = 0;
+  entry.lastRateLimitAt = undefined;
+  entry.updatedAt = now();
+}
+
+export function getThroughput(sessionId: string): SessionThroughput | undefined {
+  return sessions.get(sessionId);
+}
+
+export function snapshot(sessionId: string): ThroughputSnapshot {
+  const entry = sessions.get(sessionId);
+  if (!entry) {
+    return { ...blank(), known: false };
+  }
+  return { ...entry, known: true };
+}
+
+export function clearSession(sessionId: string): void {
+  sessions.delete(sessionId);
+}

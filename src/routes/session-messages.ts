@@ -26,6 +26,7 @@ import { prefixMessageSource, type MessageSource } from '../message-source.js';
 import { createWatchdog } from '../dispatch-watchdog.js';
 import { retryWithFreshClient } from '../dispatch-retry.js';
 import { applyDispatchEventEffects } from '../dispatch-events.js';
+import { resetRequest, snapshot } from '../session-throughput.js';
 
 const router = Router();
 
@@ -245,6 +246,14 @@ export async function dispatchMessage(
   // send-to-SDK happens later but the busy state is already true here.
   const effectiveCorrelationId = correlationId || randomUUID();
   sessionManager.startDispatch(sessionId, effectiveCorrelationId);
+
+  // Fresh user send → reset request-scoped throughput counters and push
+  // the cleared snapshot so the footer zeroes at send. Accumulation then
+  // runs across the whole multi-turn request and persists after idle
+  // until the next send. (Steering uses sendStream, not dispatchMessage,
+  // so it accumulates into the ongoing request rather than resetting.)
+  resetRequest(sessionId);
+  onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> } as unknown as SessionEvent);
 
   // Guard against double cleanup (inner cleanupAndComplete vs outer catch)
   let dispatchCompleted = false;

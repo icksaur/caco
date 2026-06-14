@@ -17,6 +17,7 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `PATCH /api/sessions/:id/applet` - Update active applet params and panel visibility
 - `DELETE /api/sessions/:id` - Delete a session
 - `GET /api/sessions/:id/state` - Get session state (for agent-to-agent polling)
+- `GET /api/sessions/:id/throughput` - Get session token throughput (input/output tokens + 429 count)
 - `GET /api/sessions/:id/icon` - Serve session icon (icon.gif preferred, falls back to icon.png). Returns 404 if no icon exists.
 - `POST /api/sessions/:id/messages` - Send message to session
 - `POST /api/sessions/:id/cancel` - Cancel current streaming

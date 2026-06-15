@@ -107,6 +107,7 @@ interface ResumeSessionConfig {
   excludedTools?: string[];
   systemMessage?: { mode: 'append'; content: string };
   model?: string;
+  reasoningEffort?: string;
   provider?: ProviderConfig;
   infiniteSessions?: InfiniteSessionConfig;
 }
@@ -125,6 +126,9 @@ interface CopilotSessionInstance {
     };
     mcp: {
       list(): Promise<{ servers: McpServerInfo[] }>;
+    };
+    model: {
+      setReasoningEffort(params: { reasoningEffort: string }): Promise<{ reasoningEffort: string }>;
     };
   };
 }
@@ -645,6 +649,9 @@ class SessionManager {
     const resolved = cacoModel ? resolveModel(cacoModel) : null;
     const applyModel = !!resolved && (!!resolved.provider || isOverride);
     const infinite = this.infiniteSessionsFor(sessionId, cacoModel ?? undefined);
+    const storedEffort = getSessionMeta(sessionId)?.reasoningEffort;
+    const defaultEffort = cacoModel ? this.cachedModels.find(m => m.id === cacoModel)?.defaultReasoningEffort : undefined;
+    const applyEffort = storedEffort && storedEffort !== defaultEffort;
     
     let repairMessage: string | undefined;
     const memoryContent = formatMemoryForPrompt();
@@ -660,6 +667,7 @@ class SessionManager {
       ...(applyModel && { model: resolved.sdkModel }),
       ...(resolved?.provider && { provider: resolved.provider }),
       ...(infinite && { infiniteSessions: infinite }),
+      ...(applyEffort && { reasoningEffort: storedEffort }),
     } as ResumeSessionConfig;
 
     const MAX_REPAIR_ATTEMPTS = 3;
@@ -1084,6 +1092,7 @@ class SessionManager {
 
     const resolved = resolveModel(model);
     const fastPath = !resolved.provider && !active.providerId;
+    this.clearStaleReasoningEffort(sessionId, model);
 
     if (fastPath) {
       await active.session.setModel(resolved.sdkModel);
@@ -1191,6 +1200,48 @@ class SessionManager {
     }
     console.log(`[COMPACT] Session ${sessionId.slice(0, 8)}: removed ${result.tokensRemoved} tokens, ${result.messagesRemoved} messages`);
     return { tokensRemoved: result.tokensRemoved, messagesRemoved: result.messagesRemoved };
+  }
+
+  /** Clear stored reasoning effort when switching to a model that doesn't
+   *  support it or doesn't include the stored value in supportedReasoningEfforts. */
+  private clearStaleReasoningEffort(sessionId: string, newModelId: string): void {
+    const meta = getSessionMeta(sessionId);
+    if (!meta?.reasoningEffort) return;
+    const newModel = this.cachedModels.find(m => m.id === newModelId);
+    const supported = newModel?.supportedReasoningEfforts;
+    const supportsEffort = newModel?.capabilities?.supports?.reasoningEffort;
+    if (!supportsEffort || (supported && !supported.includes(meta.reasoningEffort))) {
+      setSessionMeta(sessionId, { ...meta, reasoningEffort: undefined });
+    }
+  }
+
+  async setSessionReasoningEffort(sessionId: string, effort: string | null): Promise<void> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error(`Session ${sessionId} is not active`);
+    }
+    const cacoModel = readModelFromEvents(sessionId);
+    const modelInfo = cacoModel ? this.cachedModels.find(m => m.id === cacoModel) : undefined;
+    if (!modelInfo?.capabilities?.supports?.reasoningEffort) {
+      throw new Error('Active model does not support reasoning effort');
+    }
+    const supported = modelInfo.supportedReasoningEfforts;
+    if (effort !== null && supported && !supported.includes(effort)) {
+      throw new Error(`Effort "${effort}" not supported by this model. Supported: ${supported.join(', ')}`);
+    }
+    const effectiveEffort = effort ?? modelInfo.defaultReasoningEffort;
+    if (!effectiveEffort) {
+      throw new Error('Cannot clear effort: model has no default effort level');
+    }
+    await active.session.rpc.model.setReasoningEffort({ reasoningEffort: effectiveEffort });
+    const meta = getSessionMeta(sessionId) ?? { name: '' };
+    if (effort === null || effort === modelInfo.defaultReasoningEffort) {
+      const { reasoningEffort: _, ...rest } = meta;
+      setSessionMeta(sessionId, rest as typeof meta);
+    } else {
+      setSessionMeta(sessionId, { ...meta, reasoningEffort: effort });
+    }
+    console.log(`[EFFORT] Session ${sessionId.slice(0, 8)}: effort=${effort ?? `default (${effectiveEffort})`}`);
   }
 
   /**

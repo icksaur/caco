@@ -23,6 +23,11 @@ let activeFooterSessionId: string | null = null;
  *  the model-name tooltip's effective window. */
 let activeBudgetTokens: number | null = null;
 
+/** Active session's reasoning effort level, or null for the model default. */
+let activeReasoningEffort: string | null = null;
+
+const EFFORT_LABELS: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'xHigh' };
+
 /** Last-rendered model display name, kept so setActiveContextBudget can refresh
  *  the model-name tooltip without a full status re-render. */
 let currentModelDisplayName = '';
@@ -38,14 +43,20 @@ function formatWindowTokens(n: number): string {
   return `${Math.round(n / 1000)}K`;
 }
 
-/** Build the model-name tooltip: "Claude Opus 4.8 · 400K context window".
- *  The window is the override budget when set, else the model's full window. */
+/** Build the model-name tooltip: "Claude Opus 4.8 · 400K context window · High effort".
+ *  Window is the override budget when set, else the model's full window.
+ *  Effort label is omitted when null or equals the model default. */
 function modelTitleFor(displayName: string): string {
   const model = getAvailableModels().find(m => m.id === activeModelId);
   const fullWindow = model?.contextWindow ?? 0;
   const effective = activeBudgetTokens && activeBudgetTokens > 0 ? activeBudgetTokens : fullWindow;
-  if (effective > 0) return `${displayName} · ${formatWindowTokens(effective)} context window`;
-  return displayName;
+  const parts = [displayName];
+  if (effective > 0) parts.push(`${formatWindowTokens(effective)} context window`);
+  if (activeReasoningEffort) {
+    const label = EFFORT_LABELS[activeReasoningEffort] ?? activeReasoningEffort;
+    parts.push(`${label} effort`);
+  }
+  return parts.join(' · ');
 }
 
 /** The absolute token count at which background compaction starts, honoring the
@@ -65,12 +76,21 @@ function backgroundCompactSize(tokenLimit: number): number {
  *  model-name tooltip immediately. */
 export function setActiveContextBudget(tokens: number | null): void {
   activeBudgetTokens = tokens && tokens > 0 ? tokens : null;
-  // Refresh the model-name tooltip in place.
-  const modelEl = regions.footer.el.querySelector('.context-model span') as HTMLElement | null;
-  if (modelEl && currentModelDisplayName) modelEl.title = modelTitleFor(currentModelDisplayName);
+  refreshModelTooltip();
   // Re-render the cached usage pie against the new compaction denominator.
   const cached = activeFooterSessionId ? usageCache.get(activeFooterSessionId) : undefined;
   if (cached) renderUsage(cached.tokenLimit, cached.currentTokens);
+}
+
+/** Set (or clear) the active session's reasoning effort and refresh the model tooltip. */
+export function setActiveReasoningEffort(effort: string | null): void {
+  activeReasoningEffort = effort;
+  refreshModelTooltip();
+}
+
+function refreshModelTooltip(): void {
+  const modelEl = regions.footer.el.querySelector('.context-model span') as HTMLElement | null;
+  if (modelEl && currentModelDisplayName) modelEl.title = modelTitleFor(currentModelDisplayName);
 }
 
 /**

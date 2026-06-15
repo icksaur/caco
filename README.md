@@ -84,6 +84,7 @@ To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Star
 | `/session-fork [message]` | Fork session into a new side conversation (inherits history) |
 | `/session-compact` | Force context compaction |
 | `/session-context-window [tokens]` | Cap session context window so it compacts earlier (cuts per-call cost); no arg opens a picker |
+| `/session-effort` | Set reasoning effort level for models that support it (picker) |
 | `/restart` | Restart the Caco server |
 
 ### Portal

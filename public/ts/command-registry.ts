@@ -3,7 +3,7 @@ import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
-import { setActiveContextBudget } from './context-footer.js';
+import { setActiveContextBudget, setActiveReasoningEffort } from './context-footer.js';
 import { archiveSession, renameSession } from './session-panel.js';
 import type { PopupItem } from './input-popup.js';
 
@@ -27,6 +27,7 @@ export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string
   { name: 'session-fork', description: 'Fork session into a new side conversation (inherits history)' },
   { name: 'session-compact', description: 'Force context compaction (optionally add text to focus the summary)' },
   { name: 'session-context-window', description: 'Cap session context window (compact earlier to cut cost)' },
+  { name: 'session-effort', description: 'Set reasoning effort for models that support it' },
 ];
 
 const commands = new Map<string, Command>();
@@ -285,6 +286,68 @@ registerBuiltin('session-context-window', async (arg) => {
   items.push({ id: 'default', label: 'SDK default (~80%)', description: current === null ? 'current' : 'clear cap' });
   return items;
 });
+
+const EFFORT_LABELS: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'xHigh' };
+
+registerBuiltin('session-effort', async (arg) => {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) { showToast('No active session'); return; }
+  const effortId = arg.trim();
+  if (!effortId) {
+    showToast('Use the picker: /session-effort', { type: 'info', autoHideMs: 2000 });
+    return;
+  }
+  await applyEffort(sessionId, effortId);
+}, async () => {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) return [{ id: 'none', label: 'No active session', description: '' }];
+  let currentEffort: string | null = null;
+  let model: string | null = null;
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/state`);
+    if (res.ok) {
+      const data = await res.json();
+      currentEffort = data.reasoningEffort ?? null;
+      model = data.model ?? null;
+    }
+  } catch { /* fall through */ }
+  const modelInfo = model ? getAvailableModels().find(m => m.id === model) : undefined;
+  const supported = modelInfo?.supportedReasoningEfforts ?? [];
+  if (!modelInfo?.supportsReasoningEffort || supported.length === 0) {
+    return [{ id: 'none', label: 'Model does not support reasoning effort', description: '' }];
+  }
+  const defaultEffort = modelInfo?.defaultReasoningEffort ?? null;
+  const items: PopupItem[] = [
+    { id: 'default', label: 'Default', description: defaultEffort ? `Model default (${EFFORT_LABELS[defaultEffort] ?? defaultEffort})${currentEffort === null || currentEffort === defaultEffort ? ' · current' : ''}` : 'clear effort' },
+  ];
+  for (const e of supported) {
+    const label = EFFORT_LABELS[e] ?? e;
+    items.push({ id: e, label, description: currentEffort === e ? 'current' : '' });
+  }
+  return items;
+});
+
+async function applyEffort(sessionId: string, effortId: string): Promise<void> {
+  const effort = effortId === 'default' ? null : effortId;
+  if (effortId === 'none') return;
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reasoningEffort: effort }),
+    });
+    if (res.ok) {
+      setActiveReasoningEffort(effort);
+      const label = effort ? (EFFORT_LABELS[effort] ?? effort) : 'Default';
+      showToast(`Reasoning effort set to ${label}`, { type: 'success', autoHideMs: 3000 });
+    } else {
+      const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+      showToast(data.error || 'Failed to set reasoning effort');
+    }
+  } catch (e) {
+    showToast(`Failed to set reasoning effort: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
 
 function parseTokenCount(s: string): number | null {
   const m = s.match(/^(\d+(?:\.\d+)?)\s*([km])?$/i);

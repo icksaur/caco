@@ -21,6 +21,9 @@ export interface ModelInfo {
   outputPerMtok?: number;
   cachePerMtok?: number;
   contextWindow?: number;
+  supportsReasoningEffort?: boolean;
+  supportedReasoningEfforts?: string[];
+  defaultReasoningEffort?: string;
 }
 
 export type SessionKind = 'interactive' | 'agent' | 'swarm' | 'scheduled';

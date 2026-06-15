@@ -146,7 +146,7 @@ router.get('/sessions', async (_req: Request, res: Response) => {
     peers: peerSessions,
     models: models.map(m => {
       const s = modelCostSummary(m);
-      return { id: m.id, name: m.name, cost: s.multiplier, priceCategory: s.priceCategory, category: s.category, inputPerMtok: s.inputPerMtok, outputPerMtok: s.outputPerMtok, cachePerMtok: s.cachePerMtok, contextWindow: s.contextWindow };
+      return { id: m.id, name: m.name, cost: s.multiplier, priceCategory: s.priceCategory, category: s.category, inputPerMtok: s.inputPerMtok, outputPerMtok: s.outputPerMtok, cachePerMtok: s.cachePerMtok, contextWindow: s.contextWindow, supportsReasoningEffort: m.capabilities?.supports?.reasoningEffort ?? false, supportedReasoningEfforts: m.supportedReasoningEfforts, defaultReasoningEffort: m.defaultReasoningEffort };
     })
   });
 });
@@ -271,6 +271,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       repairMessage: result.repairMessage || null,
       responseOptions: meta?.responseOptions || null,
       contextBudgetTokens: meta?.contextBudgetTokens ?? null,
+      reasoningEffort: meta?.reasoningEffort ?? null,
       activeApplet: meta?.activeApplet || null,
       appletParams: meta?.appletParams || null,
       appletPanelVisible: meta?.appletPanelVisible ?? true,
@@ -434,7 +435,7 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
  */
 router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { name, envHint, model, cwd: newCwd, setContext, folder, contextBudgetTokens } = req.body as { 
+  const { name, envHint, model, cwd: newCwd, setContext, folder, contextBudgetTokens, reasoningEffort } = req.body as { 
     name?: string; 
     envHint?: string;
     model?: string;
@@ -442,6 +443,7 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
     folder?: string;
     setContext?: { setName: string; items: string[]; mode?: 'replace' | 'merge' };
     contextBudgetTokens?: number | null;
+    reasoningEffort?: string | null;
   };
   
   const currentCwd = sessionManager.getSessionCwd(sessionId);
@@ -512,6 +514,20 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       res.status(400).json({ error: `Failed to set context budget: ${msg}` });
+      return;
+    }
+  }
+
+  if (reasoningEffort !== undefined) {
+    if (!sessionManager.isActive(sessionId)) {
+      res.status(404).json({ error: 'Session not active' });
+      return;
+    }
+    try {
+      await sessionManager.setSessionReasoningEffort(sessionId, reasoningEffort);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(400).json({ error: `Failed to set reasoning effort: ${msg}` });
       return;
     }
   }
@@ -623,6 +639,7 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
     currentIntent: meta?.currentIntent || null,
     responseOptions: meta?.responseOptions || null,
     contextBudgetTokens: meta?.contextBudgetTokens ?? null,
+    reasoningEffort: meta?.reasoningEffort ?? null,
     isActive,
     isBusy
   });

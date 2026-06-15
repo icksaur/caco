@@ -32,6 +32,9 @@ export interface SessionMeta {
    *  infiniteSessions.backgroundCompactionThreshold is derived as T/W so the
    *  session compacts earlier, cutting per-call cache cost. Absent = SDK default. */
   contextBudgetTokens?: number;
+  /** Reasoning effort level for models that support it. Injected into resumeArgs
+   *  on session resume. Absent = SDK default effort for the model. */
+  reasoningEffort?: string;
   /** Caco-side cwd override. When set, wins over the SDK session.start
    *  cwd on cache rebuild (restart) so /session-cwd changes persist. */
   cwd?: string;

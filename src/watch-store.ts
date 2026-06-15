@@ -82,7 +82,7 @@ export type ChangeBroadcaster = (event: ChangeEvent) => void;
 const DEFAULT_TTL_MS = 5 * 60_000;
 const COALESCE_MS = 150;
 const REATTACH_DELAY_MS = 50;
-const PROCESS_LEASE_CAP = 16;
+const PROCESS_LEASE_CAP = 200;
 const EXPIRY_SCAN_INTERVAL_MS = 30_000;
 
 /**

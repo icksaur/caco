@@ -3,6 +3,7 @@ import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
+import { setActiveContextBudget } from './context-footer.js';
 import { archiveSession, renameSession } from './session-panel.js';
 import type { PopupItem } from './input-popup.js';
 
@@ -24,7 +25,8 @@ export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string
   { name: 'restart', description: 'Restart the Caco server' },
   { name: 'session-export', description: 'Export current session as .tar.gz' },
   { name: 'session-fork', description: 'Fork session into a new side conversation (inherits history)' },
-  { name: 'session-compact', description: 'Force context compaction' },
+  { name: 'session-compact', description: 'Force context compaction (optionally add text to focus the summary)' },
+  { name: 'session-context-window', description: 'Cap session context window (compact earlier to cut cost)' },
 ];
 
 const commands = new Map<string, Command>();
@@ -198,12 +200,17 @@ registerBuiltin('session-fork', async (message) => {
   }
 });
 
-registerBuiltin('session-compact', async () => {
+registerBuiltin('session-compact', async (arg) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
-  showToast('Compacting...', { type: 'info', autoHideMs: 5000 });
+  const focus = arg.trim();
+  showToast(focus ? 'Compacting (focused)...' : 'Compacting...', { type: 'info', autoHideMs: 5000 });
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/compact`, { method: 'POST' });
+    const res = await fetch(`/api/sessions/${sessionId}/compact`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(focus ? { customInstructions: focus } : {}),
+    });
     const data = await res.json();
     if (res.ok) {
       showToast(`Compacted: ${data.tokensRemoved} tokens, ${data.messagesRemoved} messages removed`, { type: 'success', autoHideMs: 5000 });
@@ -214,3 +221,87 @@ registerBuiltin('session-compact', async () => {
     showToast('Compaction failed');
   }
 });
+
+registerBuiltin('session-context-window', async (arg) => {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) { showToast('No active session'); return; }
+  const trimmed = arg.trim().toLowerCase();
+  let tokens: number | null;
+  if (trimmed === '' || trimmed === 'default' || trimmed === 'reset' || trimmed === 'full' || trimmed === 'clear') {
+    tokens = null;
+  } else {
+    tokens = parseTokenCount(trimmed);
+    if (tokens === null) { showToast(`Invalid token count: ${arg.trim()}`); return; }
+  }
+  showToast(tokens === null ? 'Clearing context cap...' : 'Capping context — reconnecting...', { type: 'info', autoHideMs: 4000 });
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contextBudgetTokens: tokens }),
+    });
+    if (res.ok) {
+      setActiveContextBudget(tokens);
+      const msg = tokens === null
+        ? 'Context cap cleared (SDK default ~80%)'
+        : `Context capped at ${formatTokenCount(tokens)} — history replays once`;
+      showToast(msg, { type: 'success', autoHideMs: 4000 });
+    } else {
+      const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+      showToast(data.error || 'Failed to set context window');
+    }
+  } catch (e) {
+    showToast(`Failed to set context window: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}, async () => {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) return [{ id: 'default', label: 'No active session', description: '' }];
+  let model: string | null = null;
+  let current: number | null = null;
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/state`);
+    if (res.ok) {
+      const data = await res.json();
+      model = data.model ?? null;
+      current = data.contextBudgetTokens ?? null;
+    }
+  } catch { /* fall through to defaults */ }
+  const w = model ? (getAvailableModels().find(m => m.id === model)?.contextWindow ?? 0) : 0;
+  const items: PopupItem[] = [];
+  if (w > 0) {
+    const seen = new Set<number>();
+    for (const pct of [0.2, 0.4, 0.6, 0.8]) {
+      const raw = pct * w;
+      const snapped = Math.round(raw / 100_000) * 100_000;
+      const effective = snapped > 0 ? snapped : Math.round(raw);
+      if (seen.has(effective)) continue;
+      seen.add(effective);
+      const pctLabel = Math.round((effective / w) * 100);
+      const desc = `${pctLabel}%${current === effective ? ' · current' : ''}`;
+      items.push({ id: String(effective), label: formatTokenCount(effective), description: desc, danger: effective < 100_000 });
+    }
+    items.sort((a, b) => Number(a.id) - Number(b.id));
+  }
+  items.push({ id: 'default', label: 'SDK default (~80%)', description: current === null ? 'current' : 'clear cap' });
+  return items;
+});
+
+function parseTokenCount(s: string): number | null {
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*([km])?$/i);
+  if (!m) return null;
+  let n = parseFloat(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const unit = (m[2] || '').toLowerCase();
+  if (unit === 'k') n *= 1_000;
+  else if (unit === 'm') n *= 1_000_000;
+  return Math.round(n);
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) {
+    const v = n / 1_000_000;
+    return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}M`;
+  }
+  return `${Math.round(n / 1000)}k`;
+}
+

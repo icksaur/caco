@@ -282,6 +282,10 @@ input[type="text"]:focus {
   background: var(--color-selector-hover);
 }
 
+.input-popup-item.danger {
+  color: var(--color-error);
+}
+
 .popup-description {
   color: var(--color-text-muted);
   font-size: var(--text-sm);

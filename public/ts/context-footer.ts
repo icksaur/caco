@@ -18,6 +18,61 @@ export interface SessionContext {
 
 let activeFooterSessionId: string | null = null;
 
+/** Active session's per-session context-window budget (absolute tokens), or
+ *  null for the SDK default. Drives the usage pie's compaction denominator and
+ *  the model-name tooltip's effective window. */
+let activeBudgetTokens: number | null = null;
+
+/** Last-rendered model display name, kept so setActiveContextBudget can refresh
+ *  the model-name tooltip without a full status re-render. */
+let currentModelDisplayName = '';
+
+/** SDK default background-compaction threshold (fraction of the window). */
+const DEFAULT_BG_THRESHOLD = 0.80;
+
+function formatWindowTokens(n: number): string {
+  if (n >= 1_000_000) {
+    const v = n / 1_000_000;
+    return `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}M`;
+  }
+  return `${Math.round(n / 1000)}K`;
+}
+
+/** Build the model-name tooltip: "Claude Opus 4.8 · 400K context window".
+ *  The window is the override budget when set, else the model's full window. */
+function modelTitleFor(displayName: string): string {
+  const model = getAvailableModels().find(m => m.id === activeModelId);
+  const fullWindow = model?.contextWindow ?? 0;
+  const effective = activeBudgetTokens && activeBudgetTokens > 0 ? activeBudgetTokens : fullWindow;
+  if (effective > 0) return `${displayName} · ${formatWindowTokens(effective)} context window`;
+  return displayName;
+}
+
+/** The absolute token count at which background compaction starts, honoring the
+ *  override. Mirrors the server's thresholdForBudget clamp. */
+function backgroundCompactSize(tokenLimit: number): number {
+  if (activeBudgetTokens && activeBudgetTokens > 0) {
+    const ratio = activeBudgetTokens / tokenLimit;
+    if (ratio < 0.95) {
+      const clamped = Math.min(0.94, Math.max(0.05, ratio));
+      return Math.round(clamped * tokenLimit);
+    }
+  }
+  return Math.round(DEFAULT_BG_THRESHOLD * tokenLimit);
+}
+
+/** Set (or clear) the active session's context budget and refresh the pie + the
+ *  model-name tooltip immediately. */
+export function setActiveContextBudget(tokens: number | null): void {
+  activeBudgetTokens = tokens && tokens > 0 ? tokens : null;
+  // Refresh the model-name tooltip in place.
+  const modelEl = regions.footer.el.querySelector('.context-model span') as HTMLElement | null;
+  if (modelEl && currentModelDisplayName) modelEl.title = modelTitleFor(currentModelDisplayName);
+  // Re-render the cached usage pie against the new compaction denominator.
+  const cached = activeFooterSessionId ? usageCache.get(activeFooterSessionId) : undefined;
+  if (cached) renderUsage(cached.tokenLimit, cached.currentTokens);
+}
+
 /**
  * Render file links in the context footer.
  */
@@ -61,7 +116,10 @@ export function renderNewChatStatus(modelName: string, cwd: string): void {
 
   // Row 2 left: model name.
   const modelEl = footer.querySelector('.context-model') as HTMLElement | null;
-  if (modelEl) modelEl.innerHTML = model ? `<span title="${escapeHtml(model)}">${escapeHtml(model)}</span>` : '';
+  if (modelEl) {
+    currentModelDisplayName = model || '';
+    modelEl.innerHTML = model ? `<span title="${escapeHtml(modelTitleFor(model))}">${escapeHtml(model)}</span>` : '';
+  }
 
   // Row 2 right: cwd (no links without a session).
   const descEl = footer.querySelector('.context-description') as HTMLElement | null;
@@ -103,7 +161,10 @@ export function renderSessionStatus(params: SessionStatusParams): void {
 
   // Row 2 left: model name.
   const modelEl = footer.querySelector('.context-model') as HTMLElement | null;
-  if (modelEl) modelEl.innerHTML = model ? `<span title="${escapeHtml(model)}">${escapeHtml(model)}</span>` : '';
+  if (modelEl) {
+    currentModelDisplayName = model || '';
+    modelEl.innerHTML = model ? `<span title="${escapeHtml(modelTitleFor(model))}">${escapeHtml(model)}</span>` : '';
+  }
 
   // Row 2 right: dashboard + git + cwd-as-files-link.
   renderDescription(sessionId, hasGit, gitBranch, fullCwd, dirName);
@@ -241,12 +302,17 @@ function renderUsage(tokenLimit: number, currentTokens: number): void {
   const usageEl = footer.querySelector('.context-usage') as HTMLElement | null;
   if (!usageEl) return;
   
-  const pct = Math.round((currentTokens / tokenLimit) * 100);
+  // Denominator is the background-compaction point (honoring any override), not
+  // the full window — that's where context actually gets summarized.
+  const compactSize = backgroundCompactSize(tokenLimit);
+  const pct = Math.round((currentTokens / compactSize) * 100);
   const glyphIdx = Math.min(Math.floor(pct / 25), 4);
   const glyph = PIE_GLYPHS[glyphIdx];
-  const tooltip = `${currentTokens.toLocaleString()} / ${tokenLimit.toLocaleString()} tokens (${pct}%)`;
+  const tooltip =
+    `${currentTokens.toLocaleString()} / ${compactSize.toLocaleString()} before compaction (${pct}%)` +
+    `\nfull window: ${tokenLimit.toLocaleString()} tokens`;
   
-  usageEl.textContent = `${glyph} ${pct}%`;
+  usageEl.textContent = `${glyph} ${Math.min(pct, 100)}%`;
   usageEl.title = tooltip;
   updateFooterVisibility();
 }

@@ -11,7 +11,7 @@
 
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, releaseActiveSessionForNewChat, getNewChatCwd } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
-import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, updateThroughput, restoreThroughput, clearThroughput, setActiveThroughputModel } from './context-footer.js';
+import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, updateThroughput, restoreThroughput, clearThroughput, setActiveThroughputModel, setActiveContextBudget } from './context-footer.js';
 import { loadModels } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
 import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websocket.js';
@@ -179,6 +179,7 @@ class ChatViewController {
       flight.end('resumeAndLoad');
 
       flight.span('showChat');
+      setActiveContextBudget(data.contextBudgetTokens ?? null);
       this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.hasIcon, data.kind, data.currentIntent, data.gitBranch);
       setResponseOptions(data.responseOptions?.length ? data.responseOptions : []);
       flight.end('showChat');
@@ -204,7 +205,7 @@ class ChatViewController {
     name?: string; sessionId?: string; hasIcon?: boolean; kind?: string;
     currentIntent?: string; gitBranch?: string | null; responseOptions?: string[];
     activeApplet?: string | null; appletParams?: Record<string, string> | null;
-    appletPanelVisible?: boolean;
+    appletPanelVisible?: boolean; contextBudgetTokens?: number | null;
   }> {
     flight?.span('wsConnect');
     reconnectIfNeeded();
@@ -237,6 +238,7 @@ class ChatViewController {
       activeApplet?: string | null;
       appletParams?: Record<string, string> | null;
       appletPanelVisible?: boolean;
+      contextBudgetTokens?: number | null;
     };
 
     // repairMessage is intentionally not toasted: auto-repair is opportunistic

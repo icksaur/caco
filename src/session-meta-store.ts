@@ -28,6 +28,10 @@ export interface SessionMeta {
   context?: Record<string, string[]>;
   model?: string;
   folder?: string;
+  /** Per-session context-window budget (absolute tokens). When set, the SDK's
+   *  infiniteSessions.backgroundCompactionThreshold is derived as T/W so the
+   *  session compacts earlier, cutting per-call cache cost. Absent = SDK default. */
+  contextBudgetTokens?: number;
   /** Caco-side cwd override. When set, wins over the SDK session.start
    *  cwd on cache rebuild (restart) so /session-cwd changes persist. */
   cwd?: string;

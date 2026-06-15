@@ -270,6 +270,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       cwdFallback: result.usedFallbackCwd,
       repairMessage: result.repairMessage || null,
       responseOptions: meta?.responseOptions || null,
+      contextBudgetTokens: meta?.contextBudgetTokens ?? null,
       activeApplet: meta?.activeApplet || null,
       appletParams: meta?.appletParams || null,
       appletPanelVisible: meta?.appletPanelVisible ?? true,
@@ -433,13 +434,14 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
  */
 router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { name, envHint, model, cwd: newCwd, setContext, folder } = req.body as { 
+  const { name, envHint, model, cwd: newCwd, setContext, folder, contextBudgetTokens } = req.body as { 
     name?: string; 
     envHint?: string;
     model?: string;
     cwd?: string;
     folder?: string;
     setContext?: { setName: string; items: string[]; mode?: 'replace' | 'merge' };
+    contextBudgetTokens?: number | null;
   };
   
   const currentCwd = sessionManager.getSessionCwd(sessionId);
@@ -470,14 +472,6 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
     }
   }
 
-  const existing = getSessionMeta(sessionId) ?? { name: '' };
-  const updated = {
-    ...existing,
-    ...(name !== undefined && { name }),
-    ...(envHint !== undefined && { envHint }),
-    ...(folder !== undefined && { folder: normalizeFolder(folder) || undefined }),
-  };
-  
   // Handle model change via SDK
   if (model) {
     try {
@@ -488,6 +482,51 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
       return;
     }
   }
+  
+  // Handle context-window budget change via SDK (recreate session)
+  if (contextBudgetTokens !== undefined) {
+    if (sessionManager.isBusy(sessionId)) {
+      res.status(409).json({ error: 'Session busy — try again when idle', code: 'SESSION_BUSY' });
+      return;
+    }
+    const tokens = contextBudgetTokens;
+    if (tokens !== null) {
+      if (typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens <= 0) {
+        res.status(400).json({ error: 'contextBudgetTokens must be a positive number or null' });
+        return;
+      }
+      const currentModel = sessionManager.getSessionModel(sessionId);
+      const limits = currentModel ? sessionManager.modelTokenLimits(currentModel) : undefined;
+      const w = limits?.maxPromptTokens ?? limits?.maxContextWindowTokens ?? 0;
+      if (w === 0) {
+        res.status(400).json({ error: 'Model context window unknown — cannot set a budget' });
+        return;
+      }
+      if (tokens > w) {
+        res.status(400).json({ error: `Budget ${tokens} exceeds the model window (${w})` });
+        return;
+      }
+    }
+    try {
+      await sessionManager.setSessionContextBudget(sessionId, tokens);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(400).json({ error: `Failed to set context budget: ${msg}` });
+      return;
+    }
+  }
+  
+  // Re-read meta AFTER the model/budget mutations above (each may have written
+  // to meta — model via syncModelCache, contextBudgetTokens via the recreate).
+  // Building `updated` from a snapshot taken before them would clobber those
+  // writes on the final setSessionMeta below.
+  const existing = getSessionMeta(sessionId) ?? { name: '' };
+  const updated = {
+    ...existing,
+    ...(name !== undefined && { name }),
+    ...(envHint !== undefined && { envHint }),
+    ...(folder !== undefined && { folder: normalizeFolder(folder) || undefined }),
+  };
   
   // Handle setContext if provided
   if (setContext) {
@@ -546,7 +585,8 @@ router.post('/sessions/:sessionId/compact', async (req: Request, res: Response) 
   }
 
   try {
-    const result = await sessionManager.compactSession(sessionId);
+    const customInstructions = typeof req.body?.customInstructions === 'string' ? req.body.customInstructions : undefined;
+    const result = await sessionManager.compactSession(sessionId, customInstructions);
     res.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -582,6 +622,7 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
     kind: meta?.kind || 'interactive',
     currentIntent: meta?.currentIntent || null,
     responseOptions: meta?.responseOptions || null,
+    contextBudgetTokens: meta?.contextBudgetTokens ?? null,
     isActive,
     isBusy
   });

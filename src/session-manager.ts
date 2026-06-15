@@ -15,6 +15,7 @@ import { loadMcpServers } from './mcp-config-loader.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
 import { clearSession as clearThroughputSession } from './session-throughput.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
+import { thresholdForBudget, type ModelTokenLimits } from './context-budget.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 
@@ -84,6 +85,12 @@ export interface SDKModelInfo {
   defaultReasoningEffort?: string;
 }
 
+interface InfiniteSessionConfig {
+  enabled?: boolean;
+  backgroundCompactionThreshold?: number;
+  bufferExhaustionThreshold?: number;
+}
+
 interface CreateSessionConfig {
   model?: string;
   streaming?: boolean;
@@ -91,6 +98,7 @@ interface CreateSessionConfig {
   tools?: unknown[];
   excludedTools?: string[];
   provider?: ProviderConfig;
+  infiniteSessions?: InfiniteSessionConfig;
 }
 
 interface ResumeSessionConfig {
@@ -100,6 +108,7 @@ interface ResumeSessionConfig {
   systemMessage?: { mode: 'append'; content: string };
   model?: string;
   provider?: ProviderConfig;
+  infiniteSessions?: InfiniteSessionConfig;
 }
 
 interface CopilotSessionInstance {
@@ -400,6 +409,34 @@ class SessionManager {
   }
 
   /**
+   * Resolve a model's prompt-token limits for context-budget math. Looks up the
+   * Caco model id in the aggregated model list (GitHub + BYOK both appear there
+   * with capabilities.limits populated). Returns undefined if not found.
+   */
+  modelTokenLimits(cacoModelId: string): ModelTokenLimits | undefined {
+    const m = this.cachedModels.find(x => x.id === cacoModelId);
+    if (!m) return undefined;
+    return {
+      maxPromptTokens: m.capabilities?.limits?.max_prompt_tokens,
+      maxContextWindowTokens: m.capabilities?.limits?.max_context_window_tokens,
+    };
+  }
+
+  /**
+   * Build the infiniteSessions config for a session from its persisted context
+   * budget, or undefined when no budget applies (so the SDK default stands).
+   * Used at both create and resume.
+   */
+  private infiniteSessionsFor(sessionId: string, cacoModelId: string | undefined): InfiniteSessionConfig | undefined {
+    if (!cacoModelId) return undefined;
+    const budget = getSessionMeta(sessionId)?.contextBudgetTokens;
+    if (!budget) return undefined;
+    const threshold = thresholdForBudget(budget, this.modelTokenLimits(cacoModelId));
+    if (threshold === null) return undefined;
+    return { backgroundCompactionThreshold: threshold };
+  }
+
+  /**
    * onListModels handler — installed only when BYOK providers exist. Fetches
    * GitHub models via the raw RPC (NOT listModels(), which would recurse),
    * replicates the capability normalization the SDK skips on this path, then
@@ -494,6 +531,9 @@ class SessionManager {
         mcpServers: await loadMcpServers(),
         workingDirectory: cwd,
         ...(resolved.provider && { provider: resolved.provider }),
+        // No infiniteSessions here: a brand-new session has no persisted budget
+        // yet. Budgets are applied on resume (incl. the recreate triggered by
+        // setSessionContextBudget). See infiniteSessionsFor / _doResume.
       } as CreateSessionConfig);
     } catch (e) {
       this.handleClientError(e);
@@ -604,6 +644,7 @@ class SessionManager {
     const cacoModel = config.modelOverride ?? readModelFromEvents(sessionId);
     const resolved = cacoModel ? resolveModel(cacoModel) : null;
     const applyModel = !!resolved && (!!resolved.provider || isOverride);
+    const infinite = this.infiniteSessionsFor(sessionId, cacoModel ?? undefined);
     
     let repairMessage: string | undefined;
     const memoryContent = formatMemoryForPrompt();
@@ -618,6 +659,7 @@ class SessionManager {
       ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
       ...(applyModel && { model: resolved.sdkModel }),
       ...(resolved?.provider && { provider: resolved.provider }),
+      ...(infinite && { infiniteSessions: infinite }),
     } as ResumeSessionConfig;
 
     const MAX_REPAIR_ATTEMPTS = 3;
@@ -1082,12 +1124,68 @@ class SessionManager {
     }
   }
 
-  async compactSession(sessionId: string): Promise<{ tokensRemoved: number; messagesRemoved: number }> {
+  /**
+   * Set (or clear, with null) the per-session context-window budget and apply
+   * it immediately by recreating the SDK session (the SDK has no live setter for
+   * the compaction threshold). History on disk is preserved and replayed once.
+   *
+   * Persists the budget to meta BEFORE recreate so _doResume's infiniteSessionsFor
+   * reads the new value. On resume failure, the previous meta value is restored
+   * so a failed apply doesn't leave a stale budget.
+   *
+   * Caller (route) must reject busy sessions; this method also refuses if the
+   * session isn't active.
+   */
+  async setSessionContextBudget(sessionId: string, tokens: number | null): Promise<void> {
     const active = this.activeSessions.get(sessionId);
     if (!active) {
       throw new Error(`Session ${sessionId} is not active`);
     }
-    const result = await active.session.rpc.history.compact();
+
+    const meta = getSessionMeta(sessionId) ?? { name: '' };
+    const previousBudget = meta.contextBudgetTokens;
+    const newBudget = tokens && tokens > 0 ? tokens : undefined;
+
+    if (previousBudget === newBudget) return;
+
+    setSessionMeta(sessionId, { ...meta, contextBudgetTokens: newBudget });
+
+    const { toolFactory, excludedTools } = active;
+    try {
+      await active.session.disconnect();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`[CTXWIN] disconnect during budget change failed: ${msg}`);
+    }
+    dispatchState.end(sessionId);
+    this.activeSessions.delete(sessionId);
+
+    try {
+      await this.resume(sessionId, { toolFactory, excludedTools });
+      console.log(`[CTXWIN] Recreated session ${sessionId.slice(0, 8)} with budget ${newBudget ?? 'default'}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Restore the previous meta budget, then attempt to bring the session back.
+      const cur = getSessionMeta(sessionId) ?? { name: '' };
+      setSessionMeta(sessionId, { ...cur, contextBudgetTokens: previousBudget });
+      try {
+        await this.resume(sessionId, { toolFactory, excludedTools });
+        console.warn(`[CTXWIN] Budget change failed; reverted ${sessionId.slice(0, 8)} to ${previousBudget ?? 'default'}`);
+        throw new Error(`Context budget change failed (${msg}); reverted`);
+      } catch (rollbackErr) {
+        const rmsg = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+        throw new Error(`Context budget change failed (${msg}) and rollback failed (${rmsg}); session ended`);
+      }
+    }
+  }
+
+  async compactSession(sessionId: string, customInstructions?: string): Promise<{ tokensRemoved: number; messagesRemoved: number }> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      throw new Error(`Session ${sessionId} is not active`);
+    }
+    const instr = customInstructions?.trim();
+    const result = await active.session.rpc.history.compact(instr ? { customInstructions: instr } : undefined);
     if (!result.success) {
       throw new Error('Compaction failed');
     }

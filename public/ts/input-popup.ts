@@ -6,6 +6,7 @@ export interface PopupItem {
   description?: string;
   value?: string;
   icon?: string;
+  danger?: boolean;
 }
 
 interface InputPopupConfig {
@@ -181,7 +182,7 @@ export class InputPopup {
     for (let i = 0; i < this.filtered.length; i++) {
       const item = this.filtered[i];
       const div = document.createElement('div');
-      div.className = 'input-popup-item' + (i === this.selectedIdx ? ' selected' : '');
+      div.className = 'input-popup-item' + (i === this.selectedIdx ? ' selected' : '') + (item.danger ? ' danger' : '');
       div.dataset.idx = String(i);
       if (item.icon) {
         const iconEl = document.createElement('span');

@@ -83,6 +83,7 @@ To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Star
 | `/session-export` | Export current session as .tar.gz |
 | `/session-fork [message]` | Fork session into a new side conversation (inherits history) |
 | `/session-compact` | Force context compaction |
+| `/session-context-window [tokens]` | Cap session context window so it compacts earlier (cuts per-call cost); no arg opens a picker |
 | `/restart` | Restart the Caco server |
 
 ### Portal

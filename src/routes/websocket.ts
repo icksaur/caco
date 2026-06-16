@@ -38,7 +38,7 @@ const usageCache = new Map<string, { tokenLimit: number; currentTokens: number }
 interface ClientMessage {
   type: 'setState' | 'getState' | 'sendMessage' | 'requestHistory' | 'ping' | 'subscribe';
   id?: string;  // For request/response correlation
-  sessionId?: string;  // For requestHistory and subscribe
+  sessionId?: string;  // For requestHistory, subscribe, and setState
   data?: Record<string, unknown>;
   // For sendMessage
   content?: string;
@@ -157,8 +157,11 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
     case 'setState':
       if (msg.data) {
         setAppletUserState(msg.sessionId, msg.data);
-        // Broadcast to all connections (for multi-tab sync)
-        broadcastToAll({ type: 'stateUpdate', data: msg.data }, ws);
+        // Broadcast to other tabs, tagged with the originating session so
+        // the client-side filter drops it for applets on a different session.
+        // Without the sessionId tag, every session received every applet's
+        // state, causing cross-session apply loops (e.g. files-applet flicker).
+        broadcastToAll({ type: 'stateUpdate', sessionId: msg.sessionId, data: msg.data }, ws);
       }
       break;
     

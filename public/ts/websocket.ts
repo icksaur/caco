@@ -384,7 +384,7 @@ function request<T = unknown>(type: string, data?: object): Promise<T> {
  * Called by applet JS to make state queryable by agent
  */
 export function wsSetState(state: Record<string, unknown>): void {
-  send({ type: 'setState', data: state });
+  send({ type: 'setState', sessionId: getActiveSessionId() ?? undefined, data: state });
 }
 
 /**

@@ -257,3 +257,47 @@ describe('message filtering by sessionId', () => {
     expect(shouldProcessMessage(undefined, 'session-1')).toBe(true);
   });
 });
+
+describe('setState broadcast carries originating sessionId', () => {
+  // Regression: the server's setState handler previously broadcast
+  // stateUpdate WITHOUT a sessionId. Because the client filter only
+  // drops a message when msgSessionId is present and differs, an
+  // untagged broadcast reached EVERY session's applet, causing
+  // cross-session apply loops (files-applet flicker: session A's diff
+  // state was applied against session B's repo, 404ing on
+  // /file-edits/open and re-echoing forever).
+
+  /** Envelope the server emits for an inbound setState. Must preserve
+   *  the originating sessionId so downstream filtering works. */
+  function buildStateUpdateBroadcast(
+    inboundSessionId: string | undefined,
+    data: Record<string, unknown>
+  ): { type: 'stateUpdate'; sessionId: string | undefined; data: Record<string, unknown> } {
+    return { type: 'stateUpdate', sessionId: inboundSessionId, data };
+  }
+
+  function shouldProcessMessage(
+    msgSessionId: string | undefined,
+    activeSessionId: string | null
+  ): boolean {
+    if (msgSessionId && activeSessionId && msgSessionId !== activeSessionId) {
+      return false;
+    }
+    return true;
+  }
+
+  it('tags the broadcast with the inbound sessionId', () => {
+    const env = buildStateUpdateBroadcast('session-A', { fileEdits: {} });
+    expect(env.sessionId).toBe('session-A');
+  });
+
+  it('drops a tagged broadcast for an applet on a different session', () => {
+    const env = buildStateUpdateBroadcast('session-A', { fileEdits: {} });
+    expect(shouldProcessMessage(env.sessionId, 'session-B')).toBe(false);
+  });
+
+  it('delivers a tagged broadcast to an applet on the same session', () => {
+    const env = buildStateUpdateBroadcast('session-A', { fileEdits: {} });
+    expect(shouldProcessMessage(env.sessionId, 'session-A')).toBe(true);
+  });
+});

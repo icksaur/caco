@@ -68,6 +68,10 @@
   cursor: not-allowed;
 }
 
+/* Extra gap before the + button so "Close all" isn't fat-fingered when
+   the user is reaching to open another file. */
+.fe-btn-closeall { margin-right: var(--space-lg); }
+
 /* Tab strip — adapted from .session-item styling */
 
 .fe-tabs {

@@ -17,6 +17,7 @@
   var repoEl = document.getElementById('feRepo');
   var followBtn = document.getElementById('feFollow');
   var openBtn = document.getElementById('feOpen');
+  var closeAllBtn = document.getElementById('feCloseAll');
   var tabsEl = document.getElementById('feTabs');
   var paneEl = document.getElementById('fePane');
   var paneEmptyEl = document.getElementById('fePaneEmpty');
@@ -1657,6 +1658,11 @@
     var isNew = false;
     var contentChanged = false;
     if (!container) {
+      // Reopen path (updateOnly): the snapshot refreshes restored cards
+      // only. A dirty file with no restored container must NOT spawn a
+      // tab — that is the "17 tabs flood" the user hit. Bail before any
+      // creation. Live caco.edit calls omit updateOnly and open normally.
+      if (options.updateOnly) return;
       // V5 fix: routeOpen guards itself with pendingOpenIds and only
       // calls tabs.set() AFTER awaiting the viewer factory. If the
       // poll fires between routeOpen's begin and its tabs.set, we'd
@@ -1847,6 +1853,50 @@
     echoState();
   }
 
+  /** Close every open tab in one gesture. Mirrors closeTab's teardown
+   *  (dismissal record, follow-off, persist) but with a single aggregated
+   *  dirty prompt instead of one per tab. */
+  function closeAllTabs() {
+    if (tabs.size === 0) return;
+    var anyDirty = false;
+    tabs.forEach(function(container) {
+      container.viewers.forEach(function(v) {
+        if (v && typeof v.isDirty === 'function' && v.isDirty()) anyDirty = true;
+      });
+    });
+    if (anyDirty) {
+      if (!window.confirm('Discard unsaved changes in all tabs?')) return;
+    }
+    var captured = Array.from(tabs.values());
+    tabs.clear();
+    badgeCounter.clear();
+    lastEditedTabId = null;
+    activeTabId = null;
+    captured.forEach(function(container) {
+      // Match closeTab's dismissal record (spec §4.7) so a live caco.edit
+      // for the same unchanged file doesn't immediately re-open it.
+      dismissedPaths.add(container.relPath);
+      var dvForSnap = container.viewers.get('diff');
+      if (dvForSnap && dvForSnap.edit) {
+        dismissedSnapshots.set(container.relPath, {
+          diff: dvForSnap.edit.diff,
+          status: dvForSnap.edit.status,
+          isBinary: dvForSnap.edit.isBinary,
+        });
+      }
+      try { container.deactivate(); } catch (_e) { /* ignore */ }
+      try { container.destroy(); } catch (_e) { /* ignore */ }
+    });
+    // Disable follow so the strip doesn't re-flood the instant the agent
+    // makes its next edit. Same rule as a manual single close (§4.8).
+    followEdits = false;
+    updateFollowButton();
+    updateEmptyState();
+    reconcileTabDom();
+    schedulePersist();
+    echoState();
+  }
+
   /** Self-heal stale tab DOMs that are no longer in the tabs map.
    *  These should never exist (closeTab/destroy keep them in sync),
    *  but a routeOpen race or a buggy future code path could leak one.
@@ -1986,6 +2036,7 @@
   function updateEmptyState() {
     var hasTabs = tabs.size > 0;
     paneEmptyEl.hidden = hasTabs;
+    if (closeAllBtn) closeAllBtn.hidden = !hasTabs;
     if (!hasTabs && activeTabId === null) {
       // empty pane: clear any leftover content but keep our message div
       if (paneEl.firstChild && paneEl.firstChild !== paneEmptyEl) {
@@ -2889,6 +2940,13 @@
     else openPicker();
   });
 
+  if (closeAllBtn) {
+    closeAllBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      closeAllTabs();
+    });
+  }
+
   // ── Pure utilities (preserved from V2/V2.1/V3.1) ─────────────────────
 
   function esc(s) {
@@ -3478,7 +3536,7 @@
     return true;
   }
   // ── Snapshot fetcher and session wiring ──────────────────────────────
-  async function fetchSnapshot() {
+  async function fetchSnapshot(updateOnly) {
     if (!sessionId) return;
     try {
       var res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/snapshot');
@@ -3494,7 +3552,11 @@
       cwdIsGit = data.isGit !== false;
       if (Array.isArray(data.edits)) {
         for (var i = 0; i < data.edits.length; i++) {
-          openOrUpdateTab(data.edits[i]);
+          // On reopen (updateOnly), the snapshot refreshes the content of
+          // restored cards but must NOT create tabs for dirty files the
+          // user didn't have open — otherwise every edited file floods
+          // back as a tab. Live caco.edit events keep full open semantics.
+          openOrUpdateTab(data.edits[i], updateOnly ? { updateOnly: true } : undefined);
         }
       }
       updateEmptyState();
@@ -3627,7 +3689,7 @@
       });
     }
     updateEmptyState();
-    await fetchSnapshot();
+    await fetchSnapshot(true);
   }
 
   function bootSession(existingId) {

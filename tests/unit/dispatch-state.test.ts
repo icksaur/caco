@@ -5,7 +5,7 @@
  * both busy status and correlation context atomically.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { DispatchState } from '../../src/dispatch-state.js';
 
 describe('DispatchState', () => {
@@ -54,15 +54,10 @@ describe('DispatchState', () => {
     });
 
     it('getActiveCount tracks the number of in-flight dispatches', () => {
-      // The duplicate-start branch warns intentionally; suppress for this test.
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       expect(state.getActiveCount()).toBe(0);
       state.start('s1', 'c1');
       expect(state.getActiveCount()).toBe(1);
       state.start('s2', 'c2');
-      expect(state.getActiveCount()).toBe(2);
-      // Re-starting an already-busy session does not double-count.
-      state.start('s1', 'c1-again');
       expect(state.getActiveCount()).toBe(2);
       state.end('s1');
       expect(state.getActiveCount()).toBe(1);
@@ -70,7 +65,15 @@ describe('DispatchState', () => {
       expect(state.getActiveCount()).toBe(0);
       state.end('s2'); // idempotent
       expect(state.getActiveCount()).toBe(0);
-      warnSpy.mockRestore();
+    });
+
+    it('rejects duplicate starts without overwriting correlation context', () => {
+      state.start('s1', 'c1');
+
+      expect(() => state.start('s1', 'c2')).toThrow('Session s1 is already dispatching');
+
+      expect(state.getActiveCount()).toBe(1);
+      expect(state.getCorrelationId('s1')).toBe('c1');
     });
   });
 

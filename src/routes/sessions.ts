@@ -23,11 +23,12 @@ import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
-import { dispatchMessage } from './session-messages.js';
+import { DispatchHttpError, dispatchMessage } from './session-messages.js';
 import { prefixMessageSource } from '../message-source.js';
 import { getSessionDraft, setSessionDraft, deleteSessionDraft } from '../chat-draft-store.js';
 import { modelCostSummary } from '../model-billing.js';
 import { snapshot as throughputSnapshot } from '../session-throughput.js';
+import { hasWhitespace, validateAgentForUserDispatch, visibleAgents } from '../agent-command.js';
 
 const router = Router();
 
@@ -281,6 +282,82 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(400).json({ error: message });
+  }
+});
+
+router.get('/sessions/:sessionId/agents', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+
+  if (!sessionManager.getSessionCwd(sessionId)) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+
+  try {
+    if (!sessionManager.isActive(sessionId)) {
+      await sessionManager.resume(sessionId, sessionState.getSessionConfig());
+    }
+    const agents = visibleAgents(await sessionManager.listAgents(sessionId));
+    res.json({ agents });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: `Failed to list agents: ${message}` });
+  }
+});
+
+router.post('/sessions/:sessionId/agent-dispatch', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const requestId = (req.headers['x-request-id'] as string) || `agent-${Date.now().toString(36)}`;
+  const { agentName, prompt } = req.body as { agentName?: string; prompt?: string };
+
+  if (!agentName?.trim()) {
+    res.status(400).json({ error: 'agentName is required' });
+    return;
+  }
+  if (!prompt?.trim()) {
+    res.status(400).json({ error: 'prompt is required' });
+    return;
+  }
+  if (hasWhitespace(agentName)) {
+    res.status(400).json({ error: 'Agent names with whitespace are not supported' });
+    return;
+  }
+  if (!sessionManager.getSessionCwd(sessionId)) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+  if (sessionManager.isBusy(sessionId)) {
+    res.status(409).json({ error: 'Session is busy processing another message', code: 'SESSION_BUSY' });
+    return;
+  }
+
+  try {
+    await dispatchMessage(
+      sessionId,
+      prompt.trim(),
+      {
+        requestId,
+        needsObservation: true,
+        beforeSend: async () => {
+          const agents = await sessionManager.listAgents(sessionId);
+          const validation = validateAgentForUserDispatch(agents, agentName);
+          if (!validation.ok) throw new DispatchHttpError(validation.status, validation.error);
+          await sessionManager.selectAgent(sessionId, validation.agent.name);
+        },
+      },
+      {
+        onEvent: (evt) => broadcastEvent(sessionId, evt),
+      }
+    );
+
+    const meta = getSessionMeta(sessionId);
+    if (meta) setSessionMeta(sessionId, { ...meta, lastUsedAt: new Date().toISOString() });
+    res.json({ ok: true, sessionId });
+  } catch (error) {
+    const status = error instanceof DispatchHttpError ? error.status : 500;
+    const code = error instanceof DispatchHttpError ? error.code : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(status).json({ error: message, ...(code && { code }) });
   }
 });
 

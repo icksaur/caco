@@ -62,6 +62,10 @@ export function autoResize(textarea: HTMLTextAreaElement): void {
   textarea.style.overflowY = textarea.scrollHeight > MAX_HEIGHT ? 'auto' : 'hidden';
 }
 
+export function formatSlashPickerValue(cmdName: string, picked: PopupItem): string {
+  return `/${cmdName} ${picked.value ?? picked.id}`;
+}
+
 // `registerPoundProvider` is intentionally NOT re-exported here.
 // Callers register pound providers via the canonical
 // `multiline-input.ts` module to keep a single import surface for
@@ -120,7 +124,7 @@ export class FormPopups {
       anchor: this.anchor,
       onSelect: (picked) => {
         this.picker!.hide();
-        this.textarea.value = `/${cmdName} ${picked.id}`;
+        this.textarea.value = formatSlashPickerValue(cmdName, picked);
         autoResize(this.textarea);
         this.textarea.focus();
       },

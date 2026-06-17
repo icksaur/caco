@@ -9,6 +9,9 @@
 export interface SessionEvent {
   type: string;
   data?: Record<string, unknown>;
+  /** Set by the SDK on events originating from a sub-agent (task tool).
+   *  Absent on primary-session events. Used to draw the agent discriminator. */
+  agentId?: string;
 }
 
 export interface ModelInfo {

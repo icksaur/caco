@@ -228,7 +228,7 @@ class ElementInserter {
    *
    * Otherwise uses simple last-child matching.
    */
-  getElement(eventType: string, parent: HTMLElement, data?: Record<string, unknown>): HTMLElement | null {
+  getElement(eventType: string, parent: HTMLElement, data?: Record<string, unknown>, agentId?: string): HTMLElement | null {
     const cssClass = this.map[eventType];
     if (cssClass === null || cssClass === undefined) return null;
 
@@ -241,9 +241,12 @@ class ElementInserter {
       }
     }
 
-    // Default: reuse last child if it matches
+    // Default: reuse last child if it matches class AND originating agent.
+    // The agentId guard keeps a sub-agent's events from merging into the
+    // preceding primary-session box (and vice versa), so each agent's run
+    // forms its own container that the CSS discriminator can mark.
     const last = parent.lastElementChild as HTMLElement | null;
-    if (last?.classList.contains(cssClass)) {
+    if (last?.classList.contains(cssClass) && (last.dataset.agentId || '') === (agentId || '')) {
       this.debug(`[INSERTER] "${this.name}" reuse existing div for type "${eventType}"`);
       return last;
     }
@@ -251,6 +254,7 @@ class ElementInserter {
     // Create new
     const div = document.createElement('div');
     div.className = cssClass;
+    if (agentId) div.dataset.agentId = agentId;
     parent.appendChild(div);
     this.debug(`[INSERTER] "${this.name}" create new div for type "${eventType}"`);
     return div;
@@ -720,14 +724,16 @@ export class ChatRegion {
   renderEvent(event: SessionEvent): void {
     let eventType = event.type;
     const data = event.data || {};
+    // SDK sets agentId on sub-agent (task tool) events; primary events lack it.
+    const agentId = typeof event.agentId === 'string' ? event.agentId : undefined;
 
     // Transform source-typed user messages
     if (eventType === 'user.message' && data.source && data.source !== 'user') {
       eventType = `caco.${data.source}`;
     }
 
-    // Get outer div
-    const outer = this.outerInserter.getElement(eventType, this.root.el);
+    // Get outer div (agentId keeps sub-agent boxes separate + markable)
+    const outer = this.outerInserter.getElement(eventType, this.root.el, undefined, agentId);
     if (!outer) return;
 
     // Get inner div (null = omit this event type)

@@ -882,11 +882,32 @@ main {
 }
 
 .agent-message {
+  position: relative;
   background: var(--color-agent-bg);
   padding: var(--space-lg);
   white-space: pre-wrap;
   font-family: monospace;
   font-size: var(--text-sm);
+}
+
+/* Background-agent discriminator: a 5px purple bar on the left edge of any
+   chat box originating from a sub-agent. dom-regions tags these outer boxes
+   with data-agent-id (set by the SDK on task-tool sub-agent events);
+   .agent-message covers cross-session [agent:id] messages. */
+[data-agent-id],
+.agent-message {
+  position: relative;
+}
+
+[data-agent-id]::before,
+.agent-message::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--purple);
 }
 
 .applet-message {

@@ -1093,3 +1093,61 @@ describe('edit lifecycle', () => {
     expect((inner!._children[0] as unknown as { className: string }).className).toBe('edit-header');
   });
 });
+
+// ── Background-agent discriminator (event.agentId) ──────────────
+
+describe('sub-agent discriminator via event.agentId', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal('document', {
+      createElement: (tag: string) => {
+        const el = createMockElement();
+        (el as unknown as { tagName: string }).tagName = tag.toUpperCase();
+        return el;
+      },
+    });
+  });
+
+  async function buildRegion() {
+    const { scopedRoot, ChatRegion } = await import('../../public/ts/dom-regions.js');
+    const root = createMockElement();
+    const region = new ChatRegion(scopedRoot(root));
+    return { root, region };
+  }
+
+  it('tags a sub-agent message box with data-agentId', async () => {
+    const { root, region } = await buildRegion();
+    region.renderEvent({ type: 'assistant.message', agentId: 'toolu_sub1', data: { content: 'hi' } });
+    const outer = root._children[0] as ReturnType<typeof createMockElement>;
+    expect(outer.dataset.agentId).toBe('toolu_sub1');
+  });
+
+  it('does not tag a primary message box', async () => {
+    const { root, region } = await buildRegion();
+    region.renderEvent({ type: 'assistant.message', data: { content: 'hi' } });
+    const outer = root._children[0] as ReturnType<typeof createMockElement>;
+    expect(outer.dataset.agentId).toBeUndefined();
+  });
+
+  it('splits primary and sub-agent activity into separate boxes (no reuse across agentId)', async () => {
+    const { root, region } = await buildRegion();
+    // Primary tool call, then a sub-agent tool call, then primary again.
+    region.renderEvent({ type: 'tool.execution_start', data: { toolName: 'view', toolCallId: 'p1' } });
+    region.renderEvent({ type: 'tool.execution_start', agentId: 'toolu_sub1', data: { toolName: 'grep', toolCallId: 's1' } });
+    region.renderEvent({ type: 'tool.execution_start', data: { toolName: 'edit', toolCallId: 'p2' } });
+    const boxes = root._children as ReturnType<typeof createMockElement>[];
+    expect(boxes.length).toBe(3);
+    expect(boxes[0].dataset.agentId).toBeUndefined();
+    expect(boxes[1].dataset.agentId).toBe('toolu_sub1');
+    expect(boxes[2].dataset.agentId).toBeUndefined();
+  });
+
+  it('reuses one box for consecutive events from the same sub-agent', async () => {
+    const { root, region } = await buildRegion();
+    region.renderEvent({ type: 'tool.execution_start', agentId: 'toolu_sub1', data: { toolName: 'grep', toolCallId: 's1' } });
+    region.renderEvent({ type: 'tool.execution_start', agentId: 'toolu_sub1', data: { toolName: 'view', toolCallId: 's2' } });
+    const boxes = root._children as ReturnType<typeof createMockElement>[];
+    expect(boxes.length).toBe(1);
+    expect(boxes[0].dataset.agentId).toBe('toolu_sub1');
+  });
+});

@@ -16,6 +16,7 @@ import { shouldAutoRepairSessionError, repairSessionEvents } from './session-aut
 import { clearSession as clearThroughputSession } from './session-throughput.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
 import { thresholdForBudget, type ModelTokenLimits } from './context-budget.js';
+import type { SdkAgentInfo } from './agent-command.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 
@@ -129,6 +130,10 @@ interface CopilotSessionInstance {
     };
     model: {
       setReasoningEffort(params: { reasoningEffort: string }): Promise<{ reasoningEffort: string }>;
+    };
+    agent: {
+      list(): Promise<{ agents: SdkAgentInfo[] }>;
+      select(params: { name: string }): Promise<{ agent: SdkAgentInfo }>;
     };
   };
 }
@@ -871,7 +876,7 @@ class SessionManager {
     if (!active) {
       throw new Error(`Session ${sessionId} is not active`);
     }
-    
+
     const { session } = active;
     const TIMEOUT_MS = 120000; // 2 minutes
     
@@ -889,6 +894,20 @@ class SessionManager {
       }
       throw error;
     }
+  }
+
+  async listAgents(sessionId: string): Promise<SdkAgentInfo[]> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) throw new Error(`Session ${sessionId} is not active`);
+    const result = await active.session.rpc.agent.list();
+    return result.agents;
+  }
+
+  async selectAgent(sessionId: string, name: string): Promise<SdkAgentInfo> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) throw new Error(`Session ${sessionId} is not active`);
+    const result = await active.session.rpc.agent.select({ name });
+    return result.agent;
   }
 
   /**

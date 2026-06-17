@@ -1,11 +1,12 @@
 import { newSessionClick } from './router.js';
-import { getActiveSessionId, getAvailableModels } from './app-state.js';
+import { getActiveSessionId, getAvailableModels, notifyMessageSent } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
 import { setActiveContextBudget, setActiveReasoningEffort } from './context-footer.js';
 import { archiveSession, renameSession } from './session-panel.js';
 import type { PopupItem } from './input-popup.js';
+import { parseAgentDispatchInput } from './agent-command.js';
 
 export interface Command {
   name: string;
@@ -17,6 +18,7 @@ export interface Command {
 
 export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string }> = [
   { name: 'session-new', description: 'New chat' },
+  { name: 'agent', description: 'Dispatch prompt with an SDK custom agent' },
   { name: 'session-rename', description: 'Rename current session' },
   { name: 'session-cwd', description: 'Change session working directory' },
   { name: 'session-folder', description: 'Move session to a folder (or "/" for root)' },
@@ -52,6 +54,65 @@ export function findCommand(name: string): Command | undefined {
 }
 
 registerBuiltin('session-new', () => newSessionClick());
+
+registerBuiltin('agent', async (arg) => {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) { showToast('No active session'); return; }
+
+  const parsed = parseAgentDispatchInput(arg);
+  if (!parsed) {
+    showToast('Usage: /agent <agent-name> <prompt>');
+    return;
+  }
+
+  const originalCommand = `/agent ${arg.trim()}`;
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/agent-dispatch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parsed),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Agent dispatch failed' }));
+      restoreActiveInput(originalCommand);
+      showToast(data.error || 'Agent dispatch failed');
+    } else {
+      chatView.savePrompt(originalCommand, sessionId);
+      notifyMessageSent(sessionId);
+    }
+  } catch (error) {
+    restoreActiveInput(originalCommand);
+    showToast(`Agent dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}, async () => {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) { showToast('No active session'); return []; }
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/agents`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Failed to list agents' }));
+      showToast(data.error || 'Failed to list agents');
+      return [];
+    }
+    const data = await res.json() as {
+      agents?: Array<{ name: string; displayName?: string; description?: string; model?: string }>;
+    };
+    const agents = data.agents ?? [];
+    if (agents.length === 0) {
+      showToast('No SDK agents available');
+      return [];
+    }
+    return agents.map(agent => ({
+      id: agent.name,
+      label: agent.displayName ? `${agent.displayName} (${agent.name})` : agent.name,
+      description: [agent.description, agent.model].filter(Boolean).join(' · '),
+      value: `${agent.name} `,
+    }));
+  } catch (error) {
+    showToast(`Failed to list agents: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
+});
 
 registerBuiltin('session-rename', async (newName) => {
   const sessionId = getActiveSessionId();
@@ -360,6 +421,18 @@ function parseTokenCount(s: string): number | null {
   return Math.round(n);
 }
 
+export function restoreCommandInput(form: { textarea: HTMLTextAreaElement } | null, message: string): void {
+  if (!form) return;
+  form.textarea.value = message;
+  form.textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  form.textarea.focus();
+}
+
+function restoreActiveInput(message: string): void {
+  const form = chatView.getActiveForm();
+  restoreCommandInput(form, message);
+}
+
 function formatTokenCount(n: number): string {
   if (n >= 1_000_000) {
     const v = n / 1_000_000;
@@ -367,4 +440,3 @@ function formatTokenCount(n: number): string {
   }
   return `${Math.round(n / 1000)}k`;
 }
-

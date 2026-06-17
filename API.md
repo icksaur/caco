@@ -13,6 +13,8 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `POST /api/sessions/:id/resume` - Resume an existing session
 - `POST /api/sessions/:id/fork` - Fork session into a new side conversation
 - `POST /api/sessions/:id/observe` - Mark session as observed
+- `GET /api/sessions/:id/agents` - List SDK custom agents visible to `/agent`
+- `POST /api/sessions/:id/agent-dispatch` - Select an SDK custom agent and dispatch a prompt
 - `PATCH /api/sessions/:id` - Update session metadata (name, env hint, context)
 - `PATCH /api/sessions/:id/applet` - Update active applet params and panel visibility
 - `DELETE /api/sessions/:id` - Delete a session
@@ -214,6 +216,39 @@ Returns:
   "isActive": true
 }
 ```
+
+**GET /api/sessions/:id/agents** - List SDK custom agents visible to `/agent`
+
+Returns agents from `session.rpc.agent.list()` that are user-invocable and have whitespace-free names.
+
+Returns:
+```json
+{
+  "agents": [
+    {
+      "name": "reviewer",
+      "id": "reviewer",
+      "displayName": "Reviewer",
+      "description": "Reviews code",
+      "model": "gpt-5.5"
+    }
+  ]
+}
+```
+
+**POST /api/sessions/:id/agent-dispatch** - Select an SDK custom agent and dispatch a prompt
+
+Body:
+```json
+{
+  "agentName": "reviewer",
+  "prompt": "Check maintainability and reliability"
+}
+```
+
+Selects `agentName` with `session.rpc.agent.select({ name })`, then sends `prompt` through the normal streaming dispatch path. Agent names must be whitespace-free. Returns 409 if the session is busy, 404 for unknown/non-invocable agents.
+
+Returns: `{ "ok": true, "sessionId": "uuid" }`
 
 **POST /api/sessions/:id/messages** - Send message to session
 ```json

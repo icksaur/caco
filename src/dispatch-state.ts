@@ -20,7 +20,7 @@ export class DispatchState extends EventEmitter {
 
   start(sessionId: string, correlationId: string): void {
     if (this.dispatches.has(sessionId)) {
-      console.warn(`[DISPATCH] Session ${sessionId} already dispatching, overwriting context`);
+      throw new Error(`Session ${sessionId} is already dispatching`);
     }
     this.dispatches.set(sessionId, {
       correlationId,

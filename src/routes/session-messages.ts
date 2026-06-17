@@ -207,6 +207,10 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     console.log(`[DISPATCH:${requestId}] Accepted for session ${sessionId}`);
     res.json({ ok: true, sessionId });
   } catch (err) {
+    if (err instanceof DispatchHttpError) {
+      res.status(err.status).json({ error: err.message, ...(err.code && { code: err.code }) });
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[DISPATCH:${requestId}] Failed for session ${sessionId}:`, message);
     res.status(500).json({ error: `Dispatch failed: ${message}` });
@@ -222,6 +226,18 @@ export interface DispatchCallbacks {
   onEvent?: EventCallback;
 }
 
+export class DispatchHttpError extends Error {
+  readonly status: number;
+  readonly code?: string;
+
+  constructor(status: number, message: string, code?: string) {
+    super(message);
+    this.name = 'DispatchHttpError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 /**
  * Dispatch a message to a session and forward SDK events.
  * 
@@ -232,13 +248,17 @@ export interface DispatchCallbacks {
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean },
+  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; beforeSend?: () => Promise<void> },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePaths, correlationId, requestId, needsObservation } = options || {};
+  const { tempFilePaths, correlationId, requestId, needsObservation, beforeSend } = options || {};
   const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
+
+  if (sessionManager.isBusy(sessionId)) {
+    throw new DispatchHttpError(409, 'Session is busy processing another message', 'SESSION_BUSY');
+  }
 
   // Register the dispatch with dispatch-state up-front. This is what
   // restart-manager watches; it must cover the full lifetime of dispatchMessage
@@ -257,6 +277,7 @@ export async function dispatchMessage(
 
   // Guard against double cleanup (inner cleanupAndComplete vs outer catch)
   let dispatchCompleted = false;
+  let sendStarted = false;
   
   try {
     // Ensure session is active (defensive - route handler should have done this)
@@ -332,6 +353,7 @@ export async function dispatchMessage(
             ensureClientHealthy: () => sessionManager.ensureClientHealthy(),
             resume: () => sessionManager.resume(sessionId, sessionState.getSessionConfig()).then(() => {}),
             getSession: (id) => sessionManager.getSession(id),
+            beforeSend,
             resetWatchdog: () => watchdog.reset(),
             unsubscribe,
           }).then((newUnsubscribe) => {
@@ -410,7 +432,9 @@ export async function dispatchMessage(
     
     console.log(`[DISPATCH:${rid}] Sending to SDK for session ${sessionId}`);
     try {
+      if (beforeSend) await beforeSend();
       const sendPromise = sessionManager.sendStream(sessionId, prompt, messageOptions);
+      sendStarted = true;
 
       sendPromise.catch((err: unknown) => {
         if (dispatchCompleted) return;
@@ -430,6 +454,7 @@ export async function dispatchMessage(
             ensureClientHealthy: () => sessionManager.ensureClientHealthy(),
             resume: () => sessionManager.resume(sessionId, sessionState.getSessionConfig()).then(() => {}),
             getSession: (id) => sessionManager.getSession(id),
+            beforeSend,
             resetWatchdog: () => watchdog.reset(),
             unsubscribe,
           }).then((newUnsubscribe) => {
@@ -475,6 +500,7 @@ export async function dispatchMessage(
       if (tempFilePaths) {
         for (const p of tempFilePaths) await unlink(p).catch(() => {});
       }
+      if (!sendStarted) throw error;
     }
   }
 }
@@ -534,4 +560,3 @@ function autoAddFileContext(
     data: { reason: 'changed', context, setName: 'files' }
   } as unknown as SessionEvent);
 }
-

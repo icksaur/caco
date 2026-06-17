@@ -27,6 +27,7 @@ export interface RetryDeps {
   ensureClientHealthy: () => Promise<void>;
   resume: () => Promise<void>;
   getSession: (sessionId: string) => unknown | null;
+  beforeSend?: () => Promise<void>;
   // Side effects we don't own but need to trigger.
   resetWatchdog: () => void;
   unsubscribe: () => void;
@@ -51,6 +52,7 @@ export async function retryWithFreshClient(deps: RetryDeps): Promise<(() => void
     if (!retrySession) throw new Error('No session after retry');
 
     const newUnsubscribe = (retrySession as Subscribable).on(deps.handleEvent);
+    if (deps.beforeSend) await deps.beforeSend();
     await (retrySession as Sendable).send(deps.messageOptions);
     deps.resetWatchdog();
     return newUnsubscribe;

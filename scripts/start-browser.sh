@@ -12,12 +12,14 @@ set -u
 MODE="visible"
 PORT=""
 LOG_FILE=""
+READY_TIMEOUT=25
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode) MODE="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --log-file) LOG_FILE="$2"; shift 2 ;;
+    --ready-timeout) READY_TIMEOUT="$2"; shift 2 ;;
     *) echo "Unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -58,9 +60,42 @@ port_free() {
   fi
 }
 
+# True if a CDP endpoint answers /json/version on the given port.
+cdp_ready() {
+  local p="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS -m 2 "http://127.0.0.1:$p/json/version" >/dev/null 2>&1
+  else
+    (echo >/dev/tcp/127.0.0.1/$p) >/dev/null 2>&1
+  fi
+}
+
+# Remove stale singleton locks if no live browser owns our profile, so a fresh
+# launch does not try to hand off to a dead instance.
+clear_stale_locks() {
+  if pgrep -af "user-data-dir=$PROFILE_DIR" >/dev/null 2>&1; then return; fi
+  for n in SingletonLock SingletonCookie SingletonSocket DevToolsActivePort; do
+    if [[ -e "$PROFILE_DIR/$n" ]]; then rm -f "$PROFILE_DIR/$n" && log "Removed stale profile file: $n"; fi
+  done
+}
+
+start_edge() {
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$EDGE" "${ARGS[@]}" </dev/null >/dev/null 2>&1 &
+  else
+    nohup "$EDGE" "${ARGS[@]}" </dev/null >/dev/null 2>&1 &
+    disown
+  fi
+  EDGE_PID=$!
+}
+
 if [[ -z "$PORT" ]]; then
   PORT=9222
-  while ! port_free "$PORT"; do PORT=$((PORT + 1)); if [[ $PORT -gt 9300 ]]; then log "ERROR: No free port"; exit 4; fi; done
+  if cdp_ready "$PORT"; then
+    log "Reusing existing CDP on port $PORT"
+  else
+    while ! port_free "$PORT"; do PORT=$((PORT + 1)); if [[ $PORT -gt 9300 ]]; then log "ERROR: No free port"; exit 4; fi; done
+  fi
 fi
 log "Using port: $PORT"
 
@@ -78,6 +113,12 @@ cat >"$CONFIG_FILE" <<JSON
 }
 JSON
 
+# Reuse path: CDP already serving on this port.
+if cdp_ready "$PORT"; then
+  log "CDP ready on port $PORT (reused existing instance)"
+  exit 0
+fi
+
 ARGS=(
   "--remote-debugging-port=$PORT"
   "--user-data-dir=$PROFILE_DIR"
@@ -89,12 +130,31 @@ case "$MODE" in
   headless) ARGS+=("--headless=new" "--disable-gpu") ;;
 esac
 
-# Detach via setsid so the browser survives this shell exiting.
-if command -v setsid >/dev/null 2>&1; then
-  setsid "$EDGE" "${ARGS[@]}" </dev/null >/dev/null 2>&1 &
-else
-  nohup "$EDGE" "${ARGS[@]}" </dev/null >/dev/null 2>&1 &
-  disown
-fi
-log "Launched $EDGE (pid $!) mode=$MODE port=$PORT"
-exit 0
+# Authoritative launch: spawn the browser, then verify CDP actually comes up.
+# Detect early exit (handoff/absorption) and retry once.
+DEADLINE=$(( $(date +%s) + READY_TIMEOUT ))
+ATTEMPT=0
+MAX_ATTEMPTS=2
+EDGE_PID=""
+
+while [[ $(date +%s) -lt $DEADLINE ]]; do
+  if [[ -z "$EDGE_PID" ]] || ! kill -0 "$EDGE_PID" 2>/dev/null; then
+    if [[ $ATTEMPT -ge $MAX_ATTEMPTS ]]; then
+      log "ERROR: browser exited before CDP came up after $ATTEMPT attempt(s)"
+      exit 6
+    fi
+    [[ -n "$EDGE_PID" ]] && log "Browser exited early (pid $EDGE_PID); cleaning locks and retrying"
+    clear_stale_locks
+    ATTEMPT=$((ATTEMPT + 1))
+    start_edge
+    log "Launched $EDGE (pid $EDGE_PID) mode=$MODE port=$PORT attempt=$ATTEMPT"
+  fi
+  if cdp_ready "$PORT"; then
+    log "CDP ready on port $PORT (pid $EDGE_PID)"
+    exit 0
+  fi
+  sleep 0.25
+done
+
+log "ERROR: CDP never came up on port $PORT within ${READY_TIMEOUT}s (last pid $EDGE_PID)"
+exit 7

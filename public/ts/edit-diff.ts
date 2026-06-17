@@ -1,5 +1,5 @@
 export type Hunk = { added: string[]; removed: string[] };
-export type EditDiff = { hunks: Hunk[]; stats: { added: number; removed: number } };
+export type EditDiff = { hunks: Hunk[]; stats: { added: number; removed: number }; path?: string };
 
 export function lineDiff(before: string, after: string): Hunk[] {
   const a = before ? before.split('\n') : [];
@@ -58,7 +58,7 @@ function parseUnifiedDiff(content: string): EditDiff | null {
   let cur: Hunk | null = null;
 
   for (const line of lines) {
-    if (line.startsWith('@@ ')) {
+    if (line === '@@' || line.startsWith('@@ ')) {
       if (cur) hunks.push(cur);
       cur = { added: [], removed: [] };
     } else if (cur) {
@@ -72,6 +72,95 @@ function parseUnifiedDiff(content: string): EditDiff | null {
   if (cur) hunks.push(cur);
 
   return hunks.length > 0 ? { hunks, stats: countStats(hunks) } : null;
+}
+
+function pushChangedHunk(hunks: Hunk[], cur: Hunk | null): null {
+  if (cur && (cur.added.length > 0 || cur.removed.length > 0)) {
+    hunks.push(cur);
+  }
+  return null;
+}
+
+function parseCodexPatch(content: string): EditDiff | null {
+  if (!content.includes('*** Begin Patch') || !content.includes('*** End Patch')) return null;
+
+  const hunks: Hunk[] = [];
+  let cur: Hunk | null = null;
+  let inPatch = false;
+  let inFile = false;
+  let firstPath: string | undefined;
+
+  for (const line of content.split('\n')) {
+    if (line === '*** Begin Patch') {
+      inPatch = true;
+      continue;
+    }
+    if (!inPatch) continue;
+    if (line === '*** End Patch') {
+      cur = pushChangedHunk(hunks, cur);
+      break;
+    }
+
+    const fileMatch = line.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/);
+    if (fileMatch) {
+      cur = pushChangedHunk(hunks, cur);
+      inFile = true;
+      firstPath ??= fileMatch[1];
+      continue;
+    }
+
+    if (!inFile) continue;
+
+    if (line === '@@' || line.startsWith('@@ ')) {
+      cur = pushChangedHunk(hunks, cur);
+      cur = { added: [], removed: [] };
+      continue;
+    }
+
+    if (line.startsWith('+')) {
+      cur ??= { added: [], removed: [] };
+      cur.added.push(line.slice(1));
+    } else if (line.startsWith('-')) {
+      cur ??= { added: [], removed: [] };
+      cur.removed.push(line.slice(1));
+    } else if (line.startsWith(' ')) {
+      cur = pushChangedHunk(hunks, cur);
+    }
+  }
+
+  if (hunks.length === 0) return null;
+  return { hunks, stats: countStats(hunks), path: firstPath };
+}
+
+function candidateStrings(data: Record<string, unknown>, result: Record<string, unknown> | undefined): string[] {
+  const values: string[] = [];
+  const args = data.arguments;
+  const toolName = data.toolName || data.name;
+
+  if (toolName === 'apply_patch' && typeof args === 'string') values.push(args);
+  if (toolName === 'apply_patch' && args && typeof args === 'object') {
+    const argRecord = args as Record<string, unknown>;
+    for (const key of ['patch', 'input', 'content']) {
+      const value = argRecord[key];
+      if (typeof value === 'string') values.push(value);
+    }
+  }
+
+  for (const value of [result?.detailedContent, result?.content]) {
+    if (typeof value === 'string') values.push(value);
+  }
+
+  const contents = result?.contents;
+  if (Array.isArray(contents)) {
+    for (const block of contents) {
+      if (block && typeof block === 'object') {
+        const record = block as Record<string, unknown>;
+        if (record.type === 'text' && typeof record.text === 'string') values.push(record.text);
+      }
+    }
+  }
+
+  return values;
 }
 
 function readMetricsStats(data: Record<string, unknown>): { added: number; removed: number } | null {
@@ -90,25 +179,24 @@ export function parseEditResult(data: Record<string, unknown>): EditDiff | null 
   try {
     const result = data.result as Record<string, unknown> | undefined;
 
-    // Primary shape: result.detailedContent holds a unified git diff;
-    // result.content is only a status string. Authoritative stats live
-    // in toolTelemetry.metrics.{linesAdded,linesRemoved}.
-    const detailed = typeof result?.detailedContent === 'string' ? result.detailedContent : null;
-    if (detailed?.includes('@@ ')) {
-      const diff = parseUnifiedDiff(detailed);
-      if (diff) {
-        const metricsStats = readMetricsStats(data);
-        if (metricsStats) diff.stats = metricsStats;
-        return diff;
+    for (const value of candidateStrings(data, result)) {
+      if (value.includes('*** Begin Patch')) {
+        const patchDiff = parseCodexPatch(value);
+        if (patchDiff) return patchDiff;
+      }
+      if (value.includes('@@')) {
+        const diff = parseUnifiedDiff(value);
+        if (diff) {
+          const metricsStats = readMetricsStats(data);
+          if (metricsStats) diff.stats = metricsStats;
+          return diff;
+        }
       }
     }
 
-    const content = typeof result?.content === 'string' ? result.content : null;
-    if (content?.includes('@@ ')) {
-      return parseUnifiedDiff(content);
-    }
-
-    const args = data.arguments as Record<string, unknown> | undefined;
+    const args = data.arguments && typeof data.arguments === 'object'
+      ? data.arguments as Record<string, unknown>
+      : undefined;
 
     if (args && typeof args.old_string === 'string' && typeof args.new_string === 'string') {
       const hunks = lineDiff(args.old_string, args.new_string);

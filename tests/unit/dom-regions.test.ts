@@ -848,6 +848,42 @@ describe('edit events', () => {
     }
   });
 
+  it('renders apply_patch Codex envelopes as edit events with first patch filename', async () => {
+    const { insertEvent } = await import('../../public/ts/dom-regions.js');
+    const el = editEl({ toolName: 'apply_patch' });
+
+    insertEvent({ type: 'tool.execution_complete', data: {
+      toolName: 'apply_patch',
+      toolCallId: 'tc-patch',
+      success: true,
+      arguments: {
+        patch: '*** Begin Patch\n*** Update File: src/example.ts\n@@\n-old\n+new\n*** End Patch'
+      },
+      result: { content: 'Done!' }
+    } }, el);
+
+    expect(el.classList.contains('edit-event')).toBe(true);
+    const hSpans = childSpans(childSpans(el)[0]);
+    expect(hSpans.some(s => s.textContent === 'example.ts')).toBe(true);
+    expect(findClass(hSpans, 'edit-stat-add')?.textContent).toBe('+1');
+    expect(findClass(hSpans, 'edit-stat-rem')?.textContent).toBe('-1');
+  });
+
+  it('keeps generic rendering for opaque apply_patch completions', async () => {
+    const { insertEvent } = await import('../../public/ts/dom-regions.js');
+    const el = editEl({ toolName: 'apply_patch' });
+
+    insertEvent({ type: 'tool.execution_complete', data: {
+      toolName: 'apply_patch',
+      toolCallId: 'tc-patch-opaque',
+      success: true,
+      result: { content: 'Done!' }
+    } }, el);
+
+    expect(el.classList.contains('edit-event')).toBe(false);
+    expect(el.textContent).toContain('*apply_patch*');
+  });
+
   it('failed edit with data.error string → error header + pre, not collapsed', async () => {
     const { insertEvent } = await import('../../public/ts/dom-regions.js');
     const el = editEl();

@@ -186,7 +186,7 @@ export const PRE_COLLAPSED_EVENTS = new Set([
   'tool.execution_start',
 ]);
 
-export const EDIT_TOOLS = new Set(['edit', 'create', 'write']);
+export const EDIT_TOOLS = new Set(['edit', 'create', 'write', 'apply_patch']);
 
 // ── ElementInserter (private) ───────────────────────────────────
 
@@ -406,7 +406,8 @@ function extractErrorText(data: Record<string, unknown>): string {
 }
 
 function renderEditEvent(element: InserterElement, data: Record<string, unknown>): boolean {
-  const { toolName, basename } = extractToolMeta(element, data);
+  const { toolName, basename: metaBasename } = extractToolMeta(element, data);
+  let basename = metaBasename;
   const el = element as unknown as HTMLElement;
 
   if (data.success === false) {
@@ -433,6 +434,7 @@ function renderEditEvent(element: InserterElement, data: Record<string, unknown>
 
   const diff = parseEditResult(data);
   if (!diff) return false;
+  basename ||= diff.path ? (diff.path.split(/[\\/]/).pop() || diff.path) : '';
 
   el.textContent = '';
   const header = document.createElement('p');

@@ -131,6 +131,20 @@ describe('parseEditResult', () => {
       expect(d.stats.added).toBe(3);
       expect(d.stats.removed).toBe(0);
     });
+
+    it('keeps create content as all-add when file text contains an apply_patch envelope', () => {
+      const content = '*** Begin Patch\n*** Update File: unrelated.ts\n-old\n+new\n*** End Patch';
+      const diff = parseEditResult({
+        toolName: 'create',
+        arguments: { path: 'notes.patch', content }
+      });
+
+      expect(diff).not.toBeNull();
+      const d = diff as EditDiff;
+      expect(d.stats.added).toBe(5);
+      expect(d.stats.removed).toBe(0);
+      expect(d.hunks[0].added).toEqual(content.split('\n'));
+    });
   });
 
   describe('unified diff shape', () => {
@@ -179,6 +193,51 @@ describe('parseEditResult', () => {
       const d = diff as EditDiff;
       expect(d.stats.removed).toBe(3);
       expect(d.stats.added).toBe(2);
+    });
+  });
+
+  describe('Codex apply_patch envelope shape', () => {
+    it('parses update hunks with bare @@ markers', () => {
+      const diff = parseEditResult({
+        toolName: 'apply_patch',
+        arguments: {
+          patch: '*** Begin Patch\n*** Update File: src/example.ts\n@@\n-old\n+new\n*** End Patch'
+        }
+      });
+
+      expect(diff).not.toBeNull();
+      const d = diff as EditDiff;
+      expect(d.path).toBe('src/example.ts');
+      expect(d.stats).toEqual({ added: 1, removed: 1 });
+      expect(d.hunks[0].added).toEqual(['new']);
+      expect(d.hunks[0].removed).toEqual(['old']);
+    });
+
+    it('parses header-less update add/delete runs', () => {
+      const diff = parseEditResult({
+        toolName: 'apply_patch',
+        arguments: '*** Begin Patch\n*** Update File: src/example.ts\n-old\n+new\n context\n-removed\n+added\n*** End Patch'
+      });
+
+      expect(diff).not.toBeNull();
+      const d = diff as EditDiff;
+      expect(d.stats).toEqual({ added: 2, removed: 2 });
+      expect(d.hunks).toHaveLength(2);
+    });
+
+    it('parses add file patches with no @@ marker', () => {
+      const diff = parseEditResult({
+        toolName: 'apply_patch',
+        arguments: {
+          input: '*** Begin Patch\n*** Add File: src/new.ts\n+export const value = 1;\n+export const other = 2;\n*** End Patch'
+        }
+      });
+
+      expect(diff).not.toBeNull();
+      const d = diff as EditDiff;
+      expect(d.path).toBe('src/new.ts');
+      expect(d.stats).toEqual({ added: 2, removed: 0 });
+      expect(d.hunks[0].added).toEqual(['export const value = 1;', 'export const other = 2;']);
     });
   });
 

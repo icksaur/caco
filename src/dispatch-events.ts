@@ -24,7 +24,7 @@ export function setGitEditPoller(p: GitEditPoller | null): void {
 }
 
 /** Tools that mutate files. Triggers a file-edits poll on success. */
-const WRITE_TOOLS = new Set(['edit', 'create', 'write']);
+const WRITE_TOOLS = new Set(['edit', 'create', 'write', 'apply_patch']);
 
 export interface DispatchEventDeps {
   /** Caller-provided file tracker. Updates the session-context list when

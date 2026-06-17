@@ -39,7 +39,7 @@ vi.mock('../../src/session-throughput.js', () => ({
   snapshot: (...args: unknown[]) => snapshotMock(...(args as [])),
 }));
 
-import { applyDispatchEventEffects } from '../../src/dispatch-events.js';
+import { applyDispatchEventEffects, setGitEditPoller } from '../../src/dispatch-events.js';
 
 const SID = 'session-1';
 
@@ -62,6 +62,7 @@ beforeEach(() => {
   recordUsage.mockClear();
   recordRateLimit.mockClear();
   snapshotMock.mockClear();
+  setGitEditPoller(null);
 });
 
 describe('applyDispatchEventEffects', () => {
@@ -161,6 +162,34 @@ describe('applyDispatchEventEffects', () => {
     expect(updateUsage).not.toHaveBeenCalled();
     expect(deps.autoAddFileContext).not.toHaveBeenCalled();
     expect(deps.onEvent).not.toHaveBeenCalled();
+  });
+
+  describe('file-edits polling', () => {
+    it('triggers file-edits polling after successful apply_patch completion', () => {
+      const deps = makeDeps();
+      const triggerPoll = vi.fn();
+      setGitEditPoller({ triggerPoll } as never);
+
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_complete',
+        data: { toolName: 'apply_patch', success: true },
+      } as never, deps);
+
+      expect(triggerPoll).toHaveBeenCalledWith(SID, 'event');
+    });
+
+    it('does not trigger file-edits polling after failed apply_patch completion', () => {
+      const deps = makeDeps();
+      const triggerPoll = vi.fn();
+      setGitEditPoller({ triggerPoll } as never);
+
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_complete',
+        data: { toolName: 'apply_patch', success: false },
+      } as never, deps);
+
+      expect(triggerPoll).not.toHaveBeenCalled();
+    });
   });
 
   describe('throughput: assistant.usage', () => {

@@ -169,8 +169,16 @@ export async function spawnHelper(mode: EnsureMode): Promise<string> {
     : [script, '--mode', mode, '--log-file', logFile];
 
   return new Promise<string>((resolve, reject) => {
+    // IMPORTANT (Windows): do NOT pass detached:true. A detached+windowsHide
+    // powershell child fails to initialize its host and exits 0 in ~120ms
+    // WITHOUT running the script, so Edge never launches and CDP never opens.
+    // The helper is short-lived: it launches Edge via its own Start-Process
+    // (fully independent of this child), polls for CDP readiness, then exits.
+    // Edge survives this child's exit without needing detached here.
+    // On non-Windows the .sh helper detaches Edge via setsid/nohup, so keeping
+    // detached:true there is harmless and preserves prior working behavior.
     const child = spawn(cmd, args, {
-      detached: true,
+      detached: !isWindows,
       stdio: 'ignore',
       windowsHide: true,
     });
@@ -185,7 +193,7 @@ export async function spawnHelper(mode: EnsureMode): Promise<string> {
       if (code === 0) resolve(diagnostics);
       else reject(new LaunchFailedError(`Helper exited with code ${code}`, diagnostics));
     });
-    child.unref();
+    if (!isWindows) child.unref();
   });
 }
 
@@ -228,7 +236,19 @@ export async function ensureRunning(mode: EnsureMode = 'visible'): Promise<{ cdp
     diagnostics = await spawnHelper(mode);
     // Re-read config: helper script may have picked a different port
     const updated = loadBrowserConfig();
-    await waitForCdp(updated.cdpUrl, updated.launchTimeoutMs);
+    try {
+      await waitForCdp(updated.cdpUrl, updated.launchTimeoutMs);
+    } catch (err) {
+      // waitForCdp throws with empty diagnostics; re-attach the helper log so the
+      // tool result is never blind. The helper log names the port/Edge path/errors.
+      const base = err instanceof LaunchFailedError ? err.message : (err as Error).message;
+      throw new LaunchFailedError(
+        base,
+        diagnostics
+          ? `intended cdpUrl=${updated.cdpUrl}\n--- helper log ---\n${diagnostics}`
+          : `intended cdpUrl=${updated.cdpUrl} (helper produced no log output)`,
+      );
+    }
   })();
 
   try {

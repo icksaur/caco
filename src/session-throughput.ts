@@ -31,6 +31,10 @@ interface SessionThroughput {
   totalOut: number;
   rateLimitCount: number;
   lastRateLimitAt?: string;
+  /** Session-lifetime estimate of context tokens saved by caco_run_workflow runs. */
+  workflowSavedTokens: number;
+  /** Number of workflow runs that contributed savings this session. */
+  workflowRuns: number;
   updatedAt: string;
 }
 
@@ -57,6 +61,8 @@ function blank(): SessionThroughput {
     totalCache: 0,
     totalOut: 0,
     rateLimitCount: 0,
+    workflowSavedTokens: 0,
+    workflowRuns: 0,
     updatedAt: now(),
   };
 }
@@ -92,6 +98,20 @@ export function recordRateLimit(sessionId: string): void {
   const entry = getOrCreate(sessionId);
   entry.rateLimitCount += 1;
   entry.lastRateLimitAt = now();
+  entry.updatedAt = now();
+}
+
+/**
+ * Record an estimate of context tokens a single workflow run avoided. These are
+ * session-lifetime (like total*) and are NOT cleared by resetRequest, since the
+ * saving describes work that already happened.
+ */
+export function recordWorkflowSavings(sessionId: string, savedTokens: number): void {
+  const tokens = safeInt(savedTokens);
+  if (tokens <= 0) return;
+  const entry = getOrCreate(sessionId);
+  entry.workflowSavedTokens += tokens;
+  entry.workflowRuns += 1;
   entry.updatedAt = now();
 }
 

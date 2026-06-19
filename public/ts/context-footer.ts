@@ -346,6 +346,8 @@ export interface ThroughputData {
   totalOut: number;
   rateLimitCount: number;
   lastRateLimitAt?: string;
+  workflowSavedTokens?: number;
+  workflowRuns?: number;
   updatedAt: string;
   known?: boolean;
 }
@@ -374,6 +376,14 @@ function estimateCost(d: ThroughputData): number | null {
       d.requestCache * cacheRate +
       d.requestOut * model.outputPerMtok) / 1_000_000;
   return credits;
+}
+
+/** Price workflow-saved tokens at the active model's input rate (saved tokens
+ *  are input-class). Returns null when the input price is unknown (e.g. Auto). */
+function estimateSavedCredits(savedTokens: number): number | null {
+  const model = getAvailableModels().find(m => m.id === activeModelId);
+  if (!model || model.inputPerMtok === undefined) return null;
+  return (savedTokens * model.inputPerMtok) / 1_000_000;
 }
 
 const throughputCache = new Map<string, ThroughputData>();
@@ -436,5 +446,19 @@ function renderThroughput(data: ThroughputData): void {
     rateLimitHtml = ` <span class="ratelimit" title="${escapeHtml(rlTooltip)}">⚠${data.rateLimitCount}</span>`;
   }
 
-  el.innerHTML = tokenHtml + rateLimitHtml;
+  let savedHtml = '';
+  const savedTokens = data.workflowSavedTokens ?? 0;
+  if (savedTokens > 0) {
+    const runs = data.workflowRuns ?? 0;
+    const savedCredits = estimateSavedCredits(savedTokens);
+    const creditNote = savedCredits !== null
+      ? ` (≈${savedCredits < 10 ? savedCredits.toFixed(2) : Math.round(savedCredits).toLocaleString()}cr)`
+      : '';
+    const savedTooltip =
+      `workflow: est. ${savedTokens.toLocaleString()} context tokens saved${creditNote} across ` +
+      `${runs} run${runs !== 1 ? 's' : ''} (lower-bound estimate at ~4 chars/token)`;
+    savedHtml = ` <span class="tp-saved" title="${escapeHtml(savedTooltip)}">↯${escapeHtml(kAbbrev(savedTokens))}</span>`;
+  }
+
+  el.innerHTML = tokenHtml + rateLimitHtml + savedHtml;
 }

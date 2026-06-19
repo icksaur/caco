@@ -74,6 +74,15 @@ first. Today only `index` has a reusable Caco core (`treeSitterAdapter`); `view`
   drift-prevention claim true *before* the runner exists.
 - **Slice B — runner + tool.** The `tsx` subprocess runner, result envelope, output
   budgeting, tool registration, prompt guidance, dogfood.
+- **Slice C — savings metrics.** Per-session estimate of context tokens the tool
+  avoided, surfaced in the footer usage tooltip. The child wraps the facade in a
+  counting proxy (`observedBytes` = total read-payload bytes that would otherwise
+  have entered context) and reports it in the result envelope. The tool computes
+  `savedTokens = round(max(0, observedBytes − injectedBytes) / 4)` (a conservative
+  lower bound; `injectedBytes` is the model-facing result text) and records it on
+  `SessionThroughput.workflowSavedTokens`/`workflowRuns` (session-lifetime, not
+  cleared by `resetRequest`). The frontend prices saved tokens at the active model's
+  input rate (never hardcoded). Recorded only on the `emitted` outcome.
 
 ## Design — Part 1: the tool
 
@@ -84,7 +93,8 @@ first. Today only `index` has a reusable Caco core (`treeSitterAdapter`); `view`
    `entry.mts` wrapped in a harness that imports the facade and exposes `emit(value)`.
 2. Resolve an **absolute** `tsx` runner command at startup (not just package presence)
    and smoke-test it once; cache the result. Spawn it `detached: true`,
-   `cwd = sessionCwd`, minimal env, on the per-run dir.
+   `cwd = sessionCwd`, full env passthrough (consistent with the bash-parity
+   threat model — the agent already has the host env via `bash`), on the per-run dir.
 3. Enforce a wall-clock timeout (default 30s, cap 120s). On timeout, kill the whole
    process group: `process.kill(-pid, 'SIGTERM')`, grace period, then `SIGKILL`, so
    children spawned by `tsx`/`sh()` die too.

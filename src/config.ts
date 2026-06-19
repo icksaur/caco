@@ -34,6 +34,18 @@ export const AGENT_MAX_AGE_SECONDS = 60 * 60;
 export const AGENT_RATE_LIMIT_CALLS = 10;
 export const AGENT_RATE_LIMIT_WINDOW_SECONDS = 60;
 
+// caco_run_workflow (code-execution orchestration). Opt-in: runs arbitrary code
+// auto-approved, so it is registered only when CACO_WORKFLOW=1.
+export const WORKFLOW_ENABLED = process.env.CACO_WORKFLOW === '1';
+export const WORKFLOW_TIMEOUT_DEFAULT_MS = 30 * 1000;
+export const WORKFLOW_TIMEOUT_CAP_MS = 120 * 1000;
+export const WORKFLOW_KILL_GRACE_MS = 2 * 1000;
+export const WORKFLOW_LOG_CAP_BYTES = 256 * 1024;
+export const WORKFLOW_EMIT_CAP_BYTES = 16 * 1024;
+// Hard ceiling on the result envelope the runner will read into memory, so a
+// runaway emit() (e.g. a 1 GB string) can never exhaust the Caco process.
+export const WORKFLOW_RESULT_MAX_BYTES = 2 * 1024 * 1024;
+
 // Extension→MIME mapping (single source of truth for file types)
 export const MIME_TYPES: Record<string, string> = {
   // Images

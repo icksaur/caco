@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   recordUsage,
   recordRateLimit,
+  recordWorkflowSavings,
   resetRequest,
   getThroughput,
   snapshot,
@@ -82,6 +83,37 @@ describe('recordRateLimit', () => {
     const ts = getThroughput(SID)!.lastRateLimitAt;
     expect(ts).toBeDefined();
     expect(new Date(ts!).getTime()).not.toBeNaN();
+  });
+});
+
+describe('recordWorkflowSavings', () => {
+  it('accumulates saved tokens and run count across calls', () => {
+    recordWorkflowSavings(SID, 1200);
+    recordWorkflowSavings(SID, 800);
+    const t = getThroughput(SID)!;
+    expect(t.workflowSavedTokens).toBe(2000);
+    expect(t.workflowRuns).toBe(2);
+  });
+
+  it('ignores non-positive / invalid savings without counting a run', () => {
+    recordWorkflowSavings(SID, 0);
+    recordWorkflowSavings(SID, -50);
+    recordWorkflowSavings(SID, NaN as unknown as number);
+    expect(getThroughput(SID)).toBeUndefined();
+  });
+
+  it('is preserved across resetRequest (session-lifetime, not request-scoped)', () => {
+    recordWorkflowSavings(SID, 500);
+    resetRequest(SID);
+    expect(getThroughput(SID)!.workflowSavedTokens).toBe(500);
+    expect(getThroughput(SID)!.workflowRuns).toBe(1);
+  });
+
+  it('surfaces in snapshot', () => {
+    recordWorkflowSavings(SID, 333);
+    const s = snapshot(SID);
+    expect(s.workflowSavedTokens).toBe(333);
+    expect(s.workflowRuns).toBe(1);
   });
 });
 

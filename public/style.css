@@ -2263,6 +2263,12 @@ main {
   margin-left: var(--space-xs);
 }
 
+.context-footer .context-throughput .tp-saved {
+  color: var(--green, #3fb950);
+  margin-left: var(--space-xs);
+  cursor: help;
+}
+
 .context-footer .context-description:empty {
   display: none;
 }

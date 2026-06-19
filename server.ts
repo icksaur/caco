@@ -28,6 +28,8 @@ import { createMemoryTools } from './src/memory-tool.js';
 import { createOfferActionTool } from './src/offer-action-tool.js';
 import { createIndexTool } from './src/index-tool.js';
 import { createRetrieveOutputTool } from './src/observe/retrieve-tool.js';
+import { createWorkflowTool } from './src/workflow/tool.js';
+import { isWorkflowRunnerAvailable, sweepWorkflowScratch } from './src/workflow/runner.js';
 import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
@@ -46,7 +48,7 @@ import { getQueue } from './src/caco-event-queue.js';
 import { buildSystemMessage } from './src/prompts.js';
 import { loadServerExtensions } from './src/extension-runtime.js';
 import { onAllIdle } from './src/restart-manager.js';
-import { PORT, HOST } from './src/config.js';
+import { PORT, HOST, WORKFLOW_ENABLED } from './src/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -198,6 +200,14 @@ async function start(): Promise<void> {
   
   const { pushStateToApplet } = setupWebSocket(server);
 
+  const workflowAvailable = WORKFLOW_ENABLED && await isWorkflowRunnerAvailable();
+  if (WORKFLOW_ENABLED && !workflowAvailable) {
+    console.warn('[WORKFLOW] CACO_WORKFLOW=1 but tsx runner is unavailable; caco_run_workflow not registered');
+  } else if (workflowAvailable) {
+    console.log('[WORKFLOW] caco_run_workflow registered (auto-runs arbitrary code)');
+    void sweepWorkflowScratch();
+  }
+
   // Close the listening socket before the parent exits during a restart, so
   // the child server's first bind attempt succeeds rather than racing the
   // OS-level socket teardown. Best-effort; restart-manager already has a
@@ -242,10 +252,11 @@ async function start(): Promise<void> {
     const offerActionTools = createOfferActionTool(sessionRef);
     const indexTools = createIndexTool(sessionCwd);
     const retrieveTools = createRetrieveOutputTool(sessionCwd);
+    const workflowTools = workflowAvailable ? createWorkflowTool(sessionCwd) : [];
     const surfaceTools = createSurfaceTools(sessionRef);
     const browserTools = createBrowserTools(sessionRef);
     
-    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools, ...sessionHistoryTools, ...memoryTools, ...offerActionTools, ...indexTools, ...retrieveTools, ...surfaceTools, ...browserTools];
+    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools, ...sessionHistoryTools, ...memoryTools, ...offerActionTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
   };
   
   await createSessionState({

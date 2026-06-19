@@ -68,7 +68,7 @@ export function unregisterSession(cwd: string): void {
   cwdToSessionId.delete(cwd);
 }
 
-function getSessionIdForCwd(cwd: string): string | undefined {
+export function getSessionIdForCwd(cwd: string): string | undefined {
   return cwdToSessionId.get(cwd);
 }
 

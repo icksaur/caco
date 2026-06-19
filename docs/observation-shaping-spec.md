@@ -59,19 +59,59 @@ raw policy). A test must assert untouched fields survive.
 
 ## Design — Part 2: shapers (the "known-output" parsers)
 
-`Shaper = (raw: string) => { shaped: string; preserved: number; dropped: number }`.
-Selected by detecting the output's format signature; deterministic.
+A shaper is a self-contained module, not a loose function. Adding one is purely
+additive — no core change — which is the whole maintainability story.
 
-**V1 ships only two shapers** to de-risk before format coverage grows:
+```
+interface Shaper {
+  id: string;
+  detect(raw: string, ctx: { toolName: string; argv?: string }): number; // 0 = no match, higher = stronger
+  shape(raw: string): { shaped: string; preserved: number; dropped: number };
+}
+```
 
-| Shaper | Keeps | Drops |
+**Registry & selection.** Shapers live in `src/observe/shapers/<id>.ts` and
+self-register in an array. The boundary runs every `detect`, picks the highest
+score > 0, else falls back to `generic`. One file + one registry line + one golden
+fixture = a new shaper. No edits to the hook, store, or other shapers.
+
+**Safety invariant (the key to maintainability).** `generic` is the correctness
+floor: head/tail + elision + handle, lossless-recoverable, can never hide a
+failure. Every format shaper is a pure *optimization* on top and must satisfy
+`failureSignals(format.shape(raw)) ⊇ failureSignals(generic.shape(raw))` for its
+fixtures — enforced by a shared test harness. Consequence: a stale or broken
+format parser (e.g. a tool changed its output format) degrades to **generic**, never
+to data loss. This is what keeps the long tail of parsers from becoming the RTK
+brittleness trap — a wrong shaper costs savings, never correctness.
+
+**What V1 ships:**
+
+| Shaper | Status | Covers |
 | --- | --- | --- |
-| generic (fallback, always safe) | head N + tail N lines, elision marker with dropped count | middle |
-| test/build (tsc / eslint / vitest / jest) | lines with `file:line`, error/warning codes, `FAIL`/`✗` test names, assertion diff (`expected`/`received`), `npm ERR!`, summary/exit line | passing lines, progress bars, clean files |
+| generic | V1 | everything, incl. C++/C# toolchains we can't yet dogfood |
+| ts-test-build | V1 | `tsc`, `eslint`, `vitest`/`jest` — Caco's own toolchain (dogfoodable today) |
 
-Defer mocha-specific, grep/rg, and other format parsers to V2. grep/rg is usually
-*successful search data*, not failure noise — V1 treats it as generic large-output
-recovery (conservative head/tail + handle), never format-summarized.
+Keeps (ts-test-build): `file:line`, error/warning codes, `FAIL`/`✗` names,
+assertion diff (`expected`/`received`), `npm ERR!`, summary/exit line. Drops:
+passing lines, progress bars, clean files.
+
+**What we do *not* ship up front.** We do not need a shaper for every tool Caco's
+users run. Because `generic` already gives safe, recoverable savings for any
+format, format shapers are added **data-driven**, when traces show a tool's output
+dominates tokens. Fast-follow candidates, each added when dogfoodable:
+
+| Shaper | Platform | When |
+| --- | --- | --- |
+| cpp-test-build (gcc/clang, ctest/gtest, cmake) | C++ | home dogfood, after V1 |
+| dotnet-test-build (msbuild, `dotnet test`/xUnit) | C# | office dogfood next week |
+
+grep/rg is deferred indefinitely — it is usually *successful search data*, not
+failure noise; `generic` recovery handles it conservatively.
+
+**Versioning/brittleness.** Format detection keys on stable markers (exit summary
+lines, `error TSxxxx`, `✓/✗`), not layout. A shaper that stops matching simply
+stops being selected (→ generic). Golden fixtures pin behavior in CI; updating a
+shaper for a new tool version = update its fixture, the invariant guards the rest.
 
 **Size vs failure-preservation.** `SHAPED_OUTPUT_CAP_BYTES` is a *soft* target, not
 a hard invariant. Failure preservation wins: keep up to `MAX_FAILURES` failure
@@ -142,6 +182,9 @@ generic shaper is always recoverable via the handle.
   size/failure rule).
 - **Non-shell backstop.** A large *non-shell* successful tool result is still
   bounded (proves the largeOutput-coexistence decision is honored).
+- **Format ⊇ generic (safety invariant).** For each format shaper's fixtures,
+  assert its preserved failure signals are a superset of what `generic` preserves —
+  a format shaper can never lose a failure relative to the floor.
 - **Round-trip.** `retrieve(id)` returns the raw byte-identical (no range/grep).
 - **Field preservation.** `modifiedResult` leaves `resultType`, `error`,
   `binaryResultsForLlm`, `toolTelemetry` unchanged; only `textResultForLlm` differs.
@@ -167,8 +210,9 @@ generic shaper is always recoverable via the handle.
       generic backstop path for all successful text results.
 - [ ] Reuse `output-store.ts` for raw recovery (store before mutate); confirm
       opaque-id retrieve.
-- [ ] Shaper interface + generic head/tail/elide shaper with soft cap.
-- [ ] One test/build shaper (tsc/eslint/vitest/jest) with golden fixtures.
+- [ ] Shaper interface + registry (`detect`/`shape`, self-registering array) +
+      generic head/tail/elide shaper with soft cap.
+- [ ] `ts-test-build` shaper (tsc/eslint/vitest/jest) with golden fixtures.
 - [ ] Oracle tests: expected-span superset + capped-failure-set + non-shell
       backstop + round-trip + field-preservation + size + determinism.
 - [ ] Wire `onPostToolUse` into create+resume; gate by tool name + size; preserve

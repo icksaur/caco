@@ -9,6 +9,7 @@
  * Delegates to: view-controller (DOM), context-footer (DOM), model-selector (DOM)
  */
 
+import { debug } from './debug.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, releaseActiveSessionForNewChat, getNewChatCwd } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
 import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, updateThroughput, restoreThroughput, clearThroughput, setActiveThroughputModel, setActiveContextBudget, setActiveReasoningEffort } from './context-footer.js';
@@ -151,7 +152,7 @@ class ChatViewController {
       && !stale;
     
     if (result) {
-      console.log(`[CHAT] isShowingSession SHORT-CIRCUIT: view=${viewState} active=${activeId?.slice(0,8)} content=${hasContent} stale=${stale}`);
+      debug('CHAT', `isShowingSession SHORT-CIRCUIT: view=${viewState} active=${activeId?.slice(0,8)} content=${hasContent} stale=${stale}`);
     }
     
     return result;
@@ -161,7 +162,7 @@ class ChatViewController {
    * Activate an existing session. Resume on server, load history, show chat.
    */
   async activateSession(sessionId: string): Promise<void> {
-    console.log(`[CHAT] activateSession(${sessionId.slice(0, 8)}) viewState=${vcGetViewState()} activeId=${getActiveSessionId()?.slice(0,8)}`);
+    debug('CHAT', `activateSession(${sessionId.slice(0, 8)}) viewState=${vcGetViewState()} activeId=${getActiveSessionId()?.slice(0,8)}`);
     if (this.isShowingSession(sessionId)) {
       adHocBar.activateSession(sessionId);
       return;

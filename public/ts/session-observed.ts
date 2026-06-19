@@ -5,13 +5,15 @@
  * Called when session.idle is received while viewing that session.
  */
 
+import { debug } from './debug.js';
+
 /**
  * Mark a session as observed (user has seen the completed response)
  * Calls server endpoint which updates meta and broadcasts to other clients
  */
 export async function markSessionObserved(sessionId: string): Promise<void> {
   try {
-    console.log(`[OBSERVED] Marking session as observed: ${sessionId.slice(0, 8)}`);
+    debug('OBSERVED', `Marking session as observed: ${sessionId.slice(0, 8)}`);
     const response = await fetch(`/api/sessions/${sessionId}/observe`, {
       method: 'POST'
     });

@@ -12,6 +12,7 @@
  * - Removing them does NOT destroy loaded content
  */
 
+import { debug } from './debug.js';
 import { toggleAppletExpanded } from './view-controller.js';
 import { getActiveSessionId } from './app-state.js';
 import { getActiveAppletSlug, hasAppletContent } from './applet-runtime.js';
@@ -58,11 +59,11 @@ export function initRouter(): void {
   nav.addEventListener('navigate', (event: NavigateEvent) => {
     // Debug: uncomment to verify event fires
     // alert('navigate: ' + event.navigationType + ' ' + event.destination.url);
-    console.log('[ROUTER] navigate event:', event.navigationType, event.destination.url, 'canIntercept:', event.canIntercept);
+    debug('ROUTER', 'navigate event:', event.navigationType, event.destination.url, 'canIntercept:', event.canIntercept);
     
     // Skip if we can't intercept
     if (!event.canIntercept) {
-      console.log('[ROUTER] Cannot intercept, skipping');
+      debug('ROUTER', 'Cannot intercept, skipping');
       return;
     }
     
@@ -75,7 +76,7 @@ export function initRouter(): void {
     // Only intercept same-origin
     if (url.origin !== window.location.origin) return;
     
-    console.log('[ROUTER] Intercepting navigation to:', url.toString());
+    debug('ROUTER', 'Intercepting navigation to:', url.toString());
     
     event.intercept({
       handler: async () => {
@@ -84,7 +85,7 @@ export function initRouter(): void {
     });
   });
   
-  console.log('[ROUTER] Navigation API handler installed');
+  debug('ROUTER', 'Navigation API handler installed');
   
   // Set up applet button with gesture callbacks
   initAppletButton({
@@ -92,7 +93,7 @@ export function initRouter(): void {
     onLongPress: () => {
       const currentApplet = new URL(window.location.href).searchParams.get('applet');
       if (currentApplet !== 'applet-browser') {
-        console.log('[ROUTER] Long press, opening applet-browser');
+        debug('ROUTER', 'Long press, opening applet-browser');
         nav.navigate('?applet=applet-browser');
       }
     }
@@ -253,7 +254,7 @@ export function onSessionCreated(sessionId: string): void {
 export function toggleApplet(): void {
   if (!hasAppletContent()) {
     // No applet loaded - open applet browser
-    console.log('[ROUTER] No applet loaded, opening applet-browser');
+    debug('ROUTER', 'No applet loaded, opening applet-browser');
     const nav = window.navigation;
     if (nav) {
       nav.navigate('?applet=applet-browser');

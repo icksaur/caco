@@ -6,6 +6,7 @@
  * directly without creating a circular dependency via router → chatView.
  */
 
+import { debug } from './debug.js';
 import { getActiveSessionId } from './app-state.js';
 import { pushApplet, type AppletContent } from './applet-runtime.js';
 
@@ -18,7 +19,7 @@ export async function loadApplet(
   urlParams?: Record<string, string>,
   options?: { restore?: boolean },
 ): Promise<void> {
-  console.log(`[APPLET-LOADER] Loading: ${slug}`);
+  debug('APPLET-LOADER', `Loading: ${slug}`);
 
   const sessionId = getActiveSessionId();
   const response = await fetch(`/api/applets/${encodeURIComponent(slug)}/load`, {
@@ -41,5 +42,5 @@ export async function loadApplet(
   };
 
   pushApplet(slug, data.title || slug, content);
-  console.log(`[APPLET-LOADER] Loaded: ${data.title || slug}`);
+  debug('APPLET-LOADER', `Loaded: ${data.title || slug}`);
 }

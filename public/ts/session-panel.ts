@@ -2,6 +2,7 @@
  * Session panel management
  */
 
+import { debug } from './debug.js';
 import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge, formatStatusParts } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels, notifySessionArchived } from './app-state.js';
@@ -37,7 +38,7 @@ export function initSessionPanel(): void {
   // Subscribe to unified session list change event
   onGlobalEvent((event) => {
     if (event.type === 'session.listChanged') {
-      console.log('[SESSION-PANEL] Session list changed, refreshing...', event.data);
+      debug('SESSION-PANEL', 'Session list changed, refreshing...', event.data);
       void loadSessions();
       return;
     }
@@ -317,7 +318,7 @@ async function toggleSchedule(slug: string, enabled: boolean): Promise<void> {
  */
 async function runSchedule(slug: string): Promise<void> {
   try {
-    console.log('[SCHEDULE] Running:', slug);
+    debug('SCHEDULE', 'Running:', slug);
     const response = await fetch(`/api/schedule/${slug}/run`, {
       method: 'POST'
     });
@@ -326,7 +327,7 @@ async function runSchedule(slug: string): Promise<void> {
       console.error('[SCHEDULE] Failed to run schedule:', response.status);
     } else {
       const result = await response.json();
-      console.log('[SCHEDULE] Run result:', result);
+      debug('SCHEDULE', 'Run result:', result);
     }
   } catch (error) {
     console.error('[SCHEDULE] Error running schedule:', error);
@@ -362,7 +363,7 @@ export async function loadSessions(): Promise<void> {
     sessionTracker.syncFromList(flatSessions);
     updateMenuIndicators();
     
-    console.log(`[SESSION-PANEL] Loaded sessions: ${flatSessions.length} total, ${sessionTracker.getUnobservedCount()} unobserved`);
+    debug('SESSION-PANEL', `Loaded sessions: ${flatSessions.length} total, ${sessionTracker.getUnobservedCount()} unobserved`);
     
     // Store available models from SDK
     if (models && models.length > 0) {

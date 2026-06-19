@@ -13,6 +13,7 @@
  *   inner.textContent = content  // REPLACE
  */
 
+import { debug } from './debug.js';
 import { scrollToBottom } from './ui-utils.js';
 import { getActiveSessionId, isLoadingHistory, getSelectedModel, notifyMessageSent } from './app-state.js';
 import { isViewState } from './view-controller.js';
@@ -239,7 +240,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     if (newChat || !sessionId) {
       regions.chat.clear();
       
-      console.log('[SEND] Creating new session...');
+      debug('SEND', 'Creating new session...');
       const res = await fetchWithTimeout('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -255,13 +256,13 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       sessionId = data.sessionId;
       chatView.savePrompt(prompt, sessionId || '');
       if (sessionId) notifyMessageSent(sessionId);
-      console.log('[SEND] Session created:', sessionId);
+      debug('SEND', 'Session created:', sessionId);
       chatView.onNewSessionCreated(sessionId || '', data.cwd);
       sessionTracker.setBusy(sessionId!, true);
     }
     
     const requestId = `req-${Date.now().toString(36)}`;
-    console.log(`[SEND] Posting message to ${sessionId} (${requestId})`);
+    debug('SEND', `Posting message to ${sessionId} (${requestId})`);
     const res = await fetchWithTimeout(`/api/sessions/${sessionId}/messages`, {
       method: 'POST',
       headers: { 
@@ -281,7 +282,7 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       throw new Error(error.error || `HTTP ${res.status}`);
     }
     
-    console.log(`[SEND] Message accepted (${requestId})`);
+    debug('SEND', `Message accepted (${requestId})`);
     
   } catch (error) {
     console.error('[SEND] Error:', error);

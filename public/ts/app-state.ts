@@ -10,6 +10,7 @@
  * - Side effects (URL sync, WS sync) are handled in setters
  */
 
+import { debug } from './debug.js';
 import type { ModelInfo } from './types.js';
 
 export interface AppState {
@@ -275,5 +276,5 @@ export function setNewChatCwd(cwd: string): void {
 
 /** Log current state to console */
 export function debugState(): void {
-  console.log('[APP STATE]', getState());
+  debug('APP-STATE', getState());
 }

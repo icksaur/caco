@@ -7,6 +7,7 @@
  * Navigation is handled by router.ts - this module just renders applets.
  */
 
+import { debug } from './debug.js';
 import { wsSetState, onStateUpdate, onEvent, onGlobalEvent, isWsConnected } from './websocket.js';
 import { getActiveSessionId, getCurrentCwd, isLoadingHistory, onActiveSessionChange } from './app-state.js';
 import { regions } from './dom-regions.js';
@@ -404,9 +405,9 @@ function setAppletState(state: Record<string, unknown>): void {
   // If WebSocket connected, push immediately
   if (isWsConnected()) {
     wsSetState(state);
-    console.log('[APPLET] State pushed via WebSocket:', Object.keys(state));
+    debug('APPLET', 'State pushed via WebSocket:', Object.keys(state));
   } else {
-    console.log('[APPLET] State queued (no WS):', Object.keys(state));
+    debug('APPLET', 'State queued (no WS):', Object.keys(state));
   }
 }
 
@@ -445,7 +446,7 @@ async function sendAgentMessage(prompt: string, options?: MessageOptions): Promi
   // Default to current applet if not specified
   const slug = options?.appletSlug ?? currentApplet?.slug;
   
-  console.log(`[APPLET] Sending agent message: "${prompt.slice(0, 50)}..." (session: ${sessionId}, applet: ${slug}${options?.imageData ? ', with image' : ''})`);
+  debug('APPLET', `Sending agent message: "${prompt.slice(0, 50)}..." (session: ${sessionId}, applet: ${slug}${options?.imageData ? ', with image' : ''})`);
   
   const response = await fetch(`/api/sessions/${sessionId}/messages`, {
     method: 'POST',
@@ -463,7 +464,7 @@ async function sendAgentMessage(prompt: string, options?: MessageOptions): Promi
     throw new Error(error.error || `HTTP ${response.status}`);
   }
   
-  console.log('[APPLET] Agent message sent successfully');
+  debug('APPLET', 'Agent message sent successfully');
 }
 
 /**
@@ -722,7 +723,7 @@ export async function loadAppletFromUrl(): Promise<boolean> {
   const params = new URLSearchParams(window.location.search);
   const slug = params.get('applet');
   if (slug) {
-    console.log(`[APPLET] Loading from URL param: ${slug}`);
+    debug('APPLET', `Loading from URL param: ${slug}`);
     try {
       await loadApplet(slug, getAppletUrlParams());
       return true;
@@ -920,18 +921,18 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
   // Use regions.applet — scoped, cannot collide with chat content duplicates
   const appletView = regions.applet.el;
   
-  console.log(`[APPLET] Loading: ${label} (${slug})`);
+  debug('APPLET', `Loading: ${label} (${slug})`);
   
   // If same applet already loaded, just show it
   if (currentApplet?.slug === slug) {
-    console.log(`[APPLET] Already loaded: ${slug}`);
+    debug('APPLET', `Already loaded: ${slug}`);
     showInstance(currentApplet);
     return;
   }
   
   // Destroy current applet if any
   if (currentApplet) {
-    console.log(`[APPLET] Destroying previous: ${currentApplet.slug}`);
+    debug('APPLET', `Destroying previous: ${currentApplet.slug}`);
     destroyInstance(currentApplet);
     currentApplet = null;
   }

@@ -12,6 +12,7 @@
  * Client filters by active session.
  */
 
+import { debug } from './debug.js';
 import { showToast } from './toast.js';
 import { getActiveSessionId } from './app-state.js';
 import { markSessionObserved } from './session-observed.js';
@@ -61,11 +62,11 @@ let requestId = 0;
  * No session parameter - server broadcasts all, client filters.
  */
 export function connectWs(): void {
-  console.log(`[WS] connectWs called, socket state: ${socket?.readyState ?? 'null'}`);
+  debug('WS', `connectWs called, socket state: ${socket?.readyState ?? 'null'}`);
   
   // Already connected or connecting
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-    console.log('[WS] Already connected/connecting');
+    debug('WS', 'Already connected/connecting');
     return;
   }
   
@@ -80,7 +81,7 @@ export function connectWs(): void {
  * Note: Does NOT store session state - use app-state.ts for that.
  */
 export function subscribeToSession(sessionId: string | null): void {
-  console.log(`[WS] subscribeToSession: ${sessionId}`);
+  debug('WS', `subscribeToSession: ${sessionId}`);
   
   // Subscribe on server so we only receive messages for this session
   if (sessionId) {
@@ -92,7 +93,7 @@ export function subscribeToSession(sessionId: string | null): void {
  * Request history for a session. Server streams messages with that sessionId.
  */
 export function requestHistory(sessionId: string): void {
-  console.log(`[WS] requestHistory for session: ${sessionId}`);
+  debug('WS', `requestHistory for session: ${sessionId}`);
   send({ type: 'requestHistory', sessionId });
 }
 
@@ -116,7 +117,7 @@ function startHeartbeat(myConnectionId: number): void {
     
     const origHandler = handlePong;
     handlePong = () => { clearTimeout(timeout); handlePong = origHandler; };
-    console.log('[WS] → ping');
+    debug('WS', '→ ping');
     send({ type: 'ping' });
   }, HEARTBEAT_INTERVAL_MS);
 }
@@ -135,7 +136,7 @@ let handlePong: () => void = () => {};
 function doConnect(myConnectionId: number): void {
   // Bail if a newer connection has been started
   if (myConnectionId !== connectionId) {
-    console.log(`[WS] doConnect bailing, stale connection ID ${myConnectionId} vs current ${connectionId}`);
+    debug('WS', `doConnect bailing, stale connection ID ${myConnectionId} vs current ${connectionId}`);
     return;
   }
   
@@ -147,14 +148,14 @@ function doConnect(myConnectionId: number): void {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${protocol}//${window.location.host}/ws`;
   
-  console.log(`[WS] Connecting: ${url} (connectionId: ${myConnectionId})`);
+  debug('WS', `Connecting: ${url} (connectionId: ${myConnectionId})`);
   const ws = new WebSocket(url);
   socket = ws;
   
   ws.onopen = () => {
     // Bail if stale
     if (myConnectionId !== connectionId) {
-      console.log('[WS] onopen bailing, stale connection ID');
+      debug('WS', 'onopen bailing, stale connection ID');
       ws.close();
       return;
     }
@@ -176,7 +177,7 @@ function doConnect(myConnectionId: number): void {
     // Re-subscribe to active session after reconnect
     const currentSessionId = getActiveSessionId();
     if (currentSessionId) {
-      console.log(`[WS] Re-subscribing to session ${currentSessionId} after connect`);
+      debug('WS', `Re-subscribing to session ${currentSessionId} after connect`);
       send({ type: 'subscribe', sessionId: currentSessionId });
     }
     
@@ -203,7 +204,7 @@ function doConnect(myConnectionId: number): void {
   };
   
   ws.onclose = () => {
-    console.log(`[WS] Disconnected (connectionId: ${myConnectionId}, current: ${connectionId})`);
+    debug('WS', `Disconnected (connectionId: ${myConnectionId}, current: ${connectionId})`);
     
     stopHeartbeat();
     
@@ -216,7 +217,7 @@ function doConnect(myConnectionId: number): void {
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       reconnectAttempts++;
       const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts - 1), RECONNECT_MAX_MS);
-      console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+      debug('WS', `Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
       
       if (reconnectAttempts === 1) {
         showToast('Reconnecting…', { type: 'info', autoHideMs: 5000 });
@@ -328,7 +329,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
 
       
     case 'pong':
-      console.log('[WS] ← pong');
+      debug('WS', '← pong');
       handlePong();
       break;
     
@@ -336,7 +337,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       lastServerPingTs = Date.now();
       const serverTs = (msg as unknown as { ts?: number }).ts;
       const latency = serverTs ? Date.now() - serverTs : '?';
-      console.log(`[WS] ← serverPing (latency: ${latency}ms)`);
+      debug('WS', `← serverPing (latency: ${latency}ms)`);
       break;
     }
       
@@ -516,7 +517,7 @@ export function waitForConnect(): Promise<void> {
  */
 export function reconnectIfNeeded(): void {
   if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
-    console.log('[WS] reconnectIfNeeded - reconnecting');
+    debug('WS', 'reconnectIfNeeded - reconnecting');
     reconnectAttempts = 0;
     connectionId++;
     doConnect(connectionId);

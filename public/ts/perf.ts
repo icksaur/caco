@@ -18,6 +18,8 @@
  *   f.done(); // logs table
  */
 
+import { makeDebug, debugTable } from './debug.js';
+
 interface PerfSpan {
   end(): number;
 }
@@ -27,6 +29,8 @@ interface PerfFlight {
   end(name: string): number;
   done(): void;
 }
+
+const debug = makeDebug('PERF');
 
 let counter = 0;
 
@@ -44,7 +48,7 @@ export function perfSpan(name: string): PerfSpan {
       const measure = performance.measure(name, { start: startMark });
       const ms = measure.duration;
       performance.clearMarks(startMark);
-      console.log(`[PERF] ${name}: ${ms.toFixed(1)}ms`);
+      debug(`${name}: ${ms.toFixed(1)}ms`);
       return ms;
     },
   };
@@ -79,8 +83,7 @@ export function perfFlight(flightName: string): PerfFlight {
     done(): void {
       const total = performance.now() - flightStart;
       rows.push({ span: '(total)', ms: Number(total.toFixed(1)) });
-      console.log(`[PERF] ${flightName}`);
-      console.table(rows);
+      debugTable('PERF', flightName, rows);
     },
   };
 }

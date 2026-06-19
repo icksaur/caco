@@ -8,6 +8,7 @@
  * historyGeneration counter, and server-side pendingHistory dedup.
  */
 
+import { debug } from './debug.js';
 import { getActiveSessionId, setLoadingHistory } from './app-state.js';
 import { setFormEnabled } from './view-controller.js';
 import { onHistoryComplete, getConnectionId, subscribeToSession, requestHistory, onEvent } from './websocket.js';
@@ -60,7 +61,7 @@ class HistoryLoader {
         const tComplete = performance.now();
         const waitMs = (tFirstEvent || tComplete) - tRequest;
         const streamMs = tFirstEvent ? tComplete - tFirstEvent : 0;
-        console.log(`[PERF] history ${sessionId.slice(0,8)}: ttfe=${waitMs.toFixed(1)}ms stream=${streamMs.toFixed(1)}ms events=${eventCount}`);
+        debug('PERF', `history ${sessionId.slice(0,8)}: ttfe=${waitMs.toFixed(1)}ms stream=${streamMs.toFixed(1)}ms events=${eventCount}`);
         resolve();
       };
       const timer = setTimeout(() => {

@@ -2,6 +2,7 @@
  * Model selection
  */
 
+import { debug } from './debug.js';
 import type { ModelInfo, Preferences } from './types.js';
 import { getSelectedModel, setSelectedModel as stateSetSelectedModel, getAvailableModels, setAvailableModels as stateSetAvailableModels } from './app-state.js';
 import { renderNewChatStatus } from './context-footer.js';
@@ -32,7 +33,7 @@ function formatContextWindow(n: number): string {
  */
 export function setAvailableModels(models: ModelInfo[]): void {
   stateSetAvailableModels(models);
-  console.log('[MODEL] Available models from SDK:', models.map(m => m.id));
+  debug('MODEL', 'Available models from SDK:', models.map(m => m.id));
 }
 
 /**

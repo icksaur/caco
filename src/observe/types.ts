@@ -28,8 +28,13 @@ export const SHELL_TOOLS = new Set([
 /** Below this, output passes through untouched (not worth shaping). */
 export const SHAPE_THRESHOLD_BYTES = 8 * 1024;
 
-/** Soft target for shaped output. Failure preservation may exceed it. */
-export const SHAPED_OUTPUT_CAP_BYTES = 4 * 1024;
+/**
+ * Hard byte ceiling for the generic floor. The floor ALWAYS reduces output
+ * below this regardless of line count, so a handful of huge lines (or one giant
+ * line) can never slip past the hook unbounded. This is what makes the hook the
+ * real bounding authority once the runtime truncation threshold is raised.
+ */
+export const GENERIC_HARD_CAP_BYTES = 16 * 1024;
 
 /** Max preserved failure blocks before eliding with a count. */
 export const MAX_FAILURES = 60;

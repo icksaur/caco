@@ -4,8 +4,9 @@ import { tsTestBuildShaper } from '../../src/observe/shapers/ts-test-build.js';
 import { selectShaper } from '../../src/observe/registry.js';
 import { shapeOutput } from '../../src/observe/shape.js';
 import { createObservationHook } from '../../src/observe/hook.js';
+import { createRetrieveOutputTool } from '../../src/observe/retrieve-tool.js';
 import { storeOutput, getOutput } from '../../src/output-store.js';
-import { MAX_FAILURES, SHAPE_THRESHOLD_BYTES } from '../../src/observe/types.js';
+import { MAX_FAILURES, SHAPE_THRESHOLD_BYTES, GENERIC_HARD_CAP_BYTES } from '../../src/observe/types.js';
 
 // Independent oracle: a failure-signal detector authored here, NOT imported from
 // production. The invariant under test is that the format shaper preserves a
@@ -140,6 +141,48 @@ describe('orchestrator — thresholds and backstop', () => {
   });
 });
 
+describe('orchestrator — byte bounding (C1: hook is the real bounding authority)', () => {
+  it('bounds a single multi-megabyte line via the non-shell generic floor', () => {
+    const giant = 'x'.repeat(2_000_000);
+    const d = shapeOutput('view', giant);
+    expect(d).not.toBeNull();
+    expect(d!.shapedBytes).toBeLessThan(GENERIC_HARD_CAP_BYTES + 512);
+    expect(d!.shapedBytes).toBeLessThan(d!.rawBytes);
+  });
+
+  it('bounds a handful of huge lines through the shell path', () => {
+    const raw = Array.from({ length: 5 }, () => 'y'.repeat(300_000)).join('\n');
+    const d = shapeOutput('bash', raw);
+    expect(d).not.toBeNull();
+    expect(d!.shapedBytes).toBeLessThan(GENERIC_HARD_CAP_BYTES + 512);
+    expect(d!.shapedBytes).toBeLessThan(d!.rawBytes);
+  });
+});
+
+describe('orchestrator — generic floor is enforced by construction (H1)', () => {
+  // A failure-looking line the ts-test-build SIGNAL set does NOT match, placed in
+  // the floor's head region of an otherwise ts-detected run.
+  const FLOOR_FIXTURE = [
+    'CUSTOM-MARKER-LINE-keep-me',
+    pad('✓ passing', 400),
+    ' FAIL  src/x.test.ts > boom',
+    'AssertionError: nope',
+    pad('✓ more', 400),
+    'Test Files  1 failed (1)',
+  ].join('\n');
+
+  it('the format shaper alone drops the unrecognized head line', () => {
+    expect(tsTestBuildShaper.shape(FLOOR_FIXTURE).shaped).not.toContain('CUSTOM-MARKER-LINE-keep-me');
+  });
+
+  it('the orchestrator restores it via the generic-floor union', () => {
+    const d = shapeOutput('bash', FLOOR_FIXTURE);
+    expect(d!.shaperId).toBe('ts-test-build');
+    expect(d!.shaped).toContain('CUSTOM-MARKER-LINE-keep-me');
+    expect(d!.shaped).toContain('FAIL  src/x.test.ts');
+  });
+});
+
 describe('hook — field preservation and raw recovery', () => {
   const cwd = '/tmp/obs-test-unregistered';
 
@@ -175,5 +218,37 @@ describe('hook — field preservation and raw recovery', () => {
     const hook = createObservationHook(cwd);
     const out = hook({ toolName: 'bash', toolResult: { resultType: 'success', textResultForLlm: 'ok' } as never });
     expect(out).toBeUndefined();
+  });
+});
+
+describe('retrieve_output — session scoping (M2)', () => {
+  type Handler = (args: { id: string; range?: number[]; grep?: string }) => Promise<{ textResultForLlm: string }>;
+
+  it('refuses to return output stored under a different session cwd', async () => {
+    const owner = '/tmp/obs-owner';
+    const id = storeOutput(owner, 'secret payload', { type: 'raw', command: 'bash' });
+
+    const ownerHandler = createRetrieveOutputTool(owner)[0].handler as Handler;
+    const intruderHandler = createRetrieveOutputTool('/tmp/obs-intruder')[0].handler as Handler;
+
+    const ok = await ownerHandler({ id });
+    expect(ok.textResultForLlm).toContain('secret payload');
+
+    const denied = await intruderHandler({ id });
+    expect(denied.textResultForLlm).toContain('no stored output');
+    expect(denied.textResultForLlm).not.toContain('secret payload');
+  });
+
+  it('grep filters and rejects over-long patterns', async () => {
+    const cwd = '/tmp/obs-grep';
+    const id = storeOutput(cwd, 'alpha\nERROR here\nbeta', { type: 'raw', command: 'bash' });
+    const handler = createRetrieveOutputTool(cwd)[0].handler as Handler;
+
+    const hit = await handler({ id, grep: 'ERROR' });
+    expect(hit.textResultForLlm).toContain('ERROR here');
+    expect(hit.textResultForLlm).not.toContain('alpha');
+
+    const tooLong = await handler({ id, grep: 'x'.repeat(201) });
+    expect(tooLong.textResultForLlm).toContain('too long');
   });
 });

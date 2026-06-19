@@ -13,7 +13,7 @@ function cap(text: string): string {
   return `${slice}\n[truncated to ${RETRIEVE_OUTPUT_CAP_BYTES / 1024} KB — narrow with range or grep]`;
 }
 
-export function createRetrieveOutputTool(_sessionCwd: string) {
+export function createRetrieveOutputTool(sessionCwd: string) {
   const retrieve = defineTool('retrieve_output', {
     description: `Fetch the full raw output that a prior tool result was shaped from. When a bash/test/build result shows "[Output shaped … retrieve_output id=\\"out_…\\"]", call this with that id to see everything that was hidden.
 
@@ -27,6 +27,9 @@ Narrow large output with \`range\` (1-based inclusive line span) or \`grep\` (on
     handler: async ({ id, range, grep }) => {
       const stored = getOutput(id);
       if (!stored) return err(`Error: no stored output for id "${id}" (it may have expired).`);
+      if (stored.metadata.sessionCwd && stored.metadata.sessionCwd !== sessionCwd) {
+        return err(`Error: no stored output for id "${id}" in this session.`);
+      }
 
       const data = typeof stored.data === 'string' ? stored.data : stored.data.toString('utf8');
       const allLines = data.split('\n');
@@ -43,6 +46,7 @@ Narrow large output with \`range\` (1-based inclusive line span) or \`grep\` (on
       }
 
       if (grep) {
+        if (grep.length > 200) return err('Error: grep pattern too long (max 200 chars).');
         let re: RegExp;
         try {
           re = new RegExp(grep, 'i');

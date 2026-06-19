@@ -27,11 +27,11 @@ export function createObservationHook(sessionCwd: string) {
     if (!decision) return;
 
     const id = storeOutput(sessionCwd, raw, { type: 'raw', command: input.toolName });
-    const sizeKb = (Buffer.byteLength(raw, 'utf8') / 1024).toFixed(1);
+    const rawKb = (decision.rawBytes / 1024).toFixed(1);
+    const shapedKb = (decision.shapedBytes / 1024).toFixed(1);
     const handle =
-      `\n\n[Output shaped by '${decision.shaperId}': ${decision.dropped} of ` +
-      `${decision.preserved + decision.dropped} lines hidden (${sizeKb} KB raw). ` +
-      `Retrieve full output: retrieve_output id="${id}" — supports ` +
+      `\n\n[Output shaped by '${decision.shaperId}': showing ${shapedKb} KB of ` +
+      `${rawKb} KB. Full raw output: retrieve_output id="${id}" — supports ` +
       '{ range: [start, end] } or { grep: "pattern" }.]';
 
     return {

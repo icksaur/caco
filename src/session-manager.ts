@@ -92,6 +92,18 @@ interface InfiniteSessionConfig {
   bufferExhaustionThreshold?: number;
 }
 
+interface LargeToolOutputConfig {
+  enabled?: boolean;
+  maxSizeBytes?: number;
+  outputDirectory?: string;
+}
+
+export const SDK_LARGE_OUTPUT_MAX_SIZE_BYTES = 20 * 1024;
+
+export function sdkLargeOutputConfig(): LargeToolOutputConfig {
+  return { enabled: true, maxSizeBytes: SDK_LARGE_OUTPUT_MAX_SIZE_BYTES };
+}
+
 interface CreateSessionConfig {
   model?: string;
   streaming?: boolean;
@@ -100,6 +112,7 @@ interface CreateSessionConfig {
   excludedTools?: string[];
   provider?: ProviderConfig;
   infiniteSessions?: InfiniteSessionConfig;
+  largeOutput?: LargeToolOutputConfig;
 }
 
 interface ResumeSessionConfig {
@@ -111,6 +124,7 @@ interface ResumeSessionConfig {
   reasoningEffort?: string;
   provider?: ProviderConfig;
   infiniteSessions?: InfiniteSessionConfig;
+  largeOutput?: LargeToolOutputConfig;
 }
 
 interface CopilotSessionInstance {
@@ -228,7 +242,7 @@ function readModelFromEvents(sessionId: string): string | null {
  * Enforces one active session per cwd (working directory).
  * Discovers existing sessions from ~/.copilot/session-state/
  */
-class SessionManager {
+export class SessionManager {
   // Correlation tracking for agent runaway guard
   private correlations = new Map<string, CorrelationMetrics>();
   private correlationRules: CorrelationRules = DEFAULT_RULES;
@@ -539,6 +553,7 @@ class SessionManager {
         configDir: join(homedir(), '.copilot'),
         mcpServers: await loadMcpServers(),
         workingDirectory: cwd,
+        largeOutput: sdkLargeOutputConfig(),
         ...(resolved.provider && { provider: resolved.provider }),
         // No infiniteSessions here: a brand-new session has no persisted budget
         // yet. Budgets are applied on resume (incl. the recreate triggered by
@@ -668,6 +683,7 @@ class SessionManager {
       configDir: join(homedir(), '.copilot'),
       mcpServers: await loadMcpServers(),
       workingDirectory: cwd,
+      largeOutput: sdkLargeOutputConfig(),
       ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
       ...(applyModel && { model: resolved.sdkModel }),
       ...(resolved?.provider && { provider: resolved.provider }),

@@ -21,6 +21,10 @@
     "@types/tar",
     "@codemirror/*",
     "@lezer/*",
-    "highlight.js"
+    "highlight.js",
+    "tree-sitter-c-sharp",
+    "tree-sitter-cpp",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript"
   ]
 }

@@ -76,6 +76,9 @@ Call \`caco_applet_usage\` for all applet URL patterns. Call \`caco_applet_howto
 
 **Context awareness**: The user may be viewing an applet while chatting. Call \`get_applet_state\` on your first turn to understand what they're looking at — it returns the active applet slug, URL params, and any state the applet has pushed.
 
+## Reading Code Efficiently
+For medium or large source files (TypeScript, JavaScript, C++, C#), call the \`index\` tool before reading. It returns a compact skeleton of the file's declarations, each with an exact \`[start-end]\` line range. Then use \`view\` with view_range to read only the ranges you need, instead of dumping the whole file. For small files, just \`view\` them directly.
+
 ## Response Options
 When your response ends with a discrete next action the user might choose (run-tests/skip, refactor/move-on, deploy/wait), call \`caco_offer_action\` with 1-4 short next-step instructions. The user clicks a button instead of typing. Use this routinely at the end of turns when a few productive next actions are obvious. Do not include "stop" or "pause" options — the chat input handles those.
 

@@ -26,6 +26,7 @@ import { createRoadmapTools } from './src/roadmap-tool.js';
 import { createSessionHistoryTool } from './src/session-history-tool.js';
 import { createMemoryTools } from './src/memory-tool.js';
 import { createOfferActionTool } from './src/offer-action-tool.js';
+import { createIndexTool } from './src/index-tool.js';
 import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
@@ -238,10 +239,11 @@ async function start(): Promise<void> {
     const sessionHistoryTools = createSessionHistoryTool();
     const memoryTools = createMemoryTools();
     const offerActionTools = createOfferActionTool(sessionRef);
+    const indexTools = createIndexTool(sessionCwd);
     const surfaceTools = createSurfaceTools(sessionRef);
     const browserTools = createBrowserTools(sessionRef);
     
-    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools, ...sessionHistoryTools, ...memoryTools, ...offerActionTools, ...surfaceTools, ...browserTools];
+    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools, ...sessionHistoryTools, ...memoryTools, ...offerActionTools, ...indexTools, ...surfaceTools, ...browserTools];
   };
   
   await createSessionState({

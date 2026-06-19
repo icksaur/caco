@@ -11,11 +11,7 @@ import { getExtensionMetadata } from './extension-runtime.js';
 
 export function createExtensionsTool() {
   const tool = defineTool('caco_extensions', {
-    description: `Discover loaded extensions and the extension API. Call when:
-- User asks about extensions or customization
-- You need to know what extensions are installed
-- User wants to create a new extension
-- You want to find extension-provided tools or commands`,
+    description: 'Discover loaded extensions and the extension API. Call to list installed extensions, find extension-provided tools or commands, or learn how to create a new extension.',
 
     parameters: z.object({}),
     handler: async () => {

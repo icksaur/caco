@@ -25,20 +25,9 @@ async function getLastAssistantMessage(sessionId: string): Promise<string> {
 
 export function createDelegateTool(sessionRef: SessionIdRef) {
   const cacoSessionDelegate = defineTool('caco_session_delegate', {
-    description: `Delegate work to 1-2 existing Caco sessions and wait for their response. Returns the delegate's full response so you can use it immediately.
+    description: `Delegate work to 1-2 existing Caco sessions and wait for their responses, returned to you. Unlike send_caco_message (fire-and-forget), this blocks until they reply — the preferred tool for cross-session collaboration. Sessions must already exist (caco-session:UUID); verify with get_session_state if unsure. Delegates persist after replying and see the message as coming from your session.
 
-**This is the preferred tool for cross-session collaboration.** Unlike send_caco_message (fire-and-forget), this tool blocks until the delegate responds and gives you the result.
-
-The delegate sessions must already exist. The user provides session IDs (caco-session:UUID format) or you can verify them with get_session_state first.
-
-**When to use:** Ask a reviewer session to check your work, ask a research session to look something up, or coordinate with a session working on a related part of the system.
-
-**When NOT to use:** Don't use this for quick sub-tasks (use the task tool). Don't use this to create new sessions (use create_caco_session). Don't delegate to yourself.
-
-**Tips:**
-- Ask delegates to keep responses concise
-- Delegates see the message as coming from your session
-- Delegate sessions persist — they are not deleted after responding`,
+Use to have a reviewer/research session check work or look something up. Don't delegate to yourself, create new sessions (use create_caco_session), or use for quick sub-tasks (use the task tool).`,
 
     parameters: z.object({
       prompts: z.array(z.object({

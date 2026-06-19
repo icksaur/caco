@@ -39,9 +39,7 @@ export function formatMemoryForPrompt(): string {
 
 export function createMemoryTools() {
   const getMemory = defineTool('caco_get_memory', {
-    description: `Read all persistent memories. Returns key-value entries and capacity.
-
-Memory persists across all sessions. Use this to check what's already stored before adding new entries, or when you need the latest version (system prompt injection may be stale).`,
+    description: 'Read all persistent memories (global — shared across all sessions, unlike per-session session_note). Returns key-value entries and capacity. Check before adding entries, or when you need the latest version (the injected copy may be stale).',
 
     parameters: z.object({}),
 
@@ -58,13 +56,7 @@ Memory persists across all sessions. Use this to check what's already stored bef
   });
 
   const setMemory = defineTool('caco_set_memory', {
-    description: `Store or remove a persistent memory entry.
-
-Keys must be slugs (lowercase, numbers, hyphens — e.g., "preferred-language", "git-style").
-Pass a value to store/update. Omit value or pass empty string to delete the key.
-
-When the user says "remember", "forget", "always", or "never" about a preference, use this tool.
-One concise fact per key. Prefer updating an existing key over creating a new one.`,
+    description: 'Store or remove a persistent memory entry. Keys are slugs (lowercase, numbers, hyphens — e.g. "preferred-language"). Pass a value to store/update; omit or empty to delete. Use when the user says "remember", "forget", "always", or "never" about a preference. One fact per key; prefer updating an existing key.',
 
     parameters: z.object({
       key: z.string().describe('Slug-format key (lowercase, hyphens, numbers)'),

@@ -146,24 +146,14 @@ Proactively suggest these when the user's workflow would benefit.
 
 export function createDevDocsTool(projectRoot: string) {
   const cacoDevDocs = defineTool('caco_dev_docs', {
-    description: `Get documentation for the Caco project. Call this when the user asks about Caco itself — how to use it, how to set it up, or how to modify it.
+    description: `Get documentation for the Caco project — usage, setup, autostart, configuration, architecture/internals, or how to modify it (add a tool/applet/route, find where a feature lives, or get a tool's spec after a failure).
 
-**When to call:**
-- User asks about Caco usage, setup, autostart, or configuration
-- User asks to change how Caco works (UI, tools, prompts, API)
-- User asks about Caco's architecture or internals
-- You need to find where a Caco feature is implemented
-- You want to add a new tool, applet, or route to Caco
-- A Caco tool failed in a way that suggests you need its spec
-
-**Sections:**
+Sections:
 - omit \`section\` for the full dev guide
-- \`section: "index"\` for a list of all known doc files (root + docs/)
-- \`section: "<filename>"\` to read a specific doc by name (e.g. \`"session-surface-applet"\`, \`"surface-cookbook"\`, \`"API"\`, \`"APPLETS"\`). The .md extension is added automatically; root and \`docs/\` are searched.
+- \`section: "index"\` lists all doc files (root + docs/)
+- \`section: "<filename>"\` reads a doc by name (e.g. \`"session-surface-applet"\`, \`"surface-cookbook"\`, \`"API"\`, \`"APPLETS"\`). The .md extension is added automatically; root and \`docs/\` are searched.
 
-When reading a named section, the response begins with a heading table of contents (H2/H3 with line numbers). Use \`viewRange: [startLine, endLine]\` to paginate large docs (mirrors the \`view\` tool — 1-indexed, inclusive).
-
-For general usage and setup, read \`README.md\` at the project root.`,
+A named section's response begins with a heading TOC (H2/H3 with line numbers); use \`viewRange: [startLine, endLine]\` to paginate (1-indexed, inclusive, mirrors the \`view\` tool). For general usage/setup, read \`README.md\`.`,
 
     parameters: z.object({
       section: z.string().optional().describe('Optional: "index" lists all doc files. A filename (with or without .md) reads that doc. Omit for the full dev guide.'),

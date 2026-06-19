@@ -81,11 +81,7 @@ export function runSessionStoreQuery(dbPath: string, query: string): QueryRespon
 
 export function createSessionHistoryTool() {
   const tool = defineTool('caco_session_store_sql', {
-    description: `Execute read-only SQL queries against the global session history database (~/.copilot/session-store.db).
-
-This database contains cross-session history maintained by the Copilot CLI. Available tables: sessions, turns, checkpoints, session_files, session_refs, search_index.
-
-Use this to query conversation history across all sessions — what was discussed, when, which files were changed, etc. Only SELECT queries are allowed.
+    description: `Read-only SQL over the global session history DB (~/.copilot/session-store.db), cross-session history maintained by the Copilot CLI. SELECT/WITH/PRAGMA only. Tables: sessions, turns, checkpoints, session_files, session_refs, search_index. Use to query conversation history across sessions — what was discussed, when, which files changed.
 
 Example: SELECT s.id, s.summary FROM sessions s ORDER BY s.updated_at DESC LIMIT 10`,
     parameters: z.object({

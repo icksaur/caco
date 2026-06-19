@@ -65,21 +65,9 @@ async function getLastAssistantMessage(sessionId: string): Promise<string> {
 
 export function createSwarmTool(sessionRef: SessionIdRef) {
   const cacoSessionSwarm = defineTool('caco_session_swarm', {
-    description: `Dispatch 1-6 parallel Caco sessions and wait for all to complete. Returns aggregated results.
+    description: `Dispatch 1-6 parallel Caco sessions, wait for all, return aggregated results. Use for fan-out: analyze multiple repos, parallelize independent subtasks, get diverse perspectives. Each runs independently with its own prompt — give each a complete, self-contained task. Only one swarm runs at a time.
 
-Use for fan-out tasks: analyze multiple repos, parallelize independent subtasks, get diverse perspectives.
-
-Each session runs independently with its own prompt. Results are collected and returned as one structured response.
-
-**Model tiers (enforced):**
-- 1-2 sessions: use opus for best quality (any model allowed)
-- 3-4 sessions: sonnet or cheaper (opus rejected)
-- 5-6 sessions: gpt-4.1 or cheaper
-
-**Tips:**
-- Give each session a complete, self-contained task
-- Ask sessions to keep responses brief or write to files
-- Only one swarm can run at a time`,
+Model tiers (enforced): 1-2 sessions any model; 3-4 sessions sonnet or cheaper (opus rejected); 5-6 sessions gpt-4.1 or cheaper.`,
 
     parameters: z.object({
       cwd: z.string().describe('Working directory for all sessions'),

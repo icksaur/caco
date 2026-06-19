@@ -63,43 +63,27 @@ export async function buildSystemMessage(): Promise<SystemMessage> {
 - **Extensions**: User-installed plugins. Call \`caco_extensions\` to discover loaded extensions
 
 ## Display Tools
-You have a tool that displays content directly to the user:
-- \`embed_media\` - Embed YouTube/SoundCloud/Vimeo/Spotify content
-
-Use embed_media when users want to watch or listen to media inline.
+Use \`embed_media\` when users want to watch/listen to media inline.
 
 ## Applets
 Interactive panels. Provide markdown links to open for users.
 ${appletPrompt}
 Examples: \`[View file](/?applet=files&openPath=/file)\` | \`[Git status](/?applet=git-status&path=/repo)\`
-Call \`caco_applet_usage\` for all applet URL patterns. Call \`caco_applet_howto\` to create new applets.
-
-**Context awareness**: The user may be viewing an applet while chatting. Call \`get_applet_state\` on your first turn to understand what they're looking at — it returns the active applet slug, URL params, and any state the applet has pushed.
+Call \`caco_applet_usage\` for URL patterns, \`caco_applet_howto\` to create applets.
+Call \`get_applet_state\` on your first turn to see what applet the user is viewing.
 
 ## Reading Code Efficiently
-For medium or large source files (TypeScript, JavaScript, C++, C#), call the \`index\` tool before reading. It returns a compact skeleton of the file's declarations, each with an exact \`[start-end]\` line range. Then use \`view\` with view_range to read only the ranges you need, instead of dumping the whole file. For small files, just \`view\` them directly.
-
-Large shell/test/build output may be automatically shaped down to a failure-focused summary ending in a handle like \`[Output shaped … retrieve_output id="out_…"]\`. The summary preserves errors and failures; pass/progress noise is dropped. When you need detail the summary omitted, call \`retrieve_output\` with that id (use \`grep\` or \`range\` to narrow) rather than re-running the command.
+Call \`index\` before reading medium/large source files, then \`view\` only the ranges you need.
+Large shell/test/build output may be shaped to a failure-focused summary ending in \`[Output shaped … retrieve_output id="out_…"]\`. Call \`retrieve_output\` with that id (\`grep\`/\`range\` to narrow) rather than re-running.
 
 ## Response Options
-When your response ends with a discrete next action the user might choose (run-tests/skip, refactor/move-on, deploy/wait), call \`caco_offer_action\` with 1-4 short next-step instructions. The user clicks a button instead of typing. Use this routinely at the end of turns when a few productive next actions are obvious. Do not include "stop" or "pause" options — the chat input handles those.
+Call \`caco_offer_action\` (1-4 short instructions) when your turn ends with discrete next actions the user might pick.
 
 ## Caco Session Tools
-Create and message independent Caco sessions that appear in the user's session list:
-- \`create_caco_session\` - Create a persistent session in a specific directory
-- \`send_caco_message\` - Send a message to an existing session
-- \`get_session_state\` - Check if a session is idle or busy
-- \`caco_session_swarm\` - Dispatch 1-6 parallel sessions and wait for all results
-
-Use \`caco_session_swarm\` for parallel fan-out (analyze multiple repos, diverse perspectives). Model tier enforced: opus ≤2, sonnet ≤4, gpt-4.1 ≤6.
-
-Use individual session tools for work the user will review separately. For quick sub-tasks, use the built-in \`task\` tool instead.
+Use \`caco_session_swarm\` for parallel fan-out (analyze multiple repos, diverse perspectives). Model tier enforced: opus ≤2, sonnet ≤4, gpt-4.1 ≤6. Use individual session tools (create/send/get_session_state) for work the user reviews separately; use the built-in \`task\` tool for quick sub-tasks.
 
 ## Session Memory
-- \`session_note\` — Your persistent scratchpad. Record decisions, findings, dead ends, and context as you work. Notes survive compaction.
-- \`get_roadmap\` / \`update_roadmap\` — Track multi-step work with statuses. Read the roadmap after resume or compaction to recover project state.
-
-**Use notes liberally.** Record why you chose an approach, what you tried that didn't work, and what you'd need to know if this conversation were compacted. The user can also search notes across all sessions.
+Use \`session_note\` liberally and read \`get_roadmap\`/\`update_roadmap\` after resume — notes and roadmap survive compaction.
 
 ## Schedules & Configuration
 Caco has powerful capabilities beyond chat: scheduled unattended sessions, MCP server configuration, skills, hooks, and system prompt management. **When the user needs recurring automation, monitoring, environment setup, or workflow customization, always call \`caco_dev_docs\` first** — it documents solutions you can set up directly.

@@ -330,7 +330,7 @@ The link uses relative URL format \`/?applet=slug\` which navigates without page
 export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef | undefined, pushStateToApplet: StatePushHandler) {
 
   const getAppletState = defineTool('get_applet_state', {
-    description: 'Query state pushed by applet JS via setAppletState(). Returns user input, selections, or computed values from the running applet.',
+    description: 'Query state pushed by applet JS via setAppletState(). Returns the running applet\'s user input, selections, or computed values.',
 
     parameters: z.object({
       key: z.string().optional().describe('Optional: Get a specific key from the state object instead of the full state.')
@@ -386,7 +386,7 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
   });
 
   const restartServer = defineTool('restart_server', {
-    description: 'Schedule a graceful server restart to apply backend code changes. Server waits for all active sessions to finish responding before restarting. Use as final action after modifying src/*.ts files.',
+    description: 'Schedule a graceful server restart to apply backend code changes. Waits for active sessions to finish responding before restarting. Use as final action after modifying src/*.ts files.',
 
     parameters: z.object({
       delay: z.number()
@@ -416,7 +416,7 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
   });
 
   const cacoAppletHowto = defineTool('caco_applet_howto', {
-    description: 'Get documentation for CREATING new applets (HTML/JS/CSS widgets). Call when the user asks for an interactive tool, custom dashboard, or one-off editor (e.g., drag-drop ticket triage, parameter tuner, annotation UI). Applets persist on disk and survive across sessions. For inline diagrams or styled tables in chat responses, use inline HTML/SVG directly instead — no applet needed. For USING existing applets, call caco_applet_usage instead.',
+    description: 'Get documentation for CREATING new applets (HTML/JS/CSS widgets). Call when the user wants an interactive tool, custom dashboard, or one-off editor (e.g. drag-drop triage, parameter tuner, annotation UI). Applets persist on disk across sessions. For inline diagrams or styled tables in chat, use inline HTML/SVG instead. For USING existing applets, call caco_applet_usage.',
 
     parameters: z.object({}),
 
@@ -429,7 +429,7 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
   });
 
   const cacoAppletUsage = defineTool('caco_applet_usage', {
-    description: 'Get applet URL patterns for linking users to interactive panels. Returns markdown link examples for showing files, diffs, git status, images, etc. Call when you want to display content to the user via an applet.',
+    description: 'Get applet URL patterns for linking users to interactive panels (files, diffs, git status, images, etc.). Returns markdown link examples for displaying content to the user.',
 
     parameters: z.object({
       slug: z.string().optional().describe('Filter to a specific applet by slug')
@@ -471,7 +471,7 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
   });
 
   const setAppletState = defineTool('set_applet_state', {
-    description: 'Push state to the running applet in real-time via WebSocket. The applet receives updates via onStateUpdate() callback. Use for progress updates, computed results, or any data the applet should display.',
+    description: 'Push state to the running applet via WebSocket; it receives updates via onStateUpdate(). Use for progress, computed results, or any data the applet should display.',
 
     parameters: z.object({
       data: z.record(z.string(), z.unknown()).describe('State object to push to the applet. Keys/values are merged with existing state.'),

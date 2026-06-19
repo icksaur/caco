@@ -20,14 +20,7 @@ import { getCliOAuthConfig } from './cli-oauth.js';
 export function createMcpAuthTools() {
   
   const registerMcpServer = defineTool('register_mcp_server', {
-    description: `Register an MCP server that requires OAuth authentication. 
-    
-Call this when an MCP tool returns 401 Unauthorized. This tool will:
-1. Discover OAuth endpoints for the server
-2. Register the server in the MCP auth store
-3. Tell you to direct the user to authenticate
-
-After calling this, tell the user: "Please authenticate [server name] by opening /?applet=mcp-servers"`,
+    description: 'Register an MCP server that requires OAuth. Call when an MCP tool returns 401 Unauthorized: discovers OAuth endpoints, registers the server in the auth store, then tell the user to authenticate by opening /?applet=mcp-servers.',
 
     parameters: z.object({
       serverUrl: z.string().url().describe('The MCP server URL that returned 401'),

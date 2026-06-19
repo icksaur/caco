@@ -16,11 +16,9 @@ export function createRoadmapTools(sessionRef: SessionIdRef) {
   }
 
   const getRoadmap = defineTool('get_roadmap', {
-    description: `Get the roadmap for the current session. Returns the title, documents, and step list with statuses.
+    description: `Get the current session's roadmap: title, documents, and steps with statuses. Returns empty object if none exists.
 
-Call this after session resume or context compaction to recover project state. The roadmap persists on disk and survives compaction.
-
-Returns empty object if no roadmap exists yet.`,
+Call after session resume or context compaction to recover project state (the roadmap persists on disk).`,
     parameters: z.object({
       sessionId: z.string().optional().describe('Read another session\'s roadmap (read-only). Use the caco-session:UUID from user input.'),
     }),
@@ -35,21 +33,17 @@ Returns empty object if no roadmap exists yet.`,
   });
 
   const updateRoadmap = defineTool('update_roadmap', {
-    description: `Update the session roadmap. All parameters are optional — set whatever you need in one call.
+    description: `Update the session roadmap. All params optional — set whatever you need in one call.
 
-- title: Set the roadmap title
-- steps: Replace the entire step list (for bulk creation/reorder)
-- documents: Replace the entire document list
-- addStep: Add a single step (appended, or at addStepIndex)
-- updateStep: Update fields on an existing step (by updateStepIndex OR stepTitle)
-- removeStepIndex / removeStepTitle: Remove a step by index or title
+- title / documents: set title, or replace the document list
+- steps: replace the entire step list (bulk create/reorder)
+- addStep (+ addStepIndex): append or insert one step
+- updateStep (by updateStepIndex OR stepTitle): change fields on a step
+- removeStepIndex / removeStepTitle: remove a step
 
-Step statuses: pending, active, done, blocked
+Step status: pending | active | done | blocked.
 
-Examples:
-  Create roadmap: { title: "My Project", steps: [{ title: "Research", status: "active" }, { title: "Implement", status: "pending" }] }
-  Mark step done: { stepTitle: "Research", updateStep: { status: "done" } }
-  Add a step: { addStep: { title: "Test", status: "pending" } }`,
+Example: { stepTitle: "Research", updateStep: { status: "done" } }`,
     parameters: z.object({
       title: z.string().optional(),
       steps: z.array(z.object({
@@ -125,11 +119,11 @@ Examples:
   });
 
   const sessionNote = defineTool('session_note', {
-    description: `Your persistent memory for this session. Record decisions, discoveries, dead ends, and anything you'd want to remember after context compaction. Notes survive compaction and can be read back later — use them liberally. No structure required; capture insights while they're fresh.
+    description: `Persistent per-session memory. Record decisions, discoveries, and dead ends; notes survive context compaction. No structure required.
 
-- No parameters: returns all notes (timestamped entries)
-- append: add a new note (timestamped automatically)
-- sessionId: read another session's notes (read-only, cannot append)`,
+- No params: returns all notes (timestamped)
+- append: add a timestamped note
+- sessionId: read another session's notes (read-only)`,
     parameters: z.object({
       append: z.string().optional().describe('Text to append as a new timestamped note'),
       sessionId: z.string().optional().describe('Read another session\'s notes (read-only). Use the caco-session:UUID from user input.'),

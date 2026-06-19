@@ -19,16 +19,9 @@ export type GetCorrelationId = (sessionId: string) => string | undefined;
 export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: GetCorrelationId) {
   
   const sendCacoMessage = defineTool('send_caco_message', {
-    description: `Send a message to another Caco session. The target session works independently — do NOT poll or wait for a response.
+    description: `Send a message to an existing Caco session and return immediately — fire-and-forget, do NOT poll or wait. The target works autonomously; the user watches it in the session list.
 
-Use this to dispatch work to an existing session, such as:
-- Sending follow-up instructions to a session you created
-- Coordinating across projects (e.g., "update the API client after the schema change")
-- Notifying a session of state changes
-
-The target session receives your message and works on it autonomously. The user can watch its progress in the Caco session list.
-
-**Important:** If you need the other session's response to continue your work, use \`caco_session_delegate\` instead — it waits for the response and returns it to you. Use send_caco_message only for fire-and-forget dispatches where you don't need the result.`,
+Use for follow-up instructions or cross-project notifications where you don't need the reply. If you need the response to continue your work, use \`caco_session_delegate\` instead (it waits and returns the reply).`,
 
     parameters: z.object({
       sessionId: z.string().describe('Target session ID to send the message to'),
@@ -154,16 +147,9 @@ The target session receives your message and works on it autonomously. The user 
   });
 
   const createCacoSession = defineTool('create_caco_session', {
-    description: `Create a new persistent Caco session. The session appears in the user's session list and can be watched or resumed later.
+    description: `Create a new persistent Caco session (appears in the session list, watchable/resumable). Use for work in a different project/directory the user reviews separately, long-running sessions watched live, or triaging into independent sessions. For quick sub-tasks that report back inline, use the built-in \`task\` tool instead.
 
-**When to use (instead of the \`task\` tool):**
-- Dispatching work to a **different project/directory** that the user will review separately
-- Creating a **long-running session** the user wants to watch in real-time
-- Triaging work into **independent sessions** (e.g., "fix the tests" + "update the docs")
-
-For quick sub-tasks that report results back to you, use the built-in \`task\` tool instead.
-
-Provide \`initialMessage\` to create and prompt in one step. The session works autonomously — do not poll or wait.`,
+Provide \`initialMessage\` to create and prompt in one step. Runs autonomously — do not poll or wait.`,
 
     parameters: z.object({
       cwd: z.string().describe('Working directory for the new session'),

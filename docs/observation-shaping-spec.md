@@ -19,18 +19,50 @@ instead of thousands; if it needs everything, it calls `retrieve(id)`.
 This is the *command-output* analogue of the `index` tool (which shaped *file
 reads*). Together they attack Caco's two big token surfaces: reads and observations.
 
+## Spike findings (resolved, 2026-06-19)
+
+Live run against the SDK (`claude-haiku-4.5`) settled the three blocking unknowns:
+
+1. **Failing shell command → `resultType: 'success'`.** `bash -c 'echo x; exit 3'`
+   fired `onPostToolUse` with `resultType: 'success'`; the exit code is in the text
+   (`<shellId: 1 completed with exit code 3>`). So shaping happens entirely in
+   `onPostToolUse` and **can** return `modifiedResult`. The failure-hook limitation
+   does **not** bite for shell tools.
+2. **Tool names confirmed:** `bash` (runner) and `read_bash` (async output) both
+   carry command output; async bulk output arrives via `read_bash`.
+3. **The lever is an env var, not the session `largeOutput` config.** The shell
+   tool truncates its own output at `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES`
+   (default `20480`), saving overflow to a `/tmp/copilot-tool-output-*` file and
+   handing the hook only a blind preview + path — *before* `onPostToolUse`, and
+   independent of `largeOutput.enabled`. Setting `largeOutput.enabled=false` did
+   **not** change this. Raising `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` to `2000000`
+   made the hook receive the **full raw 334 KB** for both `bash` and `read_bash`.
+
+**Design decisions from the spike:**
+- Caco sets `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` to a bounded ceiling
+  (`OBS_RAW_CEILING_BYTES`, ~1–2 MB) before the runtime starts, so the hook sees
+  raw text up to that ceiling and becomes the single bounding authority. Above the
+  ceiling the runtime still truncates (memory/transport safety net).
+- Because raising the threshold also stops the runtime pre-truncating **non-shell**
+  tool output (`view`/`grep`/custom), `onPostToolUse` **must** apply a generic
+  size cap + raw-store handle to *every* successful text result over
+  `SHAPE_THRESHOLD_BYTES` (shell-class → semantic shaping; others → generic
+  head/tail + handle). This is the mandatory backstop.
+- The session `largeOutput` config is now irrelevant to this feature; leave the
+  existing `sdkLargeOutputConfig()` as-is.
+
 ## Design — Part 1: Caco layer
 
 **Interception.** SDK `SessionHooks.onPostToolUse(input, invocation)` returns
 `{ modifiedResult?, additionalContext?, suppressOutput? }`. Register it on the
 session and thread it into `createSession` *and* `resumeSession` exactly where
-`largeOutput` is threaded today (`src/session-manager.ts`).
+`largeOutput` is threaded today (`src/session-manager.ts`). Set
+`COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = OBS_RAW_CEILING_BYTES` on the runtime env
+before `client.start()`.
 
-- The hook fires only for `resultType === 'success'`. `onPostToolUseFailure`
-  fires for `'failure'` but is reduced to `error: string` and can return **only**
-  `additionalContext` — it cannot replace result text (SDK-documented). Whether a
-  non-zero shell exit is `'success'` or `'failure'` is the make-or-break question
-  (see Spike).
+- The hook fires only for `resultType === 'success'`, which (per spike) covers
+  failing shell commands. `onPostToolUseFailure` is the reduced `error: string`
+  path used only for genuine tool-infrastructure failures; not needed for V1.
 - Scope by `toolName`. The runtime's own shell-tool set (verified in
   `@github/copilot` app.js) is **`bash`, `powershell`, `local_shell`** (runners),
   plus the async output readers **`read_bash`, `read_powershell`**. A long
@@ -135,13 +167,16 @@ generic shaper is always recoverable via the handle.
 - **Disabling SDK `largeOutput` requires a generic Caco backstop.** The hook is
   scoped to shell-class tools, but disabling the SDK cap removes the only bound on
   *every other* large successful tool output. So if the spike leads to disabling
-  it, `onPostToolUse` must apply a **generic** size cap + raw-store handle to
-  *all* successful text results (shell-class → semantic shaping; everything else →
-  generic head/tail + handle). Otherwise keep SDK `largeOutput` enabled as the
-  backstop and shape only what the hook sees raw. Acceptance must prove a large
-  *non-shell* success result is still bounded.
-- **Ordering risk.** If SDK large-output processing runs *before* `onPostToolUse`,
-  the hook receives a stub, not raw text. Decided by the spike.
+- **Disabling SDK `largeOutput` requires a generic Caco backstop.** The hook is
+  scoped to shell-class tools, but raising the runtime threshold (the actual lever,
+  per spike) stops the runtime pre-truncating *every* tool, so `onPostToolUse` must
+  apply a **generic** size cap + raw-store handle to *all* successful text results
+  (shell-class → semantic shaping; everything else → generic head/tail + handle).
+  Acceptance must prove a large *non-shell* success result is still bounded.
+- **Ordering (resolved by spike).** Runtime truncation runs *before* the hook and
+  is gated by `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES`, not `largeOutput.enabled`.
+  Raising that env var to `OBS_RAW_CEILING_BYTES` gives the hook raw text up to the
+  ceiling.
 - **Conservative by default.** Failure lines are sacred; the handle guarantees
   full recovery; shaping is opt-in by size + tool name.
 - **Concurrency / fan-out.** Hook fires per session; store keyed per session;
@@ -153,9 +188,9 @@ generic shaper is always recoverable via the handle.
 
 | Risk | Mitigation |
 | --- | --- |
-| Non-zero exit arrives as `'failure'` (can't replace text) | Spike decision gates; if so, V1 adds `additionalContext` + retrieve handle, or defers to a different boundary |
-| Hook sees post-spill stub, not raw | Spike confirms; disable SDK largeOutput **with** generic backstop, or keep it and shape only raw-visible output |
-| Disabling largeOutput unbounds non-shell tools | Generic cap + handle for all successful text results, not just shell-class; acceptance test on a non-shell large result |
+| Non-zero exit treated as failure | Resolved: spike shows shell non-zero exit is `resultType: 'success'`; shaping in `onPostToolUse` returns `modifiedResult` |
+| Hook sees truncated stub, not raw | Resolved: raise `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` to `OBS_RAW_CEILING_BYTES`; hook then sees full raw up to the ceiling |
+| Raised threshold unbounds non-shell tools | Mandatory generic cap + handle for all successful text results; acceptance test on a non-shell large result |
 | Size cap vs preserve-every-failure conflict | Cap is soft; keep up to `MAX_FAILURES` + totals + handle; never drop a failure to fit |
 | Over-aggressive shaping hides a failure | Expected-span oracle (not regex-only); conservative keep-on-doubt; always attach handle |
 | Shell tool name differs across SDK versions | Allowlist `bash`/`powershell`/`local_shell`/`read_bash`/`read_powershell` (verified) + size gate, not name alone; spike re-confirms |
@@ -169,7 +204,9 @@ generic shaper is always recoverable via the handle.
   beside `largeOutput`. `SessionConfigBase.hooks?: SessionHooks` covers both.
 - SDK types: `SessionHooks`, `PostToolUseHookInput/Output`, `ToolResultObject`
   (`textResultForLlm`, `resultType`, `error`, `sessionLog`).
-- Existing `sdkLargeOutputConfig()` helper is the coexistence lever.
+- Existing `sdkLargeOutputConfig()` is unrelated to this feature (spike); leave it.
+- Runtime truncation lever: env `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` (default
+  20480), set to `OBS_RAW_CEILING_BYTES` before `client.start()` in `ensureClient`.
 - Existing `src/output-store.ts` (`storeOutput`/`getOutput`, `type: 'raw'`, opaque
   `out_…` ids, per-session dirs, pruning) is the raw-recovery backend — reuse it.
 
@@ -201,22 +238,13 @@ generic shaper is always recoverable via the handle.
 
 ## Plan
 
-- [ ] **Spike (blocking design):** register a logging-only `onPostToolUse` +
-      `onPostToolUseFailure`; run a passing and a *failing* shell command; record
-      (a) does the hook see full raw `textResultForLlm`, (b) failing-command
-      `resultType`, (c) confirm the shell tool names at runtime (expected
-      `bash`/`powershell`/`local_shell` + readers `read_bash`/`read_powershell`)
-      and which tool delivers an **async** command's bulk output. Write findings
-      into this spec.
-      **Decision gates:**
-      - Non-zero exit is `'success'` → proceed with hook-based shaping (replace text).
-      - Non-zero exit is `'failure'` but `error` carries full raw text → V1 can only
-        add `additionalContext` (hidden guidance) + retrieve handle, not replace the
-        visible result; record whether that meets the goal or defer.
-      - Non-zero exit is `'failure'` and `error` is already spilled/truncated → this
-        interception point cannot meet the goal; stop and pick a different boundary.
-- [ ] Decide SDK `largeOutput` coexistence from spike; if disabling it, add the
-      generic backstop path for all successful text results.
+- [x] **Spike (blocking design):** DONE — see "Spike findings" above. Non-zero
+      shell exit is `resultType: 'success'`; tool names `bash`/`read_bash`
+      confirmed; the truncation lever is `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES`,
+      and raising it lets the hook see full raw text.
+- [x] Decision: raise `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` to
+      `OBS_RAW_CEILING_BYTES`; `onPostToolUse` is the single bounding authority with
+      a mandatory generic backstop for all tools.
 - [ ] Reuse `output-store.ts` for raw recovery (store before mutate); confirm
       opaque-id retrieve.
 - [ ] Shaper interface + registry (`detect`/`shape`, self-registering array) +

@@ -25,7 +25,6 @@ global state
 unnecessary layers of abstraction
 side effects
 mutable objects
-huge comments - variables and class names should explain why
 code must be kept in sync
 
 ## good
@@ -48,6 +47,26 @@ data driven behavior
 descriptive, self-documenting names
 immutable objects
 consistent naming
+
+## comments
+
+Make the code say what it can through names, types, and structure. Use
+comments only for what the code cannot say.
+
+keep (do not flag):
+- why this approach, not the obvious alternative
+- invariants/contracts the type system can't express
+- units, ranges, sentinels (ms; 0 = no timeout)
+- non-local constraints ("consumed by mobile v3; don't reorder fields")
+- workarounds with a link and a removal condition
+- public API contract: inputs, side effects, errors, idempotency
+
+flag (delete or rewrite):
+- restates the code, or narrates it line by line
+- explains what a name means -> rename instead
+- commented-out (dead) code -> delete; VCS remembers
+- vague TODO with no owner/issue/removal condition
+- stale comment that disagrees with the code -> worse than none; treat as a bug
 
 # improving codebases
 

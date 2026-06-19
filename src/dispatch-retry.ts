@@ -43,6 +43,7 @@ export async function retryWithFreshClient(deps: RetryDeps): Promise<(() => void
   type Sendable = { send: (opts: Record<string, unknown>) => Promise<unknown> };
 
   deps.unsubscribe();
+  let newUnsubscribe: (() => void) | null = null;
   try {
     deps.dropStaleSession(deps.sessionId);
     await deps.ensureClientHealthy();
@@ -51,12 +52,16 @@ export async function retryWithFreshClient(deps: RetryDeps): Promise<(() => void
     const retrySession = deps.getSession(deps.sessionId);
     if (!retrySession) throw new Error('No session after retry');
 
-    const newUnsubscribe = (retrySession as Subscribable).on(deps.handleEvent);
+    newUnsubscribe = (retrySession as Subscribable).on(deps.handleEvent);
     if (deps.beforeSend) await deps.beforeSend();
     await (retrySession as Sendable).send(deps.messageOptions);
     deps.resetWatchdog();
     return newUnsubscribe;
   } catch {
+    // If we subscribed before failing (beforeSend/send threw), tear the
+    // listener down — otherwise it leaks and keeps streaming events into an
+    // already error-completed dispatch.
+    if (newUnsubscribe) newUnsubscribe();
     return null;
   }
 }

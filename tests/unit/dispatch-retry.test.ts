@@ -41,4 +41,46 @@ describe('retryWithFreshClient', () => {
       'resetWatchdog',
     ]);
   });
+
+  it('tears down the retry listener if send fails after subscribing', async () => {
+    const retryUnsubscribe = vi.fn();
+    const retrySession = {
+      on: vi.fn(() => retryUnsubscribe),
+      send: vi.fn(async () => { throw new Error('Session not found'); }),
+    };
+
+    const result = await retryWithFreshClient({
+      sessionId: 's1',
+      messageOptions: { prompt: 'hello' },
+      handleEvent: vi.fn(),
+      dropStaleSession: vi.fn(),
+      ensureClientHealthy: vi.fn(async () => {}),
+      resume: vi.fn(async () => {}),
+      getSession: vi.fn(() => retrySession),
+      resetWatchdog: vi.fn(),
+      unsubscribe: vi.fn(),
+    });
+
+    expect(result).toBeNull();
+    // The leaked-listener regression: the new subscription must be removed.
+    expect(retryUnsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call a listener teardown when resume fails before subscribing', async () => {
+    const retryUnsubscribe = vi.fn();
+    const result = await retryWithFreshClient({
+      sessionId: 's1',
+      messageOptions: { prompt: 'hello' },
+      handleEvent: vi.fn(),
+      dropStaleSession: vi.fn(),
+      ensureClientHealthy: vi.fn(async () => {}),
+      resume: vi.fn(async () => { throw new Error('resume failed'); }),
+      getSession: vi.fn(() => ({ on: vi.fn(() => retryUnsubscribe), send: vi.fn() })),
+      resetWatchdog: vi.fn(),
+      unsubscribe: vi.fn(),
+    });
+
+    expect(result).toBeNull();
+    expect(retryUnsubscribe).not.toHaveBeenCalled();
+  });
 });

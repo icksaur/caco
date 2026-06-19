@@ -734,6 +734,29 @@ export class ChatRegion {
       eventType = `caco.${data.source}`;
     }
 
+    // Global keyed dedup: a keyed event (tool.*, assistant.message,
+    // reasoning, turn_start, embed) maps to exactly ONE element across the
+    // whole region, regardless of how many times it is delivered or what
+    // order it arrives in. The outer-box reuse below is positional ("reuse
+    // last child if class matches"), so a keyed event whose matching element
+    // is NOT the current last box — e.g. a tool result arriving after an
+    // assistant-message chunk, or a history replay interleaving with a live
+    // stream — would otherwise spawn a second outer box and the per-box key
+    // lookup would fail, producing a visible duplicate. Reusing the existing
+    // keyed element keeps it in its original box and renders the update there.
+    const keyProp = EVENT_KEY_PROPERTY[eventType];
+    if (keyProp) {
+      const keyValue = data[keyProp];
+      if (typeof keyValue === 'string' && keyValue) {
+        const existing = this.root.query(`[data-key="${keyValue}"]`) as HTMLElement | null;
+        if (existing) {
+          this.insertContent({ type: eventType, data }, existing);
+          if (eventType === 'assistant.reasoning') existing.classList.add('collapsed');
+          return;
+        }
+      }
+    }
+
     // Get outer div (agentId keeps sub-agent boxes separate + markable)
     const outer = this.outerInserter.getElement(eventType, this.root.el, undefined, agentId);
     if (!outer) return;

@@ -68,7 +68,18 @@ function createMockElement(className: string = ''): HTMLElement & { _children: H
       const keyMatch = selector.match(/\[data-key="([^"]+)"\]/);
       if (keyMatch) {
         const keyValue = keyMatch[1];
-        return children.find(c => (c as unknown as { dataset: Record<string, string> }).dataset?.key === keyValue) || null;
+        const findDeep = (nodes: HTMLElement[]): HTMLElement | null => {
+          for (const c of nodes) {
+            if ((c as unknown as { dataset: Record<string, string> }).dataset?.key === keyValue) return c;
+            const nested = (c as unknown as { _children?: HTMLElement[] })._children;
+            if (nested && nested.length) {
+              const hit = findDeep(nested);
+              if (hit) return hit;
+            }
+          }
+          return null;
+        };
+        return findDeep(children);
       }
       const tagClassMatch = selector.match(/^([a-z]+)\.([a-zA-Z0-9_-]+)$/);
       if (tagClassMatch) {
@@ -1130,7 +1141,80 @@ describe('edit lifecycle', () => {
   });
 });
 
-// ── Background-agent discriminator (event.agentId) ──────────────
+// ── Keyed-event idempotency (duplicate event-stream regression) ─
+
+describe('keyed event idempotency', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal('document', {
+      createElement: (tag: string) => {
+        const el = createMockElement();
+        (el as unknown as { tagName: string }).tagName = tag.toUpperCase();
+        return el;
+      },
+    });
+  });
+
+  async function buildRegion() {
+    const { scopedRoot, ChatRegion } = await import('../../public/ts/dom-regions.js');
+    const root = createMockElement();
+    const region = new ChatRegion(scopedRoot(root));
+    return { root, region };
+  }
+
+  function countByKey(root: ReturnType<typeof createMockElement>, key: string): number {
+    let count = 0;
+    const walk = (nodes: HTMLElement[]) => {
+      for (const c of nodes) {
+        if ((c as unknown as { dataset: { key?: string } }).dataset?.key === key) count++;
+        const nested = (c as unknown as { _children?: HTMLElement[] })._children;
+        if (nested) walk(nested);
+      }
+    };
+    walk(root._children);
+    return count;
+  }
+
+  // The original bug: tool result arrives AFTER an assistant message chunk.
+  // Positional outer-box reuse sees a non-matching last box, spawns a second
+  // activity box, and the per-box key lookup fails → duplicate tool output.
+  it('tool result after an assistant message reuses the original tool element', async () => {
+    const { root, region } = await buildRegion();
+    region.renderEvent({ type: 'tool.execution_start', data: { toolName: 'bash', toolCallId: 'T1', arguments: { command: 'ls' } } });
+    region.renderEvent({ type: 'assistant.message', data: { messageId: 'M1', content: 'working on it' } });
+    region.renderEvent({ type: 'tool.execution_complete', data: { toolName: 'bash', toolCallId: 'T1', success: true, result: { content: 'done' } } });
+
+    expect(countByKey(root, 'T1')).toBe(1);
+  });
+
+  // Replay/live overlap: the same assistant.message is delivered twice with an
+  // intervening box. Without global dedup this would render two copies.
+  it('duplicate assistant.message delivery renders a single element', async () => {
+    const { root, region } = await buildRegion();
+    region.renderEvent({ type: 'assistant.message', data: { messageId: 'M1', content: 'answer' } });
+    region.renderEvent({ type: 'tool.execution_start', data: { toolName: 'bash', toolCallId: 'T1', arguments: { command: 'ls' } } });
+    region.renderEvent({ type: 'assistant.message', data: { messageId: 'M1', content: 'answer' } });
+
+    expect(countByKey(root, 'M1')).toBe(1);
+  });
+
+  // A fully interleaved replay (clear is not modelled; we just re-deliver the
+  // whole keyed sequence) must not multiply any keyed element.
+  it('re-delivering an interleaved keyed sequence is idempotent', async () => {
+    const { root, region } = await buildRegion();
+    const seq: Array<{ type: string; data: Record<string, unknown> }> = [
+      { type: 'tool.execution_start', data: { toolName: 'bash', toolCallId: 'T1', arguments: { command: 'ls' } } },
+      { type: 'assistant.message', data: { messageId: 'M1', content: 'a' } },
+      { type: 'tool.execution_complete', data: { toolName: 'bash', toolCallId: 'T1', success: true, result: { content: 'done' } } },
+      { type: 'assistant.message', data: { messageId: 'M1', content: 'a' } },
+    ];
+    for (const e of seq) region.renderEvent(e as never);
+    for (const e of seq) region.renderEvent(e as never);
+
+    expect(countByKey(root, 'T1')).toBe(1);
+    expect(countByKey(root, 'M1')).toBe(1);
+  });
+});
 
 describe('sub-agent discriminator via event.agentId', () => {
   beforeEach(() => {

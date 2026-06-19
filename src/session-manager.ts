@@ -12,6 +12,8 @@ import { dispatchState } from './dispatch-state.js';
 import { pollQuota } from './quota-poller.js';
 import type { QuotaSnapshot } from './usage-state.js';
 import { loadMcpServers } from './mcp-config-loader.js';
+import { createObservationHook } from './observe/hook.js';
+import { OBS_RAW_CEILING_BYTES } from './observe/types.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
 import { clearSession as clearThroughputSession } from './session-throughput.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
@@ -277,6 +279,7 @@ export class SessionManager {
     if (this.clientStarting) return this.clientStarting;
     
     this.clientStarting = (async () => {
+      process.env.COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = String(OBS_RAW_CEILING_BYTES);
       const clientOptions: Record<string, unknown> = { workingDirectory: process.cwd() };
       // Only attach onListModels when BYOK providers are configured. With no
       // config the handler is never installed, so the SDK uses its native
@@ -554,6 +557,7 @@ export class SessionManager {
         mcpServers: await loadMcpServers(),
         workingDirectory: cwd,
         largeOutput: sdkLargeOutputConfig(),
+        hooks: { onPostToolUse: createObservationHook(cwd) },
         ...(resolved.provider && { provider: resolved.provider }),
         // No infiniteSessions here: a brand-new session has no persisted budget
         // yet. Budgets are applied on resume (incl. the recreate triggered by
@@ -684,6 +688,7 @@ export class SessionManager {
       mcpServers: await loadMcpServers(),
       workingDirectory: cwd,
       largeOutput: sdkLargeOutputConfig(),
+      hooks: { onPostToolUse: createObservationHook(cwd) },
       ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
       ...(applyModel && { model: resolved.sdkModel }),
       ...(resolved?.provider && { provider: resolved.provider }),

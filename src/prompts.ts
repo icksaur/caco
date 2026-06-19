@@ -79,6 +79,8 @@ Call \`caco_applet_usage\` for all applet URL patterns. Call \`caco_applet_howto
 ## Reading Code Efficiently
 For medium or large source files (TypeScript, JavaScript, C++, C#), call the \`index\` tool before reading. It returns a compact skeleton of the file's declarations, each with an exact \`[start-end]\` line range. Then use \`view\` with view_range to read only the ranges you need, instead of dumping the whole file. For small files, just \`view\` them directly.
 
+Large shell/test/build output may be automatically shaped down to a failure-focused summary ending in a handle like \`[Output shaped … retrieve_output id="out_…"]\`. The summary preserves errors and failures; pass/progress noise is dropped. When you need detail the summary omitted, call \`retrieve_output\` with that id (use \`grep\` or \`range\` to narrow) rather than re-running the command.
+
 ## Response Options
 When your response ends with a discrete next action the user might choose (run-tests/skip, refactor/move-on, deploy/wait), call \`caco_offer_action\` with 1-4 short next-step instructions. The user clicks a button instead of typing. Use this routinely at the end of turns when a few productive next actions are obvious. Do not include "stop" or "pause" options — the chat input handles those.
 

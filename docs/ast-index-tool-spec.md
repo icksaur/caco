@@ -226,16 +226,16 @@ Recommendation: implement the Caco layer plus tree-sitter adapters first. Treat 
 
 - [x] Parser spike: load `tree-sitter-cpp.wasm` and `tree-sitter-c_sharp.wasm` via `web-tree-sitter@0.26`, extract declarations with line ranges. **Done — verified working, ranges correct.**
 - [x] Decide V1 language set: **uniform tree-sitter for TS/JS/C++/C#** (shared plumbing, grammars proven). Roslyn/TS-compiler-API deferred to V2 behind adapter seams.
-- [ ] Add the pinned deps (`web-tree-sitter`, `tree-sitter-{cpp,c-sharp,typescript,javascript}`) and a wasm path resolver that works from the installed `node_modules` layout.
-- [ ] Add singleton tree-sitter runtime initialization (`Parser.init()` once, single-flight) and per-language wasm `Language` cache, with try/catch fault isolation per grammar.
-- [ ] Add `LanguageAdapter`, `IndexResult`, and formatter; golden-fixture tests per language.
-- [ ] Add line-range invariant tests (parser row +1 == 1-based inclusive `view_range`).
-- [ ] Add the `index` SDK tool and wire it into the default tool factory.
-- [ ] Add prompt/tool-description guidance to prefer `index` before broad source reads.
-- [ ] Add C# fixture coverage for common dotnet constructs and preprocessor blocks.
-- [ ] Add unsupported-language, outside-cwd, missing-file, parse-size-cap, output-budget, and truncation tests.
+- [x] Add the pinned deps (`web-tree-sitter`, `tree-sitter-{cpp,c-sharp,typescript,javascript}`) and a wasm path resolver that works from the installed `node_modules` layout.
+- [x] Add singleton tree-sitter runtime initialization (`Parser.init()` once, single-flight) and per-language wasm `Language` cache, with try/catch fault isolation per grammar.
+- [x] Add `LanguageAdapter`, `IndexResult`, and formatter; golden-fixture tests per language.
+- [x] Add line-range invariant tests (parser row +1 == 1-based inclusive `view_range`).
+- [x] Add the `index` SDK tool and wire it into the default tool factory.
+- [x] Add prompt/tool-description guidance to prefer `index` before broad source reads.
+- [x] Add C# fixture coverage for common dotnet constructs and preprocessor blocks.
+- [x] Add unsupported-language, outside-cwd, missing-file, parse-size-cap, output-budget, and truncation tests.
 - [ ] Verify bounded range reads in the Caco runtime so `index` can actually reduce follow-up read tokens.
-- [ ] Run typecheck, lint, focused tests, and full unit tests.
+- [x] Run typecheck, lint, focused tests, and full unit tests.
 - [ ] Dogfood: TS/JS on Caco itself + C++ locally (home, now); validate C# on office dotnet repos (next week).
 - [ ] Reassess V2 (Roslyn for C#, TS compiler API for TS/JS) only after dogfooding shows costly syntactic misses.
 - [ ] Reassess a repo-level index (separate spec) only if traces show repeated cross-file hunting that per-file index + grep cannot cheaply serve.

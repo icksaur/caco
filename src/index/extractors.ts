@@ -122,6 +122,14 @@ export function extractSections(
 
   const testCalls = config.testCalls;
 
+  const endLineFor = (node: Node): number => {
+    const end = node.endPosition;
+    if (end.column === 0 && end.row > node.startPosition.row) {
+      return end.row;
+    }
+    return end.row + 1;
+  };
+
   const walk = (node: Node, container: IndexItem | null): void => {
     if (truncated) return;
 
@@ -133,7 +141,7 @@ export function extractSections(
         label: labelFor(node, cap),
         kind: cap.kind,
         startLine: node.startPosition.row + 1,
-        endLine: node.endPosition.row + 1,
+        endLine: endLineFor(node),
       };
       const added = pushTo(cap.section, item, container);
       if (!added) return;
@@ -148,7 +156,7 @@ export function extractSections(
           label: `${name} ${firstStr ?? ''}`.trim(),
           kind: 'test',
           startLine: node.startPosition.row + 1,
-          endLine: node.endPosition.row + 1,
+          endLine: endLineFor(node),
         };
         const added = pushTo('tests', item, container);
         if (!added) return;

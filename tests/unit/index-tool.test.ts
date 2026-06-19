@@ -119,6 +119,19 @@ describe('tree-sitter adapter — line-range oracle', () => {
     const b = formatIndex(await treeSitterAdapter.index(args));
     expect(a).toBe(b);
   });
+
+  it('gives newline-terminated nodes a single-line range (C++ #include regression)', async () => {
+    const source = '#include <vector>\n#include <string>\nint x;';
+    const result = await treeSitterAdapter.index({
+      path: 'inc.cpp', language: 'cpp', source, options: { maxEntries: 200 },
+    });
+    const includes = allItems(result).filter((i) => i.kind === 'include');
+    expect(includes).toHaveLength(2);
+    // tree-sitter-cpp's preproc_include spans its trailing newline; the range
+    // must still be the single source line, not bleed into the next include.
+    expect(includes[0]).toMatchObject({ startLine: 1, endLine: 1 });
+    expect(includes[1]).toMatchObject({ startLine: 2, endLine: 2 });
+  });
 });
 
 describe('budgets and unsupported input', () => {
@@ -157,8 +170,21 @@ describe('runtime — init and grammar cache', () => {
     expect(loadSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('isolates a failing grammar without affecting others, and does not retry', async () => {
-    const loadSpy = vi.fn((wasmPath: string) =>
+  it('retries parser init after a transient failure (no global poisoning)', async () => {
+    let attempt = 0;
+    const initSpy = vi.fn(() => {
+      attempt++;
+      return attempt === 1 ? Promise.reject(new Error('init boom')) : Promise.resolve();
+    });
+    const rt = new TreeSitterRuntime(initSpy, () => Promise.resolve({} as never));
+    // First grammar trips the transient init failure...
+    await expect(rt.getLanguage('cpp')).rejects.toThrow('init boom');
+    // ...a different grammar must still succeed (init is retried, not poisoned).
+    await expect(rt.getLanguage('c_sharp')).resolves.toBeDefined();
+    expect(initSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('isolates a failing grammar without affecting others, and does not retry', async () => {    const loadSpy = vi.fn((wasmPath: string) =>
       wasmPath.includes('tree-sitter-cpp')
         ? Promise.reject(new Error('boom'))
         : Promise.resolve({} as never),

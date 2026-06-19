@@ -38,7 +38,13 @@ export class TreeSitterRuntime {
   ) {}
 
   private init(): Promise<void> {
-    return (this.initPromise ??= this.initParser());
+    if (!this.initPromise) {
+      this.initPromise = this.initParser().catch((err) => {
+        this.initPromise = null;
+        throw err;
+      });
+    }
+    return this.initPromise;
   }
 
   getLanguage(grammar: GrammarId): Promise<Language> {

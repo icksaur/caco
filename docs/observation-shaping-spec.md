@@ -31,9 +31,14 @@ session and thread it into `createSession` *and* `resumeSession` exactly where
   `additionalContext` — it cannot replace result text (SDK-documented). Whether a
   non-zero shell exit is `'success'` or `'failure'` is the make-or-break question
   (see Spike).
-- Scope by `toolName`: shape only shell-class tools (the SDK shell/bash tool).
-  Never shape Caco's own tool results (`index`, applets, surface, etc.) or
-  already-small output.
+- Scope by `toolName`. The runtime's own shell-tool set (verified in
+  `@github/copilot` app.js) is **`bash`, `powershell`, `local_shell`** (runners),
+  plus the async output readers **`read_bash`, `read_powershell`**. A long
+  test/build started `async` returns its bulk *through the reader*, not the runner,
+  so the allowlist must include the readers. Companions `stop_*`/`list_*` and all
+  of Caco's own tools (`index`, applets, surface, …) are never shaped, nor is
+  already-small output. Detect by this name allowlist **plus** a size gate — never
+  name alone (Spike confirms current names; versions can rename).
 
 **Raw store.** Reuse the existing `src/output-store.ts` (`storeOutput(cwd, data,
 { type: 'raw' })` → opaque random id `out_…`; `getOutput(id)` → bytes). Do **not**
@@ -153,7 +158,8 @@ generic shaper is always recoverable via the handle.
 | Disabling largeOutput unbounds non-shell tools | Generic cap + handle for all successful text results, not just shell-class; acceptance test on a non-shell large result |
 | Size cap vs preserve-every-failure conflict | Cap is soft; keep up to `MAX_FAILURES` + totals + handle; never drop a failure to fit |
 | Over-aggressive shaping hides a failure | Expected-span oracle (not regex-only); conservative keep-on-doubt; always attach handle |
-| Shell tool name differs across SDK versions | Detect by name allowlist + size/heuristic gate, not name alone |
+| Shell tool name differs across SDK versions | Allowlist `bash`/`powershell`/`local_shell`/`read_bash`/`read_powershell` (verified) + size gate, not name alone; spike re-confirms |
+| Async command output bypasses shaping | Include the `read_*` reader tools in the allowlist — that is where async bulk output arrives |
 | Raw store growth | Reuse `output-store.ts` (per-session dirs + existing pruning) |
 | Shaping a tool that must stay verbatim | Allowlist shell-class tools for semantic shaping; never format-shape Caco tools |
 
@@ -198,7 +204,10 @@ generic shaper is always recoverable via the handle.
 - [ ] **Spike (blocking design):** register a logging-only `onPostToolUse` +
       `onPostToolUseFailure`; run a passing and a *failing* shell command; record
       (a) does the hook see full raw `textResultForLlm`, (b) failing-command
-      `resultType`, (c) the shell tool name(s). Write findings into this spec.
+      `resultType`, (c) confirm the shell tool names at runtime (expected
+      `bash`/`powershell`/`local_shell` + readers `read_bash`/`read_powershell`)
+      and which tool delivers an **async** command's bulk output. Write findings
+      into this spec.
       **Decision gates:**
       - Non-zero exit is `'success'` → proceed with hook-based shaping (replace text).
       - Non-zero exit is `'failure'` but `error` carries full raw text → V1 can only

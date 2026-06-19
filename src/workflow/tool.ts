@@ -13,6 +13,8 @@ const workflowLog = createLogger('WORKFLOW');
 
 const DESCRIPTION = `Run ONE TypeScript workflow that reads/aggregates across many files in-process and returns only a compact result. **This executes arbitrary code on the host, auto-approved (no per-action confirmation).** Use it ONLY for fan-out read+aggregate tasks where a single bounded result replaces many individual tool calls — never for a single read (use \`view\`/\`index\`) or to make edits.
 
+PREFER this whenever you are about to issue 3+ read/grep/glob/index calls across files to compute one answer (e.g. "which files import X", "count TODOs per dir", "find every test that calls Y"): one workflow keeps the intermediate file contents out of your context and returns just the summary.
+
 Your code is the body of an async function with two globals:
 - \`emit(value)\` — call EXACTLY ONCE with the compact JSON result. Aggregate locally and emit a small summary; do NOT console.log intermediate data.
 - \`caco\` — a read-oriented facade (see below).

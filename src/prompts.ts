@@ -5,6 +5,7 @@
 import { homedir } from 'os';
 import { listApplets } from './applet-store.js';
 import { formatMemoryForPrompt } from './memory-tool.js';
+import { WORKFLOW_ENABLED } from './config.js';
 import type { SystemMessage } from './types.js';
 
 // ============================================================================
@@ -42,6 +43,9 @@ async function buildAppletSection(): Promise<string> {
  */
 export async function buildSystemMessage(): Promise<SystemMessage> {
   const appletPrompt = await buildAppletSection();
+  const workflowNudge = WORKFLOW_ENABLED
+    ? '\nWhen you would otherwise make 3+ read/grep/glob/index calls across files to compute one answer, call `caco_run_workflow` instead — it aggregates in-process and returns only the compact result, keeping intermediate file contents out of your context.'
+    : '';
   
   return {
     mode: 'replace',
@@ -74,7 +78,7 @@ Call \`get_applet_state\` on your first turn to see what applet the user is view
 
 ## Reading Code Efficiently
 Call \`index\` before reading medium/large source files, then \`view\` only the ranges you need.
-Large shell/test/build output may be shaped to a failure-focused summary ending in \`[Output shaped … retrieve_output id="out_…"]\`. Call \`retrieve_output\` with that id (\`grep\`/\`range\` to narrow) rather than re-running.
+Large shell/test/build output may be shaped to a failure-focused summary ending in \`[Output shaped … retrieve_output id="out_…"]\`. Call \`retrieve_output\` with that id (\`grep\`/\`range\` to narrow) rather than re-running.${workflowNudge}
 
 ## Response Options
 Call \`caco_offer_action\` (1-4 short instructions) when your turn ends with discrete next actions the user might pick.

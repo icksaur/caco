@@ -22,13 +22,10 @@ function joinPath(base, rel) {
   return trimmedBase + sep + trimmedRel;
 }
 
-// Current repository path from URL
 let repoPath = '';
 
-// Current parsed status (for commit button state)
 let currentStatus = { staged: [], unstaged: [], untracked: [] };
 
-// DOM elements
 const branchName = document.getElementById('branchName');
 const errorMessage = document.getElementById('errorMessage');
 const stagedFiles = document.getElementById('stagedFiles');
@@ -41,7 +38,6 @@ const cleanMessage = document.getElementById('cleanMessage');
 const refreshBtn = document.getElementById('refreshBtn');
 const repoPathLabel = document.getElementById('repoPath');
 
-// Phase 2 & 4 elements
 const stageAllBtn = document.getElementById('stageAllBtn');
 const unstageAllBtn = document.getElementById('unstageAllBtn');
 const stageUntrackedBtn = document.getElementById('stageUntrackedBtn');
@@ -49,7 +45,6 @@ const commitMessage = document.getElementById('commitMessage');
 const commitBtn = document.getElementById('commitBtn');
 const commitSection = document.getElementById('commitSection');
 
-// Phase 5 elements
 const pushBtn = document.getElementById('pushBtn');
 const pullBtn = document.getElementById('pullBtn');
 const aheadBehind = document.getElementById('aheadBehind');
@@ -98,14 +93,11 @@ function parseStatus(stdout) {
   
   for (const line of lines) {
     if (line.startsWith('?')) {
-      // Untracked file
       const path = line.slice(2);
       untracked.push({ path, status: '?' });
     } else if (line.startsWith('!')) {
-      // Ignored - skip
       continue;
     } else if (line.startsWith('1') || line.startsWith('2')) {
-      // Changed entry: "1 XY ..." or "2 XY ..."
       const parts = line.split(' ');
       const xy = parts[1];
       const indexStatus = xy[0];
@@ -114,19 +106,16 @@ function parseStatus(stdout) {
       // Get path (last element, may have tab for renames)
       let path;
       if (line.startsWith('2')) {
-        // Rename: path is after last tab
         const tabIndex = line.lastIndexOf('\t');
         path = tabIndex > 0 ? line.slice(tabIndex + 1) : parts[parts.length - 1];
       } else {
         path = parts[parts.length - 1];
       }
       
-      // Staged changes (index status != .)
       if (indexStatus !== '.') {
         staged.push({ path, status: indexStatus });
       }
       
-      // Unstaged changes (worktree status != .)
       if (worktreeStatus !== '.') {
         unstaged.push({ path, status: worktreeStatus });
       }
@@ -141,12 +130,12 @@ function parseStatus(stdout) {
  */
 function getStatusIcon(status) {
   switch (status) {
-    case 'M': return '✎';  // Modified
-    case 'A': return '+';  // Added
-    case 'D': return '−';  // Deleted
-    case 'R': return '→';  // Renamed
-    case 'C': return '⊕';  // Copied
-    case '?': return '?';  // Untracked
+    case 'M': return '✎';
+    case 'A': return '+';
+    case 'D': return '−';
+    case 'R': return '→';
+    case 'C': return '⊕';
+    case '?': return '?';
     default: return '•';
   }
 }
@@ -227,13 +216,6 @@ function renderFileList(container, files, section) {
   }
 }
 
-// ============================================================
-// Phase 2: Staging operations
-// ============================================================
-
-/**
- * Stage a single file
- */
 async function stageFile(filePath) {
   const result = await runGit(['add', '--', filePath]);
   if (result.code !== 0) {
@@ -243,9 +225,6 @@ async function stageFile(filePath) {
   await refresh();
 }
 
-/**
- * Unstage a single file
- */
 async function unstageFile(filePath) {
   const result = await runGit(['restore', '--staged', '--', filePath]);
   if (result.code !== 0) {
@@ -255,9 +234,6 @@ async function unstageFile(filePath) {
   await refresh();
 }
 
-/**
- * Stage all modified/deleted files
- */
 async function stageAll() {
   const result = await runGit(['add', '-u']);
   if (result.code !== 0) {
@@ -267,11 +243,7 @@ async function stageAll() {
   await refresh();
 }
 
-/**
- * Stage all untracked files
- */
 async function stageUntracked() {
-  // Stage each untracked file individually
   for (const file of currentStatus.untracked) {
     const result = await runGit(['add', '--', file.path]);
     if (result.code !== 0) {
@@ -282,9 +254,6 @@ async function stageUntracked() {
   await refresh();
 }
 
-/**
- * Unstage all files
- */
 async function unstageAll() {
   const result = await runGit(['restore', '--staged', '.']);
   if (result.code !== 0) {
@@ -294,13 +263,6 @@ async function unstageAll() {
   await refresh();
 }
 
-// ============================================================
-// Phase 4: Commit operations
-// ============================================================
-
-/**
- * Commit staged changes
- */
 async function commit() {
   const message = commitMessage.value.trim();
   if (!message) {
@@ -325,40 +287,30 @@ async function commit() {
     return;
   }
   
-  // Clear message and refresh
   commitMessage.value = '';
   commitBtn.textContent = 'Commit';
   await refresh();
 }
 
-/**
- * Update commit button state based on staged files
- */
 function updateCommitButtonState() {
   const hasStagedFiles = currentStatus.staged.length > 0;
   const hasMessage = commitMessage.value.trim().length > 0;
   commitBtn.disabled = !hasStagedFiles || !hasMessage;
 }
 
-/**
- * Update visibility of section action buttons
- */
 function updateSectionButtons() {
-  // Show/hide "Stage all" for unstaged changes
   if (currentStatus.unstaged.length > 0) {
     stageAllBtn.classList.remove('hidden');
   } else {
     stageAllBtn.classList.add('hidden');
   }
   
-  // Show/hide "Unstage all" for staged changes
   if (currentStatus.staged.length > 0) {
     unstageAllBtn.classList.remove('hidden');
   } else {
     unstageAllBtn.classList.add('hidden');
   }
   
-  // Show/hide "Stage untracked" for untracked files
   if (currentStatus.untracked.length > 0) {
     stageUntrackedBtn.classList.remove('hidden');
   } else {
@@ -366,11 +318,6 @@ function updateSectionButtons() {
   }
 }
 
-// ============================================================
-// Phase 5: Push/Pull operations
-// ============================================================
-
-// Track ahead/behind counts
 let currentAhead = 0;
 let currentBehind = 0;
 
@@ -381,11 +328,9 @@ let currentBehind = 0;
 async function getAheadBehind() {
   const result = await runGit(['rev-list', '--left-right', '--count', '@{u}...HEAD']);
   if (result.code !== 0) {
-    // No upstream or other error - hide the indicator
     return { ahead: 0, behind: 0, hasUpstream: false };
   }
   
-  // Output is "behind\tahead" (tab-separated)
   const parts = result.stdout.trim().split(/\s+/);
   const behind = parseInt(parts[0], 10) || 0;
   const ahead = parseInt(parts[1], 10) || 0;
@@ -410,7 +355,6 @@ function updateAheadBehindDisplay(ahead, behind, hasUpstream) {
     return;
   }
   
-  // Build display string
   const parts = [];
   if (ahead > 0) parts.push(`↑${ahead}`);
   if (behind > 0) parts.push(`↓${behind}`);
@@ -423,16 +367,12 @@ function updateAheadBehindDisplay(ahead, behind, hasUpstream) {
     aheadBehind.classList.add('hidden');
   }
   
-  // Enable/disable buttons based on state
   pushBtn.disabled = ahead === 0;
   pullBtn.disabled = behind === 0;
   pushBtn.title = ahead > 0 ? `Push ${ahead} commit${ahead > 1 ? 's' : ''}` : 'Nothing to push';
   pullBtn.title = behind > 0 ? `Pull ${behind} commit${behind > 1 ? 's' : ''}` : 'Nothing to pull';
 }
 
-/**
- * Push to remote
- */
 async function push() {
   if (currentAhead === 0) {
     showError('Nothing to push');
@@ -455,9 +395,6 @@ async function push() {
   await refresh();
 }
 
-/**
- * Pull from remote
- */
 async function pull() {
   if (currentBehind === 0) {
     showError('Nothing to pull');

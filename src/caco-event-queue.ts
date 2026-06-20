@@ -11,7 +11,6 @@
 
 import type { CacoEmbedEvent } from './display-tools.js';
 
-// Union type for all caco events (extend as more are added)
 export type CacoEvent = CacoEmbedEvent;
 
 /**
@@ -30,47 +29,27 @@ const FLUSH_TRIGGERS = new Set([
   'session.error',            // Error ends session
 ]);
 
-/**
- * Check if an event type should trigger queue flush
- * Used by both live streaming and history replay
- */
 export function isFlushTrigger(eventType: string): boolean {
   return FLUSH_TRIGGERS.has(eventType);
 }
 
-/**
- * Caco event queue for a single session.
- * Simple FIFO queue with flush operation.
- */
 export class CacoEventQueue {
   private pending: CacoEvent[] = [];
   
-  /**
-   * Add event to pending queue
-   */
   queue(event: CacoEvent): void {
     this.pending.push(event);
   }
   
-  /**
-   * Return and clear all pending events
-   */
   flush(): CacoEvent[] {
     const events = this.pending;
     this.pending = [];
     return events;
   }
   
-  /**
-   * Check if queue has pending events
-   */
   hasPending(): boolean {
     return this.pending.length > 0;
   }
   
-  /**
-   * Get count of pending events (for logging)
-   */
   get length(): number {
     return this.pending.length;
   }
@@ -82,9 +61,6 @@ export class CacoEventQueue {
  */
 const sessionQueues = new Map<string, CacoEventQueue>();
 
-/**
- * Get or create queue for a session
- */
 export function getQueue(sessionId: string): CacoEventQueue {
   let queue = sessionQueues.get(sessionId);
   if (!queue) {
@@ -94,9 +70,6 @@ export function getQueue(sessionId: string): CacoEventQueue {
   return queue;
 }
 
-/**
- * Clean up queue for a session
- */
 export function deleteQueue(sessionId: string): void {
   sessionQueues.delete(sessionId);
 }

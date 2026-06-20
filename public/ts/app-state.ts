@@ -40,42 +40,34 @@ const state: AppState = {
   hasImage: false
 };
 
-/** Get a shallow copy of entire state (for debugging) */
 export function getState(): Readonly<AppState> {
   return { ...state };
 }
 
-/** Get active session ID */
 export function getActiveSessionId(): string | null {
   return state.activeSessionId;
 }
 
-/** Get current working directory */
 export function getCurrentCwd(): string {
   return state.currentCwd;
 }
 
-/** Get selected model */
 export function getSelectedModel(): string {
   return state.selectedModel;
 }
 
-/** Get available models */
 export function getAvailableModels(): readonly ModelInfo[] {
   return state.availableModels;
 }
 
-/** Check if loading history */
 export function isLoadingHistory(): boolean {
   return state.loadingHistory;
 }
 
-/** Check if auto-scroll is enabled */
 export function isAutoScrollEnabled(): boolean {
   return state.autoScrollEnabled;
 }
 
-/** Check if has image attachment */
 export function hasImage(): boolean {
   return state.hasImage;
 }
@@ -177,44 +169,26 @@ export function releaseActiveSessionForNewChat(): void {
   if (prev !== null) notifyActiveSessionChange(prev, null);
 }
 
-/**
- * Set selected model
- */
 export function setSelectedModel(modelId: string): void {
   state.selectedModel = modelId;
 }
 
-/**
- * Set available models
- */
 export function setAvailableModels(models: ModelInfo[]): void {
   state.availableModels = [...models]; // Defensive copy
 }
 
-/**
- * Set loading history state
- */
 export function setLoadingHistory(loading: boolean): void {
   state.loadingHistory = loading;
 }
 
-/**
- * Enable auto-scroll (called when sending a message)
- */
 export function enableAutoScroll(): void {
   state.autoScrollEnabled = true;
 }
 
-/**
- * Disable auto-scroll (called when user scrolls up)
- */
 export function disableAutoScroll(): void {
   state.autoScrollEnabled = false;
 }
 
-/**
- * Set image attachment state
- */
 export function setHasImage(hasImage: boolean): void {
   state.hasImage = hasImage;
 }
@@ -253,17 +227,11 @@ export function initFromSession(data: {
   setActiveSession(sessionId, cwd);
 }
 
-/**
- * Get the cwd from the new chat form
- */
 export function getNewChatCwd(): string {
   const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
   return cwdInput?.value.trim() || '';
 }
 
-/**
- * Set the CWD in the new chat form
- */
 export function setNewChatCwd(cwd: string): void {
   const cwdInput = document.getElementById('newChatCwd') as HTMLInputElement;
   if (cwdInput) {
@@ -272,9 +240,6 @@ export function setNewChatCwd(cwd: string): void {
   }
 }
 
-// Debug
-
-/** Log current state to console */
 export function debugState(): void {
   debug('APP-STATE', getState());
 }

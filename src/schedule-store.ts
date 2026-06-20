@@ -41,16 +41,10 @@ export interface LastRunState {
   nextRun: string;              // ISO timestamp
 }
 
-/**
- * Get schedule directory path
- */
 function getScheduleDir(): string {
   return SCHEDULE_DIR;
 }
 
-/**
- * Get paths for a specific schedule
- */
 function getSchedulePaths(slug: string): { root: string; definition: string; lastRun: string } {
   const root = join(getScheduleDir(), slug);
   return {
@@ -60,9 +54,6 @@ function getSchedulePaths(slug: string): { root: string; definition: string; las
   };
 }
 
-/**
- * List all schedule slugs
- */
 export async function listSchedules(): Promise<string[]> {
   try {
     if (!existsSync(getScheduleDir())) {
@@ -78,9 +69,6 @@ export async function listSchedules(): Promise<string[]> {
   }
 }
 
-/**
- * Load schedule definition
- */
 export async function loadDefinition(slug: string): Promise<ScheduleDefinition | null> {
   const paths = getSchedulePaths(slug);
   
@@ -92,22 +80,14 @@ export async function loadDefinition(slug: string): Promise<ScheduleDefinition |
   }
 }
 
-/**
- * Save schedule definition
- */
 export async function saveDefinition(definition: ScheduleDefinition): Promise<void> {
   const paths = getSchedulePaths(definition.slug);
   
-  // Ensure directory exists
   await mkdir(paths.root, { recursive: true });
   
-  // Write definition
   await writeFile(paths.definition, JSON.stringify(definition, null, 2), 'utf-8');
 }
 
-/**
- * Load last run state
- */
 export async function loadLastRun(slug: string): Promise<LastRunState | null> {
   const paths = getSchedulePaths(slug);
   
@@ -119,16 +99,11 @@ export async function loadLastRun(slug: string): Promise<LastRunState | null> {
   }
 }
 
-/**
- * Save last run state
- */
 export async function saveLastRun(slug: string, state: LastRunState): Promise<void> {
   const paths = getSchedulePaths(slug);
   
-  // Ensure directory exists
   await mkdir(paths.root, { recursive: true });
   
-  // Write state
   await writeFile(paths.lastRun, JSON.stringify(state, null, 2), 'utf-8');
 }
 

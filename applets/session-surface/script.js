@@ -28,11 +28,8 @@ function sessionId() {
   return window.appletAPI && window.appletAPI.getSessionId ? window.appletAPI.getSessionId() : null;
 }
 
-// --- Human-side mutation (exposed to customScript as mutateChange) ---
-
 function mutateChange(itemId, fullItem) {
   if (!doc) return Promise.reject(new Error('No surface document'));
-  // Optimistic local update
   doc.changes = Object.assign({}, doc.changes || {});
   doc.changes[itemId] = fullItem;
   callRender();
@@ -73,8 +70,6 @@ async function putItem(itemId, item) {
   }
 }
 
-// --- Rendering ---
-
 var agentRender = null;
 
 function callRender() {
@@ -82,7 +77,6 @@ function callRender() {
   if (agentRender) {
     try {
       var result = agentRender(Object.assign({}, doc, { changes: Object.assign({}, doc.changes) }));
-      // If render() returns a string, treat it as HTML
       if (typeof result === 'string') itemsRoot.innerHTML = result;
     } catch (e) {
       itemsRoot.innerHTML = '<div class="surface-error">Render error: ' + esc(e.message) + '</div>';
@@ -94,7 +88,6 @@ function callRender() {
 }
 
 function renderFallback() {
-  // Minimal: show item labels as text
   if (!doc || !doc.items || doc.items.length === 0) { renderEmpty(); return; }
   itemsRoot.innerHTML = '';
   doc.items.forEach(function (item) {
@@ -137,8 +130,6 @@ function updateFooter() {
   }
 }
 
-// --- customScript evaluation ---
-
 function evalCustomScript(script) {
   if (customCleanup) { try { customCleanup(); } catch (e) { /* ignore */ } customCleanup = null; }
   agentRender = null;
@@ -168,8 +159,6 @@ function injectCustomStyle(css) {
   customStyleEl.textContent = css;
   document.head.appendChild(customStyleEl);
 }
-
-// --- Data loading ---
 
 var fetchEpoch = 0;
 var lastAckAt = 0;
@@ -207,8 +196,6 @@ async function fetchSurface() {
   }
 }
 
-// --- Event wiring ---
-
 function onStateBus() {
   if (!window.appletAPI) return;
   if (window.appletAPI.onSessionChange) {
@@ -217,7 +204,6 @@ function onStateBus() {
   if (window.appletAPI.onSessionEvent) {
     window.appletAPI.onSessionEvent(function (event) {
       if (event && event.type === 'caco.surface.updated') {
-        // Only refresh if the event is for the currently viewed session
         var sid = sessionId();
         if (sid && event.data && event.data.sessionId && event.data.sessionId !== sid) return;
         fetchSurface();
@@ -226,7 +212,6 @@ function onStateBus() {
   }
 }
 
-// Boot: defer to next tick so appletAPI is wired.
 setTimeout(function () {
   onStateBus();
   fetchSurface();

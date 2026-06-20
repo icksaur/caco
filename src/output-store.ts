@@ -18,10 +18,6 @@ import { join } from 'path';
 import { STORAGE_ROOT, getSessionOutputDir, ensureDir } from './storage-paths.js';
 import { OUTPUT_CACHE_TTL_MS } from './config.js';
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface OutputMetadata {
   type: 'file' | 'terminal' | 'image' | 'embed' | 'raw';
   createdAt: string;
@@ -54,10 +50,6 @@ export interface StoredActivity {
   metadata: ActivityMetadata;
 }
 
-// ============================================================================
-// cwd → sessionId registry
-// ============================================================================
-
 const cwdToSessionId = new Map<string, string>();
 
 export function registerSession(cwd: string, sessionId: string): void {
@@ -71,10 +63,6 @@ export function unregisterSession(cwd: string): void {
 export function getSessionIdForCwd(cwd: string): string | undefined {
   return cwdToSessionId.get(cwd);
 }
-
-// ============================================================================
-// In-memory output cache (fallback + LRU layer in front of disk)
-// ============================================================================
 
 interface CacheEntry {
   data: string | Buffer;
@@ -94,10 +82,6 @@ function storeInMemory(data: string | Buffer, metadata: OutputMetadata): string 
   setTimeout(() => outputCache.delete(outputId), OUTPUT_CACHE_TTL_MS);
   return outputId;
 }
-
-// ============================================================================
-// Outputs
-// ============================================================================
 
 /**
  * Store output to disk.
@@ -254,10 +238,6 @@ export function pruneOutputs(maxAgeDays: number = 30): number {
   return deleted;
 }
 
-// ============================================================================
-// Activities
-// ============================================================================
-
 function getActivityDir(sessionId: string): string {
   return join(STORAGE_ROOT, 'sessions', sessionId, 'activity');
 }
@@ -316,10 +296,6 @@ export function listActivities(sessionId: string): StoredActivity[] {
     a.metadata.createdAt.localeCompare(b.metadata.createdAt)
   );
 }
-
-// ============================================================================
-// Language detection (used when storing file-type outputs)
-// ============================================================================
 
 const LANG_MAP: Record<string, string> = {
   js: 'javascript', mjs: 'javascript', cjs: 'javascript',

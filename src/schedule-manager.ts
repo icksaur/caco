@@ -1,12 +1,3 @@
-/**
- * Schedule Manager
- * 
- * Manages scheduled task execution.
- * - Loads schedules on startup
- * - Checks every 30 minutes for due tasks
- * - Executes tasks serially (no parallel runs)
- */
-
 import { CronExpressionParser } from 'cron-parser';
 import {
   listSchedules, 
@@ -21,18 +12,13 @@ import { SERVER_URL, SCHEDULE_CHECK_INTERVAL_MS, SCHEDULE_BUSY_DELAY_MS } from '
 let checkTimer: NodeJS.Timeout | null = null;
 let isExecuting = false;
 
-/**
- * Start the schedule manager
- */
 export function startScheduleManager(): void {
   console.log('[SCHEDULER] Starting schedule manager');
   
-  // Run initial check for overdue tasks
   checkSchedules().catch(err => {
     console.error('[SCHEDULER] Error in initial check:', err);
   });
   
-  // Set up periodic check
   checkTimer = setInterval(() => {
     checkSchedules().catch(err => {
       console.error('[SCHEDULER] Error in periodic check:', err);
@@ -40,9 +26,6 @@ export function startScheduleManager(): void {
   }, SCHEDULE_CHECK_INTERVAL_MS);
 }
 
-/**
- * Stop the schedule manager
- */
 export function stopScheduleManager(): void {
   if (checkTimer) {
     clearInterval(checkTimer);
@@ -51,9 +34,6 @@ export function stopScheduleManager(): void {
   console.log('[SCHEDULER] Stopped schedule manager');
 }
 
-/**
- * Check all schedules and execute due tasks
- */
 async function checkSchedules(): Promise<void> {
   if (isExecuting) {
     console.log('[SCHEDULER] Already executing, skipping check');
@@ -74,7 +54,6 @@ async function checkSchedules(): Promise<void> {
         continue;
       }
       
-      // Validate minimum interval (catches manually-added fast schedules)
       if (validateScheduleInterval(definition.schedule)) {
         console.warn(`[SCHEDULER] Skipping ${slug}: ${validateScheduleInterval(definition.schedule)}`);
         continue;
@@ -91,7 +70,6 @@ async function checkSchedules(): Promise<void> {
     if (dueTasks.length > 0) {
       console.log(`[SCHEDULER] Found ${dueTasks.length} due tasks: ${dueTasks.join(', ')}`);
       
-      // Execute serially
       for (const slug of dueTasks) {
         await executeSchedule(slug);
       }
@@ -101,9 +79,6 @@ async function checkSchedules(): Promise<void> {
   }
 }
 
-/**
- * Execute a scheduled task
- */
 async function executeSchedule(slug: string): Promise<void> {
   console.log(`[SCHEDULER] Executing: ${slug}`);
   
@@ -152,7 +127,6 @@ async function executeSchedule(slug: string): Promise<void> {
         throw new Error(`HTTP ${response.status}`);
       }
       
-      // Success with existing session
       await saveLastRun(slug, {
         lastRun: new Date().toISOString(),
         lastResult: 'success',
@@ -168,7 +142,6 @@ async function executeSchedule(slug: string): Promise<void> {
     await createAndExecute(slug, definition);
     
   } catch (error) {
-    // Network/server error - retry on next interval
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[SCHEDULER] Error executing ${slug}:`, errorMessage);
     
@@ -182,11 +155,7 @@ async function executeSchedule(slug: string): Promise<void> {
   }
 }
 
-/**
- * Create new session and execute
- */
 async function createAndExecute(slug: string, definition: ScheduleDefinition): Promise<void> {
-  // Create session with slug as description
   const createResponse = await fetch(`${SERVER_URL}/api/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -205,7 +174,6 @@ async function createAndExecute(slug: string, definition: ScheduleDefinition): P
   const { sessionId } = await createResponse.json();
   console.log(`[SCHEDULER] Created session ${sessionId} for ${slug}`);
   
-  // POST message
   const messageResponse = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -220,7 +188,6 @@ async function createAndExecute(slug: string, definition: ScheduleDefinition): P
     throw new Error(`Failed to send message: HTTP ${messageResponse.status}`);
   }
   
-  // Save state
   await saveLastRun(slug, {
     lastRun: new Date().toISOString(),
     lastResult: 'success',
@@ -232,9 +199,6 @@ async function createAndExecute(slug: string, definition: ScheduleDefinition): P
   console.log(`[SCHEDULER] Executed ${slug} successfully with new session`);
 }
 
-/**
- * Calculate next run time based on schedule
- */
 export function calculateNextRun(definition: ScheduleDefinition, from?: Date): Date {
   const now = from || new Date();
   
@@ -257,9 +221,6 @@ export function calculateNextRun(definition: ScheduleDefinition, from?: Date): D
   return new Date(now.getTime() + 60 * 60 * 1000);
 }
 
-/**
- * Manually trigger a schedule
- */
 export async function triggerSchedule(slug: string): Promise<{ success: boolean; error?: string }> {
   try {
     await executeSchedule(slug);

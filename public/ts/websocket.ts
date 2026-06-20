@@ -18,12 +18,8 @@ import { getActiveSessionId } from './app-state.js';
 import { markSessionObserved } from './session-observed.js';
 import type { SessionEvent } from './types.js';
 
-/**
- * Message source identifies who sent a message.
- */
 export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler';
 
-// Re-export SessionEvent for consumers that import from websocket.ts
 export type { SessionEvent };
 
 let socket: WebSocket | null = null;
@@ -64,7 +60,6 @@ let requestId = 0;
 export function connectWs(): void {
   debug('WS', `connectWs called, socket state: ${socket?.readyState ?? 'null'}`);
   
-  // Already connected or connecting
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
     debug('WS', 'Already connected/connecting');
     return;
@@ -134,13 +129,11 @@ let handlePong: () => void = () => {};
  *   All callbacks capture this and bail if it's stale.
  */
 function doConnect(myConnectionId: number): void {
-  // Bail if a newer connection has been started
   if (myConnectionId !== connectionId) {
     debug('WS', `doConnect bailing, stale connection ID ${myConnectionId} vs current ${connectionId}`);
     return;
   }
   
-  // Guard for Node.js test environment
   if (typeof window === 'undefined') {
     return;
   }
@@ -274,7 +267,6 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
   const msgSessionId = msg.sessionId;
   const currentSessionId = getActiveSessionId();
   if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
-    // Message for a different session - ignore
     return;
   }
   
@@ -293,7 +285,6 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       break;
     
     case 'event': {
-      // SDK event - pass through to handlers
       const msgWithEvent = msg as unknown as { event?: SessionEvent };
       if (msgWithEvent.event) {
         for (const cb of eventCallbacks) {
@@ -313,9 +304,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       if (sessionId) {
         void markSessionObserved(sessionId);
       }
-      // Pass isBusy data from server to subscribers
       const historyData = msg.data as { isBusy?: boolean } | undefined;
-      // Notify subscribers
       for (const cb of historyCompleteCallbacks) {
         try {
           cb(historyData);
@@ -342,7 +331,6 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
     }
       
     default:
-      // Unknown message type - ignore
   }
 }
 
@@ -370,7 +358,6 @@ function request<T = unknown>(type: string, data?: object): Promise<T> {
     
     send({ type, id, data });
     
-    // Timeout after 30s
     setTimeout(() => {
       if (pendingRequests.has(id)) {
         pendingRequests.delete(id);

@@ -244,7 +244,6 @@ declare global {
  * Call this once at app startup
  */
 export function initAppletRuntime(): void {
-  // Create unified appletAPI object
   const api: AppletAPI = {
     expose,
     setAppletState,
@@ -274,7 +273,6 @@ export function initAppletRuntime(): void {
   
   window.appletAPI = api;
   
-  // Legacy globals (for backward compatibility with existing applets)
   window.expose = expose;
   window.setAppletState = setAppletState;
 
@@ -370,26 +368,21 @@ export function navigateAppletUrlParam(key: string, value: string): void {
  * });
  */
 export function onUrlParamsChange(callback: (params: Record<string, string>) => void): void {
-  // Remove any previous handler from current applet
   if (currentApplet?.popstateHandler) {
     window.removeEventListener('popstate', currentApplet.popstateHandler);
     currentApplet.popstateHandler = null;
   }
   
-  // Call immediately with current params
   callback(getAppletUrlParams());
 
-  // Create new handler
   const handler = () => {
     callback(getAppletUrlParams());
   };
   
-  // Store on current applet instance if one exists
   if (currentApplet) {
     currentApplet.popstateHandler = handler;
   }
   
-  // Listen for future changes (popstate from browser or router)
   window.addEventListener('popstate', handler);
 }
 
@@ -399,10 +392,8 @@ export function onUrlParamsChange(callback: (params: Record<string, string>) => 
  * Applet JS calls this to make state queryable by agent's get_applet_state tool
  */
 function setAppletState(state: Record<string, unknown>): void {
-  // Merge with existing pending state (newer values overwrite)
   pendingAppletState = { ...pendingAppletState, ...state };
   
-  // If WebSocket connected, push immediately
   if (isWsConnected()) {
     wsSetState(state);
     debug('APPLET', 'State pushed via WebSocket:', Object.keys(state));
@@ -865,7 +856,6 @@ function renderAppletToInstance(
 ): HTMLStyleElement | null {
   let styleElement: HTMLStyleElement | null = null;
   
-  // Inject CSS first (so HTML renders with styles), scoped to this applet instance
   if (content.css) {
     styleElement = document.createElement('style');
     styleElement.textContent = scopeAppletCSS(content.css, slug);
@@ -874,22 +864,18 @@ function renderAppletToInstance(
     document.head.appendChild(styleElement);
   }
   
-  // Add label in the clearance zone (above applet content)
   const labelEl = document.createElement('div');
   labelEl.className = 'applet-label';
   labelEl.textContent = label;
   container.appendChild(labelEl);
 
-  // Inject HTML
   container.insertAdjacentHTML('beforeend', content.html);
 
-  // Execute JavaScript after HTML is in DOM
   if (content.js) {
     try {
       const scriptElement = document.createElement('script');
       scriptElement.setAttribute('data-applet', 'true');
       scriptElement.setAttribute('data-applet-slug', slug);
-      // Provide appletContainer scoped to this instance
       scriptElement.textContent = `
 (function() {
   var appletContainer = document.querySelector('.applet-instance[data-slug="${slug}"]');
@@ -918,26 +904,22 @@ function renderAppletToInstance(
  * @param content - The applet HTML/CSS/JS content
  */
 export function pushApplet(slug: string, label: string, content: AppletContent): void {
-  // Use regions.applet — scoped, cannot collide with chat content duplicates
   const appletView = regions.applet.el;
   
   debug('APPLET', `Loading: ${label} (${slug})`);
   
-  // If same applet already loaded, just show it
   if (currentApplet?.slug === slug) {
     debug('APPLET', `Already loaded: ${slug}`);
     showInstance(currentApplet);
     return;
   }
   
-  // Destroy current applet if any
   if (currentApplet) {
     debug('APPLET', `Destroying previous: ${currentApplet.slug}`);
     destroyInstance(currentApplet);
     currentApplet = null;
   }
   
-  // Create new instance container
   const instanceDiv = document.createElement('div');
   instanceDiv.className = 'applet-instance';
   instanceDiv.dataset.slug = slug;
@@ -953,12 +935,8 @@ export function pushApplet(slug: string, label: string, content: AppletContent):
     cleanupFns: []
   };
   
-  // Render content into instance (runs applet JS which may call onUrlParamsChange)
   currentApplet.styleElement = renderAppletToInstance(instanceDiv, content, slug, label);
 
-  // Panel visibility is the router's job. pushApplet only loads content.
-
-  // WebSocket is already connected on page load - no need to connect here
 }
 
 /**

@@ -28,9 +28,6 @@ export const DEFAULT_RULES: CorrelationRules = {
   }
 };
 
-/**
- * Metrics for a single correlation flow
- */
 export class CorrelationMetrics {
   private chain: string[] = [];
   private startTime: number;
@@ -44,7 +41,6 @@ export class CorrelationMetrics {
     this.startTime = Date.now();
     this.rateAggregator = new RateAggregator(rules.rateLimit);
     
-    // Convert our rules to RunawayLimits format
     this.rulesEngine = new RunawayRulesEngine({
       maxDepth: rules.maxDepth,
       maxDuration: rules.maxAgeSeconds,
@@ -53,16 +49,9 @@ export class CorrelationMetrics {
     });
   }
   
-  /**
-   * Check if a new call is allowed
-   * 
-   * @param toSessionId - Session being called
-   * @returns { allowed: true } or { allowed: false, reason: string }
-   */
   isAllowed(toSessionId: string): { allowed: true } | { allowed: false; reason: string } {
     const now = Date.now();
     
-    // Check rate limit first (fast path)
     if (!this.rateAggregator.isAllowed(now)) {
       return {
         allowed: false,
@@ -70,7 +59,6 @@ export class CorrelationMetrics {
       };
     }
     
-    // Check rules engine (depth, age)
     const allTimestamps = [...this.chain.map(() => now)]; // Simplified for engine
     const result = this.rulesEngine.checkCall(
       {
@@ -85,20 +73,12 @@ export class CorrelationMetrics {
     return result;
   }
   
-  /**
-   * Record a successful call
-   * 
-   * @param toSessionId - Session that was called
-   */
   recordCall(toSessionId: string): void {
     const now = Date.now();
     this.chain.push(toSessionId);
     this.rateAggregator.recordCall(now);
   }
   
-  /**
-   * Get current metrics
-   */
   getMetrics() {
     const now = Date.now();
     return {
@@ -110,9 +90,6 @@ export class CorrelationMetrics {
     };
   }
   
-  /**
-   * Check if flow has expired
-   */
   isExpired(): boolean {
     const ageSeconds = (Date.now() - this.startTime) / 1000;
     return ageSeconds > this.rules.maxAgeSeconds;

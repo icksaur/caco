@@ -7,10 +7,6 @@
 
 import { debug } from './debug.js';
 
-/**
- * Mark a session as observed (user has seen the completed response)
- * Calls server endpoint which updates meta and broadcasts to other clients
- */
 export async function markSessionObserved(sessionId: string): Promise<void> {
   try {
     debug('OBSERVED', `Marking session as observed: ${sessionId.slice(0, 8)}`);

@@ -194,9 +194,6 @@ function handlePopState(): void {
   void handleNavigation(url, 'traverse');
 }
 
-/**
- * Toggle sessions overlay
- */
 export function toggleSessions(): void {
   const store = getPanelState();
   if (store.get().session) {
@@ -206,10 +203,6 @@ export function toggleSessions(): void {
   }
 }
 
-/**
- * Handle session item click
- * Switches to session, loads history, updates URL
- */
 export async function sessionClick(sessionId: string): Promise<void> {
   await chatView.activateSession(sessionId);
   // Write a clean URL containing only session=NEW. We deliberately use
@@ -229,18 +222,11 @@ export async function sessionClick(sessionId: string): Promise<void> {
   }
 }
 
-/**
- * Handle new session click from session list
- */
 export function newSessionClick(): void {
   chatView.showNewChat();
   updateUrl({ session: null });
 }
 
-/**
- * Handle model selector send (first message creates session)
- * Called after POST /api/chat returns with sessionId
- */
 export function onSessionCreated(sessionId: string): void {
   updateUrl({ session: sessionId });
 }
@@ -304,13 +290,6 @@ function updateUrl(params: { session?: string | null; applet?: string | null }, 
   }
 }
 
-/**
- * Update the footer status bar with model name and cwd.
- * Looks up friendly model name from available models.
- */
-/**
- * Get current URL params
- */
 export function getUrlParams(): { session: string | null; applet: string | null } {
   const url = new URL(window.location.href);
   return {
@@ -318,4 +297,3 @@ export function getUrlParams(): { session: string | null; applet: string | null 
     applet: url.searchParams.get('applet')
   };
 }
-

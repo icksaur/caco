@@ -1,16 +1,6 @@
-/**
- * Terminal Events
- * 
- * Events that signal the end of a streaming session.
- * Used to re-enable the form after streaming completes.
- */
-
-/**
- * Set of event types that signal streaming is complete
- */
 const TERMINAL_EVENTS = new Set([
-  'session.idle',   // Normal completion
-  'session.error',  // Error during processing
+  'session.idle',
+  'session.error',
 ]);
 
 /**

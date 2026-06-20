@@ -1,14 +1,11 @@
-// Load jobs on startup
 console.log('[Jobs Applet] Script loaded');
 
-// DOMContentLoaded may have already fired, so try both approaches
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     console.log('[Jobs Applet] DOMContentLoaded fired');
     loadJobs();
   });
 } else {
-  // DOM is already ready
   console.log('[Jobs Applet] DOM already ready, loading immediately');
   loadJobs();
 }
@@ -22,7 +19,6 @@ async function loadJobs() {
 
   console.log('[Jobs Applet] Elements:', { loading, error, jobsList, empty });
 
-  // Show loading
   loading.style.display = 'block';
   error.style.display = 'none';
   jobsList.innerHTML = '';
@@ -47,7 +43,6 @@ async function loadJobs() {
       return;
     }
 
-    // Render jobs
     jobs.forEach(job => {
       const jobCard = createJobCard(job);
       jobsList.appendChild(jobCard);
@@ -65,7 +60,6 @@ function createJobCard(job) {
   const card = document.createElement('div');
   card.className = 'job-card';
 
-  // Header with slug and status
   const header = document.createElement('div');
   header.className = 'job-header';
   
@@ -84,7 +78,6 @@ function createJobCard(job) {
   title.appendChild(statusBadge);
   header.appendChild(title);
 
-  // Last result badge (if available)
   if (job.lastResult) {
     const resultBadge = document.createElement('span');
     resultBadge.className = `result-badge result-${job.lastResult}`;
@@ -94,7 +87,6 @@ function createJobCard(job) {
 
   card.appendChild(header);
 
-  // Prompt
   if (job.prompt) {
     const prompt = document.createElement('div');
     prompt.className = 'job-prompt';
@@ -102,7 +94,6 @@ function createJobCard(job) {
     card.appendChild(prompt);
   }
 
-  // Schedule info
   if (job.schedule) {
     const scheduleInfo = document.createElement('div');
     scheduleInfo.className = 'schedule-info';
@@ -122,36 +113,29 @@ function createJobCard(job) {
     card.appendChild(scheduleInfo);
   }
 
-  // Details grid
   const details = document.createElement('div');
   details.className = 'job-details';
 
-  // Next run
   if (job.nextRun) {
     details.appendChild(createDetailItem('Next Run', formatDateTime(job.nextRun), 'time'));
   }
 
-  // Last run
   if (job.lastRun) {
     details.appendChild(createDetailItem('Last Run', formatDateTime(job.lastRun), 'time'));
   }
 
-  // Session ID
   if (job.sessionId) {
     details.appendChild(createDetailItem('Session ID', job.sessionId, 'highlight'));
   }
 
-  // Model
   if (job.sessionConfig?.model) {
     details.appendChild(createDetailItem('Model', job.sessionConfig.model, 'highlight'));
   }
 
-  // Persist session
   if (job.sessionConfig?.persistSession !== undefined) {
     details.appendChild(createDetailItem('Persist Session', job.sessionConfig.persistSession ? 'Yes' : 'No'));
   }
 
-  // Last error
   if (job.lastError) {
     details.appendChild(createDetailItem('Last Error', job.lastError, 'error'));
   }
@@ -186,7 +170,6 @@ function formatDateTime(isoString) {
     const diffMs = date - now;
     const diffMins = Math.round(diffMs / 60000);
     
-    // Format the date/time
     const formatted = date.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -195,7 +178,6 @@ function formatDateTime(isoString) {
       hour12: false
     });
 
-    // Add relative time
     if (Math.abs(diffMins) < 60) {
       if (diffMins > 0) {
         return `${formatted} (in ${diffMins}m)`;
@@ -224,5 +206,4 @@ function refreshJobs() {
   loadJobs();
 }
 
-// Make refreshJobs available globally for onclick handler
 window.refreshJobs = refreshJobs;

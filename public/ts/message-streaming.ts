@@ -173,23 +173,34 @@ function handleEvent(event: SessionEvent): void {
   if (!isLoadingHistory() && hasInserter(eventType)) scrollToBottom();
 }
 
+let messageStreamingInitialized = false;
+const wsHandlerDisposers: Array<() => void> = [];
+
 function registerWsHandlers(): void {
-  onEvent(handleEvent);
-  
-  // Tracker drives form state for active session
-  sessionTracker.onChange((sessionId, state) => {
-    if (sessionId === getActiveSessionId() && !isLoadingHistory()) {
-      chatView.setFormEnabled(!state.busy);
-    }
-  });
-  
-  onReconnect(() => {
-    const sessionId = getActiveSessionId();
-    if (!sessionId || !isViewState('chatting')) return;
-    if (chatView.getViewState() !== 'chatting') return;
-    
-    void chatView.reloadHistory(sessionId);
-  });
+  const disposers: Array<() => void> = [];
+  try {
+    disposers.push(onEvent(handleEvent));
+
+    // Tracker drives form state for active session
+    disposers.push(sessionTracker.onChange((sessionId, state) => {
+      if (sessionId === getActiveSessionId() && !isLoadingHistory()) {
+        chatView.setFormEnabled(!state.busy);
+      }
+    }));
+
+    disposers.push(onReconnect(() => {
+      const sessionId = getActiveSessionId();
+      if (!sessionId || !isViewState('chatting')) return;
+      if (chatView.getViewState() !== 'chatting') return;
+
+      void chatView.reloadHistory(sessionId);
+    }));
+
+    wsHandlerDisposers.push(...disposers);
+  } catch (e) {
+    for (const d of disposers.reverse()) { try { d(); } catch { /* ignore */ } }
+    throw e;
+  }
 }
 
 /**
@@ -336,7 +347,22 @@ export async function streamResponse(prompt: string, model: string, imageData: s
  * (one chat surface, one WS connection).
  */
 export function initMessageStreaming(): void {
+  if (messageStreamingInitialized) return;
   chatRegion = new ChatRegion(regions.chat);
   chatRegion.setupClickHandler();
   registerWsHandlers();
+  messageStreamingInitialized = true;
+}
+
+/**
+ * Tear down the WS/tracker subscriptions registered by initMessageStreaming so
+ * the next init re-wires cleanly. Test seam + future soft-reload hook; no
+ * production caller today. Does NOT undo ChatRegion's click handler (it owns no
+ * disposer yet), so a real reload path must add one before relying on this.
+ */
+export function disposeMessageStreaming(): void {
+  for (const dispose of wsHandlerDisposers.splice(0)) {
+    try { dispose(); } catch { /* ignore */ }
+  }
+  messageStreamingInitialized = false;
 }

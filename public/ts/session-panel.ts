@@ -26,6 +26,9 @@ const collapsedFolders = new Set<string>(
 // Track active session drags (iframe may restrict dataTransfer.types during dragover)
 let sessionDragActive = false;
 
+let sessionPanelInitialized = false;
+const sessionPanelDisposers: Array<() => void> = [];
+
 export function getCachedSessions(): SessionData[] {
   return allSessions;
 }
@@ -34,9 +37,11 @@ export function getCachedSessions(): SessionData[] {
  * Initialize session panel - subscribe to global events for session list changes
  */
 export function initSessionPanel(): void {
+  if (sessionPanelInitialized) return;
+  const disposers: Array<() => void> = [];
 
   // Subscribe to unified session list change event
-  onGlobalEvent((event) => {
+  disposers.push(onGlobalEvent((event) => {
     if (event.type === 'session.listChanged') {
       debug('SESSION-PANEL', 'Session list changed, refreshing...', event.data);
       void loadSessions();
@@ -48,40 +53,40 @@ export function initSessionPanel(): void {
       const { sessionId, isBusy } = event.data as { sessionId: string; isBusy: boolean };
       sessionTracker.setBusy(sessionId, isBusy);
     }
-  });
+  }));
   
   // Tracker drives DOM updates for session items and menu badges
   let badgeUpdatePending = false;
-  sessionTracker.onChange((sessionId, state) => {
+  disposers.push(sessionTracker.onChange((sessionId, state) => {
     updateSessionItemState(sessionId, state.busy);
     if (!badgeUpdatePending) {
       badgeUpdatePending = true;
       requestAnimationFrame(() => { badgeUpdatePending = false; updateFolderBadges(); });
     }
     updateMenuIndicators();
-  });
+  }));
 
   // Drag-drop .tar.gz import (guarded against session drags)
   const panel = document.getElementById('sessionView');
   if (panel) {
     let dragDepth = 0;
     const isSessionDrag = (e: DragEvent) => sessionDragActive || (e.dataTransfer?.types.includes('text/x-caco-session') ?? false);
-    panel.addEventListener('dragenter', (e) => {
+    const onDragEnter = (e: DragEvent) => {
       if (isSessionDrag(e)) return;
       e.preventDefault();
       if (dragDepth === 0) panel.classList.add('drop-active');
       dragDepth++;
-    });
-    panel.addEventListener('dragover', (e) => {
+    };
+    const onDragOver = (e: DragEvent) => {
       if (isSessionDrag(e)) return;
       e.preventDefault();
-    });
-    panel.addEventListener('dragleave', (e) => {
+    };
+    const onDragLeave = (e: DragEvent) => {
       if (isSessionDrag(e)) return;
       dragDepth--;
       if (dragDepth === 0) panel.classList.remove('drop-active');
-    });
-    panel.addEventListener('drop', (e) => {
+    };
+    const onDrop = (e: DragEvent) => {
       if (isSessionDrag(e)) return;
       e.preventDefault();
       dragDepth = 0;
@@ -92,8 +97,33 @@ export function initSessionPanel(): void {
         return;
       }
       void importSessionFile(file);
+    };
+    panel.addEventListener('dragenter', onDragEnter);
+    panel.addEventListener('dragover', onDragOver);
+    panel.addEventListener('dragleave', onDragLeave);
+    panel.addEventListener('drop', onDrop);
+    disposers.push(() => {
+      panel.removeEventListener('dragenter', onDragEnter);
+      panel.removeEventListener('dragover', onDragOver);
+      panel.removeEventListener('dragleave', onDragLeave);
+      panel.removeEventListener('drop', onDrop);
     });
   }
+
+  sessionPanelDisposers.push(...disposers);
+  sessionPanelInitialized = true;
+}
+
+/**
+ * Tear down subscriptions/listeners registered by initSessionPanel so the next
+ * init re-wires cleanly. Test seam + future soft-reload hook; no production
+ * caller today.
+ */
+export function disposeSessionPanel(): void {
+  for (const dispose of sessionPanelDisposers.splice(0)) {
+    try { dispose(); } catch { /* ignore */ }
+  }
+  sessionPanelInitialized = false;
 }
 
 /**

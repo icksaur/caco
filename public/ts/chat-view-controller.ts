@@ -30,7 +30,16 @@ import type { ChatFormController } from './chat-form-controller.js';
 
 const RESUME_TIMEOUT_MS = 30000;
 
+/** Thrown inside an activation when a newer navigation has claimed the chat
+ *  surface. Caught silently by activateSession so a superseded activation
+ *  performs no state mutation and shows no error. */
+class SupersededError extends Error {}
+
 class ChatViewController {
+  /** Monotonic navigation generation. Bumped by every entry point that claims
+   *  the chat surface (activateSession, showNewChat, onNewSessionCreated) so a
+   *  slower earlier activation cannot overwrite newer user intent. */
+  private navGeneration = 0;
   /** Shared in-memory draft cache. Keyed by session ID or
    *  NEWCHAT_DRAFT_KEY. Each ChatFormController reads/writes here
    *  via getDraftCache/setDraftCache. The Map survives form
@@ -110,6 +119,7 @@ class ChatViewController {
    * Show the new-chat view. Clears chat, footer, shows model selector.
    */
   showNewChat(): void {
+    this.navGeneration++;
     if (this.newChatForm) {
       this.activeForm = this.newChatForm;
       this.newChatForm.bind(null);
@@ -168,6 +178,7 @@ class ChatViewController {
       return;
     }
 
+    const token = ++this.navGeneration;
     const flight = perfFlight(`session.activate(${sessionId.slice(0, 8)})`);
     // (ChatFormController.bind() in showChat below will flush the
     // prior binding's pending debounce, so no explicit saveDraft
@@ -176,9 +187,10 @@ class ChatViewController {
 
     try {
       flight.span('resumeAndLoad');
-      const data = await this.resumeAndLoad(sessionId, flight);
+      const data = await this.resumeAndLoad(sessionId, token, flight);
       flight.end('resumeAndLoad');
 
+      this.assertCurrent(token);
       flight.span('showChat');
       setActiveContextBudget(data.contextBudgetTokens ?? null);
       setActiveReasoningEffort(data.reasoningEffort ?? null);
@@ -189,6 +201,7 @@ class ChatViewController {
       flight.span('restoreApplet');
       void this.restoreApplet(data.activeApplet, data.appletParams, data.appletPanelVisible).finally(() => flight.end('restoreApplet'));
     } catch (error) {
+      if (error instanceof SupersededError) return;
       const msg = error instanceof Error ? error.message : 'Network error';
       console.error('[CHAT] Error activating session:', msg);
       showToast(msg);
@@ -198,11 +211,17 @@ class ChatViewController {
     }
   }
 
+  /** Throw SupersededError if a newer navigation has claimed the surface since
+   *  the given token was captured. */
+  private assertCurrent(token: number): void {
+    if (token !== this.navGeneration) throw new SupersededError();
+  }
+
   /**
    * Resume session on server and load history. Single async operation.
    * Throws on failure — caller handles UI recovery.
    */
-  private async resumeAndLoad(sessionId: string, flight?: ReturnType<typeof perfFlight>): Promise<{
+  private async resumeAndLoad(sessionId: string, token: number, flight?: ReturnType<typeof perfFlight>): Promise<{
     cwd?: string; model?: string; cwdFallback?: string; hasGit?: boolean;
     name?: string; sessionId?: string; hasIcon?: boolean; kind?: string;
     currentIntent?: string; gitBranch?: string | null; responseOptions?: string[];
@@ -248,6 +267,11 @@ class ChatViewController {
     // user already sees their session work normally. The server logs the
     // repair in restart.log / server.log for diagnostics. If repair fails,
     // resume() throws and the user sees an error toast via the catch path.
+
+    // A newer navigation may have claimed the surface while the resume fetch
+    // was in flight. Gate every user-visible side effect (toast + the three
+    // state mutations below) on still being current.
+    this.assertCurrent(token);
 
     if (data.cwdFallback) {
       showToast(`Original directory is gone, using: ${data.cwdFallback}`, { type: 'info', autoHideMs: 5000 });
@@ -333,6 +357,7 @@ class ChatViewController {
    * Transitions to chatting view with the new session.
    */
   onNewSessionCreated(sessionId: string, cwd: string): void {
+    this.navGeneration++;
     if (this.chattingForm) {
       this.activeForm = this.chattingForm;
       this.chattingForm.bind(sessionId);
@@ -486,6 +511,16 @@ class ChatViewController {
       }
     } else {
       this.sessionDrafts.set(sessionId, prompt);
+    }
+  }
+
+  restoreNewChatPrompt(prompt: string): void {
+    if (getActiveSessionId() !== null) return;
+    if (vcGetViewState() !== 'newChat') return;
+    const ta = this.getActiveForm()?.textarea;
+    if (ta) {
+      ta.value = prompt;
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
     }
   }
 

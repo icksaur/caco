@@ -106,7 +106,7 @@ import { regions } from '../../public/ts/dom-regions.js';
 import { showToast } from '../../public/ts/toast.js';
 import { fetchWithTimeout } from '../../public/ts/fetch-timeout.js';
 import { historyLoader } from '../../public/ts/history-loader.js';
-import { getActiveSessionId } from '../../public/ts/app-state.js';
+import { getActiveSessionId, setActiveSession } from '../../public/ts/app-state.js';
 
 describe('ChatViewController', () => {
   let cvc: ChatViewController;
@@ -212,6 +212,52 @@ describe('ChatViewController', () => {
 
       expect(fetchWithTimeout).toHaveBeenCalled();
       expect(historyLoader.load).toHaveBeenCalled();
+    });
+  });
+
+  describe('activation supersession (P3-3a)', () => {
+    beforeEach(() => {
+      vi.mocked(getActiveSessionId).mockReturnValue(null);
+      vi.mocked(historyLoader.isStale).mockReturnValue(true);
+      (regions.chat.el as unknown as { children: { length: number } }).children = { length: 0 };
+    });
+
+    const resFor = (sessionId: string) => ({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ sessionId, cwd: '/test', model: 'claude-sonnet-4' }),
+    }) as unknown as Response;
+
+    it('a slower earlier activation does not overwrite a newer one', async () => {
+      let resolveA!: (r: Response) => void;
+      const aResume = new Promise<Response>(r => { resolveA = r; });
+      vi.mocked(fetchWithTimeout).mockImplementation((url: string) =>
+        url.includes('/sessions/sess-A/') ? aResume : Promise.resolve(resFor('sess-B')));
+
+      const pA = cvc.activateSession('sess-A');  // token 1
+      const pB = cvc.activateSession('sess-B');  // token 2 — latest
+      await pB;
+
+      resolveA(resFor('sess-A'));
+      await pA;
+
+      expect(setActiveSession).toHaveBeenCalledWith('sess-B', expect.anything());
+      expect(setActiveSession).not.toHaveBeenCalledWith('sess-A', expect.anything());
+      expect(historyLoader.load).not.toHaveBeenCalledWith('sess-A');
+      expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('an in-flight activation is superseded by entering new-chat', async () => {
+      let resolveA!: (r: Response) => void;
+      const aResume = new Promise<Response>(r => { resolveA = r; });
+      vi.mocked(fetchWithTimeout).mockReturnValue(aResume);
+
+      const pA = cvc.activateSession('sess-A');  // token 1
+      cvc.showNewChat();                         // bumps generation — supersedes A
+      resolveA(resFor('sess-A'));
+      await pA;
+
+      expect(setActiveSession).not.toHaveBeenCalledWith('sess-A', expect.anything());
+      expect(showToast).not.toHaveBeenCalled();
     });
   });
 

@@ -53,6 +53,12 @@ const pendingRequests = new Map<string, {
 }>();
 let requestId = 0;
 
+// History-load generation. Pre-incremented on every requestHistory so the
+// server can stamp replay frames with it; the client discards any replay frame
+// whose generation is not the current one (a superseded/cancelled load).
+let historyGeneration = 0;
+let currentHistoryGen = 0;
+
 /**
  * Connect to the WebSocket server (call once on page load).
  * No session parameter - server broadcasts all, client filters.
@@ -88,8 +94,9 @@ export function subscribeToSession(sessionId: string | null): void {
  * Request history for a session. Server streams messages with that sessionId.
  */
 export function requestHistory(sessionId: string): void {
-  debug('WS', `requestHistory for session: ${sessionId}`);
-  send({ type: 'requestHistory', sessionId });
+  currentHistoryGen = ++historyGeneration;
+  debug('WS', `requestHistory for session: ${sessionId} (gen ${currentHistoryGen})`);
+  send({ type: 'requestHistory', sessionId, generation: currentHistoryGen });
 }
 
 function startHeartbeat(myConnectionId: number): void {
@@ -234,7 +241,28 @@ function doConnect(myConnectionId: number): void {
  * - globalEvent: dispatched to all global handlers (no session filtering)
  * - event: filtered by active session, then dispatched to session handlers
  */
-function handleMessage(msg: { type: string; id?: string; sessionId?: string; data?: unknown; error?: string }): void {
+/**
+ * Discriminated union of server-pushed frames. The shared part carries the
+ * fields common to request/response correlation and session filtering; each
+ * variant adds its own typed payload so the handler needs no `as unknown` casts.
+ * `generation` appears only on history-replay frames (event / historyComplete).
+ */
+type ServerMessage = { id?: string; sessionId?: string; data?: unknown } & (
+  | { type: 'event'; event?: SessionEvent; generation?: number }
+  | { type: 'globalEvent'; event?: SessionEvent }
+  | { type: 'historyComplete'; generation?: number }
+  | { type: 'stateUpdate' }
+  | { type: 'state' }
+  | { type: 'pong' }
+  | { type: 'serverPing'; ts?: number }
+  | { type: 'error'; error?: string }
+);
+
+/**
+ * Dispatch a parsed server frame. Exported as a test seam so the
+ * generation-discard and session-filter rules can be driven directly.
+ */
+export function handleMessage(msg: ServerMessage): void {
   // Handle request/response messages (no session filtering)
   if (msg.id && pendingRequests.has(msg.id)) {
     const { resolve, reject } = pendingRequests.get(msg.id)!;
@@ -250,11 +278,10 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
   
   // Handle global events (no session filtering - affects all clients)
   if (msg.type === 'globalEvent') {
-    const msgWithEvent = msg as unknown as { event?: SessionEvent };
-    if (msgWithEvent.event) {
+    if (msg.event) {
       for (const cb of globalEventCallbacks) {
         try {
-          cb(msgWithEvent.event);
+          cb(msg.event);
         } catch (err) {
           console.error('[WS] GlobalEvent callback error:', err);
         }
@@ -267,6 +294,12 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
   // bypass the active-session filter below: a completion for a just-superseded
   // load still has to resolve that load's pending promise.
   if (msg.type === 'historyComplete') {
+    // A historyComplete tagged with a superseded generation must NOT resolve the
+    // current load — its replay frames were already discarded below.
+    if (isStaleReplay(msg.generation)) {
+      debug('WS', `discard stale historyComplete (gen ${msg.generation} != ${currentHistoryGen})`);
+      return;
+    }
     const completedId = msg.sessionId;
     if (completedId && completedId === getActiveSessionId()) {
       void markSessionObserved(completedId);
@@ -285,6 +318,9 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
   // Filter by active session for session-scoped broadcasts
   const msgSessionId = msg.sessionId;
   const currentSessionId = getActiveSessionId();
+  if (isSessionScoped(msg.type) && !msgSessionId) {
+    console.warn(`[WS] session-scoped ${msg.type} frame arrived without a sessionId; passing through unfiltered`);
+  }
   if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
     return;
   }
@@ -304,11 +340,17 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       break;
     
     case 'event': {
-      const msgWithEvent = msg as unknown as { event?: SessionEvent };
-      if (msgWithEvent.event) {
+      // A replay frame from a superseded history load carries the old
+      // generation; drop it so it cannot interleave into the active DOM.
+      // Live broadcasts carry no generation and are never dropped by this rule.
+      if (isStaleReplay(msg.generation)) {
+        debug('WS', `discard stale event (gen ${msg.generation} != ${currentHistoryGen})`);
+        break;
+      }
+      if (msg.event) {
         for (const cb of eventCallbacks) {
           try {
-            cb(msgWithEvent.event);
+            cb(msg.event);
           } catch (err) {
             console.error('[WS] Event callback error:', err);
           }
@@ -324,7 +366,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
     
     case 'serverPing': {
       lastServerPingTs = Date.now();
-      const serverTs = (msg as unknown as { ts?: number }).ts;
+      const serverTs = msg.ts;
       const latency = serverTs ? Date.now() - serverTs : '?';
       debug('WS', `← serverPing (latency: ${latency}ms)`);
       break;
@@ -332,6 +374,19 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       
     default:
   }
+}
+
+/**
+ * A replay frame is stale when it carries a generation that is not the current
+ * history-load generation. Frames with no generation (live broadcasts) are
+ * never stale.
+ */
+function isStaleReplay(generation: number | undefined): boolean {
+  return generation !== undefined && generation !== currentHistoryGen;
+}
+
+function isSessionScoped(type: ServerMessage['type']): boolean {
+  return type === 'event' || type === 'stateUpdate';
 }
 
 /**

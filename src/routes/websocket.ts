@@ -39,6 +39,7 @@ interface ClientMessage {
   type: 'setState' | 'getState' | 'sendMessage' | 'requestHistory' | 'ping' | 'subscribe';
   id?: string;  // For request/response correlation
   sessionId?: string;  // For requestHistory, subscribe, and setState
+  generation?: number;  // For requestHistory: client's history-load generation (echoed back to discard stale replays)
   data?: Record<string, unknown>;
   // For sendMessage
   content?: string;
@@ -61,6 +62,7 @@ interface ServerMessage {
   type: 'stateUpdate' | 'state' | 'event' | 'globalEvent' | 'historyComplete' | 'pong' | 'error';
   id?: string;
   sessionId?: string;  // For session-scoped broadcasts (client filters by this)
+  generation?: number;  // Present ONLY on history-replay frames; absent on live broadcasts so the client can discard a superseded replay
   data?: unknown;
   event?: SessionEvent;
   error?: string;
@@ -177,7 +179,7 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
     case 'requestHistory':
       if (msg.sessionId) {
         console.log(`[WS] requestHistory received for ${msg.sessionId.slice(0, 8)}`);
-        void streamHistory(ws, msg.sessionId);
+        void streamHistory(ws, msg.sessionId, msg.generation);
       } else {
         sendError(ws, msg.id, 'sessionId is required for requestHistory');
       }
@@ -308,13 +310,22 @@ function enrichUserMessageWithSource(event: SessionEvent): SessionEvent {
  * Converts SDK events to ChatMessage format and sends individually
  * All messages include sessionId for client filtering
  */
-async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
+/**
+ * Stream a session's recent history to one client. Every frame is stamped with
+ * the request's `generation` so the client can discard a superseded replay.
+ * Exported as a test seam.
+ */
+export async function streamHistory(ws: WebSocket, sessionId: string, generation?: number): Promise<void> {
   const shortId = sessionId.slice(0, 8);
   console.log(`[HISTORY] streamHistory called for ${shortId}, ws.readyState=${ws.readyState}`);
-  
+
+  // Every replay frame carries the request's generation so a superseded replay
+  // (rapid session switch / cancelled load) can be discarded by the client.
+  const sendFrame = (frame: ServerMessage) => send(ws, { ...frame, generation });
+
   if (!sessionId || sessionId === 'default') {
     console.log('[HISTORY] No valid session, sending historyComplete');
-    send(ws, { type: 'historyComplete', sessionId, data: { isBusy: false } });
+    sendFrame({ type: 'historyComplete', sessionId, data: { isBusy: false } });
     return;
   }
   
@@ -325,11 +336,11 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     if (!turnsResult.ok && turnsResult.kind === 'corrupt') {
       console.error(`[HISTORY] Corrupt history for ${shortId}: ${turnsResult.error.message}`);
       if (ws.readyState === WebSocket.OPEN) {
-        send(ws, { type: 'event', sessionId, event: {
+        sendFrame({ type: 'event', sessionId, event: {
           type: 'caco.history_error',
           data: { message: 'Session history could not be read (file is corrupt or unreadable).' }
         } as unknown as SessionEvent });
-        send(ws, { type: 'historyComplete', sessionId, data: { isBusy: false } });
+        sendFrame({ type: 'historyComplete', sessionId, data: { isBusy: false } });
       }
       return;
     }
@@ -357,7 +368,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     
     if (skipped > 0) {
       console.log(`[HISTORY] Truncated: skipped ${skipped} of ${totalLines} lines`);
-      send(ws, { type: 'event', sessionId, event: {
+      sendFrame({ type: 'event', sessionId, event: {
         type: 'caco.truncated',
         data: { skipped, total: totalLines }
       } as unknown as SessionEvent });
@@ -372,7 +383,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
         if (queued.length > 0) {
           console.log(`[HISTORY] Flushing ${queued.length} embeds before ${evt.type}`);
           for (const cacoEvent of queued) {
-            send(ws, { type: 'event', sessionId, event: cacoEvent as unknown as SessionEvent });
+            sendFrame({ type: 'event', sessionId, event: cacoEvent as unknown as SessionEvent });
             sentCount++;
           }
         }
@@ -382,7 +393,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
       if (!shouldFilter(evt)) {
         // Parse user.message content for source prefix (from applet/agent/scheduler)
         const enriched = enrichUserMessageWithSource(evt);
-        send(ws, { type: 'event', sessionId, event: enriched });
+        sendFrame({ type: 'event', sessionId, event: enriched });
         sentCount++;
       }
       
@@ -422,7 +433,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     if (remaining.length > 0) {
       console.log(`[HISTORY] Flushing ${remaining.length} remaining embeds at end`);
       for (const cacoEvent of remaining) {
-        send(ws, { type: 'event', sessionId, event: cacoEvent as unknown as SessionEvent });
+        sendFrame({ type: 'event', sessionId, event: cacoEvent as unknown as SessionEvent });
       }
     }
     
@@ -434,7 +445,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     // Emit caco.context if session has context (for UI footer)
     const meta = getSessionMeta(sessionId);
     if (meta?.context) {
-      send(ws, { 
+      sendFrame({ 
         type: 'event', 
         sessionId, 
         event: {
@@ -447,13 +458,13 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     console.log(`[HISTORY] Streamed ${sentCount} events (from ${events.length} raw) for ${shortId} in ${Date.now() - fetchStart}ms total`);
     const isBusy = sessionManager.isBusy(sessionId);
     const usage = getSessionUsage(sessionId);
-    send(ws, { type: 'historyComplete', sessionId, data: { isBusy, usage } });
+    sendFrame({ type: 'historyComplete', sessionId, data: { isBusy, usage } });
     console.log(`[HISTORY] historyComplete sent for ${shortId}, isBusy=${isBusy}, ws.readyState=${ws.readyState}`);
     
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[HISTORY] Error streaming history for ${shortId}:`, message);
-    send(ws, { type: 'historyComplete', sessionId, data: { isBusy: false } });
+    sendFrame({ type: 'historyComplete', sessionId, data: { isBusy: false } });
   }
 }
 

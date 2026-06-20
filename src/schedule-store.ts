@@ -5,11 +5,12 @@
  * Storage: ~/.caco/schedule/<slug>/definition.json + last-run.json
  */
 
-import { mkdir, readFile, writeFile, readdir, rm } from 'fs/promises';
+import { mkdir, writeFile, readdir, rm } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import { existsSync } from 'fs';
 import { CronExpressionParser } from 'cron-parser';
+import { readJsonFile, type DiskRead } from './disk-read.js';
 
 const SCHEDULE_DIR = join(homedir(), '.caco', 'schedule');
 
@@ -69,15 +70,13 @@ export async function listSchedules(): Promise<string[]> {
   }
 }
 
+export async function loadDefinitionResult(slug: string): Promise<DiskRead<ScheduleDefinition>> {
+  return readJsonFile<ScheduleDefinition>(getSchedulePaths(slug).definition);
+}
+
 export async function loadDefinition(slug: string): Promise<ScheduleDefinition | null> {
-  const paths = getSchedulePaths(slug);
-  
-  try {
-    const content = await readFile(paths.definition, 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    return null;
-  }
+  const result = await loadDefinitionResult(slug);
+  return result.ok ? result.value : null;
 }
 
 export async function saveDefinition(definition: ScheduleDefinition): Promise<void> {
@@ -88,15 +87,13 @@ export async function saveDefinition(definition: ScheduleDefinition): Promise<vo
   await writeFile(paths.definition, JSON.stringify(definition, null, 2), 'utf-8');
 }
 
+export async function loadLastRunResult(slug: string): Promise<DiskRead<LastRunState>> {
+  return readJsonFile<LastRunState>(getSchedulePaths(slug).lastRun);
+}
+
 export async function loadLastRun(slug: string): Promise<LastRunState | null> {
-  const paths = getSchedulePaths(slug);
-  
-  try {
-    const content = await readFile(paths.lastRun, 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    return null;
-  }
+  const result = await loadLastRunResult(slug);
+  return result.ok ? result.value : null;
 }
 
 export async function saveLastRun(slug: string, state: LastRunState): Promise<void> {

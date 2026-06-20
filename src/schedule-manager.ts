@@ -1,8 +1,8 @@
 import { CronExpressionParser } from 'cron-parser';
 import {
   listSchedules, 
-  loadDefinition, 
-  loadLastRun, 
+  loadDefinitionResult, 
+  loadLastRunResult, 
   saveLastRun,
   validateScheduleInterval,
   type ScheduleDefinition
@@ -49,19 +49,34 @@ async function checkSchedules(): Promise<void> {
     const dueTasks: string[] = [];
     
     for (const slug of slugs) {
-      const definition = await loadDefinition(slug);
-      if (!definition || !definition.enabled) {
+      const defResult = await loadDefinitionResult(slug);
+      if (!defResult.ok) {
+        if (defResult.kind === 'corrupt') {
+          console.error(`[SCHEDULER] Skipping ${slug}: definition.json is corrupt (${defResult.error.message}); not treating as enabled`);
+        }
         continue;
       }
-      
-      if (validateScheduleInterval(definition.schedule)) {
-        console.warn(`[SCHEDULER] Skipping ${slug}: ${validateScheduleInterval(definition.schedule)}`);
+      const definition = defResult.value;
+      if (!definition.enabled) {
         continue;
       }
-      
-      const lastRun = await loadLastRun(slug);
+
+      const intervalError = validateScheduleInterval(definition.schedule);
+      if (intervalError) {
+        console.warn(`[SCHEDULER] Skipping ${slug}: ${intervalError}`);
+        continue;
+      }
+
+      const lastRunResult = await loadLastRunResult(slug);
+      // Corrupt last-run must NOT default to nextRun=now — that would trigger an
+      // unintended immediate run. Skip this tick instead.
+      if (!lastRunResult.ok && lastRunResult.kind === 'corrupt') {
+        console.error(`[SCHEDULER] Skipping ${slug}: last-run.json is corrupt (${lastRunResult.error.message}); not defaulting to run-now`);
+        continue;
+      }
+      const lastRun = lastRunResult.ok ? lastRunResult.value : null;
       const nextRun = lastRun?.nextRun ? new Date(lastRun.nextRun) : now;
-      
+
       if (nextRun <= now) {
         dueTasks.push(slug);
       }
@@ -82,13 +97,23 @@ async function checkSchedules(): Promise<void> {
 async function executeSchedule(slug: string): Promise<void> {
   console.log(`[SCHEDULER] Executing: ${slug}`);
   
-  const definition = await loadDefinition(slug);
-  if (!definition) {
-    console.error(`[SCHEDULER] Definition not found for: ${slug}`);
+  const defResult = await loadDefinitionResult(slug);
+  if (!defResult.ok) {
+    if (defResult.kind === 'corrupt') {
+      console.error(`[SCHEDULER] Not executing ${slug}: definition.json is corrupt (${defResult.error.message})`);
+    } else {
+      console.error(`[SCHEDULER] Definition not found for: ${slug}`);
+    }
     return;
   }
-  
-  const lastRun = await loadLastRun(slug);
+  const definition = defResult.value;
+
+  const lastRunResult = await loadLastRunResult(slug);
+  if (!lastRunResult.ok && lastRunResult.kind === 'corrupt') {
+    console.error(`[SCHEDULER] Not executing ${slug}: last-run.json is corrupt (${lastRunResult.error.message}); refusing to spawn a duplicate session`);
+    return;
+  }
+  const lastRun = lastRunResult.ok ? lastRunResult.value : null;
   
   try {
     // Try to POST to existing session

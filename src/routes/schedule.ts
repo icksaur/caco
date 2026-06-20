@@ -8,6 +8,7 @@ import { Router, Request, Response } from 'express';
 import {
   listSchedules,
   loadDefinition,
+  loadDefinitionResult,
   loadLastRun,
   saveDefinition,
   saveLastRun,
@@ -129,7 +130,20 @@ router.put('/schedule/:slug', async (req: Request, res: Response) => {
     
     const exists = await scheduleExists(slug);
     const now = new Date().toISOString();
-    
+
+    // PUT is an explicit full replace, so overwriting is allowed even if the
+    // existing definition is corrupt — but we can only carry forward createdAt
+    // if the old file was readable.
+    let createdAt = now;
+    if (exists) {
+      const existingResult = await loadDefinitionResult(slug);
+      if (existingResult.ok) {
+        createdAt = existingResult.value.createdAt;
+      } else if (existingResult.kind === 'corrupt') {
+        console.warn(`[SCHEDULE] PUT ${slug}: existing definition.json is corrupt; replacing with a fresh createdAt`);
+      }
+    }
+
     const definition: ScheduleDefinition = {
       slug,
       prompt,
@@ -139,7 +153,7 @@ router.put('/schedule/:slug', async (req: Request, res: Response) => {
         model: sessionConfig?.model,
         persistSession: sessionConfig?.persistSession !== false
       },
-      createdAt: exists ? (await loadDefinition(slug))!.createdAt : now,
+      createdAt,
       updatedAt: now
     };
     
@@ -189,11 +203,16 @@ router.patch('/schedule/:slug', async (req: Request, res: Response) => {
     const slug = req.params.slug as string;
     const { enabled } = req.body as { enabled?: boolean };
     
-    const definition = await loadDefinition(slug);
-    if (!definition) {
-      res.status(404).json({ error: `Schedule not found: ${slug}` });
+    const defResult = await loadDefinitionResult(slug);
+    if (!defResult.ok) {
+      if (defResult.kind === 'corrupt') {
+        res.status(409).json({ error: `Schedule definition is corrupt; refusing partial update: ${slug}` });
+      } else {
+        res.status(404).json({ error: `Schedule not found: ${slug}` });
+      }
       return;
     }
+    const definition = defResult.value;
     
     // Apply partial updates
     if (enabled !== undefined) {
@@ -257,9 +276,13 @@ router.post('/schedule/:slug/run', async (req: Request, res: Response) => {
   try {
     const slug = req.params.slug as string;
     
-    const definition = await loadDefinition(slug);
-    if (!definition) {
-      res.status(404).json({ error: `Schedule not found: ${slug}` });
+    const defResult = await loadDefinitionResult(slug);
+    if (!defResult.ok) {
+      if (defResult.kind === 'corrupt') {
+        res.status(409).json({ error: `Schedule definition is corrupt; refusing to run: ${slug}` });
+      } else {
+        res.status(404).json({ error: `Schedule not found: ${slug}` });
+      }
       return;
     }
     

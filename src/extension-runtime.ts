@@ -42,6 +42,14 @@ interface ExtensionMetadata {
 }
 
 /**
+ * Two extensions claiming the same client message type is a cross-extension
+ * namespace collision — a global configuration error, not an isolated failure
+ * of one extension. It is its own type so load() can let it propagate while
+ * still isolating ordinary single-extension load failures.
+ */
+export class DuplicateClientMessageError extends Error {}
+
+/**
  * Owns the mutable extension state (client message handlers + metadata) so the
  * bad states are unrepresentable: stale handlers cannot survive a reload
  * (unload clears them) and two extensions cannot claim the same client message
@@ -70,6 +78,9 @@ export class ExtensionRuntime {
           const tools = await this.loadOne(app, ext, meta);
           allTools.push(...tools);
         } catch (err) {
+          // A namespace collision is a global error and must not be swallowed
+          // like an isolated load failure; let it abort the load.
+          if (err instanceof DuplicateClientMessageError) throw err;
           console.error(`[EXT:${ext.slug}] Failed to load server extension:`, err);
         }
       }
@@ -111,7 +122,7 @@ export class ExtensionRuntime {
    */
   registerClientMessageHandler(type: string, handler: (ws: WebSocket, data: unknown) => void, slug: string): void {
     if (this.clientMessageHandlers.has(type)) {
-      throw new Error(`[EXT:${slug}] client message type "${type}" is already registered by another extension`);
+      throw new DuplicateClientMessageError(`[EXT:${slug}] client message type "${type}" is already registered by another extension`);
     }
     this.clientMessageHandlers.set(type, handler);
   }

@@ -71,7 +71,9 @@ export function createMcpAuthTools() {
             error: errorMessage,
           };
           
-          updateMcpServerAuth(serverId, () => serverState);
+          // A concurrent flow may have registered this server during discovery;
+          // the boundary's fresh prev wins so we never clobber it with an error.
+          updateMcpServerAuth(serverId, (prev) => prev ?? serverState);
           
           return {
             textResultForLlm: `Server "${serverId}" registered but OAuth discovery failed: ${errorMessage}. ` +
@@ -95,8 +97,9 @@ export function createMcpAuthTools() {
           needsClientId: !resolvedClientId,
         };
         
-        // Save to store
-        updateMcpServerAuth(serverId, () => serverState);
+        // Save to store. A concurrent register/auth may have landed during the
+        // awaited discovery; preserve that fresh prev rather than overwriting it.
+        updateMcpServerAuth(serverId, (prev) => prev ?? serverState);
         
         // Return appropriate message based on whether we have client_id
         if (!resolvedClientId) {

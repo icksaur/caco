@@ -167,6 +167,7 @@ interface ActiveSession {
   providerId?: string;
   toolFactory: ToolFactory;
   excludedTools?: string[];
+  lastUsedAt: number;
 }
 
 interface CachedSession {
@@ -620,6 +621,7 @@ export class SessionManager {
       providerId: resolved.providerId,
       toolFactory: config.toolFactory,
       excludedTools: config.excludedTools,
+      lastUsedAt: Date.now(),
     });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
     
@@ -806,10 +808,11 @@ export class SessionManager {
       providerId: resolved?.providerId,
       toolFactory: config.toolFactory,
       excludedTools: config.excludedTools,
+      lastUsedAt: Date.now(),
     });
     
     // Evict oldest inactive sessions if over the limit
-    this.evictInactiveSessions();
+    await this.evictInactiveSessions();
     
     ensureSessionMeta(sessionId);
     
@@ -904,26 +907,26 @@ export class SessionManager {
    * Only evicts sessions that are not currently busy (not dispatching).
    * Called after resume() adds a new active session.
    */
-  private evictInactiveSessions(): void {
+  private async evictInactiveSessions(): Promise<void> {
     if (this.activeSessions.size <= SessionManager.MAX_ACTIVE_SESSIONS) return;
-    
-    // Find inactive (not busy) sessions to evict
-    const candidates: string[] = [];
-    for (const [id] of this.activeSessions) {
-      if (!dispatchState.isBusy(id)) {
-        candidates.push(id);
-      }
-    }
-    
-    // Evict oldest candidates (Map preserves insertion order, oldest first)
-    // Keep at least MAX_ACTIVE_SESSIONS total
-    const toEvict = this.activeSessions.size - SessionManager.MAX_ACTIVE_SESSIONS;
-    for (let i = 0; i < Math.min(toEvict, candidates.length); i++) {
+
+    // Candidates are sessions that are not currently dispatching, ordered
+    // least-recently-used first so an old-but-active session outlives a newer
+    // one that hasn't been touched.
+    const candidates = [...this.activeSessions.entries()]
+      .filter(([id]) => !dispatchState.isBusy(id))
+      .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt)
+      .map(([id]) => id);
+
+    const toEvict = Math.min(this.activeSessions.size - SessionManager.MAX_ACTIVE_SESSIONS, candidates.length);
+    for (let i = 0; i < toEvict; i++) {
       const id = candidates[i];
       console.log(`[EVICT] Stopping inactive session ${id} (${this.activeSessions.size} active, max ${SessionManager.MAX_ACTIVE_SESSIONS})`);
-      this.stop(id).catch(err => {
+      try {
+        await this.stop(id);
+      } catch (err) {
         console.warn(`[EVICT] Failed to stop session ${id}:`, err instanceof Error ? err.message : err);
-      });
+      }
     }
   }
 
@@ -938,6 +941,7 @@ export class SessionManager {
     }
 
     const { session } = active;
+    active.lastUsedAt = Date.now();
     const TIMEOUT_MS = 120000; // 2 minutes
     
     try {
@@ -1466,6 +1470,7 @@ export class SessionManager {
     }
     
     const { session } = active;
+    active.lastUsedAt = Date.now();
     return session.send({
       ...options,
       prompt: message,

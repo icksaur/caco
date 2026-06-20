@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { createFacade } from '../../src/workflow/facade.js';
+import { createFacade, wrapFacadeForAccounting, type Facade } from '../../src/workflow/facade.js';
 import { WorkflowInputError } from '../../src/workflow/types.js';
 
 let base: string;
@@ -62,5 +62,39 @@ describe('createFacade', () => {
   it('retrieve throws for an unknown id', async () => {
     const caco = createFacade(base);
     await expect(caco.retrieve('missing')).rejects.toBeInstanceOf(WorkflowInputError);
+  });
+});
+
+describe('wrapFacadeForAccounting', () => {
+  it('passes each resolved value to account and returns it unchanged', async () => {
+    const seen: unknown[] = [];
+    const wrapped = wrapFacadeForAccounting(createFacade(base), (v) => { seen.push(v); });
+
+    const read = await wrapped.read('one.ts', [1, 1]);
+    expect(read.text).toBe('export const x = 1;');
+
+    const list = await wrapped.list('.');
+    expect(list).toContain('one.ts');
+
+    expect(seen).toEqual([read, list]);
+  });
+
+  it('accounts the resolved value, not the promise', async () => {
+    const accounted: unknown[] = [];
+    const fake: Facade = {
+      index: async () => ({ language: 'x', declarations: [] }) as never,
+      read: async () => ({ path: 'p', totalLines: 0, range: [1, 1], text: 'BODY' }),
+      grep: async () => [{ file: 'f', line: 1, text: 't' }],
+      rg: async () => 'RG',
+      glob: async () => ['g'],
+      list: async () => ['l'],
+      retrieve: async () => 'R',
+      sh: async () => ({ stdout: 'o', stderr: '', code: 0 }),
+    };
+    const wrapped = wrapFacadeForAccounting(fake, (v) => { accounted.push(v); });
+
+    const grep = await wrapped.grep('x');
+    expect(grep).toEqual([{ file: 'f', line: 1, text: 't' }]);
+    expect(accounted[0]).toBe(grep);
   });
 });

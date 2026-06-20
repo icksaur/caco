@@ -131,27 +131,20 @@ function facadeModuleUrl(): string {
  * via temp+rename so a partial file is never observed; a second `emit` throws.
  */
 function buildHarness(userCode: string, sessionCwd: string, resultPath: string): string {
-  return `import { createFacade } from ${JSON.stringify(facadeModuleUrl())};
+  return `import { createFacade, wrapFacadeForAccounting } from ${JSON.stringify(facadeModuleUrl())};
 import { writeFileSync, renameSync } from 'node:fs';
 
 const __resultPath = ${JSON.stringify(resultPath)};
 let __observedBytes = 0;
 const __rawFacade = createFacade(${JSON.stringify(sessionCwd)});
-const __account = (v: unknown): unknown => {
+// Counting hook: every read-oriented facade call adds the bytes it returned to
+// __observedBytes — the data that would otherwise have entered the model context.
+const __account = (v: unknown): void => {
   try {
     __observedBytes += Buffer.byteLength(typeof v === 'string' ? v : (JSON.stringify(v) ?? ''), 'utf8');
   } catch { /* unserializable payloads are not counted */ }
-  return v;
 };
-// Counting proxy: every read-oriented facade call adds the bytes it returned to
-// __observedBytes — the data that would otherwise have entered the model context.
-const caco = new Proxy(__rawFacade as Record<string, unknown>, {
-  get(target, prop) {
-    const orig = (target as Record<string, unknown>)[prop as string];
-    if (typeof orig !== 'function') return orig;
-    return async (...args: unknown[]) => __account(await (orig as (...a: unknown[]) => unknown).apply(target, args));
-  },
-});
+const caco = wrapFacadeForAccounting(__rawFacade, __account);
 
 let __written = false;
 

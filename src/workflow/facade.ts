@@ -81,6 +81,26 @@ export function createFacade(sessionCwd: string): Facade {
   };
 }
 
+/**
+ * Wrap a facade so every method's resolved value is passed to `account` (e.g. a
+ * byte counter) before being returned unchanged. The explicit per-method
+ * delegation keeps the return types exact and forces this wrapper to be updated
+ * if the Facade surface changes (a compile error, not silent drift through an
+ * untyped Proxy). `account` is a side effect only — it never transforms values.
+ */
+export function wrapFacadeForAccounting(facade: Facade, account: (value: unknown) => void): Facade {
+  return {
+    index: async (path, options) => { const r = await facade.index(path, options); account(r); return r; },
+    read: async (path, range) => { const r = await facade.read(path, range); account(r); return r; },
+    grep: async (pattern, options) => { const r = await facade.grep(pattern, options); account(r); return r; },
+    rg: async (args) => { const r = await facade.rg(args); account(r); return r; },
+    glob: async (pattern) => { const r = await facade.glob(pattern); account(r); return r; },
+    list: async (path) => { const r = await facade.list(path); account(r); return r; },
+    retrieve: async (id, range) => { const r = await facade.retrieve(id, range); account(r); return r; },
+    sh: async (command) => { const r = await facade.sh(command); account(r); return r; },
+  };
+}
+
 /** Compact, model-facing description of the facade injected into workflow scripts. */
 export const FACADE_API_SUMMARY = `A read-oriented facade is available as \`caco\` (all methods are async):
 - caco.index(path, { language?, maxEntries? }) -> structural skeleton of one source file (declarations with [start-end] line ranges).

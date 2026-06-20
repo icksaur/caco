@@ -17,8 +17,10 @@
 
 (function() {
   /** Minimal binary-extension guard (subset of the main applet's
-   *  isBinaryExtension). Prevents fetching obviously-binary files. */
-  var BINARY_RE = /\.(png|jpg|jpeg|gif|webp|svg|ico|pdf|zip|gz|tar|bin|exe|class|jar)$/i;
+   *  isBinaryExtension). Prevents fetching obviously-binary files.
+   *  Audio extensions are included so SourceViewer never claims them
+   *  — keep in sync with script.js isBinaryExtension(). */
+  var BINARY_RE = /\.(png|jpg|jpeg|gif|webp|svg|ico|pdf|zip|gz|tar|bin|exe|class|jar|wav|mp3|ogg|oga|m4a|aac|opus|flac)$/i;
 
   /** Extension → hljs language key. Duplicated from script.js's
    *  EXT_TO_LANG (the full map lives in script.js which loads after

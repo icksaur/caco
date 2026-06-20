@@ -6,6 +6,6 @@
   "createdAt": "2026-05-29T22:00:00.000Z",
   "updatedAt": "2026-06-10T20:30:00.000Z",
   "agentUsage": {
-    "purpose": "Tabbed file viewer with per-tab viewer switching. Default viewer is markdown for .md files, image for binary images, html for .html, and diff for everything else. A floating button toggles between viewers when more than one applies. Ctrl+P opens the fuzzy file picker."
+    "purpose": "Tabbed file viewer with per-tab viewer switching. Default viewer is markdown for .md files, image for raster/SVG images, audio for .wav/.mp3/.ogg/.m4a/.flac and similar (native playback with watcher reload), html for .html, and diff for everything else. A floating button toggles between viewers when more than one applies. Ctrl+P opens the fuzzy file picker."
   }
 }

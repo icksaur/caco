@@ -668,6 +668,39 @@
   opacity: 0.6;
 }
 
+/* Audio viewer (docs/files-applet-audio.md) */
+.files-audio-content {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  background: var(--color-bg, #1e1e1e);
+}
+.files-audio-caption {
+  color: var(--color-text, #ccc);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  word-break: break-all;
+  text-align: center;
+  max-width: 90%;
+}
+.files-audio-el {
+  width: min(520px, 90%);
+}
+.files-audio-error {
+  color: var(--color-error, #f48771);
+  text-align: center;
+  font-family: var(--font-sans);
+}
+.fe-tab.fe-tab-audio .fe-tab-name::before {
+  content: '🔊 ';
+  opacity: 0.6;
+}
+
 /* V2.b: HtmlViewer */
 .files-html-content {
   position: relative;

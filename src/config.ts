@@ -80,5 +80,14 @@ export const MIME_TYPES: Record<string, string> = {
   toml: 'text/toml',
   // Documents
   pdf: 'application/pdf',
+  // Audio (browser-native playback in the files applet's audio viewer)
+  wav: 'audio/wav',
+  mp3: 'audio/mpeg',
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  opus: 'audio/ogg',
+  flac: 'audio/flac',
 };
 

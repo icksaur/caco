@@ -192,11 +192,13 @@
   var ImageViewer = window.__filesApplet && window.__filesApplet.ImageViewer;
   var HtmlViewer = window.__filesApplet && window.__filesApplet.HtmlViewer;
   var SourceViewer = window.__filesApplet && window.__filesApplet.SourceViewer;
+  var AudioViewer = window.__filesApplet && window.__filesApplet.AudioViewer;
   if (!DiffViewer) console.error('[files-applet] diff-viewer.js did not load');
   if (!MarkdownViewer) console.error('[files-applet] markdown-viewer.js did not load');
   if (!ImageViewer) console.warn('[files-applet] image-viewer.js did not load');
   if (!HtmlViewer) console.warn('[files-applet] html-viewer.js did not load');
   if (!SourceViewer) console.warn('[files-applet] source-viewer.js did not load');
+  if (!AudioViewer) console.warn('[files-applet] audio-viewer.js did not load');
 
   function basename(p) {
     var i = p.lastIndexOf('/');
@@ -206,10 +208,13 @@
 
   /** V2.a (spec §4.0.A): file extensions DiffViewer refuses to
    *  handle. Binary content (and SVG, whose diff is line-noise)
-   *  routes to ImageViewer / HtmlViewer / future viewers instead.
-   *  See spec §7.7 Q7 for why SVG is listed. */
+   *  routes to ImageViewer / HtmlViewer / AudioViewer / future
+   *  viewers instead. See spec §7.7 Q7 for why SVG is listed.
+   *  Audio extensions (docs/files-applet-audio.md) are listed so
+   *  Diff/Source never claim them — keep in sync with
+   *  source-viewer.js BINARY_RE and the AudioViewer descriptor regex. */
   function isBinaryExtension(rel) {
-    return /\.(png|jpg|jpeg|gif|webp|svg|ico|pdf|zip|gz|tar|bin|exe|class|jar)$/i.test(rel || '');
+    return /\.(png|jpg|jpeg|gif|webp|svg|ico|pdf|zip|gz|tar|bin|exe|class|jar|wav|mp3|ogg|oga|m4a|aac|opus|flac)$/i.test(rel || '');
   }
 
   /** V6: collision-safe tab id for diff tabs. NUL sentinels
@@ -2906,6 +2911,19 @@
         canHandle: function(_a, rel) { return /\.html?$/i.test(rel || ''); },
         isDefault: function(_a, rel) { return /\.html?$/i.test(rel || ''); },
         open: function(s, c, a, r, opts) { return HtmlViewer.open(s, c, a, r, opts); },
+      });
+    }
+    if (AudioViewer) {
+      add({
+        viewerType: 'audio',
+        label: 'Audio',
+        canHandle: function(_a, rel) {
+          return /\.(wav|mp3|ogg|oga|m4a|aac|opus|flac)$/i.test(rel || '');
+        },
+        isDefault: function(_a, rel) {
+          return /\.(wav|mp3|ogg|oga|m4a|aac|opus|flac)$/i.test(rel || '');
+        },
+        open: function(s, c, a, r, opts) { return AudioViewer.open(s, c, a, r, opts); },
       });
     }
     if (DiffViewer && capabilities.canDiff) {

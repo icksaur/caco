@@ -220,6 +220,8 @@ const SESSION_CREATE_TIMEOUT_MS = 30000;
  */
 export async function streamResponse(prompt: string, model: string, imageData: string, newChat: boolean, cwd?: string): Promise<void> {
   const currentId = getActiveSessionId();
+  const launchActiveId = currentId;
+  let targetSessionId: string | null = currentId;
   chatView.savePrompt(prompt, currentId || '');
   if (currentId) notifyMessageSent(currentId);
   
@@ -254,10 +256,19 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       
       const data = await res.json();
       sessionId = data.sessionId;
+      targetSessionId = sessionId;
+      // Session-keyed state is always applied — it is correct wherever the user
+      // navigated and is required for failure recovery. Only the view switch
+      // (onNewSessionCreated) is gated: if the user moved to another session
+      // during create, the new session still dispatches in the background but
+      // does not yank the view.
       chatView.savePrompt(prompt, sessionId || '');
       if (sessionId) notifyMessageSent(sessionId);
       debug('SEND', 'Session created:', sessionId);
-      chatView.onNewSessionCreated(sessionId || '', data.cwd);
+      const superseded = getActiveSessionId() !== launchActiveId;
+      if (!superseded) {
+        chatView.onNewSessionCreated(sessionId || '', data.cwd);
+      }
       sessionTracker.setBusy(sessionId!, true);
     }
     
@@ -287,13 +298,21 @@ export async function streamResponse(prompt: string, model: string, imageData: s
   } catch (error) {
     console.error('[SEND] Error:', error);
     
-    // HTTP-level failure — POST itself failed, restore prompt
-    const sendSessionId = getActiveSessionId();
-    if (sendSessionId) {
-      sessionTracker.setBusy(sendSessionId, false);
-      chatView.restoreFailedPrompt(sendSessionId);
+    // HTTP-level failure — POST itself failed, restore prompt. Recovery targets
+    // the dispatch target (captured at send time), not whatever session is
+    // active now — the user may have navigated away mid-flight.
+    const failedSessionId = targetSessionId;
+    if (failedSessionId) {
+      sessionTracker.setBusy(failedSessionId, false);
+      chatView.restoreFailedPrompt(failedSessionId);
+    } else {
+      // New-chat create failed before a session id existed; the form/draft was
+      // cleared on send, so put the text back if still on the new-chat surface.
+      chatView.restoreNewChatPrompt(prompt);
     }
-    chatView.setFormEnabled(true);
+    if (failedSessionId === null || failedSessionId === getActiveSessionId()) {
+      chatView.setFormEnabled(true);
+    }
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     showToast(errorMessage);

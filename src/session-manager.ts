@@ -1,5 +1,5 @@
 import { CopilotClient, approveAll } from '@github/copilot-sdk';
-import type { ProviderConfig } from '@github/copilot-sdk';
+import type { ProviderConfig, ContextTier } from '@github/copilot-sdk';
 import { existsSync, mkdirSync, cpSync, rmSync, mkdtempSync, createWriteStream } from 'fs';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
@@ -19,6 +19,7 @@ import { disposeSessionRuntime } from './session-runtime.js';
 import { broadcastEvent } from './event-bus.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
 import { thresholdForBudget, type ModelTokenLimits } from './context-budget.js';
+import { tokenLimitsForModel, effectiveContextTier } from './model-billing.js';
 import type { SdkAgentInfo } from './agent-command.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
@@ -116,6 +117,7 @@ interface CreateSessionConfig {
   provider?: ProviderConfig;
   infiniteSessions?: InfiniteSessionConfig;
   largeOutput?: LargeToolOutputConfig;
+  contextTier?: ContextTier;
 }
 
 interface ResumeSessionConfig {
@@ -128,6 +130,7 @@ interface ResumeSessionConfig {
   provider?: ProviderConfig;
   infiniteSessions?: InfiniteSessionConfig;
   largeOutput?: LargeToolOutputConfig;
+  contextTier?: ContextTier;
 }
 
 interface CopilotSessionInstance {
@@ -136,7 +139,7 @@ interface CopilotSessionInstance {
   sendAndWait(options: SendOptions, timeout?: number): Promise<unknown>;
   getEvents(): Promise<SessionEvent[]>;
   disconnect(): Promise<void>;
-  setModel(model: string): Promise<void>;
+  setModel(model: string, options?: { contextTier?: ContextTier }): Promise<void>;
   abort(): Promise<void>;
   rpc: {
     history: {
@@ -230,11 +233,15 @@ function syncModelCache(sessionId: string, model?: string): void {
 }
 
 /**
- * Get model from cache (sync happens on create/resume).
+ * Resolve a session's Caco model id. Prefers the synced meta cache (set on
+ * create/resume); falls back to parsing the SDK event log when meta lacks a
+ * model (legacy/imported/external sessions). The fallback's event-log read only
+ * runs for those uncached sessions, so it stays off the hot path while keeping
+ * tier pinning, budget, and effort consistent on the first resume.
  */
 function readModelFromEvents(sessionId: string): string | null {
   const meta = getSessionMeta(sessionId);
-  return meta?.model ?? null;
+  return meta?.model ?? parseSessionModel(sessionId);
 }
 
 // ============================================================================
@@ -476,10 +483,21 @@ export class SessionManager {
   modelTokenLimits(cacoModelId: string): ModelTokenLimits | undefined {
     const m = this.cachedModels.find(x => x.id === cacoModelId);
     if (!m) return undefined;
-    return {
-      maxPromptTokens: m.capabilities?.limits?.max_prompt_tokens,
-      maxContextWindowTokens: m.capabilities?.limits?.max_context_window_tokens,
-    };
+    return tokenLimitsForModel(m);
+  }
+
+  /**
+   * The context tier to pin for a model. Returns 'long_context' only when that
+   * tier is a free upgrade (price-equal to default); otherwise 'default'.
+   * Returns undefined when the model is unknown so callers omit the option and
+   * let the SDK default stand. Single source of truth shared by create, resume,
+   * and in-place model switch so the pinned window always matches billing.
+   */
+  contextTierFor(cacoModelId: string | undefined): ContextTier | undefined {
+    if (!cacoModelId) return undefined;
+    const m = this.cachedModels.find(x => x.id === cacoModelId);
+    if (!m) return undefined;
+    return effectiveContextTier(m);
   }
 
   /**
@@ -604,6 +622,7 @@ export class SessionManager {
         largeOutput: sdkLargeOutputConfig(),
         hooks: { onPostToolUse: createObservationHook(cwd, sessionRef) },
         ...(resolved.provider && { provider: resolved.provider }),
+        ...(this.contextTierFor(resolved.cacoId) && { contextTier: this.contextTierFor(resolved.cacoId) }),
         // No infiniteSessions here: a brand-new session has no persisted budget
         // yet. Budgets are applied on resume (incl. the recreate triggered by
         // setSessionContextBudget). See infiniteSessionsFor / _doResume.
@@ -740,6 +759,7 @@ export class SessionManager {
       ...(resolved?.provider && { provider: resolved.provider }),
       ...(infinite && { infiniteSessions: infinite }),
       ...(applyEffort && { reasoningEffort: storedEffort }),
+      ...(this.contextTierFor(cacoModel ?? undefined) && { contextTier: this.contextTierFor(cacoModel ?? undefined) }),
     } as ResumeSessionConfig;
 
     const MAX_REPAIR_ATTEMPTS = 3;
@@ -1190,7 +1210,8 @@ export class SessionManager {
     this.clearStaleReasoningEffort(sessionId, model);
 
     if (fastPath) {
-      await active.session.setModel(resolved.sdkModel);
+      const tier = this.contextTierFor(resolved.cacoId);
+      await active.session.setModel(resolved.sdkModel, tier ? { contextTier: tier } : undefined);
       syncModelCache(sessionId, resolved.cacoId);
       console.log(`[MODEL] Changed session ${sessionId.slice(0, 8)} to ${model}`);
       return;

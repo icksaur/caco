@@ -3,11 +3,18 @@ import { loadPreferences, savePreferences, DEFAULT_MODEL, resolveModelAlias } fr
 import { resolveSystemMessage } from './prompts.js';
 import type { UserPreferences, SessionStateConfig, ResumeResult } from './types.js';
 
-class SessionState {
+/** @internal Exported only as a unit-test seam; routes use the `sessionState`
+ *  singleton below. */
+export class SessionState {
   private static readonly DEFAULT_CLIENT = 'default';
   
   private _clientSessions = new Map<string, string | null>();
   private _clientPendingResume = new Map<string, string | null>();
+  /** Per-client serialization tail. Only one session transition (ensure /
+   *  switch / new-chat / delete) runs at a time for a given client, so
+   *  concurrent transitions cannot interleave their awaits and commit active
+   *  session / preferences out of order. */
+  private _clientTransition = new Map<string, Promise<unknown>>();
   private _preferences: UserPreferences;
   private _config: SessionStateConfig;
   /** Listeners fired after a successful deleteSession() call. Used for
@@ -66,6 +73,21 @@ class SessionState {
   }
 
   /**
+   * Serialize a state-mutating transition for one client. `body` is chained
+   * after the current tail so two transitions for the same client never run
+   * concurrently; the last one enqueued (the user's latest action) commits
+   * last and wins. A rejected body propagates to its caller but does not wedge
+   * the chain for the next transition.
+   */
+  private runTransition<T>(clientId: string | undefined, body: () => Promise<T>): Promise<T> {
+    const cid = clientId || SessionState.DEFAULT_CLIENT;
+    const prev = this._clientTransition.get(cid) ?? Promise.resolve();
+    const run = prev.then(body, body);
+    this._clientTransition.set(cid, run.then(() => {}, () => {}));
+    return run;
+  }
+
+  /**
    * Ensure a session exists, creating one if needed.
    * Used for lazy session creation on first message.
    * 
@@ -78,6 +100,10 @@ class SessionState {
    * @param clientId - Client identifier for multi-client support
    */
   async ensureSession(model?: string, newChat?: boolean, cwd?: string, clientId?: string): Promise<string> {
+    return this.runTransition(clientId, () => this.ensureSessionLocked(model, newChat, cwd, clientId));
+  }
+
+  private async ensureSessionLocked(model?: string, newChat?: boolean, cwd?: string, clientId?: string): Promise<string> {
     const activeId = this.getActiveSessionId(clientId);
     
     // Explicit new chat request - just clear the active session reference
@@ -152,6 +178,10 @@ class SessionState {
    * @returns ResumeResult with sessionId and optional fallback CWD used
    */
   async switchSession(sessionId: string, clientId?: string): Promise<ResumeResult> {
+    return this.runTransition(clientId, () => this.switchSessionLocked(sessionId, clientId));
+  }
+
+  private async switchSessionLocked(sessionId: string, clientId?: string): Promise<ResumeResult> {
     this.setPendingResumeId(null, clientId);
     
     // Resume new session (loads SDK client if needed, doesn't stop others)
@@ -178,6 +208,10 @@ class SessionState {
    * @param clientId - Client identifier for multi-client support
    */
   async prepareNewChat(cwd: string, clientId?: string): Promise<void> {
+    return this.runTransition(clientId, () => this.prepareNewChatLocked(cwd, clientId));
+  }
+
+  private async prepareNewChatLocked(cwd: string, clientId?: string): Promise<void> {
     const activeId = this.getActiveSessionId(clientId);
     if (activeId) {
       console.log(`[SESSION] Preparing new chat - clearing reference to ${activeId} (session continues running)`);
@@ -200,6 +234,10 @@ class SessionState {
    * @param clientId - Client identifier for multi-client support
    */
   async deleteSession(sessionId: string, clientId?: string): Promise<boolean> {
+    return this.runTransition(clientId, () => this.deleteSessionLocked(sessionId, clientId));
+  }
+
+  private async deleteSessionLocked(sessionId: string, clientId?: string): Promise<boolean> {
     const wasActive = sessionId === this.getActiveSessionId(clientId);
     
     await sessionManager.delete(sessionId);

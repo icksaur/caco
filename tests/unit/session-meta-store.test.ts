@@ -83,6 +83,17 @@ describe('updateSessionMeta', () => {
     const backups = readdirSync(metaDir()).filter(f => f.startsWith('meta.json.corrupt-'));
     expect(backups.length).toBe(1);
   });
+
+  it('backs up a corrupt file at most once across repeated refusals', () => {
+    writeFileSync(metaPath(), '{ name: "Important" ');
+
+    updateSessionMeta(SID, m => { m.lastIdleAt = 'a'; });
+    updateSessionMeta(SID, m => { m.lastIdleAt = 'b'; });
+    updateSessionMeta(SID, m => { m.lastIdleAt = 'c'; });
+
+    const backups = readdirSync(metaDir()).filter(f => f.startsWith('meta.json.corrupt-'));
+    expect(backups.length).toBe(1);
+  });
 });
 
 describe('markSessionObserved (background mutator)', () => {

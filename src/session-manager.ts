@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, cpSync, rmSync, mkdtempSync, createWriteStream }
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage, SessionEvent, ToolFactory } from './types.js';
-import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, updateSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
+import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, updateSessionMeta, readSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
 import { readSessionWorkspace, readSessionEvents, readSessionEventsResult, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
@@ -1143,6 +1143,16 @@ export class SessionManager {
 
     const resolved = resolveModel(model);
     const fastPath = !resolved.provider && !active.providerId;
+
+    // Preflight: a model switch mutates the live SDK session, but syncModelCache
+    // persists the new model best-effort. If meta.json is corrupt that persistence
+    // would be silently refused, leaving the live session ahead of disk (model
+    // reverts on restart). Refuse before touching the SDK session instead.
+    const metaCheck = readSessionMeta(sessionId);
+    if (!metaCheck.ok && metaCheck.kind === 'corrupt') {
+      throw new Error(`Cannot change model: session metadata for ${sessionId} is unreadable`);
+    }
+
     this.clearStaleReasoningEffort(sessionId, model);
 
     if (fastPath) {

@@ -9,7 +9,7 @@
  * metadata separate to avoid coupling with SDK internals.
  */
 
-import { writeFileSync, readFileSync, existsSync, copyFileSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, copyFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { STORAGE_ROOT, getSessionDir, ensureDir } from './storage-paths.js';
 import { readJsonFileSync, type DiskRead } from './disk-read.js';
@@ -147,10 +147,18 @@ export function updateSessionMeta(
 }
 
 function backupCorruptMeta(sessionId: string, error: Error): void {
-  const metaPath = join(getSessionDir(sessionId), 'meta.json');
-  const backupPath = `${metaPath}.corrupt-${Date.now()}`;
+  const dir = getSessionDir(sessionId);
+  const metaPath = join(dir, 'meta.json');
   try {
-    if (!existsSync(backupPath)) copyFileSync(metaPath, backupPath);
+    // Back up at most once per corrupt file: a unique timestamped path is always
+    // absent, so we must scan for any pre-existing corrupt-* backup instead.
+    const alreadyBackedUp = readdirSync(dir).some(f => f.startsWith('meta.json.corrupt-'));
+    if (alreadyBackedUp) {
+      console.error(`[STORAGE] updateSessionMeta: refusing to overwrite corrupt meta.json for ${sessionId.slice(0, 8)} (${error.message}); backup already exists`);
+      return;
+    }
+    const backupPath = `${metaPath}.corrupt-${Date.now()}`;
+    copyFileSync(metaPath, backupPath);
     console.error(`[STORAGE] updateSessionMeta: refusing to overwrite corrupt meta.json for ${sessionId.slice(0, 8)} (${error.message}); backed up to ${backupPath}`);
   } catch (e) {
     console.error(`[STORAGE] updateSessionMeta: corrupt meta.json for ${sessionId.slice(0, 8)} and backup failed: ${(e as Error).message}`);

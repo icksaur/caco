@@ -10,6 +10,7 @@ import {
   loadDefinition,
   loadDefinitionResult,
   loadLastRun,
+  loadLastRunResult,
   saveDefinition,
   saveLastRun,
   deleteSchedule,
@@ -213,7 +214,18 @@ router.patch('/schedule/:slug', async (req: Request, res: Response) => {
       return;
     }
     const definition = defResult.value;
-    
+
+    // When re-enabling, a corrupt last-run.json makes the scheduler skip this
+    // schedule, so reporting a successful enable would be misleading. Refuse
+    // before persisting the definition.
+    if (enabled) {
+      const lrResult = await loadLastRunResult(slug);
+      if (!lrResult.ok && lrResult.kind === 'corrupt') {
+        res.status(409).json({ error: `Schedule last-run state is corrupt; cannot re-enable: ${slug}` });
+        return;
+      }
+    }
+
     // Apply partial updates
     if (enabled !== undefined) {
       definition.enabled = enabled;
@@ -285,7 +297,16 @@ router.post('/schedule/:slug/run', async (req: Request, res: Response) => {
       }
       return;
     }
-    
+
+    // executeSchedule refuses (silently) to run a schedule whose last-run.json is
+    // corrupt, so triggerSchedule would report success without running. Surface
+    // it as a conflict instead of a false "executed".
+    const lrResult = await loadLastRunResult(slug);
+    if (!lrResult.ok && lrResult.kind === 'corrupt') {
+      res.status(409).json({ error: `Schedule last-run state is corrupt; refusing to run: ${slug}` });
+      return;
+    }
+
     const result = await triggerSchedule(slug);
     
     if (!result.success) {

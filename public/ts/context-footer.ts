@@ -416,6 +416,11 @@ export function clearThroughput(): void {
   const footer = regions.footer.el;
   const el = footer.querySelector('.context-throughput');
   if (el) el.innerHTML = '';
+  const saved = footer.querySelector('.context-saved') as HTMLElement | null;
+  if (saved) {
+    saved.textContent = '';
+    saved.removeAttribute('title');
+  }
 }
 
 function renderThroughput(data: ThroughputData): void {
@@ -446,19 +451,31 @@ function renderThroughput(data: ThroughputData): void {
     rateLimitHtml = ` <span class="ratelimit" title="${escapeHtml(rlTooltip)}">⚠${data.rateLimitCount}</span>`;
   }
 
-  let savedHtml = '';
+  el.innerHTML = tokenHtml + rateLimitHtml;
+  renderSaved(data);
+}
+
+/** Render the accumulated workflow token-savings indicator next to the context
+ *  usage pie. Cleared when there are no savings yet. */
+function renderSaved(data: ThroughputData): void {
+  const footer = regions.footer.el;
+  const el = footer.querySelector('.context-saved') as HTMLElement | null;
+  if (!el) return;
+
   const savedTokens = data.workflowSavedTokens ?? 0;
-  if (savedTokens > 0) {
-    const runs = data.workflowRuns ?? 0;
-    const savedCredits = estimateSavedCredits(savedTokens);
-    const creditNote = savedCredits !== null
-      ? ` (≈${savedCredits < 10 ? savedCredits.toFixed(2) : Math.round(savedCredits).toLocaleString()}cr)`
-      : '';
-    const savedTooltip =
-      `workflow: est. ${savedTokens.toLocaleString()} context tokens saved${creditNote} across ` +
-      `${runs} run${runs !== 1 ? 's' : ''} (lower-bound estimate at ~4 chars/token)`;
-    savedHtml = ` <span class="tp-saved" title="${escapeHtml(savedTooltip)}">↯${escapeHtml(kAbbrev(savedTokens))}</span>`;
+  if (savedTokens <= 0) {
+    el.textContent = '';
+    el.removeAttribute('title');
+    return;
   }
 
-  el.innerHTML = tokenHtml + rateLimitHtml + savedHtml;
+  const runs = data.workflowRuns ?? 0;
+  const savedCredits = estimateSavedCredits(savedTokens);
+  const creditNote = savedCredits !== null
+    ? ` (≈${savedCredits < 10 ? savedCredits.toFixed(2) : Math.round(savedCredits).toLocaleString()}cr)`
+    : '';
+  el.textContent = `↯${kAbbrev(savedTokens)}`;
+  el.title =
+    `workflow: est. ${savedTokens.toLocaleString()} context tokens saved${creditNote} across ` +
+    `${runs} run${runs !== 1 ? 's' : ''} (lower-bound estimate at ~4 chars/token)`;
 }

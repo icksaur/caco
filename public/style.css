@@ -2263,10 +2263,16 @@ main {
   margin-left: var(--space-xs);
 }
 
-.context-footer .context-throughput .tp-saved {
+.context-footer .context-saved {
+  flex-shrink: 0;
   color: var(--green, #3fb950);
-  margin-left: var(--space-xs);
   cursor: help;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.context-footer .context-saved:empty {
+  display: none;
 }
 
 .context-footer .context-description:empty {

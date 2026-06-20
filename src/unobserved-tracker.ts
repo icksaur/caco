@@ -1,5 +1,6 @@
-import { getSessionMeta, setSessionMeta } from './storage.js';
+import { getSessionMeta, updateSessionMeta } from './storage.js';
 import { broadcastGlobalEvent } from './event-bus.js';
+import type { SessionKind } from './session-meta-store.js';
 
 type BroadcastCallback = (event: {
   type: string;
@@ -48,13 +49,15 @@ export class UnobservedTracker {
    * @returns true if session became unobserved (wasn't already in set)
    */
   markIdle(sessionId: string): boolean {
-    // Update meta.json timestamp
-    const meta = getSessionMeta(sessionId) ?? { name: '' };
-    meta.lastIdleAt = new Date().toISOString();
-    setSessionMeta(sessionId, meta);
+    // Update meta.json timestamp (best-effort; corrupt meta is not clobbered)
+    let kind: SessionKind | undefined;
+    updateSessionMeta(sessionId, meta => {
+      meta.lastIdleAt = new Date().toISOString();
+      kind = meta.kind;
+    });
     
     // Swarm sessions don't become unobserved — parent agent observes them
-    if (meta.kind === 'swarm') {
+    if (kind === 'swarm') {
       console.log(`[UNOBSERVED] markIdle: ${sessionId.slice(0, 8)} (swarm session, skipping)`);
       return false;
     }
@@ -82,10 +85,8 @@ export class UnobservedTracker {
    * @returns true if session was unobserved (count decremented)
    */
   markObserved(sessionId: string): boolean {
-    // Update meta.json timestamp
-    const meta = getSessionMeta(sessionId) ?? { name: '' };
-    meta.lastObservedAt = new Date().toISOString();
-    setSessionMeta(sessionId, meta);
+    // Update meta.json timestamp (best-effort; corrupt meta is not clobbered)
+    updateSessionMeta(sessionId, meta => { meta.lastObservedAt = new Date().toISOString(); });
     
     // Remove from unobserved set
     if (!this.unobservedSet.has(sessionId)) {

@@ -19,7 +19,7 @@
 
 export type { SessionKind, SessionMeta } from './session-meta-store.js';
 export {
-  ensureSessionMeta, getSessionMeta, setSessionMeta,
+  ensureSessionMeta, getSessionMeta, setSessionMeta, updateSessionMeta, readSessionMeta,
   getSessionIconPath,
   markSessionObserved, markSessionIdle, isSessionUnobserved,
   setSessionIntent,

@@ -7,6 +7,14 @@ vi.mock('../../src/storage.js', () => ({
   setSessionMeta: vi.fn((sessionId: string, meta: Record<string, unknown>) => {
     mockMeta.set(sessionId, meta);
   }),
+  updateSessionMeta: vi.fn((sessionId: string, mutate: (m: Record<string, unknown>) => void, opts?: { createIfMissing?: boolean }) => {
+    const existing = mockMeta.get(sessionId);
+    if (!existing && opts?.createIfMissing === false) return false;
+    const meta = existing ?? { name: '' };
+    mutate(meta);
+    mockMeta.set(sessionId, meta);
+    return true;
+  }),
 }));
 
 vi.mock('../../src/routes/websocket.js', () => ({

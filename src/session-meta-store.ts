@@ -9,9 +9,10 @@
  * metadata separate to avoid coupling with SDK internals.
  */
 
-import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { STORAGE_ROOT, getSessionDir, ensureDir } from './storage-paths.js';
+import { readJsonFileSync, type DiskRead } from './disk-read.js';
 
 export type SessionKind = 'interactive' | 'agent' | 'swarm' | 'scheduled';
 
@@ -72,20 +73,37 @@ export function ensureSessionMeta(sessionId: string): void {
   }
 }
 
-export function getSessionMeta(sessionId: string): SessionMeta | undefined {
+/**
+ * Typed read of a session's meta.json: missing (no file) vs corrupt (unreadable
+ * or structurally invalid) vs ok. Applies the legacy `kind` back-fill on ok.
+ * A parsed-but-non-object value (null, array, primitive) is classified corrupt.
+ */
+export function readSessionMeta(sessionId: string): DiskRead<SessionMeta> {
   const metaPath = join(getSessionDir(sessionId), 'meta.json');
-  if (!existsSync(metaPath)) return undefined;
-  try {
-    const meta: SessionMeta = JSON.parse(readFileSync(metaPath, 'utf-8'));
-    if (!meta.kind) {
-      if (meta.isSwarmSession) meta.kind = 'swarm';
-      else if (meta.parentSessionId) meta.kind = 'agent';
-      else meta.kind = 'interactive';
-    }
-    return meta;
-  } catch {
-    return undefined;
+  const result = readJsonFileSync<unknown>(metaPath);
+  if (!result.ok) return result;
+
+  const parsed = result.value;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, kind: 'corrupt', error: new Error('meta.json is not an object') };
   }
+
+  const meta = parsed as SessionMeta;
+  if (!meta.kind) {
+    if (meta.isSwarmSession) meta.kind = 'swarm';
+    else if (meta.parentSessionId) meta.kind = 'agent';
+    else meta.kind = 'interactive';
+  }
+  return { ok: true, value: meta };
+}
+
+export function getSessionMeta(sessionId: string): SessionMeta | undefined {
+  const result = readSessionMeta(sessionId);
+  if (result.ok) return result.value;
+  if (result.kind === 'corrupt') {
+    console.error(`[STORAGE] getSessionMeta: corrupt meta.json for ${sessionId.slice(0, 8)}: ${result.error.message}`);
+  }
+  return undefined;
 }
 
 export function setSessionMeta(sessionId: string, meta: SessionMeta): void {
@@ -94,24 +112,67 @@ export function setSessionMeta(sessionId: string, meta: SessionMeta): void {
   writeFileSync(join(sessionDir, 'meta.json'), JSON.stringify(meta, null, 2));
 }
 
+/**
+ * The single read-modify-write boundary for session metadata. Never overwrites a
+ * corrupt meta.json with defaults — on corrupt it backs the file up once and
+ * refuses the write (returns false), preserving the on-disk copy for recovery.
+ *
+ * Returns true iff the mutation was persisted. A false return means nothing was
+ * written: either the file is corrupt, or it is missing and createIfMissing is
+ * false. User/API callers MUST check false and surface the refusal rather than
+ * reporting phantom success; background callers may log and ignore it.
+ */
+export function updateSessionMeta(
+  sessionId: string,
+  mutate: (meta: SessionMeta) => SessionMeta | void,
+  opts?: { createIfMissing?: boolean }
+): boolean {
+  const createIfMissing = opts?.createIfMissing ?? true;
+  const result = readSessionMeta(sessionId);
+
+  let meta: SessionMeta;
+  if (result.ok) {
+    meta = result.value;
+  } else if (result.kind === 'missing') {
+    if (!createIfMissing) return false;
+    meta = { name: '' };
+  } else {
+    backupCorruptMeta(sessionId, result.error);
+    return false;
+  }
+
+  const mutated = mutate(meta);
+  setSessionMeta(sessionId, mutated ?? meta);
+  return true;
+}
+
+function backupCorruptMeta(sessionId: string, error: Error): void {
+  const metaPath = join(getSessionDir(sessionId), 'meta.json');
+  const backupPath = `${metaPath}.corrupt-${Date.now()}`;
+  try {
+    if (!existsSync(backupPath)) copyFileSync(metaPath, backupPath);
+    console.error(`[STORAGE] updateSessionMeta: refusing to overwrite corrupt meta.json for ${sessionId.slice(0, 8)} (${error.message}); backed up to ${backupPath}`);
+  } catch (e) {
+    console.error(`[STORAGE] updateSessionMeta: corrupt meta.json for ${sessionId.slice(0, 8)} and backup failed: ${(e as Error).message}`);
+  }
+}
+
 // ============================================================================
 // Observed / idle tracking
 // ============================================================================
 
 /** Mark session as observed (user viewed the chat panel for it). */
 export function markSessionObserved(sessionId: string): void {
-  const meta = getSessionMeta(sessionId) ?? { name: '' };
-  meta.lastObservedAt = new Date().toISOString();
-  setSessionMeta(sessionId, meta);
-  console.log(`[STORAGE] markSessionObserved: ${sessionId.slice(0, 8)} lastObservedAt=${meta.lastObservedAt}`);
+  const ts = new Date().toISOString();
+  updateSessionMeta(sessionId, meta => { meta.lastObservedAt = ts; });
+  console.log(`[STORAGE] markSessionObserved: ${sessionId.slice(0, 8)} lastObservedAt=${ts}`);
 }
 
 /** Mark session as idle (assistant finished its turn). */
 export function markSessionIdle(sessionId: string): void {
-  const meta = getSessionMeta(sessionId) ?? { name: '' };
-  meta.lastIdleAt = new Date().toISOString();
-  setSessionMeta(sessionId, meta);
-  console.log(`[STORAGE] markSessionIdle: ${sessionId.slice(0, 8)} lastIdleAt=${meta.lastIdleAt}`);
+  const ts = new Date().toISOString();
+  updateSessionMeta(sessionId, meta => { meta.lastIdleAt = ts; });
+  console.log(`[STORAGE] markSessionIdle: ${sessionId.slice(0, 8)} lastIdleAt=${ts}`);
 }
 
 /** True if the session went idle after the user last observed it. */
@@ -132,15 +193,15 @@ export function isSessionUnobserved(sessionId: string): boolean {
 
 /** Update the session's current intent and append to its bounded history. */
 export function setSessionIntent(sessionId: string, intent: string): void {
-  const meta = getSessionMeta(sessionId) ?? { name: '' };
-  meta.currentIntent = intent;
-  const history = meta.intentHistory ?? [];
-  history.push({ text: intent, ts: Date.now() });
-  if (history.length > INTENT_HISTORY_LIMIT) {
-    history.splice(0, history.length - INTENT_HISTORY_LIMIT);
-  }
-  meta.intentHistory = history;
-  setSessionMeta(sessionId, meta);
+  updateSessionMeta(sessionId, meta => {
+    meta.currentIntent = intent;
+    const history = meta.intentHistory ?? [];
+    history.push({ text: intent, ts: Date.now() });
+    if (history.length > INTENT_HISTORY_LIMIT) {
+      history.splice(0, history.length - INTENT_HISTORY_LIMIT);
+    }
+    meta.intentHistory = history;
+  });
 }
 
 // ============================================================================

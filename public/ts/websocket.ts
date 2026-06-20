@@ -268,7 +268,7 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
   // load still has to resolve that load's pending promise.
   if (msg.type === 'historyComplete') {
     const completedId = msg.sessionId;
-    if (completedId) {
+    if (completedId && completedId === getActiveSessionId()) {
       void markSessionObserved(completedId);
     }
     const historyData = msg.data as { isBusy?: boolean; usage?: { tokenLimit: number; currentTokens: number } } | undefined;

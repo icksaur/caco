@@ -310,7 +310,12 @@ export async function streamResponse(prompt: string, model: string, imageData: s
       // cleared on send, so put the text back if still on the new-chat surface.
       chatView.restoreNewChatPrompt(prompt);
     }
-    if (failedSessionId === null || failedSessionId === getActiveSessionId()) {
+    // Only re-enable the form the user is actually looking at: the new-chat
+    // surface (no active session), or the dispatch target if still active.
+    const stillOnTarget = failedSessionId === null
+      ? getActiveSessionId() === null
+      : failedSessionId === getActiveSessionId();
+    if (stillOnTarget) {
       chatView.setFormEnabled(true);
     }
     

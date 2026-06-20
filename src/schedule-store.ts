@@ -155,10 +155,16 @@ export async function getScheduleForSession(sessionId: string): Promise<{
  */
 export function validateScheduleInterval(schedule: { type: 'cron' | 'interval'; expression?: string; intervalMinutes?: number }): string | null {
   if (schedule.type === 'interval') {
-    if (schedule.intervalMinutes && schedule.intervalMinutes < MIN_INTERVAL_MINUTES) {
+    if (typeof schedule.intervalMinutes !== 'number' || !Number.isFinite(schedule.intervalMinutes)) {
+      return 'Interval schedule requires a numeric intervalMinutes';
+    }
+    if (schedule.intervalMinutes < MIN_INTERVAL_MINUTES) {
       return `Minimum interval is ${MIN_INTERVAL_MINUTES} minutes (1 hour)`;
     }
-  } else if (schedule.type === 'cron' && schedule.expression) {
+  } else if (schedule.type === 'cron') {
+    if (!schedule.expression) {
+      return 'Cron schedule requires an expression';
+    }
     try {
       const interval = CronExpressionParser.parse(schedule.expression);
       const first = interval.next().toDate();
@@ -170,6 +176,8 @@ export function validateScheduleInterval(schedule: { type: 'cron' | 'interval'; 
     } catch {
       return 'Invalid cron expression';
     }
+  } else {
+    return 'Unknown schedule type';
   }
   return null;
 }

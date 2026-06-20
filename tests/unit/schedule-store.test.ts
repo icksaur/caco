@@ -62,3 +62,31 @@ describe('schedule-store typed loaders', () => {
     if (!r.ok) expect(r.kind).toBe('corrupt');
   });
 });
+
+import { validateScheduleInterval } from '../../src/schedule-store.js';
+
+describe('validateScheduleInterval', () => {
+  it('accepts a valid interval at/above the minimum', () => {
+    expect(validateScheduleInterval({ type: 'interval', intervalMinutes: 60 })).toBeNull();
+  });
+
+  it('accepts a valid cron at/above the minimum', () => {
+    expect(validateScheduleInterval({ type: 'cron', expression: '0 9 * * *' })).toBeNull();
+  });
+
+  it('rejects an interval schedule with no intervalMinutes', () => {
+    expect(validateScheduleInterval({ type: 'interval' })).toBeTruthy();
+  });
+
+  it('rejects a cron schedule with no expression', () => {
+    expect(validateScheduleInterval({ type: 'cron' })).toBeTruthy();
+  });
+
+  it('rejects an invalid cron expression', () => {
+    expect(validateScheduleInterval({ type: 'cron', expression: 'not-a-cron' })).toBeTruthy();
+  });
+
+  it('rejects an interval below the minimum', () => {
+    expect(validateScheduleInterval({ type: 'interval', intervalMinutes: 5 })).toBeTruthy();
+  });
+});

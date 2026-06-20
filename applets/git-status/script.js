@@ -444,7 +444,7 @@ function hideError() {
 /**
  * Refresh git status
  */
-async function showLastCommit(cwd = repoPath) {
+async function showLastCommit(cwd = repoPath, isStale) {
   try {
     const countResult = await runGit(['rev-list', '--count', 'HEAD'], cwd);
     const commitCount = parseInt(countResult.stdout.trim(), 10);
@@ -472,6 +472,7 @@ async function showLastCommit(cwd = repoPath) {
     // model). Per-file commit diffs are reachable from the
     // unstaged file rows. See docs/files-applet-v6.md §6.5.
 
+    if (typeof isStale === 'function' && isStale()) return;
     cleanMessage.innerHTML =
       `<div class="last-commit">` +
       `<span class="commit-hash">${hash}</span> ` +
@@ -570,7 +571,7 @@ async function refresh() {
     const totalChanges = staged.length + unstaged.length + untracked.length;
     if (totalChanges === 0) {
       cleanMessage.classList.remove('hidden');
-      await showLastCommit(cwd);
+      await showLastCommit(cwd, isStale);
     } else {
       cleanMessage.classList.add('hidden');
     }

@@ -224,6 +224,11 @@ router.patch('/schedule/:slug', async (req: Request, res: Response) => {
         res.status(409).json({ error: `Schedule last-run state is corrupt; cannot re-enable: ${slug}` });
         return;
       }
+      const intervalError = validateScheduleInterval(definition.schedule);
+      if (intervalError) {
+        res.status(400).json({ error: `Cannot enable ${slug}: ${intervalError}` });
+        return;
+      }
     }
 
     // Apply partial updates

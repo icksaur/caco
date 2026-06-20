@@ -86,7 +86,12 @@ async function checkSchedules(): Promise<void> {
       console.log(`[SCHEDULER] Found ${dueTasks.length} due tasks: ${dueTasks.join(', ')}`);
       
       for (const slug of dueTasks) {
-        await executeSchedule(slug);
+        try {
+          await executeSchedule(slug);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[SCHEDULER] Unhandled error executing ${slug}; continuing with remaining tasks:`, message);
+        }
       }
     }
   } finally {
@@ -226,24 +231,20 @@ async function createAndExecute(slug: string, definition: ScheduleDefinition): P
 
 export function calculateNextRun(definition: ScheduleDefinition, from?: Date): Date {
   const now = from || new Date();
-  
+
   if (definition.schedule.type === 'cron' && definition.schedule.expression) {
-    try {
-      const interval = CronExpressionParser.parse(definition.schedule.expression, { currentDate: now });
-      return interval.next().toDate();
-    } catch (error) {
-      console.error(`[SCHEDULER] Invalid cron expression for ${definition.slug}:`, error);
-      // Fallback to 1 hour
-      return new Date(now.getTime() + 60 * 60 * 1000);
-    }
+    const interval = CronExpressionParser.parse(definition.schedule.expression, { currentDate: now });
+    return interval.next().toDate();
   }
-  
+
   if (definition.schedule.type === 'interval' && definition.schedule.intervalMinutes) {
     return new Date(now.getTime() + definition.schedule.intervalMinutes * 60 * 1000);
   }
-  
-  // Default: 1 hour
-  return new Date(now.getTime() + 60 * 60 * 1000);
+
+  throw new Error(
+    `Cannot compute next run for ${definition.slug}: invalid ${definition.schedule.type} schedule ` +
+    `(${JSON.stringify(definition.schedule)})`
+  );
 }
 
 export async function triggerSchedule(slug: string): Promise<{ success: boolean; error?: string }> {

@@ -71,8 +71,30 @@ describe('CorrelationMetrics', () => {
       const result = metrics.isAllowed('session-4');
       expect(result.allowed).toBe(false);
       if (!result.allowed) {
-        expect(result.reason).toContain('Rate limit');
+        expect(result.reason.toLowerCase()).toContain('rate limit');
       }
+    });
+
+    it('slides the window on real recorded timestamps', () => {
+      const strictRules: CorrelationRules = {
+        maxDepth: 100,
+        maxAgeSeconds: 3600,
+        rateLimit: { maxCalls: 2, windowSeconds: 60 }
+      };
+      metrics = new CorrelationMetrics('test', strictRules);
+
+      metrics.recordCall('session-1');
+      metrics.recordCall('session-2');
+
+      // At the limit now: a third call is rejected.
+      expect(metrics.isAllowed('session-3').allowed).toBe(false);
+
+      // Advance past the window: the two earlier calls fall out, so a new call
+      // is allowed again. Under the old synthetic-timestamp behavior all prior
+      // calls were counted as "now" and this would stay rejected.
+      vi.advanceTimersByTime(61 * 1000);
+      expect(metrics.isAllowed('session-3').allowed).toBe(true);
+      expect(metrics.getMetrics().callCount).toBe(0);
     });
   });
 

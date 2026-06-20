@@ -4,7 +4,7 @@
  * Stores chain, timestamps, and checks against rules using rules-engine.
  */
 
-import { RateAggregator, type RateConfig } from './rate-aggregator.js';
+import { type RateConfig } from './rate-aggregator.js';
 import { RunawayRulesEngine } from './rules-engine.js';
 import {
   AGENT_MAX_DEPTH,
@@ -28,19 +28,22 @@ export const DEFAULT_RULES: CorrelationRules = {
   }
 };
 
+interface CallRecord {
+  sessionId: string;
+  timestamp: number;
+}
+
 export class CorrelationMetrics {
-  private chain: string[] = [];
+  private records: CallRecord[] = [];
   private startTime: number;
-  private rateAggregator: RateAggregator;
   private rulesEngine: RunawayRulesEngine;
-  
+
   constructor(
     public readonly correlationId: string,
     private rules: CorrelationRules = DEFAULT_RULES
   ) {
     this.startTime = Date.now();
-    this.rateAggregator = new RateAggregator(rules.rateLimit);
-    
+
     this.rulesEngine = new RunawayRulesEngine({
       maxDepth: rules.maxDepth,
       maxDuration: rules.maxAgeSeconds,
@@ -48,48 +51,36 @@ export class CorrelationMetrics {
       rateWindow: rules.rateLimit.windowSeconds
     });
   }
-  
+
   isAllowed(toSessionId: string): { allowed: true } | { allowed: false; reason: string } {
     const now = Date.now();
-    
-    if (!this.rateAggregator.isAllowed(now)) {
-      return {
-        allowed: false,
-        reason: `Rate limit exceeded: ${this.rules.rateLimit.maxCalls} calls per ${this.rules.rateLimit.windowSeconds}s`
-      };
-    }
-    
-    const allTimestamps = [...this.chain.map(() => now)]; // Simplified for engine
-    const result = this.rulesEngine.checkCall(
+    return this.rulesEngine.checkCall(
       {
-        chain: this.chain,
+        chain: this.records.map(r => r.sessionId),
         startTime: this.startTime,
-        callTimestamps: allTimestamps
+        callTimestamps: this.records.map(r => r.timestamp)
       },
       toSessionId,
       now
     );
-    
-    return result;
   }
-  
+
   recordCall(toSessionId: string): void {
-    const now = Date.now();
-    this.chain.push(toSessionId);
-    this.rateAggregator.recordCall(now);
+    this.records.push({ sessionId: toSessionId, timestamp: Date.now() });
   }
-  
+
   getMetrics() {
     const now = Date.now();
+    const windowStart = now - this.rules.rateLimit.windowSeconds * 1000;
     return {
       correlationId: this.correlationId,
-      chainLength: this.chain.length,
+      chainLength: this.records.length,
       ageSeconds: Math.floor((now - this.startTime) / 1000),
-      callCount: this.rateAggregator.getCallCount(now),
-      chain: [...this.chain]
+      callCount: this.records.filter(r => r.timestamp >= windowStart).length,
+      chain: this.records.map(r => r.sessionId)
     };
   }
-  
+
   isExpired(): boolean {
     const ageSeconds = (Date.now() - this.startTime) / 1000;
     return ageSeconds > this.rules.maxAgeSeconds;

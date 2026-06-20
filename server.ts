@@ -34,6 +34,7 @@ import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { storeOutput } from './src/storage.js';
+import { requireSessionId, PENDING_SESSION_ID } from './src/session-id-ref.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes, draftRoutes } from './src/routes/index.js';
 import { initWatchRoutes } from './src/routes/watch.js';
 import { flushAll as flushAllFileEditsCardLists } from './src/file-edits-store.js';
@@ -223,7 +224,7 @@ async function start(): Promise<void> {
   
   const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
     const queueCacoEvent = (event: CacoEmbedEvent) => {
-      if (sessionRef.id) {
+      if (sessionRef.id && sessionRef.id !== PENDING_SESSION_ID) {
         const queue = getQueue(sessionRef.id);
         queue.queue(event);
         console.log(`[QUEUE] caco.embed queued for session ${sessionRef.id}, pending: ${queue.length}`);
@@ -233,7 +234,7 @@ async function start(): Promise<void> {
     };
     
     const displayTools = createDisplayTools(
-      (data, meta) => storeOutput(sessionCwd, data, meta),
+      (data, meta) => storeOutput(requireSessionId(sessionRef), sessionCwd, data, meta),
       queueCacoEvent
     );
     const appletTools = createAppletTools(programCwd, sessionRef, pushStateToApplet);
@@ -251,8 +252,8 @@ async function start(): Promise<void> {
     const memoryTools = createMemoryTools();
     const offerActionTools = createOfferActionTool(sessionRef);
     const indexTools = createIndexTool(sessionCwd);
-    const retrieveTools = createRetrieveOutputTool(sessionCwd);
-    const workflowTools = workflowAvailable ? createWorkflowTool(sessionCwd) : [];
+    const retrieveTools = createRetrieveOutputTool(sessionCwd, sessionRef);
+    const workflowTools = workflowAvailable ? createWorkflowTool(sessionCwd, sessionRef) : [];
     const surfaceTools = createSurfaceTools(sessionRef);
     const browserTools = createBrowserTools(sessionRef);
     

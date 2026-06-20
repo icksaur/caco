@@ -18,7 +18,7 @@ afterAll(async () => {
 });
 
 function handler(): (args: { code: string; timeoutMs?: number; description?: string }) => Promise<{ textResultForLlm: string }> {
-  return createWorkflowTool(base)[0].handler as (args: { code: string; timeoutMs?: number; description?: string }) => Promise<{ textResultForLlm: string }>;
+  return createWorkflowTool(base, { id: 'wf-tool-session' })[0].handler as (args: { code: string; timeoutMs?: number; description?: string }) => Promise<{ textResultForLlm: string }>;
 }
 
 describe('createWorkflowTool', () => {

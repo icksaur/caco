@@ -6,6 +6,9 @@ import { shapeOutput } from '../../src/observe/shape.js';
 import { createObservationHook } from '../../src/observe/hook.js';
 import { createRetrieveOutputTool } from '../../src/observe/retrieve-tool.js';
 import { storeOutput, getOutput } from '../../src/output-store.js';
+import { getSessionOutputDir } from '../../src/storage-paths.js';
+import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { join } from 'path';
 import { MAX_FAILURES, SHAPE_THRESHOLD_BYTES, GENERIC_HARD_CAP_BYTES } from '../../src/observe/types.js';
 
 // Independent oracle: a failure-signal detector authored here, NOT imported from
@@ -185,9 +188,10 @@ describe('orchestrator — generic floor is enforced by construction (H1)', () =
 
 describe('hook — field preservation and raw recovery', () => {
   const cwd = '/tmp/obs-test-unregistered';
+  const ref = { id: 'obs-hook-session' };
 
   it('preserves non-text fields and only compacts textResultForLlm', () => {
-    const hook = createObservationHook(cwd);
+    const hook = createObservationHook(cwd, ref);
     const result = {
       resultType: 'success' as const,
       textResultForLlm: VITEST_FAIL,
@@ -208,14 +212,14 @@ describe('hook — field preservation and raw recovery', () => {
   });
 
   it('round-trips the raw output byte-identical through the store', () => {
-    const id = storeOutput(cwd, VITEST_FAIL, { type: 'raw', command: 'bash' });
+    const id = storeOutput(ref.id, cwd, VITEST_FAIL, { type: 'raw', command: 'bash' });
     const stored = getOutput(id);
     const data = typeof stored!.data === 'string' ? stored!.data : stored!.data.toString('utf8');
     expect(data).toBe(VITEST_FAIL);
   });
 
   it('passes through small output unchanged (no shaping)', () => {
-    const hook = createObservationHook(cwd);
+    const hook = createObservationHook(cwd, ref);
     const out = hook({ toolName: 'bash', toolResult: { resultType: 'success', textResultForLlm: 'ok' } as never });
     expect(out).toBeUndefined();
   });
@@ -224,12 +228,13 @@ describe('hook — field preservation and raw recovery', () => {
 describe('retrieve_output — session scoping (M2)', () => {
   type Handler = (args: { id: string; range?: number[]; grep?: string }) => Promise<{ textResultForLlm: string }>;
 
-  it('refuses to return output stored under a different session cwd', async () => {
-    const owner = '/tmp/obs-owner';
-    const id = storeOutput(owner, 'secret payload', { type: 'raw', command: 'bash' });
+  it('refuses to return output stored under a different session', async () => {
+    const ownerCwd = '/tmp/obs-owner';
+    const ownerRef = { id: 'obs-owner-session' };
+    const id = storeOutput(ownerRef.id, ownerCwd, 'secret payload', { type: 'raw', command: 'bash' });
 
-    const ownerHandler = createRetrieveOutputTool(owner)[0].handler as Handler;
-    const intruderHandler = createRetrieveOutputTool('/tmp/obs-intruder')[0].handler as Handler;
+    const ownerHandler = createRetrieveOutputTool(ownerCwd, ownerRef)[0].handler as Handler;
+    const intruderHandler = createRetrieveOutputTool(ownerCwd, { id: 'obs-intruder-session' })[0].handler as Handler;
 
     const ok = await ownerHandler({ id });
     expect(ok.textResultForLlm).toContain('secret payload');
@@ -239,10 +244,36 @@ describe('retrieve_output — session scoping (M2)', () => {
     expect(denied.textResultForLlm).not.toContain('secret payload');
   });
 
+  it('authorizes legacy outputs (no sessionId in metadata) by cwd fallback', async () => {
+    // Simulate a pre-P6 output: meta.json carries sessionCwd but no sessionId.
+    const legacyId = 'out_legacy_' + Date.now();
+    const legacySession = 'obs-legacy-session-' + Date.now();
+    const legacyCwd = '/tmp/obs-legacy';
+    const dir = getSessionOutputDir(legacySession);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${legacyId}.txt`), 'legacy payload');
+    writeFileSync(join(dir, `${legacyId}.meta.json`), JSON.stringify({
+      type: 'raw', createdAt: new Date().toISOString(), sessionCwd: legacyCwd,
+    }));
+    try {
+      const sameCwd = createRetrieveOutputTool(legacyCwd, { id: 'unrelated-id' })[0].handler as Handler;
+      const otherCwd = createRetrieveOutputTool('/tmp/obs-other', { id: 'unrelated-id' })[0].handler as Handler;
+
+      const ok = await sameCwd({ id: legacyId });
+      expect(ok.textResultForLlm).toContain('legacy payload');
+
+      const denied = await otherCwd({ id: legacyId });
+      expect(denied.textResultForLlm).toContain('no stored output');
+    } finally {
+      rmSync(getSessionOutputDir(legacySession), { recursive: true, force: true });
+    }
+  });
+
   it('grep filters and rejects over-long patterns', async () => {
     const cwd = '/tmp/obs-grep';
-    const id = storeOutput(cwd, 'alpha\nERROR here\nbeta', { type: 'raw', command: 'bash' });
-    const handler = createRetrieveOutputTool(cwd)[0].handler as Handler;
+    const ref = { id: 'obs-grep-session' };
+    const id = storeOutput(ref.id, cwd, 'alpha\nERROR here\nbeta', { type: 'raw', command: 'bash' });
+    const handler = createRetrieveOutputTool(cwd, ref)[0].handler as Handler;
 
     const hit = await handler({ id, grep: 'ERROR' });
     expect(hit.textResultForLlm).toContain('ERROR here');

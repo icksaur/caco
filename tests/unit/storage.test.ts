@@ -7,8 +7,6 @@ import {
   storeOutput, 
   getOutput, 
   detectLanguage,
-  registerSession,
-  unregisterSession,
   parseOutputMarkers,
   ensureSessionMeta,
   getSessionMeta,
@@ -26,29 +24,28 @@ import { homedir } from 'os';
 const TEST_SESSION_ID = 'test-session-meta-' + Date.now();
 const TEST_META_DIR = join(homedir(), '.caco', 'sessions', TEST_SESSION_ID);
 
-// For tests without session registration, outputs go to in-memory fallback
-const TEST_CWD = '/test/workspace';
+// Disk-backed output store: keyed by sessionId, sessionCwd is informational.
+const OUT_SESSION_A = 'test-output-session-a-' + Date.now();
+const OUT_SESSION_B = 'test-output-session-b-' + Date.now();
+const SHARED_CWD = '/test/workspace';
+const outDir = (id: string) => join(homedir(), '.caco', 'sessions', id);
 
-describe('storeOutput and getOutput (in-memory fallback)', () => {
-  // These tests deliberately trigger the unregistered-session warn path.
-  let warnSpy: ReturnType<typeof vi.spyOn>;
-  beforeEach(() => {
-    vi.useFakeTimers();
-    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
+describe('storeOutput and getOutput (disk, sessionId-keyed)', () => {
   afterEach(() => {
-    vi.useRealTimers();
-    warnSpy.mockRestore();
+    for (const id of [OUT_SESSION_A, OUT_SESSION_B]) {
+      rmSync(outDir(id), { recursive: true, force: true });
+    }
   });
 
   it('stores and retrieves content with metadata', () => {
-    const id = storeOutput(TEST_CWD, 'test content', { type: 'file' });
-    
+    const id = storeOutput(OUT_SESSION_A, SHARED_CWD, 'test content', { type: 'file' });
+
     expect(id).toMatch(/^out_\d+_\w+$/);
     const entry = getOutput(id);
     expect(entry?.data.toString()).toBe('test content');
     expect(entry?.metadata.type).toBe('file');
-    expect(entry?.metadata.sessionCwd).toBe(TEST_CWD);
+    expect(entry?.metadata.sessionId).toBe(OUT_SESSION_A);
+    expect(entry?.metadata.sessionCwd).toBe(SHARED_CWD);
     expect(entry?.metadata.createdAt).toBeDefined();
   });
 
@@ -56,24 +53,27 @@ describe('storeOutput and getOutput (in-memory fallback)', () => {
     expect(getOutput('out_nonexistent_abc123')).toBeNull();
   });
 
-  it('auto-cleans after 30 minute TTL', () => {
-    const id = storeOutput(TEST_CWD, 'ephemeral content', { type: 'terminal' });
-    expect(getOutput(id)).not.toBeNull();
-    
-    vi.advanceTimersByTime(31 * 60 * 1000);
-    expect(getOutput(id)).toBeNull();
+  it('survives memory-cache TTL via disk persistence', () => {
+    vi.useFakeTimers();
+    try {
+      const id = storeOutput(OUT_SESSION_A, SHARED_CWD, 'durable content', { type: 'terminal' });
+      expect(getOutput(id)).not.toBeNull();
+      vi.advanceTimersByTime(31 * 60 * 1000);
+      // Cache entry expired, but disk copy remains retrievable.
+      expect(getOutput(id)?.data.toString()).toBe('durable content');
+    } finally {
+      vi.useRealTimers();
+    }
   });
-});
 
-describe('registerSession and unregisterSession', () => {
-  it('registers and unregisters session mappings', () => {
-    const cwd = '/project/test';
-    const sessionId = 'session-123';
-    
-    // Before registration, no sessionId lookup possible (uses fallback)
-    // Just verify the functions don't throw
-    registerSession(cwd, sessionId);
-    unregisterSession(cwd);
+  it('two sessions in the same cwd store independently (no sibling overwrite)', () => {
+    const idA = storeOutput(OUT_SESSION_A, SHARED_CWD, 'output A', { type: 'raw' });
+    const idB = storeOutput(OUT_SESSION_B, SHARED_CWD, 'output B', { type: 'raw' });
+
+    expect(getOutput(idA)?.data.toString()).toBe('output A');
+    expect(getOutput(idB)?.data.toString()).toBe('output B');
+    expect(getOutput(idA)?.metadata.sessionId).toBe(OUT_SESSION_A);
+    expect(getOutput(idB)?.metadata.sessionId).toBe(OUT_SESSION_B);
   });
 });
 

@@ -38,7 +38,6 @@ export {
 
 export type { OutputMetadata, StoredOutput, ActivityMetadata, StoredActivity } from './output-store.js';
 export {
-  registerSession, unregisterSession,
   storeOutput, getOutput, listOutputs, listEmbedOutputs, parseOutputMarkers, pruneOutputs,
   storeActivity, getActivity, listActivities,
   detectLanguage,

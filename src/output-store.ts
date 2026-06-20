@@ -8,9 +8,9 @@
  * Activities are SDK event traces (intent + tool calls) stored under
  * ~/.caco/sessions/<id>/activity/.
  *
- * The cwd → sessionId map ("session registry") lives here because storeOutput()
- * is the only consumer that resolves cwd to id; tools are created with the
- * session's cwd in closure and need to find the matching sessionId for storage.
+ * Output is keyed directly by sessionId: the owning session's `SessionIdRef` is
+ * threaded into every tool, so callers pass the resolved id. (cwd is not a
+ * session identity — multiple sessions can share a repo.)
  */
 
 import { writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'fs';
@@ -21,7 +21,8 @@ import { OUTPUT_CACHE_TTL_MS } from './config.js';
 export interface OutputMetadata {
   type: 'file' | 'terminal' | 'image' | 'embed' | 'raw';
   createdAt: string;
-  sessionCwd: string;
+  sessionId: string;
+  sessionCwd?: string;
   path?: string;
   command?: string;
   highlight?: string;
@@ -50,20 +51,6 @@ export interface StoredActivity {
   metadata: ActivityMetadata;
 }
 
-const cwdToSessionId = new Map<string, string>();
-
-export function registerSession(cwd: string, sessionId: string): void {
-  cwdToSessionId.set(cwd, sessionId);
-}
-
-export function unregisterSession(cwd: string): void {
-  cwdToSessionId.delete(cwd);
-}
-
-export function getSessionIdForCwd(cwd: string): string | undefined {
-  return cwdToSessionId.get(cwd);
-}
-
 interface CacheEntry {
   data: string | Buffer;
   metadata: OutputMetadata;
@@ -76,41 +63,30 @@ function generateOutputId(): string {
   return `out_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function storeInMemory(data: string | Buffer, metadata: OutputMetadata): string {
-  const outputId = generateOutputId();
-  outputCache.set(outputId, { data, metadata, cachedAt: Date.now() });
-  setTimeout(() => outputCache.delete(outputId), OUTPUT_CACHE_TTL_MS);
-  return outputId;
-}
-
 /**
- * Store output to disk.
+ * Store output to disk under the owning session's directory.
  *
- * @param sessionCwd - Session's working directory (used to look up sessionId)
+ * @param sessionId - Owning session id (resolved from the session's SessionIdRef)
+ * @param sessionCwd - Session's working directory (informational metadata only)
  * @param data - Content to store
  * @param metadata - Output metadata (must include type)
  * @returns Output ID for retrieval
  */
 export function storeOutput(
+  sessionId: string,
   sessionCwd: string,
   data: string | Buffer,
   metadata: { type: OutputMetadata['type']; [key: string]: unknown }
 ): string {
-  const sessionId = getSessionIdForCwd(sessionCwd);
   const createdAt = new Date().toISOString();
 
   const fullMetadata: OutputMetadata = {
     ...metadata,
     type: metadata.type,
     createdAt,
+    sessionId,
     sessionCwd,
   };
-
-  if (!sessionId) {
-    // Fallback when session isn't registered. Shouldn't happen in normal flow.
-    console.warn(`[storage] No session registered for cwd: ${sessionCwd}, using memory cache`);
-    return storeInMemory(data, fullMetadata);
-  }
 
   const outputId = generateOutputId();
   const outputDir = getSessionOutputDir(sessionId);

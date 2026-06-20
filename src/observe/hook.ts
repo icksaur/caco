@@ -1,6 +1,8 @@
 import type { ToolResultObject } from '@github/copilot-sdk';
 import { storeOutput } from '../output-store.js';
 import { shapeOutput } from './shape.js';
+import type { SessionIdRef } from '../types.js';
+import { requireSessionId } from '../session-id-ref.js';
 
 interface PostToolUseInput {
   toolName: string;
@@ -17,7 +19,7 @@ interface PostToolUseOutput {
  * summary and stash the raw output for recovery via `retrieve_output`. Only
  * `textResultForLlm` is touched; all other result fields pass through.
  */
-export function createObservationHook(sessionCwd: string) {
+export function createObservationHook(sessionCwd: string, sessionRef: SessionIdRef) {
   return (input: PostToolUseInput): PostToolUseOutput | void => {
     const result = input.toolResult;
     if (!result || typeof result.textResultForLlm !== 'string') return;
@@ -26,7 +28,7 @@ export function createObservationHook(sessionCwd: string) {
     const decision = shapeOutput(input.toolName, raw);
     if (!decision) return;
 
-    const id = storeOutput(sessionCwd, raw, { type: 'raw', command: input.toolName });
+    const id = storeOutput(requireSessionId(sessionRef), sessionCwd, raw, { type: 'raw', command: input.toolName });
     const rawKb = (decision.rawBytes / 1024).toFixed(1);
     const shapedKb = (decision.shapedBytes / 1024).toFixed(1);
     const handle =

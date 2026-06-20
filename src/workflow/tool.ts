@@ -1,6 +1,6 @@
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { storeOutput, getSessionIdForCwd } from '../output-store.js';
+import { storeOutput } from '../output-store.js';
 import { shapeOutput } from '../observe/shape.js';
 import { createLogger } from '../logger.js';
 import { recordWorkflowSavings } from '../session-throughput.js';
@@ -8,6 +8,8 @@ import { WORKFLOW_EMIT_CAP_BYTES, WORKFLOW_TIMEOUT_CAP_MS } from '../config.js';
 import { runWorkflow } from './runner.js';
 import { estimateSavedTokens } from './savings.js';
 import { FACADE_API_SUMMARY } from './facade.js';
+import type { SessionIdRef } from '../types.js';
+import { requireSessionId } from '../session-id-ref.js';
 
 const workflowLog = createLogger('WORKFLOW');
 
@@ -34,9 +36,9 @@ for (const f of files) {
 emit(offenders);
 \`\`\``;
 
-function capValue(serialized: string, sessionCwd: string): { text: string; handle?: string } {
+function capValue(serialized: string, sessionId: string, sessionCwd: string): { text: string; handle?: string } {
   if (Buffer.byteLength(serialized, 'utf8') <= WORKFLOW_EMIT_CAP_BYTES) return { text: serialized };
-  const id = storeOutput(sessionCwd, serialized, { type: 'raw', command: 'caco_run_workflow:value' });
+  const id = storeOutput(sessionId, sessionCwd, serialized, { type: 'raw', command: 'caco_run_workflow:value' });
   const slice = Buffer.from(serialized, 'utf8').subarray(0, WORKFLOW_EMIT_CAP_BYTES).toString('utf8');
   return {
     text: `${slice}\n[emitted value truncated to ${WORKFLOW_EMIT_CAP_BYTES / 1024} KB]`,
@@ -44,16 +46,16 @@ function capValue(serialized: string, sessionCwd: string): { text: string; handl
   };
 }
 
-function logsSection(logs: string, logsTruncated: boolean, sessionCwd: string): string {
+function logsSection(logs: string, logsTruncated: boolean, sessionId: string, sessionCwd: string): string {
   if (!logs.trim()) return '';
-  const id = storeOutput(sessionCwd, logs, { type: 'terminal', command: 'caco_run_workflow' });
+  const id = storeOutput(sessionId, sessionCwd, logs, { type: 'terminal', command: 'caco_run_workflow' });
   const decision = shapeOutput('bash', logs);
   const body = decision ? decision.shaped : logs;
   const note = logsTruncated ? ' (capture hit the log ceiling — output truncated)' : '';
   return `\n\nLogs${note} [retrieve_output id="${id}"]:\n${body}`;
 }
 
-export function createWorkflowTool(sessionCwd: string) {
+export function createWorkflowTool(sessionCwd: string, sessionRef: SessionIdRef) {
   const tool = defineTool('caco_run_workflow', {
     description: DESCRIPTION,
     parameters: z.object({
@@ -63,6 +65,7 @@ export function createWorkflowTool(sessionCwd: string) {
     }),
     handler: async ({ code, timeoutMs, description }) => {
       workflowLog.info('run', { description, codeBytes: Buffer.byteLength(code, 'utf8'), code });
+      const sessionId = requireSessionId(sessionRef);
       let result;
       try {
         result = await runWorkflow(sessionCwd, { code, timeoutMs });
@@ -70,19 +73,16 @@ export function createWorkflowTool(sessionCwd: string) {
         return { textResultForLlm: `Error: ${e instanceof Error ? e.message : String(e)}` };
       }
 
-      const logs = logsSection(result.logs, result.logsTruncated, sessionCwd);
+      const logs = logsSection(result.logs, result.logsTruncated, sessionId, sessionCwd);
 
       if (result.outcome === 'emitted') {
         const serialized = JSON.stringify(result.value, null, 2);
-        const { text, handle } = capValue(serialized ?? 'undefined', sessionCwd);
+        const { text, handle } = capValue(serialized ?? 'undefined', sessionId, sessionCwd);
         const handleNote = handle ? ` [retrieve_output id="${handle}"]` : '';
         const killNote = result.timedOut ? ' (note: the workflow was killed by the timeout after emitting)' : '';
         const out = `Workflow emitted${handleNote}${killNote}:\n${text}${logs}`;
-        const sessionId = getSessionIdForCwd(sessionCwd);
-        if (sessionId) {
-          const saved = estimateSavedTokens(result.observedBytes, Buffer.byteLength(out, 'utf8'));
-          recordWorkflowSavings(sessionId, saved);
-        }
+        const saved = estimateSavedTokens(result.observedBytes, Buffer.byteLength(out, 'utf8'));
+        recordWorkflowSavings(sessionId, saved);
         return { textResultForLlm: out };
       }
       if (result.outcome === 'no-emit') {

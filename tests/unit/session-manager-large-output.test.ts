@@ -30,8 +30,6 @@ const storage = vi.hoisted(() => {
   const meta = new Map<string, Record<string, unknown>>();
   return {
     meta,
-    registerSession: vi.fn(),
-    unregisterSession: vi.fn(),
     ensureSessionMeta: vi.fn((sessionId: string) => {
       if (!meta.has(sessionId)) meta.set(sessionId, { name: '' });
     }),

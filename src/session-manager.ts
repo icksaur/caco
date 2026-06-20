@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, cpSync, rmSync, mkdtempSync, createWriteStream }
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage, SessionEvent, ToolFactory } from './types.js';
-import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, updateSessionMeta, readSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
+import { ensureSessionMeta, getSessionMeta, updateSessionMeta, readSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
 import { readSessionWorkspace, readSessionEvents, readSessionEventsResult, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
@@ -567,7 +567,7 @@ export class SessionManager {
         mcpServers: await loadMcpServers(),
         workingDirectory: cwd,
         largeOutput: sdkLargeOutputConfig(),
-        hooks: { onPostToolUse: createObservationHook(cwd) },
+        hooks: { onPostToolUse: createObservationHook(cwd, sessionRef) },
         ...(resolved.provider && { provider: resolved.provider }),
         // No infiniteSessions here: a brand-new session has no persisted budget
         // yet. Budgets are applied on resume (incl. the recreate triggered by
@@ -589,8 +589,6 @@ export class SessionManager {
     });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
     
-    // Register with storage layer for output persistence
-    registerSession(cwd, session.sessionId);
     ensureSessionMeta(session.sessionId);
     
     // Cache model in metadata — store the namespaced Caco id, not the SDK model
@@ -698,7 +696,7 @@ export class SessionManager {
       mcpServers: await loadMcpServers(),
       workingDirectory: cwd,
       largeOutput: sdkLargeOutputConfig(),
-      hooks: { onPostToolUse: createObservationHook(cwd) },
+      hooks: { onPostToolUse: createObservationHook(cwd, sessionRef) },
       ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
       ...(applyModel && { model: resolved.sdkModel }),
       ...(resolved?.provider && { provider: resolved.provider }),
@@ -779,8 +777,6 @@ export class SessionManager {
     // Evict oldest inactive sessions if over the limit
     this.evictInactiveSessions();
     
-    // Register with storage layer for output persistence
-    registerSession(cwd, sessionId);
     ensureSessionMeta(sessionId);
     
     // Sync model to cache. For BYOK or an explicit override the SDK only knows
@@ -818,7 +814,7 @@ export class SessionManager {
       return;
     }
     
-    const { cwd, session } = active;
+    const { session } = active;
     
     try {
       await session.disconnect();
@@ -836,8 +832,6 @@ export class SessionManager {
     dispatchState.end(sessionId);
     this.activeSessions.delete(sessionId);
     
-    // Unregister from storage layer
-    unregisterSession(cwd);
     clearThroughputSession(sessionId);
     
     console.log(`✓ Stopped session ${sessionId}`);
@@ -859,7 +853,6 @@ export class SessionManager {
 
     cached.cwd = newCwd;
     this.sessionCache.set(sessionId, cached);
-    registerSession(newCwd, sessionId);
 
     // Persist the override to Caco meta so it survives restart. The SDK's
     // session.start event keeps the original cwd; _discoverSessions prefers
@@ -1530,7 +1523,7 @@ export class SessionManager {
    * Fork an existing session. Returns the new session ID.
    * Uses the SDK's experimental sessions.fork RPC to copy events to a new session.
    * Mirrors the post-creation registration steps that create() does:
-   * sessionCache.set, registerSession, ensureSessionMeta.
+   * sessionCache.set, ensureSessionMeta.
    *
    * The caller is responsible for writing the new session's caco meta
    * (name, folder, model, parentSessionId, kind) before this returns to the user.
@@ -1550,7 +1543,6 @@ export class SessionManager {
 
     // Mirror what create() does for cache registration
     this.sessionCache.set(newId, { cwd: parentCwd, summary: null });
-    registerSession(parentCwd, newId);
     ensureSessionMeta(newId);
 
     return { sessionId: newId, cwd: parentCwd };

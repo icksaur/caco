@@ -132,9 +132,13 @@ export function setupWebSocket(server: Server) {
     css: 'extension.cssChanged',
     client: 'extension.reload',
   };
-  watchExtensions((slug, type) => {
+  const extensionWatch = watchExtensions((slug, type) => {
     const eventType = EXT_EVENT_TYPE[type];
     if (eventType) broadcastGlobalEvent({ type: eventType, data: { slug } } as SessionEvent);
+  });
+
+  wss.on('close', () => {
+    extensionWatch.close();
   });
 
   return { wss, pushStateToApplet };

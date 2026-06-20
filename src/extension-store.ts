@@ -92,7 +92,11 @@ export async function getExtension(slug: string): Promise<ExtensionInfo | null> 
 type ChangeType = 'css' | 'client' | 'server';
 type ChangeHandler = (slug: string, type: ChangeType) => void;
 
-export function watchExtensions(onChange: ChangeHandler): void {
+export interface ExtensionWatch {
+  close(): void;
+}
+
+export function watchExtensions(onChange: ChangeHandler): ExtensionWatch {
   const watchers: FSWatcher[] = [];
 
   for (const dir of [USER_EXT_DIR, getServerExtDir()]) {
@@ -114,4 +118,13 @@ export function watchExtensions(onChange: ChangeHandler): void {
       // dir doesn't exist, skip
     }
   }
+
+  return {
+    close() {
+      for (const watcher of watchers) {
+        try { watcher.close(); } catch { /* already closed */ }
+      }
+      watchers.length = 0;
+    },
+  };
 }

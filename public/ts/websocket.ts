@@ -36,7 +36,7 @@ let lastServerPingTs = 0;
 
 type StateCallback = (state: Record<string, unknown>) => void;
 type EventCallback = (event: SessionEvent) => void;
-type HistoryCompleteCallback = (data?: { isBusy?: boolean }) => void;
+type HistoryCompleteCallback = (sessionId: string | undefined, data?: { isBusy?: boolean; usage?: { tokenLimit: number; currentTokens: number } }) => void;
 type ConnectCallback = () => void;
 type ReconnectCallback = () => void;
 type GlobalEventCallback = (event: SessionEvent) => void;
@@ -263,6 +263,25 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
     return;
   }
   
+  // History completion is self-correlating via its own sessionId and must
+  // bypass the active-session filter below: a completion for a just-superseded
+  // load still has to resolve that load's pending promise.
+  if (msg.type === 'historyComplete') {
+    const completedId = msg.sessionId;
+    if (completedId) {
+      void markSessionObserved(completedId);
+    }
+    const historyData = msg.data as { isBusy?: boolean; usage?: { tokenLimit: number; currentTokens: number } } | undefined;
+    for (const cb of historyCompleteCallbacks) {
+      try {
+        cb(completedId, historyData);
+      } catch (err) {
+        console.error('[WS] HistoryComplete callback error:', err);
+      }
+    }
+    return;
+  }
+
   // Filter by active session for session-scoped broadcasts
   const msgSessionId = msg.sessionId;
   const currentSessionId = getActiveSessionId();
@@ -298,25 +317,6 @@ function handleMessage(msg: { type: string; id?: string; sessionId?: string; dat
       break;
     }
     
-    case 'historyComplete': {
-      // History streaming complete - mark session as observed
-      const sessionId = getActiveSessionId();
-      if (sessionId) {
-        void markSessionObserved(sessionId);
-      }
-      const historyData = msg.data as { isBusy?: boolean } | undefined;
-      for (const cb of historyCompleteCallbacks) {
-        try {
-          cb(historyData);
-        } catch (err) {
-          console.error('[WS] HistoryComplete callback error:', err);
-        }
-      }
-      break;
-    }
-    
-
-      
     case 'pong':
       debug('WS', '← pong');
       handlePong();

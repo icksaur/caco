@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../public/ts/app-state.js', () => ({
-  getActiveSessionId: vi.fn(() => 'test-session'),
+  getActiveSessionId: vi.fn(() => 'session-1'),
   setLoadingHistory: vi.fn(),
   isLoadingHistory: vi.fn(() => false),
 }));
@@ -22,7 +22,7 @@ vi.mock('../../public/ts/session-state-tracker.js', () => ({
   sessionTracker: { setBusy: vi.fn() },
 }));
 
-let historyCompleteCallback: ((data?: { isBusy?: boolean }) => void) | null = null;
+let historyCompleteCallback: ((sessionId?: string, data?: { isBusy?: boolean }) => void) | null = null;
 const mockUnsub = vi.fn();
 let connectionId = 1;
 
@@ -48,7 +48,7 @@ vi.mock('../../public/ts/ui-utils.js', () => ({
 }));
 
 import { HistoryLoader } from '../../public/ts/history-loader.js';
-import { setLoadingHistory } from '../../public/ts/app-state.js';
+import { setLoadingHistory, getActiveSessionId } from '../../public/ts/app-state.js';
 import { setFormEnabled } from '../../public/ts/view-controller.js';
 import { requestHistory, subscribeToSession } from '../../public/ts/websocket.js';
 import { sessionTracker } from '../../public/ts/session-state-tracker.js';
@@ -73,7 +73,7 @@ describe('HistoryLoader', () => {
       expect(requestHistory).toHaveBeenCalledWith('session-1');
       expect(setLoadingHistory).toHaveBeenCalledWith(true);
       
-      historyCompleteCallback?.({ isBusy: false });
+      historyCompleteCallback?.('session-1', { isBusy: false });
       await promise;
       
       expect(setLoadingHistory).toHaveBeenCalledWith(false);
@@ -82,10 +82,10 @@ describe('HistoryLoader', () => {
 
     it('sets busy state from server response', async () => {
       const promise = loader.load('session-1');
-      historyCompleteCallback?.({ isBusy: true });
+      historyCompleteCallback?.('session-1', { isBusy: true });
       await promise;
       
-      expect(sessionTracker.setBusy).toHaveBeenCalledWith('test-session', true);
+      expect(sessionTracker.setBusy).toHaveBeenCalledWith('session-1', true);
       expect(setFormEnabled).toHaveBeenCalledWith(false);
     });
 
@@ -99,7 +99,7 @@ describe('HistoryLoader', () => {
       expect(setLoadingHistory).toHaveBeenCalledWith(false);
       
       // Second load completes normally
-      historyCompleteCallback?.({ isBusy: false });
+      historyCompleteCallback?.('session-2', { isBusy: false });
       await promise2;
       
       // Old callback was unsubscribed
@@ -122,6 +122,35 @@ describe('HistoryLoader', () => {
     });
   });
 
+  describe('completion correlation (P3-3c)', () => {
+    it('ignores a completion for a different session than the pending load', async () => {
+      const promise = loader.load('session-1');
+
+      // A stale completion for another session must not resolve this load.
+      historyCompleteCallback?.('other-session', { isBusy: true });
+      expect(loader.loading).toBe(true);
+      expect(sessionTracker.setBusy).not.toHaveBeenCalled();
+
+      // The matching completion resolves it.
+      historyCompleteCallback?.('session-1', { isBusy: false });
+      await promise;
+      expect(sessionTracker.setBusy).toHaveBeenCalledWith('session-1', false);
+    });
+
+    it('applies state to the pending session and skips form toggle when it is not active', async () => {
+      // Active session is B, but the in-flight load is for A.
+      vi.mocked(getActiveSessionId).mockReturnValue('session-B');
+      const promise = loader.load('session-A');
+      historyCompleteCallback?.('session-A', { isBusy: true });
+      await promise;
+
+      // Busy applies to the request's session, not the active one.
+      expect(sessionTracker.setBusy).toHaveBeenCalledWith('session-A', true);
+      // The visible form (session-B) is not toggled by A's background load.
+      expect(setFormEnabled).not.toHaveBeenCalled();
+    });
+  });
+
   describe('isStale', () => {
     it('returns true when session never loaded', () => {
       expect(loader.isStale('any')).toBe(true);
@@ -129,7 +158,7 @@ describe('HistoryLoader', () => {
 
     it('returns false after successful load', async () => {
       const promise = loader.load('session-1');
-      historyCompleteCallback?.({ isBusy: false });
+      historyCompleteCallback?.('session-1', { isBusy: false });
       await promise;
       
       expect(loader.isStale('session-1')).toBe(false);
@@ -137,7 +166,7 @@ describe('HistoryLoader', () => {
 
     it('returns true for different session', async () => {
       const promise = loader.load('session-1');
-      historyCompleteCallback?.({ isBusy: false });
+      historyCompleteCallback?.('session-1', { isBusy: false });
       await promise;
       
       expect(loader.isStale('session-2')).toBe(true);
@@ -145,7 +174,7 @@ describe('HistoryLoader', () => {
 
     it('returns true after WS reconnect', async () => {
       const promise = loader.load('session-1');
-      historyCompleteCallback?.({ isBusy: false });
+      historyCompleteCallback?.('session-1', { isBusy: false });
       await promise;
       
       connectionId = 2;
@@ -162,7 +191,7 @@ describe('HistoryLoader', () => {
 
     it('is false after completion', async () => {
       const promise = loader.load('session-1');
-      historyCompleteCallback?.({ isBusy: false });
+      historyCompleteCallback?.('session-1', { isBusy: false });
       await promise;
       expect(loader.loading).toBe(false);
     });

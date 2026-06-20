@@ -69,7 +69,8 @@ class HistoryLoader {
         this.finish(wrappedResolve);
       }, TIMEOUT_MS);
 
-      const unsub = onHistoryComplete((data) => {
+      const unsub = onHistoryComplete((completedId, data) => {
+        if (this.pending && completedId && completedId !== this.pending.sessionId) return;
         this.finish(wrappedResolve, data);
       });
 
@@ -107,17 +108,17 @@ class HistoryLoader {
     scrollToBottom();
     
     const isBusy = data?.isBusy ?? false;
-    const activeId = getActiveSessionId();
-    if (activeId) {
-      sessionTracker.setBusy(activeId, isBusy);
-      if (data?.usage) {
-        updateContextUsage(data.usage, activeId);
-      }
+    sessionTracker.setBusy(sessionId, isBusy);
+    if (data?.usage) {
+      updateContextUsage(data.usage, sessionId);
     }
-    setFormEnabled(!isBusy);
+    const isActiveSession = sessionId === getActiveSessionId();
+    if (isActiveSession) {
+      setFormEnabled(!isBusy);
+    }
 
     // Clean up stale thinking indicator from history replay
-    if (!isBusy) {
+    if (!isBusy && isActiveSession) {
       const chat = regions.chat as { removeThinking?: () => void; removeStreamingCursors?: () => void };
       chat.removeThinking?.();
       chat.removeStreamingCursors?.();

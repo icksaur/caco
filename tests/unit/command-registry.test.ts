@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { BUILTIN_COMMANDS, findCommand, restoreCommandInput } from '../../public/ts/command-registry.js';
+import { BUILTIN_COMMANDS, findCommand, restoreCommandInput, registerCommand, type Command } from '../../public/ts/command-registry.js';
 import { setActiveSession } from '../../public/ts/app-state.js';
 import { parseAgentDispatchInput } from '../../public/ts/agent-command.js';
 import { chatView } from '../../public/ts/chat-view-controller.js';
@@ -113,5 +113,23 @@ describe('BUILTIN_COMMANDS', () => {
     expect(textarea.value).toBe('/agent reviewer long prompt');
     expect(textarea.dispatchEvent).toHaveBeenCalled();
     expect(textarea.focus).toHaveBeenCalled();
+  });
+});
+
+describe('registerCommand disposer ownership', () => {
+  it('a superseded registration disposer does not delete the current owner', () => {
+    const name = 'test-ownership-cmd';
+    const a: Command = { name, description: 'A', source: 'extension', handler: () => {} };
+    const b: Command = { name, description: 'B', source: 'extension', handler: () => {} };
+
+    const disposeA = registerCommand(a);
+    const disposeB = registerCommand(b);
+    expect(findCommand(name)).toBe(b);
+
+    disposeA();
+    expect(findCommand(name)).toBe(b);
+
+    disposeB();
+    expect(findCommand(name)).toBeUndefined();
   });
 });

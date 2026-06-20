@@ -92,19 +92,6 @@ function renderServer(server) {
 }
 
 /**
- * Render client ID configuration form
- * @param escapedId - Already HTML-attribute-escaped server ID
- */
-function renderClientIdForm(escapedId) {
-  return '<div class="client-id-form" data-server-id="' + escapedId + '">' +
-    '<input type="text" class="client-id-input" ' +
-      'placeholder="Application (client) ID">' +
-    '<button class="auth-btn primary" data-action="save-client-id" data-server-id="' + escapedId + '">Save</button>' +
-  '</div>' +
-  '<div class="client-id-hint">From Azure Portal → App Registrations → Your App</div>';
-}
-
-/**
  * Open OAuth popup for authentication
  */
 function authenticate(serverId) {

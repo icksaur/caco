@@ -155,7 +155,7 @@ export function createExtensionAPI(slug: string): { api: ClientExtensionAPI; aut
       const cmd: Command = {
         name,
         description: opts.description || '',
-        source: 'built-in' as const,
+        source: 'extension' as const,
         handler: opts.handler,
       };
       return track(registerCommand(cmd));

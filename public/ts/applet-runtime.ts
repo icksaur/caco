@@ -818,7 +818,8 @@ function scopeAppletCSS(css: string, slug: string): string {
   const sheet = temp.sheet;
   if (!sheet) {
     temp.remove();
-    return css;
+    console.error(`[applet] cannot scope CSS for "${slug}" (stylesheet did not parse); dropping its styles to avoid global leakage`);
+    return '';
   }
   
   const scoped: string[] = [];

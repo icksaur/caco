@@ -36,7 +36,9 @@ const commands = new Map<string, Command>();
 
 export function registerCommand(cmd: Command): () => void {
   commands.set(cmd.name, cmd);
-  return () => { commands.delete(cmd.name); };
+  return () => {
+    if (commands.get(cmd.name) === cmd) commands.delete(cmd.name);
+  };
 }
 
 function registerBuiltin(name: string, handler: Command['handler'], picker?: Command['picker']): void {

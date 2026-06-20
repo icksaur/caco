@@ -17,7 +17,7 @@ import { homedir } from 'os';
 import { sessionManager } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
+import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
 import { readSessionWorkspace, searchSessionEvents, searchSessionNotes, searchSessionRoadmap } from '../sdk-session-store.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
@@ -215,12 +215,12 @@ router.post('/sessions', async (req: Request, res: Response) => {
     
     // Set metadata
     const resolvedKind: SessionKind = kind ?? (isSwarmSession ? 'swarm' : parentSessionId ? 'agent' : 'interactive');
-    const meta = getSessionMeta(sessionId) ?? { name: '' };
-    meta.kind = resolvedKind;
-    if (description) meta.name = description;
-    if (parentSessionId) meta.parentSessionId = parentSessionId;
-    if (isSwarmSession) meta.isSwarmSession = true;
-    setSessionMeta(sessionId, meta);
+    updateSessionMeta(sessionId, meta => {
+      meta.kind = resolvedKind;
+      if (description) meta.name = description;
+      if (parentSessionId) meta.parentSessionId = parentSessionId;
+      if (isSwarmSession) meta.isSwarmSession = true;
+    });
     
     // Broadcast session list change for all clients to refresh
     broadcastGlobalEvent({ 
@@ -350,8 +350,7 @@ router.post('/sessions/:sessionId/agent-dispatch', async (req: Request, res: Res
       }
     );
 
-    const meta = getSessionMeta(sessionId);
-    if (meta) setSessionMeta(sessionId, { ...meta, lastUsedAt: new Date().toISOString() });
+    updateSessionMeta(sessionId, meta => { meta.lastUsedAt = new Date().toISOString(); }, { createIfMissing: false });
     res.json({ ok: true, sessionId });
   } catch (error) {
     const status = error instanceof DispatchHttpError ? error.status : 500;
@@ -370,19 +369,22 @@ router.patch('/sessions/:sessionId/applet', (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const { appletParams, panelVisible } = req.body as { appletParams?: Record<string, string>; panelVisible?: boolean };
 
-  const meta = getSessionMeta(sessionId);
-  if (!meta) {
+  let appletState: 'ok' | 'no-applet' = 'no-applet';
+  const persisted = updateSessionMeta(sessionId, meta => {
+    // Only update if there's an active applet; otherwise ignore (no-op).
+    if (!meta.activeApplet) { appletState = 'no-applet'; return; }
+    appletState = 'ok';
+    if (appletParams !== undefined) meta.appletParams = appletParams;
+    if (panelVisible !== undefined) meta.appletPanelVisible = panelVisible;
+  }, { createIfMissing: false });
+  if (!persisted) {
     res.status(404).json({ error: `Session not found: ${sessionId}` });
     return;
   }
-  // Only update if there's an active applet; otherwise ignore (no-op).
-  if (!meta.activeApplet) {
+  if (appletState === 'no-applet') {
     res.json({ ok: true, ignored: 'no active applet' });
     return;
   }
-  if (appletParams !== undefined) meta.appletParams = appletParams;
-  if (panelVisible !== undefined) meta.appletPanelVisible = panelVisible;
-  setSessionMeta(sessionId, meta);
   res.json({ ok: true });
 });
 
@@ -609,39 +611,38 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
     }
   }
   
-  // Re-read meta AFTER the model/budget mutations above (each may have written
-  // to meta — model via syncModelCache, contextBudgetTokens via the recreate).
-  // Building `updated` from a snapshot taken before them would clobber those
-  // writes on the final setSessionMeta below.
-  const existing = getSessionMeta(sessionId) ?? { name: '' };
-  const updated = {
-    ...existing,
-    ...(name !== undefined && { name }),
-    ...(envHint !== undefined && { envHint }),
-    ...(folder !== undefined && { folder: normalizeFolder(folder) || undefined }),
-  };
-  
-  // Handle setContext if provided
-  if (setContext) {
-    const { setName, items, mode = 'replace' } = setContext;
-    
-    // Warn for unknown set names (but allow them)
-    if (!KNOWN_SET_NAMES.has(setName)) {
-      console.warn(`[CONTEXT] Unknown set name: ${setName}`);
+  // updateSessionMeta re-reads meta from disk AFTER the model/budget mutations
+  // above (each may have written to meta — model via syncModelCache,
+  // contextBudgetTokens via the recreate), so those writes are preserved.
+  // On corrupt meta it refuses rather than clobbering the user's rename/folder.
+  let broadcastContext: Record<string, string[]> | undefined;
+  const persisted = updateSessionMeta(sessionId, meta => {
+    if (name !== undefined) meta.name = name;
+    if (envHint !== undefined) meta.envHint = envHint;
+    if (folder !== undefined) meta.folder = normalizeFolder(folder) || undefined;
+
+    if (setContext) {
+      const { setName, items, mode = 'replace' } = setContext;
+      if (!KNOWN_SET_NAMES.has(setName)) {
+        console.warn(`[CONTEXT] Unknown set name: ${setName}`);
+      }
+      const context = (meta.context as Record<string, string[]> | undefined) ?? {};
+      const merged = mergeContextSet(context[setName] ?? [], items, mode);
+      broadcastContext = { ...context, [setName]: merged };
+      meta.context = broadcastContext;
     }
-    
-    const context: Record<string, string[]> = updated.context ?? {};
-    const merged = mergeContextSet(context[setName] ?? [], items, mode);
-    updated.context = { ...context, [setName]: merged };
-    
-    // Broadcast context change to clients
+  });
+  if (!persisted) {
+    res.status(409).json({ error: 'Session metadata is unreadable; refusing to overwrite it' });
+    return;
+  }
+
+  if (setContext && broadcastContext) {
     broadcastEvent(sessionId, {
       type: 'caco.context',
-      data: { reason: 'changed', context: updated.context, setName }
+      data: { reason: 'changed', context: broadcastContext, setName: setContext.setName }
     });
   }
-  
-  setSessionMeta(sessionId, updated);
   
   // Broadcast session list change if name changed (for clients to refresh)
   if (name !== undefined || folder !== undefined) {

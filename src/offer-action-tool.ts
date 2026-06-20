@@ -1,6 +1,6 @@
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { getSessionMeta, setSessionMeta } from './storage.js';
+import { updateSessionMeta } from './storage.js';
 import type { SessionIdRef } from './types.js';
 
 const MAX_OPTIONS = 4;
@@ -32,9 +32,7 @@ Each option must be a complete, self-contained instruction the agent can act on 
         o.length > MAX_OPTION_LENGTH ? o.slice(0, MAX_OPTION_LENGTH) : o
       );
 
-      const meta = getSessionMeta(sessionId) ?? { name: '' };
-      meta.responseOptions = truncated;
-      setSessionMeta(sessionId, meta);
+      updateSessionMeta(sessionId, meta => { meta.responseOptions = truncated; });
 
       return {
         textResultForLlm: JSON.stringify({ ok: true, options: truncated }),

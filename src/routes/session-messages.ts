@@ -19,7 +19,7 @@ import { setAppletUserState, setAppletNavigation, type NavigationContext } from 
 import { parseImageDataUrl } from '../image-utils.js';
 import { broadcastEvent, broadcastGlobalEvent, type SessionEvent } from './websocket.js';
 import { getQueue, isFlushTrigger } from '../caco-event-queue.js';
-import { getSessionMeta, setSessionMeta } from '../storage.js';
+import { getSessionMeta, updateSessionMeta } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
 import { prefixMessageSource, type MessageSource } from '../message-source.js';
@@ -84,11 +84,9 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
       res.status(400).json({ error: 'Cannot steer: session is not busy' });
       return;
     }
-    const steerMeta = getSessionMeta(sessionId);
-    if (steerMeta?.responseOptions) {
-      steerMeta.responseOptions = undefined;
-      setSessionMeta(sessionId, steerMeta);
-    }
+    updateSessionMeta(sessionId, meta => {
+      if (meta.responseOptions) meta.responseOptions = undefined;
+    }, { createIfMissing: false });
     try {
       await sessionManager.sendStream(sessionId, prompt!, { mode: 'immediate' });
       broadcastEvent(sessionId, {
@@ -137,11 +135,9 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   const tempFilePaths: string[] = [];
 
   // Clear response options when user sends a message
-  const meta = getSessionMeta(sessionId);
-  if (meta?.responseOptions) {
-    meta.responseOptions = undefined;
-    setSessionMeta(sessionId, meta);
-  }  
+  updateSessionMeta(sessionId, meta => {
+    if (meta.responseOptions) meta.responseOptions = undefined;
+  }, { createIfMissing: false });
   // Pre-process images (multiple supported, newline-separated)
   if (imageData) {
     const imageStrings = imageData.split('\n').filter(Boolean);
@@ -191,8 +187,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   
   try {
     if (!source) {
-      const meta = getSessionMeta(sessionId);
-      if (meta) setSessionMeta(sessionId, { ...meta, lastUsedAt: new Date().toISOString() });
+      updateSessionMeta(sessionId, meta => { meta.lastUsedAt = new Date().toISOString(); }, { createIfMissing: false });
     }
     
     await dispatchMessage(
@@ -507,11 +502,9 @@ export async function dispatchMessage(
 router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   
-  const cancelMeta = getSessionMeta(sessionId);
-  if (cancelMeta?.responseOptions) {
-    cancelMeta.responseOptions = undefined;
-    setSessionMeta(sessionId, cancelMeta);
-  }
+  updateSessionMeta(sessionId, meta => {
+    if (meta.responseOptions) meta.responseOptions = undefined;
+  }, { createIfMissing: false });
   
   const { forced } = await sessionManager.cancelSession(sessionId);
   if (forced) {
@@ -533,26 +526,28 @@ function autoAddFileContext(
   sessionId: string,
   path: string
 ): void {
-  const meta = getSessionMeta(sessionId);
-  if (!meta) return;
-  
-  const context = { ...(meta.context ?? {}) };
-  let files = context.files ?? [];
-  
-  // Move to end if already present, otherwise append
-  files = files.filter(f => f !== path);
-  files.push(path);
-  
-  // Keep only the last N files
-  if (files.length > MAX_CONTEXT_FILES) {
-    files = files.slice(-MAX_CONTEXT_FILES);
-  }
-  
-  context.files = files;
-  setSessionMeta(sessionId, { ...meta, context });
-  
+  let broadcastContext: Record<string, string[]> | undefined;
+  const persisted = updateSessionMeta(sessionId, meta => {
+    const context = { ...((meta.context as Record<string, string[]> | undefined) ?? {}) };
+    let files = context.files ?? [];
+
+    // Move to end if already present, otherwise append
+    files = files.filter(f => f !== path);
+    files.push(path);
+
+    // Keep only the last N files
+    if (files.length > MAX_CONTEXT_FILES) {
+      files = files.slice(-MAX_CONTEXT_FILES);
+    }
+
+    context.files = files;
+    broadcastContext = context;
+    meta.context = context;
+  }, { createIfMissing: false });
+  if (!persisted || !broadcastContext) return;
+
   broadcastEvent(sessionId, {
     type: 'caco.context',
-    data: { reason: 'changed', context, setName: 'files' }
+    data: { reason: 'changed', context: broadcastContext, setName: 'files' }
   } as unknown as SessionEvent);
 }

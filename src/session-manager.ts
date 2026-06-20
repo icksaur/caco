@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, cpSync, rmSync, mkdtempSync, createWriteStream }
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage, SessionEvent, ToolFactory } from './types.js';
-import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, setSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
+import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, updateSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
 import { readSessionWorkspace, readSessionEvents, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
@@ -221,10 +221,9 @@ function normalizeModelCapabilities(model: SDKModelInfo): SDKModelInfo {
 function syncModelCache(sessionId: string, model?: string): void {
   const resolvedModel = model ?? parseSessionModel(sessionId);
   if (resolvedModel) {
-    const meta = getSessionMeta(sessionId) ?? { name: '' };
-    if (meta.model !== resolvedModel) {
-      setSessionMeta(sessionId, { ...meta, model: resolvedModel });
-    }
+    updateSessionMeta(sessionId, meta => {
+      if (meta.model !== resolvedModel) meta.model = resolvedModel;
+    });
   }
 }
 
@@ -854,8 +853,9 @@ export class SessionManager {
     // Persist the override to Caco meta so it survives restart. The SDK's
     // session.start event keeps the original cwd; _discoverSessions prefers
     // this override when rebuilding the cache.
-    const meta = getSessionMeta(sessionId) ?? { name: '' };
-    setSessionMeta(sessionId, { ...meta, cwd: newCwd });
+    if (!updateSessionMeta(sessionId, meta => { meta.cwd = newCwd; })) {
+      throw new Error(`Cannot change CWD: session metadata for ${sessionId} is unreadable`);
+    }
 
     console.log(`✓ Changed CWD for ${sessionId}: ${oldCwd} → ${newCwd}`);
   }
@@ -1191,13 +1191,19 @@ export class SessionManager {
       throw new Error(`Session ${sessionId} is not active`);
     }
 
-    const meta = getSessionMeta(sessionId) ?? { name: '' };
-    const previousBudget = meta.contextBudgetTokens;
     const newBudget = tokens && tokens > 0 ? tokens : undefined;
-
-    if (previousBudget === newBudget) return;
-
-    setSessionMeta(sessionId, { ...meta, contextBudgetTokens: newBudget });
+    let previousBudget: number | undefined;
+    let changed = false;
+    const persisted = updateSessionMeta(sessionId, meta => {
+      previousBudget = meta.contextBudgetTokens as number | undefined;
+      if (previousBudget === newBudget) return;
+      changed = true;
+      meta.contextBudgetTokens = newBudget;
+    });
+    if (!persisted) {
+      throw new Error(`Cannot change context budget: session metadata for ${sessionId} is unreadable`);
+    }
+    if (!changed) return;
 
     const { toolFactory, excludedTools } = active;
     try {
@@ -1215,8 +1221,7 @@ export class SessionManager {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // Restore the previous meta budget, then attempt to bring the session back.
-      const cur = getSessionMeta(sessionId) ?? { name: '' };
-      setSessionMeta(sessionId, { ...cur, contextBudgetTokens: previousBudget });
+      updateSessionMeta(sessionId, meta => { meta.contextBudgetTokens = previousBudget; });
       try {
         await this.resume(sessionId, { toolFactory, excludedTools });
         console.warn(`[CTXWIN] Budget change failed; reverted ${sessionId.slice(0, 8)} to ${previousBudget ?? 'default'}`);
@@ -1245,14 +1250,15 @@ export class SessionManager {
   /** Clear stored reasoning effort when switching to a model that doesn't
    *  support it or doesn't include the stored value in supportedReasoningEfforts. */
   private clearStaleReasoningEffort(sessionId: string, newModelId: string): void {
-    const meta = getSessionMeta(sessionId);
-    if (!meta?.reasoningEffort) return;
-    const newModel = this.cachedModels.find(m => m.id === newModelId);
-    const supported = newModel?.supportedReasoningEfforts;
-    const supportsEffort = newModel?.capabilities?.supports?.reasoningEffort;
-    if (!supportsEffort || (supported && !supported.includes(meta.reasoningEffort))) {
-      setSessionMeta(sessionId, { ...meta, reasoningEffort: undefined });
-    }
+    updateSessionMeta(sessionId, meta => {
+      if (!meta.reasoningEffort) return;
+      const newModel = this.cachedModels.find(m => m.id === newModelId);
+      const supported = newModel?.supportedReasoningEfforts;
+      const supportsEffort = newModel?.capabilities?.supports?.reasoningEffort;
+      if (!supportsEffort || (supported && !supported.includes(meta.reasoningEffort as string))) {
+        meta.reasoningEffort = undefined;
+      }
+    }, { createIfMissing: false });
   }
 
   async setSessionReasoningEffort(sessionId: string, effort: string | null): Promise<void> {
@@ -1274,12 +1280,15 @@ export class SessionManager {
       throw new Error('Cannot clear effort: model has no default effort level');
     }
     await active.session.rpc.model.setReasoningEffort({ reasoningEffort: effectiveEffort });
-    const meta = getSessionMeta(sessionId) ?? { name: '' };
-    if (effort === null || effort === modelInfo.defaultReasoningEffort) {
-      const { reasoningEffort: _, ...rest } = meta;
-      setSessionMeta(sessionId, rest as typeof meta);
-    } else {
-      setSessionMeta(sessionId, { ...meta, reasoningEffort: effort });
+    const persisted = updateSessionMeta(sessionId, meta => {
+      if (effort === null || effort === modelInfo.defaultReasoningEffort) {
+        delete meta.reasoningEffort;
+      } else {
+        meta.reasoningEffort = effort;
+      }
+    });
+    if (!persisted) {
+      throw new Error(`Reasoning effort changed on the live session but could not be persisted: metadata for ${sessionId} is unreadable`);
     }
     console.log(`[EFFORT] Session ${sessionId.slice(0, 8)}: effort=${effort ?? `default (${effectiveEffort})`}`);
   }

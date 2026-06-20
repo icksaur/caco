@@ -37,6 +37,14 @@ const storage = vi.hoisted(() => {
     }),
     getSessionMeta: vi.fn((sessionId: string) => meta.get(sessionId)),
     setSessionMeta: vi.fn((sessionId: string, value: Record<string, unknown>) => meta.set(sessionId, value)),
+    updateSessionMeta: vi.fn((sessionId: string, mutate: (m: Record<string, unknown>) => void, opts?: { createIfMissing?: boolean }) => {
+      const existing = meta.get(sessionId);
+      if (!existing && opts?.createIfMissing === false) return false;
+      const value = existing ?? { name: '' };
+      mutate(value);
+      meta.set(sessionId, value);
+      return true;
+    }),
     getSessionIconPath: vi.fn(() => null),
     setSessionOrder: vi.fn(),
   };

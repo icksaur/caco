@@ -20,7 +20,7 @@ import { randomUUID } from 'crypto';
 import ignore from 'ignore';
 import { sessionManager } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
-import { getOutput, getSessionMeta, setSessionMeta } from '../storage.js';
+import { getOutput, updateSessionMeta } from '../storage.js';
 import { setAppletUserState, getAppletUserState, clearAppletUserState, getActiveAppletSlug, setActiveAppletSlug } from '../applet-state.js';
 import { listApplets, loadApplet } from '../applet-store.js';
 import { listExtensions, getExtension } from '../extension-store.js';
@@ -274,10 +274,9 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
     }
     setActiveAppletSlug(sessionId, slug);
 
-    // Persist to session metadata
+    // Persist to session metadata (only if it already exists; don't create)
     if (sessionId) {
-      const meta = getSessionMeta(sessionId);
-      if (meta) {
+      updateSessionMeta(sessionId, meta => {
         meta.activeApplet = slug;
         meta.appletParams = urlParams;
         // Explicit user open implies visible. Restore on session switch
@@ -285,8 +284,7 @@ router.post('/applets/:slug/load', async (req: Request, res: Response) => {
         if (!isRestore) {
           meta.appletPanelVisible = true;
         }
-        setSessionMeta(sessionId, meta);
-      }
+      }, { createIfMissing: false });
     }
     
     // Return content for client-side execution

@@ -16,6 +16,7 @@ import { createObservationHook } from './observe/hook.js';
 import { OBS_RAW_CEILING_BYTES } from './observe/types.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
 import { disposeSessionRuntime } from './session-runtime.js';
+import { broadcastEvent } from './event-bus.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
 import { thresholdForBudget, type ModelTokenLimits } from './context-budget.js';
 import type { SdkAgentInfo } from './agent-command.js';
@@ -313,7 +314,52 @@ export class SessionManager {
       const client = this.sharedClient;
       this.sharedClient = null;
       this.stopHealthCheck();
+      this.dropActiveSessions(true);
       if (client) client.forceStop().catch(() => {});
+    }
+  }
+
+  /**
+   * Drop every active session as one unit: end its dispatch, dispose its
+   * runtime (queue + throughput + usage), and forget it. When `notify`, tell the
+   * FE the in-flight turn was reset so it doesn't sit on a dead dispatch.
+   *
+   * Returns the affected session ids. The SDK-level `_clientSessions` view
+   * pointers in SessionState are deliberately left intact — the next access
+   * re-resumes the session from disk; this only clears volatile runtime state.
+   */
+  private dropActiveSessions(notify: boolean): string[] {
+    const affected = [...this.activeSessions.keys()];
+    this.activeSessions.clear();
+    for (const id of affected) {
+      dispatchState.end(id);
+      disposeSessionRuntime(id);
+      if (notify) {
+        broadcastEvent(id, {
+          type: 'session.error',
+          data: { message: 'Session was reset due to a connection issue — please retry your last message.', restorePrompt: true },
+        } as SessionEvent);
+      }
+    }
+    if (affected.length > 0) {
+      console.warn(`[SDK] Dropped ${affected.length} active session(s) on client restart`);
+    }
+    return affected;
+  }
+
+  /**
+   * Tear down the shared client and drop all active sessions as one transaction.
+   * `graceful` uses client.stop() (idle teardown) rather than forceStop(); the
+   * client is NOT re-established here — callers that need it warm call
+   * ensureClient() afterwards.
+   */
+  private async restartSharedClient(opts: { notify: boolean; graceful?: boolean }): Promise<void> {
+    this.stopHealthCheck();
+    const client = this.sharedClient;
+    this.sharedClient = null;
+    this.dropActiveSessions(opts.notify);
+    if (client) {
+      try { await (opts.graceful ? client.stop() : client.forceStop()); } catch { /* already dead */ }
     }
   }
 
@@ -327,10 +373,7 @@ export class SessionManager {
       ]);
     } catch (e) {
       console.warn('[SDK] Ping failed, force-stopping client:', e instanceof Error ? e.message : e);
-      this.stopHealthCheck();
-      try { await client.forceStop(); } catch { /* already dead */ }
-      this.sharedClient = null;
-      this.activeSessions.clear();
+      await this.restartSharedClient({ notify: true });
       await this.ensureClient();
     }
   }
@@ -345,10 +388,7 @@ export class SessionManager {
         return;
       }
       console.log('[SDK] Idle timeout, tearing down client to prevent stale connection');
-      this.stopHealthCheck();
-      this.sharedClient.stop().catch(() => {});
-      this.sharedClient = null;
-      this.activeSessions.clear();
+      void this.restartSharedClient({ notify: false, graceful: true });
     }, SessionManager.SDK_IDLE_TIMEOUT_MS);
   }
 
@@ -370,10 +410,7 @@ export class SessionManager {
     const state = (client as unknown as { getState?: () => string }).getState?.();
     if (state && state !== 'connected') {
       console.warn(`[SDK] Health check: client state is "${state}", force-stopping`);
-      this.sharedClient = null;
-      this.activeSessions.clear();
-      this.stopHealthCheck();
-      try { await client.forceStop(); } catch { /* */ }
+      await this.restartSharedClient({ notify: true });
       return;
     }
 
@@ -387,10 +424,7 @@ export class SessionManager {
       void pollQuota(client);
     } catch (e) {
       console.warn('[SDK] Health check failed, force-stopping client:', e instanceof Error ? e.message : e);
-      this.sharedClient = null;
-      this.activeSessions.clear();
-      this.stopHealthCheck();
-      try { await client.forceStop(); } catch { /* */ }
+      await this.restartSharedClient({ notify: true });
     }
   }
 

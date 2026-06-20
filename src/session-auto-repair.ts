@@ -56,6 +56,35 @@ export function repairSessionEvents(sessionId: string, errorMessage?: string): s
   try {
     let content = readFileSync(eventsPath, 'utf-8');
 
+    // Validate-and-backup boundary for every destructive rewrite below. A repair
+    // that produces invalid JSONL must not be written (the repair didn't work);
+    // and the ORIGINAL on-disk content is backed up once before the first
+    // overwrite so a bad repair is recoverable.
+    const originalContent = content;
+    let backedUp = false;
+    const commit = (newContent: string): boolean => {
+      for (const line of newContent.split('\n')) {
+        if (!line.trim()) continue;
+        try { JSON.parse(line); } catch (e) {
+          console.error(`[SESSION] Refusing to write repaired ${eventsPath}: produced invalid JSONL (${e instanceof Error ? e.message : String(e)})`);
+          return false;
+        }
+      }
+      if (!backedUp) {
+        try {
+          const backupPath = `${eventsPath}.bak-${Date.now()}`;
+          writeFileSync(backupPath, originalContent);
+          backedUp = true;
+          console.log(`[SESSION] Backed up original events to ${backupPath}`);
+        } catch (e) {
+          console.error(`[SESSION] Failed to back up ${eventsPath} before repair:`, e);
+          return false;
+        }
+      }
+      writeFileSync(eventsPath, newContent);
+      return true;
+    };
+
     // Fix missing ephemeral:true on session.shutdown.
     // Only run when the error actually mentions shutdown/ephemeral so we don't
     // touch this content path (and the unrelated tool result strings that
@@ -67,7 +96,7 @@ export function repairSessionEvents(sessionId: string, errorMessage?: string): s
     const needle = '"type":"session.shutdown","data":{';
     if (isShutdownError && content.includes(needle)) {
       content = content.replaceAll(needle, '"type":"session.shutdown","ephemeral":true,"data":{');
-      writeFileSync(eventsPath, content);
+      if (!commit(content)) return null;
       console.log(`[SESSION] Repaired ephemeral field in ${eventsPath}`);
       return 'Fixed missing ephemeral flag on shutdown events';
     }
@@ -106,7 +135,7 @@ export function repairSessionEvents(sessionId: string, errorMessage?: string): s
       }
 
       if (fixed > 0) {
-        writeFileSync(eventsPath, lines.join('\n'));
+        if (!commit(lines.join('\n'))) return null;
         const detail = failingLineIdx >= 0
           ? (fixedFailingLine ? ` (incl. reported line ${failingLineIdx + 1})` : ` (reported line ${failingLineIdx + 1} NOT fixed — its attachments were already valid)`)
           : '';
@@ -184,7 +213,7 @@ export function repairSessionEvents(sessionId: string, errorMessage?: string): s
             });
             newLines.splice(inj.insertAt, 0, synthetic);
           }
-          writeFileSync(eventsPath, newLines.join('\n') + '\n');
+          if (!commit(newLines.join('\n') + '\n')) return null;
           console.log(`[SESSION] Injected ${injections.length} synthetic tool completion(s) in ${eventsPath}`);
           return `Injected ${injections.length} synthetic tool completion(s) for orphaned tool calls`;
         }
@@ -220,7 +249,7 @@ export function repairSessionEvents(sessionId: string, errorMessage?: string): s
       const kept = lines.slice(0, truncateAt + 1);
       const removed = lines.length - kept.length;
       if (removed <= 0) return null;
-      writeFileSync(eventsPath, kept.join('\n') + '\n');
+      if (!commit(kept.join('\n') + '\n')) return null;
       console.log(`[SESSION] Truncated ${eventsPath} to line ${truncateAt + 1}, removed ${removed} lines after last idle`);
       return `Truncated session history to last stable point (removed ${removed} lines). Recent conversation may be lost.`;
     }

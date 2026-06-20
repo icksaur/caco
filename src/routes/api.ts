@@ -137,7 +137,8 @@ router.get('/preferences', (_req: Request, res: Response) => {
 });
 
 router.post('/preferences', async (req: Request, res: Response) => {
-  const updated = await sessionState.updatePreferences(req.body);
+  const clientId = req.headers['x-client-id'] as string | undefined;
+  const updated = await sessionState.updatePreferences(req.body, clientId);
   res.json(updated);
 });
 

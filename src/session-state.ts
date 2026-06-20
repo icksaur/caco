@@ -266,15 +266,24 @@ export class SessionState {
   }
 
   /**
-   * Update preferences
+   * Update preferences.
+   *
+   * Routed through the per-client transition mutex so the read-modify-write of
+   * the shared `_preferences` object (and its persistence) is serialized with
+   * that client's session transitions, which mutate the same fields
+   * (lastSessionId / lastCwd). Without this, a preferences POST could interleave
+   * between a transition's mutation and its savePreferences and persist a stale
+   * snapshot.
    */
-  async updatePreferences(updates: Partial<UserPreferences>): Promise<UserPreferences> {
-    if (updates.lastModel) this._preferences.lastModel = updates.lastModel;
-    if (updates.lastCwd) this._preferences.lastCwd = updates.lastCwd;
-    if (updates.lastSessionId !== undefined) this._preferences.lastSessionId = updates.lastSessionId;
-    
-    await savePreferences(this._preferences);
-    return this._preferences;
+  async updatePreferences(updates: Partial<UserPreferences>, clientId?: string): Promise<UserPreferences> {
+    return this.runTransition(clientId, async () => {
+      if (updates.lastModel) this._preferences.lastModel = updates.lastModel;
+      if (updates.lastCwd) this._preferences.lastCwd = updates.lastCwd;
+      if (updates.lastSessionId !== undefined) this._preferences.lastSessionId = updates.lastSessionId;
+
+      await savePreferences(this._preferences);
+      return this._preferences;
+    });
   }
 
   /**

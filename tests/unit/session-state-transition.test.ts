@@ -159,4 +159,29 @@ describe('SessionState transition serialization', () => {
     expect(state.getActiveSessionId('clientA')).toBe('A');
     expect(state.getActiveSessionId('clientB')).toBe('B');
   });
+
+  it('serializes updatePreferences behind an in-flight transition on the same client', async () => {
+    const resumeA = deferred<{ sessionId: string }>();
+    const order: string[] = [];
+    h.resumeMock.mockImplementation(() => {
+      order.push('transition-start');
+      return resumeA.promise.then((r) => { order.push('transition-settle'); return r; });
+    });
+    h.savePreferencesMock.mockImplementation(async () => { order.push('prefs-save'); });
+    h.liveSessions.add('A');
+
+    const state = newState();
+    const pSwitch = state.switchSession('A', 'c1');
+    const pPrefs = state.updatePreferences({ lastModel: 'm2' }, 'c1');
+
+    await Promise.resolve();
+    expect(order).toEqual(['transition-start']);
+
+    resumeA.resolve({ sessionId: 'A' });
+    await Promise.all([pSwitch, pPrefs]);
+
+    // The preferences write runs only after the transition fully settles.
+    expect(order.indexOf('prefs-save')).toBeGreaterThan(order.indexOf('transition-settle'));
+    expect(state.preferences.lastModel).toBe('m2');
+  });
 });

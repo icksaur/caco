@@ -698,7 +698,9 @@ export class SessionManager {
     }
     
     // Already active?
-    if (this.activeSessions.has(sessionId)) {
+    const existingActive = this.activeSessions.get(sessionId);
+    if (existingActive) {
+      existingActive.lastUsedAt = Date.now();
       console.log(`Session ${sessionId} already active`);
       return { sessionId, usedFallbackCwd };
     }

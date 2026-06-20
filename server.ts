@@ -199,7 +199,7 @@ async function start(): Promise<void> {
   
   const server = createServer(app);
   
-  const { pushStateToApplet } = setupWebSocket(server);
+  const { wss, pushStateToApplet } = setupWebSocket(server);
 
   const workflowAvailable = WORKFLOW_ENABLED && await isWorkflowRunnerAvailable();
   if (WORKFLOW_ENABLED && !workflowAvailable) {
@@ -212,11 +212,14 @@ async function start(): Promise<void> {
   // Close the listening socket before the parent exits during a restart, so
   // the child server's first bind attempt succeeds rather than racing the
   // OS-level socket teardown. Best-effort; restart-manager already has a
-  // retry loop downstream.
+  // retry loop downstream. Closing the WebSocketServer first fires its 'close'
+  // handlers, which release the heartbeat interval and the extension fs
+  // watchers — closing the HTTP server alone does not emit that event.
   onAllIdle(() => {
     try {
+      wss.close();
       server.close();
-      console.log('[RESTART] HTTP server.close() called for clean port release');
+      console.log('[RESTART] WebSocketServer + HTTP server.close() called for clean port release');
     } catch (err) {
       console.error('[RESTART] server.close() failed:', err);
     }

@@ -23,6 +23,7 @@ function joinPath(base, rel) {
 }
 
 let repoPath = '';
+let refreshEpoch = 0;
 
 let currentStatus = { staged: [], unstaged: [], untracked: [] };
 
@@ -52,11 +53,11 @@ const aheadBehind = document.getElementById('aheadBehind');
 /**
  * Run a git command via /api/shell in the repo directory
  */
-async function runGit(args) {
+async function runGit(args, cwd = repoPath) {
   const response = await fetch('/api/shell', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: 'git', args, cwd: repoPath })
+    body: JSON.stringify({ command: 'git', args, cwd: cwd })
   });
   return response.json();
 }
@@ -64,8 +65,8 @@ async function runGit(args) {
 /**
  * Get current branch name
  */
-async function getBranch() {
-  const result = await runGit(['branch', '--show-current']);
+async function getBranch(cwd = repoPath) {
+  const result = await runGit(['branch', '--show-current'], cwd);
   if (result.code === 0) {
     return result.stdout.trim() || 'HEAD detached';
   }
@@ -325,8 +326,8 @@ let currentBehind = 0;
  * Get ahead/behind count for current branch
  * Uses: git rev-list --left-right --count @{u}...HEAD
  */
-async function getAheadBehind() {
-  const result = await runGit(['rev-list', '--left-right', '--count', '@{u}...HEAD']);
+async function getAheadBehind(cwd = repoPath) {
+  const result = await runGit(['rev-list', '--left-right', '--count', '@{u}...HEAD'], cwd);
   if (result.code !== 0) {
     return { ahead: 0, behind: 0, hasUpstream: false };
   }
@@ -443,13 +444,13 @@ function hideError() {
 /**
  * Refresh git status
  */
-async function showLastCommit() {
+async function showLastCommit(cwd = repoPath) {
   try {
-    const countResult = await runGit(['rev-list', '--count', 'HEAD']);
+    const countResult = await runGit(['rev-list', '--count', 'HEAD'], cwd);
     const commitCount = parseInt(countResult.stdout.trim(), 10);
     if (commitCount < 1) return;
     
-    const logResult = await runGit(['log', '-1', '--format=%h%n%s%n%an%n%ar']);
+    const logResult = await runGit(['log', '-1', '--format=%h%n%s%n%an%n%ar'], cwd);
     if (logResult.code !== 0) return;
     
     const [hash, subject, author, age] = logResult.stdout.trim().split('\n');
@@ -457,7 +458,7 @@ async function showLastCommit() {
     // Get file stats for the last commit
     let statHtml = '';
     if (commitCount >= 2) {
-      const statResult = await runGit(['diff', '--stat', 'HEAD~1..HEAD']);
+      const statResult = await runGit(['diff', '--stat', 'HEAD~1..HEAD'], cwd);
       if (statResult.code === 0 && statResult.stdout.trim()) {
         const lines = statResult.stdout.trim().split('\n');
         const coloredLines = lines.map(l => colorizeStatLine(escapeHtml(l)));
@@ -507,20 +508,27 @@ function colorizeStatLine(line) {
 }
 
 async function refresh() {
+  const myEpoch = ++refreshEpoch;
+  const cwd = repoPath;
+  const isStale = () => myEpoch !== refreshEpoch || cwd !== repoPath;
+
   refreshBtn.classList.add('spinning');
   hideError();
   
   try {
     // Get branch
-    const branch = await getBranch();
+    const branch = await getBranch(cwd);
+    if (isStale()) return;
     branchName.textContent = branch;
     
     // Get ahead/behind count
-    const { ahead, behind, hasUpstream } = await getAheadBehind();
+    const { ahead, behind, hasUpstream } = await getAheadBehind(cwd);
+    if (isStale()) return;
     updateAheadBehindDisplay(ahead, behind, hasUpstream);
     
     // Get status
-    const result = await runGit(['status', '--porcelain=v2']);
+    const result = await runGit(['status', '--porcelain=v2'], cwd);
+    if (isStale()) return;
     
     if (result.code !== 0) {
       // Check if not a git repo
@@ -562,15 +570,16 @@ async function refresh() {
     const totalChanges = staged.length + unstaged.length + untracked.length;
     if (totalChanges === 0) {
       cleanMessage.classList.remove('hidden');
-      await showLastCommit();
+      await showLastCommit(cwd);
     } else {
       cleanMessage.classList.add('hidden');
     }
     
   } catch (error) {
+    if (isStale()) return;
     showError('Failed to get git status: ' + error.message);
   } finally {
-    refreshBtn.classList.remove('spinning');
+    if (myEpoch === refreshEpoch) refreshBtn.classList.remove('spinning');
   }
 }
 

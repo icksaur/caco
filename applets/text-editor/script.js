@@ -1,4 +1,6 @@
 var currentFilePath = '';
+var editorPath = '';
+var loadEpoch = 0;
 var originalContent = '';
 var isDirty = false;
 var editorView = null;
@@ -181,7 +183,9 @@ function updateHeader(path) {
 }
 
 async function loadFile(path) {
+  var myLoad = ++loadEpoch;
   if (!path) {
+    editorPath = '';
     updateHeader('');
     if (cmReady) createEditor('', '');
     return;
@@ -198,6 +202,7 @@ async function loadFile(path) {
       return;
     }
   }
+  if (myLoad !== loadEpoch) return;
 
   updateHeader(path);
   statusEl.textContent = 'Loading...';
@@ -206,18 +211,22 @@ async function loadFile(path) {
 
   try {
     var response = await fetch('/api/file?path=' + encodeURIComponent(path));
+    if (myLoad !== loadEpoch) return;
     if (!response.ok) throw new Error('HTTP ' + response.status);
     var text = await response.text();
+    if (myLoad !== loadEpoch) return;
     originalContent = text;
     isDirty = false;
     saveBtn.disabled = true;
     saveBtn.classList.remove('dirty');
     saveBtn.textContent = 'Save';
+    editorPath = path;
     createEditor(text, langKey);
     statusEl.textContent = text.length + ' chars' + (langKey ? ' • ' + langKey : '');
 
     window.appletAPI.setAppletState({ path: path, loaded: true, size: text.length, language: langKey });
   } catch (err) {
+    if (myLoad !== loadEpoch) return;
     statusEl.textContent = 'Error: ' + err.message;
     statusEl.className = 'status error';
   }
@@ -225,6 +234,11 @@ async function loadFile(path) {
 
 saveBtn.addEventListener('click', async function() {
   if (!currentFilePath || !isDirty || !editorView) return;
+  if (editorPath !== currentFilePath) {
+    statusEl.textContent = 'Loading current file… try again';
+    statusEl.className = 'status';
+    return;
+  }
 
   saveBtn.disabled = true;
   statusEl.textContent = 'Saving...';

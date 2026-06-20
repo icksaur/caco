@@ -5,6 +5,7 @@ var pathEl = document.getElementById('igPath');
 var emptyEl = document.getElementById('igEmpty');
 var errorEl = document.getElementById('igError');
 var observer = null;
+var galleryEpoch = 0;
 
 function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
@@ -14,6 +15,7 @@ function isImage(name) {
 }
 
 function loadGallery(dirPath) {
+  var myLoad = ++galleryEpoch;
   if (!dirPath) {
     grid.innerHTML = '';
     emptyEl.style.display = '';
@@ -31,6 +33,7 @@ function loadGallery(dirPath) {
   fetch('/api/files?path=' + encodeURIComponent(dirPath))
     .then(function(r) { return r.json(); })
     .then(function(data) {
+      if (myLoad !== galleryEpoch) return;
       var images = (data.files || []).filter(function(f) {
         return f.type === 'file' && isImage(f.name);
       });
@@ -83,6 +86,7 @@ function loadGallery(dirPath) {
       });
     })
     .catch(function(err) {
+      if (myLoad !== galleryEpoch) return;
       errorEl.textContent = 'Failed to load: ' + (err.message || err);
       errorEl.style.display = '';
     });

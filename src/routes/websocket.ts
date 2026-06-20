@@ -15,7 +15,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
 import { sessionManager } from '../session-manager.js';
-import { readLastTurns } from '../sdk-session-store.js';
+import { readLastTurnsResult } from '../sdk-session-store.js';
 import { shouldFilter } from '../event-filter.js';
 import { parseMessageSource, type MessageSource } from '../message-source.js';
 import { listEmbedOutputs, parseOutputMarkers, getSessionMeta } from '../storage.js';
@@ -317,7 +317,21 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
   try {
     const fetchStart = Date.now();
     console.log(`[HISTORY] Reading events from disk for ${shortId}...`);
-    const { events, totalLines, skipped } = readLastTurns(sessionId, 5, 2000);
+    const turnsResult = readLastTurnsResult(sessionId, 5, 2000);
+    if (!turnsResult.ok && turnsResult.kind === 'corrupt') {
+      console.error(`[HISTORY] Corrupt history for ${shortId}: ${turnsResult.error.message}`);
+      if (ws.readyState === WebSocket.OPEN) {
+        send(ws, { type: 'event', sessionId, event: {
+          type: 'caco.history_error',
+          data: { message: 'Session history could not be read (file is corrupt or unreadable).' }
+        } as unknown as SessionEvent });
+        send(ws, { type: 'historyComplete', sessionId, data: { isBusy: false } });
+      }
+      return;
+    }
+    const { events, totalLines, skipped } = turnsResult.ok
+      ? turnsResult.value
+      : { events: [], totalLines: 0, skipped: 0 };
     console.log(`[HISTORY] Read ${events.length} events (from ${totalLines} total) for ${shortId} in ${Date.now() - fetchStart}ms, ws.readyState=${ws.readyState}`);
     
     if (ws.readyState !== WebSocket.OPEN) {

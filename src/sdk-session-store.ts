@@ -3,6 +3,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 import { getSessionNotes, getSessionRoadmap } from './storage.js';
+import type { DiskRead } from './disk-read.js';
 import type { SessionEvent } from './types.js';
 
 export type { SessionEvent };
@@ -34,20 +35,39 @@ export function readSessionWorkspace(sessionId: string): SessionWorkspace | null
   }
 }
 
-export function readSessionEvents(sessionId: string): SessionEvent[] {
+/**
+ * Read a session's events.jsonl as a typed result that distinguishes an absent
+ * file (`missing`) from one that exists but could not be read or parsed
+ * (`corrupt`). The key invariant: a non-empty file whose every line is malformed
+ * classifies as `corrupt`, NOT as an empty session — otherwise an all-garbage
+ * events file would make a real session look empty and vanish from discovery.
+ * A partial parse (some lines recovered) is still `ok`.
+ */
+export function readSessionEventsResult(sessionId: string): DiskRead<SessionEvent[]> {
+  const eventsPath = sessionPath(sessionId, 'events.jsonl');
+  if (!existsSync(eventsPath)) return { ok: false, kind: 'missing' };
+  let content: string;
   try {
-    const eventsPath = sessionPath(sessionId, 'events.jsonl');
-    if (!existsSync(eventsPath)) return [];
-    const content = readFileSync(eventsPath, 'utf-8');
-    const events: SessionEvent[] = [];
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue;
-      try { events.push(JSON.parse(line)); } catch { /* skip malformed */ }
-    }
-    return events;
-  } catch {
-    return [];
+    content = readFileSync(eventsPath, 'utf-8');
+  } catch (error) {
+    return { ok: false, kind: 'corrupt', error: error instanceof Error ? error : new Error(String(error)) };
   }
+  const events: SessionEvent[] = [];
+  let totalNonEmptyLines = 0;
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    totalNonEmptyLines++;
+    try { events.push(JSON.parse(line)); } catch { /* skip malformed */ }
+  }
+  if (totalNonEmptyLines > 0 && events.length === 0) {
+    return { ok: false, kind: 'corrupt', error: new Error('events.jsonl has no parseable lines') };
+  }
+  return { ok: true, value: events };
+}
+
+export function readSessionEvents(sessionId: string): SessionEvent[] {
+  const result = readSessionEventsResult(sessionId);
+  return result.ok ? result.value : [];
 }
 
 interface LastTurnsCacheEntry {
@@ -66,47 +86,62 @@ function findNthUserMessageFromEnd(lines: string[], n: number): number {
   return 0;
 }
 
-export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: number): { events: SessionEvent[]; totalLines: number; skipped: number } {
-  try {
-    const eventsPath = sessionPath(sessionId, 'events.jsonl');
-    if (!existsSync(eventsPath)) return { events: [], totalLines: 0, skipped: 0 };
+type LastTurns = { events: SessionEvent[]; totalLines: number; skipped: number };
 
-    const stat = statSync(eventsPath);
+export function readLastTurnsResult(sessionId: string, maxTurns: number, maxEvents: number): DiskRead<LastTurns> {
+  const eventsPath = sessionPath(sessionId, 'events.jsonl');
+  if (!existsSync(eventsPath)) return { ok: false, kind: 'missing' };
+
+  let stat: ReturnType<typeof statSync>;
+  let content: string;
+  try {
+    stat = statSync(eventsPath);
     const cacheKey = `${sessionId}\u0000${maxTurns}\u0000${maxEvents}`;
     const cached = lastTurnsCache.get(cacheKey);
     if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
-      return cached.result;
+      return { ok: true, value: cached.result };
     }
-
-    const content = readFileSync(eventsPath, 'utf-8');
-    const lines = content.split('\n');
-    const totalLines = lines.length;
-
-    let turns = maxTurns;
-    let startIndex = findNthUserMessageFromEnd(lines, turns);
-
-    while (startIndex > 0 && (lines.length - startIndex) > maxEvents && turns > 3) {
-      turns--;
-      startIndex = findNthUserMessageFromEnd(lines, turns);
-    }
-
-    const events: SessionEvent[] = [];
-    for (let i = startIndex; i < lines.length; i++) {
-      if (!lines[i].trim()) continue;
-      try { events.push(JSON.parse(lines[i])); } catch { /* skip */ }
-    }
-    const result = { events, totalLines, skipped: startIndex };
-
-    if (lastTurnsCache.size >= LAST_TURNS_CACHE_LIMIT) {
-      const [oldest] = lastTurnsCache.keys();
-      lastTurnsCache.delete(oldest);
-    }
-    lastTurnsCache.set(cacheKey, { size: stat.size, mtimeMs: stat.mtimeMs, result });
-
-    return result;
-  } catch {
-    return { events: [], totalLines: 0, skipped: 0 };
+    content = readFileSync(eventsPath, 'utf-8');
+  } catch (error) {
+    return { ok: false, kind: 'corrupt', error: error instanceof Error ? error : new Error(String(error)) };
   }
+
+  const lines = content.split('\n');
+  const totalLines = lines.length;
+
+  let turns = maxTurns;
+  let startIndex = findNthUserMessageFromEnd(lines, turns);
+
+  while (startIndex > 0 && (lines.length - startIndex) > maxEvents && turns > 3) {
+    turns--;
+    startIndex = findNthUserMessageFromEnd(lines, turns);
+  }
+
+  const events: SessionEvent[] = [];
+  let totalNonEmptyLines = 0;
+  for (let i = startIndex; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    totalNonEmptyLines++;
+    try { events.push(JSON.parse(lines[i])); } catch { /* skip */ }
+  }
+  if (totalNonEmptyLines > 0 && events.length === 0) {
+    return { ok: false, kind: 'corrupt', error: new Error('events.jsonl has no parseable lines') };
+  }
+  const result: LastTurns = { events, totalLines, skipped: startIndex };
+
+  const cacheKey = `${sessionId}\u0000${maxTurns}\u0000${maxEvents}`;
+  if (lastTurnsCache.size >= LAST_TURNS_CACHE_LIMIT) {
+    const [oldest] = lastTurnsCache.keys();
+    lastTurnsCache.delete(oldest);
+  }
+  lastTurnsCache.set(cacheKey, { size: stat.size, mtimeMs: stat.mtimeMs, result });
+
+  return { ok: true, value: result };
+}
+
+export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: number): LastTurns {
+  const result = readLastTurnsResult(sessionId, maxTurns, maxEvents);
+  return result.ok ? result.value : { events: [], totalLines: 0, skipped: 0 };
 }
 
 export function parseSessionModel(sessionId: string): string | null {

@@ -5,7 +5,7 @@ import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage, SessionEvent, ToolFactory } from './types.js';
 import { registerSession, unregisterSession, ensureSessionMeta, getSessionMeta, updateSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
-import { readSessionWorkspace, readSessionEvents, parseSessionModel, listSessionIds } from './sdk-session-store.js';
+import { readSessionWorkspace, readSessionEvents, readSessionEventsResult, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
@@ -495,26 +495,37 @@ export class SessionManager {
     
     for (const sessionId of listSessionIds()) {
       const record: CachedSession = { cwd: null, summary: null };
-      
-      const events = readSessionEvents(sessionId);
-      if (events.length === 0) continue;
-      
-      const startEvent = events[0];
-      if (startEvent.type === 'session.start') {
-        const ctx = startEvent.data?.context as Record<string, unknown> | undefined;
-        record.cwd = typeof ctx?.cwd === 'string' ? ctx.cwd : null;
+
+      const eventsResult = readSessionEventsResult(sessionId);
+      if (!eventsResult.ok && eventsResult.kind === 'missing') continue;
+
+      if (eventsResult.ok) {
+        const events = eventsResult.value;
+        if (events.length === 0) continue;
+
+        const startEvent = events[0];
+        if (startEvent.type === 'session.start') {
+          const ctx = startEvent.data?.context as Record<string, unknown> | undefined;
+          record.cwd = typeof ctx?.cwd === 'string' ? ctx.cwd : null;
+        }
+      } else {
+        // Corrupt events file: a transient read failure or all-malformed JSONL
+        // must not erase a real session from the UI. Register it anyway, deriving
+        // cwd from the meta override or workspace, and log loudly.
+        console.error(`[DISCOVER] Corrupt events for ${sessionId}; registering with fallback cwd (${eventsResult.error.message})`);
+        record.cwd = readSessionWorkspace(sessionId)?.cwd ?? null;
       }
 
       // Caco-side cwd override (from /session-cwd) wins over the immutable
       // session.start cwd so a changed cwd survives server restart.
       const metaCwd = getSessionMeta(sessionId)?.cwd;
       if (metaCwd) record.cwd = metaCwd;
-      
+
       const workspace = readSessionWorkspace(sessionId);
       if (workspace) {
         record.summary = workspace.summary ?? null;
       }
-      
+
       this.sessionCache.set(sessionId, record);
     }
   }
@@ -1388,7 +1399,11 @@ export class SessionManager {
    * Check if a session has messages (i.e., can be resumed)
    */
   hasMessages(sessionId: string): boolean {
-    return readSessionEvents(sessionId).length > 1;
+    const result = readSessionEventsResult(sessionId);
+    // Corrupt (unreadable but present) → treat as having messages so auto-resume
+    // does not skip a session whose history merely failed to read.
+    if (!result.ok) return result.kind === 'corrupt';
+    return result.value.length > 1;
   }
 
   /**

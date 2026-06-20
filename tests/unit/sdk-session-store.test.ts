@@ -13,7 +13,9 @@ vi.mock('os', async (importOriginal) => {
 import {
   readSessionWorkspace,
   readSessionEvents,
+  readSessionEventsResult,
   readLastTurns,
+  readLastTurnsResult,
   parseSessionModel,
   listSessionIds,
 } from '../../src/sdk-session-store.js';
@@ -121,6 +123,68 @@ describe('sdk-session-store', () => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'events.jsonl'), '');
       expect(readSessionEvents('sess-12')).toEqual([]);
+    });
+  });
+
+  describe('readSessionEventsResult', () => {
+    it('classifies an absent file as missing', () => {
+      const r = readSessionEventsResult('nonexistent');
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.kind).toBe('missing');
+    });
+
+    it('classifies an empty file as ok with no events', () => {
+      const dir = sessDir('res-empty');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'events.jsonl'), '\n  \n');
+      const r = readSessionEventsResult('res-empty');
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value).toEqual([]);
+    });
+
+    it('classifies an all-malformed non-empty file as corrupt (not empty)', () => {
+      const dir = sessDir('res-garbage');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'events.jsonl'), 'not json\nalso not json\n');
+      const r = readSessionEventsResult('res-garbage');
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.kind).toBe('corrupt');
+    });
+
+    it('classifies a partial parse as ok', () => {
+      const dir = sessDir('res-partial');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'events.jsonl'), '{"type":"ok"}\nbroken\n');
+      const r = readSessionEventsResult('res-partial');
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value).toHaveLength(1);
+    });
+  });
+
+  describe('readLastTurnsResult', () => {
+    it('classifies an absent file as missing', () => {
+      const r = readLastTurnsResult('nonexistent', 5, 2000);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.kind).toBe('missing');
+    });
+
+    it('classifies an all-malformed file as corrupt', () => {
+      const dir = sessDir('lt-garbage');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'events.jsonl'), 'nope\nstill nope\n');
+      const r = readLastTurnsResult('lt-garbage', 5, 2000);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.kind).toBe('corrupt');
+    });
+
+    it('returns ok with events for a valid file', () => {
+      writeEvents('lt-ok', [
+        { type: 'user.message', data: { content: 'hi' } },
+        { type: 'message', data: { content: 'reply' } },
+      ]);
+      const r = readLastTurnsResult('lt-ok', 5, 2000);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.events.length).toBeGreaterThan(0);
     });
   });
 

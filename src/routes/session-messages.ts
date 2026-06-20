@@ -275,10 +275,26 @@ export async function dispatchMessage(
   resetRequest(sessionId);
   onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> } as unknown as SessionEvent);
 
-  // Guard against double cleanup (inner cleanupAndComplete vs outer catch)
+  // Guard against double cleanup (completeDispatch vs outer catch)
   let dispatchCompleted = false;
   let sendStarted = false;
-  
+  let watchdog: ReturnType<typeof createWatchdog> | null = null;
+
+  // Single dispatch-teardown owner. Every exit path routes through this so no
+  // branch can forget part of the cleanup contract. Idempotent
+  // (dispatchCompleted is set synchronously) and awaitable so pre-send paths
+  // delete temp files before returning/throwing. It does NOT own unsubscribe():
+  // the retry helper manages subscription teardown for its own paths.
+  const completeDispatch = async (reason: string): Promise<void> => {
+    if (dispatchCompleted) return;
+    dispatchCompleted = true;
+    watchdog?.cancel();
+    sessionManager.endDispatch(sessionId);
+    broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
+    if (tempFilePaths) await Promise.all(tempFilePaths.map(p => unlink(p).catch(() => {})));
+    console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
+  };
+
   try {
     // Ensure session is active (defensive - route handler should have done this)
     if (!sessionManager.isActive(sessionId)) {
@@ -294,7 +310,7 @@ export async function dispatchMessage(
     const session = sessionManager.getSession(sessionId);
     if (!session) {
       onEvent({ type: 'session.error', data: { message: 'No active session' } });
-      sessionManager.endDispatch(sessionId);
+      await completeDispatch('no-session');
       return;
     }
     
@@ -309,22 +325,6 @@ export async function dispatchMessage(
     
     type SDKEventCallback = (event: SessionEvent) => void;
 
-    const cleanupAndComplete = (reason: string) => {
-      if (dispatchCompleted) return;
-      dispatchCompleted = true;
-      watchdog.cancel();
-
-      // End dispatch - clears busy state and correlation context atomically.
-      // restart-manager listens for the 'idle' event from dispatchState.
-      sessionManager.endDispatch(sessionId);
-
-      broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
-      if (tempFilePaths) {
-        for (const p of tempFilePaths) unlink(p).catch(() => {});
-      }
-      console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
-    };
-    
     const SWARM_TIMEOUT_MS = 15 * 60 * 1000;
     const meta = getSessionMeta(sessionId);
     const baseTimeout = meta?.kind === 'swarm' || meta?.kind === 'agent'
@@ -334,7 +334,7 @@ export async function dispatchMessage(
     let retried = false;
     let unsubscribe: () => void = () => {};
 
-    const watchdog = createWatchdog({
+    watchdog = createWatchdog({
       initialTimeoutMs: 45_000,
       betweenEventTimeoutMs: baseTimeout,
       longRunningTimeoutMs: SWARM_TIMEOUT_MS,
@@ -354,7 +354,7 @@ export async function dispatchMessage(
             resume: () => sessionManager.resume(sessionId, sessionState.getSessionConfig()).then(() => {}),
             getSession: (id) => sessionManager.getSession(id),
             beforeSend,
-            resetWatchdog: () => watchdog.reset(),
+            resetWatchdog: () => watchdog?.reset(),
             unsubscribe,
           }).then((newUnsubscribe) => {
             if (newUnsubscribe) {
@@ -362,7 +362,7 @@ export async function dispatchMessage(
             } else {
               console.error(`[DISPATCH:${rid}] Retry failed`);
               onEvent({ type: 'session.error', data: { message: 'Session not responding after retry', restorePrompt: true } });
-              cleanupAndComplete('retry-failed');
+              void completeDispatch('retry-failed');
             }
           });
           return;
@@ -381,13 +381,14 @@ export async function dispatchMessage(
             restorePrompt: true,
           },
         });
-        cleanupAndComplete('timeout');
+        void completeDispatch('timeout');
         unsubscribe();
       },
     });
     
     const handleEvent = (event: SessionEvent) => {
-      watchdog.notifyEvent(event.type);
+      if (dispatchCompleted) return;
+      watchdog?.notifyEvent(event.type);
 
       // Flush queued caco events before trigger events (so embeds appear at natural break)
       if (isFlushTrigger(event.type)) {
@@ -416,13 +417,13 @@ export async function dispatchMessage(
         if (event.type === 'session.idle') {
           void sessionManager.pollQuota();
         }
-        cleanupAndComplete(event.type);
+        void completeDispatch(event.type);
         unsubscribe();
       }
     };
 
     unsubscribe = (session as unknown as { on: (cb: SDKEventCallback) => () => void }).on(handleEvent);
-    watchdog.reset();
+    watchdog?.reset();
     
     // Send message — fire-and-forget. The send RPC may outlive the actual
     // session processing (SDK can be slow to ack), so we don't await it.
@@ -455,7 +456,7 @@ export async function dispatchMessage(
             resume: () => sessionManager.resume(sessionId, sessionState.getSessionConfig()).then(() => {}),
             getSession: (id) => sessionManager.getSession(id),
             beforeSend,
-            resetWatchdog: () => watchdog.reset(),
+            resetWatchdog: () => watchdog?.reset(),
             unsubscribe,
           }).then((newUnsubscribe) => {
             if (newUnsubscribe) {
@@ -463,7 +464,7 @@ export async function dispatchMessage(
             } else {
               console.error(`[DISPATCH:${rid}] Retry failed`);
               onEvent({ type: 'session.error', data: { message: 'Session not responding after retry', restorePrompt: true } });
-              cleanupAndComplete('retry-failed');
+              void completeDispatch('retry-failed');
             }
           });
           return;
@@ -475,14 +476,14 @@ export async function dispatchMessage(
           onEvent({ type: 'session.error', data: { message, restorePrompt: true } });
         }
 
-        cleanupAndComplete('send error');
+        void completeDispatch('send error');
         unsubscribe();
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[DISPATCH:${rid}] Send error:`, message);
       onEvent({ type: 'session.error', data: { message, restorePrompt: true } });
-      cleanupAndComplete('send error');
+      void completeDispatch('send error');
       unsubscribe();
       throw err;
     }
@@ -491,15 +492,10 @@ export async function dispatchMessage(
     
   } catch (error) {
     if (!dispatchCompleted) {
-      dispatchCompleted = true;
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[DISPATCH:${rid}] Outer error:`, message);
-      onEvent({ type: 'session.error', data: { message, restorePrompt: true } });      
-      sessionManager.endDispatch(sessionId);
-      broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
-      if (tempFilePaths) {
-        for (const p of tempFilePaths) await unlink(p).catch(() => {});
-      }
+      onEvent({ type: 'session.error', data: { message, restorePrompt: true } });
+      await completeDispatch('outer-error');
       if (!sendStarted) throw error;
     }
   }

@@ -26,12 +26,12 @@ import type { SessionEvent } from '../types.js';
 export type { SessionEvent };
 import { getClientMessageHandler } from '../extension-runtime.js';
 import { watchExtensions } from '../extension-store.js';
+import { setSessionUsage, getSessionUsage } from '../session-usage-cache.js';
 
 const allConnections = new Set<WebSocket>();
 const sessionSubscribers = new Map<string, Set<WebSocket>>();
 const clientSubscription = new Map<WebSocket, string>();
 const wsAlive = new WeakMap<WebSocket, boolean>();
-const usageCache = new Map<string, { tokenLimit: number; currentTokens: number }>();
 
 
 
@@ -442,7 +442,7 @@ async function streamHistory(ws: WebSocket, sessionId: string): Promise<void> {
     
     console.log(`[HISTORY] Streamed ${sentCount} events (from ${events.length} raw) for ${shortId} in ${Date.now() - fetchStart}ms total`);
     const isBusy = sessionManager.isBusy(sessionId);
-    const usage = usageCache.get(sessionId);
+    const usage = getSessionUsage(sessionId);
     send(ws, { type: 'historyComplete', sessionId, data: { isBusy, usage } });
     console.log(`[HISTORY] historyComplete sent for ${shortId}, isBusy=${isBusy}, ws.readyState=${ws.readyState}`);
     
@@ -467,7 +467,7 @@ export function broadcastEvent(
   if (event.type === 'session.usage_info' && event.data) {
     const d = event.data as { tokenLimit?: number; currentTokens?: number };
     if (d.tokenLimit && d.currentTokens) {
-      usageCache.set(sessionId, { tokenLimit: d.tokenLimit, currentTokens: d.currentTokens });
+      setSessionUsage(sessionId, { tokenLimit: d.tokenLimit, currentTokens: d.currentTokens });
     }
   }
   

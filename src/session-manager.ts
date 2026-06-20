@@ -15,7 +15,7 @@ import { loadMcpServers } from './mcp-config-loader.js';
 import { createObservationHook } from './observe/hook.js';
 import { OBS_RAW_CEILING_BYTES } from './observe/types.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
-import { clearSession as clearThroughputSession } from './session-throughput.js';
+import { disposeSessionRuntime } from './session-runtime.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
 import { thresholdForBudget, type ModelTokenLimits } from './context-budget.js';
 import type { SdkAgentInfo } from './agent-command.js';
@@ -801,6 +801,7 @@ export class SessionManager {
     const active = this.activeSessions.get(sessionId);
     if (!active) return;
     this.activeSessions.delete(sessionId);
+    disposeSessionRuntime(sessionId);
     console.log(`[SDK] Dropped stale session ${sessionId} from active map`);
   }
 
@@ -832,7 +833,7 @@ export class SessionManager {
     dispatchState.end(sessionId);
     this.activeSessions.delete(sessionId);
     
-    clearThroughputSession(sessionId);
+    disposeSessionRuntime(sessionId);
     
     console.log(`✓ Stopped session ${sessionId}`);
   }
@@ -976,7 +977,7 @@ export class SessionManager {
     }
     
     this.sessionCache.delete(sessionId);
-    clearThroughputSession(sessionId);
+    disposeSessionRuntime(sessionId);
   }
 
   async exportToFile(sessionId: string, outputPath: string): Promise<void> {

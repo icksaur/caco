@@ -1,11 +1,13 @@
 /**
  * Caco Event Queue
- * 
+ *
  * Queues caco.* synthetic events and flushes them on trigger events.
  * This ensures embeds appear after tool completion, not during.
- * 
- * Used by both live streaming (session-messages.ts) and history (websocket.ts).
- * 
+ *
+ * Per active session, the queue instance is owned by SessionRuntime
+ * (src/session-runtime.ts); history replay (websocket.ts) uses a throwaway
+ * local instance.
+ *
  * @remarks Unit test all changes - see tests/unit/caco-event-queue.test.ts
  */
 
@@ -53,23 +55,4 @@ export class CacoEventQueue {
   get length(): number {
     return this.pending.length;
   }
-}
-
-/**
- * Session ID → Queue mapping
- * Each session has its own queue to avoid cross-contamination
- */
-const sessionQueues = new Map<string, CacoEventQueue>();
-
-export function getQueue(sessionId: string): CacoEventQueue {
-  let queue = sessionQueues.get(sessionId);
-  if (!queue) {
-    queue = new CacoEventQueue();
-    sessionQueues.set(sessionId, queue);
-  }
-  return queue;
-}
-
-export function deleteQueue(sessionId: string): void {
-  sessionQueues.delete(sessionId);
 }

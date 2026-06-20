@@ -45,7 +45,7 @@ import { setGitEditPoller } from './src/dispatch-events.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
-import { getQueue } from './src/caco-event-queue.js';
+import { getSessionRuntime } from './src/session-runtime.js';
 import { buildSystemMessage } from './src/prompts.js';
 import { loadServerExtensions } from './src/extension-runtime.js';
 import { onAllIdle } from './src/restart-manager.js';
@@ -225,7 +225,7 @@ async function start(): Promise<void> {
   const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
     const queueCacoEvent = (event: CacoEmbedEvent) => {
       if (sessionRef.id && sessionRef.id !== PENDING_SESSION_ID) {
-        const queue = getQueue(sessionRef.id);
+        const queue = getSessionRuntime(sessionRef.id).queue;
         queue.queue(event);
         console.log(`[QUEUE] caco.embed queued for session ${sessionRef.id}, pending: ${queue.length}`);
       } else {

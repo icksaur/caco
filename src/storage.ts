@@ -45,7 +45,7 @@ export {
 
 export type { MCPAuthState, MCPAuthStore } from './mcp-auth-store.js';
 export {
-  getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth, removeMcpServerAuth,
+  getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth, updateMcpServerAuth, removeMcpServerAuth,
 } from './mcp-auth-store.js';
 
 export type { CacoPeer } from './peer-store.js';

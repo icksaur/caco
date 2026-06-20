@@ -14,7 +14,7 @@
 import { Router, Request, Response } from 'express';
 import { randomBytes, createHash } from 'crypto';
 import { createServer } from 'http';
-import { getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth, type MCPAuthState } from '../storage.js';
+import { getMcpAuth, setMcpAuth, getMcpServerAuth, updateMcpServerAuth, type MCPAuthState } from '../storage.js';
 import { listCliOAuthConfigs } from '../cli-oauth.js';
 import { discoverOAuthMetadata, serverIdFromUrl } from '../mcp-discovery.js';
 
@@ -104,15 +104,18 @@ router.get('/start', async (req: Request, res: Response) => {
   if (!serverAuth.authorizationEndpoint || !serverAuth.scopes?.length || !serverAuth.clientId) {
     try {
       const metadata = await discoverOAuthMetadata(serverAuth.url);
-      serverAuth = {
-        ...serverAuth,
-        authorizationEndpoint: metadata.authorization_endpoint,
-        tokenEndpoint: metadata.token_endpoint,
-        scopes: metadata.scopes_supported,
-      };
-      if (metadata.client_id) serverAuth.clientId = metadata.client_id;
-      if (metadata.redirect_uris) serverAuth.redirectUris = metadata.redirect_uris;
-      setMcpServerAuth(serverId, serverAuth);
+      serverAuth = updateMcpServerAuth(serverId, prev => {
+        const base = prev ?? serverAuth!;
+        const next: MCPAuthState = {
+          ...base,
+          authorizationEndpoint: metadata.authorization_endpoint,
+          tokenEndpoint: metadata.token_endpoint,
+          scopes: metadata.scopes_supported,
+        };
+        if (metadata.client_id) next.clientId = metadata.client_id;
+        if (metadata.redirect_uris) next.redirectUris = metadata.redirect_uris;
+        return next;
+      });
       console.log(`[MCP-AUTH] Discovered endpoints for ${serverId}: ${metadata.authorization_endpoint}` +
         (metadata.client_id ? ` (clientId from registration: ${metadata.client_id})` : ''));
     } catch (e) {
@@ -225,19 +228,19 @@ router.get('/callback', async (req: Request, res: Response) => {
 
   try {
     const tokens = await exchangeCodeForToken(pending, code);
-    setMcpServerAuth(serverId, {
-      ...serverAuth,
+    updateMcpServerAuth(serverId, prev => ({
+      ...(prev ?? serverAuth),
       token: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       expiresAt: tokens.expiresAt,
       needsAuth: false,
       error: undefined,
-    });
+    }));
     console.log(`[MCP-AUTH] Token acquired for ${serverId}`);
     res.send(callbackHtml(serverId, null));
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Token exchange failed';
-    setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: errorMessage });
+    updateMcpServerAuth(serverId, prev => ({ ...(prev ?? serverAuth), needsAuth: true, error: errorMessage }));
     res.send(callbackHtml(serverId, errorMessage));
   }
 });
@@ -254,23 +257,20 @@ router.post('/config', (req: Request, res: Response) => {
     return;
   }
   
-  const serverAuth = getMcpServerAuth(serverId);
-  if (!serverAuth) {
+  const existing = getMcpServerAuth(serverId);
+  if (!existing) {
     res.status(404).json({ ok: false, error: 'Server not found' });
     return;
   }
-  
-  // Update configuration
-  const updatedState: MCPAuthState = {
-    ...serverAuth,
-  };
-  
-  if (clientId !== undefined) {
-    updatedState.clientId = clientId || null;
-    updatedState.needsClientId = !clientId;
-  }
-  
-  setMcpServerAuth(serverId, updatedState);
+
+  updateMcpServerAuth(serverId, prev => {
+    const next: MCPAuthState = { ...(prev ?? existing) };
+    if (clientId !== undefined) {
+      next.clientId = clientId || null;
+      next.needsClientId = !clientId;
+    }
+    return next;
+  });
   
   res.json({ ok: true });
 });
@@ -362,20 +362,20 @@ function startTempTokenExchange(expectedState: string, port: number, path: strin
     void (async () => {
       try {
         const tokens = await exchangeCodeForToken(pending, code);
-        setMcpServerAuth(pending.serverId, {
-          ...serverAuth,
+        updateMcpServerAuth(pending.serverId, prev => ({
+          ...(prev ?? serverAuth),
           token: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           expiresAt: tokens.expiresAt,
           needsAuth: false,
           error: undefined,
-        });
+        }));
         console.log(`[MCP-AUTH] Token acquired for ${pending.serverId} (temp server)`);
         resp.writeHead(200, { 'Content-Type': 'text/html' });
         resp.end('<html><body><h3>Authenticated</h3><p>You can close this window.</p><script>window.close()</script></body></html>');
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        setMcpServerAuth(pending.serverId, { ...serverAuth, needsAuth: true, error: msg });
+        updateMcpServerAuth(pending.serverId, prev => ({ ...(prev ?? serverAuth), needsAuth: true, error: msg }));
         resp.writeHead(200, { 'Content-Type': 'text/html' });
         resp.end(`<html><body><h3>Error</h3><p>${escapeHtml(msg)}</p></body></html>`);
       }

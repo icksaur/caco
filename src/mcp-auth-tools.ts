@@ -10,7 +10,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { getMcpAuth, setMcpAuth, type MCPAuthState } from './storage.js';
+import { getMcpServerAuth, updateMcpServerAuth, type MCPAuthState } from './storage.js';
 import { discoverOAuthMetadata } from './mcp-discovery.js';
 import { getCliOAuthConfig } from './cli-oauth.js';
 
@@ -35,10 +35,9 @@ export function createMcpAuthTools() {
     handler: async ({ serverUrl, serverId, clientId }) => {
       try {
         // Check if server already registered
-        const store = getMcpAuth();
-        if (store.servers[serverId]) {
+        const existing = getMcpServerAuth(serverId);
+        if (existing) {
           // Server already exists - check if it needs auth
-          const existing = store.servers[serverId];
           if (existing.needsAuth || existing.needsClientId) {
             return {
               textResultForLlm: `Server "${serverId}" is already registered but needs configuration. ` +
@@ -72,8 +71,7 @@ export function createMcpAuthTools() {
             error: errorMessage,
           };
           
-          store.servers[serverId] = serverState;
-          setMcpAuth(store);
+          updateMcpServerAuth(serverId, () => serverState);
           
           return {
             textResultForLlm: `Server "${serverId}" registered but OAuth discovery failed: ${errorMessage}. ` +
@@ -98,8 +96,7 @@ export function createMcpAuthTools() {
         };
         
         // Save to store
-        store.servers[serverId] = serverState;
-        setMcpAuth(store);
+        updateMcpServerAuth(serverId, () => serverState);
         
         // Return appropriate message based on whether we have client_id
         if (!resolvedClientId) {

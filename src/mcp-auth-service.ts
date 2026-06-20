@@ -1,4 +1,4 @@
-import { getMcpServerAuth, setMcpServerAuth } from './storage.js';
+import { getMcpServerAuth, updateMcpServerAuth } from './storage.js';
 
 export async function refreshAccessToken(serverId: string): Promise<boolean> {
   const serverAuth = getMcpServerAuth(serverId);
@@ -26,31 +26,31 @@ export async function refreshAccessToken(serverId: string): Promise<boolean> {
       let msg = `Refresh failed: ${res.status}`;
       try { const d = await res.json() as { error_description?: string }; msg = d.error_description || msg; } catch { /* */ }
       console.warn(`[MCP-AUTH] Refresh failed for ${serverId}: ${msg}`);
-      setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: msg });
+      updateMcpServerAuth(serverId, prev => ({ ...prev!, needsAuth: true, error: msg }));
       return false;
     }
 
     const data = await res.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
     if (!data.access_token) {
-      setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: 'No access_token in refresh response' });
+      updateMcpServerAuth(serverId, prev => ({ ...prev!, needsAuth: true, error: 'No access_token in refresh response' }));
       return false;
     }
 
     const expiresAt = data.expires_in ? Date.now() + (data.expires_in * 1000) : undefined;
-    setMcpServerAuth(serverId, {
-      ...serverAuth,
+    updateMcpServerAuth(serverId, prev => ({
+      ...prev!,
       token: data.access_token,
-      refreshToken: data.refresh_token || serverAuth.refreshToken,
+      refreshToken: data.refresh_token || prev!.refreshToken,
       expiresAt,
       needsAuth: false,
       error: undefined,
-    });
+    }));
     console.log(`[MCP-AUTH] Token refreshed for ${serverId}`);
     return true;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn(`[MCP-AUTH] Refresh error for ${serverId}: ${msg}`);
-    setMcpServerAuth(serverId, { ...serverAuth, needsAuth: true, error: msg });
+    updateMcpServerAuth(serverId, prev => ({ ...prev!, needsAuth: true, error: msg }));
     return false;
   }
 }

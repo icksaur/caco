@@ -13,15 +13,17 @@ vi.mock('../../src/storage.js', () => ({
   setMcpAuth: vi.fn(),
   getMcpServerAuth: vi.fn(),
   setMcpServerAuth: vi.fn(),
+  updateMcpServerAuth: vi.fn(),
 }));
 
-import { getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth } from '../../src/storage.js';
+import { getMcpAuth, setMcpAuth, getMcpServerAuth, setMcpServerAuth, updateMcpServerAuth } from '../../src/storage.js';
 
 // Import after mocking to get mocked versions
 const mockedGetMcpAuth = vi.mocked(getMcpAuth);
 const _mockedSetMcpAuth = vi.mocked(setMcpAuth);
 const mockedGetMcpServerAuth = vi.mocked(getMcpServerAuth);
 const mockedSetMcpServerAuth = vi.mocked(setMcpServerAuth);
+const mockedUpdateMcpServerAuth = vi.mocked(updateMcpServerAuth);
 
 // Test the PKCE generation logic (duplicated from route for isolation)
 function generateCodeVerifier(): string {
@@ -302,6 +304,10 @@ describe('MCP Auth Routes', () => {
     let refreshAccessToken: (serverId: string) => Promise<boolean>;
 
     beforeEach(async () => {
+      // The boundary applies fn against the freshest stored state; mirror that
+      // so assertions can observe what would be persisted.
+      mockedUpdateMcpServerAuth.mockImplementation((serverId, fn) =>
+        fn(mockedGetMcpServerAuth(serverId)));
       const mod = await import('../../src/routes/mcp-auth.js');
       refreshAccessToken = mod.refreshAccessToken;
     });
@@ -378,7 +384,8 @@ describe('MCP Auth Routes', () => {
       expect(body.get('client_id')).toBe('test-client');
       expect(body.get('scope')).toBe('read write');
 
-      expect(mockedSetMcpServerAuth).toHaveBeenCalledWith('test-server', expect.objectContaining({
+      expect(mockedUpdateMcpServerAuth).toHaveBeenCalledWith('test-server', expect.any(Function));
+      expect(mockedUpdateMcpServerAuth.mock.results[0].value).toEqual(expect.objectContaining({
         token: 'new_at_12345',
         refreshToken: 'new_rt_12345',
         needsAuth: false,
@@ -410,7 +417,8 @@ describe('MCP Auth Routes', () => {
       const result = await refreshAccessToken('test-server');
       expect(result).toBe(false);
 
-      expect(mockedSetMcpServerAuth).toHaveBeenCalledWith('test-server', expect.objectContaining({
+      expect(mockedUpdateMcpServerAuth).toHaveBeenCalledWith('test-server', expect.any(Function));
+      expect(mockedUpdateMcpServerAuth.mock.results[0].value).toEqual(expect.objectContaining({
         needsAuth: true,
       }));
 

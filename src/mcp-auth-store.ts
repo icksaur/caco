@@ -57,6 +57,29 @@ export function setMcpServerAuth(serverId: string, state: MCPAuthState): void {
   setMcpAuth(store);
 }
 
+/**
+ * Atomic read-modify-write for a single server's auth state.
+ *
+ * The store is re-read immediately before `fn` runs and written immediately
+ * after, with no `await` in between, so the merge base passed to `fn` is always
+ * the freshest persisted value. Callers that do async work (token refresh, code
+ * exchange, OAuth discovery) MUST keep that work OUTSIDE this call and merge the
+ * result onto `prev` here — never onto a snapshot captured before the await.
+ * Node's single-threaded model makes this synchronous section atomic with
+ * respect to other in-process callers, which is what closes the lost-update
+ * window between a refresh's read and its write.
+ */
+export function updateMcpServerAuth(
+  serverId: string,
+  fn: (prev: MCPAuthState | undefined) => MCPAuthState,
+): MCPAuthState {
+  const store = getMcpAuth();
+  const next = fn(store.servers[serverId]);
+  store.servers[serverId] = next;
+  setMcpAuth(store);
+  return next;
+}
+
 export function removeMcpServerAuth(serverId: string): void {
   const store = getMcpAuth();
   delete store.servers[serverId];

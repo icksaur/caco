@@ -2,8 +2,17 @@
 
 ## Goal
 
-Force fan-out **search/read** through `caco_run_workflow` by excluding the
-built-in tools its facade already covers losslessly. Two wins:
+Bias fan-out **search/read** toward `caco_run_workflow` by excluding the built-in
+search tools its facade covers losslessly, so search output stays out of the model's
+context (and re-sent cache) and decided fan-outs collapse to one workflow call.
+
+**Important caveat up front:** excluding the search *tools* is a NUDGE, not an absolute
+forcing function, because `bash` (kept, for lifecycle/streaming/test runs) can still run
+`rg`/`grep`/`find`. The only configuration that truly *forces* facade routing also
+excludes `bash` ("strict read diet"), which costs live shell/test ergonomics. So the
+default is measured, not assumed (see Recommended design + Acceptance).
+
+Two intended wins:
 
 1. **Context savings:** raw search/read output (grep hit lists, globbed paths,
    file bodies) never enters the model's context — only the workflow's compact
@@ -48,44 +57,68 @@ So the cleanly facade-covered, zero-loss exclusions are exactly **`grep` and
 
 ## Proposals
 
-### Proposal A — exclude `grep` + `glob` by default (RECOMMENDED)
+### Proposal A — exclude `grep` + `glob` by default (a NUDGE, not a forcing function)
 
-Set `excludedTools: ['builtin:grep', 'builtin:glob']`. Search must go through the
-workflow (`caco.grep`/`caco.rg`/`caco.glob`), keeping hit lists out of context.
-Single-file view and edit (via `str_replace_editor`) and shell (`bash`) are
-untouched, so the common read-A-then-edit loop and test runs are unaffected. Lowest
-risk; captures the document-search win the user validated.
+Set `excludedTools: ['builtin:grep', 'builtin:glob']`. This removes the model's
+**first-choice** search tools, biasing it toward the workflow facade
+(`caco.grep`/`caco.rg`/`caco.glob`). Single-file view and edit (`str_replace_editor`)
+and shell (`bash`) are untouched, so the read-A-then-edit loop and test runs are
+unaffected. Lowest risk.
 
-### Proposal B — also exclude `bash` (opt-in, behind config)
+**Honest limitation — bash is an open escape hatch.** Because `bash` stays, the model
+can still search with `bash: rg ...` / `grep` / `find` / `ls` and get **nothing** out
+of context. So A does **not** *force* facade routing — it only removes the most obvious
+alternatives and hopes the model picks the workflow over shelling out. Whether it
+actually does is unknown and MUST be measured (the benchmark explicitly fails A if the
+model substitutes `bash` search — see Acceptance). Treat A as "remove first-choice
+search tools; expected to route through the workflow," not "search must go through the
+workflow."
 
-Add `builtin:bash` (and its lifecycle tools). Routes one-shot shell (git status/diff,
-quick commands) through `caco.sh` too — more context kept out, but at real cost:
-no streaming a long test/build, no background/detached processes, no interactive
-stdin, and the failure-focused output shaping (`retrieve_output`) no longer applies
-(the workflow caps logs differently). Offer as a config opt-in, **off by default**,
-for users who accept the tradeoff. The user leans toward "bash/git/view are well
-suited" — B is where that lands, but it should be a deliberate switch, not the default.
+### Proposal B — "strict read diet": exclude `grep` + `glob` + `bash` (the only real force, opt-in)
 
-### Proposal C — prompt-nudge only, exclude nothing
+Add `builtin:bash` (and `read_bash`/`stop_bash`/`list_bash`). This is the **only**
+configuration that genuinely forces search/read fan-out through the facade, because it
+closes the bash escape hatch. The cost is real and large: no streaming a long
+test/build, no background/detached processes, no interactive stdin, and the
+failure-focused output shaping (`retrieve_output`) no longer applies (the workflow caps
+logs differently). **Off by default**, exposed as an opt-in for users who accept losing
+live shell/test ergonomics in exchange for true context discipline. The user's
+"bash/git/view are well suited" instinct lands here — but it is a deliberate switch, not
+a safe default.
 
-Strengthen the system prompt to prefer `caco_run_workflow` for 3+ reads, but keep
-the built-ins. Rejected as the highlight: the D1 benchmark already had the workflow
-available with a nudge and the model never used it. Without removing the alternative,
-behaviour does not change. Kept only as the fallback if A measurably hurts.
+### Proposal C — prompt-nudge only (status quo, already failed)
 
-## Recommended design: Proposal A, configurable
+Strengthen the prompt to prefer the workflow, exclude nothing. **Demoted:** this is
+effectively the current state, and the D1 benchmark already showed the model ignores
+the nudge. Listed only for completeness; not a real option.
 
-- A single source: `DEFAULT_EXCLUDED_BUILTINS = ['builtin:grep', 'builtin:glob']` in
-  `src/tool-registry.ts` (next to A5's disable switch), unioned with a
-  `CACO_EXCLUDED_BUILTINS` env override (comma-separated, same parsing as
-  `CACO_DISABLED_TOOLS`). This lets the user add `builtin:bash` (Proposal B) or clear
-  the list without a code change.
+## Recommended design: ship A only if it measures clean; else strict opt-in
+
+Do **not** exclude `bash` globally — the lifecycle/test/streaming loss is too steep for
+a default. Sequence:
+
+1. Try **Proposal A** (exclude `grep`+`glob`) and run the expanded benchmark.
+2. **If A measures clean** (the model routes search through the workflow and does NOT
+   substitute `bash` search — see Acceptance fail criteria) → ship A as the default.
+3. **If A shows bash substitution or regressions** → default to **no exclusion** (keep
+   the prompt nudge) and ship **Proposal B as a documented opt-in** ("strict read
+   diet"), since B is the only configuration that truly forces routing.
+
+Implementation is the same either way (a configurable exclusion list); only the default
+contents differ based on the measurement.
+
+- A single source: `DEFAULT_EXCLUDED_BUILTINS` in `src/tool-registry.ts` (next to A5's
+  disable switch), unioned with a `CACO_EXCLUDED_BUILTINS` env override (comma-separated,
+  same parsing as `CACO_DISABLED_TOOLS`). The env lets the user select the strict diet
+  (`builtin:grep,builtin:glob,builtin:bash`) or clear the list without a code change.
+  This is NOT over-engineering: rollback and a strict opt-in both need it.
 - `server.ts` passes the resolved list to `createSessionState({ ..., excludedTools })`.
-  The existing plumbing carries it to every create/resume.
-- **Prompt:** update the workflow nudge to state that `grep`/`glob` are unavailable and
-  that search/fan-out reads go through `caco_run_workflow` (`caco.grep`/`caco.rg`/
-  `caco.glob`); single-file view stays on the normal view tool. This prevents the
-  model from flailing when it reaches for a now-absent tool.
+  The existing plumbing carries it to every create/resume/model-switch resume.
+- **Prompt:** state which search tools are unavailable and that search/fan-out reads go
+  through `caco_run_workflow` (`caco.grep`/`caco.rg`/`caco.glob`); single-file view stays
+  on the normal view tool. Under Proposal A, also instruct NOT to substitute `bash rg`/
+  `grep`/`find` for search (use the workflow) — this is the only lever that makes A more
+  than a nudge without removing bash.
 
 ## Considerations
 
@@ -102,8 +135,12 @@ behaviour does not change. Kept only as the fallback if A measurably hurts.
   `caco.sh` running `rg`) do everything the built-ins did; only the *route* changes,
   and raw output stays out of context. Nothing becomes impossible.
 - **`str_replace_editor` cannot be excluded** (it is the edit tool); file reads via its
-  `view` command therefore stay on the built-in path. C1 is about search, not single
-  reads.
+  `view` command therefore stay on the built-in path. C1 is scoped to *search*, not
+  single reads. **Unsolved leak (acknowledged):** even with search excluded, the model
+  can still read many files one-by-one via `view`, dumping each body into context. C1
+  does not address multi-file read fan-out — that would need either a routing of `view`
+  (impossible without losing edit) or a separate "read many files" tool/nudge. Out of
+  scope here; noted as a remaining context leak.
 - **Byte measurement gap.** `scripts/measure-tools.mts` only sizes Caco's `defineTool`
   tools; it cannot see SDK built-in schema bytes. The schema saving from excluding
   `grep`/`glob` is real but unmeasured by our oracle — validate via the D1
@@ -121,18 +158,31 @@ behaviour does not change. Kept only as the fallback if A measurably hurts.
 
 ## Acceptance
 
-- **Behavioural oracle (the gate):** run the fixed D1 benchmark
-  (`docs/tool-diet-bench.md`) before and after enabling Proposal A, same prompts.
-  Expected: B1/B2 (fan-out search) collapse to a single `caco_run_workflow` call
-  (`requestToolCalls` ≈1, `requestWorkflowCodeBytes` > 0) with no rise in
-  `requestToolFailures`; B3 (single view) and B4 (edit) unchanged (they never used
-  grep/glob); overall input/cache tokens per fan-out request drop. If failures rise or
-  the model stalls, A is rejected → fall back to C.
-- **Capability check:** a search that previously used `grep` returns the same answer
-  via the workflow (the doc-search example reproduced).
+- **Behavioural oracle (the gate):** run an EXPANDED search benchmark before and after
+  enabling Proposal A, same prompts each run. The current 5-prompt D1 set is too thin
+  for a change that affects every search; add search cases: (a) trivial single grep,
+  (b) doc-lookup ("is there a doc about X?"), (c) multi-glob, (d) read-after-search
+  across multiple files, (e) "find all usages of symbol Y", (f) a no-match search,
+  (g) an ambiguous/open-ended search. Capture per-request metrics (turns, tool calls,
+  failures, workflow code bytes, input/cache tokens).
+- **Explicit FAIL criteria for Proposal A (any one → reject A, fall back to strict
+  opt-in or no-exclusion):**
+  1. any fan-out search is answered with `bash`/`rg`/`grep`/`find` instead of a
+     `caco_run_workflow` call (the escape-hatch substitution);
+  2. workflow code failures increase (model writes broken facade scripts);
+  3. tool-call count or retries rise materially vs the pre-change run on the same prompt;
+  4. answer quality regresses (wrong/incomplete results);
+  5. the expected input/cache token savings do not appear on fan-out requests.
+- **Capability check:** a search that previously used `grep` returns the same answer via
+  the workflow (the doc-search example reproduced).
 - **Config check:** `CACO_EXCLUDED_BUILTINS=""` restores `grep`/`glob`;
-  `CACO_EXCLUDED_BUILTINS=builtin:bash` (Proposal B) additionally removes bash. Unit
-  test on the parse/merge helper.
+  `CACO_EXCLUDED_BUILTINS=builtin:grep,builtin:glob,builtin:bash` selects the strict
+  diet. Unit test on the parse/merge helper.
+- **Measurement honesty:** `scripts/measure-tools.mts` only sizes Caco's `defineTool`
+  tools, so the schema-byte saving from excluding built-ins is NOT measurable by our
+  oracle and must not be claimed as a hard number. The real, falsifiable evidence is the
+  D1 input/cache token delta on fan-out requests; if that delta is absent, the change
+  did nothing (fail criterion 5).
 - Gates: typecheck ×2, lint:strict, knip, full tests, build:client.
 
 ## Plan (ordered)
@@ -143,12 +193,17 @@ behaviour does not change. Kept only as the fallback if A measurably hurts.
 2. **Wire server.ts:** pass `excludedTools: [...excludedBuiltinNames()]` into
    `createSessionState`. Confirm it threads to create + resume + model-switch resume
    (it already reads `active.excludedTools`).
-3. **Prompt:** note that `grep`/`glob` route through `caco_run_workflow`; keep view/edit
-   on the normal tools. Make the facade search methods explicit.
-4. **Benchmark gate:** run the D1 fixed benchmark before/after; record in this spec.
-   Proceed only if the behavioural oracle passes.
-5. **Document** the `CACO_EXCLUDED_BUILTINS` switch (and Proposal B opt-in) in
-   `docs/response-actions.md`'s sibling or the tool-diet docs; note the measurement gap.
+3. **Prompt:** state which search tools are unavailable and that search/fan-out reads go
+   through `caco_run_workflow`; under Proposal A, explicitly instruct NOT to substitute
+   `bash rg`/`grep`/`find`. Make the facade search methods explicit.
+4. **Expanded benchmark gate (decides the default):** run the expanded search benchmark
+   before/after with `DEFAULT_EXCLUDED_BUILTINS = [grep, glob]`. Evaluate the FAIL
+   criteria. If clean → keep grep+glob as the default. If bash substitution or
+   regressions appear → set the default to `[]` (no exclusion) and ship the strict diet
+   (`grep,glob,bash`) as a documented `CACO_EXCLUDED_BUILTINS` opt-in. Record results in
+   this spec.
+5. **Document** the `CACO_EXCLUDED_BUILTINS` switch + the strict-diet opt-in in the
+   tool-diet docs; note the measurement gap (built-in schema bytes invisible to the
+   oracle; evidence is the D1 token delta).
 
-Proposal A is the highlight; B is a documented opt-in; C is the fallback if the
-benchmark shows the model can't absorb the exclusion.
+Default contents are chosen by the step-4 measurement, not assumed.

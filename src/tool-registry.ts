@@ -1,0 +1,52 @@
+/**
+ * Tool-diet disable switch. A single place to drop a tool from the per-session
+ * tool surface, cutting its name + description + parameter schema from every
+ * model turn. Re-adding is a one-line edit (remove from DEFAULT_DISABLED_TOOLS)
+ * or an env tweak — no behavior is deleted, only hidden, so git/flag restores it.
+ *
+ * Educated-guess defaults (no telemetry yet): low-frequency, easily-re-added
+ * tools. Override or extend at runtime with CACO_DISABLED_TOOLS (comma-separated
+ * tool names); the env list is unioned with the defaults.
+ */
+
+/**
+ * Names disabled by default. Conservative, high-confidence cuts: niche tools a
+ * typical coding session never calls, each trivially re-enabled. NOT capability
+ * deletions — the code stays; only registration is skipped.
+ */
+export const DEFAULT_DISABLED_TOOLS: string[] = [
+  'embed_media',           // media embeds (YouTube/Spotify/etc) — rare in coding work
+  'caco_extensions',       // extension discovery — niche; docs cover it
+  'caco_session_store_sql', // cross-session history SQL — power tool, rarely used
+];
+
+export function parseDisabledToolNames(defaults: string[], env: string | undefined): Set<string> {
+  const names = [...defaults];
+  if (env) {
+    for (const raw of env.split(',')) {
+      const name = raw.trim();
+      if (name) names.push(name);
+    }
+  }
+  return new Set(names.map(n => n.toLowerCase()));
+}
+
+export interface NamedTool { name: string; }
+
+export function filterDisabledTools<T extends NamedTool>(
+  tools: T[],
+  disabled: Set<string>,
+): { kept: T[]; removed: string[] } {
+  const kept: T[] = [];
+  const removed: string[] = [];
+  for (const tool of tools) {
+    if (disabled.has(tool.name.toLowerCase())) removed.push(tool.name);
+    else kept.push(tool);
+  }
+  return { kept, removed };
+}
+
+/** The disabled-tool set for this process (defaults ∪ CACO_DISABLED_TOOLS). */
+export function disabledToolNames(): Set<string> {
+  return parseDisabledToolNames(DEFAULT_DISABLED_TOOLS, process.env.CACO_DISABLED_TOOLS);
+}

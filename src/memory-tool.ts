@@ -38,57 +38,49 @@ export function formatMemoryForPrompt(): string {
 }
 
 export function createMemoryTools() {
-  const getMemory = defineTool('caco_get_memory', {
-    description: 'Read all persistent memories (global — shared across all sessions). Returns key-value entries and capacity. Check before adding entries, or when you need the latest version (the injected copy may be stale).',
-
-    parameters: z.object({}),
-
-    handler: async () => {
-      const store = readMemory();
-      return {
-        textResultForLlm: JSON.stringify({
-          entries: store,
-          count: Object.keys(store).length,
-          capacity: MAX_ENTRIES,
-        }),
-      };
-    },
-  });
-
-  const setMemory = defineTool('caco_set_memory', {
-    description: 'Store or remove a persistent memory entry. Keys are slugs (lowercase, numbers, hyphens — e.g. "preferred-language"). Pass a value to store/update; omit or empty to delete. Use when the user says "remember", "forget", "always", or "never" about a preference. One fact per key; prefer updating an existing key.',
+  const memory = defineTool('caco_memory', {
+    description: 'Persistent cross-session memory (global key-value, max 50 slug-keyed entries). action="read" returns all entries + capacity (memory is injected at session start; read for the latest if it may have changed). action="set" stores/updates key→value. action="delete" removes key. Use set/delete when the user says "remember", "forget", "always", or "never". One fact per key; prefer updating an existing key.',
 
     parameters: z.object({
-      key: z.string().describe('Slug-format key (lowercase, hyphens, numbers)'),
-      value: z.string().optional().describe('Value to store. Empty or omitted = delete.'),
+      action: z.enum(['read', 'set', 'delete']).describe('read all, set a key, or delete a key'),
+      key: z.string().optional().describe('Slug key (lowercase, hyphens, numbers); required for set/delete'),
+      value: z.string().optional().describe('Value to store; required for set'),
     }),
 
-    handler: async ({ key, value }) => {
-      if (!SLUG_RE.test(key)) {
-        return { textResultForLlm: `Error: invalid key "${key}". Keys must be slugs (lowercase, hyphens, numbers, e.g., "preferred-language").` };
+    handler: async ({ action, key, value }) => {
+      const store = readMemory();
+      const meta = () => ({ count: Object.keys(store).length, capacity: MAX_ENTRIES });
+
+      if (action === 'read') {
+        return { textResultForLlm: JSON.stringify({ entries: store, ...meta() }) };
       }
 
-      const store = readMemory();
-      const trimmed = (value ?? '').trim();
+      if (!key || !SLUG_RE.test(key)) {
+        return { textResultForLlm: `Error: ${action} requires a valid slug key (lowercase, hyphens, numbers, e.g., "preferred-language").` };
+      }
 
-      if (!trimmed) {
+      if (action === 'delete') {
         if (key in store) {
           delete store[key];
           writeMemory(store);
-          return { textResultForLlm: JSON.stringify({ ok: true, deleted: key, count: Object.keys(store).length, capacity: MAX_ENTRIES }) };
+          return { textResultForLlm: JSON.stringify({ ok: true, deleted: key, ...meta() }) };
         }
-        return { textResultForLlm: JSON.stringify({ ok: true, notFound: key, count: Object.keys(store).length, capacity: MAX_ENTRIES }) };
+        return { textResultForLlm: JSON.stringify({ ok: true, notFound: key, ...meta() }) };
       }
 
+      const trimmed = (value ?? '').trim();
+      if (!trimmed) {
+        return { textResultForLlm: 'Error: set requires a non-empty value (use action="delete" to remove a key).' };
+      }
       if (!(key in store) && Object.keys(store).length >= MAX_ENTRIES) {
-        return { textResultForLlm: `Error: memory is full (${MAX_ENTRIES}/${MAX_ENTRIES}). Remove an entry before adding a new one.` };
+        return { textResultForLlm: `Error: memory is full (${MAX_ENTRIES}/${MAX_ENTRIES}). Delete an entry before adding a new one.` };
       }
 
       store[key] = trimmed;
       writeMemory(store);
-      return { textResultForLlm: JSON.stringify({ ok: true, key, count: Object.keys(store).length, capacity: MAX_ENTRIES }) };
+      return { textResultForLlm: JSON.stringify({ ok: true, key, ...meta() }) };
     },
   });
 
-  return [getMemory, setMemory];
+  return [memory];
 }

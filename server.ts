@@ -28,6 +28,7 @@ import { createOfferActionTool } from './src/offer-action-tool.js';
 import { createIndexTool } from './src/index-tool.js';
 import { createRetrieveOutputTool } from './src/observe/retrieve-tool.js';
 import { createWorkflowTool } from './src/workflow/tool.js';
+import { disabledToolNames, filterDisabledTools } from './src/tool-registry.js';
 import { isWorkflowRunnerAvailable, sweepWorkflowScratch } from './src/workflow/runner.js';
 import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
@@ -224,6 +225,8 @@ async function start(): Promise<void> {
     }
   });
   
+  const disabledTools = disabledToolNames();
+  if (disabledTools.size) console.log(`[TOOLS] Disabled-tool set: ${[...disabledTools].join(', ')}`);
   const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
     const queueCacoEvent = (event: CacoEmbedEvent) => {
       if (sessionRef.id && sessionRef.id !== PENDING_SESSION_ID) {
@@ -258,7 +261,10 @@ async function start(): Promise<void> {
     const surfaceTools = createSurfaceTools(sessionRef);
     const browserTools = createBrowserTools(sessionRef);
     
-    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...offerActionTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
+    const allTools = [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...offerActionTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
+    const { kept, removed } = filterDisabledTools(allTools as Array<{ name: string }>, disabledTools);
+    if (removed.length) console.log(`[TOOLS] Disabled ${removed.length}: ${removed.join(', ')}`);
+    return kept as typeof allTools;
   };
   
   await createSessionState({

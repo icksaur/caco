@@ -8,6 +8,7 @@
  * Usage: npx tsx scripts/measure-tools.mts
  */
 import { z } from 'zod';
+import { disabledToolNames } from '../src/tool-registry.js';
 import { createDisplayTools } from '../src/display-tools.js';
 import { createAppletTools } from '../src/applet-tools.js';
 import { createAgentTools } from '../src/agent-tools.js';
@@ -49,21 +50,27 @@ const groups: Record<string, any[]> = {
 };
 
 const bytes = (s: string) => Buffer.byteLength(s, 'utf8');
-let GD = 0, GP = 0, GN = 0;
+const disabled = disabledToolNames();
+let GD = 0, GP = 0, GN = 0;          // all registered (pre-filter)
+let SD = 0, SP = 0, SN = 0;          // shipped (after disable filter)
 const rows: Array<{ g: string; n: number; d: number; p: number; tot: number }> = [];
 
 for (const [g, tools] of Object.entries(groups)) {
   let d = 0, p = 0;
   for (const t of tools) {
-    d += bytes((t as any).description ?? '');
-    try { p += bytes(JSON.stringify((z as any).toJSONSchema((t as any).parameters))); } catch { /* no params */ }
+    const td = bytes((t as any).description ?? '');
+    let tp = 0;
+    try { tp = bytes(JSON.stringify((z as any).toJSONSchema((t as any).parameters))); } catch { /* no params */ }
+    d += td; p += tp;
+    if (!disabled.has(String((t as any).name).toLowerCase())) { SD += td; SP += tp; SN++; }
   }
   GD += d; GP += p; GN += tools.length;
   rows.push({ g, n: tools.length, d, p, tot: d + p });
 }
 
 rows.sort((a, b) => b.tot - a.tot);
-console.log(`GRAND: ${GN} tools, desc=${GD}B, paramSchema=${GP}B, total=${GD + GP}B (~${Math.round((GD + GP) / 4)} tokens/turn)\n`);
+console.log(`REGISTERED: ${GN} tools, desc=${GD}B, paramSchema=${GP}B, total=${GD + GP}B (~${Math.round((GD + GP) / 4)} tokens/turn)`);
+console.log(`SHIPPED   : ${SN} tools, desc=${SD}B, paramSchema=${SP}B, total=${SD + SP}B (~${Math.round((SD + SP) / 4)} tokens/turn)  [disabled: ${[...disabled].join(', ') || 'none'}]\n`);
 console.log('group            tools  descB  paramB  totalB');
 for (const r of rows) {
   console.log(`${r.g.padEnd(16)} ${String(r.n).padStart(3)}  ${String(r.d).padStart(6)} ${String(r.p).padStart(6)}  ${String(r.tot).padStart(6)}`);

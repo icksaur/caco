@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { existsSync, writeFileSync, mkdirSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -35,5 +35,50 @@ describe('memory-tool', () => {
     expect(result).toContain('**test-key**');
     expect(result).toContain('test value');
     expect(result).toContain('## User Memory');
+  });
+
+  // The merged caco_memory tool uses an explicit action enum; the critical
+  // invariant is that read can never delete (the old arg-presence overloading
+  // was the misfire risk flagged in the tool-diet spec review).
+  type Handler = (a: { action: string; key?: string; value?: string }) => Promise<{ textResultForLlm: string }>;
+  const memFile = () => join(testDir, '.caco', 'memory.json');
+  async function handler(): Promise<Handler> {
+    const { createMemoryTools } = await import('../../src/memory-tool.js');
+    return createMemoryTools()[0].handler as Handler;
+  }
+  function readFile(): Record<string, string> {
+    return JSON.parse(readFileSync(memFile(), 'utf-8'));
+  }
+
+  it('read returns entries + capacity and does NOT mutate even with a key', async () => {
+    writeFileSync(memFile(), JSON.stringify({ 'preferred-language': 'TypeScript' }));
+    const out = JSON.parse((await (await handler())({ action: 'read', key: 'preferred-language' })).textResultForLlm);
+    expect(out.entries).toEqual({ 'preferred-language': 'TypeScript' });
+    expect(out.capacity).toBe(50);
+    expect(readFile()).toEqual({ 'preferred-language': 'TypeScript' });
+  });
+
+  it('set stores a slug key; delete removes it', async () => {
+    const h = await handler();
+    const setOut = JSON.parse((await h({ action: 'set', key: 'git-style', value: 'facts only' })).textResultForLlm);
+    expect(setOut.ok).toBe(true);
+    expect(readFile()).toEqual({ 'git-style': 'facts only' });
+    const delOut = JSON.parse((await h({ action: 'delete', key: 'git-style' })).textResultForLlm);
+    expect(delOut.deleted).toBe('git-style');
+    expect(readFile()).toEqual({});
+  });
+
+  it('set rejects a non-slug key and an empty value', async () => {
+    const h = await handler();
+    expect((await h({ action: 'set', key: 'Not A Slug', value: 'x' })).textResultForLlm).toContain('Error');
+    writeFileSync(memFile(), JSON.stringify({ k: 'v' }));
+    expect((await h({ action: 'set', key: 'k', value: '' })).textResultForLlm).toContain('Error');
+    expect(readFile()).toEqual({ k: 'v' });
+  });
+
+  it('delete without a key errors and does not mutate', async () => {
+    writeFileSync(memFile(), JSON.stringify({ k: 'v' }));
+    expect((await (await handler())({ action: 'delete' })).textResultForLlm).toContain('Error');
+    expect(readFile()).toEqual({ k: 'v' });
   });
 });

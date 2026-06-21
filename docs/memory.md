@@ -23,9 +23,16 @@ Capacity: 50 entries max. Hard-enforced on write.
 
 ## Tools
 
-### `caco_get_memory`
+### `caco_memory`
 
-Returns all entries + capacity stat. No parameters.
+One tool with an explicit `action` parameter (`read` | `set` | `delete`).
+
+Parameters:
+- `action` (enum, required) — `read`, `set`, or `delete`
+- `key` (string) — slug format; required for `set`/`delete`
+- `value` (string) — the fact to store; required for `set`
+
+`action="read"` returns all entries + capacity (no mutation):
 
 ```json
 {
@@ -38,15 +45,8 @@ Returns all entries + capacity stat. No parameters.
 }
 ```
 
-### `caco_set_memory`
-
-Set or remove a single entry.
-
-Parameters:
-- `key` (string, required) — slug format, rejected if invalid
-- `value` (string, optional) — the fact to store. Empty or omitted = delete the key.
-
-Returns: `{ ok: true, count: N, capacity: 50 }` or error.
+`action="set"` / `action="delete"` return `{ ok: true, count: N, capacity: 50 }` or an error.
+The explicit action means `read` can never delete (unlike arg-presence overloading).
 
 Errors:
 - Invalid key format (not slug)
@@ -76,12 +76,10 @@ At 50 entries averaging 60 chars each, this is roughly 500 tokens. Well within b
 
 ```
 ## Memory
-Persistent key-value memory across all sessions.
-- `caco_get_memory` — Read all stored memories (returns entries + capacity)
-- `caco_set_memory` — Store or remove a memory (key + value, empty value = delete)
+Persistent key-value memory across all sessions via `caco_memory` (action: read | set | delete).
 Keys are slugs (lowercase, hyphens, numbers). One concise fact per key.
 When the user says "remember", "forget", "always", or "never" about a preference, update memory.
-Memory is loaded into your context at session start. Use `caco_get_memory` for the latest version if memory may have changed since session start.
+Memory is loaded into your context at session start. Use `caco_memory` action="read" for the latest version if memory may have changed since session start.
 ```
 
 ## Implementation
@@ -89,8 +87,7 @@ Memory is loaded into your context at session start. Use `caco_get_memory` for t
 ### Step 1: Memory tool
 
 `src/memory-tool.ts`:
-- `caco_get_memory`: read `~/.caco/memory.json`, return entries + count + capacity
-- `caco_set_memory`: validate slug key, read file, update/delete entry, enforce capacity, write back, return count
+- `caco_memory` with `action` enum: `read` returns entries + count + capacity; `set` validates slug key and stores; `delete` removes a key. Enforces capacity on set.
 - Handle ENOENT (first-time user) — return empty entries
 - Write backup to `memory.json.bak` before overwriting
 

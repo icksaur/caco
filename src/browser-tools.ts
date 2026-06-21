@@ -93,9 +93,9 @@ async function checkDialogOpen(): Promise<boolean> {
 
 export function createBrowserTools(sessionRef: SessionIdRef | undefined) {
   const ensureToolRunning = defineTool('caco_browser_ensure_running', {
-    description: 'Ensure the Caco-controlled Edge browser is running and CDP-reachable. Idempotent. Call once before any other caco_browser_* tool; call again on not_connected to recover after the operator restarts Edge.',
+    description: 'Ensure the Caco-controlled Edge browser is running and CDP-reachable. Idempotent; call once before other caco_browser_* tools, and again on not_connected to recover.',
     parameters: z.object({
-      mode: z.enum(['visible', 'hidden', 'headless']).optional().describe('Window mode, FIRST launch only (ignored if already running). Default visible (required for first-time sign-in).'),
+      mode: z.enum(['visible', 'hidden', 'headless']).optional().describe('First-launch window mode (ignored if already running). Default visible.'),
     }),
     handler: async ({ mode }) => {
       const result = await tryToolBody(() => ensureRunning(mode ?? 'visible'));
@@ -105,11 +105,11 @@ export function createBrowserTools(sessionRef: SessionIdRef | undefined) {
   });
 
   const navigate = defineTool('caco_browser_navigate', {
-    description: 'Navigate the working tab to a URL (follows redirects). Returns the final URL and page title after load.',
+    description: 'Navigate the working tab to a URL (follows redirects). Returns final URL and page title.',
     parameters: z.object({
-      url: z.string().url().describe('Absolute URL to navigate to.'),
-      waitUntil: z.enum(['load', 'domcontentloaded', 'networkidle']).optional().describe("When the navigation is considered complete. Default: 'load'."),
-      timeoutMs: z.number().int().positive().optional(),
+      url: z.string().url(),
+      waitUntil: z.enum(['load', 'domcontentloaded', 'networkidle']).optional().describe("Completion condition. Default 'load'."),
+      timeoutMs: z.number().positive().optional(),
     }),
     handler: async ({ url, waitUntil, timeoutMs }) => {
       const config = loadBrowserConfig();
@@ -132,11 +132,11 @@ export function createBrowserTools(sessionRef: SessionIdRef | undefined) {
   });
 
   const snapshot = defineTool('caco_browser_snapshot', {
-    description: 'Read the accessibility tree of the working tab. Returns a numbered outline of interactive elements; each [N] is an id for caco_browser_action target.id. Call snapshot before targeting elements by id, and again after any state-changing action since ids re-number on page mutation.',
+    description: 'Read the accessibility tree of the working tab as a numbered outline; each [N] is an id for caco_browser_action target.id. Re-snapshot after any state change since ids re-number.',
     parameters: z.object({
-      rootSelector: z.string().optional().describe('CSS selector to restrict the snapshot to a subtree (useful for large pages).'),
-      maxNodes: z.number().int().positive().max(1000).optional().describe('Cap on numbered elements. Default 200.'),
-      interestingOnly: z.boolean().optional().describe('Default true — drops non-interactive presentational nodes. Set false for full tree.'),
+      rootSelector: z.string().optional().describe('CSS selector to restrict to a subtree.'),
+      maxNodes: z.number().int().positive().max(1000).optional().describe('Max elements. Default 200.'),
+      interestingOnly: z.boolean().optional().describe('Default true (drops presentational nodes).'),
     }),
     handler: async ({ rootSelector, maxNodes, interestingOnly }) => {
       const config = loadBrowserConfig();
@@ -174,10 +174,10 @@ export function createBrowserTools(sessionRef: SessionIdRef | undefined) {
   });
 
   const screenshot = defineTool('caco_browser_screenshot', {
-    description: 'Capture a PNG screenshot of the working tab. Writes to <STORAGE_ROOT>/browser-screenshots/<sessionId>-<unix-ms>.png and returns the absolute path. Show it to the operator via a files applet link (?applet=files&openPath=<path>) in your reply.',
+    description: 'Capture a PNG screenshot of the working tab; returns the saved absolute path. Show it to the operator via a files applet link (?applet=files&openPath=<path>).',
     parameters: z.object({
-      fullPage: z.boolean().optional().describe('Default false (viewport only). Set true to capture the full scrollable page.'),
-      clipSelector: z.string().optional().describe('CSS selector; clip to this element\'s bounding box.'),
+      fullPage: z.boolean().optional().describe('Default false (viewport only).'),
+      clipSelector: z.string().optional().describe('CSS selector to clip to.'),
     }),
     handler: async ({ fullPage, clipSelector }) => {
       const config = loadBrowserConfig();
@@ -204,15 +204,15 @@ export function createBrowserTools(sessionRef: SessionIdRef | undefined) {
   });
 
   const action = defineTool('caco_browser_action', {
-    description: 'Perform a UI action on the working tab. action discriminator selects the verb. target is either {id: N} from latest snapshot or {selector: "..."}. Shadow DOM selectors use ">>>" between segments.',
+    description: 'Perform a UI action on the working tab. target is {id: N} from the latest snapshot or {selector: "..."} (Shadow DOM uses ">>>").',
     parameters: z.object({
       action: z.enum(['click', 'type', 'select', 'check', 'uncheck', 'hover', 'press_key', 'upload']),
       target: z.object({
         id: z.number().int().positive().optional(),
         selector: z.string().optional(),
       }).refine((t) => t.id !== undefined || t.selector !== undefined, { message: 'target must have id or selector' }),
-      value: z.string().optional().describe('Required for type, select, press_key (KeyInput name like "Enter"), upload (absolute file path).'),
-      timeoutMs: z.number().int().positive().optional(),
+      value: z.string().optional().describe('For type/select/press_key (key name) / upload (file path).'),
+      timeoutMs: z.number().positive().optional(),
     }),
     handler: async ({ action: verb, target, value, timeoutMs }) => {
       const config = loadBrowserConfig();
@@ -283,10 +283,10 @@ export function createBrowserTools(sessionRef: SessionIdRef | undefined) {
   });
 
   const evalTool = defineTool('caco_browser_eval', {
-    description: 'Escape-hatch: evaluate a JavaScript expression in the working tab; returns its JSON result. Disabled by default; operator must set evalEnabled and add the current origin to evalOriginAllowlist in browser-config.json. Every call emits a logged caco.browser.eval event. Prefer caco_browser_action / caco_browser_snapshot for normal interactions.',
+    description: 'Escape-hatch: evaluate a JS expression in the working tab; returns JSON. Disabled unless evalEnabled + origin allowlisted in browser-config.json. Prefer caco_browser_action/snapshot.',
     parameters: z.object({
-      expression: z.string().describe('JavaScript expression. Wrap multi-statement code in (() => { ...; return ...; })().'),
-      timeoutMs: z.number().int().positive().optional(),
+      expression: z.string().describe('JS expression; wrap multi-statement in (() => { ...; return ...; })().'),
+      timeoutMs: z.number().positive().optional(),
     }),
     handler: async ({ expression, timeoutMs }) => {
       const config = loadBrowserConfig();

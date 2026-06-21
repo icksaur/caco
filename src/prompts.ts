@@ -81,7 +81,7 @@ Large shell/test/build output may be shaped to a failure-focused summary ending 
 Call \`caco_offer_action\` (1-4 short instructions) when your turn ends with discrete next actions the user might pick.
 
 ## Caco Session Tools
-Use \`caco_session_swarm\` for parallel fan-out (analyze multiple repos, diverse perspectives). Model tier enforced: opus ≤2, sonnet ≤4, gpt-4.1 ≤6. Use individual session tools (create/send/get_session_state) for work the user reviews separately; use the built-in \`task\` tool for quick sub-tasks.
+Use individual session tools (create/send/get_session_state) for work the user reviews separately; use the built-in \`task\` tool for quick sub-tasks; use \`caco_session_delegate\` to hand work to a persistent reviewer session.
 
 ## Schedules & Configuration
 Caco has powerful capabilities beyond chat: scheduled unattended sessions, MCP server configuration, skills, hooks, and system prompt management. **When the user needs recurring automation, monitoring, environment setup, or workflow customization, always call \`caco_dev_docs\` first** — it documents solutions you can set up directly.

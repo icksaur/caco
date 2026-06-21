@@ -15,9 +15,11 @@
  * deletions — the code stays; only registration is skipped.
  */
 export const DEFAULT_DISABLED_TOOLS: string[] = [
-  'embed_media',           // media embeds (YouTube/Spotify/etc) — rare in coding work
-  'caco_extensions',       // extension discovery — niche; docs cover it
+  'embed_media',            // media embeds (YouTube/Spotify/etc) — rare in coding work
+  'caco_extensions',        // extension discovery — niche; docs cover it
   'caco_session_store_sql', // cross-session history SQL — power tool, rarely used
+  'caco_session_swarm',     // parallel session fan-out — the built-in task tool suffices
+  'register_mcp_server',    // MCP OAuth registration — only when adding a server; re-enable on demand
 ];
 
 export function parseDisabledToolNames(defaults: string[], env: string | undefined): Set<string> {

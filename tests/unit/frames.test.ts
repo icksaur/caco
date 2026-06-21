@@ -105,6 +105,22 @@ describe('buildFrames — incoming ranking oracle', () => {
     expect(r.definitions[0].code).not.toContain('\r');
     expect(r.definitions[0].code).toContain('function widget');
   });
+
+  it('does not drop a call site whose line begins with * (C++ deref)', async () => {
+    await write('deref.cpp', 'int compute(int* out) {\n  *out = gadget(5);\n  return *out;\n}\nint gadget(int n) { return n; }\n');
+    const r = await buildFrames(dir, 'gadget', { glob: '**/*.cpp' });
+    const call = r.incoming.find((f) => f.line === 2);
+    expect(call).toBeDefined();
+    expect(call?.confidence).toBe('exact');
+  });
+
+  it('excludes the definition site from incoming even when only incoming is requested', async () => {
+    await write('only.ts', 'function target() { return 1; }\nfunction caller() { return target(); }\n');
+    const r = await buildFrames(dir, 'target', { glob: '**/*.ts', include: ['incoming'] });
+    expect(r.definitions).toEqual([]);
+    expect(r.incoming.map((f) => f.line)).not.toContain(1);
+    expect(r.incoming.map((f) => f.line)).toContain(2);
+  });
 });
 
 describe('buildFrames — caps and scoping', () => {

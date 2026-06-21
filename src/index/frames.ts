@@ -176,7 +176,7 @@ function commentLineSet(lines: string[]): Set<number> {
       if (line.includes('*/')) inBlock = false;
       continue;
     }
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) set.add(i + 1);
+    if (trimmed.startsWith('//') || trimmed.startsWith('/*')) set.add(i + 1);
     const open = line.lastIndexOf('/*');
     if (open >= 0) {
       const close = line.indexOf('*/', open);
@@ -251,7 +251,7 @@ export async function buildFrames(
   const maxFrames = opts.maxFrames ?? DEFAULT_MAX_FRAMES;
   const maxFiles = opts.maxFiles ?? DEFAULT_MAX_FILES;
   const maxHits = opts.maxHits ?? DEFAULT_MAX_HITS;
-  const glob = opts.glob ?? DEFAULT_GLOB;
+  const glob = toPosix(opts.glob ?? DEFAULT_GLOB);
   const fileFilter = opts.file ? toPosix(opts.file) : null;
 
   const notes: string[] = [];
@@ -285,7 +285,9 @@ export async function buildFrames(
     defRanges.set(file, list);
   };
 
-  if (include.includes('definition')) {
+  const wantDefs = include.includes('definition');
+
+  {
     const seenFiles = new Set<string>();
     const candidateFiles: string[] = [];
     for (const h of consideredHits) {
@@ -336,7 +338,7 @@ export async function buildFrames(
             confidence: 'heuristic',
           });
           addDefRange(file, ln, ln);
-          notes.push(`regex-tier definition (no grammar/truncated): ${file}:${ln}`);
+          if (wantDefs) notes.push(`regex-tier definition (no grammar/truncated): ${file}:${ln}`);
         }
       }
     }
@@ -372,15 +374,17 @@ export async function buildFrames(
     });
   }
 
-  let cappedDefs = definitions;
+  const allDefs = wantDefs ? definitions : [];
+  const total = allDefs.length + incoming.length;
+  let cappedDefs = allDefs;
   let cappedIncoming = incoming;
-  if (definitions.length >= maxFrames) {
-    cappedDefs = definitions.slice(0, maxFrames);
+  if (allDefs.length >= maxFrames) {
+    cappedDefs = allDefs.slice(0, maxFrames);
     cappedIncoming = [];
-    truncated = true;
-    notes.push(`frames capped at ${maxFrames}`);
-  } else if (definitions.length + incoming.length > maxFrames) {
-    cappedIncoming = incoming.slice(0, maxFrames - definitions.length);
+  } else {
+    cappedIncoming = incoming.slice(0, maxFrames - allDefs.length);
+  }
+  if (cappedDefs.length + cappedIncoming.length < total) {
     truncated = true;
     notes.push(`frames capped at ${maxFrames}`);
   }

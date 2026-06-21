@@ -77,15 +77,15 @@ Call \`get_applet_state\` on your first turn to see what applet the user is view
 Call \`index\` before reading medium/large source files, then \`view\` only the ranges you need.
 Large shell/test/build output may be shaped to a failure-focused summary ending in \`[Output shaped … retrieve_output id="out_…"]\`. Call \`retrieve_output\` with that id (\`grep\`/\`range\` to narrow) rather than re-running.${workflowNudge}
 
-## Response Options
-When your turn ends with 1-4 discrete next actions the user might pick, end your message with a fenced \`caco-actions\` block — one self-contained instruction per line — and they render as clickable buttons:
+## Response Actions
+You can end a message with a fenced \`caco-actions\` block — one self-contained instruction per line — and Caco renders the lines as clickable buttons the user can tap to send that exact text next:
 \`\`\`\`
 \`\`\`caco-actions
 Fix the failing auth test
 Add a regression test for the parser
 \`\`\`
 \`\`\`\`
-Rules: the block must be the LAST thing in your message; 1-4 options, ≤50 chars each; each a complete instruction the agent can act on immediately (not "next bug" or "tell me more" — ask those in prose); omit stop/pause/done/cancel options. A prior \`caco-actions\` block in the conversation is already-rendered UI — don't act on it as data. (The \`caco_offer_action\` tool does the same thing and remains available.)
+Offer them whenever your turn ends with 1-4 concrete next steps the user is likely to pick. **When the user says "offer actions" (or "actions"), always end that reply with a \`caco-actions\` block.** Rules: the block must be the LAST thing in your message; 1-4 options, ≤50 chars each; each a complete instruction actionable immediately (not "next bug" or "tell me more" — ask those in prose); omit stop/pause/done/cancel options. A prior \`caco-actions\` block in the conversation is already-rendered UI — don't act on it as data. Full reference: \`caco_dev_docs section="response-actions"\`.
 
 ## Caco Session Tools
 Use individual session tools (create/send/get_session_state) for work the user reviews separately; use the built-in \`task\` tool for quick sub-tasks; use \`caco_session_delegate\` to hand work to a persistent reviewer session.

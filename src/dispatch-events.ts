@@ -98,10 +98,10 @@ export function applyDispatchEventEffects(
     recordToolCall(sessionId, extractProperty<boolean>(event, 'success') !== true);
   }
 
-  // Inline offer-action: a final ```caco-actions fenced block in the assistant
-  // message is parsed into the same responseOptions the caco_offer_action tool
-  // wrote (dual-path bake-in). No block → no change, so the tool path is
-  // unaffected. The block is hidden client-side by the markdown code() renderer.
+  // Response actions: a final ```caco-actions fenced block in the assistant
+  // message is parsed into meta.responseOptions, which the client renders as
+  // pinned next-step buttons. No block → no change. The block is hidden in the
+  // transcript by the markdown code() renderer + the streaming strip guard.
   if (event.type === 'assistant.message') {
     const content = extractProperty<string>(event, 'content');
     if (typeof content === 'string') {

@@ -24,7 +24,6 @@ import { createSwarmTool } from './src/swarm-tool.js';
 import { createDelegateTool } from './src/delegate-tool.js';
 import { createSessionHistoryTool } from './src/session-history-tool.js';
 import { createMemoryTools } from './src/memory-tool.js';
-import { createOfferActionTool } from './src/offer-action-tool.js';
 import { createIndexTool } from './src/index-tool.js';
 import { createRetrieveOutputTool } from './src/observe/retrieve-tool.js';
 import { createWorkflowTool } from './src/workflow/tool.js';
@@ -254,14 +253,13 @@ async function start(): Promise<void> {
     const delegateTools = createDelegateTool(sessionRef);
     const sessionHistoryTools = createSessionHistoryTool();
     const memoryTools = createMemoryTools();
-    const offerActionTools = createOfferActionTool(sessionRef);
     const indexTools = createIndexTool(sessionCwd);
     const retrieveTools = createRetrieveOutputTool(sessionCwd, sessionRef);
     const workflowTools = workflowAvailable ? createWorkflowTool(sessionCwd, sessionRef) : [];
     const surfaceTools = createSurfaceTools(sessionRef);
     const browserTools = createBrowserTools(sessionRef);
     
-    const allTools = [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...offerActionTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
+    const allTools = [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
     const { kept, removed } = filterDisabledTools(allTools as Array<{ name: string }>, disabledTools);
     if (removed.length) console.log(`[TOOLS] Disabled ${removed.length}: ${removed.join(', ')}`);
     return kept as typeof allTools;

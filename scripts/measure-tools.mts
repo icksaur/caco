@@ -19,7 +19,6 @@ import { createSwarmTool } from '../src/swarm-tool.js';
 import { createDelegateTool } from '../src/delegate-tool.js';
 import { createSessionHistoryTool } from '../src/session-history-tool.js';
 import { createMemoryTools } from '../src/memory-tool.js';
-import { createOfferActionTool } from '../src/offer-action-tool.js';
 import { createIndexTool } from '../src/index-tool.js';
 import { createRetrieveOutputTool } from '../src/observe/retrieve-tool.js';
 import { createWorkflowTool } from '../src/workflow/tool.js';
@@ -41,7 +40,6 @@ const groups: Record<string, any[]> = {
   delegate: createDelegateTool(ref),
   'session-history': createSessionHistoryTool(),
   memory: createMemoryTools(),
-  'offer-action': createOfferActionTool(ref),
   index: createIndexTool('/tmp'),
   retrieve: createRetrieveOutputTool('/tmp', ref),
   workflow: createWorkflowTool('/tmp', ref),

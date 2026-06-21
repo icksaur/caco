@@ -17,7 +17,9 @@ const DESCRIPTION = `Run ONE TypeScript workflow on the host and return only a c
 
 Use it for: (a) running shell commands (a single command is a one-line workflow: \`emit(await caco.sh('git status'))\`); (b) fan-out read+aggregate over many files, returning a summary instead of dumping every file into context. Do NOT use it for a single file read (use \`view\`/\`index\`) or to edit (use the edit tool).
 
-Why: shell/fan-out output is bounded here — you emit only the slice that matters, keeping unbounded command output and intermediate file contents out of your context. Batch related commands in one call (\`git add -A && git commit\`) to cut round trips.
+Why: shell/fan-out output is bounded here — you emit only the slice that matters, keeping unbounded command output and intermediate file contents out of your context.
+
+**Batch aggressively — prefer ONE workflow over several calls.** When you have multiple independent steps (run tests AND check git status AND count files), do them ALL in a single workflow: chain shell with \`&&\`/\`;\`, or make several \`caco.sh\` calls and \`emit\` one combined object. Each separate \`caco_run_workflow\` call is a wasted round trip. Only split when a later step depends on reasoning about an earlier step's output, or when one command may approach the timeout.
 
 The code is an async function body with two globals: \`emit(value)\` — call EXACTLY ONCE with the compact result (don't console.log intermediate data); \`caco\` — the facade below. Top-level \`import\` is unsupported; use \`await import(...)\`. Set \`timeoutMs\` (up to 120000) for slow commands like tests/builds; for runs longer than that, detach (\`caco.sh('setsid <cmd> >log 2>&1 < /dev/null &')\`) and poll the logfile in a later call.
 
@@ -25,15 +27,16 @@ ${FACADE_API_SUMMARY}
 
 Examples:
 \`\`\`ts
-// shell
+// one shell command
 emit((await caco.sh('npm test 2>&1')).stdout);
 \`\`\`
 \`\`\`ts
-// fan-out search
-const files = await caco.glob('src/**/*.ts');
-const hits = [];
-for (const f of files) if ((await caco.grep('TODO', { path: f })).length) hits.push(f);
-emit(hits);
+// MANY independent steps batched into one call — not three workflows
+emit({
+  tests: (await caco.sh('npm test 2>&1 | tail -3')).stdout,
+  branch: (await caco.sh('git rev-parse --abbrev-ref HEAD')).stdout.trim(),
+  todoCount: (await caco.grep('TODO', { glob: 'src/**/*.ts' })).length,
+});
 \`\`\``;
 
 function capValue(serialized: string, sessionId: string, sessionCwd: string): { text: string; handle?: string } {

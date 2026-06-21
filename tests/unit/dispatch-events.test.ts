@@ -213,6 +213,27 @@ describe('applyDispatchEventEffects', () => {
       } as never, deps);
       expect(recordToolCall).toHaveBeenCalledWith(SID, true);
     });
+
+    it('records a live-format success (root-level success) as non-failed', () => {
+      const deps = makeDeps();
+      // Live SDK events carry `success` at the event root, not under `data`.
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_complete',
+        toolName: 'grep',
+        success: true,
+      } as never, deps);
+      expect(recordToolCall).toHaveBeenCalledWith(SID, false);
+    });
+
+    it('records a live-format failure (root-level success:false) as failed', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_complete',
+        toolName: 'grep',
+        success: false,
+      } as never, deps);
+      expect(recordToolCall).toHaveBeenCalledWith(SID, true);
+    });
   });
 
   describe('throughput: assistant.usage', () => {

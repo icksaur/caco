@@ -88,9 +88,12 @@ export function applyDispatchEventEffects(
     }
   }
 
-  // Count completed tool calls (and failures) for round-trip metrics.
+  // Count completed tool calls (and failures) for round-trip metrics. Use
+  // extractProperty: live events carry `success` at the root, history events
+  // under `data` — reading eventData.success alone miscounts every live
+  // success as a failure.
   if (event.type === 'tool.execution_complete') {
-    recordToolCall(sessionId, eventData.success !== true);
+    recordToolCall(sessionId, extractProperty<boolean>(event, 'success') !== true);
   }
 
   // Trigger an immediate file-edits poll when a write tool finishes

@@ -19,7 +19,11 @@ export const DEFAULT_DISABLED_TOOLS: string[] = [
   'caco_extensions',        // extension discovery — niche; docs cover it
   'caco_session_store_sql', // cross-session history SQL — power tool, rarely used
   'caco_session_swarm',     // parallel session fan-out — the built-in task tool suffices
-  'register_mcp_server',    // MCP OAuth registration — only when adding a server; re-enable on demand
+  // MCP OAuth registration — the ONLY agent path that creates an MCP auth-store
+  // entry (the applet /start + /config routes 404 without one). Disabled here
+  // because it auto-opens OAuth browser tabs; to add a new OAuth MCP server,
+  // re-enable temporarily (drop from this list or unset via CACO_DISABLED_TOOLS).
+  'register_mcp_server',
 ];
 
 export function parseDisabledToolNames(defaults: string[], env: string | undefined): Set<string> {

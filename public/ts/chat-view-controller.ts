@@ -30,6 +30,11 @@ import type { ChatFormController } from './chat-form-controller.js';
 
 const RESUME_TIMEOUT_MS = 30000;
 
+/** Applet slugs removed from the build but still possibly persisted as a
+ *  session's activeApplet. Treated as "no active applet" on restore so an old
+ *  session does not write a dead ?applet= URL or 404 the loader. */
+const REMOVED_APPLET_SLUGS = new Set(['session-context', 'roadmap']);
+
 /** Thrown inside an activation when a newer navigation has claimed the chat
  *  surface. Caught silently by activateSession so a superseded activation
  *  performs no state mutation and shows no error. */
@@ -294,7 +299,7 @@ class ChatViewController {
    * panel visibility otherwise.
    */
   private async restoreApplet(activeApplet?: string | null, appletParams?: Record<string, string> | null, _panelVisible?: boolean): Promise<void> {
-    if (!activeApplet) return;
+    if (!activeApplet || REMOVED_APPLET_SLUGS.has(activeApplet)) return;
     // Snapshot at fire-time so rapid session switches can abort late restores.
     const targetSessionId = getActiveSessionId();
     try {

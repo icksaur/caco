@@ -102,16 +102,16 @@ export function wrapFacadeForAccounting(facade: Facade, account: (value: unknown
 }
 
 /** Compact, model-facing description of the facade injected into workflow scripts. */
-export const FACADE_API_SUMMARY = `A read-oriented facade is available as \`caco\` (all methods are async):
-- caco.index(path, { language?, maxEntries? }) -> structural skeleton of one source file (declarations with [start-end] line ranges).
-- caco.read(path, [start, end]?) -> { path, totalLines, range, text }. Whole file if range omitted. 1-based inclusive.
-- caco.grep(pattern, { path?, glob?, ignoreCase? }) -> [{ file, line, text }]. rg-backed.
-- caco.rg(args[]) -> raw rg stdout (escape hatch), scoped to the session dir.
+export const FACADE_API_SUMMARY = `\`caco\` facade (all async):
+- caco.index(path, { language?, maxEntries? }) -> declaration skeleton with [start-end] line ranges.
+- caco.read(path, [start, end]?) -> { path, totalLines, range, text }. 1-based; whole file if range omitted.
+- caco.grep(pattern, { path?, glob?, ignoreCase? }) -> [{ file, line, text }] (rg-backed).
+- caco.rg(args[]) -> raw rg stdout.
 - caco.glob(pattern) -> sorted relative paths.
-- caco.list(path?) -> directory entries (dirs suffixed with /).
-- caco.retrieve(id, [start, end]?) -> previously stored large tool output by id.
-- caco.sh(command) -> { stdout, stderr, code }. Runs a shell command in the session dir; never throws on non-zero exit.
-All paths are scoped to the session directory; escaping it throws — except \`rg\` and \`sh\`, which are unrestricted escape hatches that run host tooling. Use emit(value) to return your compact result.`;
+- caco.list(path?) -> dir entries (dirs suffixed /).
+- caco.retrieve(id, [start, end]?) -> stored large output by id.
+- caco.sh(command) -> { stdout, stderr, code }. Never throws on non-zero exit.
+Paths are scoped to the session dir (escaping throws), except \`rg\`/\`sh\` (unrestricted host tooling).`;
 
 /** Hand-authored .d.ts injected so workflow scripts get types for \`caco\`. */
 export const FACADE_DTS = `interface ReadResult { path: string; totalLines: number; range: [number, number]; text: string; }

@@ -19,13 +19,11 @@ export type GetCorrelationId = (sessionId: string) => string | undefined;
 export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: GetCorrelationId) {
   
   const sendCacoMessage = defineTool('send_caco_message', {
-    description: `Send a message to an existing Caco session and return immediately — fire-and-forget, do NOT poll or wait. The target works autonomously; the user watches it in the session list.
-
-Use for follow-up instructions or cross-project notifications where you don't need the reply. If you need the response to continue your work, use \`caco_session_delegate\` instead (it waits and returns the reply).`,
+    description: 'Send a message to an existing Caco session and return immediately — fire-and-forget, do NOT poll or wait. The target works autonomously; the user watches it in the session list. For follow-ups where you don\'t need the reply; if you need the response to continue, use `caco_session_delegate` (waits and returns the reply).',
 
     parameters: z.object({
-      sessionId: z.string().describe('Target session ID to send the message to'),
-      message: z.string().describe('The message/prompt to send to the target session')
+      sessionId: z.string().describe('Target session ID'),
+      message: z.string().describe('Message to send')
     }),
 
     handler: async ({ sessionId: rawSessionId, message }) => {
@@ -114,12 +112,7 @@ Use for follow-up instructions or cross-project notifications where you don't ne
   });
 
   const listModels = defineTool('list_models', {
-    description: `List available models for creating Caco sessions. Use before create_caco_session to see model options.
-
-**Quick guide (no need to call this if you know what you need):**
-- \`claude-opus-4.6-1m\` - Reasoning, documents, analysis, complex planning
-- \`claude-sonnet-4.6\` - General-purpose engineering: edit/compile/test/fix cycles
-- \`gpt-4.1\` - Simple automation tasks (fast and cheap)`,
+    description: 'List available models for creating Caco sessions. Quick guide: `claude-opus-4.6-1m` (reasoning/planning), `claude-sonnet-4.6` (general engineering), `gpt-4.1` (simple, fast/cheap).',
 
     parameters: z.object({}),
 
@@ -147,15 +140,13 @@ Use for follow-up instructions or cross-project notifications where you don't ne
   });
 
   const createCacoSession = defineTool('create_caco_session', {
-    description: `Create a new persistent Caco session (appears in the session list, watchable/resumable). Use for work in a different project/directory the user reviews separately, long-running sessions watched live, or triaging into independent sessions. For quick sub-tasks that report back inline, use the built-in \`task\` tool instead.
-
-Provide \`initialMessage\` to create and prompt in one step. Runs autonomously — do not poll or wait.`,
+    description: 'Create a new persistent Caco session (appears in the session list, watchable/resumable). Use for work in a separate project/directory the user reviews separately, long-running watched sessions, or triaging into independent sessions. For quick sub-tasks that report back inline, use the built-in `task` tool. Provide `initialMessage` to create and prompt in one step. Runs autonomously — do not poll or wait.',
 
     parameters: z.object({
       cwd: z.string().describe('Working directory for the new session'),
-      model: z.string().describe('Model ID (e.g., claude-sonnet-4.6, claude-opus-4.6-1m). Use list_models to see options.'),
-      initialMessage: z.string().optional().describe('Optional first message to send immediately after creation'),
-      description: z.string().optional().describe('Short description for the session list (e.g., "Fix auth tests", "Update API docs")')
+      model: z.string().describe('Model ID (e.g. claude-sonnet-4.6). Use list_models for options.'),
+      initialMessage: z.string().optional().describe('Optional first message'),
+      description: z.string().optional().describe('Short label for the session list')
     }),
 
     handler: async ({ cwd, model, initialMessage, description }) => {

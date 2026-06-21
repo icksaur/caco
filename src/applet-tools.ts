@@ -386,7 +386,7 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
   });
 
   const restartServer = defineTool('restart_server', {
-    description: 'Schedule a graceful server restart to apply backend code changes. Waits for active sessions to finish responding before restarting. Use as final action after modifying src/*.ts files.',
+    description: 'Schedule a graceful server restart to apply backend code changes (waits for active sessions to finish). Use as the final action after modifying src/*.ts files.',
 
     parameters: z.object({
       delay: z.number()
@@ -416,7 +416,7 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
   });
 
   const cacoAppletHowto = defineTool('caco_applet_howto', {
-    description: 'Get documentation for CREATING new applets (HTML/JS/CSS widgets). Call when the user wants an interactive tool, custom dashboard, or one-off editor (e.g. drag-drop triage, parameter tuner, annotation UI). Applets persist on disk across sessions. For inline diagrams or styled tables in chat, use inline HTML/SVG instead. For USING existing applets, call caco_applet_usage.',
+    description: 'Get documentation for CREATING new applets (HTML/JS/CSS widgets). Call when the user wants an interactive tool, custom dashboard, or one-off editor. Applets persist on disk. For inline diagrams/tables in chat, use inline HTML/SVG instead. For USING existing applets, call caco_applet_usage.',
 
     parameters: z.object({}),
 

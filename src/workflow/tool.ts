@@ -13,27 +13,20 @@ import { requireSessionId } from '../session-id-ref.js';
 
 const workflowLog = createLogger('WORKFLOW');
 
-const DESCRIPTION = `Run ONE TypeScript workflow that reads/aggregates across many files in-process and returns only a compact result. **This executes arbitrary code on the host, auto-approved (no per-action confirmation).** Use it ONLY for fan-out read+aggregate tasks where a single bounded result replaces many individual tool calls — never for a single read (use \`view\`/\`index\`) or to make edits.
+const DESCRIPTION = `Run ONE TypeScript workflow that reads/aggregates across many files in-process and returns only a compact result. **Executes arbitrary code on the host, auto-approved.** Use ONLY for fan-out read+aggregate tasks where one bounded result replaces many tool calls — never for a single read (use \`view\`/\`index\`) or to edit.
 
-PREFER this whenever you are about to issue 3+ read/grep/glob/index calls across files to compute one answer (e.g. "which files import X", "count TODOs per dir", "find every test that calls Y"): one workflow keeps the intermediate file contents out of your context and returns just the summary.
+PREFER this when about to issue 3+ read/grep/glob/index calls to compute one answer (e.g. "which files import X", "count TODOs per dir"): it keeps intermediate file contents out of your context and returns just the summary.
 
-Your code is the body of an async function with two globals:
-- \`emit(value)\` — call EXACTLY ONCE with the compact JSON result. Aggregate locally and emit a small summary; do NOT console.log intermediate data.
-- \`caco\` — a read-oriented facade (see below).
-
-Top-level \`import\` statements are not supported (the code runs as a function body); use dynamic \`await import(...)\` if you must.
+The code is an async function body with two globals: \`emit(value)\` — call EXACTLY ONCE with the compact result (don't console.log intermediate data); \`caco\` — the read facade below. Top-level \`import\` is unsupported; use \`await import(...)\`.
 
 ${FACADE_API_SUMMARY}
 
 Example:
 \`\`\`ts
 const files = await caco.glob('src/**/*.ts');
-const offenders = [];
-for (const f of files) {
-  const hits = await caco.grep('TODO', { path: f });
-  if (hits.length) offenders.push({ file: f, todos: hits.length });
-}
-emit(offenders);
+const hits = [];
+for (const f of files) if ((await caco.grep('TODO', { path: f })).length) hits.push(f);
+emit(hits);
 \`\`\``;
 
 function capValue(serialized: string, sessionId: string, sessionCwd: string): { text: string; handle?: string } {

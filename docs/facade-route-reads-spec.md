@@ -41,6 +41,37 @@ it is always empty. C1 populates it. This is the SDK-side parallel to A5's
 `CACO_DISABLED_TOOLS` (which post-filters Caco's own `defineTool` tools; built-ins are
 not in that array, so they need this separate path).
 
+## Empirical findings (verified live, 2026-06-21)
+
+Tested `bash` tool vs `caco.sh` to check the claimed bash-only advantages. Most are
+**myths** — the real costs of excluding bash are narrower than first written:
+
+| Claimed bash advantage | Verdict | Evidence |
+|---|---|---|
+| Interactive stdin | **MYTH — neither has it.** `bash` tool stdin is "not a tty"; `read` gets immediate EOF. Input must be piped/heredoc'd in both. `caco.sh` is identical (also non-tty). | `read -t 1` → EOF rc=1; `tty` → "not a tty" on both paths |
+| Streaming | **MYTH for scripts.** Streaming is just stdout text; `caco.sh` captures it fully and the script parses it. `bash` tool's only edge is `read_bash` polling for *partial* output of a still-running command (progress watching), not different content. | slow emitter captured identically by both |
+| Background / detached | **MYTH — `caco.sh` CAN do it.** A `setsid`-detached process launched from `caco.sh` **survived** the workflow's process-group teardown. | marker file written 2 s after the workflow exited |
+| Non-zero exit handling | Equivalent — `caco.sh` returns `{code, stderr}`, never throws | `exit 7` → `{code:7, stderr:"…"}` |
+
+**The genuine, narrow costs of excluding `bash` (Proposal B):**
+1. **Foreground commands are capped at the workflow timeout** (default 30 s, cap 120 s).
+   Verified: `sleep 5` under a 2 s workflow timeout was killed. A long test/build that
+   you run in the foreground and wait on inline cannot exceed 120 s via `caco.sh`. (Work-
+   around: detach with `setsid` + poll a logfile from a later `caco.sh`; or raise
+   `WORKFLOW_TIMEOUT_CAP_MS`.)
+2. **No live progress polling.** `caco.sh` blocks and returns the full output at the end;
+   `read_bash` can show partial output mid-run. Matters for *watching* a long command,
+   not for a script that parses the result.
+3. **Output-shaping integration.** The observe hook shapes built-in `bash`/test output
+   into failure-focused summaries with `retrieve_output` handles; `caco.sh` uses the
+   workflow's own log caps (256 KB) instead.
+
+Net: the interactive/streaming/background objections do **not** hold. The only real loss
+from a strict (bash-excluded) diet is **long foreground runs (>120 s) and live progress
+watching** — both addressable (detach+poll, or a higher cap). This makes Proposal B more
+viable than the original draft implied.
+
+
 ## Tool inventory (live, 15 SDK built-ins)
 
 | Built-in | Facade equivalent | Verdict |
@@ -74,17 +105,19 @@ model substitutes `bash` search — see Acceptance). Treat A as "remove first-ch
 search tools; expected to route through the workflow," not "search must go through the
 workflow."
 
-### Proposal B — "strict read diet": exclude `grep` + `glob` + `bash` (the only real force, opt-in)
+### Proposal B — "strict read diet": exclude `grep` + `glob` + `bash` (the only real force)
 
 Add `builtin:bash` (and `read_bash`/`stop_bash`/`list_bash`). This is the **only**
 configuration that genuinely forces search/read fan-out through the facade, because it
-closes the bash escape hatch. The cost is real and large: no streaming a long
-test/build, no background/detached processes, no interactive stdin, and the
-failure-focused output shaping (`retrieve_output`) no longer applies (the workflow caps
-logs differently). **Off by default**, exposed as an opt-in for users who accept losing
-live shell/test ergonomics in exchange for true context discipline. The user's
-"bash/git/view are well suited" instinct lands here — but it is a deliberate switch, not
-a safe default.
+closes the bash escape hatch. **Per the empirical findings above, the cost is far
+smaller than the original draft claimed:** interactive stdin, streaming, and
+background/detached are NOT lost (they're myths or `caco.sh` covers them). The only real
+loss is **(1) long foreground runs >120 s** (the workflow timeout cap — a long test/build
+you wait on inline) and **(2) live progress polling** and **(3) failure-focused output
+shaping**. Given that, B is genuinely viable — but the >120 s test/build case is common
+enough that B should ship as an **opt-in** (or paired with a higher `WORKFLOW_TIMEOUT_CAP_MS`
+and a detach+poll convention for long runs), not flipped on blindly. The user's
+"bash/git/view are well suited" instinct lands here, and the findings support it.
 
 ### Proposal C — prompt-nudge only (status quo, already failed)
 

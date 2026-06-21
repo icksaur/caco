@@ -8,12 +8,15 @@ import { WORKFLOW_EMIT_CAP_BYTES, WORKFLOW_TIMEOUT_ADVERTISED_MS } from '../conf
 import { runWorkflow } from './runner.js';
 import { estimateSavedTokens } from './savings.js';
 import { FACADE_API_SUMMARY } from './facade.js';
+import { getHostShell, shellGuidance } from './shell.js';
 import type { SessionIdRef } from '../types.js';
 import { requireSessionId } from '../session-id-ref.js';
 
 const workflowLog = createLogger('WORKFLOW');
 
-const DESCRIPTION = `Run ONE TypeScript workflow on the host and return only a compact result. **Executes arbitrary code, auto-approved.** This is also how you run SHELL: \`bash\`/\`powershell\` are not separate tools — use \`caco.sh('<command>')\`, which returns { stdout, stderr, code } and never throws on non-zero exit.
+const shellG = shellGuidance(getHostShell());
+
+const DESCRIPTION = `Run ONE TypeScript workflow on the host and return only a compact result. **Executes arbitrary code, auto-approved.** This is also how you run SHELL: \`bash\`/\`powershell\` are not separate tools — use \`caco.sh('<command>')\`, which returns { stdout, stderr, code } and never throws on non-zero exit. ${shellG.banner}
 
 Use it for: (a) running shell commands (a single command is a one-line workflow: \`emit(await caco.sh('git status'))\`); (b) fan-out read+aggregate over many files, returning a summary instead of dumping every file into context. Do NOT use it for a single file read (use \`view\`/\`index\`) or to edit (use the edit tool).
 
@@ -21,7 +24,7 @@ Why: shell/fan-out output is bounded here — you emit only the slice that matte
 
 **Batch aggressively — prefer ONE workflow over several calls.** When you have multiple independent steps (run tests AND check git status AND count files), do them ALL in a single workflow: chain shell with \`&&\`/\`;\`, or make several \`caco.sh\` calls and \`emit\` one combined object. Each separate \`caco_run_workflow\` call is a wasted round trip. Only split when a later step depends on reasoning about an earlier step's output, or when one command may approach the timeout.
 
-The code is an async function body with two globals: \`emit(value)\` — call EXACTLY ONCE with the compact result (don't console.log intermediate data); \`caco\` — the facade below. Top-level \`import\` is unsupported; use \`await import(...)\`. Set \`timeoutMs\` (up to 120000) for slow commands like tests/builds; for runs longer than that, detach (\`caco.sh('setsid <cmd> >log 2>&1 < /dev/null &')\`) and poll the logfile in a later call.
+The code is an async function body with two globals: \`emit(value)\` — call EXACTLY ONCE with the compact result (don't console.log intermediate data); \`caco\` — the facade below. Top-level \`import\` is unsupported; use \`await import(...)\`. Set \`timeoutMs\` (up to 120000) for slow commands like tests/builds; for runs longer than that, detach (\`${shellG.detachExample}\`) and poll the logfile in a later call.
 
 ${FACADE_API_SUMMARY}
 
@@ -33,7 +36,7 @@ emit((await caco.sh('npm test 2>&1')).stdout);
 \`\`\`ts
 // MANY independent steps batched into one call — not three workflows
 emit({
-  tests: (await caco.sh('npm test 2>&1 | tail -3')).stdout,
+  tests: (await caco.sh('${shellG.tailExample}')).stdout,
   branch: (await caco.sh('git rev-parse --abbrev-ref HEAD')).stdout.trim(),
   todoCount: (await caco.grep('TODO', { glob: 'src/**/*.ts' })).length,
 });

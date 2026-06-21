@@ -1,5 +1,5 @@
 import { readdir } from 'fs/promises';
-import { execFile, exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { indexCore, type IndexCoreOptions } from '../index/core.js';
 import { type IndexResult } from '../index/types.js';
@@ -7,10 +7,10 @@ import { buildFrames, type FramesOptions, type FramesResult } from '../index/fra
 import { getOutput } from '../output-store.js';
 import { readFileRangeCore, grepCore, globCore, sliceLinesByRange } from './cores.js';
 import { type ReadResult, type GrepMatch, type GrepOptions, WorkflowInputError } from './types.js';
+import { getHostShell } from './shell.js';
 import { validatePath } from '../path-utils.js';
 
 const execFileAsync = promisify(execFile);
-const execAsync = promisify(exec);
 
 const CHILD_MAX_BUFFER = 64 * 1024 * 1024;
 
@@ -74,8 +74,9 @@ export function createFacade(sessionCwd: string): Facade {
       return sliceLines(data, range);
     },
     async sh(command) {
+      const shell = getHostShell();
       try {
-        const { stdout, stderr } = await execAsync(command, { cwd: sessionCwd, maxBuffer: CHILD_MAX_BUFFER });
+        const { stdout, stderr } = await execFileAsync(shell.file, [...shell.flagArgs, command], { cwd: sessionCwd, maxBuffer: CHILD_MAX_BUFFER });
         return { stdout, stderr, code: 0 };
       } catch (e) {
         const err = e as { stdout?: string; stderr?: string; code?: number };
@@ -116,7 +117,7 @@ export const FACADE_API_SUMMARY = `\`caco\` facade (all async):
 - caco.glob(pattern) -> sorted relative paths.
 - caco.list(path?) -> dir entries (dirs suffixed /).
 - caco.retrieve(id, [start, end]?) -> stored large output by id.
-- caco.sh(command) -> { stdout, stderr, code }. Never throws on non-zero exit.
+- caco.sh(command) -> { stdout, stderr, code }. Runs in ${getHostShell().label} on this host (write ${getHostShell().label} syntax); never throws on non-zero exit.
 Paths are scoped to the session dir (escaping throws), except \`rg\`/\`sh\` (unrestricted host tooling).`;
 
 /** Hand-authored .d.ts injected so workflow scripts get types for \`caco\`. */

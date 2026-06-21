@@ -44,6 +44,38 @@ describe('createFacade', () => {
     expect(res.sections.length).toBeGreaterThan(0);
   });
 
+  it('runs a shell command in the host shell and returns code 0', async () => {
+    const caco = createFacade(base);
+    const res = await caco.sh('echo hi');
+    expect(res.stdout.trim()).toBe('hi');
+    expect(res.code).toBe(0);
+  });
+
+  it('propagates a non-zero exit code without throwing', async () => {
+    const caco = createFacade(base);
+    const res = await caco.sh('exit 3');
+    expect(res.code).toBe(3);
+  });
+
+  it('returns a non-zero code for an unknown command without throwing', async () => {
+    const caco = createFacade(base);
+    const res = await caco.sh('this-command-does-not-exist-xyz');
+    expect(res.code).not.toBe(0);
+  });
+
+  it('advertises the host shell dialect in the facade summary', async () => {
+    const { FACADE_API_SUMMARY } = await import('../../src/workflow/facade.js');
+    const { getHostShell } = await import('../../src/workflow/shell.js');
+    expect(FACADE_API_SUMMARY).toContain(getHostShell().label);
+  });
+
+  it('runs a pipeline scoped to the session dir', async () => {
+    const caco = createFacade(base);
+    const res = await caco.sh('ls | grep one');
+    expect(res.stdout).toContain('one.ts');
+    expect(res.code).toBe(0);
+  });
+
   it('sh runs scoped and reports non-zero exit without throwing', async () => {
     const caco = createFacade(base);
     const ok = await caco.sh('echo hi');

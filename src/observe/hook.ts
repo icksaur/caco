@@ -1,6 +1,7 @@
 import type { ToolResultObject } from '@github/copilot-sdk';
 import { storeOutput } from '../output-store.js';
 import { shapeOutput } from './shape.js';
+import { recordShapingSavings, BYTES_PER_TOKEN } from '../session-throughput.js';
 import type { SessionIdRef } from '../types.js';
 import { requireSessionId } from '../session-id-ref.js';
 
@@ -29,6 +30,7 @@ export function createObservationHook(sessionCwd: string, sessionRef: SessionIdR
     if (!decision) return;
 
     const id = storeOutput(requireSessionId(sessionRef), sessionCwd, raw, { type: 'raw', command: input.toolName });
+    recordShapingSavings(requireSessionId(sessionRef), Math.round((decision.rawBytes - decision.shapedBytes) / BYTES_PER_TOKEN));
     const rawKb = (decision.rawBytes / 1024).toFixed(1);
     const shapedKb = (decision.shapedBytes / 1024).toFixed(1);
     const handle =

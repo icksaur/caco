@@ -3,6 +3,7 @@ import {
   recordUsage,
   recordRateLimit,
   recordWorkflowSavings,
+  recordShapingSavings,
   resetRequest,
   getThroughput,
   snapshot,
@@ -114,6 +115,47 @@ describe('recordWorkflowSavings', () => {
     const s = snapshot(SID);
     expect(s.workflowSavedTokens).toBe(333);
     expect(s.workflowRuns).toBe(1);
+  });
+});
+
+describe('recordShapingSavings', () => {
+  it('accumulates saved tokens and shape count across calls', () => {
+    recordShapingSavings(SID, 600);
+    recordShapingSavings(SID, 400);
+    const t = getThroughput(SID)!;
+    expect(t.shapingSavedTokens).toBe(1000);
+    expect(t.shapingShapeCount).toBe(2);
+  });
+
+  it('ignores non-positive / invalid savings without counting a shape', () => {
+    recordShapingSavings(SID, 0);
+    recordShapingSavings(SID, -50);
+    recordShapingSavings(SID, NaN as unknown as number);
+    expect(getThroughput(SID)).toBeUndefined();
+  });
+
+  it('is preserved across resetRequest (session-lifetime, not request-scoped)', () => {
+    recordShapingSavings(SID, 700);
+    resetRequest(SID);
+    expect(getThroughput(SID)!.shapingSavedTokens).toBe(700);
+    expect(getThroughput(SID)!.shapingShapeCount).toBe(1);
+  });
+
+  it('accumulates independently of workflow savings', () => {
+    recordWorkflowSavings(SID, 100);
+    recordShapingSavings(SID, 250);
+    const t = getThroughput(SID)!;
+    expect(t.workflowSavedTokens).toBe(100);
+    expect(t.workflowRuns).toBe(1);
+    expect(t.shapingSavedTokens).toBe(250);
+    expect(t.shapingShapeCount).toBe(1);
+  });
+
+  it('surfaces in snapshot', () => {
+    recordShapingSavings(SID, 321);
+    const s = snapshot(SID);
+    expect(s.shapingSavedTokens).toBe(321);
+    expect(s.shapingShapeCount).toBe(1);
   });
 });
 

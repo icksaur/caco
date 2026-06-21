@@ -14,7 +14,9 @@
  * as such in the UI.
  */
 
-export const BYTES_PER_TOKEN = 4;
+import { BYTES_PER_TOKEN } from '../session-throughput.js';
+
+export { BYTES_PER_TOKEN };
 
 export function estimateSavedTokens(observedBytes: number, injectedBytes: number): number {
   const obs = Number.isFinite(observedBytes) && observedBytes > 0 ? observedBytes : 0;

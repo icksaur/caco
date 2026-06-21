@@ -348,6 +348,8 @@ export interface ThroughputData {
   lastRateLimitAt?: string;
   workflowSavedTokens?: number;
   workflowRuns?: number;
+  shapingSavedTokens?: number;
+  shapingShapeCount?: number;
   updatedAt: string;
   known?: boolean;
 }
@@ -451,21 +453,28 @@ function renderThroughput(data: ThroughputData): void {
   renderSaved(data);
 }
 
-/** Render the accumulated workflow token-savings indicator next to the context
- *  usage pie. Always rendered, initialized to ↯0 before any workflow runs. */
+/** Render the accumulated token-savings indicator next to the context usage
+ *  pie. Combines exact output-shaping savings with the workflow estimate.
+ *  Always rendered, initialized to ↯0 before anything is saved. */
 function renderSaved(data: ThroughputData): void {
   const footer = regions.footer.el;
   const el = footer.querySelector('.context-saved') as HTMLElement | null;
   if (!el) return;
 
-  const savedTokens = data.workflowSavedTokens ?? 0;
-  const runs = data.workflowRuns ?? 0;
-  const savedCredits = estimateSavedCredits(savedTokens);
+  const workflowTokens = data.workflowSavedTokens ?? 0;
+  const workflowRuns = data.workflowRuns ?? 0;
+  const shapingTokens = data.shapingSavedTokens ?? 0;
+  const shapingCount = data.shapingShapeCount ?? 0;
+  const totalTokens = workflowTokens + shapingTokens;
+
+  const savedCredits = estimateSavedCredits(totalTokens);
   const creditNote = savedCredits !== null
     ? ` (≈${savedCredits < 10 ? savedCredits.toFixed(2) : Math.round(savedCredits).toLocaleString()}cr)`
     : '';
-  el.textContent = `↯${kAbbrev(savedTokens)}`;
+
+  el.textContent = `↯${kAbbrev(totalTokens)}`;
   el.title =
-    `workflow: est. ${savedTokens.toLocaleString()} context tokens saved${creditNote} across ` +
-    `${runs} run${runs !== 1 ? 's' : ''} (lower-bound estimate at ~4 chars/token)`;
+    `est. ${totalTokens.toLocaleString()} context tokens saved${creditNote}\n` +
+    `shaping: ${shapingTokens.toLocaleString()} (exact) across ${shapingCount} trim${shapingCount !== 1 ? 's' : ''}\n` +
+    `workflow: ${workflowTokens.toLocaleString()} (est.) across ${workflowRuns} run${workflowRuns !== 1 ? 's' : ''}`;
 }

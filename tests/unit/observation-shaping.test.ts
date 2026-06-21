@@ -4,6 +4,7 @@ import { tsTestBuildShaper } from '../../src/observe/shapers/ts-test-build.js';
 import { selectShaper } from '../../src/observe/registry.js';
 import { shapeOutput } from '../../src/observe/shape.js';
 import { createObservationHook } from '../../src/observe/hook.js';
+import { getThroughput, clearSession } from '../../src/session-throughput.js';
 import { createRetrieveOutputTool } from '../../src/observe/retrieve-tool.js';
 import { storeOutput, getOutput } from '../../src/output-store.js';
 import { getSessionOutputDir } from '../../src/storage-paths.js';
@@ -222,6 +223,24 @@ describe('hook — field preservation and raw recovery', () => {
     const hook = createObservationHook(cwd, ref);
     const out = hook({ toolName: 'bash', toolResult: { resultType: 'success', textResultForLlm: 'ok' } as never });
     expect(out).toBeUndefined();
+  });
+
+  it('records the exact shaping savings (raw minus shaped bytes / 4)', () => {
+    const recRef = { id: 'obs-shaping-record-session' };
+    clearSession(recRef.id);
+    const hook = createObservationHook(cwd, recRef);
+    const out = hook({ toolName: 'bash', toolResult: { resultType: 'success', textResultForLlm: VITEST_FAIL } as never });
+
+    const rawBytes = Buffer.byteLength(VITEST_FAIL, 'utf8');
+    const shapedBytes = Buffer.byteLength((out!.modifiedResult as { textResultForLlm: string }).textResultForLlm, 'utf8');
+    const t = getThroughput(recRef.id)!;
+    expect(t.shapingShapeCount).toBe(1);
+    // The shaped text the model sees carries the appended handle note, but the
+    // recorded saving is measured against the pre-handle shaped bytes, so the
+    // recorded value is at least the post-handle delta.
+    expect(t.shapingSavedTokens).toBeGreaterThan(0);
+    expect(t.shapingSavedTokens).toBeGreaterThanOrEqual(Math.round((rawBytes - shapedBytes) / 4));
+    clearSession(recRef.id);
   });
 });
 

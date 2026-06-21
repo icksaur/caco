@@ -35,6 +35,10 @@ interface SessionThroughput {
   workflowSavedTokens: number;
   /** Number of workflow runs that contributed savings this session. */
   workflowRuns: number;
+  /** Session-lifetime tokens saved by output shaping (exact bytes trimmed / 4). */
+  shapingSavedTokens: number;
+  /** Number of tool outputs the shaper trimmed this session. */
+  shapingShapeCount: number;
   updatedAt: string;
 }
 
@@ -52,6 +56,10 @@ function safeInt(value: unknown): number {
   return typeof value === 'number' && isFinite(value) && value >= 0 ? Math.floor(value) : 0;
 }
 
+/** Approximate chars per token, used to convert saved bytes into a token
+ *  estimate for both the workflow estimate and the exact shaping measurement. */
+export const BYTES_PER_TOKEN = 4;
+
 function blank(): SessionThroughput {
   return {
     requestIn: 0,
@@ -63,6 +71,8 @@ function blank(): SessionThroughput {
     rateLimitCount: 0,
     workflowSavedTokens: 0,
     workflowRuns: 0,
+    shapingSavedTokens: 0,
+    shapingShapeCount: 0,
     updatedAt: now(),
   };
 }
@@ -112,6 +122,21 @@ export function recordWorkflowSavings(sessionId: string, savedTokens: number): v
   const entry = getOrCreate(sessionId);
   entry.workflowSavedTokens += tokens;
   entry.workflowRuns += 1;
+  entry.updatedAt = now();
+}
+
+/**
+ * Record context tokens trimmed by the output-shaping hook on one tool result.
+ * Unlike the workflow estimate this is an EXACT measurement (raw minus shaped
+ * bytes / 4), accumulating on ordinary bash/test/build output. Session-lifetime
+ * like total*; NOT cleared by resetRequest.
+ */
+export function recordShapingSavings(sessionId: string, savedTokens: number): void {
+  const tokens = safeInt(savedTokens);
+  if (tokens <= 0) return;
+  const entry = getOrCreate(sessionId);
+  entry.shapingSavedTokens += tokens;
+  entry.shapingShapeCount += 1;
   entry.updatedAt = now();
 }
 

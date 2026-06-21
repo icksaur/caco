@@ -15,6 +15,7 @@ const consumeReloadSignal = vi.fn();
 const broadcastGlobalEvent = vi.fn();
 const recordUsage = vi.fn();
 const recordRateLimit = vi.fn();
+const recordToolCall = vi.fn();
 const snapshotMock = vi.fn(() => ({ requestIn: 0, requestCache: 0, requestOut: 0, totalIn: 0, totalCache: 0, totalOut: 0, rateLimitCount: 0, updatedAt: 'now', known: true }));
 
 vi.mock('../../src/session-meta-store.js', () => ({
@@ -36,6 +37,7 @@ vi.mock('../../src/applet-state.js', () => ({
 vi.mock('../../src/session-throughput.js', () => ({
   recordUsage: (...args: unknown[]) => recordUsage(...(args as [])),
   recordRateLimit: (...args: unknown[]) => recordRateLimit(...(args as [])),
+  recordToolCall: (...args: unknown[]) => recordToolCall(...(args as [])),
   snapshot: (...args: unknown[]) => snapshotMock(...(args as [])),
 }));
 
@@ -61,6 +63,7 @@ beforeEach(() => {
   broadcastGlobalEvent.mockClear();
   recordUsage.mockClear();
   recordRateLimit.mockClear();
+  recordToolCall.mockClear();
   snapshotMock.mockClear();
   setGitEditPoller(null);
 });
@@ -189,6 +192,26 @@ describe('applyDispatchEventEffects', () => {
       } as never, deps);
 
       expect(triggerPoll).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('round-trip metrics: tool calls', () => {
+    it('records a successful tool completion as a non-failed call', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_complete',
+        data: { toolName: 'grep', success: true },
+      } as never, deps);
+      expect(recordToolCall).toHaveBeenCalledWith(SID, false);
+    });
+
+    it('records a failed tool completion as a failed call', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_complete',
+        data: { toolName: 'grep', success: false },
+      } as never, deps);
+      expect(recordToolCall).toHaveBeenCalledWith(SID, true);
     });
   });
 

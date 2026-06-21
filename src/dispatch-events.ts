@@ -14,7 +14,7 @@ import { broadcastGlobalEvent } from './event-bus.js';
 import type { SessionEvent } from './event-bus.js';
 import type { GitEditPoller } from './git-edit-poller.js';
 import { extractProperty } from './sdk-normalizer.js';
-import { recordUsage, recordRateLimit, snapshot } from './session-throughput.js';
+import { recordUsage, recordRateLimit, recordToolCall, snapshot } from './session-throughput.js';
 
 // Set by server.ts after the poller is constructed. Optional — if absent
 // (e.g. unit tests), the file-edits triggers become no-ops.
@@ -75,7 +75,8 @@ export function applyDispatchEventEffects(
     const inputTokens = extractProperty(event, 'inputTokens');
     const outputTokens = extractProperty(event, 'outputTokens');
     const cacheReadTokens = extractProperty(event, 'cacheReadTokens');
-    recordUsage(sessionId, { inputTokens, outputTokens, cacheReadTokens });
+    const reasoningTokens = extractProperty(event, 'reasoningTokens');
+    recordUsage(sessionId, { inputTokens, outputTokens, cacheReadTokens, reasoningTokens });
     deps.onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> });
   }
 
@@ -85,6 +86,11 @@ export function applyDispatchEventEffects(
       recordRateLimit(sessionId);
       deps.onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> });
     }
+  }
+
+  // Count completed tool calls (and failures) for round-trip metrics.
+  if (event.type === 'tool.execution_complete') {
+    recordToolCall(sessionId, eventData.success !== true);
   }
 
   // Trigger an immediate file-edits poll when a write tool finishes

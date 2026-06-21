@@ -39,7 +39,43 @@ interface SessionThroughput {
   shapingSavedTokens: number;
   /** Number of tool outputs the shaper trimmed this session. */
   shapingShapeCount: number;
+  /** Model round trips (assistant.usage events) in the current request. */
+  requestTurns: number;
+  /** Reasoning tokens decoded in the current request. */
+  requestReasoning: number;
+  /** Tool calls completed in the current request. */
+  requestToolCalls: number;
+  /** Tool calls that failed in the current request. */
+  requestToolFailures: number;
+  /** Bytes of caco_run_workflow code submitted in the current request. */
+  requestWorkflowCodeBytes: number;
+  /** Wall-clock ms of the last completed request (set by markRequestComplete). */
+  requestWallMs: number;
+  /** Epoch ms the current request started (set by resetRequest). */
+  requestStartedAt: number;
+  /** Session-lifetime model round trips. */
+  totalTurns: number;
+  /** Session-lifetime reasoning tokens. */
+  totalReasoning: number;
+  /** Session-lifetime tool calls. */
+  totalToolCalls: number;
+  /** Session-lifetime failed tool calls. */
+  totalToolFailures: number;
   updatedAt: string;
+}
+
+/** The per-request metrics row captured at request completion (for the bench log). */
+export interface RequestMetricsRow {
+  requestIn: number;
+  requestCache: number;
+  requestOut: number;
+  requestTurns: number;
+  requestReasoning: number;
+  requestToolCalls: number;
+  requestToolFailures: number;
+  requestWorkflowCodeBytes: number;
+  requestWallMs: number;
+  rateLimitCount: number;
 }
 
 export interface ThroughputSnapshot extends SessionThroughput {
@@ -73,6 +109,17 @@ function blank(): SessionThroughput {
     workflowRuns: 0,
     shapingSavedTokens: 0,
     shapingShapeCount: 0,
+    requestTurns: 0,
+    requestReasoning: 0,
+    requestToolCalls: 0,
+    requestToolFailures: 0,
+    requestWorkflowCodeBytes: 0,
+    requestWallMs: 0,
+    requestStartedAt: Date.now(),
+    totalTurns: 0,
+    totalReasoning: 0,
+    totalToolCalls: 0,
+    totalToolFailures: 0,
     updatedAt: now(),
   };
 }
@@ -88,12 +135,13 @@ function getOrCreate(sessionId: string): SessionThroughput {
 
 export function recordUsage(
   sessionId: string,
-  tokens: { inputTokens?: unknown; outputTokens?: unknown; cacheReadTokens?: unknown },
+  tokens: { inputTokens?: unknown; outputTokens?: unknown; cacheReadTokens?: unknown; reasoningTokens?: unknown },
 ): void {
   const entry = getOrCreate(sessionId);
   const input = safeInt(tokens.inputTokens);
   const cache = safeInt(tokens.cacheReadTokens);
   const out = safeInt(tokens.outputTokens);
+  const reasoning = safeInt(tokens.reasoningTokens);
   const fresh = Math.max(0, input - cache);
   entry.requestIn += fresh;
   entry.requestCache += cache;
@@ -101,7 +149,56 @@ export function recordUsage(
   entry.totalIn += fresh;
   entry.totalCache += cache;
   entry.totalOut += out;
+  // Each assistant.usage event is one model round trip on the critical path.
+  entry.requestTurns += 1;
+  entry.totalTurns += 1;
+  entry.requestReasoning += reasoning;
+  entry.totalReasoning += reasoning;
   entry.updatedAt = now();
+}
+
+/** Record one completed tool call (and whether it failed) for round-trip metrics. */
+export function recordToolCall(sessionId: string, failed: boolean): void {
+  const entry = getOrCreate(sessionId);
+  entry.requestToolCalls += 1;
+  entry.totalToolCalls += 1;
+  if (failed) {
+    entry.requestToolFailures += 1;
+    entry.totalToolFailures += 1;
+  }
+  entry.updatedAt = now();
+}
+
+/** Record bytes of caco_run_workflow code submitted this request (an output-token cost). */
+export function recordWorkflowCode(sessionId: string, codeBytes: number): void {
+  const bytes = safeInt(codeBytes);
+  if (bytes <= 0) return;
+  const entry = getOrCreate(sessionId);
+  entry.requestWorkflowCodeBytes += bytes;
+  entry.updatedAt = now();
+}
+
+/**
+ * Finalize the current request: stamp its wall-clock duration and return a
+ * compact metrics row for the benchmark log. Returns null for unknown sessions.
+ */
+export function markRequestComplete(sessionId: string): RequestMetricsRow | null {
+  const entry = sessions.get(sessionId);
+  if (!entry) return null;
+  entry.requestWallMs = Math.max(0, Date.now() - entry.requestStartedAt);
+  entry.updatedAt = now();
+  return {
+    requestIn: entry.requestIn,
+    requestCache: entry.requestCache,
+    requestOut: entry.requestOut,
+    requestTurns: entry.requestTurns,
+    requestReasoning: entry.requestReasoning,
+    requestToolCalls: entry.requestToolCalls,
+    requestToolFailures: entry.requestToolFailures,
+    requestWorkflowCodeBytes: entry.requestWorkflowCodeBytes,
+    requestWallMs: entry.requestWallMs,
+    rateLimitCount: entry.rateLimitCount,
+  };
 }
 
 export function recordRateLimit(sessionId: string): void {
@@ -152,6 +249,13 @@ export function resetRequest(sessionId: string): void {
   entry.requestOut = 0;
   entry.rateLimitCount = 0;
   entry.lastRateLimitAt = undefined;
+  entry.requestTurns = 0;
+  entry.requestReasoning = 0;
+  entry.requestToolCalls = 0;
+  entry.requestToolFailures = 0;
+  entry.requestWorkflowCodeBytes = 0;
+  entry.requestWallMs = 0;
+  entry.requestStartedAt = Date.now();
   entry.updatedAt = now();
 }
 

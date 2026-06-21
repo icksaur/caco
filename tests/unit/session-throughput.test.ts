@@ -4,6 +4,9 @@ import {
   recordRateLimit,
   recordWorkflowSavings,
   recordShapingSavings,
+  recordToolCall,
+  recordWorkflowCode,
+  markRequestComplete,
   resetRequest,
   getThroughput,
   snapshot,
@@ -179,6 +182,74 @@ describe('resetRequest', () => {
     expect(getThroughput(SID)!.lastRateLimitAt).toBeTruthy();
     resetRequest(SID);
     expect(getThroughput(SID)!.lastRateLimitAt).toBeUndefined();
+  });
+});
+
+describe('request round-trip metrics', () => {
+  it('counts one turn and accumulates reasoning per usage event', () => {
+    recordUsage(SID, { inputTokens: 100, outputTokens: 50, reasoningTokens: 30 });
+    recordUsage(SID, { inputTokens: 80, outputTokens: 40, reasoningTokens: 20 });
+    const t = getThroughput(SID)!;
+    expect(t.requestTurns).toBe(2);
+    expect(t.totalTurns).toBe(2);
+    expect(t.requestReasoning).toBe(50);
+    expect(t.totalReasoning).toBe(50);
+  });
+
+  it('treats missing reasoningTokens as zero but still counts the turn', () => {
+    recordUsage(SID, { inputTokens: 100, outputTokens: 50 });
+    const t = getThroughput(SID)!;
+    expect(t.requestTurns).toBe(1);
+    expect(t.requestReasoning).toBe(0);
+  });
+
+  it('counts tool calls and failures', () => {
+    recordToolCall(SID, false);
+    recordToolCall(SID, true);
+    recordToolCall(SID, false);
+    const t = getThroughput(SID)!;
+    expect(t.requestToolCalls).toBe(3);
+    expect(t.totalToolCalls).toBe(3);
+    expect(t.requestToolFailures).toBe(1);
+    expect(t.totalToolFailures).toBe(1);
+  });
+
+  it('accumulates workflow code bytes', () => {
+    recordWorkflowCode(SID, 400);
+    recordWorkflowCode(SID, 600);
+    expect(getThroughput(SID)!.requestWorkflowCodeBytes).toBe(1000);
+  });
+
+  it('markRequestComplete sets a non-negative wall-clock duration', () => {
+    resetRequest(SID);
+    recordUsage(SID, { inputTokens: 10, outputTokens: 5 });
+    const row = markRequestComplete(SID);
+    expect(row).not.toBeNull();
+    expect(row!.requestWallMs).toBeGreaterThanOrEqual(0);
+    expect(getThroughput(SID)!.requestWallMs).toBe(row!.requestWallMs);
+    expect(row!.requestTurns).toBe(1);
+  });
+
+  it('markRequestComplete returns null for an unknown session', () => {
+    expect(markRequestComplete('no-such')).toBeNull();
+  });
+
+  it('resetRequest zeroes request round-trip counters but preserves totals', () => {
+    recordUsage(SID, { inputTokens: 10, outputTokens: 5, reasoningTokens: 7 });
+    recordToolCall(SID, true);
+    recordWorkflowCode(SID, 100);
+    resetRequest(SID);
+    const t = getThroughput(SID)!;
+    expect(t.requestTurns).toBe(0);
+    expect(t.requestReasoning).toBe(0);
+    expect(t.requestToolCalls).toBe(0);
+    expect(t.requestToolFailures).toBe(0);
+    expect(t.requestWorkflowCodeBytes).toBe(0);
+    // session-lifetime totals survive
+    expect(t.totalTurns).toBe(1);
+    expect(t.totalReasoning).toBe(7);
+    expect(t.totalToolCalls).toBe(1);
+    expect(t.totalToolFailures).toBe(1);
   });
 });
 

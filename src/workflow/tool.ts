@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { storeOutput } from '../output-store.js';
 import { shapeOutput } from '../observe/shape.js';
 import { createLogger } from '../logger.js';
-import { recordWorkflowSavings } from '../session-throughput.js';
+import { recordWorkflowSavings, recordWorkflowCode } from '../session-throughput.js';
 import { WORKFLOW_EMIT_CAP_BYTES, WORKFLOW_TIMEOUT_CAP_MS } from '../config.js';
 import { runWorkflow } from './runner.js';
 import { estimateSavedTokens } from './savings.js';
@@ -66,6 +66,7 @@ export function createWorkflowTool(sessionCwd: string, sessionRef: SessionIdRef)
     handler: async ({ code, timeoutMs, description }) => {
       workflowLog.info('run', { description, codeBytes: Buffer.byteLength(code, 'utf8'), code });
       const sessionId = requireSessionId(sessionRef);
+      recordWorkflowCode(sessionId, Buffer.byteLength(code, 'utf8'));
       let result;
       try {
         result = await runWorkflow(sessionCwd, { code, timeoutMs });

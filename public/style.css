@@ -2263,6 +2263,11 @@ main {
   margin-left: var(--space-xs);
 }
 
+.context-footer .tp-turns {
+  color: var(--text-muted, #8b949e);
+  margin-left: var(--space-xs);
+}
+
 .context-footer .context-saved {
   flex-shrink: 0;
   color: var(--green, #3fb950);

@@ -27,7 +27,8 @@ import { prefixMessageSource, type MessageSource } from '../message-source.js';
 import { createWatchdog } from '../dispatch-watchdog.js';
 import { retryWithFreshClient } from '../dispatch-retry.js';
 import { applyDispatchEventEffects } from '../dispatch-events.js';
-import { resetRequest, snapshot } from '../session-throughput.js';
+import { resetRequest, snapshot, markRequestComplete } from '../session-throughput.js';
+import { appendRequestMetrics } from '../request-metrics-log.js';
 
 const router = Router();
 
@@ -288,6 +289,13 @@ export async function dispatchMessage(
     sessionManager.endDispatch(sessionId);
     broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
     if (tempFilePaths) await Promise.all(tempFilePaths.map(p => unlink(p).catch(() => {})));
+    // Stamp wall-clock + persist a benchmark row for requests that ran a model
+    // turn (skip pre-send aborts, which have no turns). Best-effort.
+    const metrics = markRequestComplete(sessionId);
+    if (metrics && metrics.requestTurns > 0) {
+      appendRequestMetrics(sessionId, metrics, process.cwd());
+    }
+    onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> } as unknown as SessionEvent);
     console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
   };
 

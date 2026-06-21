@@ -145,6 +145,11 @@ describe('orchestrator — thresholds and backstop', () => {
     expect(shapeOutput('read_file', VITEST_FAIL)).toBeNull();
   });
 
+  it('passes agent-directed searches (grep/glob) through unshaped', () => {
+    expect(shapeOutput('grep', VITEST_FAIL)).toBeNull();
+    expect(shapeOutput('glob', VITEST_FAIL)).toBeNull();
+  });
+
   it('uses the generic backstop for unbounded non-shell tools even on test-like text', () => {
     const decision = shapeOutput('web_fetch', VITEST_FAIL);
     expect(decision?.shaperId).toBe('generic');

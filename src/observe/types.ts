@@ -26,17 +26,22 @@ export const SHELL_TOOLS = new Set([
 ]);
 
 /**
- * Read tools whose output extent the agent already controls (view_range, or a
- * `head`/`tail`/`grep` pipeline through `caco.sh`, or a ranged `caco.read`). Their
- * output is passed through UNSHAPED: a deliberate read is the agent's own choice, so
- * the generic floor only turned one read into a preview + N `retrieve_output` calls —
- * spending extra round trips to deliver the same bytes the agent already asked for.
- * The runtime ceiling (OBS_RAW_CEILING_BYTES) remains the catastrophe backstop.
+ * Tools whose output extent the agent already controls — ranged reads
+ * (view_range, ranged `caco.read`) and agent-directed searches (a `grep` pattern
+ * with `head_limit`, a `glob`, or a `head`/`tail` pipeline through `caco.sh`).
+ * Their output is passed through UNSHAPED: the agent chose the query and the
+ * extent, so the generic floor only turned one result into a preview + N
+ * `retrieve_output` calls — spending extra round trips to deliver the same bytes
+ * the agent already asked for. The runtime ceiling (OBS_RAW_CEILING_BYTES) remains
+ * the catastrophe backstop, and tools the agent cannot bound (e.g. web_fetch) are
+ * still shaped by the generic floor.
  */
 export const AGENT_BOUNDED_READ_TOOLS = new Set([
   'view',
   'read_file',
   'str_replace_editor',
+  'grep',
+  'glob',
 ]);
 
 /** Below this, output passes through untouched (not worth shaping). */

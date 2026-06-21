@@ -125,33 +125,35 @@ Strengthen the prompt to prefer the workflow, exclude nothing. **Demoted:** this
 effectively the current state, and the D1 benchmark already showed the model ignores
 the nudge. Listed only for completeness; not a real option.
 
-## Recommended design: ship A only if it measures clean; else strict opt-in
+## Recommended design: shell wrapping (the refocus)
 
-Do **not** exclude `bash` globally — the lifecycle/test/streaming loss is too steep for
-a default. Sequence:
+Per the owner: **the primary driver is unbounded `bash`/`powershell` output**, and
+read/search tools are a *separate* concern (a future `index_multiread` that reads many
+snippets with logic). So C1 ships as **shell wrapping**, not search exclusion:
 
-1. Try **Proposal A** (exclude `grep`+`glob`) and run the expanded benchmark.
-2. **If A measures clean** (the model routes search through the workflow and does NOT
-   substitute `bash` search — see Acceptance fail criteria) → ship A as the default.
-3. **If A shows bash substitution or regressions** → default to **no exclusion** (keep
-   the prompt nudge) and ship **Proposal B as a documented opt-in** ("strict read
-   diet"), since B is the only configuration that truly forces routing.
+- **Exclude the shell built-ins** (`bash`, `read_bash`, `stop_bash`, `list_bash`, and the
+  `powershell`/`local_shell` equivalents) so all shell runs through `caco.sh` inside a
+  workflow — bounding output and letting the model emit only the relevant slice, and
+  batching multi-command sequences into one call.
+- **Keep `grep`/`glob`/`view`** for now. They consume context but are a deliberate,
+  separate future effort (`index_multiread`); this change stays focused on shell.
+- **Raise `WORKFLOW_TIMEOUT_CAP_MS` to 130 s** (advertise 120 s in the tool description —
+  10 s wiggle room for rough math) so wrapped test/build commands have headroom.
+- The empirical findings make this low-cost: interactive stdin / streaming /
+  background-detach are not real losses; only long (>120 s) foreground runs and live
+  progress polling are, and those are rare / addressable (detach + poll).
+- Risk is minimal and fully reversible: Caco is a personal tool the owner maintains; the
+  exclusion is one config line, revertible via `CACO_EXCLUDED_BUILTINS`.
 
-Implementation is the same either way (a configurable exclusion list); only the default
-contents differ based on the measurement.
-
-- A single source: `DEFAULT_EXCLUDED_BUILTINS` in `src/tool-registry.ts` (next to A5's
-  disable switch), unioned with a `CACO_EXCLUDED_BUILTINS` env override (comma-separated,
-  same parsing as `CACO_DISABLED_TOOLS`). The env lets the user select the strict diet
-  (`builtin:grep,builtin:glob,builtin:bash`) or clear the list without a code change.
-  This is NOT over-engineering: rollback and a strict opt-in both need it.
-- `server.ts` passes the resolved list to `createSessionState({ ..., excludedTools })`.
-  The existing plumbing carries it to every create/resume/model-switch resume.
-- **Prompt:** state which search tools are unavailable and that search/fan-out reads go
-  through `caco_run_workflow` (`caco.grep`/`caco.rg`/`caco.glob`); single-file view stays
-  on the normal view tool. Under Proposal A, also instruct NOT to substitute `bash rg`/
-  `grep`/`find` for search (use the workflow) — this is the only lever that makes A more
-  than a nudge without removing bash.
+- A single source: `DEFAULT_EXCLUDED_BUILTINS` (the shell set) in `src/tool-registry.ts`,
+  unioned with a `CACO_EXCLUDED_BUILTINS` env override (comma-separated, same parsing as
+  A5's `CACO_DISABLED_TOOLS`). Adding `builtin:grep,builtin:glob` later is a config edit.
+- `server.ts` passes the resolved list to `createSessionState({ ..., excludedTools })`;
+  the existing plumbing carries it to every create/resume/model-switch resume.
+- **Workflow tool description + prompt:** state that shell runs via `caco.sh` (bash/
+  powershell are not separate tools); a single shell command is a one-line workflow
+  (`emit(await caco.sh('git status'))`); set `timeoutMs` (up to 120 s) for slow commands;
+  detach long runs with `setsid` and poll a logfile.
 
 ## Considerations
 
@@ -220,23 +222,23 @@ contents differ based on the measurement.
 
 ## Plan (ordered)
 
-1. **Config helper** (`src/tool-registry.ts`): `DEFAULT_EXCLUDED_BUILTINS` +
-   `excludedBuiltinNames()` (defaults ∪ `CACO_EXCLUDED_BUILTINS`), reusing the A5
-   parse pattern. Unit tests.
-2. **Wire server.ts:** pass `excludedTools: [...excludedBuiltinNames()]` into
-   `createSessionState`. Confirm it threads to create + resume + model-switch resume
-   (it already reads `active.excludedTools`).
-3. **Prompt:** state which search tools are unavailable and that search/fan-out reads go
-   through `caco_run_workflow`; under Proposal A, explicitly instruct NOT to substitute
-   `bash rg`/`grep`/`find`. Make the facade search methods explicit.
-4. **Expanded benchmark gate (decides the default):** run the expanded search benchmark
-   before/after with `DEFAULT_EXCLUDED_BUILTINS = [grep, glob]`. Evaluate the FAIL
-   criteria. If clean → keep grep+glob as the default. If bash substitution or
-   regressions appear → set the default to `[]` (no exclusion) and ship the strict diet
-   (`grep,glob,bash`) as a documented `CACO_EXCLUDED_BUILTINS` opt-in. Record results in
-   this spec.
-5. **Document** the `CACO_EXCLUDED_BUILTINS` switch + the strict-diet opt-in in the
-   tool-diet docs; note the measurement gap (built-in schema bytes invisible to the
-   oracle; evidence is the D1 token delta).
+1. **Config:** `WORKFLOW_TIMEOUT_CAP_MS` → 130 s (real) + `WORKFLOW_TIMEOUT_ADVERTISED_MS`
+   = 120 s (description). [done]
+2. **Config helper** (`src/tool-registry.ts`): `DEFAULT_EXCLUDED_BUILTINS` (the shell set)
+   + `excludedBuiltinNames()` (defaults ∪ `CACO_EXCLUDED_BUILTINS`), reusing the A5 parse
+   pattern. Unit tests. [done]
+3. **Wire server.ts:** pass `excludedTools: excludedBuiltinNames()` into
+   `createSessionState`; it threads to create + resume + model-switch resume (already
+   reads `active.excludedTools`). [done]
+4. **Workflow tool description + prompt:** shell runs via `caco.sh` (bash/powershell are
+   not separate tools); a single command is a one-line workflow; set `timeoutMs` (≤120 s)
+   for slow commands; detach+poll for longer. Advertise 120 s cap. [done]
+5. **Verify** in a fresh session post-restart: `bash` absent from the tool list; a shell
+   task succeeds via `caco.sh`; the agent does not stall. Dogfood in this repo's own
+   session (it loses `bash` too).
+6. **Benchmark (optional follow-up):** run the search benchmark for the token/round-trip
+   delta. Note the byte-oracle can't see built-in schema bytes; evidence is the D1 token
+   delta on shell-heavy requests.
 
-Default contents are chosen by the step-4 measurement, not assumed.
+Reverting is one edit (`CACO_EXCLUDED_BUILTINS=""` or trim `DEFAULT_EXCLUDED_BUILTINS`).
+Adding `builtin:grep,builtin:glob` later (the read-tool effort) is the same switch.

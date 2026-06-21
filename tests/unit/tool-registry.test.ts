@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { filterDisabledTools, parseDisabledToolNames } from '../../src/tool-registry.js';
+import { filterDisabledTools, parseDisabledToolNames, parseExcludedBuiltins, DEFAULT_EXCLUDED_BUILTINS } from '../../src/tool-registry.js';
 
 interface FakeTool { name: string; }
 const t = (name: string): FakeTool => ({ name });
@@ -40,5 +40,29 @@ describe('filterDisabledTools', () => {
   it('only reports removed names that were actually present', () => {
     const { removed } = filterDisabledTools([t('a')], new Set(['a', 'ghost']));
     expect(removed).toEqual(['a']);
+  });
+});
+
+describe('parseExcludedBuiltins', () => {
+  it('defaults exclude the shell built-ins (bash + powershell families)', () => {
+    expect(DEFAULT_EXCLUDED_BUILTINS).toContain('builtin:bash');
+    expect(DEFAULT_EXCLUDED_BUILTINS).toContain('builtin:powershell');
+    // search/read tools are NOT excluded (separate future effort)
+    expect(DEFAULT_EXCLUDED_BUILTINS).not.toContain('builtin:grep');
+    expect(DEFAULT_EXCLUDED_BUILTINS).not.toContain('builtin:glob');
+    expect(DEFAULT_EXCLUDED_BUILTINS).not.toContain('builtin:str_replace_editor');
+  });
+
+  it('unions the env override with the defaults, de-duped', () => {
+    const out = parseExcludedBuiltins(['builtin:bash'], 'builtin:grep, builtin:bash ,builtin:glob');
+    expect(out).toEqual(['builtin:bash', 'builtin:grep', 'builtin:glob']);
+  });
+
+  it('returns just the defaults when env is unset', () => {
+    expect(parseExcludedBuiltins(['builtin:bash'], undefined)).toEqual(['builtin:bash']);
+  });
+
+  it('an empty env string clears nothing but adds nothing', () => {
+    expect(parseExcludedBuiltins(['builtin:bash'], '')).toEqual(['builtin:bash']);
   });
 });

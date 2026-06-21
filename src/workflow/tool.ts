@@ -4,7 +4,7 @@ import { storeOutput } from '../output-store.js';
 import { shapeOutput } from '../observe/shape.js';
 import { createLogger } from '../logger.js';
 import { recordWorkflowSavings, recordWorkflowCode } from '../session-throughput.js';
-import { WORKFLOW_EMIT_CAP_BYTES, WORKFLOW_TIMEOUT_CAP_MS } from '../config.js';
+import { WORKFLOW_EMIT_CAP_BYTES, WORKFLOW_TIMEOUT_ADVERTISED_MS } from '../config.js';
 import { runWorkflow } from './runner.js';
 import { estimateSavedTokens } from './savings.js';
 import { FACADE_API_SUMMARY } from './facade.js';
@@ -13,16 +13,23 @@ import { requireSessionId } from '../session-id-ref.js';
 
 const workflowLog = createLogger('WORKFLOW');
 
-const DESCRIPTION = `Run ONE TypeScript workflow that reads/aggregates across many files in-process and returns only a compact result. **Executes arbitrary code on the host, auto-approved.** Use ONLY for fan-out read+aggregate tasks where one bounded result replaces many tool calls — never for a single read (use \`view\`/\`index\`) or to edit.
+const DESCRIPTION = `Run ONE TypeScript workflow on the host and return only a compact result. **Executes arbitrary code, auto-approved.** This is also how you run SHELL: \`bash\`/\`powershell\` are not separate tools — use \`caco.sh('<command>')\`, which returns { stdout, stderr, code } and never throws on non-zero exit.
 
-PREFER this when about to issue 3+ read/grep/glob/index calls to compute one answer (e.g. "which files import X", "count TODOs per dir"): it keeps intermediate file contents out of your context and returns just the summary.
+Use it for: (a) running shell commands (a single command is a one-line workflow: \`emit(await caco.sh('git status'))\`); (b) fan-out read+aggregate over many files, returning a summary instead of dumping every file into context. Do NOT use it for a single file read (use \`view\`/\`index\`) or to edit (use the edit tool).
 
-The code is an async function body with two globals: \`emit(value)\` — call EXACTLY ONCE with the compact result (don't console.log intermediate data); \`caco\` — the read facade below. Top-level \`import\` is unsupported; use \`await import(...)\`.
+Why: shell/fan-out output is bounded here — you emit only the slice that matters, keeping unbounded command output and intermediate file contents out of your context. Batch related commands in one call (\`git add -A && git commit\`) to cut round trips.
+
+The code is an async function body with two globals: \`emit(value)\` — call EXACTLY ONCE with the compact result (don't console.log intermediate data); \`caco\` — the facade below. Top-level \`import\` is unsupported; use \`await import(...)\`. Set \`timeoutMs\` (up to 120000) for slow commands like tests/builds; for runs longer than that, detach (\`caco.sh('setsid <cmd> >log 2>&1 < /dev/null &')\`) and poll the logfile in a later call.
 
 ${FACADE_API_SUMMARY}
 
-Example:
+Examples:
 \`\`\`ts
+// shell
+emit((await caco.sh('npm test 2>&1')).stdout);
+\`\`\`
+\`\`\`ts
+// fan-out search
 const files = await caco.glob('src/**/*.ts');
 const hits = [];
 for (const f of files) if ((await caco.grep('TODO', { path: f })).length) hits.push(f);
@@ -53,7 +60,7 @@ export function createWorkflowTool(sessionCwd: string, sessionRef: SessionIdRef)
     description: DESCRIPTION,
     parameters: z.object({
       code: z.string().describe('TypeScript workflow body. Uses `caco` and `emit`; aggregate then emit() once.'),
-      timeoutMs: z.number().int().optional().describe(`Wall-clock timeout (default 30000, cap ${WORKFLOW_TIMEOUT_CAP_MS}).`),
+      timeoutMs: z.number().int().optional().describe(`Wall-clock timeout (default 30000, cap ${WORKFLOW_TIMEOUT_ADVERTISED_MS}).`),
       description: z.string().optional().describe('One-line description of what this workflow computes.'),
     }),
     handler: async ({ code, timeoutMs, description }) => {

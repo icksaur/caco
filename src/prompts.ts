@@ -44,7 +44,7 @@ async function buildAppletSection(): Promise<string> {
 export async function buildSystemMessage(): Promise<SystemMessage> {
   const appletPrompt = await buildAppletSection();
   const workflowNudge = WORKFLOW_ENABLED
-    ? '\nWhen you would otherwise make 3+ read/grep/glob/index calls across files to compute one answer, call `caco_run_workflow` instead — it aggregates in-process and returns only the compact result, keeping intermediate file contents out of your context.'
+    ? '\nShell commands run through `caco_run_workflow`: `bash`/`powershell` are not separate tools — use `caco.sh(\'<command>\')` (a single command is a one-line workflow: `emit(await caco.sh(\'git status\'))`; batch related commands like `git add -A && git commit` in one call). Set `timeoutMs` (up to 120000) for slow tests/builds. Also use it for fan-out: when you would make 3+ read/grep/glob calls to compute one answer, aggregate in-process and emit only the summary, keeping output out of your context.'
     : '';
   
   return {

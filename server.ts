@@ -27,7 +27,7 @@ import { createMemoryTools } from './src/memory-tool.js';
 import { createIndexTool } from './src/index-tool.js';
 import { createRetrieveOutputTool } from './src/observe/retrieve-tool.js';
 import { createWorkflowTool } from './src/workflow/tool.js';
-import { disabledToolNames, filterDisabledTools } from './src/tool-registry.js';
+import { disabledToolNames, filterDisabledTools, excludedBuiltinNames } from './src/tool-registry.js';
 import { isWorkflowRunnerAvailable, sweepWorkflowScratch } from './src/workflow/runner.js';
 import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
@@ -226,6 +226,8 @@ async function start(): Promise<void> {
   
   const disabledTools = disabledToolNames();
   if (disabledTools.size) console.log(`[TOOLS] Disabled-tool set: ${[...disabledTools].join(', ')}`);
+  const excludedBuiltins = excludedBuiltinNames();
+  if (excludedBuiltins.length) console.log(`[TOOLS] Excluded built-ins (shell → caco.sh): ${excludedBuiltins.join(', ')}`);
   const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
     const queueCacoEvent = (event: CacoEmbedEvent) => {
       if (sessionRef.id && sessionRef.id !== PENDING_SESSION_ID) {
@@ -267,7 +269,8 @@ async function start(): Promise<void> {
   
   await createSessionState({
     systemMessage: SYSTEM_MESSAGE,
-    toolFactory
+    toolFactory,
+    excludedTools: excludedBuiltins
   });
 
   // Register session-end listener now that sessionState exists.

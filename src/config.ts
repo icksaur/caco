@@ -39,7 +39,10 @@ export const AGENT_RATE_LIMIT_WINDOW_SECONDS = 60;
 // inside a bounded child process. Opt out with CACO_WORKFLOW=0.
 export const WORKFLOW_ENABLED = process.env.CACO_WORKFLOW !== '0';
 export const WORKFLOW_TIMEOUT_DEFAULT_MS = 30 * 1000;
-export const WORKFLOW_TIMEOUT_CAP_MS = 120 * 1000;
+// Real hard cap. Advertised as 120s in the tool description (WORKFLOW_TIMEOUT_ADVERTISED_MS)
+// with ~10s wiggle room so commands near the advertised limit still complete.
+export const WORKFLOW_TIMEOUT_CAP_MS = 130 * 1000;
+export const WORKFLOW_TIMEOUT_ADVERTISED_MS = 120 * 1000;
 export const WORKFLOW_KILL_GRACE_MS = 2 * 1000;
 export const WORKFLOW_LOG_CAP_BYTES = 256 * 1024;
 export const WORKFLOW_EMIT_CAP_BYTES = 16 * 1024;

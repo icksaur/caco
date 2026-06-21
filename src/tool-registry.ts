@@ -56,3 +56,35 @@ export function filterDisabledTools<T extends NamedTool>(
 export function disabledToolNames(): Set<string> {
   return parseDisabledToolNames(DEFAULT_DISABLED_TOOLS, process.env.CACO_DISABLED_TOOLS);
 }
+
+/**
+ * Built-in SDK tools excluded from sessions via SessionConfig.excludedTools
+ * (a separate mechanism from DEFAULT_DISABLED_TOOLS, which only filters Caco's
+ * own defineTool tools). C1 "shell wrapping": the shell built-ins have unbounded
+ * output, so route all shell through caco.sh inside caco_run_workflow (bounded
+ * output, fewer calls, in-script summarization). Reverting is one config edit or
+ * CACO_EXCLUDED_BUILTINS="". Search/read tools (grep/glob/view) are intentionally
+ * NOT excluded here — a separate future effort (index_multiread).
+ */
+export const DEFAULT_EXCLUDED_BUILTINS: string[] = [
+  'builtin:bash', 'builtin:read_bash', 'builtin:stop_bash', 'builtin:list_bash',
+  'builtin:powershell', 'builtin:read_powershell', 'builtin:stop_powershell', 'builtin:list_powershell',
+  'builtin:local_shell',
+];
+
+/** Parse CACO_EXCLUDED_BUILTINS (comma-separated) and union with the defaults. */
+export function parseExcludedBuiltins(defaults: string[], env: string | undefined): string[] {
+  const names = [...defaults];
+  if (env) {
+    for (const raw of env.split(',')) {
+      const name = raw.trim();
+      if (name) names.push(name);
+    }
+  }
+  return [...new Set(names)];
+}
+
+/** Built-in tools to exclude from every session (defaults ∪ CACO_EXCLUDED_BUILTINS). */
+export function excludedBuiltinNames(): string[] {
+  return parseExcludedBuiltins(DEFAULT_EXCLUDED_BUILTINS, process.env.CACO_EXCLUDED_BUILTINS);
+}

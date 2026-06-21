@@ -16,10 +16,14 @@ const broadcastGlobalEvent = vi.fn();
 const recordUsage = vi.fn();
 const recordRateLimit = vi.fn();
 const recordToolCall = vi.fn();
+const updateSessionMeta = vi.fn();
 const snapshotMock = vi.fn(() => ({ requestIn: 0, requestCache: 0, requestOut: 0, totalIn: 0, totalCache: 0, totalOut: 0, rateLimitCount: 0, updatedAt: 'now', known: true }));
 
 vi.mock('../../src/session-meta-store.js', () => ({
   setSessionIntent: (...args: unknown[]) => setSessionIntent(...args),
+}));
+vi.mock('../../src/storage.js', () => ({
+  updateSessionMeta: (...args: unknown[]) => updateSessionMeta(...(args as [])),
 }));
 vi.mock('../../src/usage-state.js', () => ({
   updateUsage: (...args: unknown[]) => updateUsage(...(args as [])),
@@ -64,6 +68,7 @@ beforeEach(() => {
   recordUsage.mockClear();
   recordRateLimit.mockClear();
   recordToolCall.mockClear();
+  updateSessionMeta.mockClear();
   snapshotMock.mockClear();
   setGitEditPoller(null);
 });
@@ -233,6 +238,36 @@ describe('applyDispatchEventEffects', () => {
         success: false,
       } as never, deps);
       expect(recordToolCall).toHaveBeenCalledWith(SID, true);
+    });
+  });
+
+  describe('inline offer-action (assistant.message → responseOptions)', () => {
+    function metaAfter(content: string): { responseOptions?: string[] } {
+      applyDispatchEventEffects(SID, { type: 'assistant.message', data: { content } } as never, makeDeps());
+      if (!updateSessionMeta.mock.calls.length) return {};
+      const meta: { responseOptions?: string[] } = {};
+      const mutator = updateSessionMeta.mock.calls[0][1] as (m: typeof meta) => void;
+      mutator(meta);
+      return meta;
+    }
+
+    it('writes responseOptions from a final caco-actions block', () => {
+      const meta = metaAfter('Here is the fix.\n```caco-actions\nFix the test\nAdd a test\n```');
+      expect(updateSessionMeta).toHaveBeenCalledWith(SID, expect.any(Function));
+      expect(meta.responseOptions).toEqual(['Fix the test', 'Add a test']);
+    });
+
+    it('does nothing when the message has no block', () => {
+      applyDispatchEventEffects(SID, { type: 'assistant.message', data: { content: 'Just prose.' } } as never, makeDeps());
+      expect(updateSessionMeta).not.toHaveBeenCalled();
+    });
+
+    it('does not write for a block quoted mid-message (final-trailer rule)', () => {
+      applyDispatchEventEffects(SID, {
+        type: 'assistant.message',
+        data: { content: 'Example:\n```caco-actions\nsample\n```\nbut not really.' },
+      } as never, makeDeps());
+      expect(updateSessionMeta).not.toHaveBeenCalled();
     });
   });
 

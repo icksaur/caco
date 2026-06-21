@@ -1,10 +1,8 @@
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { updateSessionMeta } from './storage.js';
+import { normalizeOptions, MAX_OPTIONS } from './offer-action-parse.js';
 import type { SessionIdRef } from './types.js';
-
-const MAX_OPTIONS = 4;
-const MAX_OPTION_LENGTH = 50;
 
 export function createOfferActionTool(sessionRef: SessionIdRef) {
   const tool = defineTool('caco_offer_action', {
@@ -23,19 +21,15 @@ Each option must be a complete, self-contained instruction the agent can act on 
         return { textResultForLlm: 'Error: no active session' };
       }
 
-      const trimmed = options.map(o => o.trim()).filter(Boolean);
-      if (trimmed.length === 0) {
+      const normalized = normalizeOptions(options);
+      if (normalized.length === 0) {
         return { textResultForLlm: 'Error: at least one non-empty option required' };
       }
 
-      const truncated = trimmed.slice(0, MAX_OPTIONS).map(o =>
-        o.length > MAX_OPTION_LENGTH ? o.slice(0, MAX_OPTION_LENGTH) : o
-      );
-
-      updateSessionMeta(sessionId, meta => { meta.responseOptions = truncated; });
+      updateSessionMeta(sessionId, meta => { meta.responseOptions = normalized; });
 
       return {
-        textResultForLlm: JSON.stringify({ ok: true, options: truncated }),
+        textResultForLlm: JSON.stringify({ ok: true, options: normalized }),
       };
     },
   });

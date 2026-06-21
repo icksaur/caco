@@ -95,6 +95,12 @@ function configureMarked(): void {
     renderer: {
       code(code: string, language: string): string {
         const safe = escapeHtml(code);
+        // Inline offer-action blocks are parsed server-side into pinned buttons;
+        // never render them in the transcript. Match info-strings starting with
+        // `caco-actions` so an OPEN/partial fence is also hidden during streaming.
+        if (language === 'caco-actions' || language.startsWith('caco-actions')) {
+          return '';
+        }
         if (language === 'mermaid') {
           const id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
           return `<div class="mermaid-diagram" data-mermaid-id="${id}">${safe}</div>`;

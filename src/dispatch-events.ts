@@ -15,6 +15,8 @@ import type { SessionEvent } from './event-bus.js';
 import type { GitEditPoller } from './git-edit-poller.js';
 import { extractProperty } from './sdk-normalizer.js';
 import { recordUsage, recordRateLimit, recordToolCall, snapshot } from './session-throughput.js';
+import { extractActionOptions } from './offer-action-parse.js';
+import { updateSessionMeta } from './storage.js';
 
 // Set by server.ts after the poller is constructed. Optional — if absent
 // (e.g. unit tests), the file-edits triggers become no-ops.
@@ -94,6 +96,20 @@ export function applyDispatchEventEffects(
   // success as a failure.
   if (event.type === 'tool.execution_complete') {
     recordToolCall(sessionId, extractProperty<boolean>(event, 'success') !== true);
+  }
+
+  // Inline offer-action: a final ```caco-actions fenced block in the assistant
+  // message is parsed into the same responseOptions the caco_offer_action tool
+  // wrote (dual-path bake-in). No block → no change, so the tool path is
+  // unaffected. The block is hidden client-side by the markdown code() renderer.
+  if (event.type === 'assistant.message') {
+    const content = extractProperty<string>(event, 'content');
+    if (typeof content === 'string') {
+      const options = extractActionOptions(content);
+      if (options.length > 0) {
+        updateSessionMeta(sessionId, meta => { meta.responseOptions = options; });
+      }
+    }
   }
 
   // Trigger an immediate file-edits poll when a write tool finishes

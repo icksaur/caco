@@ -30,6 +30,42 @@ const BATCH_DELAY_MS = 50;
 /** Active streaming sessions keyed by messageId */
 const sessions = new Map<string, StreamingState>();
 
+const ACTION_FENCE = 'caco-actions';
+
+/**
+ * During streaming, suppress a forming `caco-actions` trailer so neither an
+ * unclosed block nor a partially-typed fence line flashes before the server has
+ * parsed it into pinned buttons. A *closed* block is left alone — the markdown
+ * `code()` renderer drops it. Pure + exported for testing.
+ */
+export function stripStreamingActionBlock(raw: string): string {
+  // Last complete opening fence line for caco-actions.
+  const openRe = /(?:^|\n)```caco-actions[ \t]*(?:\n|$)/g;
+  let lastOpen = -1;
+  let lastOpenEnd = -1;
+  let m: RegExpExecArray | null;
+  while ((m = openRe.exec(raw)) !== null) {
+    // m.index may point at the preceding '\n'; normalize to the backticks.
+    lastOpen = raw.indexOf('```', m.index);
+    lastOpenEnd = openRe.lastIndex;
+  }
+  if (lastOpen !== -1) {
+    const rest = raw.slice(lastOpenEnd);
+    if (/(?:^|\n)```[ \t]*(?:\n|$)/.test(rest)) return raw; // closed → renderer hides it
+    return raw.slice(0, lastOpen).replace(/\n$/, '');        // unclosed → strip
+  }
+  // Partial fence still being typed as the final line (e.g. "```caco-act").
+  const tailStart = raw.lastIndexOf('\n') + 1;
+  const tail = raw.slice(tailStart);
+  if (tail.startsWith('```')) {
+    const info = tail.slice(3);
+    if (info.length >= 4 && ACTION_FENCE.startsWith(info)) {
+      return raw.slice(0, tailStart).replace(/\n$/, '');
+    }
+  }
+  return raw;
+}
+
 /**
  * Render markdown and update state
  */
@@ -48,7 +84,7 @@ function render(state: StreamingState): void {
   // Remove tail before setting textContent
   element.querySelector('.streaming-tail')?.remove();
   
-  element.textContent = rawContent;
+  element.textContent = stripStreamingActionBlock(rawContent);
   window.renderMarkdownElement?.(element);
   state.lastRenderedLength = rawContent.length;
   state.timer = null;
@@ -59,11 +95,18 @@ function render(state: StreamingState): void {
  */
 function showTail(state: StreamingState): void {
   const { element, rawContent, lastRenderedLength } = state;
-  
-  if (rawContent.length <= lastRenderedLength) return;
-  
-  const tail = rawContent.slice(lastRenderedLength);
-  
+
+  // Strip a forming action block; the result is a prefix of rawContent, so
+  // slicing it at the raw-based lastRenderedLength yields the visible remainder
+  // (or empty once rendering has passed the strip point).
+  const display = stripStreamingActionBlock(rawContent);
+  if (display.length <= lastRenderedLength) {
+    element.querySelector('.streaming-tail')?.remove();
+    return;
+  }
+
+  const tail = display.slice(lastRenderedLength);
+
   // Update existing tail or create new one
   let tailSpan = element.querySelector('.streaming-tail') as HTMLSpanElement | null;
   if (!tailSpan) {

@@ -1,5 +1,13 @@
 # Spec: graph reads via the index facade (B2)
 
+> **Sequencing (spec review, 2026-06-21):** the recommendation is to build
+> **`index_multiread` FIRST**, then a trimmed B2. Rationale: ~78% of agent tokens are
+> reads, and `index_multiread` is the *general* read-reducer; a dependency graph is
+> specialized (refactor/impact/cycle questions). The `resolveSpecifier` resolver here is
+> **reusable by an import-aware `index_multiread`**, so this design is not wasted either
+> way. Build B2 now only if dependency/cycle queries are an immediate need. This spec is
+> review-ready for whenever B2 is picked up.
+
 ## Goal
 
 Let an agent get a **dependency/import graph** of the codebase in one workflow call —
@@ -64,6 +72,7 @@ caco.graph(opts?: {
   edges: Array<[from: string, to: string]>;
   cycles?: string[][];                   // detected import cycles
   unresolved?: Array<[from: string, specifier: string]>;
+  truncated: boolean;                    // hit the max-files budget
 }>
 ```
 
@@ -96,17 +105,29 @@ syntactic approximation is noisy enough to mislead. Defer; if pursued later, sco
 "intra-file call references" or pair it with an LSP/semantic backend, not tree-sitter
 alone.
 
-## Recommended design: Proposal A (`caco.graph`), imports only, v1
+## Recommended design: Proposal A (`caco.graph`), imports only, **TS/JS/TSX/JSX only**, v1
 
+- **v1 languages: TypeScript / JavaScript / TSX / JSX only.** C# `using` is a *namespace*
+  import, not a file dependency (no edge to resolve); C++ `#include "x.h"` vs `<x>` needs
+  separate header-resolution semantics. Both are deferred — a v1 that pretends to graph
+  them would emit wrong edges. The pipeline supports them for *indexing*; the *graph* is
+  TS/JS-family only until their resolution is designed.
 - New module `src/index/import-graph.ts`: `buildImportGraph(cwd, opts)` — pure, tested.
-  - **Specifier extraction:** per language, pull the module string from each captured
-    import (regex on the raw import text is sufficient and robust; the import section is
-    already isolated by tree-sitter, so we are not regexing whole files).
+  - **Specifier extraction — prefer the AST.** Pull the module string from the import
+    node's string field via tree-sitter (robust), not a regex over raw text. Regex is a
+    fallback only, and only with exhaustive tests. Must handle ALL import forms that
+    create a file edge: `import … from 's'`, **`export … from 's'` (re-exports)**,
+    **`import type … from 's'`**, **side-effect `import 's'`**, default/namespace imports,
+    and best-effort **dynamic `import('s')`** / **`require('s')`** with a static string
+    literal (skip non-literal/computed specifiers, record nothing). This requires
+    capturing more than the current `import` section — extend the extractor to surface
+    import/export module strings (or add a focused specifier pass).
   - **Resolver:** internal `resolveSpecifier(fromFile, specifier)` handling `.js`→`.ts`,
     extensionless, `index.*`, `.tsx`/`.mts`/`.cts`; bare specifiers → `external:<pkg>`;
-    unresolved → recorded in `unresolved[]`, never thrown.
+    unresolved → recorded in `unresolved[]`, never thrown. **Reusable for a future
+    import-aware `index_multiread`** — so this work is not wasted if we pivot.
   - **Graph ops:** adjacency build, `importedBy` inversion, BFS for `root`+`depth`,
-    cycle detection (DFS) when requested.
+    cycle detection (DFS) when requested (cheap once the adjacency exists — keep it).
   - **Caps:** a max-files budget (reuse/extend index caps) so a huge tree can't blow
     memory; return `truncated` when hit.
 - Facade wiring in `src/workflow/facade.ts`: add `graph` to `Facade`, `createFacade`,
@@ -144,9 +165,11 @@ alone.
   parser (hand-authored fixture + hand-computed expected graph).
 - **Facade integration:** a workflow calling `caco.graph({ root, depth: 1 })` returns the
   expected neighborhood; `importedBy` inversion verified.
-- **Capability check:** reproduce a real query on this repo — e.g. "what imports
-  `session-throughput.js`" matches the known 3 importers (dispatch-events,
-  session-runtime, request-metrics-log) found earlier this session.
+- **Capability check (secondary, non-brittle):** reproduce a real query on this repo —
+  e.g. "what imports `session-throughput.js`" should *include* the known importers
+  (dispatch-events, session-runtime, request-metrics-log). Assert superset/contains, not
+  exact equality, so unrelated repo changes don't break the test. The fixture oracles
+  above are the PRIMARY correctness gate; this is a smoke check.
 - Gates: typecheck ×2, lint:strict, knip, full tests, build:client.
 
 ## Plan (ordered)

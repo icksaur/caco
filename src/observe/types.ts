@@ -25,6 +25,20 @@ export const SHELL_TOOLS = new Set([
   'read_powershell',
 ]);
 
+/**
+ * Read tools whose output extent the agent already controls (view_range, or a
+ * `head`/`tail`/`grep` pipeline through `caco.sh`, or a ranged `caco.read`). Their
+ * output is passed through UNSHAPED: a deliberate read is the agent's own choice, so
+ * the generic floor only turned one read into a preview + N `retrieve_output` calls —
+ * spending extra round trips to deliver the same bytes the agent already asked for.
+ * The runtime ceiling (OBS_RAW_CEILING_BYTES) remains the catastrophe backstop.
+ */
+export const AGENT_BOUNDED_READ_TOOLS = new Set([
+  'view',
+  'read_file',
+  'str_replace_editor',
+]);
+
 /** Below this, output passes through untouched (not worth shaping). */
 export const SHAPE_THRESHOLD_BYTES = 8 * 1024;
 

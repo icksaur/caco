@@ -1,4 +1,4 @@
-import { SHELL_TOOLS, SHAPE_THRESHOLD_BYTES, GENERIC_HEAD_LINES, GENERIC_TAIL_LINES } from './types.js';
+import { SHELL_TOOLS, AGENT_BOUNDED_READ_TOOLS, SHAPE_THRESHOLD_BYTES, GENERIC_HEAD_LINES, GENERIC_TAIL_LINES } from './types.js';
 import { selectShaper, genericShaper } from './registry.js';
 
 export interface ShapeDecision {
@@ -30,15 +30,20 @@ function enforceGenericFloor(formatShaped: string, raw: string): string {
 
 /**
  * Decide whether and how to shape a tool result. Returns null when the output
- * passes through unchanged (below threshold, or shaping does not reduce bytes).
+ * passes through unchanged (an agent-bounded read, below threshold, or shaping
+ * does not reduce bytes).
  *
- * Shell-class tools get semantic shaping (format shaper, then generic-floor
- * union) so failures survive. Every other tool gets the generic floor only --
- * the mandatory backstop that keeps the raised runtime threshold from unbounding
- * non-shell output. The generic floor is byte-bounded, so shaping always caps
- * the bytes handed to the model.
+ * Agent-bounded read tools (view/read_file/...) pass through untouched: the agent
+ * already chose the extent, so shaping only forces a preview + retrieve_output
+ * round trips. Shell-class tools get semantic shaping (format shaper, then
+ * generic-floor union) so failures survive. Every other tool gets the generic floor
+ * only -- the mandatory backstop that keeps the raised runtime threshold from
+ * unbounding output the agent cannot itself bound. The generic floor is
+ * byte-bounded, so shaping always caps the bytes handed to the model.
  */
 export function shapeOutput(toolName: string, raw: string): ShapeDecision | null {
+  if (AGENT_BOUNDED_READ_TOOLS.has(toolName)) return null;
+
   const rawBytes = Buffer.byteLength(raw, 'utf8');
   if (rawBytes <= SHAPE_THRESHOLD_BYTES) return null;
 

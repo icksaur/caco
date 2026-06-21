@@ -138,8 +138,15 @@ describe('orchestrator — thresholds and backstop', () => {
     expect(decision?.shaperId).toBe('ts-test-build');
   });
 
-  it('uses the generic backstop for non-shell tools even on test-like text', () => {
-    const decision = shapeOutput('view', VITEST_FAIL);
+  it('passes agent-bounded read output (view) through unshaped', () => {
+    expect(shapeOutput('view', VITEST_FAIL)).toBeNull();
+    const giantRead = 'x'.repeat(2_000_000);
+    expect(shapeOutput('view', giantRead)).toBeNull();
+    expect(shapeOutput('read_file', VITEST_FAIL)).toBeNull();
+  });
+
+  it('uses the generic backstop for unbounded non-shell tools even on test-like text', () => {
+    const decision = shapeOutput('web_fetch', VITEST_FAIL);
     expect(decision?.shaperId).toBe('generic');
     expect(decision!.shaped.length).toBeLessThan(VITEST_FAIL.length);
   });
@@ -148,7 +155,7 @@ describe('orchestrator — thresholds and backstop', () => {
 describe('orchestrator — byte bounding (C1: hook is the real bounding authority)', () => {
   it('bounds a single multi-megabyte line via the non-shell generic floor', () => {
     const giant = 'x'.repeat(2_000_000);
-    const d = shapeOutput('view', giant);
+    const d = shapeOutput('web_fetch', giant);
     expect(d).not.toBeNull();
     expect(d!.shapedBytes).toBeLessThan(GENERIC_HARD_CAP_BYTES + 512);
     expect(d!.shapedBytes).toBeLessThan(d!.rawBytes);

@@ -46,7 +46,6 @@ vi.mock('../../public/ts/notifications.js', () => ({ notifySessionComplete: vi.f
 vi.mock('../../public/ts/session-observed.js', () => ({ markSessionObserved: vi.fn() }));
 vi.mock('../../public/ts/session-state-tracker.js', () => ({ sessionTracker }));
 vi.mock('../../public/ts/adhoc-bar.js', () => ({ adHocBar: { activateSession: vi.fn() } }));
-vi.mock('../../public/ts/context-footer.js', () => ({ refreshRoadmapLink: vi.fn() }));
 vi.mock('../../public/ts/fetch-timeout.js', () => ({ fetchWithTimeout }));
 vi.mock('../../public/ts/chat-view-controller.js', () => ({ chatView }));
 vi.mock('../../public/ts/form-state-store.js', () => ({ formStateStore: { set: vi.fn() } }));

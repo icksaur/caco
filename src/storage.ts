@@ -8,7 +8,6 @@
  *   storage-paths       — STORAGE_ROOT and per-session directory helpers
  *   session-meta-store  — meta.json, observed/idle, intent, session order, icon
  *   session-data-store  — generic per-session JSON blobs
- *   roadmap-store       — roadmap.json + NDJSON notes
  *   output-store        — outputs, activities, cwd↔session registry, language detection
  *   mcp-auth-store      — global MCP OAuth tokens
  *   peer-store          — known Caco peers
@@ -29,12 +28,6 @@ export {
 export {
   isValidDataName, listSessionData, getSessionData, setSessionData, deleteSessionData,
 } from './session-data-store.js';
-
-export type { RoadmapStep, Roadmap, NoteEntry } from './roadmap-store.js';
-export {
-  getSessionRoadmap, setSessionRoadmap,
-  getSessionNotes, appendSessionNote, archiveSessionNote,
-} from './roadmap-store.js';
 
 export type { OutputMetadata, StoredOutput, ActivityMetadata, StoredActivity } from './output-store.js';
 export {

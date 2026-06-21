@@ -22,7 +22,6 @@ import { createDevDocsTool } from './src/dev-docs-tool.js';
 import { createExtensionsTool } from './src/extensions-tool.js';
 import { createSwarmTool } from './src/swarm-tool.js';
 import { createDelegateTool } from './src/delegate-tool.js';
-import { createRoadmapTools } from './src/roadmap-tool.js';
 import { createSessionHistoryTool } from './src/session-history-tool.js';
 import { createMemoryTools } from './src/memory-tool.js';
 import { createOfferActionTool } from './src/offer-action-tool.js';
@@ -250,7 +249,6 @@ async function start(): Promise<void> {
     const extIntrospection = createExtensionsTool();
     const swarmTools = createSwarmTool(sessionRef);
     const delegateTools = createDelegateTool(sessionRef);
-    const roadmapTools = createRoadmapTools(sessionRef);
     const sessionHistoryTools = createSessionHistoryTool();
     const memoryTools = createMemoryTools();
     const offerActionTools = createOfferActionTool(sessionRef);
@@ -260,7 +258,7 @@ async function start(): Promise<void> {
     const surfaceTools = createSurfaceTools(sessionRef);
     const browserTools = createBrowserTools(sessionRef);
     
-    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...roadmapTools, ...sessionHistoryTools, ...memoryTools, ...offerActionTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
+    return [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...offerActionTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
   };
   
   await createSessionState({

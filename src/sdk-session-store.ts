@@ -2,7 +2,6 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
-import { getSessionNotes, getSessionRoadmap } from './storage.js';
 import type { DiskRead } from './disk-read.js';
 import type { SessionEvent } from './types.js';
 
@@ -229,75 +228,6 @@ export function searchSessionEvents(sessionId: string, query: string, maxSnippet
       } catch { /* skip malformed lines */ }
     }
   } catch { /* file read error */ }
-
-  return { matches, totalMatches };
-}
-
-export function searchSessionNotes(sessionId: string, query: string, maxSnippets = 3): SearchResult {
-  const notes = getSessionNotes(sessionId);
-  if (!notes.length) return { matches: [], totalMatches: 0 };
-
-  const lowerQuery = query.toLowerCase();
-  const matches: SearchMatch[] = [];
-  let totalMatches = 0;
-
-  for (const note of notes) {
-    if (!note.text.toLowerCase().includes(lowerQuery)) continue;
-    totalMatches++;
-    if (matches.length < maxSnippets) {
-      const result = extractSnippet(note.text, lowerQuery);
-      if (result) {
-        matches.push({
-          snippet: result.snippet,
-          matchStart: result.matchStart,
-          matchEnd: result.matchEnd,
-          eventType: 'note',
-          timestamp: new Date(note.ts).toISOString(),
-        });
-      }
-    }
-  }
-  return { matches, totalMatches };
-}
-
-export function searchSessionRoadmap(sessionId: string, query: string, maxSnippets = 3): SearchResult {
-  const roadmap = getSessionRoadmap(sessionId);
-  if (!roadmap) return { matches: [], totalMatches: 0 };
-
-  const lowerQuery = query.toLowerCase();
-  const matches: SearchMatch[] = [];
-  let totalMatches = 0;
-
-  // Search title
-  if (roadmap.title?.toLowerCase().includes(lowerQuery)) {
-    totalMatches++;
-    if (matches.length < maxSnippets) {
-      const result = extractSnippet(roadmap.title, lowerQuery);
-      if (result) matches.push({ ...result, eventType: 'roadmap' });
-    }
-  }
-
-  // Search steps: title, description, context
-  for (const step of roadmap.steps) {
-    for (const text of [step.title, step.description, ...(step.context || [])]) {
-      if (!text || !text.toLowerCase().includes(lowerQuery)) continue;
-      totalMatches++;
-      if (matches.length < maxSnippets) {
-        const result = extractSnippet(text, lowerQuery);
-        if (result) matches.push({ ...result, eventType: 'roadmap' });
-      }
-    }
-  }
-
-  // Search documents
-  for (const doc of roadmap.documents || []) {
-    if (!doc.toLowerCase().includes(lowerQuery)) continue;
-    totalMatches++;
-    if (matches.length < maxSnippets) {
-      const result = extractSnippet(doc, lowerQuery);
-      if (result) matches.push({ ...result, eventType: 'roadmap' });
-    }
-  }
 
   return { matches, totalMatches };
 }

@@ -39,7 +39,7 @@ export function formatMemoryForPrompt(): string {
 
 export function createMemoryTools() {
   const getMemory = defineTool('caco_get_memory', {
-    description: 'Read all persistent memories (global — shared across all sessions, unlike per-session session_note). Returns key-value entries and capacity. Check before adding entries, or when you need the latest version (the injected copy may be stale).',
+    description: 'Read all persistent memories (global — shared across all sessions). Returns key-value entries and capacity. Check before adding entries, or when you need the latest version (the injected copy may be stale).',
 
     parameters: z.object({}),
 

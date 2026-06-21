@@ -27,7 +27,6 @@ import { markSessionObserved } from './session-observed.js';
 import { ChatRegion, regions, CONTENT_EVENTS } from './dom-regions.js';
 import { sessionTracker } from './session-state-tracker.js';
 import { adHocBar } from './adhoc-bar.js';
-import { refreshRoadmapLink } from './context-footer.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
 import { chatView } from './chat-view-controller.js';
 import { formStateStore } from './form-state-store.js';
@@ -132,7 +131,6 @@ function handleEvent(event: SessionEvent): void {
           void markSessionObserved(sessionId);
           adHocBar.clearSession(sessionId);
           notifySessionComplete(sessionTracker.getIntent(sessionId) || '');
-          refreshRoadmapLink();
           chatView.getChattingForm()?.resetSteerCount();
           void fetch(`/api/sessions/${sessionId}/state`).then(r => r.json()).then(d => {
             if (d.responseOptions?.length) {

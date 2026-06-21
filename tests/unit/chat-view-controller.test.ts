@@ -36,7 +36,6 @@ vi.mock('../../public/ts/context-footer.js', () => ({
   restoreContextUsage: vi.fn(),
   renderContextFooter: vi.fn(),
   updateContextUsage: vi.fn(),
-  refreshRoadmapLink: vi.fn(),
   clearThroughput: vi.fn(),
   restoreThroughput: vi.fn(),
   updateThroughput: vi.fn(),

@@ -13,10 +13,4 @@ describe('SLUG_ALIASES', () => {
     expect(bundle).not.toBeNull();
     expect(bundle?.meta.slug).toBe('files');
   });
-
-  it('roadmap (existing alias) resolves to session-context', async () => {
-    const bundle = await loadApplet('roadmap');
-    expect(bundle).not.toBeNull();
-    expect(bundle?.meta.slug).toBe('session-context');
-  });
 });

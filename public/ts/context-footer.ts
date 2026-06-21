@@ -4,7 +4,7 @@
  * Left side: recently edited files as clickable links.
  * Center: token usage percentage.
  * Right side: model name + clickable cwd.
- * Description row: session name, git, applet links, roadmap.
+ * Description row: session name, git, applet links.
  * Updated via WebSocket events or on session load.
  */
 
@@ -199,7 +199,6 @@ function renderDescription(sessionId: string, hasGit = false, gitBranch?: string
   const encodedCwd = fullCwd ? encodeURIComponent(fullCwd) : '';
   const encodedSession = encodeURIComponent(sessionId);
   const appletLinks: string[] = [];
-  appletLinks.push(`<a href="/?session=${encodedSession}&applet=session-context" class="footer-applet-link" id="footerRoadmapLink" style="display:none">context dashboard</a>`);
   if (hasGit && encodedCwd) {
     const gitLabel = gitBranch ? `⎇ ${escapeHtml(gitBranch)}` : 'git';
     appletLinks.push(`<a href="/?session=${encodedSession}&applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);
@@ -211,28 +210,6 @@ function renderDescription(sessionId: string, hasGit = false, gitBranch?: string
   }
 
   descEl.innerHTML = appletLinks.join(' ');
-
-  checkRoadmap(sessionId);
-}
-
-/**
- * Check if a session has a roadmap and show/hide the link.
- * Verifies session ownership after async fetch to prevent stale updates.
- */
-function checkRoadmap(sessionId: string): void {
-  fetch(`/api/sessions/${sessionId}/roadmap`).then(r => r.json()).then(data => {
-    if (activeFooterSessionId !== sessionId) return;
-    const link = document.getElementById('footerRoadmapLink');
-    if (link) link.style.display = (data?.title || data?.steps?.length) ? '' : 'none';
-  }).catch(() => {});
-}
-
-/**
- * Re-check roadmap visibility for the current session.
- * Called when roadmap may have changed (e.g., tool update events).
- */
-export function refreshRoadmapLink(): void {
-  if (activeFooterSessionId) checkRoadmap(activeFooterSessionId);
 }
 
 /**

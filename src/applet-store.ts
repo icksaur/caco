@@ -105,7 +105,6 @@ export function getAppletPaths(slug: string): AppletFilePaths {
  * Returns null if not found in either location.
  */
 const SLUG_ALIASES: Record<string, string> = {
-  'roadmap': 'session-context',
   'file-edits': 'files',
 };
 

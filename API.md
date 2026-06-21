@@ -87,7 +87,7 @@ Returns: `{ success: true, sessionId: "uuid", cwd: "string", isBusy: false }`
 
 **POST /api/sessions/:id/fork** - Fork session into a new side conversation
 
-Creates a new session that inherits the parent's full conversation history (via the SDK's `sessions.fork` RPC). The child has fresh caco state (no roadmap, notes, intent history, applet panel) but inherits name (prefixed with `[fork] `), folder, model, cwd, and `parentSessionId`.
+Creates a new session that inherits the parent's full conversation history (via the SDK's `sessions.fork` RPC). The child has fresh caco state (no intent history, applet panel) but inherits name (prefixed with `[fork] `), folder, model, cwd, and `parentSessionId`.
 
 Body: `{ "toEventId": "optional-uuid", "initialMessage": "optional string" }` — when `toEventId` omitted, copies all events. If `initialMessage` is provided (or even if not), the new session immediately receives a `[agent:<parentId>]`-prefixed orientation message so the model knows it has been forked.
 
@@ -171,38 +171,9 @@ Body: `text/plain`, max 1 MiB. Returns 204 / 413.
 
 Returns 204.
 
-**GET /api/sessions/:id/roadmap** - Get session roadmap
-
-Returns roadmap JSON or `{}` if none exists.
-
-**PATCH /api/sessions/:id/roadmap** - Update session roadmap
-
-Body (any subset):
-```json
-{
-  "title": "string",
-  "documents": ["path1", "path2"],
-  "steps": [{ "title": "...", "status": "pending|active|done|blocked", "description": "...", "context": ["..."] }]
-}
-```
-
-Returns updated roadmap.
-
 **GET /api/sessions/:id/data** - List session data keys
 
-Returns `["roadmap", ...]`. Excludes meta.json and notes.
-
-**GET /api/sessions/:id/notes** - Get session notes
-
-Returns `{ notes: [{ ts, text }, ...] }`. Notes are NDJSON on disk.
-
-**POST /api/sessions/:id/notes** - Append a note
-
-Body: `{ "text": "string" }`. Returns `{ ok: true, entry: { ts, text } }`.
-
-**POST /api/sessions/:id/notes/archive** - Archive a note
-
-Body: `{ "ts": number }`. Moves note from active to notes-archive.json.
+Returns `["surface", ...]`. Excludes meta.json.
 
 **GET /api/sessions/:id/state** - Get session state (agent-to-agent)
 
@@ -921,30 +892,6 @@ Returns available models from SDK.
 - `initialMessage` (string, optional) - First message to send immediately
 
 Creates a new session and optionally sends an initial message. Returns the new session ID.
-
-### Session Memory Tools
-
-Defined in `src/roadmap-tool.ts`:
-
-- `get_roadmap` - Read session roadmap (steps, documents, status)
-- `update_roadmap` - Add/update/remove steps, set title and documents
-- `session_note` - Append or read timestamped notes that survive compaction
-
-**get_roadmap** parameters:
-- `sessionId` (string, optional) - Read another session's roadmap
-
-**update_roadmap** parameters (all optional):
-- `title` (string) - Set title
-- `steps` (array) - Replace entire step list
-- `documents` (string[]) - Replace document list
-- `addStep` (object) - Append a step `{ title, description?, status?, context? }`
-- `stepTitle` (string) - Find step by title (case-insensitive prefix match)
-- `updateStep` (object) - Update fields on matched step
-- `removeStepIndex` / `removeStepTitle` - Remove a step
-
-**session_note** parameters:
-- `append` (string, optional) - Add a timestamped note
-- `sessionId` (string, optional) - Read another session's notes
 
 ### Session History Tool
 

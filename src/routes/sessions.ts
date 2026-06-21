@@ -17,8 +17,8 @@ import { homedir } from 'os';
 import { sessionManager } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getSessionRoadmap, setSessionRoadmap, getSessionNotes, appendSessionNote, archiveSessionNote, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind, type Roadmap } from '../storage.js';
-import { readSessionWorkspace, searchSessionEvents, searchSessionNotes, searchSessionRoadmap } from '../sdk-session-store.js';
+import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind } from '../storage.js';
+import { readSessionWorkspace, searchSessionEvents } from '../sdk-session-store.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
@@ -168,11 +168,9 @@ router.get('/sessions/search', (req: Request, res: Response) => {
   for (const s of sessions) {
     if (s.kind === 'swarm' || !s.cwd) continue;
     const events = searchSessionEvents(s.sessionId, query);
-    const notes = searchSessionNotes(s.sessionId, query);
-    const roadmap = searchSessionRoadmap(s.sessionId, query);
-    const totalMatches = events.totalMatches + notes.totalMatches + roadmap.totalMatches;
+    const totalMatches = events.totalMatches;
     if (totalMatches > 0) {
-      const matches = [...events.matches, ...notes.matches, ...roadmap.matches];
+      const matches = [...events.matches];
       results.push({
         sessionId: s.sessionId,
         name: s.name || s.sessionId.slice(0, 8),
@@ -772,62 +770,6 @@ router.delete('/sessions/:sessionId/draft', (req: Request, res: Response) => {
   const result = deleteSessionDraft(sessionId);
   if (result === 'missing-session') { res.status(404).end(); return; }
   res.status(204).end();
-});
-
-router.get('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
-  const sessionId = req.params.sessionId as string;
-  const roadmap = getSessionRoadmap(sessionId) || {};
-  const meta = getSessionMeta(sessionId);
-  let intentHistory = meta?.intentHistory ?? [];
-  if (intentHistory.length === 0 && meta?.currentIntent) {
-    intentHistory = [{ text: meta.currentIntent, ts: Date.now() }];
-  }
-  res.json({
-    ...roadmap,
-    contextFiles: meta?.context?.files ?? [],
-    intentHistory,
-  });
-});
-
-const VALID_STEP_STATUSES = new Set(['pending', 'active', 'done', 'blocked']);
-
-function sanitizeSteps(steps: Roadmap['steps']): Roadmap['steps'] {
-  return steps.map(s => ({
-    ...s,
-    status: VALID_STEP_STATUSES.has(s.status) ? s.status : 'pending',
-  }));
-}
-
-router.patch('/sessions/:sessionId/roadmap', (req: Request, res: Response) => {
-  const sessionId = req.params.sessionId as string;
-  const update = req.body as Partial<Roadmap>;
-  
-  const existing = getSessionRoadmap(sessionId) || { title: '', steps: [] };
-  if (update.title !== undefined) existing.title = update.title;
-  if (update.documents !== undefined) existing.documents = update.documents;
-  if (update.steps !== undefined) existing.steps = sanitizeSteps(update.steps);
-  
-  setSessionRoadmap(sessionId, existing);
-  res.json(existing);
-});
-
-router.get('/sessions/:sessionId/notes', (req: Request, res: Response) => {
-  res.json({ notes: getSessionNotes(req.params.sessionId as string) });
-});
-
-router.post('/sessions/:sessionId/notes', (req: Request, res: Response) => {
-  const { text } = req.body as { text?: string };
-  if (!text?.trim()) { res.status(400).json({ error: 'text required' }); return; }
-  const entry = appendSessionNote(req.params.sessionId as string, text.trim());
-  res.json({ ok: true, entry });
-});
-
-router.post('/sessions/:sessionId/notes/archive', (req: Request, res: Response) => {
-  const { ts } = req.body as { ts?: number };
-  if (!ts) { res.status(400).json({ error: 'ts required' }); return; }
-  const ok = archiveSessionNote(req.params.sessionId as string, ts);
-  if (!ok) { res.status(404).json({ error: 'Note not found' }); return; }
-  res.json({ ok: true });
 });
 
 /**

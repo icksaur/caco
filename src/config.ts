@@ -34,9 +34,10 @@ export const AGENT_MAX_AGE_SECONDS = 60 * 60;
 export const AGENT_RATE_LIMIT_CALLS = 10;
 export const AGENT_RATE_LIMIT_WINDOW_SECONDS = 60;
 
-// caco_run_workflow (code-execution orchestration). Opt-in: runs arbitrary code
-// auto-approved, so it is registered only when CACO_WORKFLOW=1.
-export const WORKFLOW_ENABLED = process.env.CACO_WORKFLOW === '1';
+// caco_run_workflow (code-execution orchestration). On by default: it runs
+// arbitrary code auto-approved, but only ever the read-oriented `caco` facade
+// inside a bounded child process. Opt out with CACO_WORKFLOW=0.
+export const WORKFLOW_ENABLED = process.env.CACO_WORKFLOW !== '0';
 export const WORKFLOW_TIMEOUT_DEFAULT_MS = 30 * 1000;
 export const WORKFLOW_TIMEOUT_CAP_MS = 120 * 1000;
 export const WORKFLOW_KILL_GRACE_MS = 2 * 1000;

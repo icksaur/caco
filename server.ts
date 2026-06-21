@@ -203,7 +203,7 @@ async function start(): Promise<void> {
 
   const workflowAvailable = WORKFLOW_ENABLED && await isWorkflowRunnerAvailable();
   if (WORKFLOW_ENABLED && !workflowAvailable) {
-    console.warn('[WORKFLOW] CACO_WORKFLOW=1 but tsx runner is unavailable; caco_run_workflow not registered');
+    console.warn('[WORKFLOW] tsx runner is unavailable; caco_run_workflow not registered');
   } else if (workflowAvailable) {
     console.log('[WORKFLOW] caco_run_workflow registered (auto-runs arbitrary code)');
     void sweepWorkflowScratch();

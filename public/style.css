@@ -2271,10 +2271,6 @@ main {
   white-space: nowrap;
 }
 
-.context-footer .context-saved:empty {
-  display: none;
-}
-
 .context-footer .context-description:empty {
   display: none;
 }

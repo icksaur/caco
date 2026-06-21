@@ -416,11 +416,7 @@ export function clearThroughput(): void {
   const footer = regions.footer.el;
   const el = footer.querySelector('.context-throughput');
   if (el) el.innerHTML = '';
-  const saved = footer.querySelector('.context-saved') as HTMLElement | null;
-  if (saved) {
-    saved.textContent = '';
-    saved.removeAttribute('title');
-  }
+  renderSaved({} as ThroughputData);
 }
 
 function renderThroughput(data: ThroughputData): void {
@@ -456,19 +452,13 @@ function renderThroughput(data: ThroughputData): void {
 }
 
 /** Render the accumulated workflow token-savings indicator next to the context
- *  usage pie. Cleared when there are no savings yet. */
+ *  usage pie. Always rendered, initialized to ↯0 before any workflow runs. */
 function renderSaved(data: ThroughputData): void {
   const footer = regions.footer.el;
   const el = footer.querySelector('.context-saved') as HTMLElement | null;
   if (!el) return;
 
   const savedTokens = data.workflowSavedTokens ?? 0;
-  if (savedTokens <= 0) {
-    el.textContent = '';
-    el.removeAttribute('title');
-    return;
-  }
-
   const runs = data.workflowRuns ?? 0;
   const savedCredits = estimateSavedCredits(savedTokens);
   const creditNote = savedCredits !== null

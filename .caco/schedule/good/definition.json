@@ -1,0 +1,14 @@
+{
+  "slug": "good",
+  "prompt": "do the thing",
+  "enabled": true,
+  "schedule": {
+    "type": "interval",
+    "intervalMinutes": 120
+  },
+  "sessionConfig": {
+    "persistSession": true
+  },
+  "createdAt": "2026-06-20T04:01:31.683Z",
+  "updatedAt": "2026-06-20T04:01:31.683Z"
+}

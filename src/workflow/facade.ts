@@ -3,6 +3,7 @@ import { execFile, exec } from 'child_process';
 import { promisify } from 'util';
 import { indexCore, type IndexCoreOptions } from '../index/core.js';
 import { type IndexResult } from '../index/types.js';
+import { buildFrames, type FramesOptions, type FramesResult } from '../index/frames.js';
 import { getOutput } from '../output-store.js';
 import { readFileRangeCore, grepCore, globCore, sliceLinesByRange } from './cores.js';
 import { type ReadResult, type GrepMatch, type GrepOptions, WorkflowInputError } from './types.js';
@@ -27,6 +28,8 @@ export interface ShResult {
 export interface Facade {
   /** Structural skeleton of one source file (declarations with line ranges). */
   index(path: string, options?: IndexCoreOptions): Promise<IndexResult>;
+  /** Definition(s) + ranked incoming callers of a symbol, with code snippets. */
+  frames(symbol: string, options?: FramesOptions): Promise<FramesResult>;
   /** Read a 1-based inclusive line range (whole file if omitted). */
   read(path: string, range?: [start: number, end: number]): Promise<ReadResult>;
   /** Search file contents (rg-backed, JS fallback). */
@@ -50,6 +53,7 @@ function sliceLines(text: string, range?: [number, number]): string {
 export function createFacade(sessionCwd: string): Facade {
   return {
     index: (path, options) => indexCore(sessionCwd, path, options),
+    frames: (symbol, options) => buildFrames(sessionCwd, symbol, options),
     read: (path, range) => readFileRangeCore(sessionCwd, path, range),
     grep: (pattern, options) => grepCore(sessionCwd, pattern, options),
     glob: (pattern) => globCore(sessionCwd, pattern),
@@ -91,6 +95,7 @@ export function createFacade(sessionCwd: string): Facade {
 export function wrapFacadeForAccounting(facade: Facade, account: (value: unknown) => void): Facade {
   return {
     index: async (path, options) => { const r = await facade.index(path, options); account(r); return r; },
+    frames: async (symbol, options) => { const r = await facade.frames(symbol, options); account(r); return r; },
     read: async (path, range) => { const r = await facade.read(path, range); account(r); return r; },
     grep: async (pattern, options) => { const r = await facade.grep(pattern, options); account(r); return r; },
     rg: async (args) => { const r = await facade.rg(args); account(r); return r; },
@@ -104,6 +109,7 @@ export function wrapFacadeForAccounting(facade: Facade, account: (value: unknown
 /** Compact, model-facing description of the facade injected into workflow scripts. */
 export const FACADE_API_SUMMARY = `\`caco\` facade (all async):
 - caco.index(path, { language?, maxEntries? }) -> declaration skeleton with [start-end] line ranges.
+- caco.frames(symbol, { glob?, file?, include?, context?, maxFrames? }) -> { definitions, incoming, truncated, notes }: a symbol's definition(s) + ranked callers with code snippets, in one call (collapses index+read chains). Cross-stack (TS/JS/C++/C#/shaders).
 - caco.read(path, [start, end]?) -> { path, totalLines, range, text }. 1-based; whole file if range omitted.
 - caco.grep(pattern, { path?, glob?, ignoreCase? }) -> [{ file, line, text }] (rg-backed).
 - caco.rg(args[]) -> raw rg stdout.
@@ -119,8 +125,12 @@ interface GrepMatch { file: string; line: number; text: string; }
 interface GrepOptions { path?: string; glob?: string; ignoreCase?: boolean; }
 interface IndexCoreOptions { language?: string; maxEntries?: number; }
 interface ShResult { stdout: string; stderr: string; code: number; }
+interface Frame { kind: 'definition' | 'incoming'; file: string; line: number; code: string; confidence: 'exact' | 'heuristic'; }
+interface FramesOptions { glob?: string; file?: string; include?: ('definition' | 'incoming')[]; context?: number; maxFrames?: number; maxFiles?: number; maxHits?: number; }
+interface FramesResult { symbol: string; definitions: Frame[]; incoming: Frame[]; truncated: boolean; notes: string[]; }
 interface Facade {
   index(path: string, options?: IndexCoreOptions): Promise<unknown>;
+  frames(symbol: string, options?: FramesOptions): Promise<FramesResult>;
   read(path: string, range?: [number, number]): Promise<ReadResult>;
   grep(pattern: string, options?: GrepOptions): Promise<GrepMatch[]>;
   rg(args: string[]): Promise<string>;

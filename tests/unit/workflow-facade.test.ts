@@ -83,6 +83,7 @@ describe('wrapFacadeForAccounting', () => {
     const accounted: unknown[] = [];
     const fake: Facade = {
       index: async () => ({ language: 'x', declarations: [] }) as never,
+      frames: async () => ({ symbol: 's', definitions: [], incoming: [], truncated: false, notes: [] }),
       read: async () => ({ path: 'p', totalLines: 0, range: [1, 1], text: 'BODY' }),
       grep: async () => [{ file: 'f', line: 1, text: 't' }],
       rg: async () => 'RG',

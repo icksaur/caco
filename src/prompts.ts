@@ -85,6 +85,11 @@ Every turn replays the whole context window, so fewer turns = less latency and c
 - Pair \`report_intent\` WITH that batch, never as its own turn.
 Do NOT narrate between mechanical tool calls in the same phase — a progress note is itself a round trip. Update only at real phase boundaries (e.g. research → implement → test). Split a batch only when a later call needs an earlier call's RESULT, or when side-effect ordering matters and can't be expressed in one response.
 
+**Two-phase editing (the big win).** Never interleave \`view → edit → view → edit\`: that read-before-each-edit dance serializes one change into many round trips. Instead:
+1. **Gather once**: read EVERY region you intend to edit — across all files — in a single batch. Prefer ONE \`caco_run_workflow\` that \`caco.read\`s each range (compact combined output, exact text for every \`old_str\`); batched \`view\` calls also work.
+2. **Edit once**: emit ALL \`edit\`/\`create\` calls in one response.
+This is ~2 round trips for an arbitrary multi-file change. Don't re-\`view\` after an edit — \`edit\` matches unique text, not line numbers, so prior edits don't shift your remaining \`old_str\`s (re-read only when you must match text you just changed).
+
 ## Response Actions
 You can end a message with a fenced \`caco-actions\` block — one self-contained instruction per line — and Caco renders the lines as clickable buttons the user can tap to send that exact text next:
 \`\`\`\`

@@ -25,6 +25,10 @@ function usage(input = 1000) {
   recordUsage(SID, { inputTokens: input, outputTokens: 50, cacheReadTokens: input - 100 });
 }
 
+function coldUsage(input = 1000) {
+  recordUsage(SID, { inputTokens: input, outputTokens: 50, cacheReadTokens: 0 });
+}
+
 beforeEach(() => clearSession(SID));
 
 describe('workflow compounding — deferred one turn (no double-count)', () => {
@@ -46,6 +50,23 @@ describe('workflow compounding — deferred one turn (no double-count)', () => {
     run(300);
     for (let i = 0; i < 5; i++) usage();
     expect(snapshot(SID).workflowCacheCompoundSaved).toBe(4 * 300);
+  });
+
+  it('does not accrue compounding on a cold-cache turn, but the deferral still advances', () => {
+    run(500);
+    coldUsage();  // first downstream turn, cold: no increment (avoided still 0), promotes pending
+    expect(snapshot(SID).workflowCacheCompoundSaved).toBe(0);
+    coldUsage();  // second turn, cold: avoided=500 but cache=0 → still no accrual
+    expect(snapshot(SID).workflowCacheCompoundSaved).toBe(0);
+    usage();      // third turn, warm: now 500 compounds
+    expect(snapshot(SID).workflowCacheCompoundSaved).toBe(500);
+  });
+
+  it('a cold first turn does not lose the deferral — compounding starts on the first warm turn after', () => {
+    run(200);
+    coldUsage();  // deferral turn (cold) — promotes pending→avoided
+    usage();      // first warm turn after deferral → 200 compounds
+    expect(snapshot(SID).workflowCacheCompoundSaved).toBe(200);
   });
 });
 

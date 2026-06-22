@@ -181,13 +181,16 @@ export function recordUsage(
   entry.totalTurns += 1;
   entry.requestReasoning += reasoning;
   entry.totalReasoning += reasoning;
-  // Workflow savings: this round trip re-sends the window W (~all cache-read);
-  // capture it for the next workflow's replay estimate. Compound the avoided
-  // context already promoted (NOT this turn's pending — see recordWorkflowSavingsV2),
-  // then promote the pending bucket so freshly-saved context starts compounding on
-  // the SECOND later turn, never the first (avoids double-counting freshInputTokensSaved).
+  // Workflow savings: capture the window W for the next workflow's replay estimate,
+  // and compound the already-promoted avoided context — but ONLY when this turn
+  // actually read cache. A cold-cache turn (cacheReadTokens === 0) re-sends the
+  // prompt at the input rate, not the cache rate, so the absent context saved no
+  // cache tokens on it. Promotion of the pending bucket is turn-based (the deferral
+  // that avoids double-counting freshInputTokensSaved), independent of cache: a cold
+  // first downstream turn still "uses up" the deferral so compounding begins on the
+  // first WARM turn thereafter.
   entry.lastInputTokens = input;
-  entry.workflowCacheCompoundSaved += entry.avoidedContextTokens;
+  if (cache > 0) entry.workflowCacheCompoundSaved += entry.avoidedContextTokens;
   if (entry.pendingAvoidedContext > 0) {
     entry.avoidedContextTokens += entry.pendingAvoidedContext;
     entry.pendingAvoidedContext = 0;

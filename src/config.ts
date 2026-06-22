@@ -51,22 +51,12 @@ export const WORKFLOW_EMIT_CAP_BYTES = 16 * 1024;
 export const WORKFLOW_RESULT_MAX_BYTES = 2 * 1024 * 1024;
 
 // Workflow savings model (see docs/workflow-savings-model-spec.md). Tunables.
-// Fraction of collapsed facade calls assumed to have been forced sequential by
-// data dependencies (the rest the model could have emitted as parallel tool
-// calls). Drives the optimistic window-replay/time lines only, never the net
-// headline.
-export const WORKFLOW_SEQUENTIAL_FRACTION = clampFraction(process.env.CACO_WORKFLOW_SEQUENTIAL_FRACTION, 0.5);
 // Rough output tokens one tool-call arg block would have cost the model.
 export const WORKFLOW_AVG_TOOLCALL_TOKENS = 40;
 // Fallback per-round-trip latency before any request has completed (ms).
 export const WORKFLOW_AVG_ROUNDTRIP_MS = 8000;
 // Sanity cap so one pathological fan-out cannot dominate the headline.
 export const WORKFLOW_MAX_VIRTUAL_TOOLCALLS_PER_RUN = 1000;
-
-function clampFraction(raw: string | undefined, fallback: number): number {
-  const v = raw === undefined ? NaN : Number(raw);
-  return Number.isFinite(v) && v >= 0 && v <= 1 ? v : fallback;
-}
 
 // Extension→MIME mapping (single source of truth for file types)
 export const MIME_TYPES: Record<string, string> = {

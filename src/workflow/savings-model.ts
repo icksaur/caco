@@ -1,5 +1,4 @@
 import {
-  WORKFLOW_SEQUENTIAL_FRACTION,
   WORKFLOW_AVG_TOOLCALL_TOKENS,
   WORKFLOW_MAX_VIRTUAL_TOOLCALLS_PER_RUN,
 } from '../config.js';
@@ -20,13 +19,15 @@ export interface WorkflowSavingsInput {
 }
 
 export interface WorkflowSavingsBreakdown {
-  /** max(0, commandCount - 1), capped — breadth, display only. */
+  /** max(0, commandCount - 1), capped — facade calls collapsed into one workflow. */
   virtualToolCallsAvoided: number;
-  /** Conservative model round trips saved (parallel-call discounted). */
+  /** Round trips saved = virtualToolCallsAvoided (each avoided call would have
+   *  replayed the window). Drives window-replay tokens and time saved. */
   roundTripsSaved: number;
   /** One-time output kept out of context entirely (input class). Net headline. */
   freshInputTokensSaved: number;
-  /** Optimistic "if sequential" window replay = roundTripsSaved * window (cache class). */
+  /** Window replay = roundTripsSaved * window (cache class). The dominant term:
+   *  each avoided round trip would have re-sent the whole context window. */
   cacheReplayTokensSaved: number;
   /** Signed: code tokens spent minus tool-call arg tokens avoided (output class). */
   netOutputTokensSpent: number;
@@ -42,16 +43,15 @@ function toTokens(bytes: number): number {
  * session-stateful, deferred accrual of freshInputTokensSaved) and credit/time
  * pricing live in session-throughput, not here.
  *
- * The net headline is built from freshInputTokensSaved (+ later compounding) minus
- * netOutputTokensSpent — the savings that hold even if the collapsed calls had been
- * emitted as parallel tool calls (which still inject every result into context).
- * roundTripsSaved/cacheReplayTokensSaved drive only the optimistic "if sequential"
- * window-replay and time figures, never the net headline.
+ * The net headline is the sum of: window-replay (roundTripsSaved * window, the
+ * dominant cache-class term — each avoided round trip would have re-sent the whole
+ * context window), one-time freshInputTokensSaved (input class) + later compounding
+ * (cache class), minus netOutputTokensSpent (output class).
  */
 export function estimateWorkflowSavings(input: WorkflowSavingsInput): WorkflowSavingsBreakdown {
   const commandCount = Number.isFinite(input.commandCount) && input.commandCount > 0 ? Math.floor(input.commandCount) : 0;
   const virtualToolCallsAvoided = Math.min(Math.max(0, commandCount - 1), WORKFLOW_MAX_VIRTUAL_TOOLCALLS_PER_RUN);
-  const roundTripsSaved = Math.ceil(virtualToolCallsAvoided * WORKFLOW_SEQUENTIAL_FRACTION);
+  const roundTripsSaved = virtualToolCallsAvoided;
 
   const freshInputTokensSaved = estimateSavedTokens(input.observedBytes, input.injectedBytes);
 

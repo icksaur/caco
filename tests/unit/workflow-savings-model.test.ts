@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { estimateWorkflowSavings } from '../../src/workflow/savings-model.js';
 import {
-  WORKFLOW_SEQUENTIAL_FRACTION,
   WORKFLOW_AVG_TOOLCALL_TOKENS,
   WORKFLOW_MAX_VIRTUAL_TOOLCALLS_PER_RUN,
 } from '../../src/config.js';
@@ -18,16 +17,18 @@ describe('estimateWorkflowSavings — math oracle', () => {
       windowTokens: 50_000,
     });
     expect(b.virtualToolCallsAvoided).toBe(10);
-    expect(b.roundTripsSaved).toBe(Math.ceil(10 * WORKFLOW_SEQUENTIAL_FRACTION));
+    expect(b.roundTripsSaved).toBe(10);
     expect(b.freshInputTokensSaved).toBe(Math.round((8000 - 800) / BYTES_PER_TOKEN));
-    expect(b.cacheReplayTokensSaved).toBe(b.roundTripsSaved * 50_000);
+    // Window replay is the full count × the whole window (dominant cache term).
+    expect(b.cacheReplayTokensSaved).toBe(10 * 50_000);
     expect(b.netOutputTokensSpent).toBe(Math.round(400 / BYTES_PER_TOKEN) - 10 * WORKFLOW_AVG_TOOLCALL_TOKENS);
   });
 
-  it('virtualToolCallsAvoided drives display; roundTripsSaved is strictly smaller (parallel discount)', () => {
+  it('round trips saved equals virtual tool calls avoided (full, no parallel discount)', () => {
     const b = estimateWorkflowSavings({ observedBytes: 0, injectedBytes: 0, commandCount: 51, codeBytes: 0, windowTokens: 1000 });
     expect(b.virtualToolCallsAvoided).toBe(50);
-    expect(b.roundTripsSaved).toBeLessThan(b.virtualToolCallsAvoided);
+    expect(b.roundTripsSaved).toBe(50);
+    expect(b.cacheReplayTokensSaved).toBe(50 * 1000);
   });
 
   it('claims nothing for a 0- or 1-command workflow', () => {

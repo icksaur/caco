@@ -382,9 +382,9 @@ interface SavedPricing {
   rates: { input: number; cache: number; output: number } | null;
 }
 
-/** Price saved tokens by billing class (input for fresh + shaping, cache for
- *  compounding, output for the net code delta). Returns null rates/credits when
- *  the model's rates are unknown (e.g. Auto); tokens are still shown. */
+/** Price saved tokens by billing class (input for fresh + shaping; cache for
+ *  window-replay + compounding; output for the net code delta). Returns null
+ *  rates/credits when the model's rates are unknown (e.g. Auto). */
 function priceSaved(d: ThroughputData): SavedPricing {
   const roundTripsSaved = d.workflowRoundTripsSaved ?? 0;
   const totalTurns = d.totalTurns ?? 0;
@@ -400,11 +400,12 @@ function priceSaved(d: ThroughputData): SavedPricing {
 
   const fresh = d.workflowSavedTokens ?? 0;
   const compound = d.workflowCacheCompoundSaved ?? 0;
+  const replay = d.workflowCacheReplaySaved ?? 0;
   const outputDelta = d.workflowOutputDelta ?? 0;
   const shaping = d.shapingSavedTokens ?? 0;
 
   const netCredits =
-    ((fresh + shaping) * rates.input + compound * rates.cache - outputDelta * rates.output) / 1_000_000;
+    ((fresh + shaping) * rates.input + (replay + compound) * rates.cache - outputDelta * rates.output) / 1_000_000;
   return { netCredits, timeSavedMs, rates };
 }
 
@@ -513,12 +514,14 @@ function renderSaved(data: ThroughputData): void {
 
   const fresh = data.workflowSavedTokens ?? 0;
   const compound = data.workflowCacheCompoundSaved ?? 0;
+  const replay = data.workflowCacheReplaySaved ?? 0;
   const virtualCalls = data.workflowVirtualCallsAvoided ?? 0;
   const roundTrips = data.workflowRoundTripsSaved ?? 0;
   const outputDelta = data.workflowOutputDelta ?? 0;
   const shaping = data.shapingSavedTokens ?? 0;
   const inputSaved = fresh + shaping;
-  const totalTokens = fresh + compound + shaping;
+  const cacheSaved = replay + compound;
+  const totalTokens = inputSaved + cacheSaved;
 
   const { netCredits, timeSavedMs, rates } = priceSaved(data);
 
@@ -531,14 +534,14 @@ function renderSaved(data: ThroughputData): void {
   const n = (v: number) => v.toLocaleString();
   const lines: string[] = [
     `${n(virtualCalls)} virtual tool calls → ${n(roundTrips)} round trips saved`,
+    `cache saved (accum est): ${n(replay)} replay + ${n(compound)} lean = ${n(cacheSaved)} tok`,
     `input saved (exact): shaping ${n(shaping)} + workflow ${n(fresh)} = ${n(inputSaved)} tok`,
-    `cache saved (accum est): ${n(compound)} tok`,
     `output spent (script est): ${n(outputDelta)} tok`,
   ];
 
   if (rates) {
     const PER = 1_000_000;
-    const cacheCr = compound * rates.cache / PER;
+    const cacheCr = cacheSaved * rates.cache / PER;
     const inputCr = inputSaved * rates.input / PER;
     const outputCr = outputDelta * rates.output / PER;
     const net = cacheCr + inputCr - outputCr;
@@ -546,7 +549,7 @@ function renderSaved(data: ThroughputData): void {
     const outSymOp = outputDelta >= 0 ? '−' : '+';
     const outCrOp = outputCr >= 0 ? '−' : '+';
     lines.push(
-      `${n(compound)}×${rates.cache}/${PER} + ${n(inputSaved)}×${rates.input}/${PER} ${outSymOp} ${n(Math.abs(outputDelta))}×${rates.output}/${PER}`,
+      `${n(cacheSaved)}×${rates.cache}/${PER} + ${n(inputSaved)}×${rates.input}/${PER} ${outSymOp} ${n(Math.abs(outputDelta))}×${rates.output}/${PER}`,
       `= ${fmtCr(cacheCr)} + ${fmtCr(inputCr)} ${outCrOp} ${fmtCr(outputCr)} = ${net < 0 ? '−' : ''}${fmtCr(net)} cr`,
     );
   } else {

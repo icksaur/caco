@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Tool-diet benchmark reporter. Reads ~/.caco/metrics/requests.jsonl (the
- * per-request log) and prints per-commit aggregates so before/after diet
- * changes can be compared. Grouped by gitSha; the headline columns are turns
- * and reasoning tokens (the dominant latency terms).
+ * Per-request metrics reporter. Reads ~/.caco/metrics/requests.jsonl (the
+ * per-request log) and prints aggregate averages. The headline columns are turns
+ * and reasoning tokens (the dominant latency terms). For a before/after
+ * comparison, snapshot or clear the log between the two runs.
  *
  * Usage: node scripts/bench-report.mjs
  */
@@ -25,39 +25,26 @@ const rows = readFileSync(LOG, 'utf8')
   .map((l) => { try { return JSON.parse(l); } catch { return null; } })
   .filter(Boolean);
 
-const groups = new Map();
-for (const r of rows) {
-  const key = r.gitSha || 'unknown';
-  if (!groups.has(key)) groups.set(key, []);
-  groups.get(key).push(r);
-}
-
 const avg = (xs, f) => (xs.length ? xs.reduce((s, x) => s + (f(x) || 0), 0) / xs.length : 0);
 const fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
-const header = ['gitSha', 'n', 'turns', 'reasoning', 'toolCalls', 'fails', 'wallMs', 'in', 'cache', 'out', 'wfBytes'];
-const widths = header.map((h) => h.length);
-const lines = [];
-for (const [sha, xs] of groups) {
-  const cells = [
-    sha,
-    String(xs.length),
-    fmt(avg(xs, (x) => x.requestTurns)),
-    fmt(avg(xs, (x) => x.requestReasoning)),
-    fmt(avg(xs, (x) => x.requestToolCalls)),
-    fmt(avg(xs, (x) => x.requestToolFailures)),
-    fmt(avg(xs, (x) => x.requestWallMs)),
-    fmt(avg(xs, (x) => x.requestIn)),
-    fmt(avg(xs, (x) => x.requestCache)),
-    fmt(avg(xs, (x) => x.requestOut)),
-    fmt(avg(xs, (x) => x.requestWorkflowCodeBytes)),
-  ];
-  cells.forEach((c, i) => { widths[i] = Math.max(widths[i], c.length); });
-  lines.push(cells);
-}
+const header = ['n', 'turns', 'reasoning', 'toolCalls', 'fails', 'wallMs', 'in', 'cache', 'out', 'wfBytes'];
+const cells = [
+  String(rows.length),
+  fmt(avg(rows, (x) => x.requestTurns)),
+  fmt(avg(rows, (x) => x.requestReasoning)),
+  fmt(avg(rows, (x) => x.requestToolCalls)),
+  fmt(avg(rows, (x) => x.requestToolFailures)),
+  fmt(avg(rows, (x) => x.requestWallMs)),
+  fmt(avg(rows, (x) => x.requestIn)),
+  fmt(avg(rows, (x) => x.requestCache)),
+  fmt(avg(rows, (x) => x.requestOut)),
+  fmt(avg(rows, (x) => x.requestWorkflowCodeBytes)),
+];
+const widths = header.map((h, i) => Math.max(h.length, cells[i].length));
+const pad = (xs) => xs.map((c, i) => c.padEnd(widths[i])).join('  ');
 
-const pad = (cells) => cells.map((c, i) => c.padEnd(widths[i])).join('  ');
-console.log(`Tool-diet benchmark — per-commit averages (${rows.length} requests)\n`);
+console.log(`Tool-diet benchmark — averages over ${rows.length} requests\n`);
 console.log(pad(header));
 console.log(widths.map((w) => '-'.repeat(w)).join('  '));
-for (const cells of lines) console.log(pad(cells));
+console.log(pad(cells));

@@ -5,7 +5,7 @@ import { indexCore, type IndexCoreOptions } from '../index/core.js';
 import { type IndexResult } from '../index/types.js';
 import { buildFrames, type FramesOptions, type FramesResult } from '../index/frames.js';
 import { getOutput } from '../output-store.js';
-import { readFileRangeCore, grepCore, globCore, sliceLinesByRange } from './cores.js';
+import { readFileRangeCore, grepCore, globCore, sliceLinesByRange, resolveRg } from './cores.js';
 import { type ReadResult, type GrepMatch, type GrepOptions, WorkflowInputError } from './types.js';
 import { getHostShell } from './shell.js';
 import { validatePath } from '../path-utils.js';
@@ -58,7 +58,13 @@ export function createFacade(sessionCwd: string): Facade {
     grep: (pattern, options) => grepCore(sessionCwd, pattern, options),
     glob: (pattern) => globCore(sessionCwd, pattern),
     async rg(args) {
-      const { stdout } = await execFileAsync('rg', args, { cwd: sessionCwd, maxBuffer: CHILD_MAX_BUFFER });
+      const rgPath = resolveRg();
+      if (!rgPath) {
+        throw new WorkflowInputError(
+          'ripgrep is unavailable (vendored @vscode/ripgrep binary not found and CACO_RG_PATH unset). Use caco.grep, which has a built-in JS fallback.',
+        );
+      }
+      const { stdout } = await execFileAsync(rgPath, args, { cwd: sessionCwd, maxBuffer: CHILD_MAX_BUFFER, windowsHide: true });
       return stdout;
     },
     async list(path = '.') {
@@ -76,7 +82,7 @@ export function createFacade(sessionCwd: string): Facade {
     async sh(command) {
       const shell = getHostShell();
       try {
-        const { stdout, stderr } = await execFileAsync(shell.file, [...shell.flagArgs, command], { cwd: sessionCwd, maxBuffer: CHILD_MAX_BUFFER });
+        const { stdout, stderr } = await execFileAsync(shell.file, [...shell.flagArgs, command], { cwd: sessionCwd, maxBuffer: CHILD_MAX_BUFFER, windowsHide: true });
         return { stdout, stderr, code: 0 };
       } catch (e) {
         const err = e as { stdout?: string; stderr?: string; code?: number };
@@ -112,9 +118,9 @@ export const FACADE_API_SUMMARY = `\`caco\` facade (all async):
 - caco.index(path, { language?, maxEntries? }) -> declaration skeleton with [start-end] line ranges.
 - caco.frames(symbol, { glob?, file?, include?, context?, maxFrames? }) -> { definitions, incoming, truncated, notes }: a symbol's definition(s) + ranked callers with code snippets, in one call (collapses index+read chains). Cross-stack (TS/JS/C++/C#/shaders).
 - caco.read(path, [start, end]?) -> { path, totalLines, range, text }. 1-based; whole file if range omitted.
-- caco.grep(pattern, { path?, glob?, ignoreCase? }) -> [{ file, line, text }] (rg-backed).
-- caco.rg(args[]) -> raw rg stdout.
-- caco.glob(pattern) -> sorted relative paths.
+- caco.grep(pattern, { path?, glob?, ignoreCase? }) -> [{ file, line, text }] (rg-backed, JS fallback). Paths are POSIX ('/'-separated) on all platforms.
+- caco.rg(args[]) -> raw rg stdout (vendored ripgrep; prefer caco.grep, which has a JS fallback).
+- caco.glob(pattern) -> sorted relative paths (POSIX '/'-separated).
 - caco.list(path?) -> dir entries (dirs suffixed /).
 - caco.retrieve(id, [start, end]?) -> stored large output by id.
 - caco.sh(command) -> { stdout, stderr, code }. Runs in ${getHostShell().label} on this host (write ${getHostShell().label} syntax); never throws on non-zero exit.

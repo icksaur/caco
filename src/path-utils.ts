@@ -8,6 +8,16 @@
 import { resolve, relative, normalize, sep } from 'path';
 
 /**
+ * Convert any path to POSIX ('/'-separated) form. The model-facing facade emits
+ * '/'-separated relative paths on every platform so grep/glob/read/index results
+ * are identical on Windows and Linux (and match real ripgrep output). Round-trips
+ * safely: validatePath() resolves '/'-separated input correctly on Windows.
+ */
+export function toPosix(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
+/**
  * Result of path validation
  */
 export type PathValidationResult = 

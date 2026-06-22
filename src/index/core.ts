@@ -1,6 +1,6 @@
 import { stat, readFile } from 'fs/promises';
 import { extname } from 'path';
-import { validatePath } from '../path-utils.js';
+import { validatePath, toPosix } from '../path-utils.js';
 import { MAX_FILE_SIZE_BYTES } from '../config.js';
 import { treeSitterAdapter } from './tree-sitter-adapter.js';
 import { languageForExtension, LANG_CONFIGS } from './extractors.js';
@@ -67,7 +67,7 @@ export async function indexCore(
 
   const source = await readFile(resolved, 'utf8');
   return treeSitterAdapter.index({
-    path: validation.relative,
+    path: toPosix(validation.relative),
     language: lang,
     source,
     options: { maxEntries: clampEntries(options.maxEntries) },

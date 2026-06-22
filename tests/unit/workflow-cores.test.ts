@@ -3,11 +3,15 @@ import { mkdtemp, rm, mkdir, writeFile, readFile } from 'fs/promises';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { tmpdir } from 'os';
-import { join } from 'path';
-import { readFileRangeCore, grepCore, globCore } from '../../src/workflow/cores.js';
+import { join, relative, resolve } from 'path';
+import { readFileRangeCore, grepCore, globCore, resolveRg } from '../../src/workflow/cores.js';
+import { toPosix } from '../../src/path-utils.js';
 import { WorkflowInputError, type GrepMatch } from '../../src/workflow/types.js';
 
 const execFileAsync = promisify(execFile);
+
+/** Vendored ripgrep (@vscode/ripgrep). Present in dev/CI; tests that need a real rg skip if absent. */
+const RG = resolveRg();
 
 let base: string;
 
@@ -60,7 +64,7 @@ describe('readFileRangeCore', () => {
 });
 
 async function directRg(pattern: string): Promise<GrepMatch[]> {
-  const { stdout } = await execFileAsync('rg', ['--json', '-e', pattern, '--', '.'], { cwd: base });
+  const { stdout } = await execFileAsync(RG as string, ['--json', '-e', pattern, '--', '.'], { cwd: base, windowsHide: true });
   const out: GrepMatch[] = [];
   for (const raw of stdout.split('\n')) {
     if (!raw) continue;
@@ -68,28 +72,21 @@ async function directRg(pattern: string): Promise<GrepMatch[]> {
     if (evt.type !== 'match') continue;
     const text: string = evt.data.lines.text;
     const file: string = evt.data.path.text;
-    out.push({ file: file.startsWith('./') ? file.slice(2) : file, line: evt.data.line_number, text: text.endsWith('\n') ? text.slice(0, -1) : text });
+    out.push({ file: toPosix(relative(base, resolve(base, file))), line: evt.data.line_number, text: text.endsWith('\n') ? text.slice(0, -1) : text });
   }
   return out.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line));
 }
 
 describe('grepCore', () => {
-  it('matches a direct `rg --json` invocation over a tricky-filename tree', async () => {
+  it.skipIf(!RG)('matches a direct `rg --json` invocation over a tricky-filename tree', async () => {
     const expected = await directRg('TARGET');
-    const actual = await grepCore(base, 'TARGET');
+    const actual = await grepCore(base, 'TARGET', {}, RG);
     expect(actual).toEqual(expected);
   });
 
   it('JS fallback (rg forced absent) matches the rg path', async () => {
-    const viaRg = await grepCore(base, 'TARGET');
-    const savedPath = process.env.PATH;
-    process.env.PATH = '';
-    let viaFallback: GrepMatch[];
-    try {
-      viaFallback = await grepCore(base, 'TARGET');
-    } finally {
-      process.env.PATH = savedPath;
-    }
+    const viaRg = await grepCore(base, 'TARGET', {}, RG);
+    const viaFallback = await grepCore(base, 'TARGET', {}, null);
     expect(viaFallback).toEqual(viaRg);
   });
 
@@ -99,14 +96,7 @@ describe('grepCore', () => {
   });
 
   it('JS fallback honors an include glob (exercises globForRgGlob)', async () => {
-    const savedPath = process.env.PATH;
-    process.env.PATH = '';
-    let res: GrepMatch[];
-    try {
-      res = await grepCore(base, 'TARGET', { glob: '*.md' });
-    } finally {
-      process.env.PATH = savedPath;
-    }
+    const res = await grepCore(base, 'TARGET', { glob: '*.md' }, null);
     expect(res).toEqual([{ file: 'skip.md', line: 1, text: 'TARGET but markdown' }]);
   });
 
@@ -116,19 +106,29 @@ describe('grepCore', () => {
     expect(res.length).toBeGreaterThan(0);
   });
 
-  it('returns base-relative paths even when opts.path is absolute (rg/fallback parity)', async () => {
+  it('returns base-relative POSIX paths even when opts.path is absolute (rg/fallback parity)', async () => {
     const res = await grepCore(base, 'TARGET', { path: join(base, 'sub') });
     expect(res.every((m) => m.file.startsWith('sub/'))).toBe(true);
-    expect(res.every((m) => !m.file.startsWith('/'))).toBe(true);
+    expect(res.every((m) => !m.file.includes('\\'))).toBe(true);
     expect(res.length).toBeGreaterThan(0);
+  });
+
+  it('emits POSIX (/) separators on every platform (rg and JS parity)', async () => {
+    const viaRg = await grepCore(base, 'TARGET', { path: 'sub' }, RG);
+    const viaJs = await grepCore(base, 'TARGET', { path: 'sub' }, null);
+    for (const m of [...viaRg, ...viaJs]) {
+      expect(m.file).not.toContain('\\');
+      expect(m.file.startsWith('sub/')).toBe(true);
+    }
+    expect(viaJs).toEqual(viaRg);
   });
 });
 
 describe('globCore', () => {
-  it('expands a recursive glob to sorted scoped relative paths', async () => {
+  it('expands a recursive glob to sorted scoped POSIX relative paths', async () => {
     const res = await globCore(base, '**/*.txt');
     expect(res).toContain('a.txt');
-    expect(res).toContain(join('sub', 'b.txt'));
+    expect(res).toContain('sub/b.txt');
     expect([...res]).toEqual([...res].sort());
   });
 });

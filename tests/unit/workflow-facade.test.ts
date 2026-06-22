@@ -4,6 +4,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { createFacade, wrapFacadeForAccounting, type Facade } from '../../src/workflow/facade.js';
 import { WorkflowInputError } from '../../src/workflow/types.js';
+import { getHostShell } from '../../src/workflow/shell.js';
+import { resolveRg } from '../../src/workflow/cores.js';
 
 let base: string;
 
@@ -28,12 +30,12 @@ describe('createFacade', () => {
   it('greps content', async () => {
     const caco = createFacade(base);
     const res = await caco.grep('NEEDLE');
-    expect(res).toEqual([{ file: join('sub', 'two.txt'), line: 1, text: 'hello NEEDLE world' }]);
+    expect(res).toEqual([{ file: 'sub/two.txt', line: 1, text: 'hello NEEDLE world' }]);
   });
 
   it('globs and lists scoped to the session dir', async () => {
     const caco = createFacade(base);
-    expect(await caco.glob('**/*.txt')).toContain(join('sub', 'two.txt'));
+    expect(await caco.glob('**/*.txt')).toContain('sub/two.txt');
     expect(await caco.list()).toContain('sub/');
   });
 
@@ -69,11 +71,18 @@ describe('createFacade', () => {
     expect(FACADE_API_SUMMARY).toContain(getHostShell().label);
   });
 
-  it('runs a pipeline scoped to the session dir', async () => {
+  it.skipIf(getHostShell().dialect !== 'bash')('runs a pipeline scoped to the session dir', async () => {
     const caco = createFacade(base);
     const res = await caco.sh('ls | grep one');
     expect(res.stdout).toContain('one.ts');
     expect(res.code).toBe(0);
+  });
+
+  it.skipIf(!resolveRg())('caco.rg runs the vendored ripgrep and returns matching stdout', async () => {
+    const caco = createFacade(base);
+    const out = await caco.rg(['--json', '-e', 'NEEDLE', '--', '.']);
+    expect(out).toContain('NEEDLE');
+    expect(out).toContain('two.txt');
   });
 
   it('sh runs scoped and reports non-zero exit without throwing', async () => {

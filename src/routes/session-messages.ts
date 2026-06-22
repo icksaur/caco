@@ -293,7 +293,7 @@ export async function dispatchMessage(
     // turn (skip pre-send aborts, which have no turns). Best-effort.
     const metrics = markRequestComplete(sessionId);
     if (metrics && metrics.requestTurns > 0) {
-      appendRequestMetrics(sessionId, metrics, process.cwd());
+      appendRequestMetrics(sessionId, metrics);
     }
     onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> } as unknown as SessionEvent);
     console.log(`[DISPATCH:${rid}] Completed: ${reason}`);

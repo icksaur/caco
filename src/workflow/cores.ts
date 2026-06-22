@@ -1,14 +1,56 @@
 import { stat, readFile, glob as fsGlob } from 'fs/promises';
+import { existsSync } from 'fs';
 import { execFile } from 'child_process';
+import { createRequire } from 'module';
 import { join, relative, resolve, sep } from 'path';
 import { promisify } from 'util';
-import { validatePath } from '../path-utils.js';
+import { validatePath, toPosix } from '../path-utils.js';
 import { MAX_FILE_SIZE_BYTES } from '../config.js';
 import { type ReadResult, type GrepMatch, type GrepOptions, WorkflowInputError } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
 const RG_MAX_BUFFER = 64 * 1024 * 1024;
+
+const require = createRequire(import.meta.url);
+
+/**
+ * Resolve the vendored ripgrep binary (@vscode/ripgrep) by resolving its
+ * per-platform optional dependency's binary directly, rather than importing the
+ * package (whose ESM entry throws if the platform optional dep is missing). The
+ * resolved path is immutable for the process, so it is cached; existence is still
+ * checked per call in resolveRg(). Returns null when the platform binary is absent
+ * (then callers fall back to jsGrep).
+ */
+let cachedVendoredRg: string | null | undefined;
+function vendoredRgPath(): string | null {
+  if (cachedVendoredRg === undefined) {
+    const arch = process.env.npm_config_arch || process.arch;
+    const binaryName = process.platform === 'win32' ? 'rg.exe' : 'rg';
+    const platformPkg = `@vscode/ripgrep-${process.platform}-${arch}`;
+    try {
+      cachedVendoredRg = require.resolve(`${platformPkg}/bin/${binaryName}`);
+    } catch {
+      cachedVendoredRg = null;
+    }
+  }
+  return cachedVendoredRg;
+}
+
+/**
+ * Resolve a usable ripgrep binary path, or null if none is available.
+ * Precedence: CACO_RG_PATH (explicit override) -> vendored @vscode/ripgrep ->
+ * null. No PATH scavenging (vendoring removes the need and avoids system-rg
+ * --json version skew). The override is re-checked every call so a runtime
+ * CACO_RG_PATH change takes effect; only the vendored *location* lookup is cached.
+ */
+export function resolveRg(): string | null {
+  const override = process.env.CACO_RG_PATH;
+  if (override && existsSync(override)) return override;
+  const vendored = vendoredRgPath();
+  if (vendored && existsSync(vendored)) return vendored;
+  return null;
+}
 
 function scope(base: string, requested: string): string {
   const v = validatePath(base, requested);
@@ -57,7 +99,7 @@ export async function readFileRangeCore(
   const content = await readFile(resolved, 'utf8');
   const sliced = sliceLinesByRange(content, range);
   return {
-    path: relative(base, resolved) || '.',
+    path: toPosix(relative(base, resolved)) || '.',
     totalLines: sliced.totalLines,
     range: sliced.range,
     text: sliced.text,
@@ -77,14 +119,14 @@ function stripNewline(s: string): string {
   return s.endsWith('\n') ? s.slice(0, -1) : s;
 }
 
-async function rgGrep(base: string, pattern: string, opts: GrepOptions): Promise<GrepMatch[]> {
+async function rgGrep(rgPath: string, base: string, pattern: string, opts: GrepOptions): Promise<GrepMatch[]> {
   const args = ['--json'];
   if (opts.ignoreCase) args.push('-i');
   if (opts.glob) args.push('--glob', opts.glob);
   args.push('-e', pattern, '--', opts.path ?? '.');
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync('rg', args, { cwd: base, maxBuffer: RG_MAX_BUFFER }));
+    ({ stdout } = await execFileAsync(rgPath, args, { cwd: base, maxBuffer: RG_MAX_BUFFER, windowsHide: true }));
   } catch (e) {
     const code = (e as { code?: unknown }).code;
     if (code === 1) return [];
@@ -98,7 +140,7 @@ async function rgGrep(base: string, pattern: string, opts: GrepOptions): Promise
     const file = evt.data.path?.text;
     const line = evt.data.line_number;
     if (file === undefined || line === undefined) continue;
-    const rel = relative(base, resolve(base, file));
+    const rel = toPosix(relative(base, resolve(base, file)));
     matches.push({ file: rel, line, text: stripNewline(evt.data.lines?.text ?? '') });
   }
   return sortMatches(matches);
@@ -132,21 +174,34 @@ async function jsGrep(base: string, pattern: string, opts: GrepOptions): Promise
     if (!info.isFile() || info.size > MAX_FILE_SIZE_BYTES) continue;
     const rel = relative(base, abs);
     if (rel.startsWith('..') || rel.startsWith(sep)) continue;
+    const posixRel = toPosix(rel);
     const content = await readFile(abs, 'utf8');
     const lines = content.split('\n');
     for (let i = 0; i < lines.length; i++) {
       if (i === lines.length - 1 && lines[i] === '') continue;
-      if (re.test(lines[i])) matches.push({ file: rel, line: i + 1, text: lines[i] });
+      if (re.test(lines[i])) matches.push({ file: posixRel, line: i + 1, text: lines[i] });
     }
   }
   return sortMatches(matches);
 }
 
-/** Search file contents under `base`. Uses `rg` when present, JS fallback otherwise. */
-export async function grepCore(base: string, pattern: string, opts: GrepOptions = {}): Promise<GrepMatch[]> {
+/**
+ * Search file contents under `base`. Uses ripgrep when available (resolveRg:
+ * CACO_RG_PATH -> vendored @vscode/ripgrep), else a pure-JS fallback. The `rg`
+ * param is an injectable seam (default resolveRg()); pass `null` to force the JS
+ * fallback deterministically in tests. A stale vendored path that fails to spawn
+ * (ENOENT) also falls back.
+ */
+export async function grepCore(
+  base: string,
+  pattern: string,
+  opts: GrepOptions = {},
+  rg: string | null = resolveRg(),
+): Promise<GrepMatch[]> {
   if (opts.path) scope(base, opts.path);
+  if (!rg) return jsGrep(base, pattern, opts);
   try {
-    return await rgGrep(base, pattern, opts);
+    return await rgGrep(rg, base, pattern, opts);
   } catch (e) {
     if ((e as { code?: unknown }).code === 'ENOENT') return jsGrep(base, pattern, opts);
     throw e;
@@ -160,7 +215,7 @@ export async function globCore(base: string, pattern: string): Promise<string[]>
     const abs = join(base, entry);
     const v = validatePath(base, abs);
     if (!v.valid) continue;
-    out.push(v.relative);
+    out.push(toPosix(v.relative));
   }
   return out.sort();
 }

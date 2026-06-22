@@ -132,7 +132,7 @@ describe('runWorkflow bounds', () => {
     await new Promise((res) => setTimeout(res, 1500));
     let survivors = '';
     try {
-      const { stdout } = await execFileAsync('ps', ['-eo', 'args']);
+      const { stdout } = await execFileAsync('ps', ['-eo', 'args'], { windowsHide: true });
       survivors = stdout;
     } catch { /* ps unavailable; skip */ }
     if (survivors) expect(survivors).not.toContain(marker);

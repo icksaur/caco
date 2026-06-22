@@ -35,6 +35,24 @@ interface SessionThroughput {
   workflowSavedTokens: number;
   /** Number of workflow runs that contributed savings this session. */
   workflowRuns: number;
+  /** Session-lifetime virtual tool calls avoided (breadth; commandCount-1 summed). */
+  workflowVirtualCallsAvoided: number;
+  /** Session-lifetime conservative model round trips saved (parallel-discounted). */
+  workflowRoundTripsSaved: number;
+  /** Session-lifetime optimistic "if sequential" window-replay tokens (cache class). */
+  workflowCacheReplaySaved: number;
+  /** Session-lifetime compounding cache tokens saved by absent context on later turns. */
+  workflowCacheCompoundSaved: number;
+  /** Session-lifetime signed net output tokens spent (script minus avoided tool args). */
+  workflowOutputDelta: number;
+  /** Promoted avoided context that compounds on each later round trip (cache class). */
+  avoidedContextTokens: number;
+  /** Freshly-saved context awaiting promotion (deferred one turn to avoid double-count). */
+  pendingAvoidedContext: number;
+  /** Prompt-token size W from the most recent round trip (0 until requestTurns > 0). */
+  lastInputTokens: number;
+  /** Session-lifetime wall-clock ms across completed requests (for avg turn latency). */
+  totalWallMs: number;
   /** Session-lifetime tokens saved by output shaping (exact bytes trimmed / 4). */
   shapingSavedTokens: number;
   /** Number of tool outputs the shaper trimmed this session. */
@@ -107,6 +125,15 @@ function blank(): SessionThroughput {
     rateLimitCount: 0,
     workflowSavedTokens: 0,
     workflowRuns: 0,
+    workflowVirtualCallsAvoided: 0,
+    workflowRoundTripsSaved: 0,
+    workflowCacheReplaySaved: 0,
+    workflowCacheCompoundSaved: 0,
+    workflowOutputDelta: 0,
+    avoidedContextTokens: 0,
+    pendingAvoidedContext: 0,
+    lastInputTokens: 0,
+    totalWallMs: 0,
     shapingSavedTokens: 0,
     shapingShapeCount: 0,
     requestTurns: 0,
@@ -154,6 +181,17 @@ export function recordUsage(
   entry.totalTurns += 1;
   entry.requestReasoning += reasoning;
   entry.totalReasoning += reasoning;
+  // Workflow savings: this round trip re-sends the window W (~all cache-read);
+  // capture it for the next workflow's replay estimate. Compound the avoided
+  // context already promoted (NOT this turn's pending — see recordWorkflowSavingsV2),
+  // then promote the pending bucket so freshly-saved context starts compounding on
+  // the SECOND later turn, never the first (avoids double-counting freshInputTokensSaved).
+  entry.lastInputTokens = input;
+  entry.workflowCacheCompoundSaved += entry.avoidedContextTokens;
+  if (entry.pendingAvoidedContext > 0) {
+    entry.avoidedContextTokens += entry.pendingAvoidedContext;
+    entry.pendingAvoidedContext = 0;
+  }
   entry.updatedAt = now();
 }
 
@@ -186,6 +224,7 @@ export function markRequestComplete(sessionId: string): RequestMetricsRow | null
   const entry = sessions.get(sessionId);
   if (!entry) return null;
   entry.requestWallMs = Math.max(0, Date.now() - entry.requestStartedAt);
+  entry.totalWallMs += entry.requestWallMs;
   entry.updatedAt = now();
   return {
     requestIn: entry.requestIn,
@@ -209,15 +248,42 @@ export function recordRateLimit(sessionId: string): void {
 }
 
 /**
- * Record an estimate of context tokens a single workflow run avoided. These are
- * session-lifetime (like total*) and are NOT cleared by resetRequest, since the
- * saving describes work that already happened.
+ * The context-window proxy W for the next workflow's replay estimate: the prompt
+ * size from the most recent round trip, or 0 before any round trip this request
+ * (so a fresh send never prices replay against a stale window).
  */
-export function recordWorkflowSavings(sessionId: string, savedTokens: number): void {
-  const tokens = safeInt(savedTokens);
-  if (tokens <= 0) return;
+export function currentWindowTokens(sessionId: string): number {
+  const entry = sessions.get(sessionId);
+  if (!entry || entry.requestTurns <= 0) return 0;
+  return entry.lastInputTokens;
+}
+
+/**
+ * Record one emitted workflow run's savings breakdown. Session-lifetime (like
+ * total*), NOT cleared by resetRequest, since the saving describes work that
+ * already happened. `workflowSavedTokens` keeps its prior meaning (cumulative
+ * fresh-input tokens) for footer back-compat. `freshInputTokensSaved` enters a
+ * PENDING bucket here and only begins compounding after the next round trip (see
+ * recordUsage), so it is never billed as both fresh-input and cache on the same turn.
+ */
+export function recordWorkflowSavingsV2(
+  sessionId: string,
+  breakdown: {
+    virtualToolCallsAvoided: number;
+    roundTripsSaved: number;
+    freshInputTokensSaved: number;
+    cacheReplayTokensSaved: number;
+    netOutputTokensSpent: number;
+  },
+): void {
   const entry = getOrCreate(sessionId);
-  entry.workflowSavedTokens += tokens;
+  const fresh = safeInt(breakdown.freshInputTokensSaved);
+  entry.workflowSavedTokens += fresh;
+  entry.pendingAvoidedContext += fresh;
+  entry.workflowVirtualCallsAvoided += safeInt(breakdown.virtualToolCallsAvoided);
+  entry.workflowRoundTripsSaved += safeInt(breakdown.roundTripsSaved);
+  entry.workflowCacheReplaySaved += safeInt(breakdown.cacheReplayTokensSaved);
+  entry.workflowOutputDelta += Math.trunc(breakdown.netOutputTokensSpent) || 0;
   entry.workflowRuns += 1;
   entry.updatedAt = now();
 }
@@ -256,6 +322,10 @@ export function resetRequest(sessionId: string): void {
   entry.requestWorkflowCodeBytes = 0;
   entry.requestWallMs = 0;
   entry.requestStartedAt = Date.now();
+  // A fresh send must not price the next workflow's window against the prior
+  // request's prompt, and any un-promoted pending context is dropped (conservative).
+  entry.lastInputTokens = 0;
+  entry.pendingAvoidedContext = 0;
   entry.updatedAt = now();
 }
 

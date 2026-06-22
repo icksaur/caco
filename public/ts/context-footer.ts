@@ -325,6 +325,12 @@ export interface ThroughputData {
   lastRateLimitAt?: string;
   workflowSavedTokens?: number;
   workflowRuns?: number;
+  workflowVirtualCallsAvoided?: number;
+  workflowRoundTripsSaved?: number;
+  workflowCacheReplaySaved?: number;
+  workflowCacheCompoundSaved?: number;
+  workflowOutputDelta?: number;
+  totalWallMs?: number;
   shapingSavedTokens?: number;
   shapingShapeCount?: number;
   requestTurns?: number;
@@ -364,12 +370,56 @@ function estimateCost(d: ThroughputData): number | null {
   return credits;
 }
 
-/** Price workflow-saved tokens at the active model's input rate (saved tokens
- *  are input-class). Returns null when the input price is unknown (e.g. Auto). */
-function estimateSavedCredits(savedTokens: number): number | null {
+/** Fallback per-round-trip latency before this session has timed a request (ms). */
+const FALLBACK_ROUNDTRIP_MS = 8000;
+
+interface SavedPricing {
+  /** Net credits saved — context savings that survive parallel tool calls, minus output cost. May be negative. */
+  netCredits: number | null;
+  /** Optimistic "if these calls had run sequentially" window-replay credits. */
+  ifSequentialCredits: number | null;
+  /** Ballpark wall time saved (ms) from round trips saved × this session's avg turn. */
+  timeSavedMs: number;
+}
+
+/** Price saved tokens by billing class (input for fresh + shaping, cache for
+ *  compounding/replay, output for the net code delta). Returns null credits when
+ *  the model's rates are unknown (e.g. Auto); tokens are still shown. */
+function priceSaved(d: ThroughputData): SavedPricing {
+  const roundTripsSaved = d.workflowRoundTripsSaved ?? 0;
+  const totalTurns = d.totalTurns ?? 0;
+  const totalWallMs = d.totalWallMs ?? 0;
+  const avgTurnMs = totalTurns > 0 && totalWallMs > 0 ? totalWallMs / totalTurns : FALLBACK_ROUNDTRIP_MS;
+  const timeSavedMs = roundTripsSaved * avgTurnMs;
+
   const model = getAvailableModels().find(m => m.id === activeModelId);
-  if (!model || model.inputPerMtok === undefined) return null;
-  return (savedTokens * model.inputPerMtok) / 1_000_000;
+  if (!model || model.inputPerMtok === undefined) {
+    return { netCredits: null, ifSequentialCredits: null, timeSavedMs };
+  }
+  const inputRate = model.inputPerMtok;
+  const cacheRate = model.cachePerMtok ?? 0;
+  const outputRate = model.outputPerMtok ?? 0;
+
+  const fresh = d.workflowSavedTokens ?? 0;
+  const compound = d.workflowCacheCompoundSaved ?? 0;
+  const outputDelta = d.workflowOutputDelta ?? 0;
+  const shaping = d.shapingSavedTokens ?? 0;
+  const replay = d.workflowCacheReplaySaved ?? 0;
+
+  const netCredits =
+    ((fresh + shaping) * inputRate + compound * cacheRate - outputDelta * outputRate) / 1_000_000;
+  const ifSequentialCredits = (replay * cacheRate) / 1_000_000;
+  return { netCredits, ifSequentialCredits, timeSavedMs };
+}
+
+function fmtCredits(c: number): string {
+  const a = Math.abs(c);
+  return a < 10 ? a.toFixed(2) : Math.round(a).toLocaleString();
+}
+
+function fmtDuration(ms: number): string {
+  if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)}m`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 const throughputCache = new Map<string, ThroughputData>();
@@ -447,9 +497,10 @@ function renderThroughput(data: ThroughputData): void {
   renderSaved(data);
 }
 
-/** Render the accumulated token-savings indicator next to the context usage
- *  pie. Combines exact output-shaping savings with the workflow estimate.
- *  Always rendered, initialized to ↯0 before anything is saved. */
+/** Render the accumulated savings indicator next to the context usage pie.
+ *  Headline is net credits saved (context savings that survive parallel tool
+ *  calls, minus output cost); the tooltip breaks down every term. Always
+ *  rendered, initialized before anything is saved. */
 function renderSaved(data: ThroughputData): void {
   const footer = regions.footer.el;
   const el = footer.querySelector('.context-saved') as HTMLElement | null;
@@ -457,18 +508,41 @@ function renderSaved(data: ThroughputData): void {
 
   const workflowTokens = data.workflowSavedTokens ?? 0;
   const workflowRuns = data.workflowRuns ?? 0;
+  const compound = data.workflowCacheCompoundSaved ?? 0;
+  const replay = data.workflowCacheReplaySaved ?? 0;
+  const virtualCalls = data.workflowVirtualCallsAvoided ?? 0;
+  const roundTrips = data.workflowRoundTripsSaved ?? 0;
+  const outputDelta = data.workflowOutputDelta ?? 0;
   const shapingTokens = data.shapingSavedTokens ?? 0;
   const shapingCount = data.shapingShapeCount ?? 0;
-  const totalTokens = workflowTokens + shapingTokens;
+  const totalTokens = workflowTokens + compound + shapingTokens;
 
-  const savedCredits = estimateSavedCredits(totalTokens);
-  const creditNote = savedCredits !== null
-    ? ` (≈${savedCredits < 10 ? savedCredits.toFixed(2) : Math.round(savedCredits).toLocaleString()}cr)`
+  const { netCredits, ifSequentialCredits, timeSavedMs } = priceSaved(data);
+
+  let glyph: string;
+  if (netCredits === null) {
+    glyph = `↯${kAbbrev(totalTokens)}`;
+  } else if (netCredits < 0) {
+    glyph = `↯−${fmtCredits(netCredits)}cr`;
+  } else {
+    glyph = `↯≈${fmtCredits(netCredits)}cr`;
+  }
+  el.textContent = glyph;
+
+  const creditLine = netCredits === null
+    ? `est. ${totalTokens.toLocaleString()} context tokens saved (credit estimate unavailable for this model)`
+    : netCredits < 0
+      ? `net ≈−${fmtCredits(netCredits)} cr (workflow output cost exceeded savings)`
+      : `net ≈${fmtCredits(netCredits)} cr saved (est., survives parallel tool calls)`;
+  const seqLine = ifSequentialCredits !== null && ifSequentialCredits > 0
+    ? `\nif those calls had run sequentially: +≈${fmtCredits(ifSequentialCredits)} cr more (${replay.toLocaleString()} cache tokens)`
     : '';
+  const timeLine = roundTrips > 0 ? `\n~${fmtDuration(timeSavedMs)} round-trip time saved (rough)` : '';
 
-  el.textContent = `↯${kAbbrev(totalTokens)}`;
   el.title =
-    `est. ${totalTokens.toLocaleString()} context tokens saved${creditNote}\n` +
-    `shaping: ${shapingTokens.toLocaleString()} (exact) across ${shapingCount} trim${shapingCount !== 1 ? 's' : ''}\n` +
-    `workflow: ${workflowTokens.toLocaleString()} (est.) across ${workflowRuns} run${workflowRuns !== 1 ? 's' : ''}`;
+    `${creditLine}\n` +
+    `workflow: ${virtualCalls} virtual tool call${virtualCalls !== 1 ? 's' : ''} avoided across ${workflowRuns} run${workflowRuns !== 1 ? 's' : ''} (${roundTrips} est. round trips saved)\n` +
+    `  · ${workflowTokens.toLocaleString()} fresh-input + ${compound.toLocaleString()} compounding cache tokens, ${outputDelta >= 0 ? '' : '−'}${Math.abs(outputDelta).toLocaleString()} net output tokens\n` +
+    `shaping: ${shapingTokens.toLocaleString()} (exact) across ${shapingCount} trim${shapingCount !== 1 ? 's' : ''}` +
+    seqLine + timeLine;
 }

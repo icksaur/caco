@@ -53,6 +53,22 @@ describe('runWorkflow envelope', () => {
     expect(noReads.observedBytes).toBe(0);
   });
 
+  it('counts facade calls as commandCount (virtual tool calls)', async () => {
+    const r = await runWorkflow(base, {
+      code: `
+        await caco.grep('NEEDLE');
+        await caco.read('data.txt', [1, 1]);
+        await caco.glob('*.txt');
+        emit({ done: true });
+      `,
+    });
+    expect(r.outcome).toBe('emitted');
+    expect(r.commandCount).toBe(3);
+
+    const none = await runWorkflow(base, { code: 'emit({ a: 1 });' });
+    expect(none.commandCount).toBe(0);
+  });
+
   it('keeps the first emit when emit() is called twice', async () => {
     const r = await runWorkflow(base, { code: 'emit({ a: 1 }); emit({ a: 2 });' });
     expect(r.outcome).toBe('emitted');

@@ -3,10 +3,10 @@ import { z } from 'zod';
 import { storeOutput } from '../output-store.js';
 import { shapeOutput } from '../observe/shape.js';
 import { createLogger } from '../logger.js';
-import { recordWorkflowSavings, recordWorkflowCode } from '../session-throughput.js';
+import { recordWorkflowSavingsV2, recordWorkflowCode, currentWindowTokens } from '../session-throughput.js';
 import { WORKFLOW_EMIT_CAP_BYTES, WORKFLOW_TIMEOUT_ADVERTISED_MS } from '../config.js';
 import { runWorkflow } from './runner.js';
-import { estimateSavedTokens } from './savings.js';
+import { estimateWorkflowSavings } from './savings-model.js';
 import { FACADE_API_SUMMARY } from './facade.js';
 import { getHostShell, shellGuidance } from './shell.js';
 import type { SessionIdRef } from '../types.js';
@@ -88,8 +88,14 @@ export function createWorkflowTool(sessionCwd: string, sessionRef: SessionIdRef)
         const handleNote = handle ? ` [retrieve_output id="${handle}"]` : '';
         const killNote = result.timedOut ? ' (note: the workflow was killed by the timeout after emitting)' : '';
         const out = `Workflow emitted${handleNote}${killNote}:\n${text}${logs}`;
-        const saved = estimateSavedTokens(result.observedBytes, Buffer.byteLength(out, 'utf8'));
-        recordWorkflowSavings(sessionId, saved);
+        const breakdown = estimateWorkflowSavings({
+          observedBytes: result.observedBytes,
+          injectedBytes: Buffer.byteLength(out, 'utf8'),
+          commandCount: result.commandCount,
+          codeBytes: Buffer.byteLength(code, 'utf8'),
+          windowTokens: currentWindowTokens(sessionId),
+        });
+        recordWorkflowSavingsV2(sessionId, breakdown);
         return { textResultForLlm: out };
       }
       if (result.outcome === 'no-emit') {

@@ -28,6 +28,12 @@ export interface WorkflowRunResult {
    * token savings. 0 when the envelope predates this field or was unreadable.
    */
   observedBytes: number;
+  /**
+   * Number of facade calls the workflow made (virtual tool calls). One workflow
+   * round trip stands in for this many individual tool calls. 0 when the
+   * envelope predates this field or was unreadable.
+   */
+  commandCount: number;
   /** Combined stdout+stderr, capped at WORKFLOW_LOG_CAP_BYTES. */
   logs: string;
   logsTruncated: boolean;
@@ -136,10 +142,13 @@ import { writeFileSync, renameSync } from 'node:fs';
 
 const __resultPath = ${JSON.stringify(resultPath)};
 let __observedBytes = 0;
+let __commandCount = 0;
 const __rawFacade = createFacade(${JSON.stringify(sessionCwd)});
 // Counting hook: every read-oriented facade call adds the bytes it returned to
-// __observedBytes — the data that would otherwise have entered the model context.
+// __observedBytes (data that would otherwise have entered the model context) and
+// increments __commandCount (one virtual tool call).
 const __account = (v: unknown): void => {
+  __commandCount += 1;
   try {
     __observedBytes += Buffer.byteLength(typeof v === 'string' ? v : (JSON.stringify(v) ?? ''), 'utf8');
   } catch { /* unserializable payloads are not counted */ }
@@ -149,7 +158,7 @@ const caco = wrapFacadeForAccounting(__rawFacade, __account);
 let __written = false;
 
 function __write(ok: boolean, body: Record<string, unknown>): void {
-  const envelope = JSON.stringify({ ok, observedBytes: __observedBytes, ...body });
+  const envelope = JSON.stringify({ ok, observedBytes: __observedBytes, commandCount: __commandCount, ...body });
   const tmp = __resultPath + '.tmp';
   writeFileSync(tmp, envelope);
   renameSync(tmp, __resultPath);
@@ -270,7 +279,7 @@ export async function runWorkflow(sessionCwd: string, options: RunWorkflowOption
     const logs = Buffer.concat(chunks).toString('utf8');
     const durationMs = Date.now() - started;
 
-    let envelope: { ok: boolean; value?: unknown; error?: string; observedBytes?: number } | null = null;
+    let envelope: { ok: boolean; value?: unknown; error?: string; observedBytes?: number; commandCount?: number } | null = null;
     if (existsSync(resultPath)) {
       const size = (await stat(resultPath)).size;
       if (size > WORKFLOW_RESULT_MAX_BYTES) {
@@ -285,20 +294,22 @@ export async function runWorkflow(sessionCwd: string, options: RunWorkflowOption
     }
 
     const observedBytes = typeof envelope?.observedBytes === 'number' ? envelope.observedBytes : 0;
+    const commandCount = typeof envelope?.commandCount === 'number' ? envelope.commandCount : 0;
+    const common = { observedBytes, commandCount, logs, logsTruncated, timedOut, exitCode, durationMs };
 
     if (envelope && envelope.ok) {
-      return { outcome: 'emitted', value: envelope.value, observedBytes, logs, logsTruncated, timedOut, exitCode, durationMs };
+      return { outcome: 'emitted', value: envelope.value, ...common };
     }
     if (envelope && !envelope.ok) {
-      return { outcome: 'error', error: envelope.error ?? 'unknown error', observedBytes, logs, logsTruncated, timedOut, exitCode, durationMs };
+      return { outcome: 'error', error: envelope.error ?? 'unknown error', ...common };
     }
     if (timedOut) {
-      return { outcome: 'error', error: `workflow timed out after ${timeoutMs} ms`, observedBytes, logs, logsTruncated, timedOut, exitCode, durationMs };
+      return { outcome: 'error', error: `workflow timed out after ${timeoutMs} ms`, ...common };
     }
     if (exitCode !== 0 && exitCode !== null) {
-      return { outcome: 'error', error: `workflow process exited with code ${exitCode} without calling emit()`, observedBytes, logs, logsTruncated, timedOut, exitCode, durationMs };
+      return { outcome: 'error', error: `workflow process exited with code ${exitCode} without calling emit()`, ...common };
     }
-    return { outcome: 'no-emit', observedBytes, logs, logsTruncated, timedOut, exitCode, durationMs };
+    return { outcome: 'no-emit', ...common };
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

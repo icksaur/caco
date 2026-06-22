@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   recordUsage,
   recordRateLimit,
-  recordWorkflowSavings,
+  recordWorkflowSavingsV2,
   recordShapingSavings,
   recordToolCall,
   recordWorkflowCode,
@@ -90,31 +90,39 @@ describe('recordRateLimit', () => {
   });
 });
 
-describe('recordWorkflowSavings', () => {
+describe('recordWorkflowSavingsV2', () => {
+  const bd = (fresh: number) => ({
+    virtualToolCallsAvoided: 0,
+    roundTripsSaved: 0,
+    freshInputTokensSaved: fresh,
+    cacheReplayTokensSaved: 0,
+    netOutputTokensSpent: 0,
+  });
+
   it('accumulates saved tokens and run count across calls', () => {
-    recordWorkflowSavings(SID, 1200);
-    recordWorkflowSavings(SID, 800);
+    recordWorkflowSavingsV2(SID, bd(1200));
+    recordWorkflowSavingsV2(SID, bd(800));
     const t = getThroughput(SID)!;
     expect(t.workflowSavedTokens).toBe(2000);
     expect(t.workflowRuns).toBe(2);
   });
 
-  it('ignores non-positive / invalid savings without counting a run', () => {
-    recordWorkflowSavings(SID, 0);
-    recordWorkflowSavings(SID, -50);
-    recordWorkflowSavings(SID, NaN as unknown as number);
-    expect(getThroughput(SID)).toBeUndefined();
+  it('counts a run with zero fresh savings but adds no saved tokens', () => {
+    recordWorkflowSavingsV2(SID, bd(0));
+    const t = getThroughput(SID)!;
+    expect(t.workflowSavedTokens).toBe(0);
+    expect(t.workflowRuns).toBe(1);
   });
 
   it('is preserved across resetRequest (session-lifetime, not request-scoped)', () => {
-    recordWorkflowSavings(SID, 500);
+    recordWorkflowSavingsV2(SID, bd(500));
     resetRequest(SID);
     expect(getThroughput(SID)!.workflowSavedTokens).toBe(500);
     expect(getThroughput(SID)!.workflowRuns).toBe(1);
   });
 
   it('surfaces in snapshot', () => {
-    recordWorkflowSavings(SID, 333);
+    recordWorkflowSavingsV2(SID, bd(333));
     const s = snapshot(SID);
     expect(s.workflowSavedTokens).toBe(333);
     expect(s.workflowRuns).toBe(1);
@@ -145,7 +153,9 @@ describe('recordShapingSavings', () => {
   });
 
   it('accumulates independently of workflow savings', () => {
-    recordWorkflowSavings(SID, 100);
+    recordWorkflowSavingsV2(SID, {
+      virtualToolCallsAvoided: 0, roundTripsSaved: 0, freshInputTokensSaved: 100, cacheReplayTokensSaved: 0, netOutputTokensSpent: 0,
+    });
     recordShapingSavings(SID, 250);
     const t = getThroughput(SID)!;
     expect(t.workflowSavedTokens).toBe(100);

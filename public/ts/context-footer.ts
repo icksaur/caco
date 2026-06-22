@@ -341,6 +341,8 @@ export interface ThroughputData {
   requestWallMs?: number;
   totalTurns?: number;
   totalReasoning?: number;
+  totalToolCalls?: number;
+  totalToolFailures?: number;
   updatedAt: string;
   known?: boolean;
 }
@@ -358,16 +360,16 @@ export function setActiveThroughputModel(modelId: string | null): void {
   activeModelId = modelId;
 }
 
-/** Compute approximate cost in AI credits from the model's per-MTOK
- *  prices. Returns null when prices are unknown (e.g. Auto). */
+/** Compute approximate session-accumulated cost in AI credits from the model's
+ *  per-MTOK prices. Returns null when prices are unknown (e.g. Auto). */
 function estimateCost(d: ThroughputData): number | null {
   const model = getAvailableModels().find(m => m.id === activeModelId);
   if (!model || model.inputPerMtok === undefined || model.outputPerMtok === undefined) return null;
   const cacheRate = model.cachePerMtok ?? 0;
   const credits =
-    (d.requestIn * model.inputPerMtok +
-      d.requestCache * cacheRate +
-      d.requestOut * model.outputPerMtok) / 1_000_000;
+    (d.totalIn * model.inputPerMtok +
+      d.totalCache * cacheRate +
+      d.totalOut * model.outputPerMtok) / 1_000_000;
   return credits;
 }
 
@@ -458,22 +460,22 @@ function renderThroughput(data: ThroughputData): void {
   const el = footer.querySelector('.context-throughput') as HTMLElement | null;
   if (!el) return;
 
-  const turns = data.requestTurns ?? 0;
-  const reasoning = data.requestReasoning ?? 0;
-  const toolCalls = data.requestToolCalls ?? 0;
-  const toolFails = data.requestToolFailures ?? 0;
-  const wallMs = data.requestWallMs ?? 0;
+  const turns = data.totalTurns ?? 0;
+  const reasoning = data.totalReasoning ?? 0;
+  const toolCalls = data.totalToolCalls ?? 0;
+  const toolFails = data.totalToolFailures ?? 0;
+  const wallMs = data.totalWallMs ?? 0;
   const wallNote = wallMs > 0 ? ` in ${(wallMs / 1000).toFixed(1)}s` : '';
   const failNote = toolFails > 0 ? ` (${toolFails} failed)` : '';
   const tooltip =
-    `request: ${data.requestIn.toLocaleString()} in · ${data.requestCache.toLocaleString()} cache · ${data.requestOut.toLocaleString()} out` +
-    `\nsession: ${data.totalIn.toLocaleString()} in · ${data.totalCache.toLocaleString()} cache · ${data.totalOut.toLocaleString()} out` +
+    `session: ${data.totalIn.toLocaleString()} in · ${data.totalCache.toLocaleString()} cache · ${data.totalOut.toLocaleString()} out` +
+    `\nlast request: ${data.requestIn.toLocaleString()} in · ${data.requestCache.toLocaleString()} cache · ${data.requestOut.toLocaleString()} out` +
     `\nround trips: ${turns} turn${turns !== 1 ? 's' : ''}${wallNote} · ${reasoning.toLocaleString()} reasoning · ${toolCalls} tool call${toolCalls !== 1 ? 's' : ''}${failNote}`;
 
   const parts =
-    `${escapeHtml(kAbbrev(data.requestIn))} in ` +
-    `${escapeHtml(kAbbrev(data.requestCache))} cache ` +
-    `${escapeHtml(kAbbrev(data.requestOut))} out`;
+    `${escapeHtml(kAbbrev(data.totalIn))} in ` +
+    `${escapeHtml(kAbbrev(data.totalCache))} cache ` +
+    `${escapeHtml(kAbbrev(data.totalOut))} out`;
 
   const cost = estimateCost(data);
   const costHtml = cost !== null

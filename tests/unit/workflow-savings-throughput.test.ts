@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   recordUsage,
   recordWorkflowSavingsV2,
@@ -115,5 +115,44 @@ describe('time saved inputs', () => {
     const s = snapshot(SID);
     expect(s.totalWallMs).toBeGreaterThanOrEqual(0);
     expect(s.totalTurns).toBe(1);
+  });
+
+  it('accumulates time saved = (requestWall / requestTurns) * requestRoundTripsSaved', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      resetRequest(SID);   // requestStartedAt = 0
+      run(0);              // requestRoundTripsSaved += 2 (helper breakdown roundTripsSaved: 2)
+      usage();             // requestTurns = 1
+      usage();             // requestTurns = 2
+      vi.setSystemTime(4000);
+      markRequestComplete(SID); // requestWall = 4000 → (4000/2)*2 = 4000ms
+      expect(snapshot(SID).workflowTimeSavedMs).toBe(4000);
+
+      // A second request adds independently with its OWN measured RTT.
+      vi.setSystemTime(10_000);
+      resetRequest(SID);   // requestRoundTripsSaved reset to 0
+      run(0);              // += 2
+      usage();             // requestTurns = 1
+      vi.setSystemTime(13_000);
+      markRequestComplete(SID); // (3000/1)*2 = 6000 added → 10000 total
+      expect(snapshot(SID).workflowTimeSavedMs).toBe(10_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('adds no time saved for a request whose workflows saved no round trips', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      resetRequest(SID);
+      usage();
+      vi.setSystemTime(5000);
+      markRequestComplete(SID);
+      expect(snapshot(SID).workflowTimeSavedMs).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

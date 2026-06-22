@@ -45,6 +45,11 @@ interface SessionThroughput {
   workflowCacheCompoundSaved: number;
   /** Session-lifetime signed net output tokens spent (script minus avoided tool args). */
   workflowOutputDelta: number;
+  /** Round trips saved by workflows in the CURRENT request (reset each send). */
+  requestRoundTripsSaved: number;
+  /** Session-lifetime wall-clock ms saved by avoided round trips
+   *  (sum over requests of (requestWall/requestTurns) * requestRoundTripsSaved). */
+  workflowTimeSavedMs: number;
   /** Promoted avoided context that compounds on each later round trip (cache class). */
   avoidedContextTokens: number;
   /** Freshly-saved context awaiting promotion (deferred one turn to avoid double-count). */
@@ -130,6 +135,8 @@ function blank(): SessionThroughput {
     workflowCacheReplaySaved: 0,
     workflowCacheCompoundSaved: 0,
     workflowOutputDelta: 0,
+    requestRoundTripsSaved: 0,
+    workflowTimeSavedMs: 0,
     avoidedContextTokens: 0,
     pendingAvoidedContext: 0,
     lastInputTokens: 0,
@@ -228,6 +235,13 @@ export function markRequestComplete(sessionId: string): RequestMetricsRow | null
   if (!entry) return null;
   entry.requestWallMs = Math.max(0, Date.now() - entry.requestStartedAt);
   entry.totalWallMs += entry.requestWallMs;
+  // Time saved this request: estimate per-round-trip latency from THIS request
+  // (requestWall / requestTurns) and multiply by the round trips the request's
+  // workflows collapsed. Accumulated session-lifetime. Pairs each request's
+  // measured RTT with its own saved trips rather than a session-wide average.
+  if (entry.requestTurns > 0 && entry.requestRoundTripsSaved > 0) {
+    entry.workflowTimeSavedMs += (entry.requestWallMs / entry.requestTurns) * entry.requestRoundTripsSaved;
+  }
   entry.updatedAt = now();
   return {
     requestIn: entry.requestIn,
@@ -285,6 +299,7 @@ export function recordWorkflowSavingsV2(
   entry.pendingAvoidedContext += fresh;
   entry.workflowVirtualCallsAvoided += safeInt(breakdown.virtualToolCallsAvoided);
   entry.workflowRoundTripsSaved += safeInt(breakdown.roundTripsSaved);
+  entry.requestRoundTripsSaved += safeInt(breakdown.roundTripsSaved);
   entry.workflowCacheReplaySaved += safeInt(breakdown.cacheReplayTokensSaved);
   entry.workflowOutputDelta += Math.trunc(breakdown.netOutputTokensSpent) || 0;
   entry.workflowRuns += 1;
@@ -324,6 +339,7 @@ export function resetRequest(sessionId: string): void {
   entry.requestToolFailures = 0;
   entry.requestWorkflowCodeBytes = 0;
   entry.requestWallMs = 0;
+  entry.requestRoundTripsSaved = 0;
   entry.requestStartedAt = Date.now();
   // A fresh send must not price the next workflow's window against the prior
   // request's prompt, and any un-promoted pending context is dropped (conservative).

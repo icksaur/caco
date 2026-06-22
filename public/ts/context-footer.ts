@@ -330,6 +330,7 @@ export interface ThroughputData {
   workflowCacheReplaySaved?: number;
   workflowCacheCompoundSaved?: number;
   workflowOutputDelta?: number;
+  workflowTimeSavedMs?: number;
   totalWallMs?: number;
   shapingSavedTokens?: number;
   shapingShapeCount?: number;
@@ -370,14 +371,10 @@ function estimateCost(d: ThroughputData): number | null {
   return credits;
 }
 
-/** Fallback per-round-trip latency before this session has timed a request (ms). */
-const FALLBACK_ROUNDTRIP_MS = 8000;
 
 interface SavedPricing {
   /** Net credits saved — context savings that survive parallel tool calls, minus output cost. May be negative. */
   netCredits: number | null;
-  /** Ballpark wall time saved (ms) from round trips saved × this session's avg turn. */
-  timeSavedMs: number;
   /** Active model's per-MTOK rates, or null when unknown (e.g. Auto). */
   rates: { input: number; cache: number; output: number } | null;
 }
@@ -386,15 +383,9 @@ interface SavedPricing {
  *  window-replay + compounding; output for the net code delta). Returns null
  *  rates/credits when the model's rates are unknown (e.g. Auto). */
 function priceSaved(d: ThroughputData): SavedPricing {
-  const roundTripsSaved = d.workflowRoundTripsSaved ?? 0;
-  const totalTurns = d.totalTurns ?? 0;
-  const totalWallMs = d.totalWallMs ?? 0;
-  const avgTurnMs = totalTurns > 0 && totalWallMs > 0 ? totalWallMs / totalTurns : FALLBACK_ROUNDTRIP_MS;
-  const timeSavedMs = roundTripsSaved * avgTurnMs;
-
   const model = getAvailableModels().find(m => m.id === activeModelId);
   if (!model || model.inputPerMtok === undefined) {
-    return { netCredits: null, timeSavedMs, rates: null };
+    return { netCredits: null, rates: null };
   }
   const rates = { input: model.inputPerMtok, cache: model.cachePerMtok ?? 0, output: model.outputPerMtok ?? 0 };
 
@@ -406,7 +397,7 @@ function priceSaved(d: ThroughputData): SavedPricing {
 
   const netCredits =
     ((fresh + shaping) * rates.input + (replay + compound) * rates.cache - outputDelta * rates.output) / 1_000_000;
-  return { netCredits, timeSavedMs, rates };
+  return { netCredits, rates };
 }
 
 function fmtCredits(c: number): string {
@@ -522,8 +513,9 @@ function renderSaved(data: ThroughputData): void {
   const inputSaved = fresh + shaping;
   const cacheSaved = replay + compound;
   const totalTokens = inputSaved + cacheSaved;
+  const timeSavedMs = data.workflowTimeSavedMs ?? 0;
 
-  const { netCredits, timeSavedMs, rates } = priceSaved(data);
+  const { netCredits, rates } = priceSaved(data);
 
   let glyph: string;
   if (netCredits === null) glyph = `↯${kAbbrev(totalTokens)}`;
@@ -534,10 +526,13 @@ function renderSaved(data: ThroughputData): void {
   const n = (v: number) => v.toLocaleString();
   const lines: string[] = [
     `${n(virtualCalls)} virtual tool calls → ${n(roundTrips)} round trips saved`,
+  ];
+  if (timeSavedMs > 0) lines.push(`~${fmtDuration(timeSavedMs)} round-trip time saved (accum)`);
+  lines.push(
     `cache saved (accum est): ${n(replay)} replay + ${n(compound)} lean = ${n(cacheSaved)} tok`,
     `input saved (exact): shaping ${n(shaping)} + workflow ${n(fresh)} = ${n(inputSaved)} tok`,
     `output spent (script est): ${n(outputDelta)} tok`,
-  ];
+  );
 
   if (rates) {
     const PER = 1_000_000;
@@ -555,8 +550,6 @@ function renderSaved(data: ThroughputData): void {
   } else {
     lines.push(`rates unknown (Auto): ${n(totalTokens)} tok saved`);
   }
-
-  if (roundTrips > 0) lines.push(`~${fmtDuration(timeSavedMs)} round-trip time saved`);
 
   el.title = lines.join('\n');
 }

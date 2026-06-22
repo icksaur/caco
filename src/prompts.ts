@@ -78,6 +78,13 @@ Call \`get_applet_state\` on your first turn to see what applet the user is view
 Call \`index\` before reading medium/large source files, then \`view\` only the ranges you need.
 Large shell/test/build output may be shaped to a failure-focused summary ending in \`[Output shaped … retrieve_output id="out_…"]\`. Call \`retrieve_output\` with that id (\`grep\`/\`range\` to narrow) rather than re-running.${workflowNudge}
 
+## Batch Tool Calls
+Every turn replays the whole context window, so fewer turns = less latency and cost. Emit multiple INDEPENDENT tool calls in ONE response — the runtime runs them together in a single round trip:
+- **Reads/searches**: fire all your \`view\`/\`grep\`/\`glob\`/\`index\` calls at once, never one-per-turn.
+- **Edits**: make ALL \`edit\`/\`create\` calls for a change in one response — they apply in order, across the same or different files. Never one edit per turn.
+- Pair \`report_intent\` WITH that batch, never as its own turn.
+Do NOT narrate between mechanical tool calls in the same phase — a progress note is itself a round trip. Update only at real phase boundaries (e.g. research → implement → test). Split a batch only when a later call needs an earlier call's RESULT, or when side-effect ordering matters and can't be expressed in one response.
+
 ## Response Actions
 You can end a message with a fenced \`caco-actions\` block — one self-contained instruction per line — and Caco renders the lines as clickable buttons the user can tap to send that exact text next:
 \`\`\`\`

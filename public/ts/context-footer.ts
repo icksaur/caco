@@ -376,14 +376,14 @@ const FALLBACK_ROUNDTRIP_MS = 8000;
 interface SavedPricing {
   /** Net credits saved — context savings that survive parallel tool calls, minus output cost. May be negative. */
   netCredits: number | null;
-  /** Optimistic "if these calls had run sequentially" window-replay credits. */
-  ifSequentialCredits: number | null;
   /** Ballpark wall time saved (ms) from round trips saved × this session's avg turn. */
   timeSavedMs: number;
+  /** Active model's per-MTOK rates, or null when unknown (e.g. Auto). */
+  rates: { input: number; cache: number; output: number } | null;
 }
 
 /** Price saved tokens by billing class (input for fresh + shaping, cache for
- *  compounding/replay, output for the net code delta). Returns null credits when
+ *  compounding, output for the net code delta). Returns null rates/credits when
  *  the model's rates are unknown (e.g. Auto); tokens are still shown. */
 function priceSaved(d: ThroughputData): SavedPricing {
   const roundTripsSaved = d.workflowRoundTripsSaved ?? 0;
@@ -394,27 +394,33 @@ function priceSaved(d: ThroughputData): SavedPricing {
 
   const model = getAvailableModels().find(m => m.id === activeModelId);
   if (!model || model.inputPerMtok === undefined) {
-    return { netCredits: null, ifSequentialCredits: null, timeSavedMs };
+    return { netCredits: null, timeSavedMs, rates: null };
   }
-  const inputRate = model.inputPerMtok;
-  const cacheRate = model.cachePerMtok ?? 0;
-  const outputRate = model.outputPerMtok ?? 0;
+  const rates = { input: model.inputPerMtok, cache: model.cachePerMtok ?? 0, output: model.outputPerMtok ?? 0 };
 
   const fresh = d.workflowSavedTokens ?? 0;
   const compound = d.workflowCacheCompoundSaved ?? 0;
   const outputDelta = d.workflowOutputDelta ?? 0;
   const shaping = d.shapingSavedTokens ?? 0;
-  const replay = d.workflowCacheReplaySaved ?? 0;
 
   const netCredits =
-    ((fresh + shaping) * inputRate + compound * cacheRate - outputDelta * outputRate) / 1_000_000;
-  const ifSequentialCredits = (replay * cacheRate) / 1_000_000;
-  return { netCredits, ifSequentialCredits, timeSavedMs };
+    ((fresh + shaping) * rates.input + compound * rates.cache - outputDelta * rates.output) / 1_000_000;
+  return { netCredits, timeSavedMs, rates };
 }
 
 function fmtCredits(c: number): string {
   const a = Math.abs(c);
   return a < 10 ? a.toFixed(2) : Math.round(a).toLocaleString();
+}
+
+/** Precise credit formatter for the math breakdown — keeps small per-class
+ *  components legible (a component can be a tiny fraction of a credit). */
+function fmtCr(c: number): string {
+  const a = Math.abs(c);
+  if (a >= 10) return Math.round(a).toLocaleString();
+  if (a >= 0.01) return a.toFixed(2);
+  if (a === 0) return '0';
+  return a.toPrecision(2);
 }
 
 function fmtDuration(ms: number): string {
@@ -498,51 +504,56 @@ function renderThroughput(data: ThroughputData): void {
 }
 
 /** Render the accumulated savings indicator next to the context usage pie.
- *  Headline is net credits saved (context savings that survive parallel tool
- *  calls, minus output cost); the tooltip breaks down every term. Always
- *  rendered, initialized before anything is saved. */
+ *  Glyph is net credits saved; the tooltip shows the token quantities and the
+ *  exact credit arithmetic (rates expanded as perMtok/1000000). */
 function renderSaved(data: ThroughputData): void {
   const footer = regions.footer.el;
   const el = footer.querySelector('.context-saved') as HTMLElement | null;
   if (!el) return;
 
-  const workflowTokens = data.workflowSavedTokens ?? 0;
-  const workflowRuns = data.workflowRuns ?? 0;
+  const fresh = data.workflowSavedTokens ?? 0;
   const compound = data.workflowCacheCompoundSaved ?? 0;
-  const replay = data.workflowCacheReplaySaved ?? 0;
   const virtualCalls = data.workflowVirtualCallsAvoided ?? 0;
   const roundTrips = data.workflowRoundTripsSaved ?? 0;
   const outputDelta = data.workflowOutputDelta ?? 0;
-  const shapingTokens = data.shapingSavedTokens ?? 0;
-  const shapingCount = data.shapingShapeCount ?? 0;
-  const totalTokens = workflowTokens + compound + shapingTokens;
+  const shaping = data.shapingSavedTokens ?? 0;
+  const inputSaved = fresh + shaping;
+  const totalTokens = fresh + compound + shaping;
 
-  const { netCredits, ifSequentialCredits, timeSavedMs } = priceSaved(data);
+  const { netCredits, timeSavedMs, rates } = priceSaved(data);
 
   let glyph: string;
-  if (netCredits === null) {
-    glyph = `↯${kAbbrev(totalTokens)}`;
-  } else if (netCredits < 0) {
-    glyph = `↯−${fmtCredits(netCredits)}cr`;
-  } else {
-    glyph = `↯≈${fmtCredits(netCredits)}cr`;
-  }
+  if (netCredits === null) glyph = `↯${kAbbrev(totalTokens)}`;
+  else if (netCredits < 0) glyph = `↯−${fmtCredits(netCredits)}cr`;
+  else glyph = `↯≈${fmtCredits(netCredits)}cr`;
   el.textContent = glyph;
 
-  const creditLine = netCredits === null
-    ? `est. ${totalTokens.toLocaleString()} context tokens saved (credit estimate unavailable for this model)`
-    : netCredits < 0
-      ? `net ≈−${fmtCredits(netCredits)} cr (workflow output cost exceeded savings)`
-      : `net ≈${fmtCredits(netCredits)} cr saved (est., survives parallel tool calls)`;
-  const seqLine = ifSequentialCredits !== null && ifSequentialCredits > 0
-    ? `\nif those calls had run sequentially: +≈${fmtCredits(ifSequentialCredits)} cr more (${replay.toLocaleString()} cache tokens)`
-    : '';
-  const timeLine = roundTrips > 0 ? `\n~${fmtDuration(timeSavedMs)} round-trip time saved (rough)` : '';
+  const n = (v: number) => v.toLocaleString();
+  const lines: string[] = [
+    `${n(virtualCalls)} virtual tool calls → ${n(roundTrips)} round trips saved`,
+    `input saved (exact): shaping ${n(shaping)} + workflow ${n(fresh)} = ${n(inputSaved)} tok`,
+    `cache saved (accum est): ${n(compound)} tok`,
+    `output spent (script est): ${n(outputDelta)} tok`,
+  ];
 
-  el.title =
-    `${creditLine}\n` +
-    `workflow: ${virtualCalls} virtual tool call${virtualCalls !== 1 ? 's' : ''} avoided across ${workflowRuns} run${workflowRuns !== 1 ? 's' : ''} (${roundTrips} est. round trips saved)\n` +
-    `  · ${workflowTokens.toLocaleString()} fresh-input + ${compound.toLocaleString()} compounding cache tokens, ${outputDelta >= 0 ? '' : '−'}${Math.abs(outputDelta).toLocaleString()} net output tokens\n` +
-    `shaping: ${shapingTokens.toLocaleString()} (exact) across ${shapingCount} trim${shapingCount !== 1 ? 's' : ''}` +
-    seqLine + timeLine;
+  if (rates) {
+    const PER = 1_000_000;
+    const cacheCr = compound * rates.cache / PER;
+    const inputCr = inputSaved * rates.input / PER;
+    const outputCr = outputDelta * rates.output / PER;
+    const net = cacheCr + inputCr - outputCr;
+    // Sign-fold the output term so the formula never prints "− −".
+    const outSymOp = outputDelta >= 0 ? '−' : '+';
+    const outCrOp = outputCr >= 0 ? '−' : '+';
+    lines.push(
+      `${n(compound)}×${rates.cache}/${PER} + ${n(inputSaved)}×${rates.input}/${PER} ${outSymOp} ${n(Math.abs(outputDelta))}×${rates.output}/${PER}`,
+      `= ${fmtCr(cacheCr)} + ${fmtCr(inputCr)} ${outCrOp} ${fmtCr(outputCr)} = ${net < 0 ? '−' : ''}${fmtCr(net)} cr`,
+    );
+  } else {
+    lines.push(`rates unknown (Auto): ${n(totalTokens)} tok saved`);
+  }
+
+  if (roundTrips > 0) lines.push(`~${fmtDuration(timeSavedMs)} round-trip time saved`);
+
+  el.title = lines.join('\n');
 }

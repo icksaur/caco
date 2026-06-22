@@ -21,6 +21,7 @@
     "@types/tar",
     "@codemirror/*",
     "@lezer/*",
+    "@vscode/ripgrep",
     "highlight.js",
     "tree-sitter-c-sharp",
     "tree-sitter-cpp",

@@ -1,18 +1,20 @@
 # Tool-diet benchmark
 
 Fixed tasks run **before and after** each diet change. Each completed request
-appends a row to `~/.caco/metrics/requests.jsonl` tagged with the Caco repo git
-sha, so before/after is keyed by commit automatically. Compare the **same task**
-across commits — comparing different work is too noisy to be an oracle.
+appends a row to `~/.caco/metrics/requests.jsonl`. To compare before/after,
+snapshot or clear the log between the two runs (e.g. rename it after the "before"
+pass). Compare the **same task** across runs — comparing different work is too
+noisy to be an oracle.
 
 ## Protocol
 
-1. Check out / run the commit you want to measure (the running server's HEAD is
-   recorded per row).
+1. Run the build you want to measure (the running server's code is what's recorded).
 2. In a fresh session, send each benchmark prompt below verbatim, one per request.
 3. Let it run to idle (one prompt = one request = one row).
-4. Make the diet change, rebuild/restart, repeat the same prompts.
-5. Run the report: `node scripts/bench-report.mjs` (groups rows by git sha).
+4. Snapshot the log (`mv requests.jsonl before.jsonl`), make the diet change,
+   rebuild/restart, repeat the same prompts.
+5. Run the report: `node scripts/bench-report.mjs` (aggregate averages over the
+   current log).
 
 ## Metrics captured per request
 

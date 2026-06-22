@@ -15,6 +15,10 @@ describe('route module side-effects', () => {
   // will throw — same code path the server runs at startup.
   it('routes/index.ts imports cleanly without throwing', async () => {
     await expect(import('../../src/routes/index.js')).resolves.toBeDefined();
-  });
+    // 30s (not the 5s default): this import transitively transforms the entire
+    // route layer via tsx/esbuild — a heavy one-time cost that can exceed 5s
+    // under full-suite parallel CPU contention (passes in ~1.7s isolated). The
+    // generous deadline removes the flake without masking a real hang.
+  }, 30000);
 });
 

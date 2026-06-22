@@ -27,6 +27,7 @@
   "type": "module",
   "dependencies": {
     "@github/copilot-sdk": "1.0.1",
+    "@vscode/ripgrep": "^1.18.0",
     "chokidar": "^5.0.0",
     "cron-parser": "^5.5.0",
     "express": "^5.2.1",

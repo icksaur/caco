@@ -111,14 +111,14 @@ background spec review before implementation. This document is the index of reco
 
 ## Future / portability
 
-- **Cross-platform `caco.sh` (TODO).** `caco.sh` runs via Node `exec`, whose default
-  shell is `/bin/sh` on Unix and `cmd.exe` on Windows — so a bash command emitted by the
-  model fails on Windows, and vice versa. Now that C1 routes all shell through `caco.sh`,
-  this is the portability gap to close. Needs: (a) pick the right shell per platform
-  (bash/sh on Unix, PowerShell on Windows), and (b) tell the model which shell dialect to
-  write for (expose the platform/shell in the facade or prompt) — picking the binary
-  alone isn't enough since the *command syntax* differs. Until then, Caco shell wrapping
-  assumes a Unix-like shell. Deferred; revisit before any Windows use.
+- **Cross-platform `caco.sh` (DONE).** Resolved by `src/workflow/shell.ts`
+  (`resolveShell`/`getHostShell`): PowerShell on Windows (pwsh→powershell.exe), bash→sh
+  elsewhere, and the model is told the host dialect via `FACADE_API_SUMMARY` /
+  `shellGuidance`. See `docs/windows-proofing-spec.md`.
+- **`caco.rg` + path parity (DONE).** `caco.rg` now resolves a vendored `@vscode/ripgrep`
+  binary (`CACO_RG_PATH` → vendored → JS fallback for `caco.grep`), so it works on Windows
+  without a system rg. All four model-facing relative paths (`grep`/`glob`/`read`/`index`)
+  are normalized to POSIX `/` on every platform. See `docs/windows-proofing-spec.md`.
 - **`caco.frames` portability (in spec).** The planned code-navigation helper
   (`docs/caco-frames-spec.md`) must use only the JS/WASM facade primitives
   (`caco.grep`/`glob`/`read`/`index`), never `caco.rg` or `caco.sh`-with-bash, so it works

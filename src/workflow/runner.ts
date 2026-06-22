@@ -13,6 +13,8 @@ import {
   WORKFLOW_LOG_CAP_BYTES,
   WORKFLOW_RESULT_MAX_BYTES,
 } from '../config.js';
+
+const isWindows = process.platform === 'win32';
 
 export type WorkflowOutcome = 'emitted' | 'error' | 'no-emit';
 
@@ -79,7 +81,7 @@ export function resolveTsxRunner(): Promise<TsxRunner | null> {
       const probe = join(dir, 'probe.mts');
       await writeFile(probe, 'const x: number = 41; process.stdout.write(String(x + 1));');
       const out = await new Promise<string>((resolveOut, rejectOut) => {
-        const child = spawn(runner.node, [runner.cli, probe], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, NODE_NO_WARNINGS: '1' } });
+        const child = spawn(runner.node, [runner.cli, probe], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, env: { ...process.env, NODE_NO_WARNINGS: '1' } });
         let buf = '';
         child.stdout.on('data', (d) => { buf += d.toString(); });
         child.on('error', rejectOut);
@@ -206,9 +208,10 @@ export interface RunWorkflowOptions {
 }
 
 /**
- * Run one workflow script in a detached tsx subprocess scoped to `sessionCwd`.
- * Enforces a wall-clock timeout (process-group kill so children die too) and a
- * hard log byte ceiling, then reads the emit() result envelope.
+ * Run one workflow script in a tsx subprocess scoped to `sessionCwd` (detached
+ * on Unix for process-group kill; non-detached on Windows so console grandchildren
+ * stay hidden). Enforces a wall-clock timeout (tree kill so children die too) and
+ * a hard log byte ceiling, then reads the emit() result envelope.
  */
 export async function runWorkflow(sessionCwd: string, options: RunWorkflowOptions): Promise<WorkflowRunResult> {
   const runner = await resolveTsxRunner();
@@ -241,10 +244,20 @@ export async function runWorkflow(sessionCwd: string, options: RunWorkflowOption
       }
     };
 
+    // On Windows we do NOT detach: a DETACHED_PROCESS parent has no console, so
+    // any console grandchild it spawns (PowerShell via caco.sh, rg via caco.rg)
+    // escapes into a fresh VISIBLE window despite windowsHide. Keeping the
+    // workflow node non-detached makes its child spawns occur in the same
+    // proven-quiet context as routes/shell.ts (which spawns PowerShell hidden
+    // from the main server process and never flashes). Unix keeps detached so
+    // the timeout path can group-kill via process.kill(-pid). Tree reaping on
+    // Windows is handled by taskkill /T in killGroup (Windows has no process
+    // groups, so child.kill() would orphan the grandchildren).
     const child = spawn(runner.node, [runner.cli, entry], {
       cwd: sessionCwd,
-      detached: true,
+      detached: !isWindows,
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
       env: { ...process.env, NODE_NO_WARNINGS: '1' },
     });
     child.stdout.on('data', capture);
@@ -254,6 +267,21 @@ export async function runWorkflow(sessionCwd: string, options: RunWorkflowOption
     let killTimer: NodeJS.Timeout | undefined;
     const killGroup = (signal: NodeJS.Signals): void => {
       if (child.pid === undefined) return;
+      if (isWindows) {
+        // No process groups on Windows; taskkill /T walks and kills the whole
+        // tree (node + its PowerShell/rg children). /F (force) on the SIGKILL
+        // phase; the SIGTERM phase attempts a non-forced kill first. taskkill
+        // itself is spawned hidden so the reap doesn't flash a window.
+        const args = signal === 'SIGKILL'
+          ? ['/pid', String(child.pid), '/T', '/F']
+          : ['/pid', String(child.pid), '/T'];
+        try {
+          spawn('taskkill', args, { stdio: 'ignore', windowsHide: true });
+        } catch {
+          try { child.kill('SIGKILL'); } catch { /* already gone */ }
+        }
+        return;
+      }
       try {
         process.kill(-child.pid, signal);
       } catch {

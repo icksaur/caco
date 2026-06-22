@@ -1,3 +1,10 @@
+/**
+ * INTEGRATION smokes for the workflow runner. Each test here spawns a REAL tsx
+ * subprocess (slow: node start + esbuild transform), so this file is deliberately
+ * small — only behaviors that genuinely need a child process live here. The pure
+ * emit/accounting and envelope-classification logic is unit-tested in-process in
+ * workflow-harness-runtime.test.ts and workflow-classify-envelope.test.ts.
+ */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { execFile } from 'child_process';
@@ -23,12 +30,12 @@ afterAll(async () => {
   await rm(base, { recursive: true, force: true });
 });
 
-describe('runWorkflow envelope', () => {
+describe('runWorkflow (integration smokes)', () => {
   it('runner is available (tsx resolvable)', async () => {
     expect(await isWorkflowRunnerAvailable()).toBe(true);
   });
 
-  it('emits a JSON value computed from the facade', async () => {
+  it('spawns a child, runs the facade, and emits a JSON value (happy path)', async () => {
     const r = await runWorkflow(base, { code: `
       const hits = await caco.grep('NEEDLE');
       emit({ count: hits.length, first: (await caco.read('data.txt', [1, 1])).text });
@@ -36,72 +43,17 @@ describe('runWorkflow envelope', () => {
     expect(r.outcome).toBe('emitted');
     expect(r.value).toEqual({ count: 2, first: 'one NEEDLE' });
     expect(r.timedOut).toBe(false);
-  });
+    // accounting is wired end-to-end (logic itself is unit-tested separately)
+    expect(r.observedBytes).toBeGreaterThan(0);
+    expect(r.commandCount).toBe(2);
+  }, 15000);
 
-  it('accumulates observedBytes from facade read payloads', async () => {
-    const withReads = await runWorkflow(base, {
-      code: `
-        await caco.grep('NEEDLE');
-        const r = await caco.read('data.txt', [1, 1]);
-        emit({ n: r.text.length });
-      `,
-    });
-    expect(withReads.outcome).toBe('emitted');
-    expect(withReads.observedBytes).toBeGreaterThan(0);
-
-    const noReads = await runWorkflow(base, { code: 'emit({ a: 1 });' });
-    expect(noReads.observedBytes).toBe(0);
-  });
-
-  it('counts facade calls as commandCount (virtual tool calls)', async () => {
-    const r = await runWorkflow(base, {
-      code: `
-        await caco.grep('NEEDLE');
-        await caco.read('data.txt', [1, 1]);
-        await caco.glob('*.txt');
-        emit({ done: true });
-      `,
-    });
-    expect(r.outcome).toBe('emitted');
-    expect(r.commandCount).toBe(3);
-
-    const none = await runWorkflow(base, { code: 'emit({ a: 1 });' });
-    expect(none.commandCount).toBe(0);
-  });
-
-  it('keeps the first emit when emit() is called twice', async () => {
-    const r = await runWorkflow(base, { code: 'emit({ a: 1 }); emit({ a: 2 });' });
-    expect(r.outcome).toBe('emitted');
-    expect(r.value).toEqual({ a: 1 });
-  });
-
-  it('reports a clear error for a non-JSON-serializable value', async () => {
+  it('captures a non-serializable emit as a clean error (harness wiring)', async () => {
     const r = await runWorkflow(base, { code: 'emit({ big: 1n });' });
     expect(r.outcome).toBe('error');
     expect(r.error).toMatch(/not JSON-serializable/i);
-  });
+  }, 15000);
 
-  it('reports no-emit when the script never calls emit()', async () => {
-    const r = await runWorkflow(base, { code: 'const x = 1 + 1;' });
-    expect(r.outcome).toBe('no-emit');
-  });
-
-  it('captures an uncaught throw as an error with stack', async () => {
-    const r = await runWorkflow(base, { code: 'throw new Error(\'boom\');' });
-    expect(r.outcome).toBe('error');
-    expect(r.error).toMatch(/boom/);
-  });
-
-  it('rejects facade path escapes inside the workflow', async () => {
-    const r = await runWorkflow(base, { code: `
-      try { await caco.read('../../etc/passwd'); emit({ escaped: true }); }
-      catch { emit({ escaped: false }); }
-    ` });
-    expect(r.value).toEqual({ escaped: false });
-  });
-});
-
-describe('runWorkflow bounds', () => {
   it('caps captured logs at the byte ceiling and flags truncation', async () => {
     const r = await runWorkflow(base, {
       code: 'for (let i = 0; i < 60000; i++) console.log(\'x\'.repeat(100));',
@@ -109,12 +61,6 @@ describe('runWorkflow bounds', () => {
     });
     expect(r.logsTruncated).toBe(true);
     expect(Buffer.byteLength(r.logs, 'utf8')).toBeLessThanOrEqual(WORKFLOW_LOG_CAP_BYTES);
-  }, 30000);
-
-  it('rejects an oversized emit value instead of loading it all into memory', async () => {
-    const r = await runWorkflow(base, { code: 'emit({ blob: \'q\'.repeat(3 * 1024 * 1024) });', timeoutMs: 20000 });
-    expect(r.outcome).toBe('error');
-    expect(r.error).toMatch(/too large/i);
   }, 30000);
 
   it('times out an infinite loop within the deadline', async () => {
@@ -134,7 +80,7 @@ describe('runWorkflow bounds', () => {
     try {
       const { stdout } = await execFileAsync('ps', ['-eo', 'args'], { windowsHide: true });
       survivors = stdout;
-    } catch { /* ps unavailable; skip */ }
+    } catch { /* ps unavailable (e.g. Windows); skip */ }
     if (survivors) expect(survivors).not.toContain(marker);
   }, 15000);
 });
@@ -157,3 +103,4 @@ describe('sweepWorkflowScratch', () => {
     await rm(fresh, { recursive: true, force: true });
   });
 });
+

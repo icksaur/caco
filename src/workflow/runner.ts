@@ -127,19 +127,21 @@ export async function sweepWorkflowScratch(): Promise<void> {
   }));
 }
 
-function facadeModuleUrl(): string {
-  const facadeJs = fileURLToPath(new URL('./facade.js', import.meta.url));
-  const facadeTs = facadeJs.replace(/\.js$/, '.ts');
-  return pathToFileURL(existsSync(facadeTs) ? facadeTs : facadeJs).href;
+function moduleUrl(relJs: string): string {
+  const js = fileURLToPath(new URL(relJs, import.meta.url));
+  const ts = js.replace(/\.js$/, '.ts');
+  return pathToFileURL(existsSync(ts) ? ts : js).href;
 }
 
 /**
  * The script the child runs. User `code` is the body of an async IIFE with
- * `caco` (the facade) and `emit` in scope. `emit` writes the result envelope
- * via temp+rename so a partial file is never observed; a second `emit` throws.
+ * `caco` (the facade) and `emit` in scope. The emit/accounting/serialization
+ * logic lives in `harness-runtime.ts` (imported by URL, unit-tested in-process);
+ * only the subprocess fs write and the live byte/command counters stay inline.
  */
 function buildHarness(userCode: string, sessionCwd: string, resultPath: string): string {
-  return `import { createFacade, wrapFacadeForAccounting } from ${JSON.stringify(facadeModuleUrl())};
+  return `import { createFacade, wrapFacadeForAccounting } from ${JSON.stringify(moduleUrl('./facade.js'))};
+import { accountBytes, createEmitController } from ${JSON.stringify(moduleUrl('./harness-runtime.js'))};
 import { writeFileSync, renameSync } from 'node:fs';
 
 const __resultPath = ${JSON.stringify(resultPath)};
@@ -149,39 +151,19 @@ const __rawFacade = createFacade(${JSON.stringify(sessionCwd)});
 // Counting hook: every read-oriented facade call adds the bytes it returned to
 // __observedBytes (data that would otherwise have entered the model context) and
 // increments __commandCount (one virtual tool call).
-const __account = (v: unknown): void => {
-  __commandCount += 1;
-  try {
-    __observedBytes += Buffer.byteLength(typeof v === 'string' ? v : (JSON.stringify(v) ?? ''), 'utf8');
-  } catch { /* unserializable payloads are not counted */ }
-};
+const __account = (v) => { __commandCount += 1; __observedBytes += accountBytes(v); };
 const caco = wrapFacadeForAccounting(__rawFacade, __account);
 
-let __written = false;
-
-function __write(ok: boolean, body: Record<string, unknown>): void {
+// Atomic envelope write (temp+rename) reading the live counters at write time.
+function __write(ok, body) {
   const envelope = JSON.stringify({ ok, observedBytes: __observedBytes, commandCount: __commandCount, ...body });
   const tmp = __resultPath + '.tmp';
   writeFileSync(tmp, envelope);
   renameSync(tmp, __resultPath);
-  __written = true;
 }
 
-function emit(value: unknown): void {
-  if (__written) throw new Error('emit() called more than once');
-  let json: string | undefined;
-  try {
-    json = JSON.stringify(value);
-  } catch (e) {
-    __write(false, { error: 'emit(): value is not JSON-serializable: ' + (e instanceof Error ? e.message : String(e)) });
-    throw new Error('emit(): value is not JSON-serializable');
-  }
-  if (json === undefined) {
-    __write(false, { error: 'emit(): value is undefined or not JSON-serializable' });
-    throw new Error('emit(): value is undefined or not JSON-serializable');
-  }
-  __write(true, { value });
-}
+const __ctl = createEmitController(__write);
+const emit = __ctl.emit;
 
 void (async () => {
   try {
@@ -189,9 +171,7 @@ void (async () => {
 ${userCode}
     })();
   } catch (e) {
-    if (!__written) {
-      __write(false, { error: e instanceof Error ? (e.stack || e.message) : String(e) });
-    }
+    __ctl.finalizeError(e);
   }
 })();
 `;
@@ -200,6 +180,85 @@ ${userCode}
 function clampTimeout(requested: number | undefined): number {
   if (requested === undefined || !Number.isFinite(requested)) return WORKFLOW_TIMEOUT_DEFAULT_MS;
   return Math.max(1000, Math.min(WORKFLOW_TIMEOUT_CAP_MS, Math.floor(requested)));
+}
+
+/** Shape of the JSON envelope the child harness writes to result.json. */
+export interface ParsedEnvelope {
+  ok: boolean;
+  value?: unknown;
+  error?: string;
+  observedBytes?: number;
+  commandCount?: number;
+}
+
+/**
+ * Outcome of reading the result file, preserving size-guard-BEFORE-parse: an
+ * oversized file is never parsed/loaded (`oversized`), a present-but-corrupt file
+ * is `invalid`, a missing file is `absent`. Keeps these distinct so the classifier
+ * can synthesize the right error and so `absent` (no-emit) ≠ `invalid` (error).
+ */
+export type EnvelopeFileResult =
+  | { kind: 'absent' }
+  | { kind: 'oversized'; size: number }
+  | { kind: 'invalid' }
+  | { kind: 'ok'; envelope: ParsedEnvelope };
+
+export async function readEnvelopeFile(resultPath: string, maxBytes: number): Promise<EnvelopeFileResult> {
+  if (!existsSync(resultPath)) return { kind: 'absent' };
+  const size = (await stat(resultPath)).size;
+  if (size > maxBytes) return { kind: 'oversized', size };
+  try {
+    return { kind: 'ok', envelope: JSON.parse(await readFile(resultPath, 'utf8')) as ParsedEnvelope };
+  } catch {
+    return { kind: 'invalid' };
+  }
+}
+
+export interface ClassifyInput {
+  file: EnvelopeFileResult;
+  timedOut: boolean;
+  exitCode: number | null;
+  timeoutMs: number;
+  maxBytes: number;
+  logs: string;
+  logsTruncated: boolean;
+  durationMs: number;
+}
+
+/**
+ * Pure classification of a finished run into a WorkflowRunResult. Branch
+ * precedence is load-bearing and matches the original inline logic exactly:
+ * a written envelope (ok, or a !ok error incl. synthesized oversized/invalid)
+ * beats timeout, which beats a nonzero exit, which beats no-emit.
+ */
+export function classifyEnvelope(input: ClassifyInput): WorkflowRunResult {
+  const { file, timedOut, exitCode, timeoutMs, maxBytes, logs, logsTruncated, durationMs } = input;
+
+  let envelope: ParsedEnvelope | null;
+  switch (file.kind) {
+    case 'absent': envelope = null; break;
+    case 'oversized': envelope = { ok: false, error: `emitted value too large (${file.size} bytes, cap ${maxBytes}); emit a compact summary instead` }; break;
+    case 'invalid': envelope = { ok: false, error: 'result envelope was not valid JSON' }; break;
+    case 'ok': envelope = file.envelope; break;
+  }
+
+  const observedBytes = typeof envelope?.observedBytes === 'number' ? envelope.observedBytes : 0;
+  const commandCount = typeof envelope?.commandCount === 'number' ? envelope.commandCount : 0;
+  const common = { observedBytes, commandCount, logs, logsTruncated, timedOut, exitCode, durationMs };
+
+  if (envelope && envelope.ok) {
+    return { outcome: 'emitted', value: envelope.value, ...common };
+  }
+  if (envelope && !envelope.ok) {
+    return { outcome: 'error', error: envelope.error ?? 'unknown error', ...common };
+  }
+  if (timedOut) {
+    return { outcome: 'error', error: `workflow timed out after ${timeoutMs} ms`, ...common };
+  }
+  if (exitCode !== 0 && exitCode !== null) {
+    return { outcome: 'error', error: `workflow process exited with code ${exitCode} without calling emit()`, ...common };
+  }
+  return { outcome: 'no-emit', ...common };
 }
 
 export interface RunWorkflowOptions {
@@ -307,37 +366,11 @@ export async function runWorkflow(sessionCwd: string, options: RunWorkflowOption
     const logs = Buffer.concat(chunks).toString('utf8');
     const durationMs = Date.now() - started;
 
-    let envelope: { ok: boolean; value?: unknown; error?: string; observedBytes?: number; commandCount?: number } | null = null;
-    if (existsSync(resultPath)) {
-      const size = (await stat(resultPath)).size;
-      if (size > WORKFLOW_RESULT_MAX_BYTES) {
-        envelope = { ok: false, error: `emitted value too large (${size} bytes, cap ${WORKFLOW_RESULT_MAX_BYTES}); emit a compact summary instead` };
-      } else {
-        try {
-          envelope = JSON.parse(await readFile(resultPath, 'utf8'));
-        } catch {
-          envelope = { ok: false, error: 'result envelope was not valid JSON' };
-        }
-      }
-    }
-
-    const observedBytes = typeof envelope?.observedBytes === 'number' ? envelope.observedBytes : 0;
-    const commandCount = typeof envelope?.commandCount === 'number' ? envelope.commandCount : 0;
-    const common = { observedBytes, commandCount, logs, logsTruncated, timedOut, exitCode, durationMs };
-
-    if (envelope && envelope.ok) {
-      return { outcome: 'emitted', value: envelope.value, ...common };
-    }
-    if (envelope && !envelope.ok) {
-      return { outcome: 'error', error: envelope.error ?? 'unknown error', ...common };
-    }
-    if (timedOut) {
-      return { outcome: 'error', error: `workflow timed out after ${timeoutMs} ms`, ...common };
-    }
-    if (exitCode !== 0 && exitCode !== null) {
-      return { outcome: 'error', error: `workflow process exited with code ${exitCode} without calling emit()`, ...common };
-    }
-    return { outcome: 'no-emit', ...common };
+    const file = await readEnvelopeFile(resultPath, WORKFLOW_RESULT_MAX_BYTES);
+    return classifyEnvelope({
+      file, timedOut, exitCode, timeoutMs,
+      maxBytes: WORKFLOW_RESULT_MAX_BYTES, logs, logsTruncated, durationMs,
+    });
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

@@ -232,8 +232,8 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
     case 'caco.term.input': {
       const sid = clientSubscription.get(ws);
       if (!sid) break;
-      const d = msg.data as { data?: string } | undefined;
-      if (typeof d?.data === 'string') writeTerminalInput(sid, d.data);
+      const d = msg.data as { data?: string; binary?: boolean } | undefined;
+      if (typeof d?.data === 'string') writeTerminalInput(sid, d.data, d.binary === true);
       break;
     }
 

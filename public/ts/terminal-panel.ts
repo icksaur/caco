@@ -17,6 +17,7 @@
 
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { CanvasAddon } from '@xterm/addon-canvas';
 import { onEvent, onReconnect, wsSendRaw } from './websocket.js';
 import { getActiveSessionId, onActiveSessionChange } from './app-state.js';
 import { showToast } from './toast.js';
@@ -203,12 +204,31 @@ function attachActive(): void {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(el);
+    // Canvas renderer instead of the default DOM renderer: the DOM renderer
+    // fails to repaint draw-then-idle full-screen apps (vim, Copilot CLI) after
+    // their first frame, while continuously-redrawing apps (htop, micro) mask
+    // it. Canvas is a separate render path and works on the iOS Safari target
+    // (unlike WebGL, which suffers context loss there). Load after open().
+    try {
+      term.loadAddon(new CanvasAddon());
+    } catch {
+      /* canvas unsupported — fall back to the DOM renderer */
+    }
     // After the shell exits, the next keystroke respawns it (matches the
     // "press any key … to restart" hint); otherwise it's normal pty input.
     term.onData(d => {
       const cur = terms.get(sid);
       if (cur?.exited) { attachActive(); return; }
       wsSendRaw({ type: 'caco.term.input', data: { data: d } });
+    });
+    // Terminal report replies (DA/DSR/cursor-position) are emitted on onBinary
+    // (Latin-1 byte string), NOT onData. Full-screen TUIs (vim, the Copilot CLI)
+    // and fish block waiting for these, so they MUST be forwarded to the pty as
+    // raw bytes — flagged so the server writes them with Buffer.from(d,'binary').
+    term.onBinary(d => {
+      const cur = terms.get(sid);
+      if (cur?.exited) return;
+      wsSendRaw({ type: 'caco.term.input', data: { data: d, binary: true } });
     });
     entry = { term, fit, el, exited: false };
     terms.set(sid, entry);

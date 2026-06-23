@@ -227,10 +227,19 @@ export function ensureTerminal(sessionId: string, cols: number, rows: number): E
   return { ring: '' };
 }
 
-export function writeTerminalInput(sessionId: string, data: string): void {
+/**
+ * Decode a terminal-input frame for the pty. onData frames are UTF-8 text
+ * (written as a string); onBinary frames (DA/DSR/report replies) are a Latin-1
+ * byte string and must become raw bytes. Pure + exported for testing.
+ */
+export function decodeTerminalInput(data: string, binary: boolean): string | Buffer {
+  return binary ? Buffer.from(data, 'binary') : data;
+}
+
+export function writeTerminalInput(sessionId: string, data: string, binary = false): void {
   const entry = terminals.get(sessionId);
   if (!entry || entry.exited) return;
-  entry.pty.write(data);
+  entry.pty.write(decodeTerminalInput(data, binary));
   entry.lastActivity = Date.now();
 }
 

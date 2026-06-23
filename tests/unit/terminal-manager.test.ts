@@ -1,10 +1,31 @@
 import { describe, it, expect } from 'vitest';
-import { RingBuffer, interactiveShellArgs, resolveInteractiveShell } from '../../src/terminal-manager.js';
+import { RingBuffer, interactiveShellArgs, resolveInteractiveShell, decodeTerminalInput } from '../../src/terminal-manager.js';
 import type { ShellSpec } from '../../src/workflow/shell.js';
 
 function spec(dialect: ShellSpec['dialect']): ShellSpec {
   return { file: 'x', flagArgs: ['-c'], label: dialect, dialect };
 }
+
+describe('decodeTerminalInput', () => {
+  it('passes onData (UTF-8 text) through as a string', () => {
+    expect(decodeTerminalInput('ls -la\r', false)).toBe('ls -la\r');
+  });
+
+  it('converts an onBinary DA reply (Latin-1) to the exact bytes', () => {
+    // xterm emits the Primary DA reply ESC [ ? 1 ; 2 c on onBinary; full-screen
+    // TUIs block until these bytes reach the pty.
+    const reply = '\x1b[?1;2c';
+    const out = decodeTerminalInput(reply, true);
+    expect(Buffer.isBuffer(out)).toBe(true);
+    expect([...(out as Buffer)]).toEqual([0x1b, 0x5b, 0x3f, 0x31, 0x3b, 0x32, 0x63]);
+  });
+
+  it('round-trips a DSR cursor-position reply byte-for-byte', () => {
+    const reply = '\x1b[24;80R';
+    const out = decodeTerminalInput(reply, true) as Buffer;
+    expect(out.toString('binary')).toBe(reply);
+  });
+});
 
 describe('interactiveShellArgs', () => {
   it('launches PowerShell with -NoLogo (not exec flags)', () => {

@@ -3,161 +3,180 @@
 ## Goal
 
 A real, user-identity terminal you can pop open under the meta-context footer — **pwsh on
-Windows, a TTY shell on Linux** — vendored entirely as a Caco **extension**, so it never
-becomes permanent core UI. A small glyph mid-right in the footer toggles a terminal panel
-that takes vertical space **below** the footer. The pty is a **child of the Caco session**:
-one terminal per session, switching sessions switches terminals.
+Windows, a TTY shell on Linux** — with the terminal *feature* (panel, glyph, pty bridge)
+living entirely in a vendored Caco **extension** (`~/.caco/extensions/terminal/`). A small
+glyph mid-right in the footer toggles a panel that takes vertical space **below** the footer.
+The pty is a **child of the Caco session**: one terminal per session; switching sessions
+switches terminals.
 
-V1 is a spike on a new branch (`terminal-ext`). Self-contained in
-`~/.caco/extensions/terminal/`; deleting the dir removes it with zero core residue.
+**Honest reframe (post-review):** a *zero-core* V1 is NOT achievable for the exact
+session-child semantics — the current extension API lacks the seams (session-scoped client
+events, active-session id, session cwd, a real footer right-slot, server-known session
+context on inbound messages). So V1 = **(a) a small set of GENERIC, reusable extension-API
+seams in core** + **(b) the terminal as a vendored extension on top.** The terminal UI/logic
+never enters core; only generic plumbing does. Deleting the extension dir removes the
+*feature*; the seams remain as capability for any future extension. This split is the
+reviewer's recommended path (B): land the seams first, then the extension.
 
-## Why an extension (the seams already exist)
+V1 is a spike on branch `terminal-ext`.
 
-| Need | Extension API (verified) |
-|---|---|
-| PTY bytes both ways | server `onClientMessage('term:input'|'term:resize', (ws,data)=>…)` + `broadcastToSession(sid,'term:output',…)` — rides Caco's existing WebSocket; **no new ws server / no http upgrade** |
-| Serve xterm assets | server `router` mounted at `/ext/terminal` (static files) |
-| Footer glyph | client `footer.addRight(id, render)` |
-| Terminal panel | client creates its own DOM, appended below `#contextFooter` |
-| Receive output / send input | client `on('term:output', …)` (session-scoped delivery) + `send('term:input', …)` |
-| Toggle shortcut | client `registerShortcut('Ctrl+\\`', …)` + `registerCommand` |
-| Persist panel open/height | client + server `getState`/`setState` |
+## Part A — generic extension-API seams to add to core (V1 prerequisite)
 
-`broadcastToSession`/`broadcastEvent` deliver only to clients subscribed to that session, so
-output is **naturally session-scoped** — the core of the "child of the session" coupling.
+Each is small, generic, and independently useful — none is terminal-specific.
 
-## Architecture
+| Seam | Where | Why |
+|---|---|---|
+| `ext.<slug>.*` message namespacing already required | `src/routes/websocket.ts` (dispatch only fires `onClientMessage` for `msg.type.startsWith('ext.')`) | protocol must use `ext.terminal.*` — not a change, a constraint to honor |
+| **server-known session context** on inbound: `onClientMessage(type, (ws, data, ctx) => …)` where `ctx.sessionId` is the ws's *subscribed* session (from the websocket layer's private subscription map) | `src/extension-runtime.ts` + `src/routes/websocket.ts` | removes client-stamped `sid` spoofing; authorizes input to the ws's own session |
+| **session-scoped client events**: `api.onSessionEvent((sid, event) => …)` (or preserve `sessionId` in the extension event callback) | `public/ts/extension-api.ts` (currently `on` only sees global events, `sessionId` stripped) | so the client can route `term:output` to the right xterm |
+| **active session id + change**: `api.getActiveSessionId()` + `api.onActiveSessionChange(cb)` | `public/ts/extension-api.ts` (wrap `app-state.getActiveSessionId`/`setActiveSession` listeners) | client can stamp attach, swap visible terminal |
+| **read-only session info**: `api.getSessionInfo(sid) -> { cwd }` | `src/extension-runtime.ts` (read session meta) | spawn the pty in the session's cwd — the "child of the session" cwd |
+| **a real footer right-slot**: ensure `footer.addRight` mounts into an existing element (add a `.context-status`/right container to `#contextFooter`, or repoint `addRight`) | `public/index.html` + `public/ts/extension-api.ts` (`addRight` queries `.context-status` which does not exist → no-op today) | the toggle glyph must actually mount |
+| **same-origin WS check** before honoring `ext.*` input | `src/routes/websocket.ts` (no `Origin` validation today) | a real shell-input channel needs origin/session authorization, not just CSP |
+
+These seams are the BLOCKING items from review, generalized. They make the extension system
+capable of *any* session-bound, server-backed panel — the terminal is just the first user.
+
+## Part B — the terminal extension (vendored)
 
 ### Server (`server.ts`)
-- Keep `ptys: Map<sessionId, IPty>` (node-pty instances).
-- **Shell selection:** `process.platform === 'win32'` → `pwsh.exe` (fallback `powershell.exe`);
-  else `process.env.SHELL || 'bash'`. (Mirrors `src/workflow/shell.ts`; the extension keeps a
-  tiny self-contained copy rather than importing core, to stay vendor-portable.)
-- **Spawn lazily** on the first `term:input`/`term:attach` for a session (don't spawn a pty
-  for sessions whose terminal is never opened). `pty.spawn(shell, [], { name:'xterm-color',
-  cols, rows, cwd: <session cwd>, env: process.env })` — runs as the **Caco server's user
-  identity** (which is the user's, for a local personal tool).
-- `pty.onData(d => api.broadcastToSession(sid, 'term:output', d))`.
-- `onClientMessage('term:input', (ws,{sid,data}) => ptys.get(sid)?.write(data))`.
-- `onClientMessage('term:resize', (ws,{sid,cols,rows}) => ptys.get(sid)?.resize(cols,rows))`.
-- `onClientMessage('term:attach', (ws,{sid,cols,rows}) => ensurePty(sid,cols,rows))`.
-- Static: `router.use(express.static(<ext>/web))` so the client can import xterm from
-  `/ext/terminal/...`.
-- **Message shape carries `sid`** because `onClientMessage` hands the handler `(ws, data)`,
-  not a sessionId — the client stamps the active session id into every message.
+- `ptys: Map<sessionId, { pty: IPty; buf: RingBuffer }>`.
+- **Shell selection** (self-contained copy of the pure logic in `src/workflow/shell.ts`):
+  win32 → `pwsh`/`powershell` (PATH lookup); else PATH `bash` → `sh` fallback. **Interactive
+  PTY: pass NO `-c` flags** (unlike the workflow's command-exec use).
+- **Lazy spawn** on `ext.terminal.attach`: `pty.spawn(shell, [], { name:'xterm-color', cols,
+  rows, cwd: api.getSessionInfo(ctx.sessionId)?.cwd ?? process.cwd(), env: process.env })` —
+  runs as the Caco server's (i.e. the user's) identity.
+- `pty.onData(d => { ring.push(sid,d); api.broadcastToSession(sid,'ext.terminal.output',{sid,data:d}); })`.
+- Handlers (all use `ctx.sessionId`, NOT client-supplied sid):
+  - `ext.terminal.attach (ctx,{cols,rows}) → ensurePty; replay bounded scrollback`
+  - `ext.terminal.input  (ctx,{data})      → pty.write(data)`
+  - `ext.terminal.resize (ctx,{cols,rows}) → pty.resize`
+  - `ext.terminal.close  (ctx)             → pty.kill (process-group), drop`
+- **Bounded scrollback ring** per session (e.g. 256 KB) so background output (when a session
+  has no subscriber, `broadcastEvent` drops) is replayed on re-attach. Output **coalesced**
+  (batch within a frame / max chunk) for throughput.
+- Static assets: `router.use(express.static(<ext>/web))` → client imports `@xterm` from
+  `/ext/terminal/...` (confirmed feasible; same-origin, CSP-allowed).
 
-### Client (`client.ts`)
-- Dynamic-import vendored `xterm` + `xterm-addon-fit` from `/ext/terminal/`.
-- `terms: Map<sessionId, { term: Terminal; fit: FitAddon; el: HTMLElement }>` — one xterm per
-  session; only the active session's element is visible (rest `display:none`).
-- Footer glyph via `footer.addRight('term-toggle', …)` → toggles the panel.
-- Panel: a `div.terminal-panel` inserted as the **last child of `#chatFooter`** (so it sits
-  visually below `#contextFooter` and grows upward, pushing the footer up). Height persisted
-  via `setState`; a top drag-handle resizes (V2 — V1 fixed height ~280px).
-- On toggle-open for the active session: lazily create its xterm, `send('term:attach',{sid,cols,rows})`,
-  wire `term.onData(d => send('term:input',{sid,data:d}))` and `on('term:output', …)` →
-  write to the matching session's term (match by the event's session scoping; if the API
-  doesn't tag the event with sid, the client maps via the currently-attached set — see Risks).
-- On active-session change (poll `getActiveSessionId()` / `on('session…')`): swap which
-  term element is visible; keep the others alive and buffered.
-- Monospace, xterm default dark theme tuned to Caco's footer palette via `customStyle`.
+### Client (`client.ts` + `style.css`)
+- Dynamic-import vendored `@xterm/xterm` + `@xterm/addon-fit` from `/ext/terminal/`.
+- `terms: Map<sid, { term, fit, el }>`; only the active session's `el` visible.
+- Glyph via `footer.addRight('term-toggle', …)` (needs Part A footer slot) → toggle panel.
+- Panel `div.terminal-panel` inserted as **last child of `#chatFooter`** (renders below
+  `#contextFooter`; `.chat-scroll` is `flex:1` so it shrinks). **CSS contract:**
+  `align-self:stretch; width:100%`, fixed ~280px tall in V1, dark, monospace
+  (`#chatFooter` is `align-items:center`, so stretch/width are required).
+- On open for the active session: lazily create xterm, fit, `send('ext.terminal.attach',{cols,rows})`,
+  wire `term.onData(d => send('ext.terminal.input',{data:d}))`.
+- `api.onSessionEvent((sid,e)=>{ if(e.type==='ext.terminal.output') terms.get(sid)?.term.write(e.data.data) })`.
+- `api.onActiveSessionChange(sid => swap visible terminal el)`; background terms stay alive.
+- Fit + `ext.terminal.resize` on open and window resize.
 
-### Message protocol (client ↔ extension, over Caco ws)
+### Message protocol (client ↔ extension, over Caco's existing `/ws`)
 ```
-client → server:  term:attach  { sid, cols, rows }
-client → server:  term:input   { sid, data }
-client → server:  term:resize  { sid, cols, rows }
-server → client:  term:output  <string>          (delivered session-scoped)
+client → server:  ext.terminal.attach  { cols, rows }          (sid from ctx)
+client → server:  ext.terminal.input   { data }                (sid from ctx)
+client → server:  ext.terminal.resize  { cols, rows }          (sid from ctx)
+client → server:  ext.terminal.close   {}                      (sid from ctx)
+server → client:  ext.terminal.output  { sid, data }           (session-scoped + replay)
 ```
+No new ws server, no http upgrade — rides `onClientMessage`/`broadcastToSession`.
 
 ## Session coupling & lifetime
 
-- **One pty per `sessionId`**, spawned on first attach.
-- **Switching sessions** (clicking another session) swaps the visible xterm client-side; the
-  background ptys keep running and buffering. Reopening shows the session's live terminal.
-- **Reaping (V1 pragmatic — the extension API has no session-end hook yet):**
-  - explicit close glyph → `term:close {sid}` → `pty.kill()` + drop from map;
-  - **idle TTL**: a pty with no client attached and no IO for N minutes (e.g. 30) is killed;
-  - server restart clears all (process-bound).
-- **V2:** add an `onSessionEnd(sid)` hook to `ServerExtensionAPI` so pty lifetime binds
-  exactly to the Caco session connection (the literal "child of the session" guarantee).
-  V1 approximates it with the TTL + explicit close; note the gap honestly.
-
-## Layout / UX
-
-- **Glyph:** small monospace `▢`/`>_` mid-right in `#contextFooter` (via `footer.addRight`);
-  click toggles. Active state styled (e.g. accent when open).
-- **Panel:** appears **below** the footer (last child of `#chatFooter`), fixed ~280px tall in
-  V1, full footer width, dark, monospace. The chat scroll area shrinks to accommodate (flex
-  layout already shrinks `#chatScroll`).
-- Keyboard: `Ctrl+\`` toggles; focus moves into the terminal on open.
+- **One pty per `sessionId`** (server, keyed by the ws-subscribed session), spawned on first
+  attach in the session's cwd.
+- **Switching sessions** swaps the visible xterm client-side; background ptys keep running,
+  their output captured in the per-session ring buffer and replayed on re-attach.
+- **Lifetime caps (V1 — no `onSessionEnd` extension hook yet; core has an internal
+  `sessionState.onSessionEnd` that V2 should expose):**
+  - explicit close glyph → kill;
+  - **max PTY count** (e.g. 8) — evict the least-recently-attached;
+  - **max detached lifetime** (killed N min after its last client detaches, regardless of
+    output — so a runaway command can't live forever);
+  - bounded ring buffer (drop oldest);
+  - process-**group** kill on teardown; server restart clears all.
+- **V2:** expose `onSessionEnd(sid)` on `ServerExtensionAPI` for exact child-of-session
+  binding. V1 approximates with the caps above and states the gap.
 
 ## Deps to vendor (into the extension dir)
 
-- **node-pty** (server, native) — the one native dep. Ships prebuilds; **verify a Node-26 ABI
-  prebuild exists** before building, else it needs `node-gyp` (Python + a compiler). This is
-  the primary build risk and the first thing the spike must confirm.
-- **xterm** + **xterm-addon-fit** (client, pure JS) — vendored as static assets under
-  `<ext>/web/`, served by the extension router.
+- **node-pty** (server, native) — **the gating viability risk.** `npm view node-pty` shows
+  `install: node scripts/prebuild.js || node-gyp rebuild`, so a prebuild is NOT guaranteed for
+  Node v26.2.0. **Gate 1 of the spike:** from `~/.caco/extensions/terminal/`, `npm i node-pty`
+  and `jiti.import` a trivial `server.ts` that `require('node-pty')` **inside Caco's actual
+  server process**; if it falls back to `node-gyp` (needs Python + compiler), record the
+  toolchain or stop. (jiti does not forbid native `.node` addons; the risk is build/resolution,
+  not the loader.)
+- **@xterm/xterm** + **@xterm/addon-fit** (client, pure JS — the deprecated `xterm`/
+  `xterm-addon-fit` names are replaced by these scoped packages) — vendored as static ESM
+  assets under `<ext>/web/`, served by the extension router.
 
 ## Considerations / risks
 
-- **Output routing on the client.** `broadcastToSession` is session-scoped on the wire, but
-  the client `on('term:output')` handler must still route bytes to the *right* xterm when
-  multiple session terminals exist. If the delivered event isn't tagged with `sid`, the client
-  can only know "this is for the session I'm subscribed to" — which for a single active ws is
-  the active session. **V1 constraint: render/stream only the active session's terminal**;
-  background sessions' ptys keep running but their output is drained/buffered server-side and
-  replayed on re-attach (send a `term:attach` that returns recent scrollback, or simply rely
-  on the live shell state). Confirm the multi-session delivery semantics in the spike; if the
-  event carries `sid`, full background streaming is trivial.
-- **Native module.** node-pty is the only thing that can fail to install on a fresh
-  platform/Node. The spike must prove `npm i node-pty` resolves a prebuild for the dev Node
-  (26) on Linux first; Windows/pwsh validated separately.
-- **Security.** A real shell as the user = full RCE — but Caco already auto-approves arbitrary
-  code via `caco_run_workflow` and is local/personal, so this adds **no new exposure**. The pty
-  binds to no network port (rides the existing localhost ws). Don't expose `/ext/terminal` ws
-  cross-origin.
-- **No core changes in V1.** Everything lives in the extension dir. The only *desirable* core
-  addition (deferred to V2) is the `onSessionEnd` hook for exact lifetime coupling.
-- **Resize correctness.** Fit addon on panel open + on window resize + on panel drag (V2);
-  always `term:resize` after fit so the pty's winsize matches.
+- **The zero-core promise is reframed, not kept.** V1 needs the Part-A seams in core. They are
+  generic and reusable; the terminal feature stays in the extension. Do not claim both
+  zero-core AND exact session-child semantics — they are mutually exclusive given today's API.
+- **Inbound authorization.** Input is honored only for the ws's *server-known* subscribed
+  session (`ctx.sessionId`), never a client-stamped sid → no cross-session shell injection.
+  Add the same-origin WS check before any `ext.*` input is honored.
+- **Background output** is preserved by the per-session ring buffer + replay-on-attach, not by
+  live streaming to unsubscribed sessions (`broadcastEvent` drops those). Bounded to cap memory.
+- **JSON-over-WS throughput.** PTY data is string-oriented; control sequences ride fine in
+  JSON. Specify: output coalescing, max chunk size, paste chunking, a `bufferedAmount`
+  high-water backpressure check, ring-buffer cap. Binary/base64 unnecessary unless a concrete
+  encoding bug appears.
+- **Security.** A real shell as the user is a direct command channel — stronger than the
+  existing agent-mediated workflow RCE. Mitigate with: server-known `ctx.sessionId` (no
+  spoofing), same-origin WS validation, localhost-only (no new port), no cross-origin `/ext`
+  ws. This is a real new surface; the seam work must include the origin check.
+- **Resize correctness.** Fit on open + window resize; always `ext.terminal.resize` after fit.
 
 ## V1 scope vs non-goals
 
-**In V1:** single active-session terminal, lazy pty spawn, footer glyph + `Ctrl+\`` toggle,
-panel below footer (fixed height), input/output/resize, pwsh-Windows / shell-Linux, idle-TTL +
-explicit-close reaping, monospace + Caco-tuned theme.
+**In V1:** the Part-A seams; single active-session terminal with background ptys + ring-buffer
+replay; footer glyph + `Ctrl+\`` toggle; panel below footer (fixed height); input/output/
+resize; pwsh-Windows / shell-Linux; lifetime caps (count, detached-TTL, ring); monospace +
+Caco-tuned theme.
 
-**Not in V1:** background multi-session live streaming (needs confirmed sid-tagged delivery or
-the V2 hook), drag-to-resize, scrollback persistence across restart, split panes, copy-paste
-toolbar, per-session env customization, the `onSessionEnd` core hook.
+**Not in V1:** live streaming to *unsubscribed* sessions (replay only); the `onSessionEnd`
+core hook (exact lifetime binding); drag-to-resize; scrollback persistence across restart;
+split panes; copy/paste toolbar; per-session env customization.
 
 ## Acceptance (spike)
 
-- `npm i node-pty xterm xterm-addon-fit` in the extension resolves (node-pty prebuild for
-  Node 26 on Linux); record the result.
-- Opening the glyph spawns a shell as the user; `touch /tmp/caco-term-test && ls` works and
-  renders.
-- pwsh launches on Windows, `$SHELL`/bash on Linux (verify the platform branch; Windows may be
-  validated manually if no Windows host is available — note it).
-- Switching to another session and back shows a terminal scoped to each (at minimum the active
-  one is correct and isolated).
-- Closing the glyph hides the panel; the pty survives until idle-TTL/explicit close.
-- No core Caco files modified; removing `~/.caco/extensions/terminal/` fully removes the feature.
+- **Gate 1 (viability):** `npm i node-pty` in the extension dir resolves and `require`s under
+  Caco's server process on Node v26.2.0 Linux; record prebuild vs node-gyp. **If node-gyp with
+  no toolchain → stop/redecide before further work.**
+- Part-A seams land with unit coverage where testable (message-context resolution,
+  active-session accessor, footer right-slot mounts, session-scoped event delivery preserves
+  `sid`, same-origin WS rejection).
+- Opening the glyph spawns a shell as the user in the **session's cwd**;
+  `mkdir -p .caco-terminal-probe && touch .caco-terminal-probe/ok && ls .caco-terminal-probe`
+  works and renders (scratch path under the session cwd — **not** `/tmp`).
+- pwsh launches on Windows, PATH `bash`→`sh` on Linux (Windows validated manually if no host).
+- Switch session and back: the active terminal is correct and isolated; a background pty's
+  output is replayed on re-attach (not lost).
+- Closing the glyph hides the panel; the pty survives until a cap fires; an inbound message
+  with a forged sid does not reach another session's pty.
+- The terminal *feature* is fully contained in `~/.caco/extensions/terminal/` (only the generic
+  Part-A seams live in core).
 
 ## Plan (ordered, on branch `terminal-ext`)
 
-1. **Prove the native dep:** scaffold `~/.caco/extensions/terminal/`, `npm i node-pty`,
-   confirm a Node-26 Linux prebuild (the gating risk). If it needs a build, decide go/no-go.
-2. **Server pty bridge** (`server.ts`): shell select, lazy spawn map, the 4 message handlers,
-   static router for xterm assets, idle-TTL reaper.
-3. **Client panel** (`client.ts` + `style.css`): vendored xterm under `<ext>/web/`, footer
-   glyph, panel below footer, attach/input/output/resize, active-session swap.
-4. **Manual validation** against the acceptance list (Linux now; Windows/pwsh as available).
-5. **Write up** the multi-session delivery finding (sid-tagged or not) to decide the V2 path
-   (background streaming vs the `onSessionEnd` core hook).
+1. **Gate 1: prove node-pty** under Caco's server process on Node 26 (install + jiti import +
+   require). Go/no-go.
+2. **Part-A core seams** (generic): `ctx.sessionId` on `onClientMessage`; `onSessionEvent`/
+   sid-preserving event delivery; client `getActiveSessionId`+`onActiveSessionChange`;
+   `getSessionInfo(sid).cwd`; footer right-slot; same-origin WS check. Unit-test each.
+3. **Server pty bridge** (`server.ts`): shell select, lazy spawn in session cwd, 4 handlers via
+   `ctx.sessionId`, ring buffer + replay, lifetime caps, process-group kill.
+4. **Client panel** (`client.ts`+`style.css`): vendored @xterm under `<ext>/web/`, glyph,
+   panel-below-footer CSS contract, attach/input/output/resize, active-session swap.
+5. **Validate** against acceptance (Linux now; Windows/pwsh as available).
+6. **Decide V2**: expose `onSessionEnd` for exact lifetime binding + live background streaming,
+   based on what V1 confirms.
 
-V1 proves the vendored node-pty + xterm terminal as a session-scoped extension with zero core
-changes; the exact session-lifetime hook and background multi-terminal streaming are V2,
-gated on what the spike learns about ws delivery semantics.
+V1 = generic seams + a vendored, session-scoped terminal extension. Exact child-of-session
+lifetime (`onSessionEnd`) and live multi-session streaming are V2.

@@ -72,6 +72,31 @@ export function interactiveShellArgs(spec: ShellSpec): string[] {
   return spec.dialect === 'powershell' ? ['-NoLogo'] : [];
 }
 
+export interface InteractiveShell {
+  file: string;
+  args: string[];
+}
+
+/**
+ * Shell for the interactive terminal. Honors the user's login shell ($SHELL,
+ * e.g. fish/zsh) on POSIX so the terminal feels native — unlike the workflow
+ * tool, which deliberately uses bash for predictable scripting. Falls back to
+ * the workflow resolver (bash→sh; pwsh on Windows). Pure + injectable for tests.
+ */
+export function resolveInteractiveShell(opts: {
+  platform: NodeJS.Platform;
+  env: NodeJS.ProcessEnv;
+  exists: (p: string) => boolean;
+}): InteractiveShell {
+  const { platform, env, exists } = opts;
+  if (platform !== 'win32') {
+    const login = env.SHELL;
+    if (login && exists(login)) return { file: login, args: [] };
+  }
+  const spec = resolveShell({ platform, env, exists });
+  return { file: spec.file, args: interactiveShellArgs(spec) };
+}
+
 function clampDim(n: number | undefined, fallback: number): number {
   if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
   return Math.min(MAX_DIM, Math.max(MIN_DIM, Math.floor(n)));
@@ -160,13 +185,12 @@ export function ensureTerminal(sessionId: string, cols: number, rows: number): E
   const cwd = sessionManager.getSessionCwd(sessionId);
   if (!cwd) return { error: 'no working directory for session' };
 
-  const spec = resolveShell({ platform: process.platform, env: process.env, exists: existsSync });
-  const args = interactiveShellArgs(spec);
+  const shell = resolveInteractiveShell({ platform: process.platform, env: process.env, exists: existsSync });
 
   let ptyProc: IPty;
   try {
-    ptyProc = spawn(spec.file, args, {
-      name: 'xterm-color',
+    ptyProc = spawn(shell.file, shell.args, {
+      name: 'xterm-256color',
       cols: clampDim(cols, 80),
       rows: clampDim(rows, 24),
       cwd,
@@ -256,6 +280,12 @@ export function terminalCount(): number {
  */
 export function initTerminalManager(): void {
   if (lifecycleHooked) return;
+  if (!sessionState) {
+    throw new Error(
+      'initTerminalManager() called before createSessionState(); it registers ' +
+      'sessionState.onSessionEnd and must run after session state exists.',
+    );
+  }
   lifecycleHooked = true;
   sessionState.onSessionEnd(sessionId => killTerminal(sessionId));
   process.once('exit', killAllTerminals);

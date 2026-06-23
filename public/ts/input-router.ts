@@ -37,6 +37,12 @@ export function registerChatKeyHandler(handler: KeyHandler): void {
 export function initInputRouter(): void {
   // Single global keyboard listener - routes to active handler
   document.addEventListener('keydown', (e: KeyboardEvent) => {
+    // The integrated terminal owns ALL keys while focused (vim needs Escape,
+    // shells use Ctrl+P, etc.). Never intercept when the event originates inside
+    // the terminal panel, or Escape would blur the pty and swallow keystrokes.
+    const origin = e.target as HTMLElement | null;
+    if (origin?.closest?.('#terminalPanel')) return;
+
     // Leader key follow-ups (checked first, works from anywhere)
     if (escapeTime && Date.now() - escapeTime < LEADER_TIMEOUT) {
       escapeTime = null;

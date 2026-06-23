@@ -207,7 +207,6 @@ async function start(): Promise<void> {
   const server = createServer(app);
   
   const { wss, pushStateToApplet } = setupWebSocket(server);
-  initTerminalManager();
 
   const workflowAvailable = WORKFLOW_ENABLED && await isWorkflowRunnerAvailable();
   if (WORKFLOW_ENABLED && !workflowAvailable) {
@@ -286,6 +285,10 @@ async function start(): Promise<void> {
   // (Route module is imported eagerly; sessionState is `let` and undefined
   // at module load time, so registration must be deferred to here.)
   initWatchRoutes();
+
+  // Terminal manager registers sessionState.onSessionEnd (to kill a session's
+  // pty) + a process 'exit' reaper, so it must run AFTER createSessionState.
+  initTerminalManager();
 
   // File-edits poller: lazy-attach on first triggerPoll/snapshot.
   // Detach via sessionState.onSessionEnd. Flush any pending PUTs to the

@@ -17,7 +17,6 @@
 
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { onEvent, onReconnect, wsSendRaw } from './websocket.js';
 import { getActiveSessionId, onActiveSessionChange } from './app-state.js';
 import { showToast } from './toast.js';
@@ -200,18 +199,9 @@ function attachActive(): void {
       cursorBlink: true,
       scrollback: 5000,
       theme: TERM_THEME,
-      // Required by xterm 6 to use the Unicode11 addon (proposed API).
-      allowProposedApi: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    // Unicode 11 width tables: xterm's default (v6) mis-measures some wide /
-    // ambiguous-width glyphs (e.g. the Copilot CLI banner art), so cells drift
-    // out of alignment. The v11 provider matches modern terminals like Windows
-    // Terminal. Must be activated after loading.
-    const unicode11 = new Unicode11Addon();
-    term.loadAddon(unicode11);
-    term.unicode.activeVersion = '11';
     term.open(el);
     // After the shell exits, the next keystroke respawns it (matches the
     // "press any key … to restart" hint); otherwise it's normal pty input.

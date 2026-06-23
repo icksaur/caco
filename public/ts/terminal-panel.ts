@@ -169,7 +169,8 @@ function attachActive(): void {
     panelEl.appendChild(el);
     const term = new Terminal({
       fontFamily: 'var(--font-mono, monospace)',
-      fontSize: 13,
+      fontSize: 14,
+      lineHeight: 1.25,
       cursorBlink: true,
       scrollback: 5000,
       theme: TERM_THEME,

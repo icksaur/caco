@@ -2,7 +2,7 @@
  * Terminal Panel (client)
  *
  * A real user-identity terminal below the meta-context footer, bound to the
- * active Caco session. A footer glyph (`>_`) or Ctrl+` toggles a panel that
+ * active Caco session. A footer glyph (`>`) or Ctrl+` toggles a panel that
  * renders an xterm.js terminal for the active session. One xterm per session;
  * switching sessions swaps the visible terminal. On (re-)attach the client
  * resets the xterm and the server replays its ring buffer, so returning to a
@@ -17,6 +17,7 @@
 
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { onEvent, onReconnect, wsSendRaw } from './websocket.js';
 import { getActiveSessionId, onActiveSessionChange } from './app-state.js';
 import { showToast } from './toast.js';
@@ -42,6 +43,22 @@ const TERM_THEME = {
   cursor: '#d4d4d4',
 };
 
+/**
+ * Resolve the real --font-mono stack for xterm. xterm renders to canvas and
+ * cannot interpret CSS var(), so we read the computed custom property and pass
+ * the literal stack. Falls back to a Consolas-first stack (good on Windows) if
+ * the variable is unset or unreadable.
+ */
+function resolveMonoFont(): string {
+  const fallback = "'Consolas', 'Monaco', 'Courier New', monospace";
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim();
+    return v || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function initTerminalPanel(): void {
   const footer = document.getElementById('contextFooter');
   const chatFooter = document.getElementById('chatFooter');
@@ -51,7 +68,7 @@ export function initTerminalPanel(): void {
   toggleBtn.id = 'termToggle';
   toggleBtn.type = 'button';
   toggleBtn.className = 'term-toggle';
-  toggleBtn.textContent = '>_';
+  toggleBtn.textContent = '>';
   toggleBtn.title = 'Toggle terminal (Ctrl+`) — long-press to restart';
 
   // Long-press = kill + respawn the pty (escape hatch for a wedged shell). A
@@ -168,15 +185,33 @@ function attachActive(): void {
     el.className = 'terminal-instance';
     panelEl.appendChild(el);
     const term = new Terminal({
-      fontFamily: 'var(--font-mono, monospace)',
+      // xterm renders to canvas and does NOT resolve CSS var(); passing
+      // 'var(--font-mono)' silently falls back to the browser's generic
+      // monospace (Courier New on Windows — squat/narrow). Resolve the real
+      // stack from the CSS variable so Windows gets Consolas like the rest of
+      // the UI, with a literal fallback if the var is unset.
+      fontFamily: resolveMonoFont(),
       fontSize: 14,
-      lineHeight: 1.25,
+      // 1.0 (not 1.25): the Copilot CLI mascot is drawn with block/box-art
+      // glyphs that tile edge-to-edge; extra line-height inserts vertical gaps
+      // that break the art's continuity (looks misaligned). Terminals like
+      // Windows Terminal render this art at line-height ~1.0.
+      lineHeight: 1.0,
       cursorBlink: true,
       scrollback: 5000,
       theme: TERM_THEME,
+      // Required by xterm 6 to use the Unicode11 addon (proposed API).
+      allowProposedApi: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // Unicode 11 width tables: xterm's default (v6) mis-measures some wide /
+    // ambiguous-width glyphs (e.g. the Copilot CLI banner art), so cells drift
+    // out of alignment. The v11 provider matches modern terminals like Windows
+    // Terminal. Must be activated after loading.
+    const unicode11 = new Unicode11Addon();
+    term.loadAddon(unicode11);
+    term.unicode.activeVersion = '11';
     term.open(el);
     // After the shell exits, the next keystroke respawns it (matches the
     // "press any key … to restart" hint); otherwise it's normal pty input.

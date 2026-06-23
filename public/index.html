@@ -78,8 +78,6 @@
             <div id="chat" class="hidden">
               <!-- Messages will appear here -->
             </div>
-            <!-- Working cursor (shown during streaming) -->
-            <div id="workingCursor" class="streaming-cursor hidden"></div>
           </div>
         </div>
 
@@ -127,17 +125,20 @@
             </div>
           </form>
           <div id="contextFooter" class="context-footer nohighlight" data-context-footer="true">
-            <div class="context-main-row">
-              <span class="context-links"></span>
-              <span class="context-usage"></span>
-              <span class="context-session"></span>
-            </div>
-            <div class="context-description-row">
-              <span class="context-model"></span>
-              <span class="usage-display" data-usage-display="footer"></span>
-              <span class="context-throughput"></span>
-              <span class="context-saved"></span>
-              <div class="context-description"></div>
+            <div id="workingCursor" class="footer-busy hidden"></div>
+            <div class="context-rows">
+              <div class="context-main-row">
+                <span class="context-links"></span>
+                <span class="context-usage"></span>
+                <span class="context-session"></span>
+              </div>
+              <div class="context-description-row">
+                <span class="context-model"></span>
+                <span class="usage-display" data-usage-display="footer"></span>
+                <span class="context-throughput"></span>
+                <span class="context-saved"></span>
+                <div class="context-description"></div>
+              </div>
             </div>
           </div>
         </footer>

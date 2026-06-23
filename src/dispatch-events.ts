@@ -8,8 +8,6 @@
 
 import { setSessionIntent } from './session-meta-store.js';
 import { updateUsage, getUsage, type QuotaSnapshot } from './usage-state.js';
-import { shouldEmitReload } from './sdk-event-parser.js';
-import { consumeReloadSignal } from './applet-state.js';
 import { broadcastGlobalEvent } from './event-bus.js';
 import type { SessionEvent } from './event-bus.js';
 import type { GitEditPoller } from './git-edit-poller.js';
@@ -32,7 +30,7 @@ export interface DispatchEventDeps {
   /** Caller-provided file tracker. Updates the session-context list when
    *  the agent edits or creates a file. */
   autoAddFileContext: (sessionId: string, path: string) => void;
-  /** Forward a synthetic event back to the client (used for caco.reload). */
+  /** Forward a synthetic event back to the client (e.g. caco.throughput). */
   onEvent: (event: SessionEvent) => void;
 }
 
@@ -120,10 +118,5 @@ export function applyDispatchEventEffects(
     if (toolName && WRITE_TOOLS.has(toolName) && eventData.success === true) {
       gitEditPoller.triggerPoll(sessionId, 'event');
     }
-  }
-
-  // Reload requires consuming an external state flag.
-  if (shouldEmitReload(event) && consumeReloadSignal(sessionId)) {
-    deps.onEvent({ type: 'caco.reload', data: {} });
   }
 }

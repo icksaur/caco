@@ -159,10 +159,6 @@ describe('shouldFilter', () => {
       expect(shouldFilter({ type: 'caco.embed', data: {} })).toBe(false);
     });
 
-    it('caco.reload passes through', () => {
-      expect(shouldFilter({ type: 'caco.reload', data: {} })).toBe(false);
-    });
-
     it('caco.agent passes through', () => {
       expect(shouldFilter({ 
         type: 'caco.agent', 

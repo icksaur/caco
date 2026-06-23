@@ -79,7 +79,7 @@ Copilot SDK → Copilot CLI → AI Models
 
 **Tool definitions:**
 - \`src/agent-tools.ts\` — create_caco_session, send_caco_message, get_session_state
-- \`src/applet-tools.ts\` — Applet CRUD, reload_page, restart_server
+- \`src/applet-tools.ts\` — Applet CRUD, restart_server
 - \`src/display-tools.ts\` — embed_media
 - \`src/mcp-auth-tools.ts\` — register_mcp_server
 - \`src/extensions-tool.ts\` — caco_extensions (extension discovery + API guide)
@@ -95,8 +95,8 @@ Copilot SDK → Copilot CLI → AI Models
 ## Making Changes
 
 1. Edit server-side TypeScript in \`src/\` — use \`restart_server\` tool to apply
-2. Edit frontend TypeScript in \`public/ts/\` — run \`npm run build:client\`, then \`reload_page\`
-3. Edit HTML/CSS in \`public/\` — use \`reload_page\` tool to apply
+2. Edit frontend TypeScript in \`public/ts/\` — run \`npm run build:client\`, then refresh the browser
+3. Edit \`public/style.css\` — refresh the browser to apply. **Editing \`public/index.html\` requires \`restart_server\`** (it is read and hostname-injected once at startup, so a refresh alone serves the cached copy)
 4. Always run \`npm run test\` before committing
 5. Read \`code-quality.md\` for review standards
 

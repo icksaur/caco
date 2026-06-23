@@ -2201,8 +2201,49 @@ main {
   display: none;  /* Hidden when empty */
 }
 
-.context-footer.has-context {
-  display: block;
+.context-footer.has-context,
+.context-footer.is-busy {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-sm);
+}
+
+/* Reserved left column: blinking busy cursor, always present so toggling
+   busy never shifts the rows. Lives in the sticky footer so it is visible
+   regardless of chat scroll position. */
+.context-footer .footer-busy {
+  flex: 0 0 auto;
+  width: 0.7em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.context-footer .footer-busy.hidden {
+  /* keep the column width reserved; just stop blinking */
+  visibility: hidden;
+}
+
+.context-footer .footer-busy::after {
+  content: '';
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 2px;
+  animation: blink 0.7s infinite;
+  /* 4-corner gradient matching the send button / streaming cursor */
+  background:
+    radial-gradient(ellipse at 0% 0%, var(--host-color-tl, var(--color-accent)), transparent 60%),
+    radial-gradient(ellipse at 100% 0%, var(--host-color-tr, var(--color-accent)), transparent 60%),
+    radial-gradient(ellipse at 0% 100%, var(--host-color-bl, var(--color-accent)), transparent 60%),
+    radial-gradient(ellipse at 100% 100%, var(--host-color-br, var(--color-accent)), transparent 60%),
+    var(--bg-hover);
+}
+
+.context-footer .context-rows {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .context-footer .context-main-row {

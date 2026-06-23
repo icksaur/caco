@@ -101,12 +101,6 @@ function handleEvent(event: SessionEvent): void {
     return;
   }
   
-  // Handle page reload signal from reload_page tool
-  if (eventType === 'caco.reload') {
-    location.reload();
-    return;
-  }
-  
   // Drop stale session.error events — if tracker says active session isn't busy,
   // this error is from a previous or stale dispatch
   if (eventType === 'session.error' && !isLoadingHistory()) {
@@ -132,6 +126,11 @@ function handleEvent(event: SessionEvent): void {
           adHocBar.clearSession(sessionId);
           notifySessionComplete(sessionTracker.getIntent(sessionId) || '');
           chatView.getChattingForm()?.resetSteerCount();
+          // Final settle-scroll: the last streaming event scrolled before the
+          // assistant message's markdown/code finished reflowing, so it can
+          // undershoot. Defer past two frames so layout has settled, then snap
+          // to the very bottom.
+          requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()));
           void fetch(`/api/sessions/${sessionId}/state`).then(r => r.json()).then(d => {
             if (d.responseOptions?.length) {
               formStateStore.set({ options: d.responseOptions });

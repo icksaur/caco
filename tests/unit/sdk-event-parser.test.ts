@@ -38,25 +38,6 @@ describe('extractToolTelemetry', () => {
     expect(telemetry?.provider).toBe('YouTube');
   });
 
-  it('extracts reloadTriggered from nested JSON', () => {
-    const event: ToolExecutionCompleteEvent = {
-      success: true,
-      result: {
-        content: JSON.stringify({
-          textResultForLlm: 'Page reload signal sent.',
-          toolTelemetry: {
-            reloadTriggered: true
-          }
-        })
-      },
-      toolTelemetry: {}
-    };
-
-    const telemetry = extractToolTelemetry(event);
-    
-    expect(telemetry?.reloadTriggered).toBe(true);
-  });
-
   it('returns undefined when result.content is not JSON', () => {
     const event: ToolExecutionCompleteEvent = {
       success: true,

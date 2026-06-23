@@ -7,7 +7,6 @@
 
 export interface ToolTelemetry {
   outputId?: string;
-  reloadTriggered?: boolean;
   [key: string]: unknown;
 }
 
@@ -57,20 +56,10 @@ export function extractToolTelemetry(eventData: ToolExecutionCompleteEvent): Too
   if (eventData.toolTelemetry) {
     const topLevel = eventData.toolTelemetry as ToolTelemetry;
     // Only return if it has actual data (not empty object)
-    if (topLevel.outputId || topLevel.reloadTriggered) {
+    if (topLevel.outputId) {
       return topLevel;
     }
   }
   
   return undefined;
-}
-
-/**
- * Check if an SDK event is a caco.reload trigger.
- * Reload requires external state (consumeReloadSignal); this is just the predicate.
- */
-export function shouldEmitReload(event: { type: string; [key: string]: unknown }): boolean {
-  if (event.type !== 'tool.execution_complete') return false;
-  const telemetry = extractToolTelemetry(event as unknown as ToolExecutionCompleteEvent);
-  return telemetry?.reloadTriggered === true;
 }

@@ -10,8 +10,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const setSessionIntent = vi.fn();
 const updateUsage = vi.fn(() => ({ changed: false }));
 const getUsage = vi.fn((): unknown => null);
-const shouldEmitReload = vi.fn();
-const consumeReloadSignal = vi.fn();
 const broadcastGlobalEvent = vi.fn();
 const recordUsage = vi.fn();
 const recordRateLimit = vi.fn();
@@ -31,12 +29,6 @@ vi.mock('../../src/usage-state.js', () => ({
 }));
 vi.mock('../../src/routes/websocket.js', () => ({
   broadcastGlobalEvent: (...args: unknown[]) => broadcastGlobalEvent(...(args as [never])),
-}));
-vi.mock('../../src/sdk-event-parser.js', () => ({
-  shouldEmitReload: (...args: unknown[]) => shouldEmitReload(...args),
-}));
-vi.mock('../../src/applet-state.js', () => ({
-  consumeReloadSignal: (...args: unknown[]) => consumeReloadSignal(...args),
 }));
 vi.mock('../../src/session-throughput.js', () => ({
   recordUsage: (...args: unknown[]) => recordUsage(...(args as [])),
@@ -62,8 +54,6 @@ beforeEach(() => {
   updateUsage.mockReturnValue({ changed: false });
   getUsage.mockClear();
   getUsage.mockReturnValue(null);
-  shouldEmitReload.mockReset();
-  consumeReloadSignal.mockReset();
   broadcastGlobalEvent.mockClear();
   recordUsage.mockClear();
   recordRateLimit.mockClear();
@@ -137,30 +127,6 @@ describe('applyDispatchEventEffects', () => {
     updateUsage.mockReturnValue({ changed: false });
     applyDispatchEventEffects(SID, { type: 'assistant.usage', data: { quotaSnapshots: {} } } as never, deps);
     expect(broadcastGlobalEvent).not.toHaveBeenCalled();
-  });
-
-  it('emits caco.reload when reload is signalled', () => {
-    shouldEmitReload.mockReturnValue(true);
-    consumeReloadSignal.mockReturnValue(true);
-    const deps = makeDeps();
-    applyDispatchEventEffects(SID, { type: 'tool.execution_complete', data: {} } as never, deps);
-    expect(deps.onEvent).toHaveBeenCalledWith({ type: 'caco.reload', data: {} });
-  });
-
-  it('does NOT emit caco.reload when signal absent', () => {
-    shouldEmitReload.mockReturnValue(true);
-    consumeReloadSignal.mockReturnValue(false);
-    const deps = makeDeps();
-    applyDispatchEventEffects(SID, { type: 'tool.execution_complete', data: {} } as never, deps);
-    expect(deps.onEvent).not.toHaveBeenCalled();
-  });
-
-  it('does NOT emit caco.reload for non-reload-triggering events', () => {
-    shouldEmitReload.mockReturnValue(false);
-    const deps = makeDeps();
-    applyDispatchEventEffects(SID, { type: 'assistant.message', data: {} } as never, deps);
-    expect(consumeReloadSignal).not.toHaveBeenCalled();
-    expect(deps.onEvent).not.toHaveBeenCalled();
   });
 
   it('ignores irrelevant events without side effects', () => {

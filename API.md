@@ -800,7 +800,6 @@ Defined in `src/applet-tools.ts`:
 - `caco_applet_usage` - Get applet URL patterns for linking users to applets
 - `get_applet_state` - Query state pushed by applet JS
 - `set_applet_state` - Push state to running applet via WebSocket
-- `reload_page` - Trigger browser page refresh
 - `restart_server` - Schedule server restart after delay
 
 **caco_applet_howto** - no parameters
@@ -825,10 +824,6 @@ Returns: State object + navigation context (stack, urlParams)
 - `sessionId` (string, optional) - Target session (broadcasts to all if omitted)
 
 Pushes state via WebSocket to running applet. Applet receives via `onStateUpdate()` callback.
-
-**reload_page** - no parameters
-
-Sends reload signal to browser.
 
 **restart_server** parameters:
 - `delay` (number, optional) - Seconds to wait before restarting (1-30, default: 3)
@@ -1222,7 +1217,7 @@ Common SDK event types inside `event.type`:
 - `session.compaction_start`, `session.compaction_complete` - Conversation compaction
 - `caco.embed` - Media embed queued for rendering
 - `caco.context` - Session context changed
-- `caco.reload` - Browser should refresh
+- `caco.embed` - Render an embedded media iframe
 
 **GlobalEvent wrapper**:
 ```json

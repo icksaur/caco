@@ -6,7 +6,7 @@
 
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
-import { getAppletUserState, getAppletNavigation, getActiveAppletSlug, triggerReload } from './applet-state.js';
+import { getAppletUserState, getAppletNavigation, getActiveAppletSlug } from './applet-state.js';
 import type { StatePushHandler } from './event-bus.js';
 import { listApplets, type AppletMeta } from './applet-store.js';
 import { requestRestart, getActiveDispatches } from './restart-manager.js';
@@ -308,7 +308,6 @@ const sessionId = appletAPI.getSessionId();
 
 - **For onclick handlers:** Use \`expose('functionName', functionName)\` to make functions globally accessible
 - **Preferred:** Use \`addEventListener\` instead of onclick attributes (no exposure needed)
-- Test with reload_page tool after file changes
 - Applet runs in sandboxed scope but has full DOM access
 - Use relative paths for any fetch() calls to local APIs
 
@@ -363,24 +362,6 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
           ? `Applet state: ${JSON.stringify(state, null, 2)}\n\nNavigation: ${JSON.stringify(meta)}`
           : `No applet state set.${activeSlug ? ` Active applet: ${activeSlug}` : ' No applet open.'}\n\nNavigation: ${JSON.stringify(meta)}`,
         resultType: 'success' as const
-      };
-    }
-  });
-
-  const reloadPage = defineTool('reload_page', {
-    description: 'Reload the browser page to apply client-side file changes.',
-
-    parameters: z.object({}),
-
-    handler: async () => {
-      triggerReload(sessionRef?.id);
-      
-      return {
-        textResultForLlm: 'Page reload signal sent. The browser will refresh.',
-        resultType: 'success' as const,
-        toolTelemetry: {
-          reloadTriggered: true
-        }
       };
     }
   });
@@ -499,5 +480,5 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
     }
   });
 
-  return [cacoAppletHowto, cacoAppletUsage, getAppletState, setAppletState, reloadPage, restartServer];
+  return [cacoAppletHowto, cacoAppletUsage, getAppletState, setAppletState, restartServer];
 }

@@ -15,7 +15,6 @@ const DEFAULT_KEY = '_default';
 const appletUserStates = new Map<string, Record<string, unknown>>();
 const appletNavigations = new Map<string, NavigationContext>();
 const activeSlugs = new Map<string, string | null>();
-const pendingReloads = new Set<string>();
 
 export function setAppletUserState(sessionId: string | undefined, state: Record<string, unknown>): void {
   const key = sessionId || DEFAULT_KEY;
@@ -45,17 +44,4 @@ export function getActiveAppletSlug(sessionId?: string): string | null {
 
 export function setActiveAppletSlug(sessionId: string | undefined, slug: string | null): void {
   activeSlugs.set(sessionId || DEFAULT_KEY, slug);
-}
-
-export function triggerReload(sessionId?: string): void {
-  pendingReloads.add(sessionId || DEFAULT_KEY);
-}
-
-export function consumeReloadSignal(sessionId?: string): boolean {
-  const key = sessionId || DEFAULT_KEY;
-  if (pendingReloads.has(key)) {
-    pendingReloads.delete(key);
-    return true;
-  }
-  return false;
 }

@@ -67,17 +67,20 @@ export function setFormEnabled(enabled: boolean): void {
   const newChat = document.getElementById('newChatForm');
   const chatting = document.getElementById('chattingForm');
   const cursor = document.getElementById('workingCursor');
+  const footer = document.getElementById('contextFooter');
   const visible = currentState === 'chatting' ? chatting : newChat;
   if (!visible) return;
 
   if (enabled) {
     visible.classList.remove('busy');
     cursor?.classList.add('hidden');
+    footer?.classList.remove('is-busy');
     const input = visible.querySelector('textarea') as HTMLTextAreaElement | null;
     input?.focus();
   } else {
     visible.classList.add('busy');
     cursor?.classList.remove('hidden');
+    footer?.classList.add('is-busy');
   }
 }
 

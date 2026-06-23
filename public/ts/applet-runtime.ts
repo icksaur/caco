@@ -71,6 +71,9 @@ export function notifySessionChange(sessionId: string, info: SessionInfo): void 
  */
 function appletOnSessionEvent(cb: (event: SessionEvent) => void): () => void {
   const wrapper = (event: SessionEvent) => {
+    // Terminal bytes ride the session event channel but are private to the
+    // terminal panel; never expose them to applet event subscribers.
+    if (event.type === 'caco.term.output' || event.type === 'caco.term.exit') return;
     // caco.fs.changed is delivered through the dedicated watch channel, not
     // here. Suppress so generic subscribers don't see other applets' watches.
     if (deliverWatchEvent(event as { type: string; data?: Record<string, unknown> })) return;

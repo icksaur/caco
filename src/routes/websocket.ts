@@ -12,7 +12,7 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
-import type { Server } from 'http';
+import type { Server, IncomingMessage } from 'http';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
 import { sessionManager } from '../session-manager.js';
 import { readLastTurnsResult } from '../sdk-session-store.js';
@@ -27,6 +27,8 @@ export type { SessionEvent };
 import { getClientMessageHandler } from '../extension-runtime.js';
 import { watchExtensions } from '../extension-store.js';
 import { setSessionUsage, getSessionUsage } from '../session-usage-cache.js';
+import { ensureTerminal, writeTerminalInput, resizeTerminal, detachTerminal, killTerminal } from '../terminal-manager.js';
+import { verifyWsUpgrade } from '../security/same-origin.js';
 
 const allConnections = new Set<WebSocket>();
 const sessionSubscribers = new Map<string, Set<WebSocket>>();
@@ -36,7 +38,9 @@ const wsAlive = new WeakMap<WebSocket, boolean>();
 
 
 interface ClientMessage {
-  type: 'setState' | 'getState' | 'sendMessage' | 'requestHistory' | 'ping' | 'subscribe';
+  type:
+    | 'setState' | 'getState' | 'sendMessage' | 'requestHistory' | 'ping' | 'subscribe'
+    | 'caco.term.attach' | 'caco.term.input' | 'caco.term.resize' | 'caco.term.detach' | 'caco.term.kill';
   id?: string;  // For request/response correlation
   sessionId?: string;  // For requestHistory, subscribe, and setState
   generation?: number;  // For requestHistory: client's history-load generation (echoed back to discard stale replays)
@@ -73,9 +77,10 @@ interface ServerMessage {
  * Single persistent connection - no session in URL
  */
 export function setupWebSocket(server: Server) {
-  const wss = new WebSocketServer({ 
-    server, 
-    path: '/ws' 
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    verifyClient: (info: { origin: string; req: IncomingMessage }) => verifyWsUpgrade(info.origin, info.req.headers.host),
   });
 
   wss.on('connection', (ws, _req) => {
@@ -210,6 +215,48 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
       }
       break;
       
+    case 'caco.term.attach': {
+      const sid = clientSubscription.get(ws);
+      if (!sid) { sendError(ws, msg.id, 'No subscribed session for terminal'); break; }
+      const d = msg.data as { cols?: number; rows?: number } | undefined;
+      const result = ensureTerminal(sid, d?.cols ?? 80, d?.rows ?? 24);
+      if ('error' in result) { sendError(ws, msg.id, result.error); break; }
+      // Replay the ring ONLY to the attaching client (live output already
+      // reached other tabs via broadcastEvent).
+      if (result.ring) {
+        send(ws, { type: 'event', sessionId: sid, event: { type: 'caco.term.output', data: { data: result.ring } } });
+      }
+      break;
+    }
+
+    case 'caco.term.input': {
+      const sid = clientSubscription.get(ws);
+      if (!sid) break;
+      const d = msg.data as { data?: string } | undefined;
+      if (typeof d?.data === 'string') writeTerminalInput(sid, d.data);
+      break;
+    }
+
+    case 'caco.term.resize': {
+      const sid = clientSubscription.get(ws);
+      if (!sid) break;
+      const d = msg.data as { cols?: number; rows?: number } | undefined;
+      if (typeof d?.cols === 'number' && typeof d?.rows === 'number') resizeTerminal(sid, d.cols, d.rows);
+      break;
+    }
+
+    case 'caco.term.detach': {
+      const sid = clientSubscription.get(ws);
+      if (sid) detachTerminal(sid);
+      break;
+    }
+
+    case 'caco.term.kill': {
+      const sid = clientSubscription.get(ws);
+      if (sid) killTerminal(sid);
+      break;
+    }
+
     default:
       sendError(ws, msg.id, `Unknown message type: ${msg.type}`);
   }

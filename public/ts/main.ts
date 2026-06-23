@@ -23,6 +23,7 @@ import { initRouter, toggleSessions, toggleApplet, sessionClick } from './router
 import { registerCommand } from './command-registry.js';
 import { initPanelResizer } from './panel-resizer.js';
 import { initNotifications } from './notifications.js';
+import { initTerminalPanel } from './terminal-panel.js';
 import { loadClientExtensions, reloadExtension } from './extension-loader.js';
 import { onGlobalEvent } from './websocket.js';
 import { adHocBar } from './adhoc-bar.js';
@@ -130,6 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     initPanelResizer();
     initNotifications();
+    initTerminalPanel();
     
     // Initialize session panel (subscribe to WS session state events)
     initSessionPanel();

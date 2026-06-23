@@ -42,6 +42,8 @@ import { legacyAppletRedirectTarget } from './src/legacy-applet-redirects.js';
 import { createGitEditPoller } from './src/git-edit-poller.js';
 import { setGitEditPoller } from './src/dispatch-events.js';
 import { setupWebSocket } from './src/routes/websocket.js';
+import { initTerminalManager } from './src/terminal-manager.js';
+import { requireSameOrigin } from './src/security/same-origin.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { getSessionRuntime } from './src/session-runtime.js';
@@ -173,6 +175,12 @@ const transferCors: express.RequestHandler = (_req, res, next) => {
 app.use('/api/sessions/import', transferCors);
 app.use('/api/sessions/:sessionId/export', transferCors);
 
+// Same-origin guard: blocks foreign browser pages (CSRF/CSWSH) from driving the
+// local server, uniform across every route below. Mounted AFTER the portal transfer
+// carve-outs (which it skips) and BEFORE the /api routes. Unscoped so req.path is the
+// full path for the carve-out match. See docs/same-origin-guard-spec.md.
+app.use(requireSameOrigin);
+
 // API routes
 app.use('/api', sessionRoutes);
 app.use('/api', apiRoutes);
@@ -199,6 +207,7 @@ async function start(): Promise<void> {
   const server = createServer(app);
   
   const { wss, pushStateToApplet } = setupWebSocket(server);
+  initTerminalManager();
 
   const workflowAvailable = WORKFLOW_ENABLED && await isWorkflowRunnerAvailable();
   if (WORKFLOW_ENABLED && !workflowAvailable) {

@@ -39,8 +39,17 @@ V1 on branch `terminal-ext`.
   fires with the deleted `sid` on session **delete** (filter internally). On it →
   `pty.kill()` (process-group) + drop. (Eviction/newChat do NOT delete a resumable session, so
   its pty correctly survives.) Kill ALSO on: explicit `caco.term.kill`, max-terminal cap (LRU
-  evict), pty self-exit, process restart. Panel close / tab close = **detach only** (count
-  drops), never kill.
+  evict), pty self-exit, process exit. Panel close / tab close = **detach only** (count
+  drops), never kill. **Do not own SIGINT/SIGTERM in the terminal manager** — that would
+  suppress the server's graceful-shutdown path; register only a non-suppressing `exit` hook,
+  which fires when the server's SIGINT handler calls `process.exit`.
+- **Output ring holds only already-broadcast bytes** (push to the ring on flush, not on raw
+  pty data). An attach snapshot then never overlaps with output still queued for the 16 ms
+  coalesce flush, so a re-attach during active output cannot double-render; un-flushed bytes
+  arrive next via the normal live broadcast. The client **resets the xterm before every
+  (re-)attach** so the ring replay is an exact reconstruction (no backlog duplication on
+  reopen). Re-attach also **resizes the existing pty** to the client's fitted cols/rows so the
+  winsize never goes stale across session-swap/reconnect.
 - Bounded scrollback **ring** (e.g. 256 KB) per session, **replayed on attach** so switching
   back to a session restores its terminal view.
 
@@ -56,11 +65,14 @@ V1 on branch `terminal-ext`.
   - `caco.term.resize { cols, rows }`  → `pty.resize`.
   - `caco.term.detach {}`              → decrement attach count (keep pty).
   - `caco.term.kill   {}`              → kill (process-group) + drop.
-- **Same-origin WS check** (new, required — verified absent today): reject cross-origin ws at
-  connection/upgrade (`verifyClient`: `new URL(origin).host === req.headers.host`) **before**
-  any `caco.term.*` input is honored. The existing browser client is same-origin
-  (`${location.host}/ws`), so this won't break it. Localhost-only; no new port. Unit-test
-  same-origin accept + cross-origin reject.
+- **Same-origin + local-host WS guard** (new, required). Reject the ws upgrade in
+  `verifyClient` unless `new URL(origin).host === req.headers.host` AND the Host header's
+  hostname is in a local allowlist (`localhost`, `127.0.0.1`, `[::1]`, the configured
+  `SERVER_URL` host, `os.hostname()`). Same-origin alone is insufficient — a DNS-rebinding
+  page presents matching Origin/Host for its own domain after rebinding to loopback; the
+  host allowlist rejects it. The existing browser client is same-origin + local, so this
+  won't break it. Localhost-only; no new port. Unit-test same-origin, host-allowlist, and
+  combined accept/reject (incl. the rebinding case).
 - **Terminal output is never persisted to SDK/session history.** It flows only via
   `broadcastEvent` (live) + the in-memory ring (replay) — it is NOT written to the SDK
   `events.jsonl`, so nothing to filter on replay by default. Do NOT add `caco.term.*` to the

@@ -21,36 +21,54 @@ V1 on branch `terminal-ext`.
 ## Architecture
 
 ### Server — `src/terminal-manager.ts` (new)
+- Session cwd via `sessionManager.getSessionCwd(sid)` (`src/session-manager.ts:1167`); reject
+  attach if null. `broadcastEvent` imported from `src/event-bus.ts`.
 - `terminals: Map<sessionId, { pty: IPty; ring: RingBuffer }>`.
 - **Shell:** reuse `resolveShell()` from `src/workflow/shell.ts` directly, but spawn it
   **interactively** — no `-c`/`-Command` flags (those are for the workflow's command-exec use).
-  win32 → pwsh/powershell; else bash→sh (PATH-resolved). Verify the interactive-launch arg
-  difference (e.g. pwsh `-NoLogo`, bash login/interactive) in the spike.
+  win32 → pwsh/powershell; else bash→sh (PATH-resolved). Use the resolved `file` + `dialect`,
+  but **interactive args, not exec flags**: PowerShell `-NoLogo` (optionally `-NoProfile`) —
+  NOT `-NonInteractive`/`-Command`/`-NoExit`; bash/sh no args (or `-i`).
 - **Lazy spawn** on first attach for a session: `pty.spawn(shell, args, { name:'xterm-color',
   cols, rows, cwd: <session cwd from session state>, env: process.env })` — runs as the Caco
   server's (the user's) identity.
 - `pty.onData(d => { ring.push(d); broadcastEvent(sid, { type:'caco.term.output', data:{ data:d } }); })`
   — reuses the existing per-session broadcast (output is delivered to that session's ws only).
-- **Lifetime = session lifetime.** Subscribe to `sessionState.onSessionEnd(sid)` (the
-  internal hook that already exists in core) → `pty.kill()` (process-group) + drop. This is
-  the exact child-of-session guarantee the extension path could not give. Also: explicit
-  close, a max-terminal cap (evict LRU) as a safety bound, and process-restart clears all.
+- **Lifetime = session lifetime.** `sessionState.onSessionEnd(cb)` exists
+  (`src/session-state.ts:259`): a **global** listener on the `sessionState` singleton that
+  fires with the deleted `sid` on session **delete** (filter internally). On it →
+  `pty.kill()` (process-group) + drop. (Eviction/newChat do NOT delete a resumable session, so
+  its pty correctly survives.) Kill ALSO on: explicit `caco.term.kill`, max-terminal cap (LRU
+  evict), pty self-exit, process restart. Panel close / tab close = **detach only** (count
+  drops), never kill.
 - Bounded scrollback **ring** (e.g. 256 KB) per session, **replayed on attach** so switching
   back to a session restores its terminal view.
 
 ### WebSocket — extend the existing dispatch (`src/routes/websocket.ts`)
-- Add inbound types handled where the ws's **subscribed session is already known** (the ws
-  layer holds the subscription map) — so no client-supplied sid, no spoofing, native scoping:
+- Resolve the ws's session via `clientSubscription.get(ws)` (the ws layer's existing
+  `Map<WebSocket,string>`); reject if absent. No client-supplied sid → no spoofing. Add
+  `caco.term.*` to the `ClientMessage.type` union + the `switch(msg.type)` in `handleMessage()`
+  (core cases, beside the existing `ext.*` extension route). Output uses `broadcastEvent`
+  imported from `src/event-bus.ts` (domain layer), not reached out of routes.
+- Inbound types (session from `clientSubscription`, never the payload):
   - `caco.term.attach { cols, rows }` → `ensureTerminal(sid, cwd, cols, rows)`; replay ring.
   - `caco.term.input  { data }`        → `pty.write`.
   - `caco.term.resize { cols, rows }`  → `pty.resize`.
-  - `caco.term.close  {}`              → kill + drop.
-- **Same-origin WS check** (new, required): the ws server does not validate `Origin` today; a
-  real shell-input channel must reject cross-origin connections before honoring `caco.term.*`.
-  Localhost-only; no new port (rides existing `/ws`).
-- Outbound `caco.term.output` flows through the existing `broadcastEvent`; **history/replay**
-  intentionally does NOT persist terminal output (live + ring only) — filter it in the
-  event-persistence path like other ephemerals.
+  - `caco.term.detach {}`              → decrement attach count (keep pty).
+  - `caco.term.kill   {}`              → kill (process-group) + drop.
+- **Same-origin WS check** (new, required — verified absent today): reject cross-origin ws at
+  connection/upgrade (`verifyClient`: `new URL(origin).host === req.headers.host`) **before**
+  any `caco.term.*` input is honored. The existing browser client is same-origin
+  (`${location.host}/ws`), so this won't break it. Localhost-only; no new port. Unit-test
+  same-origin accept + cross-origin reject.
+- **Terminal output is never persisted to SDK/session history.** It flows only via
+  `broadcastEvent` (live) + the in-memory ring (replay) — it is NOT written to the SDK
+  `events.jsonl`, so nothing to filter on replay by default. Do NOT add `caco.term.*` to the
+  shared `shouldFilter()` (`src/event-filter.ts`) — that filter gates BOTH live broadcast and
+  history, so it would suppress live terminal output. If defense-in-depth is wanted, add a
+  history-ONLY guard in `streamHistory()`. Also exclude `caco.term.*` from the generic applet
+  `onSessionEvent` delivery (`public/ts/applet-runtime.ts`) so terminal bytes aren't exposed to
+  applet event subscribers.
 
 ### Client — `public/ts/terminal-panel.ts` (new) + `style.css`
 - `@xterm/xterm` + `@xterm/addon-fit` as **npm deps, bundled via the existing esbuild**
@@ -72,9 +90,15 @@ V1 on branch `terminal-ext`.
 client → server:  caco.term.attach { cols, rows }
 client → server:  caco.term.input  { data }
 client → server:  caco.term.resize { cols, rows }
-client → server:  caco.term.close  {}
-server → client:  caco.term.output { data }     (session-scoped; ring-replayed on attach)
+client → server:  caco.term.detach {}                 (panel closed / tab gone — keep pty)
+client → server:  caco.term.kill   {}                 (explicit terminate)
+server → client:  caco.term.output { data }           (session-scoped; ring-replayed on attach)
+server → client:  caco.term.exit   { exitCode?, signal? }   (pty exited on its own)
 ```
+**close = detach, not kill.** Multiple tabs can subscribe to one session
+(`sessionSubscribers: Set<WebSocket>`); closing the panel in one tab must NOT kill the
+shared pty. Track an attachment count per session; `detach` decrements; the pty is killed
+only on session end, explicit `kill`, max-cap eviction, or its own exit.
 
 ## Session coupling & lifetime
 
@@ -97,8 +121,11 @@ server → client:  caco.term.output { data }     (session-scoped; ring-replayed
   install: npm's `allow-scripts` policy warns on node-pty's build script; the Linux build still
   produced `build/Release/pty.node` and loaded. Ensure `npm install` builds it in the real repo
   (toolchain present); Windows/macOS use shipped prebuilds.
-- **@xterm/xterm**, **@xterm/addon-fit** (client, pure JS) — bundled via esbuild (the scoped
-  packages; the unscoped `xterm`/`xterm-addon-fit` are deprecated).
+- **@xterm/xterm**, **@xterm/addon-fit** (client, pure JS) — bundled via esbuild (scoped
+  packages; unscoped `xterm`/`xterm-addon-fit` are deprecated). **xterm CSS:** esbuild bundles
+  the JS but the HTML loads no TS-imported CSS today — **fold `@xterm/xterm/css/xterm.css` into
+  `public/style.css`** (or add an esbuild CSS output + `<link>`), else the terminal renders
+  broken.
 
 ## Considerations / risks
 
@@ -141,6 +168,10 @@ toolbar; per-session env customization; multiple terminals per session; mobile l
   terminal view is **ring-replayed** on return.
 - A cross-origin ws connection is rejected before any `caco.term.input` is honored.
 - Terminal output does **not** appear in persisted session history.
+- Closing the panel in one of two tabs on the same session does NOT kill the shared pty
+  (detach semantics); the pty dies only on session delete / explicit kill / exit / eviction.
+- A self-exiting shell emits `caco.term.exit`; the client marks it closed and the next attach
+  respawns.
 - Gates: typecheck ×2, lint:strict, knip, full tests, build:client.
 
 ## Plan (ordered, branch `terminal-ext`)

@@ -27,7 +27,9 @@ interface TermEntry {
   term: Terminal;
   fit: FitAddon;
   el: HTMLDivElement;
-  exited: boolean;
+  /** A live server pty is attached. False = idle/exited/never-started: showing a
+   *  placeholder, where a keypress or explicit toggle spawns a real shell. */
+  live: boolean;
 }
 
 const terms = new Map<string, TermEntry>();
@@ -106,13 +108,15 @@ export function initTerminalPanel(): void {
 
   onEvent(handleTermEvent);
   // setActiveSession fires this BEFORE subscribeToSession sends the new
-  // subscription frame; defer the attach so it reaches the server after the
-  // ws is subscribed to the new session (term ops are keyed by subscription).
+  // subscription frame; defer so the attach reaches the server after the ws is
+  // subscribed to the new session (term ops are keyed by subscription). Session
+  // switch + reconnect are PASSIVE: continue an existing pty, but never spawn —
+  // browsing sessions must not start shells.
   onActiveSessionChange(() => {
-    if (open) setTimeout(() => attachActive(), 0);
+    if (open) setTimeout(() => revealActive(), 0);
   });
   onReconnect(() => {
-    if (open) setTimeout(() => attachActive(), 0);
+    if (open) setTimeout(() => revealActive(), 0);
   });
 }
 
@@ -121,7 +125,8 @@ function toggle(): void {
   open = !open;
   panelEl.classList.toggle('hidden', !open);
   toggleBtn.classList.toggle('active', open);
-  if (open) revealActive();
+  // Expanding the panel is an EXPLICIT action: start or continue the shell.
+  if (open) startTerminal();
 }
 
 function showOnly(sid: string): void {
@@ -137,21 +142,93 @@ function fitAndResize(entry: TermEntry): void {
   wsSendRaw({ type: 'caco.term.resize', data: { cols: entry.term.cols, rows: entry.term.rows } });
 }
 
-/** Reveal the active session's terminal. Creates + attaches (with ring replay)
- *  on first use; for an already-live xterm it only re-shows it — NO reset — so a
- *  running program (vim, etc.) survives a hide/show toggle. An exited terminal is
- *  respawned. */
-function revealActive(): void {
-  const sid = getActiveSessionId();
-  if (!sid || !panelEl) return;
-  const entry = terms.get(sid);
-  if (entry && !entry.exited) {
-    showOnly(sid);
-    fitAndResize(entry);
-    entry.term.focus();
-  } else {
-    attachActive();
+/** Create the xterm + wire IO for a session (once). The entry starts not-live;
+ *  it goes live only when the server confirms a pty (caco.term.live). */
+function ensureEntry(sid: string): TermEntry {
+  let entry = terms.get(sid);
+  if (entry) return entry;
+
+  const el = document.createElement('div');
+  el.className = 'terminal-instance';
+  panelEl!.appendChild(el);
+  const term = new Terminal({
+    // xterm renders to canvas and does NOT resolve CSS var(); passing
+    // 'var(--font-mono)' silently falls back to the browser's generic
+    // monospace (Courier New on Windows — squat/narrow). Resolve the real
+    // stack from the CSS variable so Windows gets Consolas like the rest of
+    // the UI, with a literal fallback if the var is unset.
+    fontFamily: resolveMonoFont(),
+    fontSize: 14,
+    // 1.0 (not 1.25): the Copilot CLI mascot is drawn with block/box-art
+    // glyphs that tile edge-to-edge; extra line-height inserts vertical gaps
+    // that break the art's continuity (looks misaligned). Terminals like
+    // Windows Terminal render this art at line-height ~1.0.
+    lineHeight: 1.0,
+    cursorBlink: true,
+    scrollback: 5000,
+    theme: TERM_THEME,
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.open(el);
+  // Canvas renderer instead of the default DOM renderer: the DOM renderer
+  // fails to repaint draw-then-idle full-screen apps (vim, Copilot CLI) after
+  // their first frame, while continuously-redrawing apps (htop, micro) mask
+  // it. Canvas is a separate render path and works on the iOS Safari target
+  // (unlike WebGL, which suffers context loss there). Load after open().
+  try {
+    term.loadAddon(new CanvasAddon());
+  } catch {
+    /* canvas unsupported — fall back to the DOM renderer */
   }
+  // While not live (idle/exited placeholder), the next keystroke is an EXPLICIT
+  // request to start a shell — spawn rather than forwarding the key. When live,
+  // forward keystrokes to the pty.
+  term.onData(d => {
+    const cur = terms.get(sid);
+    if (!cur?.live) { startTerminal(); return; }
+    wsSendRaw({ type: 'caco.term.input', data: { data: d } });
+  });
+  // Terminal report replies (DA/DSR/cursor-position) are emitted on onBinary
+  // (Latin-1 byte string), NOT onData. Full-screen TUIs (vim, the Copilot CLI)
+  // and fish block waiting for these, so they MUST be forwarded to the pty as
+  // raw bytes — flagged so the server writes them with Buffer.from(d,'binary').
+  term.onBinary(d => {
+    const cur = terms.get(sid);
+    if (!cur?.live) return;
+    wsSendRaw({ type: 'caco.term.input', data: { data: d, binary: true } });
+  });
+  entry = { term, fit, el, live: false };
+  terms.set(sid, entry);
+  return entry;
+}
+
+/** Send an attach for the active session. `spawn` true = explicit (start or
+ *  continue); false = passive (continue an existing pty, else go idle). */
+function sendAttach(spawn: boolean): void {
+  const sid = getActiveSessionId();
+  if (!sid || !panelEl || !open) return;
+  const entry = ensureEntry(sid);
+  entry.term.reset();
+  showOnly(sid);
+  try {
+    entry.fit.fit();
+  } catch {
+    /* element not yet measurable */
+  }
+  wsSendRaw({ type: 'caco.term.attach', data: { cols: entry.term.cols, rows: entry.term.rows, spawn } });
+  entry.term.focus();
+}
+
+/** Explicit start/continue (toggle open, keypress on idle, restart). Spawns. */
+function startTerminal(): void {
+  sendAttach(true);
+}
+
+/** Passive reveal (session switch, reconnect). Continues an existing pty but
+ *  never spawns — browsing sessions must not start shells. */
+function revealActive(): void {
+  sendAttach(false);
 }
 
 /** Kill the server pty and respawn a fresh shell (long-press escape hatch). */
@@ -167,83 +244,8 @@ function restartTerminal(): void {
     panelEl?.classList.remove('hidden');
     toggleBtn?.classList.add('active');
   }
-  attachActive();
-  terms.get(sid)?.term.focus();
+  startTerminal();
   showToast('Terminal restarted', { type: 'info', autoHideMs: 1500 });
-}
-
-/** Create (if needed), reset, show, fit and (re-)attach the active terminal so
- *  the server replays its ring. Used for first open, session switch and
- *  reconnect — paths where the local xterm may be stale and needs a resync. */
-function attachActive(): void {
-  const sid = getActiveSessionId();
-  if (!sid || !panelEl || !open) return;
-
-  let entry = terms.get(sid);
-  if (!entry) {
-    const el = document.createElement('div');
-    el.className = 'terminal-instance';
-    panelEl.appendChild(el);
-    const term = new Terminal({
-      // xterm renders to canvas and does NOT resolve CSS var(); passing
-      // 'var(--font-mono)' silently falls back to the browser's generic
-      // monospace (Courier New on Windows — squat/narrow). Resolve the real
-      // stack from the CSS variable so Windows gets Consolas like the rest of
-      // the UI, with a literal fallback if the var is unset.
-      fontFamily: resolveMonoFont(),
-      fontSize: 14,
-      // 1.0 (not 1.25): the Copilot CLI mascot is drawn with block/box-art
-      // glyphs that tile edge-to-edge; extra line-height inserts vertical gaps
-      // that break the art's continuity (looks misaligned). Terminals like
-      // Windows Terminal render this art at line-height ~1.0.
-      lineHeight: 1.0,
-      cursorBlink: true,
-      scrollback: 5000,
-      theme: TERM_THEME,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(el);
-    // Canvas renderer instead of the default DOM renderer: the DOM renderer
-    // fails to repaint draw-then-idle full-screen apps (vim, Copilot CLI) after
-    // their first frame, while continuously-redrawing apps (htop, micro) mask
-    // it. Canvas is a separate render path and works on the iOS Safari target
-    // (unlike WebGL, which suffers context loss there). Load after open().
-    try {
-      term.loadAddon(new CanvasAddon());
-    } catch {
-      /* canvas unsupported — fall back to the DOM renderer */
-    }
-    // After the shell exits, the next keystroke respawns it (matches the
-    // "press any key … to restart" hint); otherwise it's normal pty input.
-    term.onData(d => {
-      const cur = terms.get(sid);
-      if (cur?.exited) { attachActive(); return; }
-      wsSendRaw({ type: 'caco.term.input', data: { data: d } });
-    });
-    // Terminal report replies (DA/DSR/cursor-position) are emitted on onBinary
-    // (Latin-1 byte string), NOT onData. Full-screen TUIs (vim, the Copilot CLI)
-    // and fish block waiting for these, so they MUST be forwarded to the pty as
-    // raw bytes — flagged so the server writes them with Buffer.from(d,'binary').
-    term.onBinary(d => {
-      const cur = terms.get(sid);
-      if (cur?.exited) return;
-      wsSendRaw({ type: 'caco.term.input', data: { data: d, binary: true } });
-    });
-    entry = { term, fit, el, exited: false };
-    terms.set(sid, entry);
-  }
-  entry.exited = false;
-  entry.term.reset();
-
-  showOnly(sid);
-  try {
-    entry.fit.fit();
-  } catch {
-    /* element not yet measurable */
-  }
-  wsSendRaw({ type: 'caco.term.attach', data: { cols: entry.term.cols, rows: entry.term.rows } });
-  entry.term.focus();
 }
 
 function fitActive(): void {
@@ -255,17 +257,38 @@ function fitActive(): void {
 }
 
 function handleTermEvent(event: SessionEvent): void {
-  if (event.type !== 'caco.term.output' && event.type !== 'caco.term.exit') return;
+  if (!event.type.startsWith('caco.term.')) return;
   const sid = getActiveSessionId();
   if (!sid) return;
   const entry = terms.get(sid);
   if (!entry) return;
 
-  if (event.type === 'caco.term.output') {
-    const data = (event.data as { data?: string } | undefined)?.data;
-    if (typeof data === 'string') entry.term.write(data);
-  } else {
-    entry.exited = true;
-    entry.term.write('\r\n\x1b[2m[process exited — press any key or toggle to restart]\x1b[0m\r\n');
+  switch (event.type) {
+    case 'caco.term.live': {
+      // Server confirmed a pty; render the ring replay (may be empty for a
+      // freshly spawned shell — its prompt arrives as live output next).
+      entry.live = true;
+      const ring = (event.data as { ring?: string } | undefined)?.ring;
+      if (ring) entry.term.write(ring);
+      break;
+    }
+    case 'caco.term.idle':
+      // No pty exists and we didn't ask to spawn (passive attach). Show the
+      // placeholder; a keypress or toggle will start a shell.
+      entry.live = false;
+      entry.term.write('\x1b[2m[terminal idle — press any key or toggle to start]\x1b[0m');
+      break;
+    case 'caco.term.output': {
+      // Live output. (Another tab may have spawned this session's pty; if so,
+      // adopt live state so our keystrokes flow.)
+      entry.live = true;
+      const data = (event.data as { data?: string } | undefined)?.data;
+      if (typeof data === 'string') entry.term.write(data);
+      break;
+    }
+    case 'caco.term.exit':
+      entry.live = false;
+      entry.term.write('\r\n\x1b[2m[process exited — press any key or toggle to restart]\x1b[0m\r\n');
+      break;
   }
 }

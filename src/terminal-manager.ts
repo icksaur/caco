@@ -159,14 +159,17 @@ function enforceCap(): void {
   }
 }
 
-export type EnsureResult = { ring: string } | { error: string };
+export type EnsureResult = { ring: string } | { idle: true } | { error: string };
 
 /**
- * Ensure a pty exists for the session and return its ring snapshot for replay.
- * Spawns lazily in the session's cwd on first attach (or after the prior pty
- * exited). The returned ring should be delivered ONLY to the attaching client.
+ * Attach to the session's terminal. If a live pty exists, attach + return its
+ * ring (continue). Otherwise: spawn a new shell only when `spawn` is true
+ * (explicit user action); when `spawn` is false (a passive attach from a session
+ * switch / reconnect) return `{ idle: true }` WITHOUT starting a shell, so merely
+ * browsing sessions never spawns terminals. The returned ring is delivered ONLY
+ * to the attaching client.
  */
-export function ensureTerminal(sessionId: string, cols: number, rows: number): EnsureResult {
+export function ensureTerminal(sessionId: string, cols: number, rows: number, allowSpawn: boolean): EnsureResult {
   const existing = terminals.get(sessionId);
   if (existing && !existing.exited) {
     existing.attachCount++;
@@ -181,6 +184,8 @@ export function ensureTerminal(sessionId: string, cols: number, rows: number): E
     return { ring: existing.ring.snapshot() };
   }
   if (existing) terminals.delete(sessionId);
+
+  if (!allowSpawn) return { idle: true };
 
   const cwd = sessionManager.getSessionCwd(sessionId);
   if (!cwd) return { error: 'no working directory for session' };

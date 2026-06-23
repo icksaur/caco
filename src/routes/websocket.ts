@@ -218,13 +218,16 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
     case 'caco.term.attach': {
       const sid = clientSubscription.get(ws);
       if (!sid) { sendError(ws, msg.id, 'No subscribed session for terminal'); break; }
-      const d = msg.data as { cols?: number; rows?: number } | undefined;
-      const result = ensureTerminal(sid, d?.cols ?? 80, d?.rows ?? 24);
+      const d = msg.data as { cols?: number; rows?: number; spawn?: boolean } | undefined;
+      const result = ensureTerminal(sid, d?.cols ?? 80, d?.rows ?? 24, d?.spawn === true);
       if ('error' in result) { sendError(ws, msg.id, result.error); break; }
-      // Replay the ring ONLY to the attaching client (live output already
-      // reached other tabs via broadcastEvent).
-      if (result.ring) {
-        send(ws, { type: 'event', sessionId: sid, event: { type: 'caco.term.output', data: { data: result.ring } } });
+      // Reply ONLY to the attaching client (live output already reaches other
+      // tabs via broadcastEvent). `idle` = no pty (passive attach, none exists);
+      // `live` carries the ring replay (possibly empty for a fresh shell).
+      if ('idle' in result) {
+        send(ws, { type: 'event', sessionId: sid, event: { type: 'caco.term.idle' } });
+      } else {
+        send(ws, { type: 'event', sessionId: sid, event: { type: 'caco.term.live', data: { ring: result.ring } } });
       }
       break;
     }

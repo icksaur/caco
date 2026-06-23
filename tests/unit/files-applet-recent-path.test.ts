@@ -57,11 +57,11 @@ function routeDecision(input: string, cachedCwd: string): 'external' | 'in-cwd' 
   return 'in-cwd';
 }
 
-const CWD = '/home/carl/repo/caco';
+const CWD = '/home/user/repo/caco';
 
 describe('recent-file path resolution', () => {
   it('out-of-cwd recent: relativize leaves absolute, absPathOf is idempotent, routes external', () => {
-    const stored = '/home/carl/repo/hull/spec-architecture.md';
+    const stored = '/home/user/repo/hull/spec-architecture.md';
     const rel = relativizePath(stored, CWD);
     expect(rel).toBe(stored); // unchanged — not in cwd
 
@@ -72,7 +72,7 @@ describe('recent-file path resolution', () => {
   });
 
   it('in-cwd recent: relativize strips cwd, absPathOf rejoins, routes in-cwd', () => {
-    const stored = '/home/carl/repo/caco/README.md';
+    const stored = '/home/user/repo/caco/README.md';
     const rel = relativizePath(stored, CWD);
     expect(rel).toBe('README.md');
 
@@ -83,13 +83,13 @@ describe('recent-file path resolution', () => {
   });
 
   it('absPathOf does not double-prefix an absolute path (the bug)', () => {
-    const abs = '/home/carl/repo/hull/spec-architecture.md';
+    const abs = '/home/user/repo/hull/spec-architecture.md';
     // Before the fix this produced cwd + '/' + abs.
     expect(absPathOf(abs, CWD)).toBe(abs);
     expect(absPathOf(abs, CWD)).not.toContain('caco//home');
   });
 
   it('relative picker result still joins to cwd', () => {
-    expect(absPathOf('src/foo.ts', CWD)).toBe('/home/carl/repo/caco/src/foo.ts');
+    expect(absPathOf('src/foo.ts', CWD)).toBe('/home/user/repo/caco/src/foo.ts');
   });
 });

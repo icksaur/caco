@@ -354,6 +354,14 @@ export async function rotateSessionHistory(sessionId: string, overrides: Partial
 
 const AUTO_ROTATE_COOLDOWN_MS = 60 * 60 * 1000;
 
+/** Auto-rotation (both the on-deactivation trigger and the idle sweep) is ON by
+ *  default; set CACO_ROTATE_AUTO=0 to disable. Manual `POST /rotate` is always
+ *  available regardless. The append-only events-archive.jsonl + reconcileRotation
+ *  give a recovery path, so default-on is acceptable. */
+function isAutoRotateEnabled(): boolean {
+  return process.env.CACO_ROTATE_AUTO !== '0';
+}
+
 function envMs(name: string, def: number): number {
   const v = Number(process.env[name]);
   return Number.isFinite(v) && v > 0 ? v : def;
@@ -384,7 +392,7 @@ export async function autoRotateIfEligible(
   sessionId: string,
   overrides: AutoRotateOverrides = {},
 ): Promise<RotationResult | null> {
-  if (process.env.CACO_ROTATE_AUTO !== '1') return null;
+  if (!isAutoRotateEnabled()) return null;
 
   const isUnobserved = overrides.isUnobserved ?? defaultIsUnobserved;
   if (isUnobserved(sessionId)) return null;
@@ -455,11 +463,11 @@ let sweeping = false;
 /**
  * Idle sweep: discover rotation-eligible sessions and rotate them sequentially
  * (one isolated verify client at a time). Pure discovery — every gate lives in
- * autoRotateIfEligible. No-op unless CACO_ROTATE_AUTO=1; guarded against overlap.
+ * autoRotateIfEligible. No-op when disabled (CACO_ROTATE_AUTO=0); guarded against overlap.
  */
 export async function sweepRotateEligible(deps: SweepDeps = {}): Promise<SweepSummary> {
   const summary: SweepSummary = { scanned: 0, rotated: 0, savedBytes: 0 };
-  if (process.env.CACO_ROTATE_AUTO !== '1') return summary;
+  if (!isAutoRotateEnabled()) return summary;
   if (sweeping) return summary;
   sweeping = true;
   try {

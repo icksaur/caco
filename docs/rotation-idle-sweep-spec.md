@@ -24,7 +24,7 @@ We must NOT rotate a session a client is actively looking at (idle but on-screen
 
 ## Eligibility (unchanged chokepoint + sweep-only coldness gate)
 
-The sweep does NOT re-implement gates. It calls the existing `autoRotateIfEligible(sessionId, opts)`, which enforces (cheapest-first): `CACO_ROTATE_AUTO=1` → observed → **viewed (new)** → **cheap not-blocked pre-check (new)** → size ≥ threshold → cooldown → then `rotateSessionHistory`'s exclusivity lock (not active/busy/resuming/rotating) + saving threshold + real-SDK verify-before-swap.
+The sweep does NOT re-implement gates. It calls the existing `autoRotateIfEligible(sessionId, opts)`, which enforces (cheapest-first): `CACO_ROTATE_AUTO` enabled (default on; `=0` disables) → observed → **viewed (new)** → **cheap not-blocked pre-check (new)** → size ≥ threshold → cooldown → then `rotateSessionHistory`'s exclusivity lock (not active/busy/resuming/rotating) + saving threshold + real-SDK verify-before-swap.
 
 Two gate refinements forced by review:
 
@@ -38,7 +38,7 @@ Two gate refinements forced by review:
 
 ## Operation: `sweepRotateEligible(deps)` (in `session-history-rotation.ts`)
 
-1. If `CACO_ROTATE_AUTO !== '1'` return immediately (no logging churn).
+1. If auto-rotate is disabled (`CACO_ROTATE_AUTO=0`) return immediately (no logging churn).
 2. Snapshot candidate ids via a **public** accessor — `sessionCache` is private, so add `SessionManager.knownSessionIds(): string[]` (returns `Array.from(this.sessionCache.keys())`) and use it. (Do NOT reach into the private field; it won't compile.)
 3. Optionally exclude `bootExcludeId` (see Boot timing).
 4. **Sequentially** (never parallel — one isolated verify client at a time) `await autoRotateIfEligible(id, { minIdleAgeMs })` for each. Defensively try/catch per id and continue; tally `{ scanned, rotated, savedBytes }`.
@@ -58,7 +58,7 @@ Owned by a small controller started from `server.ts` after `sessionManager.init(
 - **Periodic sweep:** `setInterval(4 h)`. `timer.unref()` so it never keeps the process alive; clear on shutdown.
 - Both call the same `sweepRotateEligible`. Guard against overlap with a module-level `sweeping` boolean (a 4 h period can't realistically overlap, but the boot+interval pair could if a sweep ran long).
 
-`CACO_ROTATE_SWEEP_INTERVAL_MS` (default 4 h), `CACO_ROTATE_BOOT_DELAY_MS` (default 60 s), and `CACO_ROTATE_MIN_IDLE_AGE_MS` (default 4 h, sweep-only coldness gate) for tuning/tests. The whole feature stays behind `CACO_ROTATE_AUTO=1`.
+`CACO_ROTATE_SWEEP_INTERVAL_MS` (default 4 h), `CACO_ROTATE_BOOT_DELAY_MS` (default 60 s), and `CACO_ROTATE_MIN_IDLE_AGE_MS` (default 4 h, sweep-only coldness gate) for tuning/tests. The whole feature is ON by default; set `CACO_ROTATE_AUTO=0` to disable.
 
 ## Correctness / safety
 
@@ -71,7 +71,7 @@ Owned by a small controller started from `server.ts` after `sessionManager.init(
 
 ## Tests
 
-- `sweepRotateEligible`: returns early when `CACO_ROTATE_AUTO!=1`; iterates `knownSessionIds()` and calls the (injected) `autoRotateIfEligible` per id; tallies; never throws if one id throws.
+- `sweepRotateEligible`: returns early when disabled (`CACO_ROTATE_AUTO=0`); iterates `knownSessionIds()` and calls the (injected) `autoRotateIfEligible` per id; tallies; never throws if one id throws.
 - `isViewed` gate on `autoRotateIfEligible`: a viewed session short-circuits to null before size/stat (injected `isViewed: () => true`).
 - **min-idle-age gate:** a session idle < age is skipped; a session with no `lastIdleAt` is skipped; idle ≥ age + observed passes (sweep path); `minIdleAgeMs=0` (stop path) ignores age.
 - **no spurious cooldown:** an active/busy/rotating/resuming session does NOT get `lastRotateAttemptAt` written (cheap pre-check returns before the stamp).
@@ -84,4 +84,4 @@ Owned by a small controller started from `server.ts` after `sessionManager.init(
 
 - No UI. (Manual `POST /rotate` already exists; a session-list affordance is a separate follow-up.)
 - No change to the cut point, archive, or verify mechanism.
-- Default remains `CACO_ROTATE_AUTO=0`; enabling is a deliberate opt-in after dogfooding.
+- Default is `CACO_ROTATE_AUTO` ON; set `=0` to disable. Enabled after coherence + dogfood validation.

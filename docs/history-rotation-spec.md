@@ -63,7 +63,7 @@ Write a small **rotation-state marker** (`events.jsonl.rotation`: phase + candid
 
 ## Config (env, defaults)
 
-`CACO_ROTATE_THRESHOLD_BYTES=67108864` (64 MB), `CACO_ROTATE_MIN_TAIL_EVENTS=4000`, `CACO_ROTATE_MIN_SAVING_BYTES=33554432` (32 MB), `CACO_ROTATE_AUTO=0` (Phase 2 off by default until validated).
+`CACO_ROTATE_THRESHOLD_BYTES=67108864` (64 MB), `CACO_ROTATE_MIN_TAIL_EVENTS=4000`, `CACO_ROTATE_MIN_SAVING_BYTES=33554432` (32 MB), `CACO_ROTATE_AUTO` **ON by default** (set `=0` to disable; validated and enabled after coherence testing).
 
 ## Auto-rotate eligibility gates (`autoRotateIfEligible`)
 

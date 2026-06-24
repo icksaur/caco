@@ -305,8 +305,8 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
 
   afterEach(() => { delete process.env.CACO_ROTATE_AUTO; });
 
-  it('returns null when CACO_ROTATE_AUTO is not 1', async () => {
-    delete process.env.CACO_ROTATE_AUTO;
+  it('returns null when auto-rotate is disabled (CACO_ROTATE_AUTO=0)', async () => {
+    process.env.CACO_ROTATE_AUTO = '0';
     writeSession('ar1', [START, line('a'), COMPACT, line('c')]);
     expect(await autoRotateIfEligible('ar1', { stateDir, config: cfg })).toBeNull();
   });
@@ -407,8 +407,8 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
 describe('sweepRotateEligible', () => {
   afterEach(() => { delete process.env.CACO_ROTATE_AUTO; });
 
-  it('returns an empty summary when auto-rotate is off', async () => {
-    delete process.env.CACO_ROTATE_AUTO;
+  it('returns an empty summary when auto-rotate is disabled', async () => {
+    process.env.CACO_ROTATE_AUTO = '0';
     const rotate = vi.fn(async () => ({ ok: true, savedBytes: 1 }));
     const summary = await sweepRotateEligible({ knownSessionIds: () => ['a', 'b'], rotate });
     expect(summary).toEqual({ scanned: 0, rotated: 0, savedBytes: 0 });

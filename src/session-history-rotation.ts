@@ -179,8 +179,24 @@ function defaultDeps(): RotationDeps {
   };
 }
 
-function appendAndFsync(path: string, text: string): void {
-  const fd = openSync(path, 'a');
+/** Read a file's non-empty lines without ever building a single >512MB string
+ *  (which readFileSync(path,'utf-8') would on a mega-session). Reads the bytes
+ *  as a Buffer and decodes per line, so it is safe at the exact sizes rotation
+ *  exists to shrink. Uses native Buffer.indexOf for speed. */
+function readEventLinesNonEmpty(path: string): string[] {
+  const buf = readFileSync(path);
+  const lines: string[] = [];
+  let start = 0;
+  while (start < buf.length) {
+    let nl = buf.indexOf(0x0a, start);
+    if (nl === -1) nl = buf.length;
+    if (nl > start) lines.push(buf.toString('utf-8', start, nl));
+    start = nl + 1;
+  }
+  return lines;
+}
+
+function appendAndFsync(path: string, text: string): void {  const fd = openSync(path, 'a');
   try {
     writeSync(fd, text);
     fsyncSync(fd);
@@ -207,8 +223,7 @@ export async function performRotation(sessionId: string, overrides: Partial<Rota
   if (existsSync(prerotate) || existsSync(candidate)) return { ok: false, reason: 'rotation-artifacts-present' };
 
   const srcStat = statSync(eventsPath);
-  const content = readFileSync(eventsPath, 'utf-8');
-  const lines = content.split('\n').filter(l => l.length > 0);
+  const lines = readEventLinesNonEmpty(eventsPath);
 
   const plan = planRotation(lines, srcStat.size, deps.config);
   if (!plan.rotate) return { ok: false, reason: plan.reason };

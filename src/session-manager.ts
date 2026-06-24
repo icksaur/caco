@@ -724,7 +724,9 @@ export class SessionManager {
       return { sessionId, usedFallbackCwd };
     }
     
+    const tEnsure0 = performance.now();
     const client = await this.ensureClient();
+    const tEnsure = performance.now() - tEnsure0;
     
     const sessionRef = { id: sessionId };
     const tools = config.toolFactory(cwd, sessionRef);
@@ -744,13 +746,16 @@ export class SessionManager {
     
     let repairMessage: string | undefined;
     const memoryContent = formatMemoryForPrompt();
+    const tMcp0 = performance.now();
+    const mcpServers = await loadMcpServers();
+    const tMcp = performance.now() - tMcp0;
     const resumeArgs = {
       streaming: true,
       tools,
       excludedTools: config.excludedTools,
       onPermissionRequest: approveAll,
       configDir: join(homedir(), '.copilot'),
-      mcpServers: await loadMcpServers(),
+      mcpServers,
       workingDirectory: cwd,
       largeOutput: sdkLargeOutputConfig(),
       hooks: { onPostToolUse: createObservationHook(cwd, sessionRef) },
@@ -766,9 +771,12 @@ export class SessionManager {
     let lastFailureSignature: string | null = null;
     let attemptedSession: CopilotSessionInstance | null = null;
     let lastError: unknown = null;
+    const tSdk0 = performance.now();
+    let sdkAttempts = 0;
 
     for (let attempt = 0; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
       try {
+        sdkAttempts++;
         attemptedSession = await client.resumeSession(sessionId, resumeArgs);
         lastError = null;
         break;
@@ -823,6 +831,14 @@ export class SessionManager {
       throw err;
     }
     const session: CopilotSessionInstance = attemptedSession;
+    const tSdk = performance.now() - tSdk0;
+    // Cold-open latency attribution: ensureClient (first-call SDK client init),
+    // loadMcpServers, and the SDK resumeSession (events.jsonl rehydration) are
+    // the awaited costs inside switchSession. sdkAttempts>1 means auto-repair ran.
+    console.log(
+      `[PERF] _doResume ${sessionId.slice(0, 8)} ensureClient=${tEnsure.toFixed(1)}ms ` +
+      `mcp=${tMcp.toFixed(1)}ms sdkResume=${tSdk.toFixed(1)}ms attempts=${sdkAttempts}`,
+    );
     
     this.activeSessions.set(sessionId, {
       cwd,

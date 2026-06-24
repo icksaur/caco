@@ -144,9 +144,26 @@ export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: nu
 }
 
 export function parseSessionModel(sessionId: string): string | null {
-  const events = readSessionEvents(sessionId);
+  const eventsPath = sessionPath(sessionId, 'events.jsonl');
+  if (!existsSync(eventsPath)) return null;
+  let content: string;
+  try {
+    content = readFileSync(eventsPath, 'utf-8');
+  } catch {
+    return null;
+  }
+  // The model is only ever set by a session.start (selectedModel) or a
+  // session.model_change (newModel); last write wins. A cheap substring guard
+  // lets us skip JSON.parse on the (potentially hundreds of thousands of) other
+  // event lines — the bulk of cold-open prework cost on large sessions. The
+  // full file is still scanned because the last model_change can be anywhere.
   let model: string | null = null;
-  for (const event of events) {
+  for (const line of content.split('\n')) {
+    const isStart = line.includes('"session.start"');
+    const isChange = !isStart && line.includes('"session.model_change"');
+    if (!isStart && !isChange) continue;
+    let event: SessionEvent;
+    try { event = JSON.parse(line); } catch { continue; }
     if (event.type === 'session.start' && event.data?.selectedModel) {
       model = String(event.data.selectedModel);
     } else if (event.type === 'session.model_change') {

@@ -206,6 +206,34 @@ describe('sdk-session-store', () => {
       expect(parseSessionModel('sess-21')).toBe('claude-sonnet-4');
     });
 
+    it('returns the newModel of the last of several model_change events', () => {
+      writeEvents('sess-21b', [
+        { type: 'session.start', data: { selectedModel: 'gpt-4' } },
+        { type: 'session.model_change', data: { newModel: 'claude-sonnet-4' } },
+        { type: 'message', data: { content: 'hi' } },
+        { type: 'session.model_change', data: { newModel: 'claude-opus-4' } },
+      ]);
+      expect(parseSessionModel('sess-21b')).toBe('claude-opus-4');
+    });
+
+    it('ignores model strings appearing in message content (substring guard)', () => {
+      writeEvents('sess-21c', [
+        { type: 'session.start', data: { selectedModel: 'gpt-4' } },
+        { type: 'message', data: { content: 'the "session.model_change" wording is just text' } },
+      ]);
+      expect(parseSessionModel('sess-21c')).toBe('gpt-4');
+    });
+
+    it('skips malformed lines without throwing', () => {
+      const dir = sessDir('sess-21d');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'events.jsonl'),
+        '{"type":"session.start","data":{"selectedModel":"gpt-4"}}\n' +
+        '{"type":"session.model_change","data":{ broken json\n' +
+        '{"type":"session.model_change","data":{"newModel":"claude-opus-4"}}\n');
+      expect(parseSessionModel('sess-21d')).toBe('claude-opus-4');
+    });
+
     it('returns null for missing events', () => {
       expect(parseSessionModel('nonexistent')).toBeNull();
     });

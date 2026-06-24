@@ -21,6 +21,7 @@ import { CanvasAddon } from '@xterm/addon-canvas';
 import { onEvent, onReconnect, wsSendRaw } from './websocket.js';
 import { getActiveSessionId, onActiveSessionChange } from './app-state.js';
 import { showToast } from './toast.js';
+import { selectEvictions } from './terminal-lru.js';
 import type { SessionEvent } from './types.js';
 
 interface TermEntry {
@@ -38,6 +39,13 @@ let toggleBtn: HTMLButtonElement | null = null;
 let open = false;
 
 const LONG_PRESS_MS = 600;
+
+/** Max live client-side xterms. Each carries a canvas renderer + scrollback +
+ *  xterm-internal listeners, so an unbounded set leaks as you browse sessions.
+ *  Keep the active session plus the two most-recently-used; evict the rest. The
+ *  server pty is untouched (capped separately), so an evicted session re-attaches
+ *  and ring-replays on revisit. */
+const MAX_TERMS = 3;
 
 const TERM_THEME = {
   background: '#0c0d10',
@@ -203,12 +211,44 @@ function ensureEntry(sid: string): TermEntry {
   return entry;
 }
 
+/** Dispose a session's client-side xterm (canvas renderer, scrollback, internal
+ *  listeners) and drop it. The server pty is NOT affected — it persists until
+ *  session end / cap / kill / exit, so revisiting re-attaches and ring-replays.
+ *  No detach is sent: the ws is subscribed only to the active session, and the
+ *  server's attachCount doesn't gate teardown. */
+function disposeEntry(sid: string): void {
+  const entry = terms.get(sid);
+  if (!entry) return;
+  try { entry.term.dispose(); } catch { /* already disposed */ }
+  entry.el.remove();
+  terms.delete(sid);
+}
+
+/** Move a session to most-recently-used (end of the Map's insertion order). */
+function touch(sid: string): void {
+  const entry = terms.get(sid);
+  if (!entry) return;
+  terms.delete(sid);
+  terms.set(sid, entry);
+}
+
+/** Pure LRU eviction policy lives in ./terminal-lru (dependency-free, unit-tested). */
+
+/** Evict least-recently-used client xterms beyond MAX_TERMS, never the active. */
+function evictExcess(activeSid: string): void {
+  for (const sid of selectEvictions([...terms.keys()], activeSid, MAX_TERMS)) {
+    disposeEntry(sid);
+  }
+}
+
 /** Send an attach for the active session. `spawn` true = explicit (start or
  *  continue); false = passive (continue an existing pty, else go idle). */
 function sendAttach(spawn: boolean): void {
   const sid = getActiveSessionId();
   if (!sid || !panelEl || !open) return;
   const entry = ensureEntry(sid);
+  touch(sid);
+  evictExcess(sid);
   entry.term.reset();
   showOnly(sid);
   try {
@@ -237,8 +277,7 @@ function restartTerminal(): void {
   if (!sid) return;
   // Kill first; the subsequent attach (in-order on the same ws) respawns.
   wsSendRaw({ type: 'caco.term.kill', data: {} });
-  const entry = terms.get(sid);
-  if (entry) { entry.term.dispose(); entry.el.remove(); terms.delete(sid); }
+  disposeEntry(sid);
   if (!open) {
     open = true;
     panelEl?.classList.remove('hidden');

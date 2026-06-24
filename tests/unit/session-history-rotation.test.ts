@@ -24,6 +24,7 @@ vi.mock('os', async (importOriginal) => {
 
 import {
   planRotation, performRotation, reconcileRotation, defaultPreserveModel, autoRotateIfEligible,
+  sweepRotateEligible,
   type RotationConfig, type RotationDeps,
 } from '../../src/session-history-rotation.js';
 
@@ -47,7 +48,7 @@ function read(path: string): string { return readFileSync(path, 'utf-8'); }
 function eventsPath(sid: string): string { return join(stateDir, sid, 'events.jsonl'); }
 
 function baseOverrides(verify: RotationDeps['verify']): Partial<RotationDeps> {
-  return { stateDir, verify, preserveModel: () => true, config: LOOSE, log: () => {} };
+  return { stateDir, verify, preserveModel: () => true, isViewed: () => false, config: LOOSE, log: () => {} };
 }
 
 beforeEach(() => {
@@ -214,6 +215,21 @@ describe('performRotation — auto-revert and guards', () => {
     expect(existsSync(eventsPath(sid) + '.candidate')).toBe(false);
   });
 
+  it('aborts the swap if the session becomes viewed during verify', async () => {
+    const sid = 'became-viewed';
+    writeSession(sid, [START, line('a'), line('b'), COMPACT, line('c')]);
+    const before = read(eventsPath(sid));
+    let viewed = false;
+    const result = await performRotation(sid, {
+      ...baseOverrides(async () => { viewed = true; }), // a client subscribes during verify
+      isViewed: () => viewed,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('became-viewed');
+    expect(read(eventsPath(sid))).toBe(before);
+    expect(existsSync(eventsPath(sid) + '.candidate')).toBe(false);
+  });
+
   it('refuses when rotation sidecars are already present', async () => {
     const sid = 'artifacts';
     writeSession(sid, [START, line('a'), line('b'), COMPACT, line('c')]);
@@ -329,9 +345,110 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
       join(env.home, '.caco', 'sessions', sid, 'meta.json'),
       JSON.stringify({ name: '', lastRotateAttemptAt: Date.now() }),
     );
-    // Threshold is 0 here so size passes; the cooldown gate must short-circuit
-    // to null WITHOUT reaching rotateSessionHistory (which would import the SDK).
-    expect(await autoRotateIfEligible(sid, { stateDir, config: { ...cfg, thresholdBytes: 0 } })).toBeNull();
+    // Threshold is 0 here so size passes; inject isBlocked=false so we reach the
+    // cooldown gate, which must short-circuit WITHOUT calling rotateSessionHistory.
+    expect(await autoRotateIfEligible(sid, {
+      stateDir, config: { ...cfg, thresholdBytes: 0 }, isBlocked: () => false,
+    })).toBeNull();
+  });
+
+  it('skips a viewed session before stat/rotation', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-viewed';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    const result = await autoRotateIfEligible(sid, {
+      stateDir, config: { ...cfg, thresholdBytes: 0 },
+      isViewed: () => true,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('skips when idle age is below minIdleAgeMs (sweep gate)', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-fresh';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    mkdirSync(join(env.home, '.caco', 'sessions', sid), { recursive: true });
+    writeFileSync(join(env.home, '.caco', 'sessions', sid, 'meta.json'),
+      JSON.stringify({ name: '', lastIdleAt: new Date().toISOString() }));
+    const result = await autoRotateIfEligible(sid, {
+      stateDir, config: { ...cfg, thresholdBytes: 0 },
+      isBlocked: () => false, minIdleAgeMs: 60_000,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('skips when there is no idle metadata under a sweep age gate', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-noidle';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    const result = await autoRotateIfEligible(sid, {
+      stateDir, config: { ...cfg, thresholdBytes: 0 },
+      isBlocked: () => false, minIdleAgeMs: 60_000,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('does NOT stamp cooldown when the session is blocked (active/busy/etc.)', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-blocked';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    const metaP = join(env.home, '.caco', 'sessions', sid, 'meta.json');
+    const result = await autoRotateIfEligible(sid, {
+      stateDir, config: { ...cfg, thresholdBytes: 0 },
+      isBlocked: () => true,
+    });
+    expect(result).toBeNull();
+    // No attempt timestamp written → eligible again the moment it unblocks.
+    const meta = existsSync(metaP) ? JSON.parse(read(metaP)) : {};
+    expect(meta.lastRotateAttemptAt).toBeUndefined();
+  });
+});
+
+describe('sweepRotateEligible', () => {
+  afterEach(() => { delete process.env.CACO_ROTATE_AUTO; });
+
+  it('returns an empty summary when auto-rotate is off', async () => {
+    delete process.env.CACO_ROTATE_AUTO;
+    const rotate = vi.fn(async () => ({ ok: true, savedBytes: 1 }));
+    const summary = await sweepRotateEligible({ knownSessionIds: () => ['a', 'b'], rotate });
+    expect(summary).toEqual({ scanned: 0, rotated: 0, savedBytes: 0 });
+    expect(rotate).not.toHaveBeenCalled();
+  });
+
+  it('rotates eligible ids sequentially and tallies savings', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    let inFlight = 0;
+    let maxConcurrent = 0;
+    const rotate = vi.fn(async (id: string) => {
+      inFlight++; maxConcurrent = Math.max(maxConcurrent, inFlight);
+      await new Promise(r => setTimeout(r, 1));
+      inFlight--;
+      return id === 'big' ? { ok: true, savedBytes: 1000 } : { ok: false };
+    });
+    const summary = await sweepRotateEligible({ knownSessionIds: () => ['small', 'big', 'small2'], rotate });
+    expect(summary.scanned).toBe(3);
+    expect(summary.rotated).toBe(1);
+    expect(summary.savedBytes).toBe(1000);
+    expect(maxConcurrent).toBe(1); // never parallel
+  });
+
+  it('skips the boot-excluded id', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const seen: string[] = [];
+    const rotate = vi.fn(async (id: string) => { seen.push(id); return { ok: false }; });
+    await sweepRotateEligible({ knownSessionIds: () => ['keep', 'open-on-boot'], rotate, bootExcludeId: 'open-on-boot' });
+    expect(seen).toEqual(['keep']);
+  });
+
+  it('continues when one id throws', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const rotate = vi.fn(async (id: string) => {
+      if (id === 'boom') throw new Error('kaboom');
+      return { ok: true, savedBytes: 5 };
+    });
+    const summary = await sweepRotateEligible({ knownSessionIds: () => ['boom', 'ok'], rotate });
+    expect(summary.scanned).toBe(2);
+    expect(summary.rotated).toBe(1);
   });
 });
 

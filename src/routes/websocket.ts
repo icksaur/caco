@@ -29,9 +29,9 @@ import { watchExtensions } from '../extension-store.js';
 import { setSessionUsage, getSessionUsage } from '../session-usage-cache.js';
 import { ensureTerminal, writeTerminalInput, resizeTerminal, detachTerminal, killTerminal } from '../terminal-manager.js';
 import { verifyWsUpgrade } from '../security/same-origin.js';
+import { addViewer, removeViewer, getViewers } from '../session-viewers.js';
 
 const allConnections = new Set<WebSocket>();
-const sessionSubscribers = new Map<string, Set<WebSocket>>();
 const clientSubscription = new Map<WebSocket, string>();
 const wsAlive = new WeakMap<WebSocket, boolean>();
 
@@ -103,7 +103,7 @@ export function setupWebSocket(server: Server) {
       
       const oldSessionId = clientSubscription.get(ws);
       if (oldSessionId) {
-        sessionSubscribers.get(oldSessionId)?.delete(ws);
+        removeViewer(oldSessionId, ws);
         clientSubscription.delete(ws);
       }
     });
@@ -203,14 +203,11 @@ function handleMessage(ws: WebSocket, msg: ClientMessage): void {
         // Unsubscribe from previous session
         const oldSessionId = clientSubscription.get(ws);
         if (oldSessionId && oldSessionId !== msg.sessionId) {
-          sessionSubscribers.get(oldSessionId)?.delete(ws);
+          removeViewer(oldSessionId, ws);
         }
         
         // Subscribe to new session
-        if (!sessionSubscribers.has(msg.sessionId)) {
-          sessionSubscribers.set(msg.sessionId, new Set());
-        }
-        sessionSubscribers.get(msg.sessionId)!.add(ws);
+        addViewer(msg.sessionId, ws);
         clientSubscription.set(ws, msg.sessionId);
       }
       break;
@@ -536,7 +533,7 @@ export function broadcastEvent(
     }
   }
   
-  const subscribers = sessionSubscribers.get(sessionId);
+  const subscribers = getViewers(sessionId);
   if (!subscribers || subscribers.size === 0 || shouldFilter(event)) {
     return;
   }

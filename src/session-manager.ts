@@ -1460,6 +1460,19 @@ export class SessionManager {
     return this.activeSessions.has(sessionId);
   }
 
+  /** Session ids known on disk/in cache. For maintenance sweeps (history
+   *  rotation); does not imply the session is active. */
+  knownSessionIds(): string[] {
+    return Array.from(this.sessionCache.keys());
+  }
+
+  /** A resume is in flight for this session (set synchronously at resume()
+   *  entry, before the multi-second SDK read). Used to avoid rotating/cooling
+   *  down a session that is being opened. */
+  isResuming(sessionId: string): boolean {
+    return this.resumeInProgress.has(sessionId);
+  }
+
   /**
    * Check if a session is currently processing a message
    */

@@ -25,6 +25,7 @@ import { STATE_DIR } from './sdk-session-store.js';
 import { parseSessionModel } from './sdk-session-store.js';
 import { getSessionMeta, updateSessionMeta } from './session-meta-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
+import { isSessionViewed } from './session-viewers.js';
 
 const COMPACTION_MARK = '"type":"session.compaction_complete"';
 const USER_MESSAGE_MARK = '"type":"user.message"';
@@ -134,6 +135,9 @@ export interface RotationDeps {
   verify: (stagedDir: string, stagedId: string) => Promise<void>;
   /** Persist the resolved model to meta before truncating. Returns false to abort. */
   preserveModel: (sessionId: string) => boolean;
+  /** True iff a client currently has the session on-screen. Re-checked just
+   *  before the swap so a session viewed mid-verify is not rotated. */
+  isViewed: (sessionId: string) => boolean;
   config: RotationConfig;
   log: (msg: string) => void;
 }
@@ -175,6 +179,7 @@ function defaultDeps(): RotationDeps {
     stateDir: STATE_DIR,
     verify: verifyWithIsolatedClient,
     preserveModel: defaultPreserveModel,
+    isViewed: isSessionViewed,
     config: rotationConfigFromEnv(),
     log: (msg: string) => console.log(msg),
   };
@@ -257,6 +262,13 @@ export async function performRotation(sessionId: string, overrides: Partial<Rota
     return { ok: false, reason: 'concurrent-write' };
   }
 
+  // A client may have opened (subscribed to) this session during the multi-second
+  // verify. Don't swap the file out from under an on-screen session — abort and
+  // leave the original untouched.
+  if (deps.isViewed(sessionId)) {
+    safeUnlink(candidate);
+    return { ok: false, reason: 'became-viewed' };
+  }
   try {
     appendAndFsync(archivePath, archived.join('\n') + '\n');
   } catch (e) {
@@ -342,33 +354,67 @@ export async function rotateSessionHistory(sessionId: string, overrides: Partial
 
 const AUTO_ROTATE_COOLDOWN_MS = 60 * 60 * 1000;
 
+function envMs(name: string, def: number): number {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) && v > 0 ? v : def;
+}
+
+export interface AutoRotateOverrides extends Partial<RotationDeps> {
+  isUnobserved?: (sessionId: string) => boolean;
+  /** Sweep-only coldness gate: require the session idle for ≥ this long (and
+   *  already observed). 0 (default, the stop() path) disables the age check. */
+  minIdleAgeMs?: number;
+  /** True iff the session is active/busy/resuming/rotating — skip without
+   *  stamping cooldown. Default consults SessionManager. */
+  isBlocked?: (sessionId: string) => boolean | Promise<boolean>;
+}
+
 /**
- * Phase 2 auto-rotation entry, called fire-and-forget when a session deactivates.
- * Cheap pre-gates (env flag, observed, size threshold, cooldown) run BEFORE
- * spinning up the isolated verify client, so ineligible sessions cost ~nothing.
- * Never throws — a refused/failed rotation must not break deactivation.
+ * Phase 2 auto-rotation entry, called fire-and-forget when a session deactivates
+ * and per-session by the idle sweep. Cheap gates run BEFORE the isolated verify
+ * client, so ineligible sessions cost ~nothing. Never throws.
  *
- * The `isUnobserved` gate deliberately SKIPS sessions that went idle but the user
- * hasn't viewed the result of yet: those are exactly the ones a user is about to
- * click open, and we don't want to mutate a session right before it's read.
+ * Gate order (cheapest-first): env → observed → not-viewed → idle-age (sweep) →
+ * size → not-blocked → cooldown → stamp → rotate. The size check precedes the
+ * (SessionManager-importing) not-blocked check so small/missing sessions never
+ * pull in the manager. The not-blocked check precedes the cooldown stamp so a
+ * temporarily active/busy session is not spuriously cooled down for an hour.
  */
 export async function autoRotateIfEligible(
   sessionId: string,
-  overrides: Partial<RotationDeps> & { isUnobserved?: (sessionId: string) => boolean } = {},
+  overrides: AutoRotateOverrides = {},
 ): Promise<RotationResult | null> {
   if (process.env.CACO_ROTATE_AUTO !== '1') return null;
+
   const isUnobserved = overrides.isUnobserved ?? defaultIsUnobserved;
   if (isUnobserved(sessionId)) return null;
+
+  const isViewed = overrides.isViewed ?? isSessionViewed;
+  if (isViewed(sessionId)) return null;
+
+  const meta = getSessionMeta(sessionId);
+
+  const minIdleAgeMs = overrides.minIdleAgeMs ?? 0;
+  if (minIdleAgeMs > 0) {
+    const lastIdleAt = meta?.lastIdleAt ? Date.parse(meta.lastIdleAt) : NaN;
+    if (!Number.isFinite(lastIdleAt)) return null; // never idle / no metadata ⇒ not provably cold
+    if (Date.now() - lastIdleAt < minIdleAgeMs) return null;
+  }
+
   const stateDir = overrides.stateDir ?? STATE_DIR;
   let size = 0;
   try { size = statSync(join(stateDir, sessionId, 'events.jsonl')).size; } catch { return null; }
   const cfg = overrides.config ?? rotationConfigFromEnv();
   if (size < cfg.thresholdBytes) return null;
+
+  const isBlocked = overrides.isBlocked ?? defaultIsRotationBlocked;
+  if (await isBlocked(sessionId)) return null;
+
   // Back off on the most recent attempt OR success — a session that keeps
   // failing verify must not re-spin the isolated client on every deactivation.
-  const meta = getSessionMeta(sessionId);
   const lastTouch = Math.max(meta?.lastRotatedAt ?? 0, meta?.lastRotateAttemptAt ?? 0);
   if (lastTouch && Date.now() - lastTouch < AUTO_ROTATE_COOLDOWN_MS) return null;
+
   // Record the attempt BEFORE the expensive work so a failure still cools down.
   updateSessionMeta(sessionId, m => { m.lastRotateAttemptAt = Date.now(); });
   try {
@@ -382,4 +428,90 @@ export async function autoRotateIfEligible(
  *  hasn't viewed yet (they're likely about to open it). */
 function defaultIsUnobserved(sessionId: string): boolean {
   return unobservedTracker.isUnobserved(sessionId);
+}
+
+/** A session is "blocked" for rotation if it's active/busy/resuming/rotating.
+ *  Imported lazily to avoid an import cycle with session-manager. */
+async function defaultIsRotationBlocked(sessionId: string): Promise<boolean> {
+  const { sessionManager } = await import('./session-manager.js');
+  return sessionManager.isActive(sessionId)
+    || sessionManager.isBusy(sessionId)
+    || sessionManager.isRotating(sessionId)
+    || sessionManager.isResuming(sessionId);
+}
+
+export interface SweepSummary { scanned: number; rotated: number; savedBytes: number; }
+
+export interface SweepDeps {
+  rotate?: (sessionId: string, overrides: AutoRotateOverrides) => Promise<RotationResult | null>;
+  knownSessionIds?: () => string[] | Promise<string[]>;
+  minIdleAgeMs?: number;
+  bootExcludeId?: string | null;
+  log?: (msg: string) => void;
+}
+
+let sweeping = false;
+
+/**
+ * Idle sweep: discover rotation-eligible sessions and rotate them sequentially
+ * (one isolated verify client at a time). Pure discovery — every gate lives in
+ * autoRotateIfEligible. No-op unless CACO_ROTATE_AUTO=1; guarded against overlap.
+ */
+export async function sweepRotateEligible(deps: SweepDeps = {}): Promise<SweepSummary> {
+  const summary: SweepSummary = { scanned: 0, rotated: 0, savedBytes: 0 };
+  if (process.env.CACO_ROTATE_AUTO !== '1') return summary;
+  if (sweeping) return summary;
+  sweeping = true;
+  try {
+    const ids = deps.knownSessionIds
+      ? await deps.knownSessionIds()
+      : (await import('./session-manager.js')).sessionManager.knownSessionIds();
+    const rotate = deps.rotate ?? autoRotateIfEligible;
+    const minIdleAgeMs = deps.minIdleAgeMs ?? envMs('CACO_ROTATE_MIN_IDLE_AGE_MS', 4 * 60 * 60 * 1000);
+    for (const id of ids) {
+      if (deps.bootExcludeId && id === deps.bootExcludeId) continue;
+      summary.scanned++;
+      try {
+        const r = await rotate(id, { minIdleAgeMs });
+        if (r?.ok) { summary.rotated++; summary.savedBytes += r.savedBytes ?? 0; }
+      } catch { /* one session must never break the sweep */ }
+    }
+    (deps.log ?? ((m: string) => console.log(m)))(
+      `[ROTATE-SWEEP] scanned=${summary.scanned} rotated=${summary.rotated} freed=${(summary.savedBytes / 1048576).toFixed(1)} MB`,
+    );
+    return summary;
+  } finally {
+    sweeping = false;
+  }
+}
+
+export interface SweeperHandle { stop(): void; }
+
+/**
+ * Start the background sweeper: one boot sweep (delayed so reconnecting clients
+ * register as viewers first) + a periodic sweep. Timers are unref'd so they
+ * never keep the process alive. Behind CACO_ROTATE_AUTO=1 via sweepRotateEligible.
+ */
+export function startRotationSweeper(opts: {
+  bootDelayMs?: number;
+  intervalMs?: number;
+  getBootExcludeId?: () => string | null;
+} = {}): SweeperHandle {
+  const bootDelay = opts.bootDelayMs ?? envMs('CACO_ROTATE_BOOT_DELAY_MS', 60 * 1000);
+  const intervalMs = opts.intervalMs ?? envMs('CACO_ROTATE_SWEEP_INTERVAL_MS', 4 * 60 * 60 * 1000);
+
+  const bootTimer = setTimeout(() => {
+    void sweepRotateEligible({ bootExcludeId: opts.getBootExcludeId?.() ?? null });
+  }, bootDelay);
+  bootTimer.unref?.();
+
+  const intervalTimer = setInterval(() => { void sweepRotateEligible(); }, intervalMs);
+  intervalTimer.unref?.();
+
+  return {
+    stop() {
+      clearTimeout(bootTimer);
+      clearInterval(intervalTimer);
+    },
+  };
 }

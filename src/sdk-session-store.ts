@@ -210,41 +210,46 @@ export interface SearchResult {
 
 export function searchSessionEvents(sessionId: string, query: string, maxSnippets = 5): SearchResult {
   const eventsPath = sessionPath(sessionId, 'events.jsonl');
-  if (!existsSync(eventsPath)) return { matches: [], totalMatches: 0 };
+  const archivePath = sessionPath(sessionId, 'events-archive.jsonl');
 
   const lowerQuery = query.toLowerCase();
   const matches: SearchMatch[] = [];
   let totalMatches = 0;
 
-  try {
-    const content = readFileSync(eventsPath, 'utf-8');
-    const lines = content.split('\n');
+  // Scan the archived (rotated-out) history first so older matches read in
+  // chronological order ahead of the live tail.
+  for (const path of [archivePath, eventsPath]) {
+    if (!existsSync(path)) continue;
+    try {
+      const content = readFileSync(path, 'utf-8');
+      const lines = content.split('\n');
 
-    for (const line of lines) {
-      if (!line.includes('"user.message"') && !line.includes('"assistant.message"')) continue;
+      for (const line of lines) {
+        if (!line.includes('"user.message"') && !line.includes('"assistant.message"')) continue;
 
-      try {
-        const event = JSON.parse(line);
-        const text = event.data?.content;
-        if (typeof text !== 'string') continue;
-        if (!text.toLowerCase().includes(lowerQuery)) continue;
+        try {
+          const event = JSON.parse(line);
+          const text = event.data?.content;
+          if (typeof text !== 'string') continue;
+          if (!text.toLowerCase().includes(lowerQuery)) continue;
 
-        totalMatches++;
-        if (matches.length < maxSnippets) {
-          const result = extractSnippet(text, lowerQuery);
-          if (result) {
-            matches.push({
-              snippet: result.snippet,
-              matchStart: result.matchStart,
-              matchEnd: result.matchEnd,
-              eventType: event.type,
-              timestamp: event.timestamp,
-            });
+          totalMatches++;
+          if (matches.length < maxSnippets) {
+            const result = extractSnippet(text, lowerQuery);
+            if (result) {
+              matches.push({
+                snippet: result.snippet,
+                matchStart: result.matchStart,
+                matchEnd: result.matchEnd,
+                eventType: event.type,
+                timestamp: event.timestamp,
+              });
+            }
           }
-        }
-      } catch { /* skip malformed lines */ }
-    }
-  } catch { /* file read error */ }
+        } catch { /* skip malformed lines */ }
+      }
+    } catch { /* file read error */ }
+  }
 
   return { matches, totalMatches };
 }

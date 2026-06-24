@@ -11,6 +11,7 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `GET /api/sessions/search` - Search message text across sessions
 - `POST /api/sessions` - Create new session
 - `POST /api/sessions/:id/resume` - Resume an existing session
+- `POST /api/sessions/:id/rotate` - Front-truncate history to speed up cold resume
 - `POST /api/sessions/:id/fork` - Fork session into a new side conversation
 - `POST /api/sessions/:id/observe` - Mark session as observed
 - `GET /api/sessions/:id/agents` - List SDK custom agents visible to `/agent`
@@ -84,6 +85,12 @@ Returns: `{ sessionId: "uuid", cwd: "string", model: "string" }`
 **POST /api/sessions/:id/resume** - Resume session
 
 Returns: `{ success: true, sessionId: "uuid", cwd: "string", isBusy: false }`
+
+**POST /api/sessions/:id/rotate** - Rotate (front-truncate) session history
+
+Shrinks a long-lived session's append-only `events.jsonl` so the SDK's resume (which reads the whole file) stays fast. Retains `session.start` + everything from the last compaction summary onward; the pruned head is moved to `events-archive.jsonl` (still full-text searchable). The truncated file is verified by a real SDK load before the swap, and the original is restored on any failure. Refused (409) when the session is active, busy, already rotating, or too small to benefit.
+
+Returns: `{ success: true, beforeBytes, afterBytes, savedBytes, archivedLines }` or `{ success: false, reason }`.
 
 **POST /api/sessions/:id/fork** - Fork session into a new side conversation
 

@@ -266,6 +266,9 @@ export class SessionManager {
   // sessionId → Promise (serializes concurrent resume attempts)
   private resumeInProgress = new Map<string, Promise<ResumeResult>>();
   
+  // sessionId → Promise (history rotation in progress; resume waits on it)
+  private rotatingSessions = new Map<string, Promise<unknown>>();
+  
   // Shared SDK client — all sessions use one CLI backend process
   private sharedClient: CopilotClientInstance | null = null;
   private clientStarting: Promise<CopilotClientInstance> | null = null;
@@ -665,6 +668,14 @@ export class SessionManager {
    * @throws Error if session doesn't exist
    */
   async resume(sessionId: string, config: ResumeConfig): Promise<ResumeResult> {
+    // Wait out any in-progress history rotation so we resume against the
+    // post-swap file, never a half-rotated one.
+    const rotation = this.rotatingSessions.get(sessionId);
+    if (rotation) {
+      console.log(`[RESUME] Waiting for in-progress rotation of ${sessionId}`);
+      await rotation;
+    }
+
     // If a resume is already in progress for this session, wait for it
     const existing = this.resumeInProgress.get(sessionId);
     if (existing) {
@@ -680,6 +691,29 @@ export class SessionManager {
     } finally {
       this.resumeInProgress.delete(sessionId);
     }
+  }
+
+  /**
+   * Run an exclusive history-rotation operation for a session. Refuses if the
+   * session is active, busy, or already rotating. While it runs, resume() waits
+   * on it so a rotation and a resume never race on the same events.jsonl.
+   */
+  async runExclusiveRotation<T>(sessionId: string, op: () => Promise<T>): Promise<T> {
+    if (this.activeSessions.has(sessionId)) throw new Error(`Cannot rotate active session ${sessionId}`);
+    if (this.isBusy(sessionId)) throw new Error(`Cannot rotate busy session ${sessionId}`);
+    if (this.rotatingSessions.has(sessionId)) throw new Error(`Rotation already in progress for ${sessionId}`);
+
+    const promise = op();
+    this.rotatingSessions.set(sessionId, promise.catch(() => {}));
+    try {
+      return await promise;
+    } finally {
+      this.rotatingSessions.delete(sessionId);
+    }
+  }
+
+  isRotating(sessionId: string): boolean {
+    return this.rotatingSessions.has(sessionId);
   }
 
   /**

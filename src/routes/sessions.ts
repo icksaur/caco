@@ -19,6 +19,7 @@ import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
 import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind } from '../storage.js';
 import { readSessionWorkspace, searchSessionEvents } from '../sdk-session-store.js';
+import { rotateSessionHistory } from '../session-history-rotation.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
@@ -280,6 +281,27 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.status(400).json({ error: message });
+  }
+});
+
+router.post('/sessions/:sessionId/rotate', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+
+  if (!sessionManager.getSessionCwd(sessionId)) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+
+  try {
+    const result = await rotateSessionHistory(sessionId);
+    if (result.ok) {
+      res.json({ success: true, ...result });
+    } else {
+      res.status(409).json({ success: false, ...result });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(409).json({ success: false, reason: 'refused', error: message });
   }
 });
 

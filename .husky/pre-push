@@ -1,0 +1,2 @@
+echo "pre-push: running full gate (npm run build) — use 'git push --no-verify' to skip"
+npm run build

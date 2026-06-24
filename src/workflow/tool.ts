@@ -28,17 +28,20 @@ Economy: prefer one workflow that \`caco.read\`/\`caco.grep\`s many files over r
 
 The code is an async function body with two globals: \`emit(value)\` — call EXACTLY ONCE with the compact result (don't console.log intermediate data); \`caco\` — the facade below. Top-level \`import\` is unsupported; use \`await import(...)\`. Set \`timeoutMs\` (up to 120000) for slow commands like tests/builds; for runs longer than that, detach (\`${shellG.detachExample}\`) and poll the logfile in a later call.
 
+Judging success: \`caco.sh\` reports failure via \`code\` (non-zero = failed), NOT via the text. When a command's success matters (tests, build, typecheck, lint, git push), **emit its \`.code\`** and assert it is 0 — never decide pass/fail from \`.stdout\` alone. Do NOT pipe a success-critical command through \`| tail\`/\`| grep\`/\`| head\`: the pipeline's exit status is the LAST stage's, so a non-zero failure (e.g. a failing test run) is hidden behind \`tail\`'s 0. Run the command directly and slice \`.stdout\` in JS if you want fewer lines.
+
 ${FACADE_API_SUMMARY}
 
 Examples:
 \`\`\`ts
-// one shell command
-emit((await caco.sh('npm test 2>&1')).stdout);
+// run a gate — keep the exit code (nonzero = failure) plus a tail; never judge success by text alone
+const r = await caco.sh('npm test 2>&1');
+emit({ code: r.code, tail: r.stdout.split('\\n').slice(-15).join('\\n') });
 \`\`\`
 \`\`\`ts
 // MANY independent steps batched into one call — not three workflows
 emit({
-  tests: (await caco.sh('${shellG.tailExample}')).stdout,
+  test: await caco.sh('npm test 2>&1').then(r => ({ code: r.code, tail: r.stdout.split('\\n').slice(-3).join('\\n') })),
   branch: (await caco.sh('git rev-parse --abbrev-ref HEAD')).stdout.trim(),
   todoCount: (await caco.grep('TODO', { glob: 'src/**/*.ts' })).length,
 });

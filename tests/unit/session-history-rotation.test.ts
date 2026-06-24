@@ -306,6 +306,19 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
     expect(await autoRotateIfEligible('ar2', { stateDir, config: { ...cfg, thresholdBytes: 10_000_000 } })).toBeNull();
   });
 
+  it('skips an unobserved session (user likely about to open it)', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-unobs';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    // Even with thresholds wide open, an unobserved session must short-circuit
+    // to null BEFORE the size statSync / rotation work.
+    const result = await autoRotateIfEligible(sid, {
+      stateDir, config: { ...cfg, thresholdBytes: 0 },
+      isUnobserved: () => true,
+    });
+    expect(result).toBeNull();
+  });
+
   it('backs off within the cooldown after a recent attempt (even a failed one)', async () => {
     process.env.CACO_ROTATE_AUTO = '1';
     const sid = 'ar3';

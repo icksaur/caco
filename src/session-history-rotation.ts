@@ -24,6 +24,7 @@ import { homedir } from 'os';
 import { STATE_DIR } from './sdk-session-store.js';
 import { parseSessionModel } from './sdk-session-store.js';
 import { getSessionMeta, updateSessionMeta } from './session-meta-store.js';
+import { unobservedTracker } from './unobserved-tracker.js';
 
 const COMPACTION_MARK = '"type":"session.compaction_complete"';
 const USER_MESSAGE_MARK = '"type":"user.message"';
@@ -343,12 +344,21 @@ const AUTO_ROTATE_COOLDOWN_MS = 60 * 60 * 1000;
 
 /**
  * Phase 2 auto-rotation entry, called fire-and-forget when a session deactivates.
- * Cheap pre-gates (env flag, size threshold, cooldown) run BEFORE spinning up the
- * isolated verify client, so small/recently-rotated sessions cost only a statSync.
+ * Cheap pre-gates (env flag, observed, size threshold, cooldown) run BEFORE
+ * spinning up the isolated verify client, so ineligible sessions cost ~nothing.
  * Never throws — a refused/failed rotation must not break deactivation.
+ *
+ * The `isUnobserved` gate deliberately SKIPS sessions that went idle but the user
+ * hasn't viewed the result of yet: those are exactly the ones a user is about to
+ * click open, and we don't want to mutate a session right before it's read.
  */
-export async function autoRotateIfEligible(sessionId: string, overrides: Partial<RotationDeps> = {}): Promise<RotationResult | null> {
+export async function autoRotateIfEligible(
+  sessionId: string,
+  overrides: Partial<RotationDeps> & { isUnobserved?: (sessionId: string) => boolean } = {},
+): Promise<RotationResult | null> {
   if (process.env.CACO_ROTATE_AUTO !== '1') return null;
+  const isUnobserved = overrides.isUnobserved ?? defaultIsUnobserved;
+  if (isUnobserved(sessionId)) return null;
   const stateDir = overrides.stateDir ?? STATE_DIR;
   let size = 0;
   try { size = statSync(join(stateDir, sessionId, 'events.jsonl')).size; } catch { return null; }
@@ -366,4 +376,10 @@ export async function autoRotateIfEligible(sessionId: string, overrides: Partial
   } catch {
     return null;
   }
+}
+
+/** Real unobserved check: a session that went idle but whose result the user
+ *  hasn't viewed yet (they're likely about to open it). */
+function defaultIsUnobserved(sessionId: string): boolean {
+  return unobservedTracker.isUnobserved(sessionId);
 }

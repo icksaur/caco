@@ -65,6 +65,15 @@ Write a small **rotation-state marker** (`events.jsonl.rotation`: phase + candid
 
 `CACO_ROTATE_THRESHOLD_BYTES=67108864` (64 MB), `CACO_ROTATE_MIN_TAIL_EVENTS=4000`, `CACO_ROTATE_MIN_SAVING_BYTES=33554432` (32 MB), `CACO_ROTATE_AUTO=0` (Phase 2 off by default until validated).
 
+## Auto-rotate eligibility gates (`autoRotateIfEligible`)
+
+Evaluated cheapest-first; all must pass before the isolated verify client spins up:
+1. `CACO_ROTATE_AUTO=1`.
+2. **Observed** — skip if the session is *unobserved* (went idle but the user hasn't viewed the result). Those are exactly the sessions a user is about to click open, so we never mutate them out from under an imminent read. O(1) via `unobservedTracker.isUnobserved`.
+3. Size ≥ threshold (`statSync`).
+4. Cooldown — `lastRotateAttemptAt`/`lastRotatedAt` older than 1 h (so a session that keeps failing verify doesn't re-spin the client).
+Then `rotateSessionHistory` still enforces the exclusivity lock (not active/busy/resuming/rotating), the saving threshold, and the real-SDK verify-before-swap.
+
 ## Tests
 
 - Pure cut-point selection (compaction present / absent / too-near-head / below-threshold) — table-driven, no SDK.

@@ -967,9 +967,9 @@ export class SessionManager {
     console.log(`✓ Stopped session ${sessionId}`);
 
     // Phase 2: the session is now at rest. Auto-rotate its history if eligible
-    // (env-gated, size+cooldown pre-checked). Fire-and-forget with swallowed
-    // errors so deactivation latency and correctness are never affected.
-    void autoRotateIfEligible(sessionId);
+    // (gated, size+cooldown pre-checked). Fire-and-forget; .catch keeps a
+    // background maintenance task from ever surfacing as an unhandled rejection.
+    void autoRotateIfEligible(sessionId).catch(() => {});
   }
 
   async changeCwd(sessionId: string, newCwd: string): Promise<void> {

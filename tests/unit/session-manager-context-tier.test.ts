@@ -43,6 +43,7 @@ vi.mock('../../src/sdk-session-store.js', () => ({
   readSessionEventsResult: vi.fn(() => ({ ok: true, value: [] })),
   parseSessionModel: vi.fn(() => store.model),
   listSessionIds: vi.fn(() => []),
+  STATE_DIR: '/tmp/nonexistent-state',
 }));
 vi.mock('../../src/mcp-config-loader.js', () => ({ loadMcpServers: vi.fn(async () => ({})) }));
 vi.mock('../../src/provider-registry.js', () => ({

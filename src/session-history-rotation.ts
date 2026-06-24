@@ -509,11 +509,11 @@ export function startRotationSweeper(opts: {
   const intervalMs = opts.intervalMs ?? envMs('CACO_ROTATE_SWEEP_INTERVAL_MS', 4 * 60 * 60 * 1000);
 
   const bootTimer = setTimeout(() => {
-    void sweepRotateEligible({ bootExcludeId: opts.getBootExcludeId?.() ?? null });
+    void sweepRotateEligible({ bootExcludeId: opts.getBootExcludeId?.() ?? null }).catch(() => {});
   }, bootDelay);
   bootTimer.unref?.();
 
-  const intervalTimer = setInterval(() => { void sweepRotateEligible(); }, intervalMs);
+  const intervalTimer = setInterval(() => { void sweepRotateEligible().catch(() => {}); }, intervalMs);
   intervalTimer.unref?.();
 
   return {

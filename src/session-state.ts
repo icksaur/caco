@@ -178,17 +178,21 @@ export class SessionState {
    * @returns ResumeResult with sessionId and optional fallback CWD used
    */
   async switchSession(sessionId: string, clientId?: string): Promise<ResumeResult> {
-    return this.runTransition(clientId, () => this.switchSessionLocked(sessionId, clientId));
+    const tCall = performance.now();
+    return this.runTransition(clientId, () =>
+      this.switchSessionLocked(sessionId, clientId, performance.now() - tCall));
   }
 
-  private async switchSessionLocked(sessionId: string, clientId?: string): Promise<ResumeResult> {
+  private async switchSessionLocked(sessionId: string, clientId?: string, lockWaitMs = 0): Promise<ResumeResult> {
     this.setPendingResumeId(null, clientId);
     
     // Resume new session (loads SDK client if needed, doesn't stop others)
+    const tResume0 = performance.now();
     const result = await sessionManager.resume(sessionId, {
       toolFactory: this._config.toolFactory,
       excludedTools: this._config.excludedTools
     });
+    const tResume = performance.now() - tResume0;
     
     this.setActiveSessionId(result.sessionId, clientId);
     this._preferences.lastSessionId = result.sessionId;
@@ -196,7 +200,14 @@ export class SessionState {
     if (resumedCwd) {
       this._preferences.lastCwd = resumedCwd;
     }
+    const tSave0 = performance.now();
     await savePreferences(this._preferences);
+    const tSave = performance.now() - tSave0;
+    
+    console.log(
+      `[PERF] switchSessionLocked ${sessionId.slice(0, 8)} lockWait=${lockWaitMs.toFixed(1)}ms ` +
+      `resume=${tResume.toFixed(1)}ms savePrefs=${tSave.toFixed(1)}ms`,
+    );
     
     return result;
   }

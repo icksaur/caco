@@ -724,6 +724,7 @@ export class SessionManager {
       return { sessionId, usedFallbackCwd };
     }
     
+    const tDoStart = performance.now();
     const tEnsure0 = performance.now();
     const client = await this.ensureClient();
     const tEnsure = performance.now() - tEnsure0;
@@ -832,14 +833,6 @@ export class SessionManager {
     }
     const session: CopilotSessionInstance = attemptedSession;
     const tSdk = performance.now() - tSdk0;
-    // Cold-open latency attribution: ensureClient (first-call SDK client init),
-    // loadMcpServers, and the SDK resumeSession (events.jsonl rehydration) are
-    // the awaited costs inside switchSession. sdkAttempts>1 means auto-repair ran.
-    console.log(
-      `[PERF] _doResume ${sessionId.slice(0, 8)} ensureClient=${tEnsure.toFixed(1)}ms ` +
-      `mcp=${tMcp.toFixed(1)}ms sdkResume=${tSdk.toFixed(1)}ms attempts=${sdkAttempts}`,
-    );
-    
     this.activeSessions.set(sessionId, {
       cwd,
       session,
@@ -850,7 +843,9 @@ export class SessionManager {
     });
     
     // Evict oldest inactive sessions if over the limit
+    const tEvict0 = performance.now();
     await this.evictInactiveSessions();
+    const tEvict = performance.now() - tEvict0;
     
     ensureSessionMeta(sessionId);
     
@@ -864,6 +859,18 @@ export class SessionManager {
     }
     
     console.log(`✓ Resumed session ${sessionId} for ${cwd}${usedFallbackCwd ? ' (fallback)' : ''}${repairMessage ? ' (repaired)' : ''}`);
+    // Cold-open latency attribution. ensureClient = first-call SDK client init;
+    // mcp = loadMcpServers; sdkResume = SDK resumeSession (events.jsonl
+    // rehydration, the dominant cost on large sessions); evict = stopping LRU
+    // sessions; prework = model/meta lookups (readModelFromEvents parses the
+    // events file when meta is absent). attempts>1 means auto-repair ran.
+    const tTotal = performance.now() - tDoStart;
+    const tPrework = tTotal - tEnsure - tMcp - tSdk - tEvict;
+    console.log(
+      `[PERF] _doResume ${sessionId.slice(0, 8)} ensureClient=${tEnsure.toFixed(1)}ms ` +
+      `mcp=${tMcp.toFixed(1)}ms sdkResume=${tSdk.toFixed(1)}ms evict=${tEvict.toFixed(1)}ms ` +
+      `prework=${tPrework.toFixed(1)}ms total=${tTotal.toFixed(1)}ms attempts=${sdkAttempts}`,
+    );
     return { sessionId, usedFallbackCwd, repairMessage };
   }
 

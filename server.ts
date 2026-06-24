@@ -43,6 +43,7 @@ import { createGitEditPoller } from './src/git-edit-poller.js';
 import { setGitEditPoller } from './src/dispatch-events.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { initTerminalManager } from './src/terminal-manager.js';
+import { startRotationSweeper } from './src/session-history-rotation.js';
 import { requireSameOrigin } from './src/security/same-origin.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
@@ -303,6 +304,13 @@ async function start(): Promise<void> {
   });
   
   startScheduleManager();
+  
+  // Background history-rotation sweeper (no-op unless CACO_ROTATE_AUTO=1): one
+  // delayed boot sweep + every 4h, rotating only cold/unviewed/observed large
+  // sessions. Excludes the session the UI auto-opens on load.
+  startRotationSweeper({
+    getBootExcludeId: () => sessionState.preferences.lastSessionId ?? null,
+  });
   
   sessionManager.snapshotSessionOrder();
   const msToMidnight = new Date().setHours(24, 0, 0, 0) - Date.now();

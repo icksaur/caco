@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, statSync, openSync, readSync, closeSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
@@ -87,12 +87,67 @@ function findNthUserMessageFromEnd(lines: string[], n: number): number {
 
 type LastTurns = { events: SessionEvent[]; totalLines: number; skipped: number };
 
+// Node cannot materialize a single string larger than ~512MB (0x1fffffe8).
+// A long-lived session's events.jsonl can exceed that, which made a whole-file
+// readFileSync(path,'utf-8') throw and the history read report "corrupt". For
+// files past tailReadBytes() we read only the tail (more than enough for the
+// last few turns) and count total lines with a bounded streaming scan, so memory
+// and the string-length cap are never hit. Default is well under the 512MB ceiling.
+function tailReadBytes(): number {
+  const v = Number(process.env.CACO_TAIL_READ_BYTES);
+  return Number.isFinite(v) && v > 0 ? v : 64 * 1024 * 1024;
+}
+
+/** Count lines (newline count + 1, mirroring split('\n').length) without ever
+ *  holding the file in memory — fixed-size buffer scan, safe at any file size. */
+function countFileLines(path: string): number {
+  const fd = openSync(path, 'r');
+  try {
+    const buf = Buffer.allocUnsafe(1 << 20);
+    let newlines = 0;
+    let bytesRead: number;
+    while ((bytesRead = readSync(fd, buf, 0, buf.length, null)) > 0) {
+      for (let i = 0; i < bytesRead; i++) if (buf[i] === 0x0a) newlines++;
+    }
+    return newlines + 1;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Read the last `maxBytes` of a file as a string, dropping the partial first
+ *  line when the window starts mid-file (so the result is whole lines and any
+ *  UTF-8 char split at the window boundary is discarded). */
+function readTailString(path: string, size: number, maxBytes: number): string {
+  const start = Math.max(0, size - maxBytes);
+  const length = size - start;
+  const fd = openSync(path, 'r');
+  try {
+    const buf = Buffer.allocUnsafe(length);
+    let off = 0;
+    while (off < length) {
+      const n = readSync(fd, buf, off, length - off, start + off);
+      if (n <= 0) break;
+      off += n;
+    }
+    let text = buf.toString('utf-8', 0, off);
+    if (start > 0) {
+      const nl = text.indexOf('\n');
+      text = nl >= 0 ? text.slice(nl + 1) : '';
+    }
+    return text;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function readLastTurnsResult(sessionId: string, maxTurns: number, maxEvents: number): DiskRead<LastTurns> {
   const eventsPath = sessionPath(sessionId, 'events.jsonl');
   if (!existsSync(eventsPath)) return { ok: false, kind: 'missing' };
 
   let stat: ReturnType<typeof statSync>;
   let content: string;
+  let totalLines: number;
   try {
     stat = statSync(eventsPath);
     const cacheKey = `${sessionId}\u0000${maxTurns}\u0000${maxEvents}`;
@@ -100,13 +155,20 @@ export function readLastTurnsResult(sessionId: string, maxTurns: number, maxEven
     if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
       return { ok: true, value: cached.result };
     }
-    content = readFileSync(eventsPath, 'utf-8');
+    if (stat.size <= tailReadBytes()) {
+      content = readFileSync(eventsPath, 'utf-8');
+      totalLines = -1; // derive from the full split below (whole file in hand)
+    } else {
+      // Too big for one JS string: tail-read the recent events, count the rest.
+      content = readTailString(eventsPath, stat.size, tailReadBytes());
+      totalLines = countFileLines(eventsPath);
+    }
   } catch (error) {
     return { ok: false, kind: 'corrupt', error: error instanceof Error ? error : new Error(String(error)) };
   }
 
   const lines = content.split('\n');
-  const totalLines = lines.length;
+  if (totalLines < 0) totalLines = lines.length;
 
   let turns = maxTurns;
   let startIndex = findNthUserMessageFromEnd(lines, turns);
@@ -126,7 +188,12 @@ export function readLastTurnsResult(sessionId: string, maxTurns: number, maxEven
   if (totalNonEmptyLines > 0 && events.length === 0) {
     return { ok: false, kind: 'corrupt', error: new Error('events.jsonl has no parseable lines') };
   }
-  const result: LastTurns = { events, totalLines, skipped: startIndex };
+  // skipped = everything not in the shown slice. For the whole-file path this
+  // equals startIndex (original semantics); for the tail path it also counts the
+  // lines before the read window.
+  const shownLines = lines.length - startIndex;
+  const skipped = Math.max(0, totalLines - shownLines);
+  const result: LastTurns = { events, totalLines, skipped };
 
   const cacheKey = `${sessionId}\u0000${maxTurns}\u0000${maxEvents}`;
   if (lastTurnsCache.size >= LAST_TURNS_CACHE_LIMIT) {
@@ -144,9 +211,26 @@ export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: nu
 }
 
 export function parseSessionModel(sessionId: string): string | null {
-  const events = readSessionEvents(sessionId);
+  const eventsPath = sessionPath(sessionId, 'events.jsonl');
+  if (!existsSync(eventsPath)) return null;
+  let content: string;
+  try {
+    content = readFileSync(eventsPath, 'utf-8');
+  } catch {
+    return null;
+  }
+  // The model is only ever set by a session.start (selectedModel) or a
+  // session.model_change (newModel); last write wins. A cheap substring guard
+  // lets us skip JSON.parse on the (potentially hundreds of thousands of) other
+  // event lines — the bulk of cold-open prework cost on large sessions. The
+  // full file is still scanned because the last model_change can be anywhere.
   let model: string | null = null;
-  for (const event of events) {
+  for (const line of content.split('\n')) {
+    const isStart = line.includes('"session.start"');
+    const isChange = !isStart && line.includes('"session.model_change"');
+    if (!isStart && !isChange) continue;
+    let event: SessionEvent;
+    try { event = JSON.parse(line); } catch { continue; }
     if (event.type === 'session.start' && event.data?.selectedModel) {
       model = String(event.data.selectedModel);
     } else if (event.type === 'session.model_change') {
@@ -193,41 +277,48 @@ export interface SearchResult {
 
 export function searchSessionEvents(sessionId: string, query: string, maxSnippets = 5): SearchResult {
   const eventsPath = sessionPath(sessionId, 'events.jsonl');
-  if (!existsSync(eventsPath)) return { matches: [], totalMatches: 0 };
+  const archivePath = sessionPath(sessionId, 'events-archive.jsonl');
 
   const lowerQuery = query.toLowerCase();
   const matches: SearchMatch[] = [];
   let totalMatches = 0;
 
-  try {
-    const content = readFileSync(eventsPath, 'utf-8');
-    const lines = content.split('\n');
+  // Scan the archived (rotated-out) history and the live tail. Note rotation
+  // retains user.message events in the live file while archiving their
+  // surrounding assistant/tool events, so a pre-cut user message reads after its
+  // archived assistant reply — search is for recall, not strict transcript order.
+  for (const path of [archivePath, eventsPath]) {
+    if (!existsSync(path)) continue;
+    try {
+      const content = readFileSync(path, 'utf-8');
+      const lines = content.split('\n');
 
-    for (const line of lines) {
-      if (!line.includes('"user.message"') && !line.includes('"assistant.message"')) continue;
+      for (const line of lines) {
+        if (!line.includes('"user.message"') && !line.includes('"assistant.message"')) continue;
 
-      try {
-        const event = JSON.parse(line);
-        const text = event.data?.content;
-        if (typeof text !== 'string') continue;
-        if (!text.toLowerCase().includes(lowerQuery)) continue;
+        try {
+          const event = JSON.parse(line);
+          const text = event.data?.content;
+          if (typeof text !== 'string') continue;
+          if (!text.toLowerCase().includes(lowerQuery)) continue;
 
-        totalMatches++;
-        if (matches.length < maxSnippets) {
-          const result = extractSnippet(text, lowerQuery);
-          if (result) {
-            matches.push({
-              snippet: result.snippet,
-              matchStart: result.matchStart,
-              matchEnd: result.matchEnd,
-              eventType: event.type,
-              timestamp: event.timestamp,
-            });
+          totalMatches++;
+          if (matches.length < maxSnippets) {
+            const result = extractSnippet(text, lowerQuery);
+            if (result) {
+              matches.push({
+                snippet: result.snippet,
+                matchStart: result.matchStart,
+                matchEnd: result.matchEnd,
+                eventType: event.type,
+                timestamp: event.timestamp,
+              });
+            }
           }
-        }
-      } catch { /* skip malformed lines */ }
-    }
-  } catch { /* file read error */ }
+        } catch { /* skip malformed lines */ }
+      }
+    } catch { /* file read error */ }
+  }
 
   return { matches, totalMatches };
 }

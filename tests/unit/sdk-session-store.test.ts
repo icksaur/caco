@@ -186,6 +186,52 @@ describe('sdk-session-store', () => {
       expect(r.ok).toBe(true);
       if (r.ok) expect(r.value.events.length).toBeGreaterThan(0);
     });
+
+    describe('large file (tail path, exceeds single-string limit surrogate)', () => {
+      const realTail = process.env.CACO_TAIL_READ_BYTES;
+      afterEach(() => {
+        if (realTail === undefined) delete process.env.CACO_TAIL_READ_BYTES;
+        else process.env.CACO_TAIL_READ_BYTES = realTail;
+      });
+
+      function bigSession(sid: string, turns: number): void {
+        const lines: string[] = [];
+        for (let t = 0; t < turns; t++) {
+          lines.push(JSON.stringify({ type: 'user.message', data: { content: `ask ${t} ${'x'.repeat(200)}` } }));
+          lines.push(JSON.stringify({ type: 'assistant.message', data: { content: `reply ${t} ${'y'.repeat(200)}` } }));
+        }
+        const dir = sessDir(sid);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'events.jsonl'), lines.join('\n') + '\n');
+      }
+
+      it('loads the last turns from the tail without reading the whole file as one string', () => {
+        process.env.CACO_TAIL_READ_BYTES = '1500'; // force the tail branch
+        bigSession('lt-big', 40);
+        const r = readLastTurnsResult('lt-big', 5, 2000);
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        // The most recent user message must be present...
+        const contents = r.value.events.map(e => (e.data as { content?: string })?.content ?? '');
+        expect(contents.some(c => c.startsWith('ask 39'))) .toBe(true);
+        // ...older turns are skipped, and the count is reported.
+        expect(r.value.skipped).toBeGreaterThan(0);
+        expect(r.value.totalLines).toBe(81); // 40*2 lines + trailing empty from final \n
+        // No corrupt partial JSON leaked in (partial first line was dropped).
+        expect(r.value.events.every(e => typeof e.type === 'string')).toBe(true);
+      });
+
+      it('matches whole-file semantics when the file fits under the threshold', () => {
+        delete process.env.CACO_TAIL_READ_BYTES; // default 64MB → whole-file path
+        bigSession('lt-small', 3);
+        const r = readLastTurnsResult('lt-small', 5, 2000);
+        expect(r.ok).toBe(true);
+        if (r.ok) {
+          expect(r.value.skipped).toBe(0); // all 3 turns fit in 5-turn window
+          expect(r.value.events.length).toBe(6);
+        }
+      });
+    });
   });
 
   describe('parseSessionModel', () => {
@@ -204,6 +250,34 @@ describe('sdk-session-store', () => {
         { type: 'session.model_change', data: { model: 'claude-sonnet-4' } },
       ]);
       expect(parseSessionModel('sess-21')).toBe('claude-sonnet-4');
+    });
+
+    it('returns the newModel of the last of several model_change events', () => {
+      writeEvents('sess-21b', [
+        { type: 'session.start', data: { selectedModel: 'gpt-4' } },
+        { type: 'session.model_change', data: { newModel: 'claude-sonnet-4' } },
+        { type: 'message', data: { content: 'hi' } },
+        { type: 'session.model_change', data: { newModel: 'claude-opus-4' } },
+      ]);
+      expect(parseSessionModel('sess-21b')).toBe('claude-opus-4');
+    });
+
+    it('ignores model strings appearing in message content (substring guard)', () => {
+      writeEvents('sess-21c', [
+        { type: 'session.start', data: { selectedModel: 'gpt-4' } },
+        { type: 'message', data: { content: 'the "session.model_change" wording is just text' } },
+      ]);
+      expect(parseSessionModel('sess-21c')).toBe('gpt-4');
+    });
+
+    it('skips malformed lines without throwing', () => {
+      const dir = sessDir('sess-21d');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'events.jsonl'),
+        '{"type":"session.start","data":{"selectedModel":"gpt-4"}}\n' +
+        '{"type":"session.model_change","data":{ broken json\n' +
+        '{"type":"session.model_change","data":{"newModel":"claude-opus-4"}}\n');
+      expect(parseSessionModel('sess-21d')).toBe('claude-opus-4');
     });
 
     it('returns null for missing events', () => {

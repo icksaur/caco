@@ -15,6 +15,7 @@ import { loadMcpServers } from './mcp-config-loader.js';
 import { createObservationHook } from './observe/hook.js';
 import { OBS_RAW_CEILING_BYTES } from './observe/types.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
+import { reconcileRotation, autoRotateIfEligible } from './session-history-rotation.js';
 import { disposeSessionRuntime } from './session-runtime.js';
 import { broadcastEvent } from './event-bus.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
@@ -265,6 +266,9 @@ export class SessionManager {
   
   // sessionId → Promise (serializes concurrent resume attempts)
   private resumeInProgress = new Map<string, Promise<ResumeResult>>();
+  
+  // sessionId → Promise (history rotation in progress; resume waits on it)
+  private rotatingSessions = new Map<string, Promise<unknown>>();
   
   // Shared SDK client — all sessions use one CLI backend process
   private sharedClient: CopilotClientInstance | null = null;
@@ -547,6 +551,13 @@ export class SessionManager {
     this.sessionCache.clear();
     
     for (const sessionId of listSessionIds()) {
+      // A rotation that crashed mid-swap may have left this session with its
+      // events.jsonl renamed aside (no events.jsonl on disk). Reconcile from the
+      // sidecars BEFORE the events read below, or the session would look missing
+      // and silently vanish. Cheap (two existsSync) when nothing is pending.
+      const recovery = reconcileRotation(sessionId);
+      if (recovery !== 'clean') console.warn(`[DISCOVER] Rotation recovery for ${sessionId}: ${recovery}`);
+
       const record: CachedSession = { cwd: null, summary: null };
 
       const eventsResult = readSessionEventsResult(sessionId);
@@ -665,6 +676,14 @@ export class SessionManager {
    * @throws Error if session doesn't exist
    */
   async resume(sessionId: string, config: ResumeConfig): Promise<ResumeResult> {
+    // Wait out any in-progress history rotation so we resume against the
+    // post-swap file, never a half-rotated one.
+    const rotation = this.rotatingSessions.get(sessionId);
+    if (rotation) {
+      console.log(`[RESUME] Waiting for in-progress rotation of ${sessionId}`);
+      await rotation;
+    }
+
     // If a resume is already in progress for this session, wait for it
     const existing = this.resumeInProgress.get(sessionId);
     if (existing) {
@@ -680,6 +699,34 @@ export class SessionManager {
     } finally {
       this.resumeInProgress.delete(sessionId);
     }
+  }
+
+  /**
+   * Run an exclusive history-rotation operation for a session. Refuses if the
+   * session is active, busy, or already rotating. While it runs, resume() waits
+   * on it so a rotation and a resume never race on the same events.jsonl.
+   */
+  async runExclusiveRotation<T>(sessionId: string, op: () => Promise<T>): Promise<T> {
+    if (this.activeSessions.has(sessionId)) throw new Error(`Cannot rotate active session ${sessionId}`);
+    if (this.isBusy(sessionId)) throw new Error(`Cannot rotate busy session ${sessionId}`);
+    if (this.rotatingSessions.has(sessionId)) throw new Error(`Rotation already in progress for ${sessionId}`);
+    // A resume in flight is invisible to activeSessions until AFTER the multi-second
+    // SDK read of events.jsonl (_doResume sets activeSessions only at the end), but it
+    // is reading the very file we would swap. resumeInProgress is set synchronously at
+    // resume() entry, before any await, so checking it closes that window.
+    if (this.resumeInProgress.has(sessionId)) throw new Error(`Cannot rotate session ${sessionId} while a resume is in flight`);
+
+    const promise = op();
+    this.rotatingSessions.set(sessionId, promise.catch(() => {}));
+    try {
+      return await promise;
+    } finally {
+      this.rotatingSessions.delete(sessionId);
+    }
+  }
+
+  isRotating(sessionId: string): boolean {
+    return this.rotatingSessions.has(sessionId);
   }
 
   /**
@@ -724,7 +771,10 @@ export class SessionManager {
       return { sessionId, usedFallbackCwd };
     }
     
+    const tDoStart = performance.now();
+    const tEnsure0 = performance.now();
     const client = await this.ensureClient();
+    const tEnsure = performance.now() - tEnsure0;
     
     const sessionRef = { id: sessionId };
     const tools = config.toolFactory(cwd, sessionRef);
@@ -744,13 +794,16 @@ export class SessionManager {
     
     let repairMessage: string | undefined;
     const memoryContent = formatMemoryForPrompt();
+    const tMcp0 = performance.now();
+    const mcpServers = await loadMcpServers();
+    const tMcp = performance.now() - tMcp0;
     const resumeArgs = {
       streaming: true,
       tools,
       excludedTools: config.excludedTools,
       onPermissionRequest: approveAll,
       configDir: join(homedir(), '.copilot'),
-      mcpServers: await loadMcpServers(),
+      mcpServers,
       workingDirectory: cwd,
       largeOutput: sdkLargeOutputConfig(),
       hooks: { onPostToolUse: createObservationHook(cwd, sessionRef) },
@@ -766,9 +819,12 @@ export class SessionManager {
     let lastFailureSignature: string | null = null;
     let attemptedSession: CopilotSessionInstance | null = null;
     let lastError: unknown = null;
+    const tSdk0 = performance.now();
+    let sdkAttempts = 0;
 
     for (let attempt = 0; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
       try {
+        sdkAttempts++;
         attemptedSession = await client.resumeSession(sessionId, resumeArgs);
         lastError = null;
         break;
@@ -823,7 +879,7 @@ export class SessionManager {
       throw err;
     }
     const session: CopilotSessionInstance = attemptedSession;
-    
+    const tSdk = performance.now() - tSdk0;
     this.activeSessions.set(sessionId, {
       cwd,
       session,
@@ -834,7 +890,9 @@ export class SessionManager {
     });
     
     // Evict oldest inactive sessions if over the limit
+    const tEvict0 = performance.now();
     await this.evictInactiveSessions();
+    const tEvict = performance.now() - tEvict0;
     
     ensureSessionMeta(sessionId);
     
@@ -848,6 +906,18 @@ export class SessionManager {
     }
     
     console.log(`✓ Resumed session ${sessionId} for ${cwd}${usedFallbackCwd ? ' (fallback)' : ''}${repairMessage ? ' (repaired)' : ''}`);
+    // Cold-open latency attribution. ensureClient = first-call SDK client init;
+    // mcp = loadMcpServers; sdkResume = SDK resumeSession (events.jsonl
+    // rehydration, the dominant cost on large sessions); evict = stopping LRU
+    // sessions; prework = model/meta lookups (readModelFromEvents parses the
+    // events file when meta is absent). attempts>1 means auto-repair ran.
+    const tTotal = performance.now() - tDoStart;
+    const tPrework = tTotal - tEnsure - tMcp - tSdk - tEvict;
+    console.log(
+      `[PERF] _doResume ${sessionId.slice(0, 8)} ensureClient=${tEnsure.toFixed(1)}ms ` +
+      `mcp=${tMcp.toFixed(1)}ms sdkResume=${tSdk.toFixed(1)}ms evict=${tEvict.toFixed(1)}ms ` +
+      `prework=${tPrework.toFixed(1)}ms total=${tTotal.toFixed(1)}ms attempts=${sdkAttempts}`,
+    );
     return { sessionId, usedFallbackCwd, repairMessage };
   }
 
@@ -895,6 +965,11 @@ export class SessionManager {
     disposeSessionRuntime(sessionId);
     
     console.log(`✓ Stopped session ${sessionId}`);
+
+    // Phase 2: the session is now at rest. Auto-rotate its history if eligible
+    // (env-gated, size+cooldown pre-checked). Fire-and-forget with swallowed
+    // errors so deactivation latency and correctness are never affected.
+    void autoRotateIfEligible(sessionId);
   }
 
   async changeCwd(sessionId: string, newCwd: string): Promise<void> {
@@ -1383,6 +1458,19 @@ export class SessionManager {
    */
   isActive(sessionId: string): boolean {
     return this.activeSessions.has(sessionId);
+  }
+
+  /** Session ids known on disk/in cache. For maintenance sweeps (history
+   *  rotation); does not imply the session is active. */
+  knownSessionIds(): string[] {
+    return Array.from(this.sessionCache.keys());
+  }
+
+  /** A resume is in flight for this session (set synchronously at resume()
+   *  entry, before the multi-second SDK read). Used to avoid rotating/cooling
+   *  down a session that is being opened. */
+  isResuming(sessionId: string): boolean {
+    return this.resumeInProgress.has(sessionId);
   }
 
   /**

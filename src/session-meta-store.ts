@@ -45,6 +45,13 @@ export interface SessionMeta {
   appletPanelVisible?: boolean;
   /** @deprecated Use kind === 'swarm' instead */
   isSwarmSession?: boolean;
+  /** Epoch ms of the last history rotation (front-truncation of events.jsonl).
+   *  Used as a cooldown so we don't re-rotate a session repeatedly. */
+  lastRotatedAt?: number;
+  /** Epoch ms of the last AUTO-rotation attempt (success OR failure/refusal).
+   *  Auto-rotation backs off on this so a session that keeps failing verify
+   *  doesn't re-spin the isolated verify client on every deactivation. */
+  lastRotateAttemptAt?: number;
 }
 
 const INTENT_HISTORY_LIMIT = 5;

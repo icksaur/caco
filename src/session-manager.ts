@@ -15,6 +15,7 @@ import { loadMcpServers } from './mcp-config-loader.js';
 import { createObservationHook } from './observe/hook.js';
 import { OBS_RAW_CEILING_BYTES } from './observe/types.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
+import { reconcileRotation } from './session-history-rotation.js';
 import { disposeSessionRuntime } from './session-runtime.js';
 import { broadcastEvent } from './event-bus.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
@@ -550,6 +551,13 @@ export class SessionManager {
     this.sessionCache.clear();
     
     for (const sessionId of listSessionIds()) {
+      // A rotation that crashed mid-swap may have left this session with its
+      // events.jsonl renamed aside (no events.jsonl on disk). Reconcile from the
+      // sidecars BEFORE the events read below, or the session would look missing
+      // and silently vanish. Cheap (two existsSync) when nothing is pending.
+      const recovery = reconcileRotation(sessionId);
+      if (recovery !== 'clean') console.warn(`[DISCOVER] Rotation recovery for ${sessionId}: ${recovery}`);
+
       const record: CachedSession = { cwd: null, summary: null };
 
       const eventsResult = readSessionEventsResult(sessionId);
@@ -702,6 +710,11 @@ export class SessionManager {
     if (this.activeSessions.has(sessionId)) throw new Error(`Cannot rotate active session ${sessionId}`);
     if (this.isBusy(sessionId)) throw new Error(`Cannot rotate busy session ${sessionId}`);
     if (this.rotatingSessions.has(sessionId)) throw new Error(`Rotation already in progress for ${sessionId}`);
+    // A resume in flight is invisible to activeSessions until AFTER the multi-second
+    // SDK read of events.jsonl (_doResume sets activeSessions only at the end), but it
+    // is reading the very file we would swap. resumeInProgress is set synchronously at
+    // resume() entry, before any await, so checking it closes that window.
+    if (this.resumeInProgress.has(sessionId)) throw new Error(`Cannot rotate session ${sessionId} while a resume is in flight`);
 
     const promise = op();
     this.rotatingSessions.set(sessionId, promise.catch(() => {}));

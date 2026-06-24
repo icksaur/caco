@@ -339,8 +339,13 @@ export async function autoRotateIfEligible(sessionId: string, overrides: Partial
   try { size = statSync(join(stateDir, sessionId, 'events.jsonl')).size; } catch { return null; }
   const cfg = overrides.config ?? rotationConfigFromEnv();
   if (size < cfg.thresholdBytes) return null;
-  const last = getSessionMeta(sessionId)?.lastRotatedAt;
-  if (typeof last === 'number' && Date.now() - last < AUTO_ROTATE_COOLDOWN_MS) return null;
+  // Back off on the most recent attempt OR success — a session that keeps
+  // failing verify must not re-spin the isolated client on every deactivation.
+  const meta = getSessionMeta(sessionId);
+  const lastTouch = Math.max(meta?.lastRotatedAt ?? 0, meta?.lastRotateAttemptAt ?? 0);
+  if (lastTouch && Date.now() - lastTouch < AUTO_ROTATE_COOLDOWN_MS) return null;
+  // Record the attempt BEFORE the expensive work so a failure still cools down.
+  updateSessionMeta(sessionId, m => { m.lastRotateAttemptAt = Date.now(); });
   try {
     return await rotateSessionHistory(sessionId, overrides);
   } catch {

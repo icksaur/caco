@@ -305,6 +305,21 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
     writeSession('ar2', [START, line('a'), COMPACT, line('c')]);
     expect(await autoRotateIfEligible('ar2', { stateDir, config: { ...cfg, thresholdBytes: 10_000_000 } })).toBeNull();
   });
+
+  it('backs off within the cooldown after a recent attempt (even a failed one)', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar3';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    // Simulate a just-recorded attempt timestamp in meta.
+    mkdirSync(join(env.home, '.caco', 'sessions', sid), { recursive: true });
+    writeFileSync(
+      join(env.home, '.caco', 'sessions', sid, 'meta.json'),
+      JSON.stringify({ name: '', lastRotateAttemptAt: Date.now() }),
+    );
+    // Threshold is 0 here so size passes; the cooldown gate must short-circuit
+    // to null WITHOUT reaching rotateSessionHistory (which would import the SDK).
+    expect(await autoRotateIfEligible(sid, { stateDir, config: { ...cfg, thresholdBytes: 0 } })).toBeNull();
+  });
 });
 
 describe('defaultPreserveModel', () => {

@@ -216,8 +216,10 @@ export function searchSessionEvents(sessionId: string, query: string, maxSnippet
   const matches: SearchMatch[] = [];
   let totalMatches = 0;
 
-  // Scan the archived (rotated-out) history first so older matches read in
-  // chronological order ahead of the live tail.
+  // Scan the archived (rotated-out) history and the live tail. Note rotation
+  // retains user.message events in the live file while archiving their
+  // surrounding assistant/tool events, so a pre-cut user message reads after its
+  // archived assistant reply — search is for recall, not strict transcript order.
   for (const path of [archivePath, eventsPath]) {
     if (!existsSync(path)) continue;
     try {

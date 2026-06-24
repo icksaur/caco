@@ -19,7 +19,7 @@ Make cold-resume of "mega-sessions" sub-second by front-truncating the append-on
 
 ## Cut point
 
-Retain `session.start` (line 1) **+ every line from the last `session.compaction_complete` onward**. This resumes fast AND preserves the freshest compaction summary, so the model keeps its compacted memory (soft-correctness, not just resume-ability). Fallback if no compaction event: retain last `MIN_TAIL_EVENTS` (e.g. 4000). Skip rotation entirely if file < `ROTATE_THRESHOLD_BYTES` (e.g. 64 MB) or the cut would save < `MIN_SAVING` (e.g. <50% / <32 MB).
+Retain `session.start` (line 1) **+ every `user.message` event + everything from the last `session.compaction_complete` onward**. The compaction tail preserves the freshest summary; **all user messages are retained** because the SDK rebuilds a resumed session's context from the user-message digest scattered across the *whole* history — dropping them (an earlier `start + last-compaction` cut) made a rotated session recall materially less than the full history. User messages are ~0.1% of a mega-session's bytes, so retaining them is nearly free. Validated against a real SDK resume + memory probe: the user-message-retaining cut is memory-equivalent to the full 428 MB history (the bare last-compaction cut was not). Everything else before the cut is archived. Fallback if no compaction event: retain from `MIN_TAIL_EVENTS` back. Skip rotation if file < `ROTATE_THRESHOLD_BYTES` or saving < `MIN_SAVING`.
 
 ## Operation: `rotateSessionHistory(sessionId)` (new module `src/session-history-rotation.ts`)
 
@@ -40,7 +40,7 @@ The live `events.jsonl` is replaced only by a candidate that **already passed a 
 ## Trigger policy (phased)
 
 - **Phase 1 — manual/explicit.** A `POST /api/sessions/:id/rotate` route + a session-list action. User invokes on a chosen inactive session; result reported. Lets the user **validate coherence** (resume + send a probe; does the model still "remember" via the summary?) on real sessions before any automation. NOTE: `onSessionEnd` is **delete**, not idle — do NOT hook it.
-- **Phase 2 — automatic (gated, after validation).** Run `rotateSessionHistory` inside `SessionManager.stop()`/`evictInactiveSessions()` (file at rest, session just deactivated), gated by threshold + cooldown, holding the rotation lock for the whole op (NOT fire-and-forget mid-swap); errors swallowed so deactivation never breaks. Never inline on the resume path. **Phase 2 gate (required, not optional):** an opt-in integration validation — rotate copied sessions, resume, send probe prompts that require pre-cut knowledge, compare to full-history behavior. Phase 2 stays off (`CACO_ROTATE_AUTO=0`) until this passes.
+- **Phase 2 — automatic (gated, after validation).** Run `autoRotateIfEligible` (fire-and-forget) at the end of `SessionManager.stop()` (covers explicit stop AND `evictInactiveSessions`, i.e. the session is at rest). Cheap pre-gates (env `CACO_ROTATE_AUTO=1`, size ≥ threshold, `lastRotatedAt` cooldown) run before spinning the isolated verify client; errors swallowed so deactivation never breaks. Never inline on the resume path. **Phase 2 gate (DONE):** validated via a real SDK resume + memory-probe comparison — the full 428 MB history recalled the early goal / the two extraction techniques / the animation driver; the bare last-compaction cut recalled none; the **user-message-retaining cut matched the full history**. This drove the cut-point change above. Auto stays off (`CACO_ROTATE_AUTO=0`) by default.
 
 ## Caco-side correctness
 

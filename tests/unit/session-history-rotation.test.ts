@@ -23,7 +23,7 @@ vi.mock('os', async (importOriginal) => {
 });
 
 import {
-  planRotation, performRotation, reconcileRotation, defaultPreserveModel,
+  planRotation, performRotation, reconcileRotation, defaultPreserveModel, autoRotateIfEligible,
   type RotationConfig, type RotationDeps,
 } from '../../src/session-history-rotation.js';
 
@@ -104,6 +104,16 @@ describe('planRotation', () => {
   it('refuses with too few events', () => {
     expect(planRotation([START, COMPACT], 1000, LOOSE).reason).toBe('too-few-events');
   });
+
+  it('counts retained user.message events in retained, not archived', () => {
+    const u = line('user.message', { content: 'x' });
+    const withUser = [START, u, line('a'), line('b'), COMPACT, line('c')];
+    const p = planRotation(withUser, 1000, LOOSE);
+    expect(p.rotate).toBe(true);
+    expect(p.cutIndex).toBe(4);
+    expect(p.archivedLines).toBe(2); // a, b — NOT the user message
+    expect(p.retainedLines).toBe(4); // START, u, COMPACT, c
+  });
 });
 
 describe('performRotation — happy path', () => {
@@ -118,6 +128,20 @@ describe('performRotation — happy path', () => {
     expect(read(join(stateDir, sid, 'events-archive.jsonl'))).toBe([line('a'), line('b')].join('\n') + '\n');
     expect(existsSync(eventsPath(sid) + '.prerotate')).toBe(false);
     expect(existsSync(eventsPath(sid) + '.candidate')).toBe(false);
+    expect(result.archivedLines).toBe(2);
+  });
+
+  it('retains pre-cut user.message events (memory digest) instead of archiving them', async () => {
+    const sid = 'keepusers';
+    const u1 = line('user.message', { content: 'early ask' });
+    writeSession(sid, [START, u1, line('a'), line('b'), COMPACT, line('c')]);
+
+    const result = await performRotation(sid, baseOverrides(async () => {}));
+
+    expect(result.ok).toBe(true);
+    // u1 stays in the live file; only the non-user head (a, b) is archived.
+    expect(read(eventsPath(sid))).toBe([START, u1, COMPACT, line('c')].join('\n') + '\n');
+    expect(read(join(stateDir, sid, 'events-archive.jsonl'))).toBe([line('a'), line('b')].join('\n') + '\n');
     expect(result.archivedLines).toBe(2);
   });
 
@@ -257,6 +281,29 @@ describe('reconcileRotation — crash recovery by file presence', () => {
     setup('f', { 'events.jsonl': null, 'events.jsonl.prerotate': 'orig\n' });
     expect(reconcileRotation('f', { stateDir })).toBe('restored-original');
     expect(read(eventsPath('f'))).toBe('orig\n');
+  });
+});
+
+describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
+  const cfg: RotationConfig = { thresholdBytes: 1000, minTailEvents: 2, minSavingBytes: 0 };
+
+  afterEach(() => { delete process.env.CACO_ROTATE_AUTO; });
+
+  it('returns null when CACO_ROTATE_AUTO is not 1', async () => {
+    delete process.env.CACO_ROTATE_AUTO;
+    writeSession('ar1', [START, line('a'), COMPACT, line('c')]);
+    expect(await autoRotateIfEligible('ar1', { stateDir, config: cfg })).toBeNull();
+  });
+
+  it('returns null when the events file is missing', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    expect(await autoRotateIfEligible('nope', { stateDir, config: cfg })).toBeNull();
+  });
+
+  it('returns null when the file is below the size threshold', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    writeSession('ar2', [START, line('a'), COMPACT, line('c')]);
+    expect(await autoRotateIfEligible('ar2', { stateDir, config: { ...cfg, thresholdBytes: 10_000_000 } })).toBeNull();
   });
 });
 

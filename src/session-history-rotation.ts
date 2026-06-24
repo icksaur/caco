@@ -26,6 +26,7 @@ import { parseSessionModel } from './sdk-session-store.js';
 import { getSessionMeta, updateSessionMeta } from './session-meta-store.js';
 
 const COMPACTION_MARK = '"type":"session.compaction_complete"';
+const USER_MESSAGE_MARK = '"type":"user.message"';
 const SIBLING_FILES = ['workspace.yaml', 'vscode.metadata.json', 'session.db'];
 
 export interface RotationConfig {
@@ -55,15 +56,38 @@ export interface CutPlan {
   savedBytes: number;
 }
 
-function lineBytes(lines: string[], start: number, end: number): number {
+function lineBytes(lines: string[]): number {
   let bytes = 0;
-  for (let i = start; i < end; i++) bytes += Buffer.byteLength(lines[i], 'utf-8') + 1;
+  for (const l of lines) bytes += Buffer.byteLength(l, 'utf-8') + 1;
   return bytes;
 }
 
 /**
+ * Split event lines into the retained file and the archived (removed) head.
+ * Retained = session.start (line 0) + EVERY user.message + everything from the
+ * last compaction onward (cutIndex). Archived = the rest.
+ *
+ * Retaining all user.message events is what preserves the model's recall on
+ * resume: the SDK rebuilds a resumed session's context from the user-message
+ * digest scattered across the whole history, not just the last compaction
+ * summary. They are ~0.1% of a mega-session's bytes, so keeping them is nearly
+ * free yet makes a rotated session memory-equivalent to the full history
+ * (validated against a real SDK resume + probe — see findings doc).
+ */
+export function partitionRotation(lines: string[], cutIndex: number): { retained: string[]; archived: string[] } {
+  const retained: string[] = [];
+  const archived: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (i === 0 || i >= cutIndex || lines[i].includes(USER_MESSAGE_MARK)) retained.push(lines[i]);
+    else archived.push(lines[i]);
+  }
+  return { retained, archived };
+}
+
+/**
  * Decide whether and where to cut. `lines` must be the non-empty event lines.
- * Retained = [lines[0], ...lines.slice(cutIndex)]; archived = lines.slice(1, cutIndex).
+ * Uses partitionRotation so the saving estimate matches what performRotation
+ * actually archives.
  */
 export function planRotation(lines: string[], fileBytes: number, cfg: RotationConfig): CutPlan {
   const none = (reason: string): CutPlan =>
@@ -80,14 +104,15 @@ export function planRotation(lines: string[], fileBytes: number, cfg: RotationCo
 
   if (cutIndex <= 1) return none('cut-too-near-head');
 
-  const savedBytes = lineBytes(lines, 1, cutIndex);
+  const { retained, archived } = partitionRotation(lines, cutIndex);
+  const savedBytes = lineBytes(archived);
   if (savedBytes < cfg.minSavingBytes) return none('saving-too-small');
 
   return {
     rotate: true,
     cutIndex,
-    retainedLines: 1 + (lines.length - cutIndex),
-    archivedLines: cutIndex - 1,
+    retainedLines: retained.length,
+    archivedLines: archived.length,
     savedBytes,
   };
 }
@@ -190,8 +215,8 @@ export async function performRotation(sessionId: string, overrides: Partial<Rota
 
   if (!deps.preserveModel(sessionId)) return { ok: false, reason: 'model-persist-failed' };
 
-  const retained = [lines[0], ...lines.slice(plan.cutIndex)].join('\n') + '\n';
-  writeFileSync(candidate, retained);
+  const { retained, archived } = partitionRotation(lines, plan.cutIndex);
+  writeFileSync(candidate, retained.join('\n') + '\n');
 
   const stagedId = `rotcheck-${sessionId.slice(0, 8)}-${Date.now()}`;
   const stagedDir = join(deps.stateDir, stagedId);
@@ -217,8 +242,7 @@ export async function performRotation(sessionId: string, overrides: Partial<Rota
   }
 
   try {
-    const archived = lines.slice(1, plan.cutIndex).join('\n') + '\n';
-    appendAndFsync(archivePath, archived);
+    appendAndFsync(archivePath, archived.join('\n') + '\n');
   } catch (e) {
     safeUnlink(candidate);
     return { ok: false, reason: 'archive-failed', error: e instanceof Error ? e.message : String(e) };
@@ -298,4 +322,28 @@ export async function rotateSessionHistory(sessionId: string, overrides: Partial
   const { sessionManager } = await import('./session-manager.js');
   reconcileRotation(sessionId, overrides);
   return sessionManager.runExclusiveRotation(sessionId, () => performRotation(sessionId, overrides));
+}
+
+const AUTO_ROTATE_COOLDOWN_MS = 60 * 60 * 1000;
+
+/**
+ * Phase 2 auto-rotation entry, called fire-and-forget when a session deactivates.
+ * Cheap pre-gates (env flag, size threshold, cooldown) run BEFORE spinning up the
+ * isolated verify client, so small/recently-rotated sessions cost only a statSync.
+ * Never throws — a refused/failed rotation must not break deactivation.
+ */
+export async function autoRotateIfEligible(sessionId: string, overrides: Partial<RotationDeps> = {}): Promise<RotationResult | null> {
+  if (process.env.CACO_ROTATE_AUTO !== '1') return null;
+  const stateDir = overrides.stateDir ?? STATE_DIR;
+  let size = 0;
+  try { size = statSync(join(stateDir, sessionId, 'events.jsonl')).size; } catch { return null; }
+  const cfg = overrides.config ?? rotationConfigFromEnv();
+  if (size < cfg.thresholdBytes) return null;
+  const last = getSessionMeta(sessionId)?.lastRotatedAt;
+  if (typeof last === 'number' && Date.now() - last < AUTO_ROTATE_COOLDOWN_MS) return null;
+  try {
+    return await rotateSessionHistory(sessionId, overrides);
+  } catch {
+    return null;
+  }
 }

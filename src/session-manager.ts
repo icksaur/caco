@@ -15,7 +15,7 @@ import { loadMcpServers } from './mcp-config-loader.js';
 import { createObservationHook } from './observe/hook.js';
 import { OBS_RAW_CEILING_BYTES } from './observe/types.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
-import { reconcileRotation } from './session-history-rotation.js';
+import { reconcileRotation, autoRotateIfEligible } from './session-history-rotation.js';
 import { disposeSessionRuntime } from './session-runtime.js';
 import { broadcastEvent } from './event-bus.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
@@ -965,6 +965,11 @@ export class SessionManager {
     disposeSessionRuntime(sessionId);
     
     console.log(`✓ Stopped session ${sessionId}`);
+
+    // Phase 2: the session is now at rest. Auto-rotate its history if eligible
+    // (env-gated, size+cooldown pre-checked). Fire-and-forget with swallowed
+    // errors so deactivation latency and correctness are never affected.
+    void autoRotateIfEligible(sessionId);
   }
 
   async changeCwd(sessionId: string, newCwd: string): Promise<void> {

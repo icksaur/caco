@@ -23,6 +23,7 @@ import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
 import { prefixMessageSource, type MessageSource } from '../message-source.js';
 import { createWatchdog } from '../dispatch-watchdog.js';
+import { dispatchState } from '../dispatch-state.js';
 import { retryWithFreshClient } from '../dispatch-retry.js';
 import { applyDispatchEventEffects } from '../dispatch-events.js';
 import { resetRequest, snapshot, markRequestComplete } from '../session-throughput.js';
@@ -391,6 +392,7 @@ export async function dispatchMessage(
     const handleEvent = (event: SessionEvent) => {
       if (dispatchCompleted) return;
       watchdog?.notifyEvent(event.type);
+      dispatchState.notifyActivity(sessionId, event.type);
 
       // Forward the SDK event to the client (no transformation — caco.* events
       // are emitted directly by their tool handlers).

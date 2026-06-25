@@ -9,14 +9,35 @@
  */
 
 import { EventEmitter } from 'events';
+import { createWatchdog } from './dispatch-watchdog.js';
 
 export interface ActiveDispatch {
   correlationId: string;
   startedAt: number;
 }
 
+/** Options for an activity-aware wait. */
+export interface WaitForActiveOptions {
+  /** Resolve 'timeout' after this long with no activity from the session (resets on each event). */
+  idleTimeoutMs: number;
+  /** Resolve 'timeout' after this long total regardless of activity — caller-side backstop. */
+  maxTotalMs: number;
+  /** Optional liveness probe; when it returns true the wait resolves 'gone'. */
+  isGone?: () => boolean;
+  /** How often to poll isGone (default 10s). */
+  gonePollMs?: number;
+}
+
 export class DispatchState extends EventEmitter {
   private dispatches = new Map<string, ActiveDispatch>();
+
+  constructor() {
+    super();
+    // Each waitForActive adds an 'activity' + 'idle' listener; many concurrent
+    // delegate waits would trip the default 10-listener warning. Unbounded is
+    // safe here — listeners are always removed on resolution.
+    this.setMaxListeners(0);
+  }
 
   start(sessionId: string, correlationId: string): void {
     if (this.dispatches.has(sessionId)) {
@@ -31,6 +52,11 @@ export class DispatchState extends EventEmitter {
   end(sessionId: string): void {
     this.dispatches.delete(sessionId);
     this.emit('idle', sessionId);
+  }
+
+  /** Signal that a session emitted an SDK event — resets activity-aware waits. */
+  notifyActivity(sessionId: string, eventType: string): void {
+    this.emit('activity', { sessionId, eventType });
   }
 
   isBusy(sessionId: string): boolean {
@@ -77,41 +103,56 @@ export class DispatchState extends EventEmitter {
       if (!this.isBusy(sessionId)) { cleanup(); resolve('idle'); }
     });
   }
-}
 
-export function waitForSessionIdle(
-  sessionId: string,
-  timeoutMs: number,
-  isGone: () => boolean
-): Promise<'idle' | 'timeout' | 'gone'> {
-  return new Promise((resolve) => {
-    if (isGone()) { resolve('gone'); return; }
-    if (!dispatchState.isBusy(sessionId)) { resolve('idle'); return; }
+  /**
+   * Wait for a session's dispatch to finish, bounded by an *inactivity* gap
+   * (reset by each `notifyActivity` for the session) rather than a flat deadline,
+   * plus a non-resetting absolute cap as a caller-side backstop. The idle gap
+   * reuses createWatchdog, so a long-running tool pauses it exactly as an
+   * interactive dispatch does — a delegate that is genuinely working never
+   * false-times-out. Resolves 'idle' when the dispatch ends, 'gone' when isGone
+   * trips, or 'timeout' on either the idle gap or the absolute cap.
+   */
+  waitForActive(sessionId: string, opts: WaitForActiveOptions): Promise<'idle' | 'timeout' | 'gone'> {
+    return new Promise((resolve) => {
+      if (opts.isGone?.()) { resolve('gone'); return; }
+      if (!this.isBusy(sessionId)) { resolve('idle'); return; }
 
-    let resolved = false;
-    const cleanup = () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      clearInterval(goneCheck);
-      dispatchState.removeListener('idle', onIdle);
-    };
+      let settled = false;
+      const finish = (outcome: 'idle' | 'timeout' | 'gone') => {
+        if (settled) return;
+        settled = true;
+        watchdog.cancel();
+        clearTimeout(absoluteTimer);
+        if (goneTimer) clearInterval(goneTimer);
+        this.removeListener('activity', onActivity);
+        this.removeListener('idle', onIdle);
+        resolve(outcome);
+      };
 
-    const timer = setTimeout(() => { cleanup(); resolve('timeout'); }, timeoutMs);
+      const watchdog = createWatchdog({
+        initialTimeoutMs: opts.idleTimeoutMs,
+        betweenEventTimeoutMs: opts.idleTimeoutMs,
+        longRunningTimeoutMs: opts.idleTimeoutMs,
+        onTimeout: () => finish('timeout'),
+      });
 
-    const goneCheck = setInterval(() => {
-      if (isGone()) { cleanup(); resolve('gone'); }
-    }, 10_000);
+      const absoluteTimer = setTimeout(() => finish('timeout'), opts.maxTotalMs);
 
-    const onIdle = (id: string) => {
-      if (id !== sessionId) return;
-      cleanup();
-      resolve('idle');
-    };
+      const goneTimer = opts.isGone
+        ? setInterval(() => { if (opts.isGone!()) finish('gone'); }, opts.gonePollMs ?? 10_000)
+        : undefined;
 
-    dispatchState.on('idle', onIdle);
-    if (!dispatchState.isBusy(sessionId)) { cleanup(); resolve('idle'); }
-  });
+      const onActivity = (e: { sessionId: string; eventType: string }) => {
+        if (e.sessionId === sessionId) watchdog.notifyEvent(e.eventType);
+      };
+      const onIdle = (id: string) => { if (id === sessionId) finish('idle'); };
+
+      this.on('activity', onActivity);
+      this.on('idle', onIdle);
+      if (!this.isBusy(sessionId)) finish('idle');
+    });
+  }
 }
 
 export const dispatchState = new DispatchState();

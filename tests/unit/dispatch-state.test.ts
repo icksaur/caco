@@ -5,7 +5,7 @@
  * both busy status and correlation context atomically.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { DispatchState } from '../../src/dispatch-state.js';
 
 describe('DispatchState', () => {
@@ -203,6 +203,111 @@ describe('DispatchState', () => {
       state.end('session-1');
       await promise;
 
+      expect(state.listenerCount('idle')).toBe(0);
+    });
+  });
+
+  describe('notifyActivity', () => {
+    it('emits an activity event carrying sessionId and eventType', () => {
+      const seen: Array<{ sessionId: string; eventType: string }> = [];
+      state.on('activity', (e: { sessionId: string; eventType: string }) => seen.push(e));
+
+      state.notifyActivity('session-1', 'tool.execution_start');
+
+      expect(seen).toEqual([{ sessionId: 'session-1', eventType: 'tool.execution_start' }]);
+    });
+  });
+
+  describe('waitForActive', () => {
+    const IDLE = 1000;
+    const MAX = 10_000;
+
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('resolves idle immediately when not busy', async () => {
+      await expect(state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX })).resolves.toBe('idle');
+    });
+
+    it('resolves gone immediately when isGone is already true', async () => {
+      state.start('s1', 'c1');
+      await expect(
+        state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX, isGone: () => true })
+      ).resolves.toBe('gone');
+    });
+
+    it('resolves idle when the dispatch ends', async () => {
+      state.start('s1', 'c1');
+      const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX });
+      state.end('s1');
+      await expect(p).resolves.toBe('idle');
+    });
+
+    it('times out after the idle gap with no activity', async () => {
+      state.start('s1', 'c1');
+      const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX });
+      await vi.advanceTimersByTimeAsync(IDLE);
+      await expect(p).resolves.toBe('timeout');
+    });
+
+    it('activity resets the idle gap (no false timeout while working)', async () => {
+      state.start('s1', 'c1');
+      const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX });
+      let settled = false;
+      void p.then(() => { settled = true; });
+
+      // Keep emitting activity just under the idle gap across several windows.
+      for (let i = 0; i < 5; i++) {
+        await vi.advanceTimersByTimeAsync(IDLE - 1);
+        state.notifyActivity('s1', 'assistant.message_delta');
+      }
+      expect(settled).toBe(false);
+
+      // Then go silent — times out one idle gap later.
+      await vi.advanceTimersByTimeAsync(IDLE);
+      await expect(p).resolves.toBe('timeout');
+    });
+
+    it('the absolute cap fires even under continuous activity', async () => {
+      state.start('s1', 'c1');
+      const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX });
+      const keep = setInterval(() => state.notifyActivity('s1', 'assistant.message_delta'), IDLE - 1);
+      await vi.advanceTimersByTimeAsync(MAX);
+      clearInterval(keep);
+      await expect(p).resolves.toBe('timeout');
+    });
+
+    it('does not time out while a tool is executing (watchdog pause)', async () => {
+      state.start('s1', 'c1');
+      const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX });
+      let settled = false;
+      void p.then(() => { settled = true; });
+
+      state.notifyActivity('s1', 'tool.execution_start');
+      // Silence longer than the idle gap (but under the absolute cap).
+      await vi.advanceTimersByTimeAsync(IDLE * 3);
+      expect(settled).toBe(false);
+
+      state.notifyActivity('s1', 'tool.execution_complete');
+      state.end('s1');
+      await expect(p).resolves.toBe('idle');
+    });
+
+    it('resolves gone when isGone trips during the wait', async () => {
+      state.start('s1', 'c1');
+      let gone = false;
+      const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX, isGone: () => gone, gonePollMs: 100 });
+      gone = true;
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(p).resolves.toBe('gone');
+    });
+
+    it('removes its listeners on every exit path', async () => {
+      state.start('s1', 'c1');
+      const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX });
+      await vi.advanceTimersByTimeAsync(IDLE);
+      await p;
+      expect(state.listenerCount('activity')).toBe(0);
       expect(state.listenerCount('idle')).toBe(0);
     });
   });

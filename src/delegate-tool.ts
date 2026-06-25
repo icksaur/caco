@@ -3,10 +3,11 @@ import { z } from 'zod';
 import { SERVER_URL } from './config.js';
 import type { SessionIdRef } from './types.js';
 import { sessionManager } from './session-manager.js';
-import { waitForSessionIdle } from './dispatch-state.js';
+import { dispatchState } from './dispatch-state.js';
 import { getSessionMeta } from './storage.js';
 
-const DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
+const DELEGATE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+const DELEGATE_MAX_TOTAL_MS = 60 * 60 * 1000;
 
 async function getLastAssistantMessage(sessionId: string): Promise<string> {
   try {
@@ -84,11 +85,11 @@ Use to have a reviewer/research session check work or look something up. Don't d
       const waitPromises = delegates
         .filter(d => !d.done)
         .map(async (d) => {
-          const result = await waitForSessionIdle(
-            d.sessionId,
-            DELEGATE_TIMEOUT_MS,
-            () => !sessionManager.getSessionCwd(d.sessionId)
-          );
+          const result = await dispatchState.waitForActive(d.sessionId, {
+            idleTimeoutMs: DELEGATE_IDLE_TIMEOUT_MS,
+            maxTotalMs: DELEGATE_MAX_TOTAL_MS,
+            isGone: () => !sessionManager.getSessionCwd(d.sessionId),
+          });
 
           if (result === 'idle') {
             d.done = true;
@@ -100,7 +101,7 @@ Use to have a reviewer/research session check work or look something up. Don't d
             console.log(`[DELEGATE] Session ${d.sessionId.slice(0, 8)} gone`);
           } else {
             d.done = true;
-            d.result = '(timed out after 15 minutes)';
+            d.result = '(delegate still running — check the session list)';
             console.log(`[DELEGATE] Session ${d.sessionId.slice(0, 8)} timed out`);
           }
         });

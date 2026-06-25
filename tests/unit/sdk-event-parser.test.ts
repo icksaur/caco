@@ -108,23 +108,4 @@ describe('extractToolTelemetry', () => {
     
     expect(telemetry).toBeUndefined();
   });
-
-  it('handles real SDK embed_media event structure', () => {
-    // Actual event captured from server.log
-    const event: ToolExecutionCompleteEvent = {
-      toolCallId: 'toolu_01HB6UBnmR3m6hUhRcTBhLwP',
-      success: true,
-      result: {
-        content: '{"textResultForLlm":"[output:out_1769659224244_jg2lco] Embedded YouTube content: \\"Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)\\" by Rick Astley","toolTelemetry":{"outputId":"out_1769659224244_jg2lco","provider":"YouTube","title":"Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)","author":"Rick Astley"}}',
-        detailedContent: '{"textResultForLlm":"[output:out_1769659224244_jg2lco] Embedded YouTube content"}'
-      },
-      toolTelemetry: {}
-    };
-
-    const telemetry = extractToolTelemetry(event);
-    
-    expect(telemetry?.outputId).toBe('out_1769659224244_jg2lco');
-    expect(telemetry?.provider).toBe('YouTube');
-    expect(telemetry?.author).toBe('Rick Astley');
-  });
 });

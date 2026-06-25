@@ -46,10 +46,10 @@ export function formatAppletUsage(applet: AppletMeta & { paths: unknown }): stri
 }
 
 /**
- * Documentation returned by caco_applet_howto tool.
+ * Documentation for creating applets, surfaced via caco_docs section="applets:create".
  * This teaches agents how to create applets using file tools.
  */
-const APPLET_HOWTO = `
+export const APPLET_HOWTO = `
 # Creating Applets in Caco
 
 Applets are interactive HTML/JS/CSS components stored on disk and loaded via URL.
@@ -326,6 +326,35 @@ The link uses relative URL format \`/?applet=slug\` which navigates without page
  * Create applet tools
  * Returns an array of tool definitions to include in session creation.
  */
+/**
+ * Build the applet usage guide (URL patterns for linking users to panels),
+ * optionally filtered to one slug. Surfaced via caco_docs section="applets:usage".
+ */
+export async function buildAppletUsage(slug?: string): Promise<string> {
+  const allApplets = await listApplets();
+  const visibleApplets = allApplets.filter(a => !a.deprecated);
+
+  if (slug) {
+    const deprecatedHit = allApplets.find(a => a.slug === slug && a.deprecated);
+    if (deprecatedHit) {
+      return `Applet "${slug}" is deprecated. Use "${deprecatedHit.replacedBy || 'files'}" instead.`;
+    }
+  }
+
+  const filtered = slug
+    ? visibleApplets.filter(a => a.slug === slug)
+    : visibleApplets;
+
+  if (filtered.length === 0) {
+    return slug
+      ? `Applet "${slug}" not found. Available: ${visibleApplets.map(a => a.slug).join(', ') || 'none'}`
+      : 'No applets installed. Use caco_docs section="applets:create" to create one.';
+  }
+
+  const usage = filtered.map(formatAppletUsage).join('\n\n');
+  return `# Applet Usage\n\nProvide markdown links to open applets for users.\n\n${usage}`;
+}
+
 export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef | undefined, pushStateToApplet: StatePushHandler) {
 
   const getAppletState = defineTool('get_applet_state', {
@@ -396,61 +425,6 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
     }
   });
 
-  const cacoAppletHowto = defineTool('caco_applet_howto', {
-    description: 'Get documentation for CREATING new applets (HTML/JS/CSS widgets). Call when the user wants an interactive tool, custom dashboard, or one-off editor. Applets persist on disk. For inline diagrams/tables in chat, use inline HTML/SVG instead. For USING existing applets, call caco_applet_usage.',
-
-    parameters: z.object({}),
-
-    handler: async () => {
-      return {
-        textResultForLlm: APPLET_HOWTO,
-        resultType: 'success' as const
-      };
-    }
-  });
-
-  const cacoAppletUsage = defineTool('caco_applet_usage', {
-    description: 'Get applet URL patterns for linking users to interactive panels (files, diffs, git status, images, etc.). Returns markdown link examples for displaying content to the user.',
-
-    parameters: z.object({
-      slug: z.string().optional().describe('Filter to a specific applet by slug')
-    }),
-
-    handler: async ({ slug }) => {
-      const allApplets = await listApplets();
-      const visibleApplets = allApplets.filter(a => !a.deprecated);
-
-      if (slug) {
-        const deprecatedHit = allApplets.find(a => a.slug === slug && a.deprecated);
-        if (deprecatedHit) {
-          return {
-            textResultForLlm: `Applet "${slug}" is deprecated. Use "${deprecatedHit.replacedBy || 'files'}" instead.`,
-            resultType: 'success' as const
-          };
-        }
-      }
-
-      const filtered = slug
-        ? visibleApplets.filter(a => a.slug === slug)
-        : visibleApplets;
-
-      if (filtered.length === 0) {
-        return {
-          textResultForLlm: slug
-            ? `Applet "${slug}" not found. Available: ${visibleApplets.map(a => a.slug).join(', ') || 'none'}`
-            : 'No applets installed. Use caco_applet_howto to create one.',
-          resultType: 'success' as const
-        };
-      }
-
-      const usage = filtered.map(formatAppletUsage).join('\n\n');
-      return {
-        textResultForLlm: `# Applet Usage\n\nProvide markdown links to open applets for users.\n\n${usage}`,
-        resultType: 'success' as const
-      };
-    }
-  });
-
   const setAppletState = defineTool('set_applet_state', {
     description: 'Push state to the running applet via WebSocket; it receives updates via onStateUpdate(). Use for progress, computed results, or any data the applet should display.',
 
@@ -480,5 +454,5 @@ export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef 
     }
   });
 
-  return [cacoAppletHowto, cacoAppletUsage, getAppletState, setAppletState, restartServer];
+  return [getAppletState, setAppletState, restartServer];
 }

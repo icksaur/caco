@@ -12,65 +12,13 @@
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { SERVER_URL } from './config.js';
+import { sessionManager } from './session-manager.js';
 import type { SessionIdRef } from './types.js';
 
 export type GetCorrelationId = (sessionId: string) => string | undefined;
 
 export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: GetCorrelationId) {
-  
-  const sendCacoMessage = defineTool('send_caco_message', {
-    description: 'Send a message to an existing Caco session and return immediately — fire-and-forget, do NOT poll or wait. The target works autonomously; the user watches it in the session list. For follow-ups where you don\'t need the reply; if you need the response to continue, use `caco_session_delegate` (waits and returns the reply).',
-
-    parameters: z.object({
-      sessionId: z.string().describe('Target session ID'),
-      message: z.string().describe('Message to send')
-    }),
-
-    handler: async ({ sessionId: rawSessionId, message }) => {
-      // Strip caco-session: prefix if present (agents commonly include it)
-      const sessionId = rawSessionId.replace(/^caco-session:/, '');
-      try {
-        const correlationId = getCorrelationId(sessionRef.id);
-        
-        if (!correlationId) {
-          return { 
-            textResultForLlm: 'Cannot send message: no correlationId in dispatch context.',
-            resultType: 'error' as const
-          };
-        }
-        
-        const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: message,
-            source: 'agent',
-            fromSession: sessionRef.id,
-            correlationId
-          })
-        });
-        
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({ error: response.statusText }));
-          return { 
-            textResultForLlm: `Failed to send message: ${error.error || response.statusText}`,
-            resultType: 'error' as const
-          };
-        }
-
-        await response.json();
-        return { 
-          textResultForLlm: `Message sent to session ${sessionId}. It will work independently — the user can watch its progress in the session list.`,
-          resultType: 'text' as const
-        };
-      } catch (err) {
-        return { 
-          textResultForLlm: `Error sending message: ${err instanceof Error ? err.message : String(err)}`,
-          resultType: 'error' as const
-        };
-      }
-    }
-  });
+  const modelIds = sessionManager.getModels().map(m => m.id);
 
   const getSessionState = defineTool('get_session_state', {
     description: 'Check the current state of a Caco session (idle, busy, or inactive). Use to verify a session exists before sending messages.',
@@ -111,45 +59,23 @@ export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: Get
     }
   });
 
-  const listModels = defineTool('list_models', {
-    description: 'List available models for creating Caco sessions. Quick guide: `claude-opus-4.6-1m` (reasoning/planning), `claude-sonnet-4.6` (general engineering), `gpt-4.1` (simple, fast/cheap).',
-
-    parameters: z.object({}),
-
-    handler: async () => {
-      try {
-        const response = await fetch(`${SERVER_URL}/api/models`);
-        if (!response.ok) {
-          return {
-            textResultForLlm: `Failed to list models: ${response.statusText}`,
-            resultType: 'error' as const
-          };
-        }
-        const models = await response.json();
-        return {
-          textResultForLlm: JSON.stringify(models, null, 2),
-          resultType: 'text' as const
-        };
-      } catch (err) {
-        return {
-          textResultForLlm: `Error listing models: ${err instanceof Error ? err.message : String(err)}`,
-          resultType: 'error' as const
-        };
-      }
-    }
-  });
-
   const createCacoSession = defineTool('create_caco_session', {
-    description: 'Create a new persistent Caco session (appears in the session list, watchable/resumable). Use for work in a separate project/directory the user reviews separately, long-running watched sessions, or triaging into independent sessions. For quick sub-tasks that report back inline, use the built-in `task` tool. Provide `initialMessage` to create and prompt in one step. Runs autonomously — do not poll or wait.',
+    description: `Create a new persistent Caco session (appears in the session list, watchable/resumable). Use for work in a separate project/directory the user reviews separately, long-running watched sessions, or triaging into independent sessions. For quick sub-tasks that report back inline, use the built-in \`task\` tool. Provide \`initialMessage\` to create and prompt in one step. Runs autonomously — do not poll or wait.\n\nModel IDs: ${modelIds.join(', ') || '(none loaded)'}.`,
 
     parameters: z.object({
       cwd: z.string().describe('Working directory for the new session'),
-      model: z.string().describe('Model ID (e.g. claude-sonnet-4.6). Use list_models for options.'),
+      model: z.string().describe('Model ID (e.g. claude-sonnet-4.6). See this tool\'s description for the available IDs.'),
       initialMessage: z.string().optional().describe('Optional first message'),
       description: z.string().optional().describe('Short label for the session list')
     }),
 
     handler: async ({ cwd, model, initialMessage, description }) => {
+      if (modelIds.length > 0 && !modelIds.includes(model)) {
+        return {
+          textResultForLlm: `Unknown model "${model}". Available: ${modelIds.join(', ')}.`,
+          resultType: 'error' as const
+        };
+      }
       try {
         const createResponse = await fetch(`${SERVER_URL}/api/sessions`, {
           method: 'POST',
@@ -194,7 +120,7 @@ export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: Get
         }
         
         return { 
-          textResultForLlm: `Created Caco session ${newSessionId} in ${cwd}. Use send_caco_message('${newSessionId}', '...') to send work to it.`,
+          textResultForLlm: `Created Caco session ${newSessionId} in ${cwd}. Use caco_session_delegate to send it work and await its reply.`,
           resultType: 'text' as const
         };
       } catch (err) {
@@ -206,5 +132,5 @@ export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: Get
     }
   });
 
-  return [sendCacoMessage, getSessionState, listModels, createCacoSession];
+  return [getSessionState, createCacoSession];
 }

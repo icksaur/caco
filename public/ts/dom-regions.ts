@@ -116,7 +116,6 @@ export const EVENT_TO_OUTER: Record<string, string> = {
   'caco.agent': 'agent-message',
   'caco.applet': 'applet-message',
   'caco.scheduler': 'scheduler-message',
-  'caco.embed': 'embed-message',
   'caco.info': 'assistant-activity',
   'caco.truncated': 'assistant-activity',
 };
@@ -151,7 +150,6 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
   'caco.agent': 'agent-text',
   'caco.applet': 'applet-text',
   'caco.scheduler': 'scheduler-text',
-  'caco.embed': 'embed-content',
   'caco.info': null,  // omit - internal signal
   'caco.truncated': 'truncated-text',
 };
@@ -174,8 +172,6 @@ export const EVENT_KEY_PROPERTY: Record<string, string> = {
   // Message deltas use messageId
   'assistant.message': 'messageId',
   'assistant.message_delta': 'messageId',
-  // Embed events use outputId (each embed gets own element)
-  'caco.embed': 'outputId',
 };
 
 /**
@@ -305,51 +301,6 @@ function getByPath(obj: Record<string, unknown>, path: string): unknown {
     (o, k) => (o as Record<string, unknown>)?.[k],
     obj
   );
-}
-
-/**
- * Fetch embed output and render into element.
- * Replaces placeholder content with actual embed iframe.
- */
-async function fetchAndRenderEmbed(element: HTMLElement, outputId: string): Promise<void> {
-  try {
-    const res = await fetch(`/api/outputs/${outputId}?format=json`);
-    if (!res.ok) {
-      element.textContent = 'Failed to load embed';
-      return;
-    }
-
-    const { data, metadata } = await res.json();
-
-    // Create embed container (matches CSS .output-embed structure)
-    const container = document.createElement('div');
-    container.className = 'output-embed';
-    if (metadata?.provider) {
-      container.dataset.provider = metadata.provider.toLowerCase();
-    }
-
-    // Create frame wrapper
-    const frame = document.createElement('div');
-    frame.className = 'embed-frame';
-
-    // Sanitize and inject HTML (allow iframes for trusted embeds, strip IDs to prevent collisions)
-    const purify = (window as unknown as { DOMPurify?: { sanitize: (html: string, options?: { ADD_TAGS?: string[], FORBID_ATTR?: string[] }) => string } }).DOMPurify;
-    if (purify) {
-      frame.innerHTML = purify.sanitize(data, { ADD_TAGS: ['iframe'], FORBID_ATTR: ['id'] });
-    } else {
-      frame.innerHTML = data;
-    }
-
-    container.appendChild(frame);
-
-    // Replace element content
-    element.textContent = '';
-    element.appendChild(container);
-
-  } catch (err) {
-    element.textContent = 'Embed failed to load';
-    console.error('[embed] Failed to fetch:', err);
-  }
 }
 
 /** Create a simple path-based inserter (replace mode) */
@@ -574,15 +525,6 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     // report_intent keeps its intent display
     if (name === 'report_intent') return;
 
-    // embed_media completion is handled by caco.embed event
-    if (name === 'embed_media') {
-      element.textContent = 'embed_media\n```\nEmbed rendered below\n```';
-      if (typeof window !== 'undefined' && window.renderMarkdownElement) {
-        window.renderMarkdownElement(element as unknown as Element);
-      }
-      return;
-    }
-
     const input = element.dataset.toolInput || '';
     const success = !!data.success;
     const result = str(getByPath(data, 'result.content')).trim();
@@ -638,23 +580,6 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'caco.truncated': (element, data) => {
     const skipped = (data.skipped as number) || 0;
     element.textContent = `${skipped} earlier events not shown`;
-  },
-
-  // Embed media - renders iframe from outputId
-  'caco.embed': (element, data) => {
-    const outputId = str(data.outputId);
-    if (!outputId) {
-      element.textContent = 'Missing embed outputId';
-      return;
-    }
-
-    // Set placeholder while loading
-    element.textContent = 'Loading embed...';
-
-    // Async fetch and render (only in browser)
-    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-      void fetchAndRenderEmbed(element as unknown as HTMLElement, outputId);
-    }
   },
 };
 

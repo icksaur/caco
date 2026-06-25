@@ -4,7 +4,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { tmpdir } from 'os';
 import { join, relative, resolve } from 'path';
-import { readFileRangeCore, grepCore, globCore, resolveRg } from '../../src/workflow/cores.js';
+import { readFileRangeCore, readSpecsCore, peekAnchorsCore, grepCore, globCore, resolveRg } from '../../src/workflow/cores.js';
 import { toPosix } from '../../src/path-utils.js';
 import { WorkflowInputError, type GrepMatch } from '../../src/workflow/types.js';
 
@@ -76,6 +76,60 @@ async function directRg(pattern: string): Promise<GrepMatch[]> {
   }
   return out.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line));
 }
+
+describe('readSpecsCore', () => {
+  it('returns ranges in input order, including two ranges from one file', async () => {
+    const res = await readSpecsCore(base, [
+      { path: 'a.txt', range: [2, 2] },
+      { path: 'sub/b.txt' },
+      { path: 'a.txt', range: [4, 4] },
+    ]);
+    expect(res.map((r) => r.text)).toEqual(['beta TARGET', 'no match here\nTARGET deep\n', 'delta TARGET']);
+    expect(res.map((r) => r.path)).toEqual(['a.txt', 'sub/b.txt', 'a.txt']);
+  });
+
+  it('clamps an out-of-bounds range instead of throwing', async () => {
+    const res = await readSpecsCore(base, [{ path: 'a.txt', range: [3, 9999] }]);
+    expect(res[0].range).toEqual([3, res[0].totalLines]);
+  });
+
+  it('fail-fast: a single missing path rejects the whole batch', async () => {
+    await expect(readSpecsCore(base, [{ path: 'a.txt' }, { path: 'nope.txt' }])).rejects.toBeInstanceOf(WorkflowInputError);
+  });
+
+  it('rejects a path that escapes the base', async () => {
+    await expect(readSpecsCore(base, [{ path: '../../etc/passwd' }])).rejects.toBeInstanceOf(WorkflowInputError);
+  });
+});
+
+describe('peekAnchorsCore', () => {
+  it('returns exact ±context lines around each found anchor', async () => {
+    const res = await peekAnchorsCore(base, 'a.txt', ['beta TARGET'], 1);
+    expect(res[0].found).toBe(true);
+    expect(res[0].line).toBe(2);
+    expect(res[0].range).toEqual([1, 3]);
+    expect(res[0].text).toBe('alpha\nbeta TARGET\ngamma');
+  });
+
+  it('marks a missing anchor not found without throwing the batch', async () => {
+    const res = await peekAnchorsCore(base, 'a.txt', ['beta TARGET', 'no such anchor']);
+    expect(res[0].found).toBe(true);
+    expect(res[1]).toEqual({ anchor: 'no such anchor', found: false });
+  });
+
+  it('clamps context at the file edges', async () => {
+    const res = await peekAnchorsCore(base, 'a.txt', ['alpha'], 5);
+    expect(res[0].range![0]).toBe(1);
+  });
+
+  it('rejects a path that escapes the base', async () => {
+    await expect(peekAnchorsCore(base, '../../etc/passwd', ['x'])).rejects.toBeInstanceOf(WorkflowInputError);
+  });
+
+  it('rejects a missing file', async () => {
+    await expect(peekAnchorsCore(base, 'nope.txt', ['x'])).rejects.toBeInstanceOf(WorkflowInputError);
+  });
+});
 
 describe('grepCore', () => {
   it.skipIf(!RG)('matches a direct `rg --json` invocation over a tricky-filename tree', async () => {

@@ -4,6 +4,7 @@
 
 import { regions } from './dom-regions.js';
 import { escapeHtml } from './ui-utils.js';
+import { mediaEmbed } from './media-embed.js';
 
 interface MermaidAPI {
   initialize(config: object): void;
@@ -101,6 +102,12 @@ function configureMarked(): void {
         if (language === 'caco-actions' || language.startsWith('caco-actions')) {
           return '';
         }
+        // caco-embed: emit a placeholder div carrying the (escaped) URL list.
+        // Iframes are built post-sanitize by renderMediaEmbedsIn (DOMPurify
+        // forbids <iframe>, mirroring the mermaid placeholder pattern).
+        if (language === 'caco-embed' || language.startsWith('caco-embed')) {
+          return `<div class="media-embed">${safe}</div>`;
+        }
         if (language === 'mermaid') {
           const id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
           return `<div class="mermaid-diagram" data-mermaid-id="${id}">${safe}</div>`;
@@ -157,6 +164,44 @@ async function renderMermaidIn(container: Element): Promise<void> {
 }
 
 /**
+ * Replace `.media-embed` placeholders (emitted by the caco-embed fence) with
+ * sandboxed iframes built from the whitelisted fixed-template src, or a safe
+ * link/text fallback. Runs AFTER DOMPurify, building the <iframe> directly in
+ * code so no model- or provider-authored iframe ever passes the sanitizer.
+ */
+function renderMediaEmbedsIn(container: Element): void {
+  const placeholders = container.querySelectorAll<HTMLElement>('.media-embed');
+  for (const ph of placeholders) {
+    if (ph.dataset.embedProcessed === 'true') continue;
+    const urls = (ph.textContent ?? '').split('\n').map(s => s.trim()).filter(Boolean);
+    ph.textContent = '';
+    ph.dataset.embedProcessed = 'true';
+    for (const url of urls) {
+      const embed = mediaEmbed(url);
+      if (embed) {
+        const frame = document.createElement('iframe');
+        frame.className = `media-embed-frame media-embed-${embed.kind}`;
+        frame.src = embed.src;
+        frame.loading = 'lazy';
+        frame.setAttribute('allowfullscreen', '');
+        frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+        frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation allow-popups');
+        ph.appendChild(frame);
+      } else if (/^https?:\/\//i.test(url)) {
+        const link = document.createElement('a');
+        link.href = url;
+        link.textContent = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        ph.appendChild(link);
+      } else {
+        ph.appendChild(document.createTextNode(url));
+      }
+    }
+  }
+}
+
+/**
  * Render markdown in all marked elements
  */
 async function renderMarkdown(): Promise<void> {
@@ -194,6 +239,9 @@ async function renderMarkdown(): Promise<void> {
       
       // Render any Mermaid diagrams
       await renderMermaidIn(contentDiv);
+
+      // Build whitelisted media embeds
+      renderMediaEmbedsIn(contentDiv);
     }
     
     // Mark parent as processed
@@ -244,6 +292,7 @@ export function renderMarkdownElement(element: Element): void {
   const fenceCount = (markdownText.match(/^```/gm) || []).length;
   if (fenceCount % 2 === 0) {
     void renderMermaidIn(element);
+    renderMediaEmbedsIn(element);
   }
 }
 

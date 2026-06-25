@@ -5,8 +5,8 @@ import { indexCore, type IndexCoreOptions } from '../index/core.js';
 import { type IndexResult } from '../index/types.js';
 import { buildFrames, type FramesOptions, type FramesResult } from '../index/frames.js';
 import { getOutput } from '../output-store.js';
-import { readFileRangeCore, grepCore, globCore, sliceLinesByRange, resolveRg } from './cores.js';
-import { type ReadResult, type GrepMatch, type GrepOptions, WorkflowInputError } from './types.js';
+import { readFileRangeCore, readSpecsCore, peekAnchorsCore, grepCore, globCore, sliceLinesByRange, resolveRg } from './cores.js';
+import { type ReadResult, type GrepMatch, type GrepOptions, type ReadSpec, type PeekResult, WorkflowInputError } from './types.js';
 import { getHostShell } from './shell.js';
 import { validatePath } from '../path-utils.js';
 
@@ -32,6 +32,10 @@ export interface Facade {
   frames(symbol: string, options?: FramesOptions): Promise<FramesResult>;
   /** Read a 1-based inclusive line range (whole file if omitted). */
   read(path: string, range?: [start: number, end: number]): Promise<ReadResult>;
+  /** Batch-read many ranges across files in one call (gather every edit region at once). */
+  reads(specs: ReadSpec[]): Promise<ReadResult[]>;
+  /** Exact surrounding context for each literal anchor — precise `old_str` text for many edits without re-viewing. */
+  peek(path: string, anchors: string[], context?: number): Promise<PeekResult[]>;
   /** Search file contents (rg-backed, JS fallback). */
   grep(pattern: string, options?: GrepOptions): Promise<GrepMatch[]>;
   /** Raw `rg` escape hatch; returns stdout. cwd is the session directory. */
@@ -55,6 +59,8 @@ export function createFacade(sessionCwd: string): Facade {
     index: (path, options) => indexCore(sessionCwd, path, options),
     frames: (symbol, options) => buildFrames(sessionCwd, symbol, options),
     read: (path, range) => readFileRangeCore(sessionCwd, path, range),
+    reads: (specs) => readSpecsCore(sessionCwd, specs),
+    peek: (path, anchors, context) => peekAnchorsCore(sessionCwd, path, anchors, context),
     grep: (pattern, options) => grepCore(sessionCwd, pattern, options),
     glob: (pattern) => globCore(sessionCwd, pattern),
     async rg(args) {
@@ -104,6 +110,8 @@ export function wrapFacadeForAccounting(facade: Facade, account: (value: unknown
     index: async (path, options) => { const r = await facade.index(path, options); account(r); return r; },
     frames: async (symbol, options) => { const r = await facade.frames(symbol, options); account(r); return r; },
     read: async (path, range) => { const r = await facade.read(path, range); account(r); return r; },
+    reads: async (specs) => { const r = await facade.reads(specs); account(r); return r; },
+    peek: async (path, anchors, context) => { const r = await facade.peek(path, anchors, context); account(r); return r; },
     grep: async (pattern, options) => { const r = await facade.grep(pattern, options); account(r); return r; },
     rg: async (args) => { const r = await facade.rg(args); account(r); return r; },
     glob: async (pattern) => { const r = await facade.glob(pattern); account(r); return r; },
@@ -118,6 +126,8 @@ export const FACADE_API_SUMMARY = `\`caco\` facade (all async):
 - caco.index(path, { language?, maxEntries? }) -> declaration skeleton with [start-end] line ranges.
 - caco.frames(symbol, { glob?, file?, include?, context?, maxFrames? }) -> { definitions, incoming, truncated, notes }: a symbol's definition(s) + ranked callers with code snippets, in one call (collapses index+read chains). Cross-stack (TS/JS/C++/C#/shaders).
 - caco.read(path, [start, end]?) -> { path, totalLines, range, text }. 1-based; whole file if range omitted.
+- caco.reads([{ path, range? }, ...]) -> ReadResult[]: batch-read many ranges/files in one call (gather every edit region before a batch of edits); reads each unique file once. Fail-fast — a missing path throws (unlike peek, which marks misses found:false).
+- caco.peek(path, anchors[], context?) -> [{ anchor, found, line?, range?, text? }]: exact ±context lines around each literal anchor — precise old_str text for many edits without re-viewing (context default 3).
 - caco.grep(pattern, { path?, glob?, ignoreCase? }) -> [{ file, line, text }] (rg-backed, JS fallback). Paths are POSIX ('/'-separated) on all platforms.
 - caco.rg(args[]) -> raw rg stdout (vendored ripgrep; prefer caco.grep, which has a JS fallback).
 - caco.glob(pattern) -> sorted relative paths (POSIX '/'-separated).
@@ -128,6 +138,8 @@ Paths are scoped to the session dir (escaping throws), except \`rg\`/\`sh\` (unr
 
 /** Hand-authored .d.ts injected so workflow scripts get types for \`caco\`. */
 export const FACADE_DTS = `interface ReadResult { path: string; totalLines: number; range: [number, number]; text: string; }
+interface ReadSpec { path: string; range?: [number, number]; }
+interface PeekResult { anchor: string; found: boolean; line?: number; range?: [number, number]; text?: string; }
 interface GrepMatch { file: string; line: number; text: string; }
 interface GrepOptions { path?: string; glob?: string; ignoreCase?: boolean; }
 interface IndexCoreOptions { language?: string; maxEntries?: number; }
@@ -139,6 +151,8 @@ interface Facade {
   index(path: string, options?: IndexCoreOptions): Promise<unknown>;
   frames(symbol: string, options?: FramesOptions): Promise<FramesResult>;
   read(path: string, range?: [number, number]): Promise<ReadResult>;
+  reads(specs: ReadSpec[]): Promise<ReadResult[]>;
+  peek(path: string, anchors: string[], context?: number): Promise<PeekResult[]>;
   grep(pattern: string, options?: GrepOptions): Promise<GrepMatch[]>;
   rg(args: string[]): Promise<string>;
   glob(pattern: string): Promise<string[]>;

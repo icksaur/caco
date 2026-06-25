@@ -31,7 +31,7 @@ export {
 
 export type { OutputMetadata, StoredOutput, ActivityMetadata, StoredActivity } from './output-store.js';
 export {
-  storeOutput, getOutput, listOutputs, listEmbedOutputs, parseOutputMarkers, pruneOutputs,
+  storeOutput, getOutput, listOutputs, pruneOutputs,
   storeActivity, getActivity, listActivities,
   detectLanguage,
 } from './output-store.js';

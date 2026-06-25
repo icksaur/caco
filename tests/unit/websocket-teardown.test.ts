@@ -21,8 +21,6 @@ vi.mock('../../src/applet-state.js', () => ({
 vi.mock('../../src/extension-runtime.js', () => ({ getClientMessageHandler: vi.fn(() => null) }));
 vi.mock('../../src/sdk-session-store.js', () => ({ readLastTurnsResult: vi.fn(() => null) }));
 vi.mock('../../src/storage.js', () => ({
-  listEmbedOutputs: vi.fn(() => []),
-  parseOutputMarkers: vi.fn(() => []),
   getSessionMeta: vi.fn(() => null),
 }));
 vi.mock('../../src/session-usage-cache.js', () => ({

@@ -1,23 +1,16 @@
 /**
- * Extension Introspection Tool
+ * Extension Introspection
  *
- * Lets the agent discover loaded extensions, their tools, and capabilities.
- * Follows the same pull-on-demand pattern as caco_applet_usage and caco_dev_docs.
+ * Builds the extensions guide (loaded extensions + extension API), surfaced via
+ * caco_docs section="extensions".
  */
 
-import { defineTool } from '@github/copilot-sdk';
-import { z } from 'zod';
 import { getExtensionMetadata } from './extension-runtime.js';
 
-export function createExtensionsTool() {
-  const tool = defineTool('caco_extensions', {
-    description: 'Discover loaded extensions and the extension API. Call to list installed extensions, find extension-provided tools or commands, or learn how to create a new extension.',
+export function buildExtensionsGuide(): string {
+  const metadata = getExtensionMetadata();
 
-    parameters: z.object({}),
-    handler: async () => {
-      const metadata = getExtensionMetadata();
-
-      const guide = `# Caco Extensions
+  return `# Caco Extensions
 
 ## Loaded Extensions
 ${metadata.length === 0 ? 'None.' : metadata.map(m =>
@@ -84,7 +77,7 @@ export default function(api: ServerExtensionAPI) {
     api.broadcast('ext.myext.pong', { received: true });
   });
 
-  // Extension description (shown in caco_extensions output)
+  // Extension description (shown in caco_docs section="extensions" output)
   api.setDescription('Detailed description of what this extension does');
 
   // Persistent state (JSON file in extension dir)
@@ -102,9 +95,4 @@ export default function(api: ServerExtensionAPI) {
 - Server-local (\`.caco/extensions/\`) overrides user-global (\`~/.caco/extensions/\`) on slug collision
 - Hot-reload: CSS and client changes broadcast automatically, server changes require restart
 - Full spec: \`EXTENSIONS.md\``;
-
-      return { textResultForLlm: guide };
-    },
-  });
-  return [tool];
 }

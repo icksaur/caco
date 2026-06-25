@@ -15,10 +15,7 @@
  * deletions — the code stays; only registration is skipped.
  */
 export const DEFAULT_DISABLED_TOOLS: string[] = [
-  'embed_media',            // media embeds (YouTube/Spotify/etc) — rare in coding work
-  'caco_extensions',        // extension discovery — niche; docs cover it
   'caco_session_store_sql', // cross-session history SQL — power tool, rarely used
-  'caco_session_swarm',     // parallel session fan-out — the built-in task tool suffices
   // MCP OAuth registration — the ONLY agent path that creates an MCP auth-store
   // entry (the applet /start + /config routes 404 without one). Disabled here
   // because it auto-opens OAuth browser tabs; to add a new OAuth MCP server,

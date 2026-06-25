@@ -189,7 +189,6 @@ describe('ElementInserter (via config tables)', () => {
     expect(EVENT_TO_OUTER['caco.agent']).toBe('agent-message');
     expect(EVENT_TO_OUTER['caco.applet']).toBe('applet-message');
     expect(EVENT_TO_OUTER['caco.scheduler']).toBe('scheduler-message');
-    expect(EVENT_TO_OUTER['caco.embed']).toBe('embed-message');
   });
 });
 
@@ -205,11 +204,6 @@ describe('EVENT_TO_INNER', () => {
 });
 
 describe('EVENT_KEY_PROPERTY', () => {
-  it('includes caco.embed with outputId key', async () => {
-    const { EVENT_KEY_PROPERTY } = await import('../../public/ts/dom-regions.js');
-    expect(EVENT_KEY_PROPERTY['caco.embed']).toBe('outputId');
-  });
-
   it('includes tool events with toolCallId key', async () => {
     const { EVENT_KEY_PROPERTY } = await import('../../public/ts/dom-regions.js');
     expect(EVENT_KEY_PROPERTY['tool.execution_start']).toBe('toolCallId');

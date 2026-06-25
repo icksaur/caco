@@ -1,11 +1,10 @@
 /**
  * Surface tools — agent-facing wrappers over the surface store.
  *
- * Four tools for V1:
+ * Three tools for V1:
  *   caco_get_surface
  *   caco_get_surface_changes
- *   caco_mutate_surface
- *   caco_clear_surface_changes
+ *   caco_mutate_surface (ops-less call acks human edits without writing)
  *
  * All tools auto-inject the current sessionId from sessionRef. Direct calls
  * to the store keep the protocol identical to the HTTP routes.
@@ -58,7 +57,7 @@ export function createSurfaceTools(sessionRef: SessionIdRef) {
   });
 
   const cacoGetSurfaceChanges = defineTool('caco_get_surface_changes', {
-    description: 'Read pending human-side edits. Returns { exists, dataToken, changes }; changes maps item id -> latest post-edit item. When exists=false the doc is new and dataToken is the initial token for your first caco_mutate_surface. Call at the start of each turn; if changes is non-empty, integrate the user\'s edits then call caco_mutate_surface (write+ack) or caco_clear_surface_changes (ack only).',
+    description: 'Read pending human-side edits. Returns { exists, dataToken, changes }; changes maps item id -> latest post-edit item. When exists=false the doc is new and dataToken is the initial token for your first caco_mutate_surface. Call at the start of each turn; if changes is non-empty, integrate the user\'s edits then call caco_mutate_surface — with items to write+ack, or with no create/update/delete to ack only.',
     parameters: z.object({}),
     handler: async () => {
       const doc = getSurface(sessionRef.id);
@@ -70,7 +69,7 @@ export function createSurfaceTools(sessionRef: SessionIdRef) {
   });
 
   const cacoMutateSurface = defineTool('caco_mutate_surface', {
-    description: 'Apply create/update/delete AND atomically clear the human-side changes map. Returns { ok: true, dataToken }. On { ok: false, reason: "stale", currentDataToken }: caco_get_surface, rebase, retry; give up after two stale rounds. Other failures: "invalid" (bad item shape), "limit" (>200 items). Items need { id, type } plus style-defined fields; update shallow-merges by id, delete takes ids. Item shapes: `caco_dev_docs section="surface-cookbook"`. To ack edits without writing, use caco_clear_surface_changes.',
+    description: 'Apply create/update/delete AND atomically clear the human-side changes map. Returns { ok: true, dataToken }. On { ok: false, reason: "stale", currentDataToken }: caco_get_surface, rebase, retry; give up after two stale rounds. Other failures: "invalid" (bad item shape), "limit" (>200 items). Items need { id, type } plus style-defined fields; update shallow-merges by id, delete takes ids. Item shapes: `caco_docs section="surface-cookbook"`. To ack the user\'s edits without writing, call this with no create/update/delete.',
     parameters: z.object({
       dataToken: z.string().describe('Current dataToken from caco_get_surface or caco_get_surface_changes'),
       create: z.array(ITEM_SCHEMA).optional().describe('New items to add'),
@@ -78,30 +77,21 @@ export function createSurfaceTools(sessionRef: SessionIdRef) {
       delete: z.array(z.string()).optional().describe('Item ids to remove'),
     }),
     handler: async ({ dataToken, create, update, delete: del }) => {
-      const result = mutate(sessionRef.id, dataToken, {
-        create: create as SurfaceItem[] | undefined,
-        update: update as SurfaceItem[] | undefined,
-        delete: del,
-      });
-      notify(sessionRef.id, result);
-      return result;
-    },
-  });
-
-  const cacoClearSurfaceChanges = defineTool('caco_clear_surface_changes', {
-    description: 'Mark the user\'s edits as seen without writing items. Returns { ok: true, dataToken }, or { ok: false, reason: "stale", currentDataToken } if another writer raced. Use after caco_get_surface_changes when no structural mutation is needed.',
-    parameters: z.object({
-      dataToken: z.string().describe('Current dataToken from caco_get_surface_changes'),
-    }),
-    handler: async ({ dataToken }) => {
-      const result = clearChanges(sessionRef.id, dataToken);
+      const hasOps = (create?.length ?? 0) + (update?.length ?? 0) + (del?.length ?? 0) > 0;
+      const result = hasOps
+        ? mutate(sessionRef.id, dataToken, {
+            create: create as SurfaceItem[] | undefined,
+            update: update as SurfaceItem[] | undefined,
+            delete: del,
+          })
+        : clearChanges(sessionRef.id, dataToken);
       notify(sessionRef.id, result);
       return result;
     },
   });
 
   const cacoSetSurfaceStyle = defineTool('caco_set_surface_style', {
-    description: 'Set the surface\'s style, customScript, and/or customStyle. customScript is JS defining a render(surface) function; customStyle is CSS scoped to the applet. Before authoring either, read `caco_dev_docs section="surface-cookbook"` for copy-pasteable layouts (list, form, kanban, table), the `merged = { ...item, ...changes[id] }` pattern, and Caco CSS vars (--color-*, --text-*, --space-*, --font-*). Requires the current dataToken. Returns { ok: true, dataToken } or { ok: false, reason: "stale" }.',
+    description: 'Set the surface\'s style, customScript, and/or customStyle. customScript is JS defining a render(surface) function; customStyle is CSS scoped to the applet. Before authoring either, read `caco_docs section="surface-cookbook"` for copy-pasteable layouts (list, form, kanban, table), the `merged = { ...item, ...changes[id] }` pattern, and Caco CSS vars (--color-*, --text-*, --space-*, --font-*). Requires the current dataToken. Returns { ok: true, dataToken } or { ok: false, reason: "stale" }.',
     parameters: z.object({
       dataToken: z.string().describe('Current dataToken from caco_get_surface'),
       style: z.enum(['roadmap', 'custom']).optional().describe('Style identifier'),
@@ -119,5 +109,5 @@ export function createSurfaceTools(sessionRef: SessionIdRef) {
     },
   });
 
-  return [cacoGetSurface, cacoGetSurfaceChanges, cacoMutateSurface, cacoClearSurfaceChanges, cacoSetSurfaceStyle];
+  return [cacoGetSurface, cacoGetSurfaceChanges, cacoMutateSurface, cacoSetSurfaceStyle];
 }

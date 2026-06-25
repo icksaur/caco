@@ -14,13 +14,10 @@ import { readFileSync, appendFileSync, mkdirSync, statSync, renameSync } from 'f
 import { homedir } from 'os';
 import { sessionState, createSessionState } from './src/session-state.js';
 import { sessionManager } from './src/session-manager.js';
-import { createDisplayTools, type CacoEmbedEvent } from './src/display-tools.js';
 import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools } from './src/agent-tools.js';
 import { createMcpAuthTools } from './src/mcp-auth-tools.js';
-import { createDevDocsTool } from './src/dev-docs-tool.js';
-import { createExtensionsTool } from './src/extensions-tool.js';
-import { createSwarmTool } from './src/swarm-tool.js';
+import { createDocsTool } from './src/dev-docs-tool.js';
 import { createDelegateTool } from './src/delegate-tool.js';
 import { createSessionHistoryTool } from './src/session-history-tool.js';
 import { createMemoryTools } from './src/memory-tool.js';
@@ -32,8 +29,6 @@ import { isWorkflowRunnerAvailable, sweepWorkflowScratch } from './src/workflow/
 import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
-import { storeOutput } from './src/storage.js';
-import { requireSessionId, PENDING_SESSION_ID } from './src/session-id-ref.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes, draftRoutes } from './src/routes/index.js';
 import { initWatchRoutes } from './src/routes/watch.js';
 import { flushAll as flushAllFileEditsCardLists } from './src/file-edits-store.js';
@@ -47,7 +42,6 @@ import { startRotationSweeper } from './src/session-history-rotation.js';
 import { requireSameOrigin } from './src/security/same-origin.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
-import { getSessionRuntime } from './src/session-runtime.js';
 import { buildSystemMessage } from './src/prompts.js';
 import { loadServerExtensions } from './src/extension-runtime.js';
 import { onAllIdle } from './src/restart-manager.js';
@@ -80,7 +74,7 @@ app.use((_req, res, next) => {
     "img-src 'self' data: blob: https: http://localhost:*; " +
     "connect-src 'self' ws: wss: http://localhost:*; " +
     "font-src 'self'; " +
-    'frame-src \'self\' http://localhost:* https://www.youtube.com https://www.youtube-nocookie.com https://w.soundcloud.com https://player.vimeo.com https://open.spotify.com https://platform.twitter.com; ' +
+    'frame-src \'self\' http://localhost:* https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://open.spotify.com; ' +
     'frame-ancestors *;'
   );
   next();
@@ -238,29 +232,13 @@ async function start(): Promise<void> {
   const excludedBuiltins = excludedBuiltinNames();
   if (excludedBuiltins.length) console.log(`[TOOLS] Excluded built-ins (shell → caco.sh): ${excludedBuiltins.join(', ')}`);
   const toolFactory: ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => {
-    const queueCacoEvent = (event: CacoEmbedEvent) => {
-      if (sessionRef.id && sessionRef.id !== PENDING_SESSION_ID) {
-        const queue = getSessionRuntime(sessionRef.id).queue;
-        queue.queue(event);
-        console.log(`[QUEUE] caco.embed queued for session ${sessionRef.id}, pending: ${queue.length}`);
-      } else {
-        console.log('[QUEUE] No sessionRef.id, event not queued');
-      }
-    };
-    
-    const displayTools = createDisplayTools(
-      (data, meta) => storeOutput(requireSessionId(sessionRef), sessionCwd, data, meta),
-      queueCacoEvent
-    );
     const appletTools = createAppletTools(programCwd, sessionRef, pushStateToApplet);
     const agentTools = createAgentTools(
       sessionRef, 
       (id) => sessionManager.getDispatchCorrelationId(id)
     );
     const mcpAuthTools = createMcpAuthTools();
-    const devDocs = createDevDocsTool(programCwd);
-    const extIntrospection = createExtensionsTool();
-    const swarmTools = createSwarmTool(sessionRef);
+    const docs = createDocsTool(programCwd);
     const delegateTools = createDelegateTool(sessionRef);
     const sessionHistoryTools = createSessionHistoryTool();
     const memoryTools = createMemoryTools();
@@ -270,7 +248,7 @@ async function start(): Promise<void> {
     const surfaceTools = createSurfaceTools(sessionRef);
     const browserTools = createBrowserTools(sessionRef);
     
-    const allTools = [...displayTools, ...appletTools, ...agentTools, ...mcpAuthTools, ...devDocs, ...extIntrospection, ...extensionTools, ...swarmTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
+    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
     const { kept, removed } = filterDisabledTools(allTools as Array<{ name: string }>, disabledTools);
     if (removed.length) console.log(`[TOOLS] Disabled ${removed.length}: ${removed.join(', ')}`);
     return kept as typeof allTools;

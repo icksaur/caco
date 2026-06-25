@@ -23,9 +23,9 @@ You must define `function render(surface) { ... }` at the top level. The applet 
 
 After the user calls `mutateChange`, the human-side edit lives in `surface.changes[id]`. The applet footer shows *"Your edits will be visible to the agent on its next response. (N unsent)"*.
 
-When the agent reads the changes via `caco_get_surface_changes` and clears them (either via `caco_mutate_surface` with `update` baking the answer into the underlying `items`, or via `caco_clear_surface_changes` alone), the `changes` map empties and the footer shows a green *"✓ Agent received your edits."* for ~6 seconds.
+When the agent reads the changes via `caco_get_surface_changes` and clears them (either via `caco_mutate_surface` with `update` baking the answer into the underlying `items`, or via an ops-less `caco_mutate_surface` — no `create`/`update`/`delete` — to ack alone), the `changes` map empties and the footer shows a green *"✓ Agent received your edits."* for ~6 seconds.
 
-**Important:** when an agent clears changes, the underlying `items[]` may still show the original `status: "open"` and an empty `notes` field — so to a user watching the surface, it can look like their input was thrown away. Always do one of these instead of bare `caco_clear_surface_changes`:
+**Important:** when an agent clears changes, the underlying `items[]` may still show the original `status: "open"` and an empty `notes` field — so to a user watching the surface, it can look like their input was thrown away. Always do one of these instead of a bare ack (ops-less `caco_mutate_surface`):
 
 1. **Bake the answer into the items.** Call `caco_mutate_surface` with the `update` array, where each updated item carries the user's `status` and `notes` baked in. The clear happens atomically as part of the mutate.
 2. **Echo back as a separate read-only field.** If you can't apply the user's answer to the item itself, copy it into a separate `answeredStatus` / `answeredNotes` field on the item so the surface visibly retains what the user said.

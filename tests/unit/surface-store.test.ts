@@ -231,6 +231,12 @@ describe('surface-store', () => {
       // Token may stay the same because no changes existed.
       expect(r1.dataToken).toBe(doc.dataToken);
     });
+    it('returns unknown-item when no doc exists', () => {
+      const result = clearChanges('surface-missing-' + Date.now(), 'any-token');
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('unreachable');
+      expect(result.reason).toBe('unknown-item');
+    });
   });
 
   describe('deleteSurface', () => {

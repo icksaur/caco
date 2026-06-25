@@ -6,7 +6,7 @@ import { join, relative, resolve, sep } from 'path';
 import { promisify } from 'util';
 import { validatePath, toPosix } from '../path-utils.js';
 import { MAX_FILE_SIZE_BYTES } from '../config.js';
-import { type ReadResult, type GrepMatch, type GrepOptions, WorkflowInputError } from './types.js';
+import { type ReadResult, type GrepMatch, type GrepOptions, type ReadSpec, type PeekResult, WorkflowInputError } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -104,6 +104,72 @@ export async function readFileRangeCore(
     range: sliced.range,
     text: sliced.text,
   };
+}
+
+/**
+ * For each literal anchor, return the surrounding ±context lines around its first
+ * occurrence in the file, with the exact text — the gather step for batching many
+ * edits: each result's `text` is a precise `old_str` candidate without re-viewing.
+ * Anchors are plain substrings (not regex); a missing anchor yields `found: false`
+ * rather than throwing, so one bad anchor doesn't lose the rest of the batch.
+ */
+export async function peekAnchorsCore(
+  base: string,
+  path: string,
+  anchors: string[],
+  context = 3,
+): Promise<PeekResult[]> {
+  const resolved = scope(base, path);
+  let info;
+  try {
+    info = await stat(resolved);
+  } catch {
+    throw new WorkflowInputError(`file not found: ${path}`);
+  }
+  if (!info.isFile()) throw new WorkflowInputError(`not a file: ${path}`);
+  if (info.size > MAX_FILE_SIZE_BYTES) throw new WorkflowInputError(`file too large (${info.size} bytes): ${path}`);
+  const ctx = Math.max(0, Math.floor(context));
+  const lines = (await readFile(resolved, 'utf8')).split('\n');
+  return anchors.map((anchor) => {
+    const idx = lines.findIndex((l) => l.includes(anchor));
+    if (idx === -1) return { anchor, found: false };
+    const line = idx + 1;
+    const start = Math.max(1, line - ctx);
+    const end = Math.min(lines.length, line + ctx);
+    return { anchor, found: true, line, range: [start, end] as [number, number], text: lines.slice(start - 1, end).join('\n') };
+  });
+}
+
+/**
+ * Batch-read many ranges in input order, reading each unique file exactly once
+ * (keyed by resolved path) so multiple ranges within one file don't re-stat/re-read
+ * it. Fail-fast: a missing/non-file/oversized path throws WorkflowInputError for the
+ * whole batch — `reads` is a commit-to-edit gather, so a bad path means a wrong mental
+ * model the caller should fix and re-run (contrast peekAnchorsCore, which tolerates
+ * misses). Out-of-bounds ranges are clamped, not errors (see sliceLinesByRange).
+ */
+export async function readSpecsCore(base: string, specs: ReadSpec[]): Promise<ReadResult[]> {
+  const cache = new Map<string, { rel: string; content: string }>();
+  const results: ReadResult[] = [];
+  for (const spec of specs) {
+    const resolved = scope(base, spec.path);
+    let entry = cache.get(resolved);
+    if (!entry) {
+      let info;
+      try {
+        info = await stat(resolved);
+      } catch {
+        throw new WorkflowInputError(`file not found: ${spec.path}`);
+      }
+      if (!info.isFile()) throw new WorkflowInputError(`not a file: ${spec.path}`);
+      if (info.size > MAX_FILE_SIZE_BYTES) throw new WorkflowInputError(`file too large (${info.size} bytes): ${spec.path}`);
+      entry = { rel: toPosix(relative(base, resolved)) || '.', content: await readFile(resolved, 'utf8') };
+      cache.set(resolved, entry);
+    }
+    const sliced = sliceLinesByRange(entry.content, spec.range);
+    results.push({ path: entry.rel, totalLines: sliced.totalLines, range: sliced.range, text: sliced.text });
+  }
+  return results;
 }
 
 function sortMatches(matches: GrepMatch[]): GrepMatch[] {

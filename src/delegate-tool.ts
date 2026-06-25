@@ -25,18 +25,19 @@ async function getLastAssistantMessage(sessionId: string): Promise<string> {
 
 export function createDelegateTool(sessionRef: SessionIdRef) {
   const cacoSessionDelegate = defineTool('caco_session_delegate', {
-    description: `Delegate work to 1-2 existing Caco sessions and wait for their responses, returned to you. Unlike send_caco_message (fire-and-forget), this blocks until they reply — the preferred tool for cross-session collaboration. Sessions must already exist (caco-session:UUID); verify with get_session_state if unsure. Delegates persist after replying and see the message as coming from your session.
+    description: `Delegate work to 1-2 existing Caco sessions and wait for their responses, returned to you. This blocks until they reply — the preferred tool for cross-session collaboration. Sessions must already exist (caco-session:UUID); verify with get_session_state if unsure. Delegates persist after replying and see the message as coming from your session.
 
 Use to have a reviewer/research session check work or look something up. Don't delegate to yourself, create new sessions (use create_caco_session), or use for quick sub-tasks (use the task tool).`,
 
     parameters: z.object({
       prompts: z.array(z.object({
-        sessionId: z.string().describe('Target session ID (UUID)'),
+        sessionId: z.string().describe('Target session ID (UUID, with or without the caco-session: prefix)'),
         message: z.string().describe('Message to send to the delegate'),
       })).min(1).max(2).describe('Sessions to delegate to (1-2)'),
     }),
 
-    handler: async ({ prompts }) => {
+    handler: async ({ prompts: rawPrompts }) => {
+      const prompts = rawPrompts.map(p => ({ ...p, sessionId: p.sessionId.replace(/^caco-session:/, '') }));
       if (prompts.some(p => p.sessionId === sessionRef.id)) {
         return { textResultForLlm: 'Cannot delegate to yourself.', resultType: 'error' as const };
       }

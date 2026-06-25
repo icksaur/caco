@@ -27,7 +27,6 @@ import { initTerminalPanel } from './terminal-panel.js';
 import { loadClientExtensions, reloadExtension } from './extension-loader.js';
 import { onGlobalEvent } from './websocket.js';
 import { adHocBar } from './adhoc-bar.js';
-import { setupSwarmProgress } from './swarm-progress.js';
 import { initUsageDisplays, refreshUsageDisplays } from './usage-display.js';
 import { getPanelState } from './panel-state.js';
 import { bindPanelStateToDom, readPanelStateFromDom } from './panel-dom-binder.js';
@@ -178,7 +177,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize ad-hoc bar
   const adHocContainer = document.getElementById('adHocBar');
   if (adHocContainer) adHocBar.init(adHocContainer);
-  setupSwarmProgress();
   
   // Set up event handlers
   setupImagePaste();

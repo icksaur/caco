@@ -19,7 +19,7 @@ import { STORAGE_ROOT, getSessionOutputDir, ensureDir } from './storage-paths.js
 import { OUTPUT_CACHE_TTL_MS } from './config.js';
 
 export interface OutputMetadata {
-  type: 'file' | 'terminal' | 'image' | 'embed' | 'raw';
+  type: 'file' | 'terminal' | 'image' | 'raw';
   createdAt: string;
   sessionId: string;
   sessionCwd?: string;
@@ -92,8 +92,7 @@ export function storeOutput(
   const outputDir = getSessionOutputDir(sessionId);
   ensureDir(outputDir);
 
-  const ext = metadata.type === 'image' ? 'b64' :
-              metadata.type === 'embed' ? 'json' : 'txt';
+  const ext = metadata.type === 'image' ? 'b64' : 'txt';
 
   writeFileSync(join(outputDir, `${outputId}.${ext}`), data);
   writeFileSync(join(outputDir, `${outputId}.meta.json`), JSON.stringify(fullMetadata, null, 2));
@@ -156,41 +155,6 @@ export function listOutputs(sessionId: string): OutputMetadata[] {
     } catch { /* skip malformed */ }
   }
   return outputs;
-}
-
-export function listEmbedOutputs(sessionId: string): Array<{ outputId: string; metadata: OutputMetadata }> {
-  const outputDir = getSessionOutputDir(sessionId);
-  if (!existsSync(outputDir)) return [];
-
-  const embeds: Array<{ outputId: string; metadata: OutputMetadata }> = [];
-  for (const file of readdirSync(outputDir)) {
-    if (!file.endsWith('.meta.json')) continue;
-    try {
-      const metadata: OutputMetadata = JSON.parse(readFileSync(join(outputDir, file), 'utf-8'));
-      if (metadata.type === 'embed') {
-        embeds.push({ outputId: file.replace('.meta.json', ''), metadata });
-      }
-    } catch { /* skip malformed */ }
-  }
-
-  embeds.sort((a, b) =>
-    new Date(a.metadata.createdAt).getTime() - new Date(b.metadata.createdAt).getTime()
-  );
-  return embeds;
-}
-
-/**
- * Parse [output:xxx] markers from text. Used by history replay to find
- * output references embedded in tool result text.
- */
-export function parseOutputMarkers(text: string): string[] {
-  const regex = /\[output:([^\]]+)\]/g;
-  const ids: string[] = [];
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    ids.push(match[1]);
-  }
-  return ids;
 }
 
 /**

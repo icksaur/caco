@@ -9,6 +9,8 @@ import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { APPLET_HOWTO, buildAppletUsage } from './applet-tools.js';
+import { buildExtensionsGuide } from './extensions-tool.js';
 
 const DEV_DOCS = `# Caco Documentation
 
@@ -78,18 +80,17 @@ Copilot SDK → Copilot CLI → AI Models
 - \`public/ts/dom-regions.ts\` — DOM ownership and event rendering
 
 **Tool definitions:**
-- \`src/agent-tools.ts\` — create_caco_session, send_caco_message, get_session_state
+- \`src/agent-tools.ts\` — create_caco_session, get_session_state
 - \`src/applet-tools.ts\` — Applet CRUD, restart_server
-- \`src/display-tools.ts\` — embed_media
 - \`src/mcp-auth-tools.ts\` — register_mcp_server
-- \`src/extensions-tool.ts\` — caco_extensions (extension discovery + API guide)
+- \`src/extensions-tool.ts\` — extensions guide (caco_docs section="extensions")
 
 **Extension system:**
 - \`src/extension-store.ts\` — Discovery: scans ~/.caco/extensions/ + .caco/extensions/
 - \`src/extension-runtime.ts\` — Server extension loading via jiti, ServerExtensionAPI
 - \`public/ts/extension-api.ts\` — ClientExtensionAPI (UI slots, commands, shortcuts, #pound items)
 - \`public/ts/extension-loader.ts\` — Dynamic import + hot-reload of client extensions
-- Call \`caco_extensions\` tool for full API reference and extension authoring guide
+- Call \`caco_docs section="extensions"\` for full API reference and extension authoring guide
 - Spec: \`EXTENSIONS.md\`
 
 ## Making Changes
@@ -144,23 +145,36 @@ Proactively suggest these when the user's workflow would benefit.
 - Security model, agent recursion guards
 `;
 
-export function createDevDocsTool(projectRoot: string) {
-  const cacoDevDocs = defineTool('caco_dev_docs', {
-    description: `Get documentation for the Caco project — usage, setup, autostart, configuration, architecture/internals, or how to modify it (add a tool/applet/route, find where a feature lives, or get a tool's spec after a failure).
+export function createDocsTool(projectRoot: string) {
+  const cacoDocs = defineTool('caco_docs', {
+    description: `Get documentation for the Caco project and its tools — usage, setup, autostart, configuration, architecture/internals, how to modify it (add a tool/applet/route, find where a feature lives), plus applet and extension authoring.
 
 Sections:
 - omit \`section\` for the full dev guide
 - \`section: "index"\` lists all doc files (root + docs/)
 - \`section: "<filename>"\` reads a doc by name (e.g. \`"session-surface-applet"\`, \`"surface-cookbook"\`, \`"API"\`, \`"APPLETS"\`). The .md extension is added automatically; root and \`docs/\` are searched.
+- \`section: "applets:create"\` — how to CREATE applets (HTML/JS/CSS widgets).
+- \`section: "applets:usage"\` — applet URL patterns for linking users to panels; pass \`slug\` to filter to one applet.
+- \`section: "extensions"\` — loaded extensions + the extension API.
 
-A named section's response begins with a heading TOC (H2/H3 with line numbers); use \`viewRange: [startLine, endLine]\` to paginate (1-indexed, inclusive, mirrors the \`view\` tool). For general usage/setup, read \`README.md\`.`,
+A named file section's response begins with a heading TOC (H2/H3 with line numbers); use \`viewRange: [startLine, endLine]\` to paginate (1-indexed, inclusive, mirrors the \`view\` tool). For general usage/setup, read \`README.md\`.`,
 
     parameters: z.object({
-      section: z.string().optional().describe('Optional: "index" lists all doc files. A filename (with or without .md) reads that doc. Omit for the full dev guide.'),
+      section: z.string().optional().describe('Optional: "index" lists all doc files; "applets:create" / "applets:usage" / "extensions" are virtual sections; a filename (with or without .md) reads that doc. Omit for the full dev guide.'),
+      slug: z.string().optional().describe('Only for section="applets:usage": filter to one applet by slug.'),
       viewRange: z.array(z.number()).length(2).optional().describe('Optional [startLine, endLine] (1-indexed, inclusive). Only meaningful with section=<filename>. Mirrors the view tool.')
     }),
 
-    handler: async ({ section, viewRange }) => {
+    handler: async ({ section, slug, viewRange }) => {
+      if (section === 'applets:create') {
+        return { textResultForLlm: APPLET_HOWTO };
+      }
+      if (section === 'applets:usage') {
+        return { textResultForLlm: await buildAppletUsage(slug) };
+      }
+      if (section === 'extensions') {
+        return { textResultForLlm: buildExtensionsGuide() };
+      }
       const rootCandidates = ['README.md', 'API.md', 'APPLETS.md', 'EXTENSIONS.md', 'code-quality.md'];
       const docsDir = join(projectRoot, 'docs');
 
@@ -185,7 +199,7 @@ A named section's response begins with a heading TOC (H2/H3 with line numbers); 
           .join('\n');
         const subDocs = scanDocs().map(f => `- ${f}`).join('\n');
         return {
-          textResultForLlm: `# Documentation Index\n\nAll paths are absolute. Read directly with the view tool, or call caco_dev_docs with section="<basename>" to fetch by short name.\n\n## Root docs\n${rootDocs || '(none)'}\n\n## docs/ directory\n${subDocs || '(none)'}`
+          textResultForLlm: `# Documentation Index\n\nAll paths are absolute. Read directly with the view tool, or call caco_docs with section="<basename>" to fetch by short name.\n\n## Root docs\n${rootDocs || '(none)'}\n\n## docs/ directory\n${subDocs || '(none)'}`
         };
       }
 
@@ -248,5 +262,5 @@ A named section's response begins with a heading TOC (H2/H3 with line numbers); 
     }
   });
 
-  return [cacoDevDocs];
+  return [cacoDocs];
 }

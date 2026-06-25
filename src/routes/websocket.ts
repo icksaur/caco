@@ -18,9 +18,7 @@ import { sessionManager } from '../session-manager.js';
 import { readLastTurnsResult } from '../sdk-session-store.js';
 import { shouldFilter } from '../event-filter.js';
 import { parseMessageSource, type MessageSource } from '../message-source.js';
-import { listEmbedOutputs, parseOutputMarkers, getSessionMeta } from '../storage.js';
-import { CacoEventQueue, isFlushTrigger, type CacoEvent } from '../caco-event-queue.js';
-import { normalizeToolComplete, extractToolResultText, type RawSDKEvent } from '../sdk-normalizer.js';
+import { getSessionMeta } from '../storage.js';
 import type { SessionEvent } from '../types.js';
 
 export type { SessionEvent };
@@ -401,16 +399,6 @@ export async function streamHistory(ws: WebSocket, sessionId: string, generation
       return;
     }
     
-    const embedLookup = new Map<string, { provider: string; title: string }>();
-    for (const { outputId, metadata } of listEmbedOutputs(sessionId)) {
-      embedLookup.set(outputId, {
-        provider: (metadata.provider as string) || 'unknown',
-        title: (metadata.title as string) || 'Embedded content'
-      });
-    }
-    console.log(`[HISTORY] Loaded ${embedLookup.size} embeds for session ${sessionId}`);
-    
-    const queue = new CacoEventQueue();
     let sentCount = 0;
     
     if (skipped > 0) {
@@ -424,17 +412,6 @@ export async function streamHistory(ws: WebSocket, sessionId: string, generation
     
     for (let i = 0; i < events.length; i++) {
       const evt = events[i];
-      // Flush queued embeds before trigger events (same as live stream)
-      if (isFlushTrigger(evt.type)) {
-        const queued = queue.flush();
-        if (queued.length > 0) {
-          console.log(`[HISTORY] Flushing ${queued.length} embeds before ${evt.type}`);
-          for (const cacoEvent of queued) {
-            sendFrame({ type: 'event', sessionId, event: cacoEvent as unknown as SessionEvent });
-            sentCount++;
-          }
-        }
-      }
       
       // Send SDK event
       if (!shouldFilter(evt)) {
@@ -443,50 +420,6 @@ export async function streamHistory(ws: WebSocket, sessionId: string, generation
         sendFrame({ type: 'event', sessionId, event: enriched });
         sentCount++;
       }
-      
-      // After tool.execution_complete, queue any embeds it created
-      // Use normalizer to handle SDK format inconsistencies
-      const toolComplete = normalizeToolComplete(evt as RawSDKEvent);
-      if (toolComplete) {
-        const content = extractToolResultText(toolComplete.resultContent);
-        
-        if (content) {
-          // Parse [output:xxx] markers from tool result
-          const outputIds = parseOutputMarkers(content);
-          
-          for (const outputId of outputIds) {
-            const embed = embedLookup.get(outputId);
-            if (embed) {
-              // Queue caco.embed event (will flush before next assistant.message)
-              queue.queue({
-                type: 'caco.embed',
-                data: {
-                  outputId,
-                  provider: embed.provider,
-                  title: embed.title
-                }
-              } as CacoEvent);
-              
-              // Remove from lookup so we don't queue again
-              embedLookup.delete(outputId);
-            }
-          }
-        }
-      }
-    }
-    
-    // Flush any remaining queued embeds
-    const remaining = queue.flush();
-    if (remaining.length > 0) {
-      console.log(`[HISTORY] Flushing ${remaining.length} remaining embeds at end`);
-      for (const cacoEvent of remaining) {
-        sendFrame({ type: 'event', sessionId, event: cacoEvent as unknown as SessionEvent });
-      }
-    }
-    
-    // Log unmatched embeds (shouldn't happen normally)
-    if (embedLookup.size > 0) {
-      console.log(`[HISTORY] ${embedLookup.size} unmatched embeds (no tool.execution_complete found)`);
     }
     
     // Emit caco.context if session has context (for UI footer)

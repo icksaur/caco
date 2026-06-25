@@ -7,7 +7,6 @@ import {
   storeOutput, 
   getOutput, 
   detectLanguage,
-  parseOutputMarkers,
   ensureSessionMeta,
   getSessionMeta,
   setSessionMeta,
@@ -74,23 +73,6 @@ describe('storeOutput and getOutput (disk, sessionId-keyed)', () => {
     expect(getOutput(idB)?.data.toString()).toBe('output B');
     expect(getOutput(idA)?.metadata.sessionId).toBe(OUT_SESSION_A);
     expect(getOutput(idB)?.metadata.sessionId).toBe(OUT_SESSION_B);
-  });
-});
-
-describe('parseOutputMarkers', () => {
-  it('extracts output IDs from text', () => {
-    const text = '[output:out_123_abc] Displayed file.\n[output:out_456_def] Command output.';
-    const ids = parseOutputMarkers(text);
-    expect(ids).toEqual(['out_123_abc', 'out_456_def']);
-  });
-
-  it('returns empty array when no markers', () => {
-    expect(parseOutputMarkers('No outputs here')).toEqual([]);
-  });
-
-  it('handles multiple markers on same line', () => {
-    const text = 'Results: [output:a] and [output:b]';
-    expect(parseOutputMarkers(text)).toEqual(['a', 'b']);
   });
 });
 

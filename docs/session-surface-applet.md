@@ -146,15 +146,14 @@ All tools are prefixed `caco_`. They are thin wrappers over the HTTP routes; the
 | --- | --- | --- |
 | `caco_get_surface` | GET `/surface` | Full document. |
 | `caco_get_surface_changes` | GET `/surface/changes` | Human-side dirty map only. |
-| `caco_mutate_surface` | POST `/surface/mutate` | Apply `create`/`update`/`delete`, atomically clearing `changes`. |
-| `caco_clear_surface_changes` | POST `/surface/clear-changes` | Acknowledge `changes` without writing. |
+| `caco_mutate_surface` | POST `/surface/mutate` | Apply `create`/`update`/`delete`, atomically clearing `changes`. Call with no items to ack `changes` without writing. |
 | `caco_set_surface_style` | PATCH `/surface/style` | Change `style`, optionally provide `customScript`/`customStyle`. (Beta) |
 | `caco_reset_surface` | DELETE `/surface` | Discard the document entirely. |
 
 Tool descriptions in Caco's prompt assembly must teach the model the canonical flow:
 
 1. At turn start (or before any surface action), call `caco_get_surface_changes`. If `changes` is non-empty, the user has edited the document; integrate those into your plan.
-2. Either call `caco_mutate_surface(...)` (atomic write + ack) or `caco_clear_surface_changes(token)` (ack without write).
+2. Call `caco_mutate_surface(...)` — with `create`/`update`/`delete` for an atomic write + ack, or with no items to ack without writing.
 3. **On `stale` response**: call `caco_get_surface`, rebase your intended mutations against the new `items` + `changes`, then retry `caco_mutate_surface` with the fresh `dataToken`. Do NOT retry indefinitely — give up after two stale rounds and tell the user.
 4. Emit a markdown link `[Open surface](/?applet=session-surface&session=<id>)` so the user can review.
 
@@ -250,7 +249,7 @@ This replaces what was previously a built-in renderer — it's now just an examp
 
 1. ✅ Storage: `~/.caco/sessions/<id>/surface.json`. Schema validator. Token computation.
 2. ✅ HTTP routes: GET full, GET changes, POST mutate, POST clear-changes, PUT change.
-3. ✅ Tools: `caco_get_surface`, `caco_get_surface_changes`, `caco_mutate_surface`, `caco_clear_surface_changes`.
+3. ✅ Tools: `caco_get_surface`, `caco_get_surface_changes`, `caco_mutate_surface` (ops-less call acks edits).
 4. ✅ System-prompt addition teaching the read-changes-then-mutate flow.
 5. ✅ Tests: `surface-store.test.ts` (249 lines).
 
@@ -405,7 +404,7 @@ Or it can stay silent. Author's choice per script.
 1. `caco_get_surface` returns the route payload verbatim.
 2. `caco_get_surface_changes` returns the route payload verbatim.
 3. `caco_mutate_surface` forwards body and returns route response.
-4. `caco_clear_surface_changes` forwards `dataToken` and returns route response.
+4. An ops-less `caco_mutate_surface` forwards `dataToken` and returns route response.
 5. Each tool injects the current session ID into the route URL (auto-`sessionId` behavior).
 6. Each tool surfaces network errors as tool errors (not silent).
 

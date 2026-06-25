@@ -27,6 +27,18 @@ describe('createFacade', () => {
     expect(res.text).toBe('export const x = 1;');
   });
 
+  it('batch-reads multiple ranges across files in one call', async () => {
+    const caco = createFacade(base);
+    const res = await caco.reads([{ path: 'one.ts', range: [1, 1] }, { path: 'sub/two.txt' }]);
+    expect(res.map((r) => r.text)).toEqual(['export const x = 1;', 'hello NEEDLE world\n']);
+  });
+
+  it('peeks exact context around a literal anchor', async () => {
+    const caco = createFacade(base);
+    const res = await caco.peek('one.ts', ['function f'], 0);
+    expect(res[0]).toEqual({ anchor: 'function f', found: true, line: 2, range: [2, 2], text: 'export function f() { return x; }' });
+  });
+
   it('greps content', async () => {
     const caco = createFacade(base);
     const res = await caco.grep('NEEDLE');
@@ -126,6 +138,8 @@ describe('wrapFacadeForAccounting', () => {
       index: async () => ({ language: 'x', declarations: [] }) as never,
       frames: async () => ({ symbol: 's', definitions: [], incoming: [], truncated: false, notes: [] }),
       read: async () => ({ path: 'p', totalLines: 0, range: [1, 1], text: 'BODY' }),
+      reads: async () => [{ path: 'p', totalLines: 0, range: [1, 1], text: 'BODY' }],
+      peek: async () => [{ anchor: 'a', found: true, line: 1, range: [1, 1], text: 'BODY' }],
       grep: async () => [{ file: 'f', line: 1, text: 't' }],
       rg: async () => 'RG',
       glob: async () => ['g'],

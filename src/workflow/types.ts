@@ -29,5 +29,27 @@ export interface GrepOptions {
   ignoreCase?: boolean;
 }
 
+/** A file plus optional range, for batch-reading many edit regions in one call. */
+export interface ReadSpec {
+  /** Path relative to the session directory. */
+  path: string;
+  /** 1-based inclusive line range; whole file if omitted. */
+  range?: [start: number, end: number];
+}
+
+/** Surrounding context for one literal anchor, for preparing an exact edit `old_str`. */
+export interface PeekResult {
+  /** The anchor literal searched for. */
+  anchor: string;
+  /** Whether the anchor was found in the file. */
+  found: boolean;
+  /** 1-based line of the anchor's first occurrence (present only when found). */
+  line?: number;
+  /** 1-based inclusive range of the returned context (present only when found). */
+  range?: [start: number, end: number];
+  /** The context lines joined by '\n' (present only when found). */
+  text?: string;
+}
+
 /** Bad input the caller should surface verbatim (path/type/size), not a crash. */
 export class WorkflowInputError extends Error {}

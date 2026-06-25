@@ -10,14 +10,11 @@
  * delete goes through `SessionState.onSessionEnd`.
  */
 
-import { CacoEventQueue } from './caco-event-queue.js';
 import { clearSession as clearThroughput } from './session-throughput.js';
 import { clearSessionUsage } from './session-usage-cache.js';
 
 export interface SessionRuntime {
   readonly sessionId: string;
-  /** Synthetic caco.* event queue: produced during a turn, flushed on trigger. */
-  readonly queue: CacoEventQueue;
   /** Idempotent: safe to call under stop/eviction/restart races. */
   dispose(): void;
 }
@@ -25,15 +22,12 @@ export interface SessionRuntime {
 const runtimes = new Map<string, SessionRuntime>();
 
 function createRuntime(sessionId: string): SessionRuntime {
-  const queue = new CacoEventQueue();
   let disposed = false;
   return {
     sessionId,
-    queue,
     dispose() {
       if (disposed) return;
       disposed = true;
-      queue.flush();
       clearThroughput(sessionId);
       clearSessionUsage(sessionId);
     },

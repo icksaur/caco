@@ -18,8 +18,6 @@ import { sessionState } from '../session-state.js';
 import { setAppletUserState, setAppletNavigation, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
 import { broadcastEvent, broadcastGlobalEvent, type SessionEvent } from './websocket.js';
-import { isFlushTrigger } from '../caco-event-queue.js';
-import { getSessionRuntime } from '../session-runtime.js';
 import { getSessionMeta, updateSessionMeta } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS } from '../config.js';
@@ -393,18 +391,6 @@ export async function dispatchMessage(
     const handleEvent = (event: SessionEvent) => {
       if (dispatchCompleted) return;
       watchdog?.notifyEvent(event.type);
-
-      // Flush queued caco events before trigger events (so embeds appear at natural break)
-      if (isFlushTrigger(event.type)) {
-        const queue = getSessionRuntime(sessionId).queue;
-        const queued = queue.flush();
-        if (queued.length > 0) {
-          console.log(`[QUEUE] Flushing ${queued.length} caco events before ${event.type}`);
-          for (const cacoEvent of queued) {
-            onEvent(cacoEvent as unknown as SessionEvent);
-          }
-        }
-      }
 
       // Forward the SDK event to the client (no transformation — caco.* events
       // are emitted directly by their tool handlers).

@@ -35,6 +35,7 @@ vi.mock('../../public/ts/websocket.js', () => ({
   getConnectionId: vi.fn(() => connectionId),
   subscribeToSession: vi.fn(),
   requestHistory: vi.fn(),
+  advanceHistoryGeneration: vi.fn(),
   onEvent: vi.fn(() => mockUnsub),
   replayEvents: vi.fn(),
 }));
@@ -52,7 +53,7 @@ vi.mock('../../public/ts/ui-utils.js', () => ({
 import { HistoryLoader } from '../../public/ts/history-loader.js';
 import { setLoadingHistory, getActiveSessionId } from '../../public/ts/app-state.js';
 import { setFormEnabled } from '../../public/ts/view-controller.js';
-import { requestHistory, subscribeToSession, replayEvents } from '../../public/ts/websocket.js';
+import { requestHistory, subscribeToSession, replayEvents, advanceHistoryGeneration } from '../../public/ts/websocket.js';
 import { sessionTracker } from '../../public/ts/session-state-tracker.js';
 import { regions } from '../../public/ts/dom-regions.js';
 import { putCachedTranscript, getCachedTranscript, clearTranscriptCache } from '../../public/ts/transcript-cache.js';
@@ -221,6 +222,9 @@ describe('HistoryLoader', () => {
 
       expect(requestHistory).not.toHaveBeenCalled();
       expect(replayEvents).toHaveBeenCalledWith([ev('a'), ev('b')]);
+      // Must advance the history-load fence so superseded in-flight slow-load
+      // frames can't interleave into this re-rendered transcript.
+      expect(advanceHistoryGeneration).toHaveBeenCalled();
       expect(setLoadingHistory).toHaveBeenCalledWith(true);
       expect(setLoadingHistory).toHaveBeenCalledWith(false);
       expect(setFormEnabled).toHaveBeenCalledWith(true);

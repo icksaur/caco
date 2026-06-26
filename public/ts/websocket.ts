@@ -99,6 +99,18 @@ export function requestHistory(sessionId: string): void {
   send({ type: 'requestHistory', sessionId, generation: currentHistoryGen });
 }
 
+/**
+ * Advance the history-load generation without issuing a request. The transcript
+ * fast path (cached re-render) renders without calling requestHistory, so it must
+ * still bump the generation — otherwise in-flight replay frames from a superseded
+ * slow load (which carry the prior generation and pass isStaleReplay) would
+ * interleave into the now-active session's DOM. replayEvents dispatches cached
+ * events directly (not as generation-tagged frames), so it is unaffected.
+ */
+export function advanceHistoryGeneration(): void {
+  currentHistoryGen = ++historyGeneration;
+}
+
 function startHeartbeat(myConnectionId: number): void {
   stopHeartbeat();
   lastServerPingTs = Date.now();

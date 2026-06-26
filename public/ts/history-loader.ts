@@ -11,7 +11,7 @@
 import { debug } from './debug.js';
 import { getActiveSessionId, setLoadingHistory } from './app-state.js';
 import { setFormEnabled } from './view-controller.js';
-import { onHistoryComplete, getConnectionId, subscribeToSession, requestHistory, onEvent, replayEvents, type SessionEvent } from './websocket.js';
+import { onHistoryComplete, getConnectionId, subscribeToSession, requestHistory, advanceHistoryGeneration, onEvent, replayEvents, type SessionEvent } from './websocket.js';
 import { clearContextFooter, updateContextUsage } from './context-footer.js';
 import { regions } from './dom-regions.js';
 import { scrollToBottom } from './ui-utils.js';
@@ -136,6 +136,10 @@ class HistoryLoader {
   /** Re-render a cached transcript locally, skipping the WS history round trip. */
   private reuseFromCache(sessionId: string, events: SessionEvent[]): void {
     setLoadingHistory(true);
+    // Advance the history-load generation so any in-flight replay frames from a
+    // superseded slow load are fenced out by isStaleReplay (the fast path issues
+    // no requestHistory, which is what normally bumps the generation).
+    advanceHistoryGeneration();
     regions.chat.clear();
     clearContextFooter();
     subscribeToSession(sessionId);

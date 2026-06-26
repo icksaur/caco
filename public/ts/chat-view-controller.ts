@@ -204,7 +204,7 @@ class ChatViewController {
       flight.end('showChat');
 
       flight.span('restoreApplet');
-      void this.restoreApplet(data.activeApplet, data.appletParams, data.appletPanelVisible).finally(() => flight.end('restoreApplet'));
+      void this.restoreApplet(token, data.activeApplet, data.appletParams, data.appletPanelVisible).finally(() => flight.end('restoreApplet'));
     } catch (error) {
       if (error instanceof SupersededError) return;
       const msg = error instanceof Error ? error.message : 'Network error';
@@ -216,10 +216,16 @@ class ChatViewController {
     }
   }
 
+  /** Whether the given navigation token is still current — no newer navigation
+   *  has claimed the surface since it was captured. */
+  private isCurrent(token: number): boolean {
+    return token === this.navGeneration;
+  }
+
   /** Throw SupersededError if a newer navigation has claimed the surface since
    *  the given token was captured. */
   private assertCurrent(token: number): void {
-    if (token !== this.navGeneration) throw new SupersededError();
+    if (!this.isCurrent(token)) throw new SupersededError();
   }
 
   /**
@@ -298,23 +304,26 @@ class ChatViewController {
    * Only loads if the session has a saved activeApplet — respects current
    * panel visibility otherwise.
    */
-  private async restoreApplet(activeApplet?: string | null, appletParams?: Record<string, string> | null, _panelVisible?: boolean): Promise<void> {
+  private async restoreApplet(token: number, activeApplet?: string | null, appletParams?: Record<string, string> | null, _panelVisible?: boolean): Promise<void> {
     if (!activeApplet || REMOVED_APPLET_SLUGS.has(activeApplet)) return;
-    // Snapshot at fire-time so rapid session switches can abort late restores.
-    const targetSessionId = getActiveSessionId();
+    // The session this restore targets (set by resumeAndLoad), used for the URL
+    // param below.
+    const restoredSessionId = getActiveSessionId();
     try {
       // Yield one microtask so a synchronously-following session activation
       // can land before we commit content/URL writes. This is the same
       // boundary the previous dynamic import('./router.js') provided.
       await Promise.resolve();
-      if (getActiveSessionId() !== targetSessionId) return;
+      // Same staleness token as the orchestrator gates (assertCurrent): a newer
+      // navigation since this activation aborts the late applet/URL write.
+      if (!this.isCurrent(token)) return;
 
       // Best-effort URL hygiene. Wrapped separately so a missing window
       // (unit tests, headless contexts) doesn't block the content swap.
       try {
         if (typeof window !== 'undefined') {
           const params = new URLSearchParams();
-          if (targetSessionId) params.set('session', targetSessionId);
+          if (restoredSessionId) params.set('session', restoredSessionId);
           params.set('applet', activeApplet);
           for (const [k, v] of Object.entries(appletParams || {})) {
             params.set(k, v);

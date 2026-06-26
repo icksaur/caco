@@ -389,13 +389,18 @@ describe('ChatViewController', () => {
 
   describe('restoreApplet visibility invariant', () => {
     type RestoreApplet = (
+      token: number,
       activeApplet?: string | null,
       appletParams?: Record<string, string> | null,
       panelVisible?: boolean,
     ) => Promise<void>;
 
-    function restoreApplet(c: ChatViewController): RestoreApplet {
-      return (c as unknown as { restoreApplet: RestoreApplet }).restoreApplet.bind(c);
+    // Bind the controller's CURRENT navigation token, mirroring how
+    // activateSession calls restoreApplet with its own activation token.
+    function restoreApplet(c: ChatViewController) {
+      const token = (c as unknown as { navGeneration: number }).navGeneration;
+      const fn = (c as unknown as { restoreApplet: RestoreApplet }).restoreApplet;
+      return (a?: string | null, p?: Record<string, string> | null, v?: boolean) => fn.call(c, token, a, p, v);
     }
 
     it('never calls showAppletPanel or hideAppletPanel — regardless of panelVisible value', async () => {
@@ -427,14 +432,15 @@ describe('ChatViewController', () => {
       expect(router.loadApplet).toHaveBeenCalledWith('applet-a', { path: '/x' }, { restore: true });
     });
 
-    it('aborts late restore when active session changed mid-flight', async () => {
+    it('aborts late restore when superseded by a newer navigation token', async () => {
       const router = await import('../../public/ts/applet-loader.js');
       vi.mocked(router.loadApplet).mockClear();
       vi.mocked(getActiveSessionId).mockReturnValue('s1');
 
-      // Start the restore but flip the active session before its imports resolve.
+      // Start the restore (binds the current token) then bump the generation,
+      // simulating a newer activation landing before the microtask resolves.
       const inFlight = restoreApplet(cvc)('applet-a', {});
-      vi.mocked(getActiveSessionId).mockReturnValue('s2');
+      (cvc as unknown as { navGeneration: number }).navGeneration++;
       await inFlight;
 
       // Stale restore must not have called loadApplet.

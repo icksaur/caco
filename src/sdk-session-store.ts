@@ -13,6 +13,27 @@ function sessionPath(sessionId: string, file: string): string {
   return join(homedir(), '.copilot', 'session-state', sessionId, file);
 }
 
+/** A cheap, faithful version of a session's history: the `events.jsonl` file's
+ *  byte size and mtime. It changes on every append, and — crucially — on every
+ *  rewrite the SDK/server can't broadcast (history rotation front-truncates the
+ *  file, repair rewrites it). The transcript cache compares this between a cached
+ *  load and a later `/resume` to decide whether a re-render is safe or the history
+ *  must be re-streamed. Returns null when the session has no events file yet. */
+export interface EventVersion {
+  size: number;
+  mtimeMs: number;
+}
+
+export function getEventVersion(sessionId: string): EventVersion | null {
+  const eventsPath = sessionPath(sessionId, 'events.jsonl');
+  try {
+    const st = statSync(eventsPath);
+    return { size: st.size, mtimeMs: st.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
 export interface SessionWorkspace {
   updatedAt?: string;
   summary?: string;

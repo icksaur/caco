@@ -18,7 +18,7 @@ import { sessionManager } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
 import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind } from '../storage.js';
-import { readSessionWorkspace, searchSessionEvents } from '../sdk-session-store.js';
+import { readSessionWorkspace, searchSessionEvents, getEventVersion } from '../sdk-session-store.js';
 import { rotateSessionHistory } from '../session-history-rotation.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
@@ -276,6 +276,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       appletParams: meta?.appletParams || null,
       appletPanelVisible: meta?.appletPanelVisible ?? true,
       throughput: throughputSnapshot(result.sessionId),
+      eventVersion: getEventVersion(result.sessionId),
     });
     const tTotal = performance.now() - t0;
     console.log(`[PERF] resume ${sessionId.slice(0, 8)} switchSession=${tSwitch.toFixed(1)}ms total=${tTotal.toFixed(1)}ms`);

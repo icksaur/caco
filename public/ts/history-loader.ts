@@ -11,12 +11,13 @@
 import { debug } from './debug.js';
 import { getActiveSessionId, setLoadingHistory } from './app-state.js';
 import { setFormEnabled } from './view-controller.js';
-import { onHistoryComplete, getConnectionId, subscribeToSession, requestHistory, onEvent } from './websocket.js';
+import { onHistoryComplete, getConnectionId, subscribeToSession, requestHistory, advanceHistoryGeneration, onEvent, replayEvents, type SessionEvent } from './websocket.js';
 import { clearContextFooter, updateContextUsage } from './context-footer.js';
 import { regions } from './dom-regions.js';
 import { scrollToBottom } from './ui-utils.js';
 import { sessionTracker } from './session-state-tracker.js';
 import { loadModels } from './model-selector.js';
+import { getCachedTranscript, putCachedTranscript, versionsEqual, type EventVersion } from './transcript-cache.js';
 
 const TIMEOUT_MS = 30000;
 
@@ -25,6 +26,10 @@ interface PendingLoad {
   resolve: () => void;
   timer: ReturnType<typeof setTimeout>;
   unsub: () => void;
+  /** Events collected during this load, cached for a later fast re-render. */
+  events: SessionEvent[];
+  /** Server events.jsonl version at load (the freshness token), if known. */
+  version?: EventVersion | null;
 }
 
 class HistoryLoader {
@@ -37,18 +42,30 @@ class HistoryLoader {
    * Clears chat, subscribes to WS, requests history, waits for completion.
    * Sets tracker busy state and form state from server response.
    */
-  async load(sessionId: string): Promise<void> {
+  async load(sessionId: string, version?: EventVersion | null, isBusy = false): Promise<void> {
     this.cancel();
+
+    // Fast path: a fresh cached transcript (same events.jsonl version, same WS
+    // connection, not currently streaming) re-renders locally instead of
+    // re-streaming history over the WebSocket.
+    const cached = getCachedTranscript(sessionId);
+    if (cached && version && versionsEqual(cached.version, version)
+        && cached.connectionId === getConnectionId() && !isBusy) {
+      this.reuseFromCache(sessionId, cached.events);
+      return;
+    }
 
     setLoadingHistory(true);
     regions.chat.clear();
     clearContextFooter();
     subscribeToSession(sessionId);
 
+    const events: SessionEvent[] = [];
     const tRequest = performance.now();
     let tFirstEvent = 0;
     let eventCount = 0;
-    const unsubEvent = onEvent(() => {
+    const unsubEvent = onEvent(e => {
+      events.push(e);
       eventCount += 1;
       if (tFirstEvent === 0) tFirstEvent = performance.now();
     });
@@ -74,7 +91,7 @@ class HistoryLoader {
         this.finish(wrappedResolve, data);
       });
 
-      this.pending = { sessionId, resolve: wrappedResolve, timer, unsub };
+      this.pending = { sessionId, resolve: wrappedResolve, timer, unsub, events, version };
     });
   }
 
@@ -96,17 +113,51 @@ class HistoryLoader {
 
   private finish(resolve: () => void, data?: { isBusy?: boolean; usage?: { tokenLimit: number; currentTokens: number } }): void {
     if (!this.pending) return;
-    const { sessionId, timer, unsub } = this.pending;
+    const { sessionId, timer, unsub, events, version } = this.pending;
     clearTimeout(timer);
     unsub();
-    
+    this.pending = null;
+
+    // Cache the freshly streamed transcript for an instant re-render on a later
+    // switch-back. Only on a real completion (data present, not a timeout), with
+    // a freshness token, and an idle session (a busy session's array is mid-stream).
+    if (data && version && !data.isBusy) {
+      putCachedTranscript(sessionId, {
+        events: events.slice(),
+        version,
+        connectionId: getConnectionId(),
+      });
+    }
+
+    this.settle(sessionId, data);
+    resolve();
+  }
+
+  /** Re-render a cached transcript locally, skipping the WS history round trip. */
+  private reuseFromCache(sessionId: string, events: SessionEvent[]): void {
+    setLoadingHistory(true);
+    // Advance the history-load generation so any in-flight replay frames from a
+    // superseded slow load are fenced out by isStaleReplay (the fast path issues
+    // no requestHistory, which is what normally bumps the generation).
+    advanceHistoryGeneration();
+    regions.chat.clear();
+    clearContextFooter();
+    subscribeToSession(sessionId);
+    // Replay through the same callback path the WS stream drives, with
+    // loadingHistory set, so handleEvent renders identically to a real replay
+    // (rebuilds footer context + usage, no per-event scroll).
+    replayEvents(events);
+    this.settle(sessionId, { isBusy: false });
+  }
+
+  /** Post-stream settle, shared by the streamed and cached-replay paths. */
+  private settle(sessionId: string, data?: { isBusy?: boolean; usage?: { tokenLimit: number; currentTokens: number } }): void {
     this.lastSessionId = sessionId;
     this.lastConnectionId = getConnectionId();
-    this.pending = null;
-    
+
     setLoadingHistory(false);
     scrollToBottom();
-    
+
     const isBusy = data?.isBusy ?? false;
     sessionTracker.setBusy(sessionId, isBusy);
     if (data?.usage) {
@@ -123,11 +174,10 @@ class HistoryLoader {
       chat.removeThinking?.();
       chat.removeStreamingCursors?.();
     }
-    
+
     if (regions.chat.el.children.length === 0) {
       loadModels();
     }
-    resolve();
   }
 
   private cancel(): void {

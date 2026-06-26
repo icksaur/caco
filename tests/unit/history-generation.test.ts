@@ -73,6 +73,24 @@ describe('history generation discard', () => {
     expect(received).toEqual(['live']);
   });
 
+  it('advanceHistoryGeneration fences in-flight replay frames from a superseded load', async () => {
+    const ws = await import('../../public/ts/websocket.js');
+    const received: string[] = [];
+    ws.onEvent((e) => {
+      received.push(((e as { data?: { id?: string } }).data?.id) ?? '?');
+    });
+
+    ws.requestHistory('s'); // slow load for A, gen 1
+    // The transcript fast path renders a different session without requestHistory,
+    // but advances the generation so A's still-queued gen-1 frames are dropped.
+    ws.advanceHistoryGeneration(); // now gen 2
+
+    ws.handleMessage({ type: 'event', sessionId: 's', generation: 1, event: ev('stale-A') }); // dropped
+    ws.handleMessage({ type: 'event', sessionId: 's', event: ev('live') });                    // kept
+
+    expect(received).toEqual(['live']);
+  });
+
   it('warns when a session-scoped frame arrives without a sessionId', async () => {
     const ws = await import('../../public/ts/websocket.js');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

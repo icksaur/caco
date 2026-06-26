@@ -99,6 +99,18 @@ export function requestHistory(sessionId: string): void {
   send({ type: 'requestHistory', sessionId, generation: currentHistoryGen });
 }
 
+/**
+ * Advance the history-load generation without issuing a request. The transcript
+ * fast path (cached re-render) renders without calling requestHistory, so it must
+ * still bump the generation — otherwise in-flight replay frames from a superseded
+ * slow load (which carry the prior generation and pass isStaleReplay) would
+ * interleave into the now-active session's DOM. replayEvents dispatches cached
+ * events directly (not as generation-tagged frames), so it is unaffected.
+ */
+export function advanceHistoryGeneration(): void {
+  currentHistoryGen = ++historyGeneration;
+}
+
 function startHeartbeat(myConnectionId: number): void {
   stopHeartbeat();
   lastServerPingTs = Date.now();
@@ -504,6 +516,24 @@ export function wsSendMessage(content: string, imageData?: string, source: Messa
 export function onEvent(callback: EventCallback): () => void {
   eventCallbacks.add(callback);
   return () => eventCallbacks.delete(callback);
+}
+
+/**
+ * Locally re-dispatch an array of events through the same callback path a live
+ * `event` WS frame uses (so `handleEvent` renders them identically). Used by the
+ * transcript cache to re-render a cached history without a WS round trip. Callers
+ * must set `loadingHistory` before invoking so subscribers treat these as replay.
+ */
+export function replayEvents(events: SessionEvent[]): void {
+  for (const event of events) {
+    for (const cb of eventCallbacks) {
+      try {
+        cb(event);
+      } catch (err) {
+        console.error('[WS] Replay callback error:', err);
+      }
+    }
+  }
 }
 
 /**

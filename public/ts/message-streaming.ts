@@ -15,7 +15,7 @@
 
 import { debug } from './debug.js';
 import { scrollToBottom } from './ui-utils.js';
-import { getActiveSessionId, isLoadingHistory, getSelectedModel, notifyMessageSent } from './app-state.js';
+import { getActiveSessionId, isLoadingHistory, getSelectedModel, notifyMessageSent, onSessionArchived } from './app-state.js';
 import { isViewState } from './view-controller.js';
 import { onEvent, onReconnect, type SessionEvent } from './websocket.js';
 import { showToast } from './toast.js';
@@ -30,6 +30,7 @@ import { adHocBar } from './adhoc-bar.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
 import { chatView } from './chat-view-controller.js';
 import { formStateStore } from './form-state-store.js';
+import { dropCachedTranscript } from './transcript-cache.js';
 
 let chatRegion: ChatRegion;
 
@@ -348,6 +349,9 @@ export function initMessageStreaming(): void {
   chatRegion = new ChatRegion(regions.chat);
   chatRegion.setupClickHandler();
   registerWsHandlers();
+  // Evict a session's cached transcript when it is archived/deleted so a reused
+  // id can never re-render a gone session's history.
+  wsHandlerDisposers.push(onSessionArchived(id => dropCachedTranscript(id)));
   messageStreamingInitialized = true;
 }
 

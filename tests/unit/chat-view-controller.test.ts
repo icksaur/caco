@@ -40,6 +40,7 @@ vi.mock('../../public/ts/context-footer.js', () => ({
   updateContextUsage: vi.fn(),
   clearThroughput: vi.fn(),
   restoreThroughput: vi.fn(),
+  seedThroughput: vi.fn(),
   updateThroughput: vi.fn(),
   setActiveThroughputModel: vi.fn(),
   setActiveContextBudget: vi.fn(),
@@ -103,7 +104,7 @@ vi.mock('../../public/ts/chat-draft-api.js', () => ({
 
 import { ChatViewController } from '../../public/ts/chat-view-controller.js';
 import { setViewState, getViewState } from '../../public/ts/view-controller.js';
-import { clearStatus, clearContextFooter, renderSessionStatus, renderNewChatStatus, setFooterOwner, isFooterOwner, updateContextUsage, updateThroughput, renderContextFooter } from '../../public/ts/context-footer.js';
+import { clearStatus, clearContextFooter, renderSessionStatus, renderNewChatStatus, setFooterOwner, isFooterOwner, updateContextUsage, updateThroughput, renderContextFooter, seedThroughput } from '../../public/ts/context-footer.js';
 import { loadModels } from '../../public/ts/model-selector.js';
 import { regions } from '../../public/ts/dom-regions.js';
 import { showToast } from '../../public/ts/toast.js';
@@ -342,6 +343,23 @@ describe('ChatViewController', () => {
       cvc.updateUsage('owner', { tokenLimit: 100, currentTokens: 10 });
       expect(isFooterOwner).toHaveBeenCalledWith('owner');
       expect(updateContextUsage).toHaveBeenCalledWith({ tokenLimit: 100, currentTokens: 10 }, 'owner');
+    });
+  });
+
+  describe('throughput bundling (R4 Slice A)', () => {
+    it('seeds throughput from the resume payload (no separate fetch)', async () => {
+      vi.mocked(getActiveSessionId).mockReturnValue(null);
+      vi.mocked(historyLoader.isStale).mockReturnValue(true);
+      const throughput = { totalIn: 1, totalOut: 2, known: true };
+      const mockResponse = {
+        ok: true,
+        json: vi.fn().mockResolvedValue({ sessionId: 'tp-id', cwd: '/t', throughput }),
+      };
+      vi.mocked(fetchWithTimeout).mockResolvedValue(mockResponse as unknown as Response);
+
+      await cvc.activateSession('tp-id');
+
+      expect(seedThroughput).toHaveBeenCalledWith('tp-id', throughput);
     });
   });
 

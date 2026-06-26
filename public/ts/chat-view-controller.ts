@@ -12,7 +12,7 @@
 import { debug } from './debug.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, releaseActiveSessionForNewChat, getNewChatCwd, onSessionActivate, notifySessionActivated, type SessionActivateCtx } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
-import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, updateThroughput, restoreThroughput, clearThroughput, setActiveThroughputModel, setActiveContextBudget, setActiveReasoningEffort, setFooterOwner, isFooterOwner } from './context-footer.js';
+import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, updateThroughput, seedThroughput, clearThroughput, setActiveThroughputModel, setActiveContextBudget, setActiveReasoningEffort, setFooterOwner, isFooterOwner, type ThroughputData } from './context-footer.js';
 import { loadModels } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
 import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websocket.js';
@@ -189,7 +189,7 @@ class ChatViewController {
       flight.span('showChat');
       setActiveContextBudget(data.contextBudgetTokens ?? null);
       setActiveReasoningEffort(data.reasoningEffort ?? null);
-      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.hasIcon, data.kind, data.currentIntent, data.gitBranch);
+      this.showChat(sessionId, data.cwd || getCurrentCwd(), data.model, data.hasGit, data.name, data.hasIcon, data.kind, data.currentIntent, data.gitBranch, data.throughput);
       setResponseOptions(data.responseOptions?.length ? data.responseOptions : []);
       flight.end('showChat');
 
@@ -228,6 +228,7 @@ class ChatViewController {
     currentIntent?: string; gitBranch?: string | null; responseOptions?: string[];
     activeApplet?: string | null; appletParams?: Record<string, string> | null;
     appletPanelVisible?: boolean; contextBudgetTokens?: number | null; reasoningEffort?: string | null;
+    throughput?: ThroughputData;
   }> {
     flight?.span('wsConnect');
     reconnectIfNeeded();
@@ -261,6 +262,7 @@ class ChatViewController {
       appletParams?: Record<string, string> | null;
       appletPanelVisible?: boolean;
       contextBudgetTokens?: number | null;
+      throughput?: ThroughputData;
     };
 
     // repairMessage is intentionally not toasted: auto-repair is opportunistic
@@ -341,14 +343,14 @@ class ChatViewController {
   /**
    * Transition to chatting view after successful load.
    */
-  private showChat(sessionId: string, cwd: string, model?: string, hasGit = false, name?: string, hasIcon?: boolean, kind?: string, currentIntent?: string, gitBranch?: string | null): void {
+  private showChat(sessionId: string, cwd: string, model?: string, hasGit = false, name?: string, hasIcon?: boolean, kind?: string, currentIntent?: string, gitBranch?: string | null, throughput?: ThroughputData): void {
     if (this.chattingForm) {
       this.activeForm = this.chattingForm;
       this.chattingForm.bind(sessionId);
     }
     this.updateStatus(cwd, model, hasGit, name, sessionId, hasIcon, gitBranch);
     restoreContextUsage(sessionId);
-    restoreThroughput(sessionId);
+    seedThroughput(sessionId, throughput);
     notifySessionActivated({ sessionId, cwd, info: { sessionId, cwd, name, kind, model, currentIntent } });
     setViewState('chatting');
   }

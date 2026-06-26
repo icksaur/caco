@@ -275,6 +275,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       activeApplet: meta?.activeApplet || null,
       appletParams: meta?.appletParams || null,
       appletPanelVisible: meta?.appletPanelVisible ?? true,
+      throughput: throughputSnapshot(result.sessionId),
     });
     const tTotal = performance.now() - t0;
     console.log(`[PERF] resume ${sessionId.slice(0, 8)} switchSession=${tSwitch.toFixed(1)}ms total=${tTotal.toFixed(1)}ms`);

@@ -462,6 +462,18 @@ export function restoreThroughput(sessionId: string): void {
     .catch(() => {});
 }
 
+/** Seed throughput from a bundled payload (the /resume response) instead of a
+ *  separate GET /throughput round trip. Falls back to a fetch when the payload
+ *  is absent (e.g. an older server during a rolling deploy). */
+export function seedThroughput(sessionId: string, data: ThroughputData | null | undefined): void {
+  if (!data) {
+    restoreThroughput(sessionId);
+    return;
+  }
+  throughputCache.set(sessionId, data);
+  renderThroughput(data);
+}
+
 export function clearThroughput(): void {
   const footer = regions.footer.el;
   const el = footer.querySelector('.context-throughput');

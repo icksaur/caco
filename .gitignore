@@ -44,3 +44,6 @@ backlog.md
 issues.md
 code-review.md
 github-copilot-sdk-*.tgz
+
+# Local Caco runtime state (schedules, drafts) — never commit
+.caco/

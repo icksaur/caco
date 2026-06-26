@@ -10,7 +10,7 @@
  */
 
 import { debug } from './debug.js';
-import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, releaseActiveSessionForNewChat, getNewChatCwd } from './app-state.js';
+import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, releaseActiveSessionForNewChat, getNewChatCwd, onSessionActivate, notifySessionActivated, type SessionActivateCtx } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
 import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, updateThroughput, restoreThroughput, clearThroughput, setActiveThroughputModel, setActiveContextBudget, setActiveReasoningEffort } from './context-footer.js';
 import { loadModels } from './model-selector.js';
@@ -348,12 +348,10 @@ class ChatViewController {
       this.chattingForm.bind(sessionId);
     }
     this.footerSessionId = sessionId;
-    updateMenuIndicators();
-    notifySessionChange(sessionId, { sessionId, cwd, name, kind, model, currentIntent });
     this.updateStatus(cwd, model, hasGit, name, sessionId, hasIcon, gitBranch);
     restoreContextUsage(sessionId);
     restoreThroughput(sessionId);
-    adHocBar.activateSession(sessionId);
+    notifySessionActivated({ sessionId, cwd, info: { sessionId, cwd, name, kind, model, currentIntent } });
     setViewState('chatting');
   }
 
@@ -369,9 +367,8 @@ class ChatViewController {
     }
     setActiveSession(sessionId, cwd);
     subscribeToSession(sessionId);
-    updateMenuIndicators();
     this.updateStatus(cwd);
-    adHocBar.activateSession(sessionId);
+    notifySessionActivated({ sessionId, cwd, info: { sessionId, cwd } });
     setViewState('chatting');
     // The send that created this session consumed the newchat draft.
     // The newChatForm's bind() already flushed any pending newchat
@@ -541,3 +538,15 @@ class ChatViewController {
 
 export const chatView = new ChatViewController();
 export { ChatViewController };
+
+/** Core late session-activate side-effects, in the original `showChat` order:
+ *  session-list highlight, applet notify, adhoc widgets. Registered as the
+ *  baseline `onSessionActivate` subscriber so a session switch and a new-session
+ *  creation share one path; new per-session features append via
+ *  `onSessionActivate` rather than editing `showChat`. Exported for unit tests. */
+export function sessionActivateHandler(ctx: SessionActivateCtx): void {
+  updateMenuIndicators();
+  notifySessionChange(ctx.sessionId, ctx.info);
+  adHocBar.activateSession(ctx.sessionId);
+}
+onSessionActivate(sessionActivateHandler);

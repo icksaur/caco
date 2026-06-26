@@ -8,6 +8,8 @@ vi.mock('../../public/ts/app-state.js', () => ({
   getAvailableModels: vi.fn(() => [{ id: 'claude-sonnet-4', name: 'Claude Sonnet 4', cost: 1 }]),
   releaseActiveSessionForNewChat: vi.fn(),
   getNewChatCwd: vi.fn(() => '/new-chat-cwd'),
+  onSessionActivate: vi.fn(() => () => {}),
+  notifySessionActivated: vi.fn(),
 }));
 
 vi.mock('../../public/ts/view-controller.js', () => {
@@ -105,7 +107,11 @@ import { regions } from '../../public/ts/dom-regions.js';
 import { showToast } from '../../public/ts/toast.js';
 import { fetchWithTimeout } from '../../public/ts/fetch-timeout.js';
 import { historyLoader } from '../../public/ts/history-loader.js';
-import { getActiveSessionId, setActiveSession } from '../../public/ts/app-state.js';
+import { getActiveSessionId, setActiveSession, notifySessionActivated } from '../../public/ts/app-state.js';
+import { sessionActivateHandler } from '../../public/ts/chat-view-controller.js';
+import { updateMenuIndicators } from '../../public/ts/session-panel.js';
+import { notifySessionChange } from '../../public/ts/applet-runtime.js';
+import { adHocBar } from '../../public/ts/adhoc-bar.js';
 
 describe('ChatViewController', () => {
   let cvc: ChatViewController;
@@ -257,6 +263,50 @@ describe('ChatViewController', () => {
 
       expect(setActiveSession).not.toHaveBeenCalledWith('sess-A', expect.anything());
       expect(showToast).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('session-activate hook (R2 Slice 1)', () => {
+    it('showChat fires notifySessionActivated with session ctx after a switch', async () => {
+      vi.mocked(getActiveSessionId).mockReturnValue(null);
+      vi.mocked(historyLoader.isStale).mockReturnValue(true);
+      const mockResponse = {
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          sessionId: 'sess-x', cwd: '/x', model: 'claude-sonnet-4', name: 'X', kind: 'normal',
+        }),
+      };
+      vi.mocked(fetchWithTimeout).mockResolvedValue(mockResponse as unknown as Response);
+
+      await cvc.activateSession('sess-x');
+
+      expect(notifySessionActivated).toHaveBeenCalledTimes(1);
+      expect(notifySessionActivated).toHaveBeenCalledWith({
+        sessionId: 'sess-x',
+        cwd: '/x',
+        info: { sessionId: 'sess-x', cwd: '/x', name: 'X', kind: 'normal', model: 'claude-sonnet-4', currentIntent: undefined },
+      });
+    });
+
+    it('onNewSessionCreated also fires notifySessionActivated (unified late path)', () => {
+      cvc.onNewSessionCreated('new-sess', '/w');
+      expect(notifySessionActivated).toHaveBeenCalledTimes(1);
+      expect(notifySessionActivated).toHaveBeenCalledWith({
+        sessionId: 'new-sess', cwd: '/w', info: { sessionId: 'new-sess', cwd: '/w' },
+      });
+    });
+
+    it('showNewChat does NOT fire the activate hook', () => {
+      cvc.showNewChat();
+      expect(notifySessionActivated).not.toHaveBeenCalled();
+    });
+
+    it('sessionActivateHandler runs menu, applet-notify, and adhoc for the ctx', () => {
+      const info = { sessionId: 's9', cwd: '/z', name: 'Z' };
+      sessionActivateHandler({ sessionId: 's9', cwd: '/z', info });
+      expect(updateMenuIndicators).toHaveBeenCalledTimes(1);
+      expect(notifySessionChange).toHaveBeenCalledWith('s9', info);
+      expect(adHocBar.activateSession).toHaveBeenCalledWith('s9');
     });
   });
 

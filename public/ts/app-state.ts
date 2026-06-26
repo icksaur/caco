@@ -156,6 +156,48 @@ export function notifySessionArchived(sessionId: string): void {
   }
 }
 
+export interface SessionActivateInfo {
+  sessionId: string;
+  cwd: string;
+  name?: string;
+  kind?: string;
+  model?: string;
+  currentIntent?: string;
+}
+
+/** Context for a session-activate. `info` carries session metadata for
+ *  subscribers that render identity (e.g. applet notify). */
+export interface SessionActivateCtx {
+  sessionId: string;
+  cwd: string;
+  info: SessionActivateInfo;
+}
+
+const sessionActivateListeners: Array<(ctx: SessionActivateCtx) => void> = [];
+
+/** Fires when a session becomes the displayed, history-loaded active session
+ *  (session switch or new-session creation). Does NOT fire on new-chat or on a
+ *  failed resume. This is the LATE phase, paired with the EARLY
+ *  `onActiveSessionChange` (pointer change / teardown). Subscribers: late
+ *  session-scoped side-effects that render or restore for the now-active
+ *  session (applet notify, menu highlight, adhoc, footer). Decision rule:
+ *  clear/prune on pointer change -> onActiveSessionChange; render/restore for
+ *  the now-active session -> onSessionActivate. Handlers run in registration
+ *  order; an exception in one is isolated from the rest. */
+export function onSessionActivate(fn: (ctx: SessionActivateCtx) => void): () => void {
+  sessionActivateListeners.push(fn);
+  return () => {
+    const idx = sessionActivateListeners.indexOf(fn);
+    if (idx >= 0) sessionActivateListeners.splice(idx, 1);
+  };
+}
+
+export function notifySessionActivated(ctx: SessionActivateCtx): void {
+  for (const fn of sessionActivateListeners) {
+    try { fn(ctx); } catch (e) { console.error('[app-state] session-activate listener:', e); }
+  }
+}
+
 /**
  * Transitional state used by `showNewChat` between view teardown and
  * the next session binding. Subsequent re-binding happens in

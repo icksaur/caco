@@ -26,6 +26,7 @@ import { fetchWithTimeout } from './fetch-timeout.js';
 import { regions } from './dom-regions.js';
 import { perfFlight } from './perf.js';
 import { deleteDraft } from './chat-draft-api.js';
+import type { EventVersion } from './transcript-cache.js';
 import type { ChatFormController } from './chat-form-controller.js';
 
 const RESUME_TIMEOUT_MS = 30000;
@@ -228,7 +229,7 @@ class ChatViewController {
     currentIntent?: string; gitBranch?: string | null; responseOptions?: string[];
     activeApplet?: string | null; appletParams?: Record<string, string> | null;
     appletPanelVisible?: boolean; contextBudgetTokens?: number | null; reasoningEffort?: string | null;
-    throughput?: ThroughputData;
+    throughput?: ThroughputData; eventVersion?: EventVersion | null;
   }> {
     flight?.span('wsConnect');
     reconnectIfNeeded();
@@ -263,6 +264,7 @@ class ChatViewController {
       appletPanelVisible?: boolean;
       contextBudgetTokens?: number | null;
       throughput?: ThroughputData;
+      eventVersion?: EventVersion | null;
     };
 
     // repairMessage is intentionally not toasted: auto-repair is opportunistic
@@ -283,7 +285,7 @@ class ChatViewController {
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
     setFooterOwner(data.sessionId);
     flight?.span('history.load');
-    await historyLoader.load(data.sessionId);
+    await historyLoader.load(data.sessionId, data.eventVersion, data.isBusy);
     flight?.end('history.load');
 
     return data;

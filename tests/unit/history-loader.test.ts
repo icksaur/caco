@@ -12,6 +12,7 @@ vi.mock('../../public/ts/view-controller.js', () => ({
 
 vi.mock('../../public/ts/context-footer.js', () => ({
   clearContextFooter: vi.fn(),
+  updateContextUsage: vi.fn(),
 }));
 
 vi.mock('../../public/ts/model-selector.js', () => ({
@@ -35,6 +36,7 @@ vi.mock('../../public/ts/websocket.js', () => ({
   subscribeToSession: vi.fn(),
   requestHistory: vi.fn(),
   onEvent: vi.fn(() => mockUnsub),
+  replayEvents: vi.fn(),
 }));
 
 vi.mock('../../public/ts/dom-regions.js', () => ({
@@ -50,15 +52,22 @@ vi.mock('../../public/ts/ui-utils.js', () => ({
 import { HistoryLoader } from '../../public/ts/history-loader.js';
 import { setLoadingHistory, getActiveSessionId } from '../../public/ts/app-state.js';
 import { setFormEnabled } from '../../public/ts/view-controller.js';
-import { requestHistory, subscribeToSession } from '../../public/ts/websocket.js';
+import { requestHistory, subscribeToSession, replayEvents } from '../../public/ts/websocket.js';
 import { sessionTracker } from '../../public/ts/session-state-tracker.js';
 import { regions } from '../../public/ts/dom-regions.js';
+import { putCachedTranscript, getCachedTranscript, clearTranscriptCache } from '../../public/ts/transcript-cache.js';
+import type { SessionEvent } from '../../public/ts/types.js';
+
+function ev(id: string): SessionEvent {
+  return { type: 'assistant.message', data: { id } } as unknown as SessionEvent;
+}
 
 describe('HistoryLoader', () => {
   let loader: HistoryLoader;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearTranscriptCache();
     historyCompleteCallback = null;
     connectionId = 1;
     loader = new HistoryLoader();
@@ -197,20 +206,88 @@ describe('HistoryLoader', () => {
     });
   });
 
-  describe('cancel (via load)', () => {
-    it('is a no-op when nothing pending', () => {
-      void loader.load('session-1');
+  describe('transcript cache (MRU fast path)', () => {
+    const V = { size: 100, mtimeMs: 50 };
+
+    beforeEach(() => {
+      // clearAllMocks doesn't reset mockReturnValue set by earlier tests.
+      vi.mocked(getActiveSessionId).mockReturnValue('session-1');
     });
 
-    it('resets loadingHistory on cancel', async () => {
-      const promise1 = loader.load('session-1');
-      void loader.load('session-2');
-      await promise1;
-      
-      // cancel() inside load() should have called setLoadingHistory(false)
-      const calls = (setLoadingHistory as ReturnType<typeof vi.fn>).mock.calls;
-      // Pattern: true (load1), false (cancel), true (load2)
-      expect(calls).toEqual([[true], [false], [true]]);
+    it('re-renders from cache and skips requestHistory when version+connection match and idle', async () => {
+      putCachedTranscript('session-1', { events: [ev('a'), ev('b')], version: V, connectionId: 1 });
+
+      await loader.load('session-1', V, false);
+
+      expect(requestHistory).not.toHaveBeenCalled();
+      expect(replayEvents).toHaveBeenCalledWith([ev('a'), ev('b')]);
+      expect(setLoadingHistory).toHaveBeenCalledWith(true);
+      expect(setLoadingHistory).toHaveBeenCalledWith(false);
+      expect(setFormEnabled).toHaveBeenCalledWith(true);
+    });
+
+    it('re-streams when the events.jsonl version differs', async () => {
+      putCachedTranscript('session-1', { events: [ev('a')], version: V, connectionId: 1 });
+      const p = loader.load('session-1', { size: 101, mtimeMs: 50 }, false);
+      expect(requestHistory).toHaveBeenCalledWith('session-1');
+      expect(replayEvents).not.toHaveBeenCalled();
+      historyCompleteCallback?.('session-1', { isBusy: false });
+      await p;
+    });
+
+    it('re-streams when the WS connection changed since cache', async () => {
+      putCachedTranscript('session-1', { events: [ev('a')], version: V, connectionId: 99 });
+      const p = loader.load('session-1', V, false);
+      expect(requestHistory).toHaveBeenCalledWith('session-1');
+      historyCompleteCallback?.('session-1', { isBusy: false });
+      await p;
+    });
+
+    it('re-streams when the session is busy', async () => {
+      putCachedTranscript('session-1', { events: [ev('a')], version: V, connectionId: 1 });
+      const p = loader.load('session-1', V, true);
+      expect(requestHistory).toHaveBeenCalledWith('session-1');
+      historyCompleteCallback?.('session-1', { isBusy: true });
+      await p;
+    });
+
+    it('re-streams when no freshness token is provided', async () => {
+      putCachedTranscript('session-1', { events: [ev('a')], version: V, connectionId: 1 });
+      const p = loader.load('session-1');
+      expect(requestHistory).toHaveBeenCalledWith('session-1');
+      historyCompleteCallback?.('session-1', { isBusy: false });
+      await p;
+    });
+
+    it('caches a freshly streamed idle transcript; a later load hits the cache', async () => {
+      const p = loader.load('session-1', V, false);
+      historyCompleteCallback?.('session-1', { isBusy: false });
+      await p;
+
+      expect(getCachedTranscript('session-1')?.version).toEqual(V);
+
+      const p2 = loader.load('session-1', V, false);
+      await p2;
+      expect(requestHistory).toHaveBeenCalledTimes(1); // only the first (slow) load
+      expect(replayEvents).toHaveBeenCalled();
+    });
+
+    it('does not cache a busy completion', async () => {
+      const p = loader.load('session-1', V, false);
+      historyCompleteCallback?.('session-1', { isBusy: true });
+      await p;
+      expect(getCachedTranscript('session-1')).toBeUndefined();
+    });
+
+    it('does not cache on timeout (no completion data)', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers();
+      const p = loader.load('session-1', V, false);
+      vi.advanceTimersByTime(30000);
+      await p;
+      expect(getCachedTranscript('session-1')).toBeUndefined();
+      vi.useRealTimers();
+      warnSpy.mockRestore();
     });
   });
 });

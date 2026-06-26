@@ -507,6 +507,24 @@ export function onEvent(callback: EventCallback): () => void {
 }
 
 /**
+ * Locally re-dispatch an array of events through the same callback path a live
+ * `event` WS frame uses (so `handleEvent` renders them identically). Used by the
+ * transcript cache to re-render a cached history without a WS round trip. Callers
+ * must set `loadingHistory` before invoking so subscribers treat these as replay.
+ */
+export function replayEvents(events: SessionEvent[]): void {
+  for (const event of events) {
+    for (const cb of eventCallbacks) {
+      try {
+        cb(event);
+      } catch (err) {
+        console.error('[WS] Replay callback error:', err);
+      }
+    }
+  }
+}
+
+/**
  * Subscribe to history complete event
  * Returns unsubscribe function
  */

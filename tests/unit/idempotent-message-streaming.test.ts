@@ -22,6 +22,7 @@ vi.mock('../../public/ts/app-state.js', () => ({
   isLoadingHistory: vi.fn(() => false),
   getSelectedModel: vi.fn(() => 'm'),
   notifyMessageSent: vi.fn(),
+  onSessionArchived: vi.fn(() => () => {}),
 }));
 vi.mock('../../public/ts/view-controller.js', () => ({ isViewState: vi.fn(() => false) }));
 vi.mock('../../public/ts/websocket.js', () => ({

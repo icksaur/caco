@@ -158,7 +158,7 @@ describe('ChatViewController', () => {
       await cvc.activateSession('test-id');
 
       expect(fetchWithTimeout).toHaveBeenCalled();
-      expect(historyLoader.load).toHaveBeenCalledWith('test-id');
+      expect(historyLoader.load).toHaveBeenCalledWith('test-id', undefined, false);
       expect(setViewState).toHaveBeenCalledWith('chatting');
       expect(cvc.getViewState()).toBe('chatting');
     });

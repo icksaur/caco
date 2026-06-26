@@ -12,7 +12,7 @@
 import { debug } from './debug.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, releaseActiveSessionForNewChat, getNewChatCwd, onSessionActivate, notifySessionActivated, type SessionActivateCtx } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
-import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, updateThroughput, restoreThroughput, clearThroughput, setActiveThroughputModel, setActiveContextBudget, setActiveReasoningEffort } from './context-footer.js';
+import { renderSessionStatus, renderNewChatStatus, clearStatus, clearContextFooter, clearContextUsage, restoreContextUsage, renderContextFooter, updateContextUsage, updateThroughput, restoreThroughput, clearThroughput, setActiveThroughputModel, setActiveContextBudget, setActiveReasoningEffort, setFooterOwner, isFooterOwner } from './context-footer.js';
 import { loadModels } from './model-selector.js';
 import { historyLoader } from './history-loader.js';
 import { reconnectIfNeeded, waitForConnect, subscribeToSession } from './websocket.js';
@@ -51,7 +51,6 @@ class ChatViewController {
    *  rebinds, so session-switches see the prior draft instantly. */
   private sessionDrafts = new Map<string, string>();
   private sessionPrompts = new Map<string, string>();
-  private footerSessionId: string | null = null;
   /** Last full session-status params, captured in showChat. Lets
    *  applyCwdChange re-render the session footer with a new cwd/git
    *  without losing session identity (name, icon, model). */
@@ -70,14 +69,6 @@ class ChatViewController {
 
   getViewState(): ViewState {
     return vcGetViewState();
-  }
-
-  /**
-   * The session that currently owns the footer. Footer updates for
-   * other sessions are silently dropped.
-   */
-  getFooterSessionId(): string | null {
-    return this.footerSessionId;
   }
 
   /** Register the two per-view form controllers. Called once from
@@ -130,7 +121,6 @@ class ChatViewController {
       this.newChatForm.bind(null);
     }
     const lastCwd = getCurrentCwd();
-    this.footerSessionId = null;
     releaseActiveSessionForNewChat();
     updateMenuIndicators();  // deselect prior session in the session list
     regions.chat.clear();
@@ -289,7 +279,7 @@ class ChatViewController {
     }
 
     setActiveSession(data.sessionId, data.cwd || getCurrentCwd());
-    this.footerSessionId = data.sessionId;
+    setFooterOwner(data.sessionId);
     flight?.span('history.load');
     await historyLoader.load(data.sessionId);
     flight?.end('history.load');
@@ -356,7 +346,6 @@ class ChatViewController {
       this.activeForm = this.chattingForm;
       this.chattingForm.bind(sessionId);
     }
-    this.footerSessionId = sessionId;
     this.updateStatus(cwd, model, hasGit, name, sessionId, hasIcon, gitBranch);
     restoreContextUsage(sessionId);
     restoreThroughput(sessionId);
@@ -438,7 +427,7 @@ class ChatViewController {
    * session or the change is for a different session.
    */
   applyCwdChange(sessionId: string, cwd: string, hasGit: boolean, gitBranch: string | null): void {
-    if (this.footerSessionId !== sessionId || !this.lastStatusParams) return;
+    if (!isFooterOwner(sessionId) || !this.lastStatusParams) return;
     const p = this.lastStatusParams;
     this.updateStatus(cwd, p.modelId, hasGit, p.name, sessionId, p.hasIcon, gitBranch);
   }
@@ -458,7 +447,7 @@ class ChatViewController {
    * the current footer owner.
    */
   updateContextFiles(sessionId: string, context: Record<string, string[] | undefined>): void {
-    if (this.footerSessionId !== sessionId) return;
+    if (!isFooterOwner(sessionId)) return;
     renderContextFooter(context);
   }
 
@@ -467,12 +456,12 @@ class ChatViewController {
    * sessionId matches the current footer owner.
    */
   updateUsage(sessionId: string, data: { tokenLimit?: number; currentTokens?: number }): void {
-    if (this.footerSessionId !== sessionId) return;
+    if (!isFooterOwner(sessionId)) return;
     updateContextUsage(data, sessionId);
   }
 
   updateThroughputData(sessionId: string, data: Record<string, unknown>): void {
-    if (this.footerSessionId !== sessionId) return;
+    if (!isFooterOwner(sessionId)) return;
     updateThroughput(data as unknown as Parameters<typeof updateThroughput>[0], sessionId);
   }
 

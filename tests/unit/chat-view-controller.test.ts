@@ -44,6 +44,8 @@ vi.mock('../../public/ts/context-footer.js', () => ({
   setActiveThroughputModel: vi.fn(),
   setActiveContextBudget: vi.fn(),
   setActiveReasoningEffort: vi.fn(),
+  setFooterOwner: vi.fn(),
+  isFooterOwner: vi.fn(() => true),
 }));
 
 vi.mock('../../public/ts/model-selector.js', () => ({
@@ -101,7 +103,7 @@ vi.mock('../../public/ts/chat-draft-api.js', () => ({
 
 import { ChatViewController } from '../../public/ts/chat-view-controller.js';
 import { setViewState, getViewState } from '../../public/ts/view-controller.js';
-import { clearStatus, clearContextFooter, renderSessionStatus, renderNewChatStatus } from '../../public/ts/context-footer.js';
+import { clearStatus, clearContextFooter, renderSessionStatus, renderNewChatStatus, setFooterOwner, isFooterOwner, updateContextUsage, updateThroughput, renderContextFooter } from '../../public/ts/context-footer.js';
 import { loadModels } from '../../public/ts/model-selector.js';
 import { regions } from '../../public/ts/dom-regions.js';
 import { showToast } from '../../public/ts/toast.js';
@@ -307,6 +309,39 @@ describe('ChatViewController', () => {
       expect(updateMenuIndicators).toHaveBeenCalledTimes(1);
       expect(notifySessionChange).toHaveBeenCalledWith('s9', info);
       expect(adHocBar.activateSession).toHaveBeenCalledWith('s9');
+    });
+  });
+
+  describe('footer ownership (R2 Slice 3)', () => {
+    it('claims footer ownership early on resume (before history loads)', async () => {
+      vi.mocked(getActiveSessionId).mockReturnValue(null);
+      vi.mocked(historyLoader.isStale).mockReturnValue(true);
+      const mockResponse = {
+        ok: true,
+        json: vi.fn().mockResolvedValue({ sessionId: 'own-id', cwd: '/o', model: 'claude-sonnet-4' }),
+      };
+      vi.mocked(fetchWithTimeout).mockResolvedValue(mockResponse as unknown as Response);
+
+      await cvc.activateSession('own-id');
+
+      expect(setFooterOwner).toHaveBeenCalledWith('own-id');
+    });
+
+    it('drops footer updates for a non-owning session', () => {
+      vi.mocked(isFooterOwner).mockReturnValue(false);
+      cvc.updateUsage('other', { tokenLimit: 100, currentTokens: 10 });
+      cvc.updateContextFiles('other', { files: ['a'] });
+      cvc.updateThroughputData('other', {});
+      expect(updateContextUsage).not.toHaveBeenCalled();
+      expect(renderContextFooter).not.toHaveBeenCalled();
+      expect(updateThroughput).not.toHaveBeenCalled();
+    });
+
+    it('applies footer updates for the owning session', () => {
+      vi.mocked(isFooterOwner).mockReturnValue(true);
+      cvc.updateUsage('owner', { tokenLimit: 100, currentTokens: 10 });
+      expect(isFooterOwner).toHaveBeenCalledWith('owner');
+      expect(updateContextUsage).toHaveBeenCalledWith({ tokenLimit: 100, currentTokens: 10 }, 'owner');
     });
   });
 

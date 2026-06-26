@@ -16,7 +16,21 @@ export interface SessionContext {
   [key: string]: string[] | undefined;
 }
 
-let activeFooterSessionId: string | null = null;
+let ownerSessionId: string | null = null;
+
+/** The session that currently owns the footer. Usage / throughput / context-file
+ *  updates for any other session are silently dropped. Set early on resume
+ *  (before history loads, via setFooterOwner) so in-flight updates for the
+ *  incoming session are accepted, and re-affirmed by the status renderers. This
+ *  is the single footer-ownership pointer (formerly split between this module
+ *  and ChatViewController.footerSessionId). */
+export function setFooterOwner(sessionId: string | null): void {
+  ownerSessionId = sessionId;
+}
+
+export function isFooterOwner(sessionId: string): boolean {
+  return ownerSessionId === sessionId;
+}
 
 /** Active session's per-session context-window budget (absolute tokens), or
  *  null for the SDK default. Drives the usage pie's compaction denominator and
@@ -78,7 +92,7 @@ export function setActiveContextBudget(tokens: number | null): void {
   activeBudgetTokens = tokens && tokens > 0 ? tokens : null;
   refreshModelTooltip();
   // Re-render the cached usage pie against the new compaction denominator.
-  const cached = activeFooterSessionId ? usageCache.get(activeFooterSessionId) : undefined;
+  const cached = ownerSessionId ? usageCache.get(ownerSessionId) : undefined;
   if (cached) renderUsage(cached.tokenLimit, cached.currentTokens);
 }
 
@@ -108,7 +122,7 @@ export function renderContextFooter(context: SessionContext): void {
   // Read current active session at render time so session switches don't leave
   // stale IDs baked into file links. Falls back to the captured ID for callers
   // that render outside an active-session context (transitional states).
-  const sid = getActiveSessionId() ?? activeFooterSessionId;
+  const sid = getActiveSessionId() ?? ownerSessionId;
   const sessionPart = sid ? `session=${encodeURIComponent(sid)}&` : '';
   const links = files.map(({ name, path }) => {
     const encodedPath = encodeURIComponent(path);
@@ -126,7 +140,7 @@ export function renderContextFooter(context: SessionContext): void {
  * Render status for the new-chat view (model + cwd only, no session data).
  */
 export function renderNewChatStatus(modelName: string, cwd: string): void {
-  activeFooterSessionId = null;
+  ownerSessionId = null;
   const footer = regions.footer.el;
   const { model, dirName, fullCwd } = formatStatusParts(modelName, cwd);
 
@@ -163,7 +177,7 @@ interface SessionStatusParams {
  */
 export function renderSessionStatus(params: SessionStatusParams): void {
   const { modelName, cwd, hasGit = false, sessionName, sessionId, hasIcon, gitBranch } = params;
-  activeFooterSessionId = sessionId;
+  ownerSessionId = sessionId;
 
   const footer = regions.footer.el;
   const { model, dirName, fullCwd } = formatStatusParts(modelName, cwd);
@@ -216,7 +230,7 @@ function renderDescription(sessionId: string, hasGit = false, gitBranch?: string
  * Clear status from the footer.
  */
 export function clearStatus(): void {
-  activeFooterSessionId = null;
+  ownerSessionId = null;
   const footer = regions.footer.el;
   for (const sel of ['.context-session', '.context-model', '.context-description']) {
     const el = footer.querySelector(sel);

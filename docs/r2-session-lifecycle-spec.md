@@ -1,6 +1,6 @@
 # R2 — Unify the client session-activate seam
 
-Status: spec (not started). Parent: `docs/session-lifecycle-architecture.md` §R2.
+Status: implemented (all 3 slices). Parent: `docs/session-lifecycle-architecture.md` §R2.
 Prerequisite landed: R1 (delete cleanup). Scope: client only (`public/ts/`).
 
 ## Goal

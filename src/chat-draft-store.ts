@@ -15,7 +15,8 @@
  * prevents a stale browser tab pointing at a deleted session from
  * resurrecting a ghost directory on every keystroke. The unconditional
  * ensureDir pattern used by setSessionData would defeat the cleanup
- * guarantee at session-manager.ts (rmSync of the whole session dir).
+ * guarantee in SessionManager.delete()/archive() (rmSync of the whole
+ * session dir).
  */
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';

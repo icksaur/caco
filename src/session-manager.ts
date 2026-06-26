@@ -5,6 +5,8 @@ import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage, SessionEvent, ToolFactory } from './types.js';
 import { ensureSessionMeta, getSessionMeta, updateSessionMeta, readSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
+import { getSessionDir } from './storage-paths.js';
+import { cancelCardPersist } from './file-edits-store.js';
 import { readSessionWorkspace, readSessionEvents, readSessionEventsResult, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
@@ -1113,6 +1115,22 @@ export class SessionManager {
     
     this.sessionCache.delete(sessionId);
     disposeSessionRuntime(sessionId);
+
+    // Remove the whole Caco per-session directory (meta.json, files-cards.json,
+    // surface.json, chat-draft.txt, outputs/, …). client.deleteSession only
+    // removes the SDK dir; without this every Caco per-session file leaks on
+    // delete. archive() already does the same rmSync for its own teardown.
+    // Cancel the files-applet debounced card write FIRST: a timer firing after
+    // rmSync would setSessionData → ensureDir and resurrect a ghost directory.
+    cancelCardPersist(sessionId);
+    const cacoDir = getSessionDir(sessionId);
+    if (existsSync(cacoDir)) {
+      try {
+        rmSync(cacoDir, { recursive: true, force: true });
+      } catch (e) {
+        console.warn(`[delete] failed to remove Caco session dir ${cacoDir}:`, e);
+      }
+    }
   }
 
   async exportToFile(sessionId: string, outputPath: string): Promise<void> {
@@ -1160,8 +1178,9 @@ export class SessionManager {
       const client = await this.ensureClient();
       await client.deleteSession(sessionId);
 
-      const cacoPath = join(homedir(), '.caco', 'sessions', sessionId);
+      const cacoPath = getSessionDir(sessionId);
       if (existsSync(cacoPath)) {
+        cancelCardPersist(sessionId);
         rmSync(cacoPath, { recursive: true });
       }
 

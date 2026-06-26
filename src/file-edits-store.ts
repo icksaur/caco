@@ -141,6 +141,17 @@ export function flushSession(sessionId: string): void {
   }
 }
 
+/** Cancel any pending write for `sessionId` WITHOUT writing it (the opposite of
+ *  flushSession). Call before deleting/archiving a session's directory: a
+ *  debounced write firing after rmSync would call setSessionData → ensureDir and
+ *  resurrect a ghost directory, re-leaking the files-cards.json we just removed. */
+export function cancelCardPersist(sessionId: string): void {
+  const p = pending.get(sessionId);
+  if (!p) return;
+  clearTimeout(p.timer);
+  pending.delete(sessionId);
+}
+
 /** Fire all pending writes synchronously. Call from SIGINT shutdown. */
 export function flushAll(): void {
   for (const sid of Array.from(pending.keys())) flushSession(sid);

@@ -151,35 +151,8 @@
     this._saveInFlight = true;
     this.shell.echoState();   // surfaces busy state via isDirty + activeMode
     try {
-      // The server's PUT /api/files/*path route treats the captured
-      // path as relative unless it begins with `/`. Express's
-      // wildcard collapses the empty segment between `/files/` and
-      // an absolute path's leading `/`, so we have to ensure the
-      // URL keeps both slashes (`/api/files//home/...`). Without
-      // this, an absolute path would land at programCwd-relative
-      // and writeFile would mkdir a nested ghost tree.
-      var encodedAbs = this.absPath.split('/').map(encodeURIComponent).join('/');
-      var url = '/api/files'
-        + (this.absPath.charAt(0) === '/' ? '/' : '')
-        + encodedAbs;
-      var res = await fetch(
-        url,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'text/plain' },
-          body: pendingText,
-        }
-      );
+      await window.__filesApplet.writeFileText(this.absPath, pendingText);
       if (this.destroyed) return;
-      if (!res.ok) {
-        var msg;
-        try {
-          var body = await res.json();
-          msg = (body && body.error) || ('HTTP ' + res.status);
-        } catch (_e) { msg = 'HTTP ' + res.status; }
-        this._diskText = priorDisk;
-        throw new Error(msg);
-      }
       // Success: pin _diskText to what WE just wrote (NOT the live
       // _editorText, which may have moved on during the PUT).
       this._diskText = pendingText;
@@ -297,9 +270,22 @@
 
   MarkdownViewer.prototype.activate = function() {
     this.contentEl.style.display = '';
+    if (typeof this._scrollTop === 'number') this.contentEl.scrollTop = this._scrollTop;
   };
   MarkdownViewer.prototype.deactivate = function() {
+    this._scrollTop = this.contentEl.scrollTop;
     this.contentEl.style.display = 'none';
+  };
+
+  /** C1 editor-state restore. contentEl is the scroller (.files-md-content). */
+  MarkdownViewer.prototype.getScrollState = function() {
+    return (this.contentEl.style.display === 'none')
+      ? (this._scrollTop || 0)
+      : this.contentEl.scrollTop;
+  };
+  MarkdownViewer.prototype.setScrollState = function(n) {
+    this._scrollTop = n || 0;
+    if (this.contentEl.style.display !== 'none') this.contentEl.scrollTop = this._scrollTop;
   };
 
   MarkdownViewer.prototype.destroy = function() {

@@ -175,6 +175,23 @@
     this.contentEl.style.display = 'none';
   };
 
+  /** C1 editor-state restore: scrollTop is the single source of truth (updated
+   *  by the scroll handler + deactivate), and activate's rAF applies it. */
+  DiffViewer.prototype.getScrollState = function() {
+    return (this.contentEl && this.contentEl.style.display !== 'none')
+      ? this.contentEl.scrollTop
+      : this.scrollTop;
+  };
+  DiffViewer.prototype.setScrollState = function(n) {
+    this.scrollTop = n || 0;
+    if (this.contentEl && this.contentEl.style.display !== 'none') {
+      var self = this;
+      requestAnimationFrame(function() {
+        if (!self.destroyed) self.shell.programmaticScrollTo(self.contentEl, self.scrollTop);
+      });
+    }
+  };
+
   DiffViewer.prototype.destroy = function() {
     if (this.destroyed) return;
     this.destroyed = true;

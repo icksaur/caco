@@ -488,6 +488,8 @@
       if (v && typeof v.setMode === 'function') {
         v.setMode(targetMode);
         self.updateModeToggle();
+        // C1: persist the mode change so view/edit survives reload.
+        schedulePersist();
       }
     });
     pane.appendChild(modeBtn);
@@ -896,14 +898,15 @@
   // No attempt is made to restore the native Range on focus-in
   // (spec §B1: defeated by mousedown→focus→mouseup ordering).
 
-  /** Random per-page-load ID. Included in applet→agent echoes so
-   *  cross-tab loops are prevented: Tab A's echo reaches Tab B via
-   *  broadcast, but Tab B sees Tab A's sourceId and bails. Agent
-   *  pushes have no sourceId (the server tool omits it), so every tab
-   *  applies them; each tab's resulting echo carries its own sourceId
-   *  which other tabs filter. Single-tab loops can't occur because
-   *  appletAPI.setAppletState sends via WebSocket and the server's
-   *  broadcastToAll excludes the sender connection. */
+  /** Random per-page-load ID stamped into every applet→agent echo
+   *  (buildFileEditsLegacyState). It marks state as "a CLIENT's UI echo"
+   *  vs "an agent navigation push" — the agent's set_applet_state tool
+   *  never stamps a sourceId. applyAgentState relies on this to enforce the
+   *  invariant that active-tab focus is LOCAL: a peer client's echo must
+   *  never move this client's focus (that is the two-clients-fighting
+   *  flicker). The id stays per-client so the server can still store the
+   *  echoed activeTab for get_applet_state queries; only focus-application
+   *  is gated. */
   var SOURCE_ID = (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
     : 'src-' + Math.random().toString(36).slice(2) + '-' + Date.now();
@@ -1431,7 +1434,14 @@
    *  - No container: POST /open, then create diff-default container. */
   async function applyAgentState(fileEdits) {
     if (!fileEdits || typeof fileEdits !== 'object') return;
-    if (fileEdits.sourceId === SOURCE_ID) return;
+    // Focus is LOCAL by design. Any state carrying a sourceId is a peer
+    // client's UI echo (only buildFileEditsLegacyState stamps one); applying
+    // it would let one client's active tab override another's, producing the
+    // two-clients-fighting-for-focus flicker. Only sourceId-less state — an
+    // agent navigation via the set_applet_state tool — may move focus. This
+    // makes the cross-client fight impossible regardless of how many
+    // connections, reconnects, or competing follow-edits states exist.
+    if (fileEdits.sourceId) return;
     var targetRelPath = fileEdits.activeTab;
     var rawSel = fileEdits.selection || null;
     if (!targetRelPath) return;
@@ -1708,7 +1718,7 @@
         paneEl.appendChild(container.contentEl);
         container.updateToggle();
         lastEditedTabId = container.id;
-        if (followEdits) setActiveTab(container.id);
+        if (followEdits && !options.suppressFollowSelect) setActiveTab(container.id);
         (function() {
           var factoryDesc = desc;
           var factoryContainer = container;
@@ -1765,20 +1775,26 @@
     } else if (followEdits) {
       var dv3 = container.viewers.get('diff');
       if (isNew && dv3) dv3.scrollTop = 0;
-      setActiveTab(container.id);
-      // V6.1: when an edit arrives and follow-edits is on, scroll
-      // to the first add/del row so the user actually sees what
-      // changed. Previously this only happened on explicit
-      // Follow-Edits button clicks, not on edit arrival —
-      // meaning a click-then-edit sequence wouldn't auto-scroll
-      // and the user thought follow-edits was broken.
-      // contentChanged guard: don't scroll on no-op refreshes.
-      if (contentChanged) {
-        requestAnimationFrame(function() {
+      // Active-tab actions (select + scroll-to-first-diff-row) run only for the
+      // last edit of a caco.edit batch — suppressFollowSelect is set on every
+      // edit but the final one, so a multi-file burst no longer flickers through
+      // each tab. Per-viewer scroll INIT above still applies to all new tabs.
+      if (!options.suppressFollowSelect) {
+        setActiveTab(container.id);
+        // V6.1: when an edit arrives and follow-edits is on, scroll
+        // to the first add/del row so the user actually sees what
+        // changed. Previously this only happened on explicit
+        // Follow-Edits button clicks, not on edit arrival —
+        // meaning a click-then-edit sequence wouldn't auto-scroll
+        // and the user thought follow-edits was broken.
+        // contentChanged guard: don't scroll on no-op refreshes.
+        if (contentChanged) {
           requestAnimationFrame(function() {
-            scrollPaneToFirstDiffRow(container.id);
+            requestAnimationFrame(function() {
+              scrollPaneToFirstDiffRow(container.id);
+            });
           });
-        });
+        }
       }
     } else {
       if (contentChanged) {
@@ -2086,6 +2102,21 @@
       };
       if (container.diffMode && container.diffMode !== 'unstaged') {
         card.diffMode = container.diffMode;
+      }
+      // C1: per-card editor state (additive; older readers ignore unknown
+      // fields, and the server round-trips unknown per-card props untouched).
+      // active is per-card (a top-level activeTabId would be dropped by the
+      // route). scroll/mode come from the active viewer; 0/view are omitted.
+      if (container.id === activeTabId) card.active = true;
+      var av = container.viewers.get(container.activeViewerType);
+      if (av) {
+        if (typeof av.getScrollState === 'function') {
+          var sc = av.getScrollState();
+          if (sc) card.scroll = sc;
+        }
+        if (typeof av.getActiveMode === 'function' && av.getActiveMode() === 'edit') {
+          card.mode = 'edit';
+        }
       }
       list.push(card);
     });
@@ -3585,6 +3616,27 @@
 
   async function initFromPersistence(sid) {
     var persisted = await loadPersistedCards(sid);
+    // C1: persisted editor state to restore after viewers are constructed.
+    var pendingActiveId = null;
+    var pendingState = {};
+    function applyRestoreState(container) {
+      var st = pendingState[container.id];
+      var av = container.viewers.get(container.activeViewerType);
+      if (st && av) {
+        if (st.mode === 'edit' && typeof av.setMode === 'function') {
+          av.setMode('edit');
+          if (typeof container.updateModeToggle === 'function') container.updateModeToggle();
+        }
+        if (typeof st.scroll === 'number' && typeof av.setScrollState === 'function') {
+          av.setScrollState(st.scroll);
+        }
+      }
+      // Only auto-select the persisted active tab if the user hasn't already
+      // clicked one during rehydrate — never stomp a real gesture.
+      if (pendingActiveId === container.id && activeTabId === null) {
+        setActiveTab(container.id);
+      }
+    }
     if (persisted && Array.isArray(persisted.cards)) {
       // defaultViewerType is no longer trusted from disk — it is
       // always recomputed from the file's actual type via
@@ -3619,6 +3671,12 @@
           candidateId = diffTabId({ mode: cardMode, relPath: c.relativePath });
         }
         if (tabs.has(candidateId)) return;
+        // C1: record persisted editor state keyed by the container id we are
+        // about to create, so the post-construction hooks can apply it.
+        if (c.active) pendingActiveId = candidateId;
+        if (typeof c.scroll === 'number' || c.mode) {
+          pendingState[candidateId] = { scroll: c.scroll, mode: c.mode };
+        }
         // V6.1 fix: also skip if a routeOpen for this exact path+mode
         // is in flight (its tab isn't in the map yet because it's
         // awaiting desc.open). Without this guard, init creates a
@@ -3666,6 +3724,20 @@
           tabsEl.appendChild(container.tabEl);
           paneEl.appendChild(container.contentEl);
           container.updateToggle();
+          // If the user had toggled this unstaged tab to a non-diff viewer
+          // (e.g. Source in edit mode), switch to it before applying restore
+          // state so mode/scroll land on the right viewer; the diff viewer
+          // exists synchronously otherwise.
+          if (activeType !== 'diff') {
+            (function(c) {
+              Promise.resolve(c.switchViewer(activeType)).then(
+                function() { applyRestoreState(c); },
+                function() { applyRestoreState(c); }
+              );
+            })(container);
+          } else {
+            applyRestoreState(container);
+          }
         } else {
           // Async factory path (image, html, markdown, OR V6 staged
           // diff). Insert into tabs synchronously so caco.edit dedup
@@ -3690,13 +3762,23 @@
               }
               factoryContainer.viewers.set(factoryDesc.viewerType, v);
               factoryContainer.rehydrating = false;
-              // Secondary viewer (active !== default) — switch in
-              // sequence after the default is constructed. switchViewer
-              // handles the lazy construct + activate.
+              var finish = function() {
+                // Mirror the live path (openOrUpdateTab): if this tab became
+                // active while rehydrating, activate the now-built viewer so
+                // it renders (setActiveTab earlier no-op'd on the empty map).
+                if (activeTabId === factoryContainer.id) {
+                  try { factoryContainer.activate(); } catch (_e) { /* ignore */ }
+                }
+                applyRestoreState(factoryContainer);
+                shell.echoState();
+              };
+              // Secondary viewer (active !== default) — switch in sequence
+              // after the default is constructed, then apply restore state.
               if (factoryActive !== factoryDesc.viewerType && !factoryContainer.destroyed) {
-                void factoryContainer.switchViewer(factoryActive);
+                Promise.resolve(factoryContainer.switchViewer(factoryActive)).then(finish, finish);
+              } else {
+                finish();
               }
-              shell.echoState();
             }, function(err) {
               console.warn('[files-applet] rehydrate factory failed', c.relativePath, err);
               tabs.delete(factoryContainer.id);
@@ -3708,6 +3790,19 @@
     }
     updateEmptyState();
     await fetchSnapshot(true);
+    // C1: a diff update() during fetchSnapshot re-renders and can reset the
+    // active tab's scroll — reapply it once after the snapshot settles. Async
+    // (markdown/staged) tabs apply their own scroll in the factory .then.
+    if (pendingActiveId) {
+      var activeContainer = tabs.get(pendingActiveId);
+      var activeState = pendingState[pendingActiveId];
+      if (activeContainer && activeState && typeof activeState.scroll === 'number') {
+        var activeViewer = activeContainer.viewers.get(activeContainer.activeViewerType);
+        if (activeViewer && typeof activeViewer.setScrollState === 'function') {
+          activeViewer.setScrollState(activeState.scroll);
+        }
+      }
+    }
   }
 
   function bootSession(existingId) {
@@ -3759,12 +3854,16 @@
       window.appletAPI.onSessionEvent(function(event) {
         if (event && event.type === 'caco.edit' && event.data) {
           var d = event.data;
-          if (Array.isArray(d.edits)) {
-            d.edits.forEach(function(e) { openOrUpdateTab(e); });
-          }
-          if (Array.isArray(d.cleanedEdits)) {
-            d.cleanedEdits.forEach(function(e) { openOrUpdateTab(e); });
-          }
+          // Batch all edits, but run active-tab selection only for the LAST one
+          // so a multi-file burst selects a single tab instead of flickering
+          // through each. Order (edits then cleanedEdits) is preserved, matching
+          // the prior last-write-wins behavior.
+          var all = [];
+          if (Array.isArray(d.edits)) all = all.concat(d.edits);
+          if (Array.isArray(d.cleanedEdits)) all = all.concat(d.cleanedEdits);
+          all.forEach(function(e, i) {
+            openOrUpdateTab(e, { suppressFollowSelect: i < all.length - 1 });
+          });
         }
       });
       window.appletAPI.onSessionChange(function(sid, info) {

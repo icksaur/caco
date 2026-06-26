@@ -856,6 +856,53 @@
   font-family: var(--font-sans);
   padding: 12px;
 }
+.fe-source-content {
+  position: relative;
+  height: 100%;
+  box-sizing: border-box;
+}
+/* Edit mode: the <pre> becomes a highlighted backdrop and the textarea overlays
+ * it transparently. BOTH layers must share identical box metrics or the caret
+ * drifts from the tokens — keep this rule the single source of those metrics. */
+.fe-source-content.fe-editing .fe-source,
+.fe-source-content.fe-editing .fe-source-editor {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  border: 0;
+  padding: var(--space-sm) 56px var(--space-sm) var(--space-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-indent: 0;
+  tab-size: 4;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  overflow: auto;
+  box-sizing: border-box;
+}
+.fe-source-content.fe-editing .fe-source {
+  pointer-events: none;
+}
+/* The editor textarea: hidden in view mode, transparent overlay in edit mode. */
+.fe-source-editor {
+  display: none;
+}
+.fe-source-content.fe-editing .fe-source-editor {
+  display: block;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background: transparent;
+  caret-color: var(--color-text, #d4d4d4);
+  resize: none;
+  outline: none;
+}
+.fe-source code.hljs {
+  tab-size: 4;
+}
 .fe-tab.fe-tab-source .fe-tab-name::before {
   content: '◈ ';
   opacity: 0.6;

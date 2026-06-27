@@ -16,7 +16,7 @@
  */
 
 export const MAX_OPTIONS = 4;
-export const MAX_OPTION_LENGTH = 50;
+export const MAX_OPTION_LENGTH = 200;
 
 /** Trim, drop blanks, cap to MAX_OPTIONS, truncate each to MAX_OPTION_LENGTH. */
 export function normalizeOptions(raw: string[]): string[] {

@@ -33,6 +33,7 @@ import { isViewState } from './view-controller.js';
 import { dispatchPrompt, dispatchSteer } from './message-streaming.js';
 import { showNewChatError } from './model-selector.js';
 import { removeImage } from './image-paste.js';
+import { buildResponseOptionsHtml } from './response-option-html.js';
 
 const DRAFT_DEBOUNCE_MS = 1000;
 const DRAFT_BODY_CAP = 1024 * 1024;  // 1 MiB; matches server limit
@@ -40,13 +41,14 @@ const NEWCHAT_DRAFT_KEY = '__newchat__';
 
 /** Render response-option buttons into the given container. Lifted
  *  from message-streaming.ts so each form owns its own #responseOptions
- *  rendering off its own click handler. */
-function renderResponseOptions(container: HTMLElement, options: string[], muted: boolean): void {
+ *  rendering off its own click handler. The canonical (≤200-char) action text
+ *  is carried verbatim in BOTH `data-prompt` (sent on click) and `title` (hover
+ *  tooltip) via one escape, so the two are byte-identical; the visible label is
+ *  ellipsis-truncated by CSS so four buttons fit a 2x2 grid. Exported for tests. */
+export function renderResponseOptions(container: HTMLElement, options: string[], muted: boolean): void {
   if (options.length === 0) { container.style.display = 'none'; return; }
   container.style.display = '';
-  container.innerHTML = options.map(o =>
-    `<button class="response-option-btn${muted ? ' muted' : ''}" data-prompt="${o.replace(/"/g, '&quot;')}">${o.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</button>`
-  ).join('');
+  container.innerHTML = buildResponseOptionsHtml(options, muted);
 }
 
 /** Binding identifies which key the form's input routes drafts under.

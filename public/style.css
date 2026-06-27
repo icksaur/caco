@@ -221,11 +221,10 @@ input[type="text"]:focus {
 
 /* Response option buttons */
 .response-options {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
   padding: 0 var(--space-sm) 4px;
-  justify-content: flex-start;
   width: 100%;
 }
 
@@ -238,6 +237,11 @@ input[type="text"]:focus {
   font-size: var(--text-sm);
   padding: 4px 12px;
   transition: background 0.15s, opacity 0.15s;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
 }
 .response-option-btn:hover { background: var(--color-bg-hover); }
 .response-option-btn.muted { opacity: 0.3; cursor: default; pointer-events: none; }

@@ -4,10 +4,15 @@ import { extractActionOptions, normalizeOptions, MAX_OPTION_LENGTH } from '../..
 const block = (lines: string[]) => '```caco-actions\n' + lines.join('\n') + '\n```';
 
 describe('normalizeOptions (shared validation, must match the tool)', () => {
-  it('trims, drops blanks, caps to 4, truncates to 50', () => {
+  it('trims, drops blanks, caps to 4, truncates to MAX_OPTION_LENGTH (200)', () => {
     expect(normalizeOptions([' a ', '', '  ', 'b'])).toEqual(['a', 'b']);
     expect(normalizeOptions(['1', '2', '3', '4', '5'])).toEqual(['1', '2', '3', '4']);
-    const long = 'x'.repeat(60);
+    expect(MAX_OPTION_LENGTH).toBe(200);
+    // An option under the cap is preserved in full (no 50-char truncation).
+    const mid = 'x'.repeat(120);
+    expect(normalizeOptions([mid])[0]).toBe(mid);
+    // An option over the cap is cut at exactly 200.
+    const long = 'y'.repeat(260);
     expect(normalizeOptions([long])[0]).toHaveLength(MAX_OPTION_LENGTH);
   });
 });

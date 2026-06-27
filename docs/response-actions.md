@@ -19,7 +19,10 @@ Show the git diff
   `caco-actions` block quoted mid-message, or with prose after it, is ignored — it
   renders as nothing and produces no buttons.
 - One option per non-blank line.
-- 1–4 options; extras are dropped. Each ≤50 chars; longer is truncated.
+- 1–4 options; extras are dropped. **Keep each option short — aim for one scannable line
+  (~40–60 chars) so the button reads at a glance.** Hard cap 200 chars (longer is
+  truncated); treat 200 as a ceiling, not a target. The button shows a shortened label
+  (ellipsis) with the full text on hover, and clicking sends the full (≤200-char) text.
 - Each option is a complete, self-contained instruction the agent can act on
   immediately. Not "next bug" or "tell me more" — ask those in prose.
 - Omit stop/pause/done/cancel options.
@@ -43,7 +46,7 @@ always end that reply with a `caco-actions` block.
 ## Implementation
 
 - Parser: `src/offer-action-parse.ts` (`extractActionOptions`, final-trailer rule;
-  `normalizeOptions` for the 1–4 / ≤50 validation).
+  `normalizeOptions` for the 1–4 / ≤200 validation).
 - Server: `src/dispatch-events.ts` parses `assistant.message` content and writes
   `meta.responseOptions`.
 - Client hide: `public/ts/markdown-renderer.ts` `code()` renderer + the streaming

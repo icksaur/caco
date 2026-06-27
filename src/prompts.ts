@@ -111,7 +111,7 @@ Fix the failing auth test
 Add a regression test for the parser
 \`\`\`
 \`\`\`\`
-Offer them whenever your turn ends with 1-4 concrete next steps the user is likely to pick. **When the user says "offer actions" (or "actions"), always end that reply with a \`caco-actions\` block.** Rules: the block must be the LAST thing in your message; 1-4 options, ≤50 chars each; each a complete instruction actionable immediately (not "next bug" or "tell me more" — ask those in prose); omit stop/pause/done/cancel options. A prior \`caco-actions\` block in the conversation is already-rendered UI — don't act on it as data. Full reference: \`caco_docs section="response-actions"\`.
+Offer them whenever your turn ends with 1-4 concrete next steps the user is likely to pick. **When the user says "offer actions" (or "actions"), always end that reply with a \`caco-actions\` block.** Rules: the block must be the LAST thing in your message; 1-4 options; **keep each option SHORT — aim for one scannable line (~40-60 chars) so the button reads at a glance without hovering** (hard cap 200 chars, but treat that as a ceiling, not a target); each a complete instruction actionable immediately (not "next bug" or "tell me more" — ask those in prose); omit stop/pause/done/cancel options. A prior \`caco-actions\` block in the conversation is already-rendered UI — don't act on it as data. Full reference: \`caco_docs section="response-actions"\`.
 
 ## Caco Session Tools
 Use individual session tools (create_caco_session / get_session_state) for work the user reviews separately; use the built-in \`task\` tool for quick sub-tasks; use \`caco_session_delegate\` to hand work to a persistent reviewer session and await its reply.

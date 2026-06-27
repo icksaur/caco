@@ -166,90 +166,104 @@ A `plugins.*`-backed management surface (list/install/enable/disable, marketplac
 browse) — likely a future applet. Out of scope here; documented so the SDK capability
 isn't forgotten.
 
-## Probe RESULTS (resolved — 2026-06-26)
+## Probe RESULTS (resolved — 2026-06-26, corrected)
 
-A standalone SDK probe (`@github/copilot-sdk@1.0.1`, faithful fixture: a project with
-`.github/agents/speckit.probe.agent.md`, a fixture `configDirectory` with
-`agents/`+`prompts/`, folder trust granted) settled the unknowns:
+Two SDK probes (`@github/copilot-sdk@1.0.1`, faithful fixtures) settled the unknowns.
+**The decisive variable is `enableConfigDiscovery`** (a `SessionConfig` flag,
+`types.d.ts:1299`, `@default false`).
 
-- **The SDK does NOT filesystem-discover agent/prompt files.** With nothing passed,
-  `agent.list` was **empty** and `commands.list` returned **only 30 CLI builtins**
-  (`/plan`, `/model`, `/mcp`, `/plugin`, `/review`, …). Project `.github/agents`,
-  `configDir/agents`, and `configDir/prompts` did **not** appear — even after
-  `permissions.folderTrust.addTrusted`. So folder trust is **not** the gate.
-- **Custom agents must be passed programmatically.** Passing
-  `customAgents: [{ name:'speckit.probe', prompt, description }]` to `createSession`
-  made the agent appear in **`agent.list`** immediately (displayName carried through).
-  → The host (the CLI normally; **Caco** here) must read agent files and supply
-  `customAgents`. The SDK also exposes `skillDirectories` for skill resolution.
-- **Custom agents surface in `agent.list`, NOT `commands.list`.** `commands.list`
-  (incl. `{includeBuiltins,includeSkills,includeClientCommands}`) never contained the
-  custom agent — it is the **builtin/skill/client slash-command** surface only. So
-  the spec-kit path is **agent selection** (`agent.select` + dispatch), matching
-  Caco's existing `/agent`.
-- **`configDirectory` IS honored (and is the R0 bug).** Overriding it to an empty
-  fixture dir dropped the user's real `~/.copilot/skills` from the picture, proving
-  the option works — and therefore that Caco's current **`configDir`** (wrong key,
-  `session-manager.ts:632,807`) is silently ignored. R0 confirmed real.
-- **`$ARGUMENTS` substitution is a non-issue.** Spec Kit's own command bodies say
-  "the text the user typed … **is** the feature description … even if `$ARGUMENTS`
-  appears literally below." So dispatching the user's text as the message works
-  whether or not the runtime substitutes — no Caco substitution needed.
-- **RPC surface confirmed present:** `session.rpc.commands.{list,invoke,…}`,
+**Probe matrix** (project with `.github/agents/probe-proj.agent.md`; fixture
+`configDirectory` with `agents/probe-user.agent.md`; trust granted at create):
+
+| Variant | `agent.list` | `commands.list` |
+|---|---|---|
+| `enableConfigDiscovery: true`, fixture configDir | **2** — `probe-user` (from `<configDir>/agents`) + `probe-proj` (from `<cwd>/.github/agents`), **file-backed** (`path` set) | 30 builtin |
+| `enableConfigDiscovery: true`, no configDir override (real `~/.copilot`) | **1** — `probe-proj` | **35** — +5 **`skill`** commands (the real `~/.copilot/skills`) |
+| `enableConfigDiscovery: false` (default) | **0** | 30 builtin |
+
+Findings:
+
+- **The SDK DOES auto-discover file-based agents** — from **both** `<cwd>/.github/agents`
+  **and** `<configDir>/agents` (`~/.copilot/agents`) — **but only when
+  `enableConfigDiscovery: true`.** It defaults to **false**; the **Copilot CLI sets it
+  true** (`enableConfigDiscovery??true` in the CLI bundle); **Caco passes nothing →
+  false → zero discovery.** *This single flag is the gap*, not a missing file parser.
+  (My first probe ran with the flag off, which produced the earlier — wrong —
+  "SDK doesn't scan" conclusion.)
+- **Discovery is additive.** `enableConfigDiscovery` "merges discovered MCP configs +
+  skill directories with any explicitly provided `mcpServers`/`skillDirectories`, with
+  explicit values taking precedence on name collision" (`types.d.ts:1289-1299`).
+  Programmatic `customAgents` likewise layer on top — so Caco's explicit MCP loading
+  is preserved.
+- **Skills surface as `skill`-kind `commands.list` entries** (the real `~/.copilot/skills`
+  appeared once the flag was on). So skills get parity "for free" too.
+- **`configDirectory` IS honored (R0 bug confirmed).** Overriding it changed which
+  `agents/`+`skills/` were discovered; with no override the real `~/.copilot` was used.
+  Caco's current **`configDir`** (wrong key, `session-manager.ts:632,807`) is silently
+  ignored → the SDK uses its default `~/.copilot`. Works by luck today; R0 is real.
+- **Custom agents surface in `agent.list`, NOT `commands.list`.** The spec-kit path is
+  **agent selection** (Caco's existing `/agent` → `agent.select` + dispatch). Discovered
+  agents carry a `path` (file-backed) vs. programmatic ones (in-memory).
+- **`$ARGUMENTS` substitution is a non-issue.** Spec Kit bodies say "the text the user
+  typed … **is** the feature description … even if `$ARGUMENTS` appears literally
+  below." Dispatching the user's text as the message works regardless.
+- **RPC surface confirmed:** `session.rpc.commands.{list,invoke,…}`,
   `session.rpc.agent.{list,select,reload,getCurrent,deselect}`,
-  `session.rpc.permissions.folderTrust.{isTrusted,addTrusted}`, `plugins.*`.
+  `permissions.folderTrust.{isTrusted,addTrusted}`, `plugins.*`.
 
-### Architecture correction this forces
-The **core deliverable is NOT "render `commands.list` as `/speckit.*`."** It is:
-**Caco must discover agent files (`.github/agents/*.agent.md` in the project +
-`~/.copilot/agents/*.agent.md`), parse their frontmatter+body, and pass them as
-`customAgents` (and configure `skillDirectories`) at `createSession`/`resumeSession`.**
-Then Caco's existing `/agent <name>` picker already runs them — `/agent speckit.specify
-<text>` works. The previously-central R2 (render `commands.list`) is **demoted** to a
-*separate parity nice-to-have* for the CLI's own builtin slash commands (`/plan`,
-`/review`, `/mcp`, …) — it does **not** surface spec-kit commands and is not required
-for Spec Kit. Registering discovered agents as native `/speckit.*` commands (vs.
-`/agent speckit.specify`) is the ergonomic layer (old G1), built on the discovery
-work, not on `commands.list`.
+### Architecture correction (this is the big simplification)
+The core deliverable is **two SDK config flags**, not a file-discovery subsystem:
+1. **R0:** `configDir` → `configDirectory` (so the config root is actually pinned).
+2. **RA (now trivial):** pass **`enableConfigDiscovery: true`** at
+   `createSession`/`resumeSession`. That alone makes the SDK scan `~/.copilot/agents`,
+   `<cwd>/.github/agents`, `~/.copilot/skills`, and project MCP configs — so
+   `/agent speckit.specify <text>` works through Caco's **existing** `/agent` picker,
+   and skills/user-agents/MCP get parity too. **No Caco-side `.agent.md` parser.**
+
+`customAgents`/`skillDirectories` remain available for anything Caco wants to inject
+programmatically, but are not needed for Spec Kit. Rendering builtin `commands.list`
+(`/plan`, `/review`, `/mcp`) and native `/speckit.*` registration stay as separate,
+optional ergonomic layers.
+
+### Consideration / risk introduced by the flag
+`enableConfigDiscovery: true` also auto-loads **project** `.mcp.json` / `.vscode/mcp.json`
+MCP servers and project skill dirs from the working directory. That is the desired
+parity behavior, but it means opening an untrusted repo would auto-wire its MCP servers
+— a **trust/security** consideration. Mitigation options (decide in RA): gate discovery
+on the folder being trusted, and/or surface which project MCP servers/agents were
+auto-loaded. (Caco already auto-approves tools via `approveAll`, so this widens an
+existing trust posture rather than creating a new one — but it should be explicit.)
 
 ## Empirical unknowns — RESOLVED
-- **U1 (was: prompts in `commands.list`)** → **No.** Prompt/agent files are not
-  SDK-scanned; the host supplies them. `.caco/prompts` retire/repoint (R3) is now a
-  host-side discovery decision, not gated on SDK command surfacing.
-- **U2 (`$ARGUMENTS`)** → **Moot.** Dispatch the user text as the message; spec-kit
-  bodies handle it. No substitution required.
-- **U3 (project `.github/agents` discovery)** → **No auto-discovery.** Caco must read
-  + pass `customAgents`. This is the central gap.
+- **U1 (prompts/agents discovery)** → **Yes, via `enableConfigDiscovery: true`** — the
+  SDK scans `~/.copilot/agents` + `<cwd>/.github/agents` (+ `~/.copilot/skills` as
+  commands). Off by default; Caco must enable it.
+- **U2 (`$ARGUMENTS`)** → **Moot.** Dispatch the user text as the message.
+- **U3 (project `.github/agents`)** → **Discovered with the flag on**; appears in
+  `agent.list` with a file `path`.
 
 ## Plan (slices) — revised post-probe
 
-1. ✅ **Probe (DONE):** findings above. The core need is **agent-file discovery →
-   `customAgents`**, not `commands.list` rendering.
+1. ✅ **Probe (DONE):** the gap is **two SDK config flags**, not a file parser.
 2. **R0 (do first, tiny):** fix `configDir` → `configDirectory`
    (`session-manager.ts:632,807`).
-3. **RA — Agent discovery (the core deliverable):** in `session-manager.ts`, before
-   `createSession`/`resumeSession`, read agent files from the project
-   (`<cwd>/.github/agents/*.agent.md`) and user dir
-   (`~/.copilot/agents/*.agent.md`, i.e. `<configDir>/agents`), parse YAML
-   frontmatter (`name`, `description`, optional `tools`) + markdown body, and pass
-   them as `customAgents` (`name` = frontmatter `name` or filename stem, e.g.
-   `speckit.specify`; `prompt` = body; carry `description`; map `tools`).
-   **Precedence (per GitHub docs):** on a name collision the **user/home
-   `~/.copilot/agents` entry wins** over the project `.github/agents` one — dedupe
-   by name with home taking priority. Configure `skillDirectories` from
-   `<configDir>/skills` + `<cwd>/.github/skills`. **Loads at session start** (the CLI
-   says "restart to load"), so Caco re-reads on every create/resume — no hot reload
-   required for v1, though subscribing to `custom-agents.updated` + `agent.reload`
-   is a nice follow-up. Now `/agent` lists + runs spec-kit commands:
-   `/agent speckit.specify <text>` works end-to-end.
+3. **RA — enable config discovery (the core deliverable, ~1 line):** pass
+   **`enableConfigDiscovery: true`** to `createSession`/`resumeSession`
+   (`session-manager.ts:~625,~807`). The SDK then scans `~/.copilot/agents`,
+   `<cwd>/.github/agents`, `~/.copilot/skills` (→ skill commands), and project MCP
+   configs. Caco's existing `/agent` picker now lists + runs spec-kit:
+   `/agent speckit.specify <text>` works end-to-end. **Decide the trust gate** (see
+   the consideration above): likely only enable discovery for a trusted/explicitly
+   opened folder, or surface what was auto-loaded. Add a focused test asserting a
+   fixture `.github/agents/*.agent.md` appears in `listAgents`.
 4. **G1 — ergonomic `/speckit.*` commands (optional, after RA):** auto-register each
-   discovered user-invocable agent as a native slash command (`source:'agent'`) that
-   dispatches via the existing `agent-dispatch`. Gives `/speckit.specify <text>`
-   parity with the CLI UX.
+   discovered user-invocable agent (`listAgents` already wired) as a native slash
+   command (`source:'agent'`) dispatching via the existing `agent-dispatch`. Gives
+   `/speckit.specify <text>` parity with the CLI UX.
 5. **R1 — `caco.*` prefix** with SDK-precedence fallback aliases (independent).
-6. **R3 — retire/repoint `.caco/prompts`:** since the SDK doesn't surface prompts,
-   this is a host-discovery choice — fold prompt files into the same RA discovery
-   (read `<configDir>/prompts` + `.github/prompts`) or drop in favor of agents.
+6. **R3 — retire/repoint `.caco/prompts`:** with discovery on, prefer
+   `~/.copilot/prompts` / project prompt files surfaced by the SDK; retire the
+   bespoke `.caco/prompts` scanner (verify prompts appear as commands first).
 7. **R2 — render CLI builtin `commands.list`** (separate parity nice-to-have:
    `/plan`, `/review`, `/mcp`, …) with `list`/`invoke` + the four result variants.
    **Not required for Spec Kit.**

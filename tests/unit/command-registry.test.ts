@@ -191,4 +191,22 @@ describe('agent slash commands (G1)', () => {
     expect(findCommand('agent')).toBe(builtinAgent);
     expect(findCommand('agent')!.source).toBe('built-in');
   });
+
+  it('discards a stale batch when the session changed during the fetch', async () => {
+    // Session A's /agents fetch resolves, but the user has switched to B by then.
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/sessions/sA/agents') {
+        return { ok: true, json: async () => ({ agents: [{ name: 'agent-from-A' }] }) } as unknown as Response;
+      }
+      return { ok: true, json: async () => ({ agents: [] }) } as unknown as Response;
+    }));
+
+    setActiveSession('sA', '/repoA');
+    const inflight = loadAgentCommands();      // captures sA
+    setActiveSession('sB', '/repoB');          // switch before the fetch resolves
+    await inflight;
+
+    // A's agents must NOT be registered while B is active.
+    expect(findCommand('agent-from-A')).toBeUndefined();
+  });
 });

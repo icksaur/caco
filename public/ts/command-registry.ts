@@ -455,11 +455,17 @@ async function fetchSessionAgents(): Promise<SessionAgent[] | null> {
 const agentCommandDisposers: Array<() => void> = [];
 
 export async function loadAgentCommands(): Promise<void> {
+  // Capture the activation we're loading for. The agent set is session/cwd-scoped,
+  // so a fetch that resolves after the user switched away must be discarded —
+  // otherwise a late batch from a no-longer-active session would register its
+  // agents over the current one (the fetch is async; switches are not serialized).
+  const sessionId = getActiveSessionId();
+  const agents = await fetchSessionAgents();
+  if (!agents) return;
+  if (getActiveSessionId() !== sessionId) return; // superseded by a newer activation
   for (const dispose of agentCommandDisposers.splice(0)) {
     try { dispose(); } catch { /* ignore */ }
   }
-  const agents = await fetchSessionAgents();
-  if (!agents) return;
   for (const agent of agents) {
     const existing = findCommand(agent.name);
     if (existing && existing.source !== 'agent') continue; // built-ins/templates win
@@ -468,11 +474,11 @@ export async function loadAgentCommands(): Promise<void> {
       description: agent.description || (agent.displayName ? `Agent: ${agent.displayName}` : `Custom agent ${agent.name}`),
       source: 'agent',
       handler: async (arg) => {
-        const sessionId = getActiveSessionId();
-        if (!sessionId) { showToast('No active session'); return; }
+        const activeId = getActiveSessionId();
+        if (!activeId) { showToast('No active session'); return; }
         const prompt = arg.trim();
         if (!prompt) { showToast(`Usage: /${agent.name} <prompt>`); return; }
-        await dispatchAgent(sessionId, agent.name, prompt, `/${agent.name} ${prompt}`);
+        await dispatchAgent(activeId, agent.name, prompt, `/${agent.name} ${prompt}`);
       },
     });
     agentCommandDisposers.push(dispose);

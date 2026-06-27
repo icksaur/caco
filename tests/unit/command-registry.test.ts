@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { BUILTIN_COMMANDS, findCommand, restoreCommandInput, registerCommand, loadAgentCommands, type Command } from '../../public/ts/command-registry.js';
+import { BUILTIN_COMMANDS, findCommand, restoreCommandInput, registerCommand, type Command } from '../../public/ts/command-registry.js';
 import { setActiveSession } from '../../public/ts/app-state.js';
-import { parseAgentDispatchInput } from '../../public/ts/agent-command.js';
 import { chatView } from '../../public/ts/chat-view-controller.js';
 
 const README = readFileSync(join(__dirname, '../../README.md'), 'utf-8');
@@ -37,21 +36,13 @@ describe('BUILTIN_COMMANDS', () => {
     });
   }
 
-  it('/agent parses the first token as agent name and the rest as prompt', () => {
-    expect(parseAgentDispatchInput('reviewer check reliability')).toEqual({
-      agentName: 'reviewer',
-      prompt: 'check reliability',
-    });
-    expect(parseAgentDispatchInput('reviewer')).toBeNull();
-  });
-
-  it('/agent picker lists SDK agents and fills a trailing prompt space', async () => {
+  it('/agent picker lists SDK agents by slug and fills a trailing prompt space', async () => {
     setActiveSession('s1', '/repo');
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({
         agents: [
-          { name: 'reviewer', displayName: 'Reviewer', description: 'Reviews code', model: 'gpt-5.5' },
+          { id: 'reviewer', name: 'reviewer', displayName: 'Reviewer', description: 'Reviews code', model: 'gpt-5.5' },
         ],
       }),
     })));
@@ -69,7 +60,7 @@ describe('BUILTIN_COMMANDS', () => {
     ]);
   });
 
-  it('/agent posts selected agent and prompt', async () => {
+  it('/agent posts the raw input for the server to resolve', async () => {
     setActiveSession('s1', '/repo');
     const fetchMock = vi.fn(async () => ({
       ok: true,
@@ -82,7 +73,7 @@ describe('BUILTIN_COMMANDS', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/agent-dispatch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agentName: 'reviewer', prompt: 'check reliability' }),
+      body: JSON.stringify({ input: 'reviewer check reliability' }),
     });
   });
 
@@ -131,82 +122,5 @@ describe('registerCommand disposer ownership', () => {
 
     disposeB();
     expect(findCommand(name)).toBeUndefined();
-  });
-});
-
-describe('agent slash commands (G1)', () => {
-  beforeEach(() => {
-    setActiveSession('s1', '/repo');
-    vi.unstubAllGlobals();
-  });
-
-  function stubAgents(agents: Array<{ name: string; displayName?: string; description?: string }>) {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/sessions/s1/agents') {
-        return { ok: true, json: async () => ({ agents }) } as unknown as Response;
-      }
-      return { ok: true, json: async () => ({ ok: true }) } as unknown as Response;
-    }));
-  }
-
-  it('registers each discovered agent as a /<name> command, then disposes on reload', async () => {
-    stubAgents([{ name: 'speckit.specify', displayName: 'Specify', description: 'Create a spec' }]);
-    await loadAgentCommands();
-
-    const cmd = findCommand('speckit.specify');
-    expect(cmd).toBeDefined();
-    expect(cmd!.source).toBe('agent');
-    expect(cmd!.description).toBe('Create a spec');
-
-    // A reload with no agents disposes the prior batch.
-    stubAgents([]);
-    await loadAgentCommands();
-    expect(findCommand('speckit.specify')).toBeUndefined();
-  });
-
-  it('the /<name> handler dispatches that agent with the typed prompt', async () => {
-    const fetchMock = vi.fn(async (url: string) => {
-      if (url === '/api/sessions/s1/agents') {
-        return { ok: true, json: async () => ({ agents: [{ name: 'speckit.plan' }] }) } as unknown as Response;
-      }
-      return { ok: true, json: async () => ({ ok: true }) } as unknown as Response;
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    await loadAgentCommands();
-
-    await findCommand('speckit.plan')!.handler('use Vite and SQLite');
-
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/agent-dispatch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agentName: 'speckit.plan', prompt: 'use Vite and SQLite' }),
-    });
-  });
-
-  it('an agent never shadows a built-in command of the same name', async () => {
-    const builtinAgent = findCommand('agent');
-    stubAgents([{ name: 'agent', description: 'evil shadow' }]);
-    await loadAgentCommands();
-    // The built-in /agent is preserved.
-    expect(findCommand('agent')).toBe(builtinAgent);
-    expect(findCommand('agent')!.source).toBe('built-in');
-  });
-
-  it('discards a stale batch when the session changed during the fetch', async () => {
-    // Session A's /agents fetch resolves, but the user has switched to B by then.
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/sessions/sA/agents') {
-        return { ok: true, json: async () => ({ agents: [{ name: 'agent-from-A' }] }) } as unknown as Response;
-      }
-      return { ok: true, json: async () => ({ agents: [] }) } as unknown as Response;
-    }));
-
-    setActiveSession('sA', '/repoA');
-    const inflight = loadAgentCommands();      // captures sA
-    setActiveSession('sB', '/repoB');          // switch before the fetch resolves
-    await inflight;
-
-    // A's agents must NOT be registered while B is active.
-    expect(findCommand('agent-from-A')).toBeUndefined();
   });
 });

@@ -73,7 +73,7 @@ Verified against `@github/copilot-sdk@1.0.1` (`node_modules/@github/copilot-sdk/
 | R1 | **Naming hygiene:** Caco's own slash commands must not collide with SDK/plugin/prompt commands | Must | Yes (collision avoidance) |
 | R2 | **Render the SDK slash-command list** (`session.commands.list`) in the `/` menu; invoke via `session.commands.invoke`, handling all `SlashCommandInvocationResult` variants | Must | Yes (this *is* `/speckit.*`) |
 | R3 | **Retire `.caco/prompts`** bespoke scanner; prompts come from the SDK command list (per U1) | Should | Indirectly (removes a parallel surface) |
-| R4 | **Agent commands**: keep `/agent`; ensure agent-backed commands also appear via R2 | Done/verify | Yes |
+| R4 | **Agent invocation by name or slug**: `/agent` accepts the frontmatter `name` **and** the slug `id`; picker presents the slug; unknown names fail gracefully via the SDK. Fix the current `name`-keyed bugs. | Must | Yes |
 | R5 | **Hook-queued startup prompts**: surface prompt strings returned by `loadDeferredRepoHooks`/session start | Could | No |
 | R6 | **Plugin management** surface (`plugins.*`) | Could | No |
 
@@ -150,10 +150,94 @@ Once R2 renders SDK-surfaced prompts/commands, the bespoke `scanPromptDir`
 `.caco/prompts` → `~/.copilot/prompts` + project prompt dirs (smaller change, still
 removes the non-standard `.caco/prompts`).
 
-### R4 — Agents (verify only)
-`/agent` stays. Confirm via U3 that agent-backed commands also appear in
-`commands.list` (kind `skill`/`client`); if so, users get both `/agent <name>` and the
-native `/<name>` for the same agent — acceptable. No code beyond R2.
+### R4 — Agent invocation by name or slug (the `/agent` surface)
+`/agent` stays as the agent surface (the CLI has no per-agent slash command — see the
+reverted G1 below). This requirement fixes how `/agent` resolves an agent identifier.
+
+**SDK behavior (probe-confirmed, `@github/copilot-sdk@1.0.1`):** an agent file exposes
+three identifiers — frontmatter `name` (may contain spaces, e.g. `"smoke user test"`),
+SDK-derived slug `id` (always whitespace-free, e.g. `smoke-user`), and `displayName`.
+`rpc.agent.select({ name })` resolves **all three** to the same agent. An unknown value
+**throws** `Custom agent '<x>' not found` — so the SDK already "presents a failure if it
+doesn't exist." This matches the user's CLI finding: both `/agent <name-from-file>` and
+`/agent <slug-name>` succeed; only the slug is presented in the `/agent` picker.
+
+**Current Caco bugs (must fix):**
+- `isUsableAgent` (`agent-command.ts:24`) filters out any agent whose **`name`** has
+  whitespace → an agent like `name: "smoke user test"` (slug `smoke-user`) is **dropped
+  from the picker entirely**, despite being valid and SDK-selectable.
+- Everything is keyed on `name` (picker `value`/`id`, dispatch token, validation lookup,
+  `parseAgentDispatchInput`), and `agent-dispatch` **rejects whitespace agent names**
+  (`sessions.ts:343`, `validateAgentForUserDispatch:47`). The whitespace-free slug `id`
+  is the correct key and is never used.
+
+**Required behavior:**
+- **Filter on `userInvocable` + a usable slug**, not on `name` whitespace. Define a
+  usable slug as `typeof id === 'string' && id.length > 0 && id.trim() === id &&
+  !/\s/.test(id)`, plus `userInvocable !== false`. The slug is whitespace-free by
+  construction, so usable agents are never dropped.
+- **Picker presents the slug.** Insert `id` as the command value (parser-safe, matches
+  the CLI); show `displayName`/`name` in the label/description for recognizability.
+- **Server is the single home for resolution.** The combined `/agent <token> <prompt>`
+  command means the client must NOT pre-split into `{agentName, prompt}` — a multi-word
+  frontmatter name (`smoke user test hello`) would lose everything after the first token
+  before the server could resolve it. The client sends the **raw** args
+  (`{ input: arg.trim() }`); the server fetches the live `agent.list()` and resolves.
+- **Deterministic resolution algorithm** (server, exact + case-sensitive, no
+  normalization), against the usable-agent list:
+  1. Let `firstToken` = input up to the first whitespace. If some agent's **slug `id`**
+     equals `firstToken` exactly → that agent; prompt = the remainder. (Slug always wins
+     first, so `id=foo` + `name="foo bar"` resolves `/agent foo bar do x` to slug `foo`
+     with prompt `bar do x`.)
+  2. Else greedily match the **longest** identifier among each agent's `id`, `name`,
+     `displayName` such that `input === identifier` **or** `input.startsWith(identifier +
+     ' ')` (the match must end on a whitespace/end-of-string boundary, so `name="agent"`
+     does NOT match input `agentic …`). Longest identifier wins; prompt = remainder.
+  3. Else no match → forward `firstToken` to the SDK; `agent.select` throws
+     `not found`, surfaced as a toast (existing `dispatchAgent` failure path).
+- **Prompt is required (no select-only).** Caco's `/agent` is combined select+dispatch;
+  it does **not** support CLI-style select-only `/agent <name>`. If resolution consumes
+  the entire input (no remainder), return `prompt is required`. Stateful select-only is
+  a separate future feature (selected-agent UX + route changes), explicitly out of scope.
+- **Server selects a resolved KNOWN identifier**, preferring the agent's `id`, and
+  enforces `userInvocable !== false`. Free-form whitespace names are never forwarded
+  raw — only a value matched against `agent.list()` reaches `agent.select` (this is why
+  dropping the client whitespace rejection is safe: it flows to an RPC, not a shell, and
+  the server only selects resolved known agents).
+
+This keeps the "pit of success": the picker only ever inserts the slug, so the common
+path is unambiguous; manual name-with-spaces entry is best-effort via the boundary-anchored
+greedy match and degrades to a clear SDK `not found` toast, never a silent mis-dispatch.
+
+**Success / failure feedback (what the user sees):**
+- **Failure → red toast** + input restored for retry. Already the behavior:
+  `showToast` defaults to the `error`/red variant and `dispatchAgent` restores the
+  command text. The SDK's `Custom agent '<x>' not found` (and `not invocable`) messages
+  surface verbatim. No transcript event on failure.
+- **Success → synthetic inline activity marker** "Selected agent: `<slug>`", rendered
+  exactly like the compaction notice ("Conversation compacted"), positioned immediately
+  before the agent's turn (echoes the CLI's `● Selected custom agent: <name>`). An
+  optional green (`type:'success'`) toast may accompany it as a near-input confirmation.
+- **Mechanism:** the server `agent-dispatch` route, after a successful `selectAgent` and
+  before/at `dispatchMessage`, emits `{ type: 'caco.agent_selected', data: { agentId,
+  displayName } }` through the session's `onEvent`. The client renders it via the
+  `dom-regions` maps: `EVENT_TO_OUTER['caco.agent_selected'] = 'assistant-activity'`,
+  `EVENT_TO_INNER = 'compact-text'` (reuse compaction styling), formatter →
+  `Selected agent: ${data.agentId}`. `caco.*` events already pass the event filter
+  (`event-filter.ts:71`).
+- **Persistence caveat (explicit):** `caco.*` synthetic events are **broadcast-only**
+  (not written to the SDK `events.jsonl`), so this marker shows **live but does not
+  replay on resume/reload** — unlike the compaction notices, which are real SDK events.
+  The dispatched prompt (`user.message`) and the agent's reply DO persist, so the turn
+  itself survives; only the "Selected agent" line is ephemeral in v1. Persisting it
+  across resume is a deliberate follow-up (inject into the replayed history path) — out
+  of scope unless requested.
+
+**Divisible:** (a) server — raw-input route + resolver in `agent-command.ts` (pure,
+unit-testable: slug-first, boundary greedy, prompt-required, displayName) + `visibleAgents`
+slug filter + emit `caco.agent_selected` on success; (b) client — picker inserts `id`,
+`/agent` handler posts `{ input }`, render `caco.agent_selected` + green toast. Ship
+(a) first (it stands alone and is fully testable); (b) is a thin follow-up.
 
 ### R5 — Hook-queued startup prompts (optional, deferred)
 On session start/resume, `loadDeferredRepoHooks` returns "queued repo-level startup
@@ -256,10 +340,12 @@ existing trust posture rather than creating a new one — but it should be expli
    the consideration above): likely only enable discovery for a trusted/explicitly
    opened folder, or surface what was auto-loaded. Add a focused test asserting a
    fixture `.github/agents/*.agent.md` appears in `listAgents`.
-4. **G1 — ergonomic `/speckit.*` commands (optional, after RA):** auto-register each
-   discovered user-invocable agent (`listAgents` already wired) as a native slash
-   command (`source:'agent'`) dispatching via the existing `agent-dispatch`. Gives
-   `/speckit.specify <text>` parity with the CLI UX.
+4. ~~**G1 — ergonomic `/speckit.*` commands**~~ **(REVERTED — wrong model).** The CLI
+   gives custom agents **no** per-name slash command; they are *selected* via
+   `/agent <name>` (Caco's existing picker). Registering agents as `/<name>` commands
+   diverged from the CLI and is reverted (`command-registry.ts`). The agent surface is
+   R4 (`/agent` by name or slug). The real slash-command surface is **skills**, which
+   appear in `commands.list` — covered by R2.
 5. **R1 — `caco.*` prefix** with SDK-precedence fallback aliases (independent).
 6. **R3 — retire/repoint `.caco/prompts`:** with discovery on, prefer
    `~/.copilot/prompts` / project prompt files surfaced by the SDK; retire the
@@ -280,9 +366,13 @@ existing trust posture rather than creating a new one — but it should be expli
 | Collisions between SDK command and a `caco.*` (none expected) | `caco.` prefix is reserved; SDK commands rendered in a separate group |
 
 ## Acceptance
-A `specify init --integration copilot` project opened in a Caco session shows
-`/speckit.*` in the `/` menu (from `session.commands.list`), and invoking
-`/speckit.specify <text>` runs the agent turn (via `agent-prompt`) and writes the spec
-files — **with no Spec-Kit-specific code in Caco**. Caco's own commands are
-`caco.*`-prefixed and never collide. `.caco/prompts` is gone (retired or repointed to
-`~/.copilot/prompts`). Plugin/hook parity (R5/R6) is documented and deferred.
+A `specify init --integration copilot` project opened in a Caco session can drive Spec
+Kit's **default (agent) mode** via `/agent speckit.specify <text>` — the discovered agent
+(slug `speckit.specify`) appears in the `/agent` picker and the dispatch runs the agent
+turn and writes the spec files — **with no Spec-Kit-specific code in Caco**. A custom
+agent is invocable by its slug `id` **or** frontmatter `name` (R4), and an unknown agent
+fails with a clear `not found` toast. Spec Kit's **skills mode** surfaces `/speckit-*` as
+SDK `commands.list` skill commands (R2). Custom agents do **not** get per-name slash
+commands (the reverted G1). Caco's own commands are `caco.*`-prefixed and never collide.
+`.caco/prompts` is gone (retired or repointed to `~/.copilot/prompts`). Plugin/hook
+parity (R5/R6) is documented and deferred.

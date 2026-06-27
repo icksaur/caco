@@ -1,17 +1,16 @@
 import { newSessionClick } from './router.js';
-import { getActiveSessionId, getAvailableModels, notifyMessageSent, onSessionActivate } from './app-state.js';
+import { getActiveSessionId, getAvailableModels, notifyMessageSent } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
 import { setActiveContextBudget, setActiveReasoningEffort } from './context-footer.js';
 import { archiveSession, renameSession } from './session-panel.js';
 import type { PopupItem } from './input-popup.js';
-import { parseAgentDispatchInput } from './agent-command.js';
 
 export interface Command {
   name: string;
   description: string;
-  source: 'built-in' | 'template' | 'extension' | 'agent';
+  source: 'built-in' | 'template' | 'extension';
   handler: (args: string) => void | Promise<void>;
   picker?: () => PopupItem[] | Promise<PopupItem[]>;
 }
@@ -57,23 +56,26 @@ export function findCommand(name: string): Command | undefined {
 
 registerBuiltin('session-new', () => newSessionClick());
 
-/** Dispatch a prompt to a named SDK custom agent for the active session. Shared by
- *  the `/agent <name> <prompt>` builtin and the per-agent `/<name>` commands (G1).
- *  On failure restores the original command text so the user can retry. */
-async function dispatchAgent(sessionId: string, agentName: string, prompt: string, originalCommand: string): Promise<void> {
+/** Dispatch a raw `/agent` payload (`<token> <prompt>`) to the active session. The
+ *  server resolves the token against the live agent list (by slug `id`, frontmatter
+ *  `name`, or `displayName`) and selects it. On failure restores the original command
+ *  text so the user can retry. */
+async function dispatchAgent(sessionId: string, input: string, originalCommand: string): Promise<void> {
   try {
     const res = await fetch(`/api/sessions/${sessionId}/agent-dispatch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agentName, prompt }),
+      body: JSON.stringify({ input }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({ error: 'Agent dispatch failed' }));
       restoreActiveInput(originalCommand);
       showToast(data.error || 'Agent dispatch failed');
     } else {
+      const data = await res.json().catch(() => ({} as { agentId?: string }));
       chatView.savePrompt(originalCommand, sessionId);
       notifyMessageSent(sessionId);
+      if (data.agentId) showToast(`Dispatched to ${data.agentId}`, { type: 'success', autoHideMs: 2000 });
     }
   } catch (error) {
     restoreActiveInput(originalCommand);
@@ -85,22 +87,22 @@ registerBuiltin('agent', async (arg) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
 
-  const parsed = parseAgentDispatchInput(arg);
-  if (!parsed) {
+  const input = arg.trim();
+  if (!input) {
     showToast('Usage: /agent <agent-name> <prompt>');
     return;
   }
 
-  await dispatchAgent(sessionId, parsed.agentName, parsed.prompt, `/agent ${arg.trim()}`);
+  await dispatchAgent(sessionId, input, `/agent ${input}`);
 }, async () => {
   const agents = await fetchSessionAgents();
   if (agents === null) return [];
   if (agents.length === 0) { showToast('No SDK agents available'); return []; }
   return agents.map(agent => ({
-    id: agent.name,
-    label: agent.displayName ? `${agent.displayName} (${agent.name})` : agent.name,
+    id: agent.id,
+    label: agent.displayName && agent.displayName !== agent.id ? `${agent.displayName} (${agent.id})` : agent.id,
     description: [agent.description, agent.model].filter(Boolean).join(' · '),
-    value: `${agent.name} `,
+    value: `${agent.id} `,
   }));
 });
 
@@ -423,7 +425,7 @@ function restoreActiveInput(message: string): void {
   restoreCommandInput(form, message);
 }
 
-interface SessionAgent { name: string; displayName?: string; description?: string; model?: string }
+interface SessionAgent { id: string; name: string; displayName?: string; description?: string; model?: string }
 
 /** Fetch the active session's discovered SDK custom agents (project + user dirs,
  *  filtered server-side to user-invocable). Returns null on error (after toasting),
@@ -445,47 +447,6 @@ async function fetchSessionAgents(): Promise<SessionAgent[] | null> {
     return null;
   }
 }
-
-// LIFECYCLE: per-session agent slash commands (G1). Discovered SDK custom agents
-// (e.g. spec-kit's speckit.specify, or ~/.copilot/agents entries) are registered as
-// first-class `/<name>` commands so users get CLI-parity ergonomics instead of only
-// `/agent <name>`. Re-derived on every session activation (the agent set is
-// cwd-dependent); the prior batch is disposed first. Agent commands never shadow a
-// built-in/template/extension command of the same name (those win).
-const agentCommandDisposers: Array<() => void> = [];
-
-export async function loadAgentCommands(): Promise<void> {
-  // Capture the activation we're loading for. The agent set is session/cwd-scoped,
-  // so a fetch that resolves after the user switched away must be discarded —
-  // otherwise a late batch from a no-longer-active session would register its
-  // agents over the current one (the fetch is async; switches are not serialized).
-  const sessionId = getActiveSessionId();
-  const agents = await fetchSessionAgents();
-  if (!agents) return;
-  if (getActiveSessionId() !== sessionId) return; // superseded by a newer activation
-  for (const dispose of agentCommandDisposers.splice(0)) {
-    try { dispose(); } catch { /* ignore */ }
-  }
-  for (const agent of agents) {
-    const existing = findCommand(agent.name);
-    if (existing && existing.source !== 'agent') continue; // built-ins/templates win
-    const dispose = registerCommand({
-      name: agent.name,
-      description: agent.description || (agent.displayName ? `Agent: ${agent.displayName}` : `Custom agent ${agent.name}`),
-      source: 'agent',
-      handler: async (arg) => {
-        const activeId = getActiveSessionId();
-        if (!activeId) { showToast('No active session'); return; }
-        const prompt = arg.trim();
-        if (!prompt) { showToast(`Usage: /${agent.name} <prompt>`); return; }
-        await dispatchAgent(activeId, agent.name, prompt, `/${agent.name} ${prompt}`);
-      },
-    });
-    agentCommandDisposers.push(dispose);
-  }
-}
-
-onSessionActivate(() => { void loadAgentCommands(); });
 
 function formatTokenCount(n: number): string {
   if (n >= 1_000_000) {

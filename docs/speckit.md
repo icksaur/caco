@@ -1,26 +1,49 @@
 # Spec Kit support in Caco
 
-Status: requirements + gap analysis. Goal: determine what GitHub **Spec Kit**
+Status: requirements + gap analysis. **Model corrected (empirical, 2025):** in the
+Copilot CLI, custom **agents** are *selected* (`/agent <name>`), not given per-name
+slash commands; **skills** are the surface that becomes `/skill-name <prompt>`; **prompt
+files** are not a CLI feature. See "Invocation model (confirmed)" below.
+
+Goal: determine what GitHub **Spec Kit**
 (github/spec-kit) needs from a harness, confirm the Copilot SDK provides it, assess
 what Caco offers for *interactive* Spec Kit use, enumerate gaps, give a runnable test
 plan, and document how a user would drive the workflow inside a Caco session.
 
+## Invocation model (confirmed — empirical probe + official docs)
+
+| Type | File location | SDK surface | Slash command? | How invoked |
+|---|---|---|---|---|
+| **Custom agent** | `.github/agents/*.agent.md`, `~/.copilot/agents/*.agent.md` | `agent.list` | **No** | `/agent <name>` *selects* it (loads persona; no per-name command) |
+| **Skill** | `.github/skills/<name>/SKILL.md`, `~/.copilot/skills/<name>/SKILL.md` | `commands.list` (`kind:skill`) | **Yes** | `/skill-name <prompt>` (auto-chosen or manual) |
+| **Prompt file** | `.github/prompts/*.prompt.md` | — (not surfaced) | **No** | IDE-only (VS Code picker); ✗ in Copilot CLI |
+
+Verified by probe against `@github/copilot-sdk@1.0.1` with `enableConfigDiscovery:true`:
+user + project skills appear in `commands.list` as `kind:skill`; prompt files appear
+nowhere; agents appear only in `agent.list`. Consequence: **the native `/speckit.*`
+surface only exists in Spec Kit's *skills* mode** (`--integration-options="--skills"`,
+which writes `.github/skills/speckit-{name}/SKILL.md` → `/speckit-specify`). In default
+(agent) mode you drive it via Caco's existing `/agent speckit.specify <text>` picker.
+
 ## TL;DR verdict
 
-Spec Kit is **slash-command-driven**, not hook-driven. Its Copilot integration
-installs **agent files** (`.github/agents/speckit.*.agent.md`) + companion prompt
-files into the *project*, and you run a fixed workflow:
-`/speckit.constitution → /speckit.specify → /speckit.clarify → /speckit.plan →
-/speckit.tasks → /speckit.analyze → /speckit.implement`.
+Spec Kit is **slash-command-driven**, not hook-driven. Its Copilot integration has two
+install modes: **default (agents)** writes `.github/agents/speckit.*.agent.md`
+(+ companion prompt files) — driven via the **agent picker** (`/agent speckit.specify`),
+NOT native slash commands; **skills mode** (`--integration-options="--skills"`) writes
+`.github/skills/speckit-{name}/SKILL.md` — these DO become native `/speckit-specify`
+slash commands. The fixed workflow either way is
+`constitution → specify → clarify → plan → tasks → analyze → implement`.
 
 Caco is **closer than expected**: it already has a working `/agent` picker that lists
 SDK-discovered agents and dispatches them (`selectAgent` + `dispatchMessage`), runs
-the agent in the project cwd with full file + shell tools, and supports MCP. The
-likely-functional path today is **`/agent speckit.specify <text>`** — *if* the SDK
-discovers project-local `.github/agents`. Two things are unverified and gate
-everything (see "Empirical unknowns"). The ergonomic gap is that Caco does not surface
-discovered agents as first-class `/speckit.*` commands, and its prompt-template
-scanner reads `.caco/prompts/`, not Spec Kit's `.github/prompts/`.
+the agent in the project cwd with full file + shell tools, and supports MCP. With
+`enableConfigDiscovery:true` (shipped, RA) the SDK discovers both `~/.copilot/agents`
+and project `<cwd>/.github/agents`, so **`/agent speckit.specify <text>` works today**
+for default (agent) mode. The remaining ergonomic gap is **skills mode**: Caco does not
+yet render `commands.list` skills as native `/speckit-specify` slash commands (the
+corrected R2 / former G6). Note its prompt-template scanner reads `.caco/prompts/`, a
+Caco-specific feature unrelated to CLI parity (CLI has no prompt-file surface).
 
 ## How Spec Kit works (the model)
 
@@ -97,16 +120,13 @@ semantics** — both empirical (below).
 
 | # | Gap | Impact | Sketch of fix |
 |---|---|---|---|
-| G1 | **No first-class `/speckit.*` commands.** Discovered agents are reachable only via `/agent <name> …`, not as native `/speckit.specify`. | Ergonomic; workflow still runnable | Auto-register each user-invocable SDK agent as a slash command (`source:'agent'`) that dispatches `agent-dispatch`. Mirrors `loadPromptTemplates`. |
-| G2 | **Prompt scanner ignores `.github/prompts/`.** Spec Kit's `.prompt.md` companions aren't surfaced. | Low (CLI uses agents, not prompts) | Add `.github/prompts/` to `scanPromptDir` roots; strip `.prompt.md`. |
-| G3 | **Agent-discovery scope unverified.** If the SDK reads only `~/.copilot/agents`, project `.github/agents` won't appear. | **Blocking if true** | If unsupported, copy/symlink project `.github/agents` → discoverable dir, or pass an agents path to the SDK. Resolve via test T3. |
-| G4 | **`$ARGUMENTS` substitution unverified.** | **Blocking if the SDK doesn't substitute** | If not substituted, Caco's `agent-dispatch` must replace `$ARGUMENTS` in the agent body before dispatch, or append the user text in the SDK's expected manner. Resolve via test T5. |
-| G5 | **Shell built-ins excluded.** Spec Kit's `.agent.md` bodies may call `bash`/`run_in_terminal` directly. | Medium — scripts may no-op | The agent can still run scripts via `caco_run_workflow`; if Spec Kit bodies hard-call `bash`, either re-include `bash` for these sessions (`CACO_EXCLUDED_BUILTINS`) or confirm the agent adapts. Resolve via test T6. |
-| G6 | **No skills-mode discovery for `.github/skills/`.** | Low (default mode is agents) | Out of scope unless skills mode chosen. |
-| G7 | **No hooks needed**, but if a preset relies on pre/post hooks, only `onPostToolUse` exists. | Negligible for core SDD | None for v1. |
-
-Likely **slash-command work** (G1, optionally G2) is the main ergonomic deliverable;
-**G3/G4/G5 are empirical** and decided by the test plan before any code.
+| ~~G1~~ | ~~No first-class `/speckit.*` from agents.~~ **WRONG MODEL — reverted.** The CLI gives agents NO per-name slash command; they are *selected* via `/agent <name>` (which Caco already has). | n/a | Revert the agent→slash-command registration; keep the `/agent` picker. |
+| **R2** | **Skills not rendered as slash commands.** Spec Kit *skills mode* writes `.github/skills/speckit-{name}/SKILL.md`; these surface in `commands.list` (`kind:skill`) but Caco shows no slash command for them. **This is the real CLI-parity deliverable.** | Ergonomic (skills mode unusable in Caco) | Fetch `commands.list`, register each `kind:skill` as `/skill-name`, dispatch via `commands.invoke({name,input})`. |
+| G2 | Prompt scanner ignores `.github/prompts/`. | **Moot for parity** — prompt files are not a CLI feature (proven absent from `commands.list`). | None for parity. Caco's `.caco/prompts` stays a Caco-specific feature. |
+| ~~G3~~ | ~~Agent-discovery scope unverified.~~ **RESOLVED.** | n/a | `enableConfigDiscovery:true` (RA, shipped) discovers `~/.copilot/agents` + `<cwd>/.github/agents`. |
+| G4 | `$ARGUMENTS` substitution unverified. | Low — agents take the dispatched user text as the prompt; `$ARGUMENTS` is a skill/prompt-template concern. | For skills (R2), pass user text as `commands.invoke` `input`. |
+| G5 | **Shell built-ins excluded.** Spec Kit `.agent.md`/`SKILL.md` bodies may call `bash` directly. | Medium — scripts may no-op | Re-include `bash` for these sessions (`CACO_EXCLUDED_BUILTINS`) or confirm the agent adapts via `caco_run_workflow`. Resolve via test T6. |
+| G7 | No hooks needed; only `onPostToolUse` exists. | Negligible for core SDD | None for v1. |
 
 ## Test plan — make a Spec Kit project and verify it in Caco
 
@@ -170,20 +190,22 @@ tool error. T3/T5/T6 outcomes decide whether G3/G4/G5 need code.
 commands (auto-registered from discovered agents), matching Spec Kit's documented UX,
 with the picker showing them grouped as agent commands.
 
-## Empirical unknowns (resolve before coding)
+## Empirical unknowns (resolved)
 
-- **U1 (T3):** Does `@github/copilot-sdk@1.0.1` `rpc.agent.list()` include
-  project-local `.github/agents/*.agent.md` when `workingDirectory` is the project?
-  (If only `~/.copilot/agents` is read → G3 fix required.)
-- **U2 (T5):** Does `select`+`dispatchMessage` substitute `$ARGUMENTS` in the agent
-  body, or is the body system-context with the user text appended? (Decides G4.)
-- **U3 (T6):** Do Spec Kit agent bodies hard-depend on the excluded `bash` built-in, or
-  do they adapt to available shell tooling? (Decides G5.)
+- **U1 (RESOLVED):** With `enableConfigDiscovery:true`, `rpc.agent.list()` includes
+  project-local `.github/agents/*.agent.md` (and `~/.copilot/agents`). Probe-confirmed.
+- **U2 (RESOLVED for agents):** Agents take the dispatched user text as the prompt;
+  the agent body is loaded as subordinate context, not a `$ARGUMENTS` template. For
+  skills (R2), user text is passed as `commands.invoke` `input`.
+- **U3 (T6, open):** Do Spec Kit bodies hard-depend on the excluded `bash` built-in, or
+  adapt to available shell tooling? (Decides G5.)
 
 ## Next steps
-1. Run T0–T8; fill in U1–U3.
-2. If U1/U2 pass: implement **G1** (auto-register discovered agents as `/speckit.*`
-   slash commands) as the primary deliverable; optionally **G2**.
-3. If U1 fails: implement **G3** (make project `.github/agents` discoverable to the
-   SDK). If U2 fails: implement **G4** (`$ARGUMENTS` substitution in `agent-dispatch`).
-4. Spec the chosen items separately; this document is the requirements baseline.
+1. **Revert G1** (agent→slash-command registration in `public/ts/command-registry.ts`):
+   it does not match the CLI. Keep the `/agent <name>` picker as the agent surface.
+2. Implement **R2** (the real parity deliverable): render `commands.list` `kind:skill`
+   entries as native `/skill-name` slash commands, dispatched via `commands.invoke`.
+   This makes Spec Kit *skills mode* (`/speckit-specify …`) work natively.
+3. Default (agent) mode already works via `/agent speckit.specify <text>` (RA shipped).
+   Validate end-to-end with T0–T8; G5 (excluded `bash`) is the main remaining empirical.
+4. Drop G2/prompt-file parity — not a CLI feature. `.caco/prompts` stays Caco-specific.

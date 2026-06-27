@@ -29,7 +29,7 @@ import { prefixMessageSource } from '../message-source.js';
 import { getSessionDraft, setSessionDraft, deleteSessionDraft } from '../chat-draft-store.js';
 import { modelCostSummary } from '../model-billing.js';
 import { snapshot as throughputSnapshot } from '../session-throughput.js';
-import { hasWhitespace, validateAgentForUserDispatch, visibleAgents } from '../agent-command.js';
+import { resolveAgentDispatch, visibleAgents } from '../agent-command.js';
 
 const router = Router();
 
@@ -330,18 +330,10 @@ router.get('/sessions/:sessionId/agents', async (req: Request, res: Response) =>
 router.post('/sessions/:sessionId/agent-dispatch', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const requestId = (req.headers['x-request-id'] as string) || `agent-${Date.now().toString(36)}`;
-  const { agentName, prompt } = req.body as { agentName?: string; prompt?: string };
+  const { input } = req.body as { input?: string };
 
-  if (!agentName?.trim()) {
-    res.status(400).json({ error: 'agentName is required' });
-    return;
-  }
-  if (!prompt?.trim()) {
-    res.status(400).json({ error: 'prompt is required' });
-    return;
-  }
-  if (hasWhitespace(agentName)) {
-    res.status(400).json({ error: 'Agent names with whitespace are not supported' });
+  if (!input?.trim()) {
+    res.status(400).json({ error: 'input is required' });
     return;
   }
   if (!sessionManager.getSessionCwd(sessionId)) {
@@ -354,17 +346,33 @@ router.post('/sessions/:sessionId/agent-dispatch', async (req: Request, res: Res
   }
 
   try {
+    // The agent list is session/cwd-scoped, so resolve against the live list (the
+    // session must be active to list). Resolution must happen before dispatch because
+    // it produces the prompt that dispatchMessage sends.
+    if (!sessionManager.isActive(sessionId)) {
+      await sessionManager.resume(sessionId, sessionState.getSessionConfig());
+    }
+    const agents = visibleAgents(await sessionManager.listAgents(sessionId));
+    const resolution = resolveAgentDispatch(agents, input);
+    if (!resolution.ok) {
+      res.status(resolution.status).json({ error: resolution.error });
+      return;
+    }
+
+    let selectedAgentId = resolution.agentId;
     await dispatchMessage(
       sessionId,
-      prompt.trim(),
+      resolution.prompt,
       {
         requestId,
         needsObservation: true,
         beforeSend: async () => {
-          const agents = await sessionManager.listAgents(sessionId);
-          const validation = validateAgentForUserDispatch(agents, agentName);
-          if (!validation.ok) throw new DispatchHttpError(validation.status, validation.error);
-          await sessionManager.selectAgent(sessionId, validation.agent.name);
+          const agent = await sessionManager.selectAgent(sessionId, resolution.agentId);
+          selectedAgentId = agent.id;
+          broadcastEvent(sessionId, {
+            type: 'caco.agent_selected',
+            data: { agentId: agent.id, displayName: agent.displayName },
+          });
         },
       },
       {
@@ -373,7 +381,7 @@ router.post('/sessions/:sessionId/agent-dispatch', async (req: Request, res: Res
     );
 
     updateSessionMeta(sessionId, meta => { meta.lastUsedAt = new Date().toISOString(); }, { createIfMissing: false });
-    res.json({ ok: true, sessionId });
+    res.json({ ok: true, sessionId, agentId: selectedAgentId });
   } catch (error) {
     const status = error instanceof DispatchHttpError ? error.status : 500;
     const code = error instanceof DispatchHttpError ? error.code : undefined;

@@ -121,6 +121,8 @@ interface CreateSessionConfig {
   infiniteSessions?: InfiniteSessionConfig;
   largeOutput?: LargeToolOutputConfig;
   contextTier?: ContextTier;
+  configDirectory?: string;
+  enableConfigDiscovery?: boolean;
 }
 
 interface ResumeSessionConfig {
@@ -134,6 +136,8 @@ interface ResumeSessionConfig {
   infiniteSessions?: InfiniteSessionConfig;
   largeOutput?: LargeToolOutputConfig;
   contextTier?: ContextTier;
+  configDirectory?: string;
+  enableConfigDiscovery?: boolean;
 }
 
 interface CopilotSessionInstance {
@@ -629,7 +633,20 @@ export class SessionManager {
         tools,
         excludedTools: config.excludedTools,
         onPermissionRequest: approveAll,
-        configDir: join(homedir(), '.copilot'),
+        // configDirectory is the SDK's public option name (it maps internally to
+        // the wire field configDir). Passing `configDir` here was silently dropped,
+        // so the SDK fell back to its ~/.copilot default; name it correctly so the
+        // config root is actually pinned.
+        configDirectory: join(homedir(), '.copilot'),
+        // Parity with the Copilot CLI (which enables this by default): discover
+        // file-based custom agents (~/.copilot/agents, <cwd>/.github/agents), skills
+        // (~/.copilot/skills), and project MCP configs (.mcp.json/.vscode/mcp.json),
+        // merged with the explicit mcpServers below (explicit wins on name
+        // collision). This is what makes Spec Kit's `/agent speckit.*` commands and
+        // user-installed agents/skills work in a Caco session. Note: it also
+        // auto-loads a project's MCP config — acceptable under Caco's existing
+        // approveAll trust posture (the user explicitly chose this cwd).
+        enableConfigDiscovery: true,
         mcpServers: await loadMcpServers(),
         workingDirectory: cwd,
         largeOutput: sdkLargeOutputConfig(),
@@ -804,7 +821,10 @@ export class SessionManager {
       tools,
       excludedTools: config.excludedTools,
       onPermissionRequest: approveAll,
-      configDir: join(homedir(), '.copilot'),
+      // See createSession: correct option name + enable file-based agent/skill/MCP
+      // discovery so resumed sessions keep parity with the Copilot CLI.
+      configDirectory: join(homedir(), '.copilot'),
+      enableConfigDiscovery: true,
       mcpServers,
       workingDirectory: cwd,
       largeOutput: sdkLargeOutputConfig(),

@@ -74,19 +74,23 @@ To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Star
 
 | Command | Description |
 |---------|-------------|
-| `/session-new` | New chat |
-| `/agent <name>` | Select an SDK custom agent for your next message (no prompt; mirrors the Copilot CLI) |
-| `/session-rename <name>` | Rename current session |
-| `/session-cwd <path>` | Change session working directory |
-| `/session-folder <name>` | Move session to a folder (or "/" for root) |
-| `/session-archive` | Archive current session |
-| `/session-model` | Change session model |
-| `/session-export` | Export current session as .tar.gz |
-| `/session-fork [message]` | Fork session into a new side conversation (inherits history) |
-| `/session-compact` | Force context compaction |
-| `/session-context-window [tokens]` | Cap session context window so it compacts earlier (cuts per-call cost); no arg opens a picker |
-| `/session-effort` | Set reasoning effort level for models that support it (picker) |
-| `/restart` | Restart the Caco server |
+| `/caco.session-new` | New chat |
+| `/caco.agent <name>` | Select an SDK custom agent for your next message (no prompt; mirrors the Copilot CLI) |
+| `/caco.session-rename <name>` | Rename current session |
+| `/caco.session-cwd <path>` | Change session working directory |
+| `/caco.session-folder <name>` | Move session to a folder (or "/" for root) |
+| `/caco.session-archive` | Archive current session |
+| `/caco.session-model` | Change session model |
+| `/caco.session-export` | Export current session as .tar.gz |
+| `/caco.session-fork [message]` | Fork session into a new side conversation (inherits history) |
+| `/caco.session-compact` | Force context compaction |
+| `/caco.session-context-window [tokens]` | Cap session context window so it compacts earlier (cuts per-call cost); no arg opens a picker |
+| `/caco.session-effort` | Set reasoning effort level for models that support it (picker) |
+| `/caco.restart` | Restart the Caco server |
+
+Caco's built-ins live in the reserved `caco.` namespace so they never collide with SDK
+skills (`/skill-name`) or agents. The legacy bare names (`/restart`, `/agent`, …) still
+work as aliases, but yield to a skill of the same name when one exists.
 
 ### Portal
 

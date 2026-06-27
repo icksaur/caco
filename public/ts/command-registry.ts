@@ -16,19 +16,19 @@ export interface Command {
 }
 
 export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string }> = [
-  { name: 'session-new', description: 'New chat' },
-  { name: 'agent', description: 'Select an SDK custom agent (applies to your next message)' },
-  { name: 'session-rename', description: 'Rename current session' },
-  { name: 'session-cwd', description: 'Change session working directory' },
-  { name: 'session-folder', description: 'Move session to a folder (or "/" for root)' },
-  { name: 'session-archive', description: 'Archive current session' },
-  { name: 'session-model', description: 'Change session model' },
-  { name: 'restart', description: 'Restart the Caco server' },
-  { name: 'session-export', description: 'Export current session as .tar.gz' },
-  { name: 'session-fork', description: 'Fork session into a new side conversation (inherits history)' },
-  { name: 'session-compact', description: 'Force context compaction (optionally add text to focus the summary)' },
-  { name: 'session-context-window', description: 'Cap session context window (compact earlier to cut cost)' },
-  { name: 'session-effort', description: 'Set reasoning effort for models that support it' },
+  { name: 'caco.session-new', description: 'New chat' },
+  { name: 'caco.agent', description: 'Select an SDK custom agent (applies to your next message)' },
+  { name: 'caco.session-rename', description: 'Rename current session' },
+  { name: 'caco.session-cwd', description: 'Change session working directory' },
+  { name: 'caco.session-folder', description: 'Move session to a folder (or "/" for root)' },
+  { name: 'caco.session-archive', description: 'Archive current session' },
+  { name: 'caco.session-model', description: 'Change session model' },
+  { name: 'caco.restart', description: 'Restart the Caco server' },
+  { name: 'caco.session-export', description: 'Export current session as .tar.gz' },
+  { name: 'caco.session-fork', description: 'Fork session into a new side conversation (inherits history)' },
+  { name: 'caco.session-compact', description: 'Force context compaction (optionally add text to focus the summary)' },
+  { name: 'caco.session-context-window', description: 'Cap session context window (compact earlier to cut cost)' },
+  { name: 'caco.session-effort', description: 'Set reasoning effort for models that support it' },
 ];
 
 const commands = new Map<string, Command>();
@@ -50,11 +50,20 @@ export function getCommands(): Command[] {
   return [...commands.values()];
 }
 
+/** Resolve a typed command name. A direct registration always wins, so a skill/extension
+ *  using a bare name (e.g. `restart`) is reached as typed — the bare namespace belongs to
+ *  the SDK/skills. Otherwise a legacy bare name falls back to its `caco.`-prefixed
+ *  built-in (`/restart` → `caco.restart`), preserving muscle memory while ceding the bare
+ *  name on collision. */
 export function findCommand(name: string): Command | undefined {
-  return commands.get(name);
+  const direct = commands.get(name);
+  if (direct) return direct;
+  const prefixed = commands.get(`caco.${name}`);
+  if (prefixed && prefixed.source === 'built-in') return prefixed;
+  return undefined;
 }
 
-registerBuiltin('session-new', () => newSessionClick());
+registerBuiltin('caco.session-new', () => newSessionClick());
 
 /** Select an SDK custom agent for the active session. `/agent <name>` SELECTS only — no
  *  prompt, no turn; the agent stays active for the user's next message (CLI semantics).
@@ -82,7 +91,7 @@ async function selectAgentCommand(sessionId: string, input: string, originalComm
   }
 }
 
-registerBuiltin('agent', async (arg) => {
+registerBuiltin('caco.agent', async (arg) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
 
@@ -105,7 +114,7 @@ registerBuiltin('agent', async (arg) => {
   }));
 });
 
-registerBuiltin('session-rename', async (newName) => {
+registerBuiltin('caco.session-rename', async (newName) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
   const trimmed = newName.trim();
@@ -113,7 +122,7 @@ registerBuiltin('session-rename', async (newName) => {
   await renameSession(sessionId, trimmed);
 });
 
-registerBuiltin('session-cwd', async (newCwd) => {
+registerBuiltin('caco.session-cwd', async (newCwd) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
   const trimmed = newCwd.trim();
@@ -138,7 +147,7 @@ registerBuiltin('session-cwd', async (newCwd) => {
   }
 });
 
-registerBuiltin('session-folder', async (arg) => {
+registerBuiltin('caco.session-folder', async (arg) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
   const trimmed = arg.trim();
@@ -165,7 +174,7 @@ registerBuiltin('session-folder', async (arg) => {
   }
 });
 
-registerBuiltin('session-archive', async () => {
+registerBuiltin('caco.session-archive', async () => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
   const res = await fetch(`/api/sessions/${sessionId}/state`).catch(() => null);
@@ -174,7 +183,7 @@ registerBuiltin('session-archive', async () => {
   await archiveSession(sessionId, name);
 });
 
-registerBuiltin('session-model', async (modelId) => {
+registerBuiltin('caco.session-model', async (modelId) => {
   const sessionId = getActiveSessionId();
   if (sessionId) {
     const res = await fetch(`/api/sessions/${sessionId}`, {
@@ -201,7 +210,7 @@ registerBuiltin('session-model', async (modelId) => {
   });
 });
 
-registerBuiltin('restart', async () => {
+registerBuiltin('caco.restart', async () => {
   try {
     const res = await fetch('/api/restart', { method: 'POST' });
     const data = await res.json();
@@ -211,7 +220,7 @@ registerBuiltin('restart', async () => {
   }
 });
 
-registerBuiltin('session-export', async () => {
+registerBuiltin('caco.session-export', async () => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
   showToast('Exporting session...', { type: 'info', autoHideMs: 3000 });
@@ -229,7 +238,7 @@ registerBuiltin('session-export', async () => {
   }
 });
 
-registerBuiltin('session-fork', async (message) => {
+registerBuiltin('caco.session-fork', async (message) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
   const trimmed = message.trim();
@@ -253,7 +262,7 @@ registerBuiltin('session-fork', async (message) => {
   }
 });
 
-registerBuiltin('session-compact', async (arg) => {
+registerBuiltin('caco.session-compact', async (arg) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
   const focus = arg.trim();
@@ -275,7 +284,7 @@ registerBuiltin('session-compact', async (arg) => {
   }
 });
 
-registerBuiltin('session-context-window', async (arg) => {
+registerBuiltin('caco.session-context-window', async (arg) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
   const trimmed = arg.trim().toLowerCase();
@@ -341,7 +350,7 @@ registerBuiltin('session-context-window', async (arg) => {
 
 const EFFORT_LABELS: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'xHigh' };
 
-registerBuiltin('session-effort', async (arg) => {
+registerBuiltin('caco.session-effort', async (arg) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
   const effortId = arg.trim();
@@ -508,7 +517,7 @@ export async function loadSkillCommands(): Promise<void> {
   if (getActiveSessionId() !== sessionId) return; // superseded by a newer activation
   disposeSkillCommands();
   for (const skill of skills) {
-    const existing = findCommand(skill.name);
+    const existing = commands.get(skill.name); // direct lookup: bare-name aliases must NOT shadow a skill
     if (existing && existing.source !== 'skill') continue; // built-ins/templates win
     const dispose = registerCommand({
       name: skill.name,

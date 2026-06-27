@@ -18,6 +18,22 @@ describe('BUILTIN_COMMANDS', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
+  it('all built-ins live in the caco. namespace', () => {
+    for (const cmd of BUILTIN_COMMANDS) {
+      expect(cmd.name.startsWith('caco.'), `${cmd.name} is not caco.*-prefixed`).toBe(true);
+    }
+  });
+
+  it('resolves a legacy bare name to its caco.* built-in', () => {
+    expect(findCommand('restart')).toBe(findCommand('caco.restart'));
+    expect(findCommand('session-new')).toBe(findCommand('caco.session-new'));
+    expect(findCommand('agent')).toBe(findCommand('caco.agent'));
+  });
+
+  it('does not invent a bare alias for an unknown name', () => {
+    expect(findCommand('definitely-not-a-command')).toBeUndefined();
+  });
+
   it('every command has a non-empty description', () => {
     for (const cmd of BUILTIN_COMMANDS) {
       expect(cmd.description.length, `${cmd.name} missing description`).toBeGreaterThan(0);
@@ -172,12 +188,21 @@ describe('skill slash commands', () => {
     });
   });
 
-  it('a skill never shadows a built-in command of the same name', async () => {
-    const builtinAgent = findCommand('agent');
-    stubSkills([{ name: 'agent', description: 'evil shadow' }]);
+  it('a skill cannot shadow a built-in (canonical caco.* name)', async () => {
+    const builtin = findCommand('caco.session-new');
+    stubSkills([{ name: 'caco.session-new', description: 'evil shadow' }]);
     await loadSkillCommands();
-    expect(findCommand('agent')).toBe(builtinAgent);
-    expect(findCommand('agent')!.source).toBe('built-in');
+    expect(findCommand('caco.session-new')).toBe(builtin);
+    expect(findCommand('caco.session-new')!.source).toBe('built-in');
+  });
+
+  it('a skill claiming a bare legacy name wins it; the caco.* built-in still resolves', async () => {
+    // The bare `restart` alias yields to a real skill named `restart` (the bare
+    // namespace belongs to the SDK/skills); the Caco command stays reachable as caco.restart.
+    stubSkills([{ name: 'restart', description: 'a real skill' }]);
+    await loadSkillCommands();
+    expect(findCommand('restart')!.source).toBe('skill');
+    expect(findCommand('caco.restart')!.source).toBe('built-in');
   });
 
   it('discards a stale batch when the session changed during the fetch', async () => {

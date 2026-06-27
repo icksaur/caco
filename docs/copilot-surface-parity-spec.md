@@ -230,14 +230,18 @@ work, not on `commands.list`.
 3. **RA — Agent discovery (the core deliverable):** in `session-manager.ts`, before
    `createSession`/`resumeSession`, read agent files from the project
    (`<cwd>/.github/agents/*.agent.md`) and user dir
-   (`<configDir>/agents/*.agent.md`), parse YAML frontmatter (`description`, optional
-   `name`/`tools`/`model`) + markdown body, and pass them as `customAgents`
-   (`name` = filename stem, e.g. `speckit.specify`; `prompt` = body; carry
-   `description`). Configure `skillDirectories` from `<configDir>/skills` +
-   `<cwd>/.github/skills`. Re-read on resume. Now `/agent` lists + runs spec-kit
-   commands: `/agent speckit.specify <text>` works end-to-end. Subscribe to
-   `custom-agents.updated` (and reload via `agent.reload`) so mid-session installs
-   appear.
+   (`~/.copilot/agents/*.agent.md`, i.e. `<configDir>/agents`), parse YAML
+   frontmatter (`name`, `description`, optional `tools`) + markdown body, and pass
+   them as `customAgents` (`name` = frontmatter `name` or filename stem, e.g.
+   `speckit.specify`; `prompt` = body; carry `description`; map `tools`).
+   **Precedence (per GitHub docs):** on a name collision the **user/home
+   `~/.copilot/agents` entry wins** over the project `.github/agents` one — dedupe
+   by name with home taking priority. Configure `skillDirectories` from
+   `<configDir>/skills` + `<cwd>/.github/skills`. **Loads at session start** (the CLI
+   says "restart to load"), so Caco re-reads on every create/resume — no hot reload
+   required for v1, though subscribing to `custom-agents.updated` + `agent.reload`
+   is a nice follow-up. Now `/agent` lists + runs spec-kit commands:
+   `/agent speckit.specify <text>` works end-to-end.
 4. **G1 — ergonomic `/speckit.*` commands (optional, after RA):** auto-register each
    discovered user-invocable agent as a native slash command (`source:'agent'`) that
    dispatches via the existing `agent-dispatch`. Gives `/speckit.specify <text>`

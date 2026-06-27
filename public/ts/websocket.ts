@@ -18,7 +18,7 @@ import { getActiveSessionId } from './app-state.js';
 import { markSessionObserved } from './session-observed.js';
 import type { SessionEvent } from './types.js';
 
-export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler';
+export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler' | 'skill';
 
 export type { SessionEvent };
 

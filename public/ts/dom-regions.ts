@@ -116,6 +116,7 @@ export const EVENT_TO_OUTER: Record<string, string> = {
   'caco.agent': 'agent-message',
   'caco.applet': 'applet-message',
   'caco.scheduler': 'scheduler-message',
+  'caco.skill': 'agent-message',
   'caco.agent_selected': 'assistant-activity',
   'caco.info': 'assistant-activity',
   'caco.truncated': 'assistant-activity',
@@ -151,6 +152,7 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
   'caco.agent': 'agent-text',
   'caco.applet': 'applet-text',
   'caco.scheduler': 'scheduler-text',
+  'caco.skill': 'agent-text',
   'caco.agent_selected': 'compact-text',
   'caco.info': null,  // omit - internal signal
   'caco.truncated': 'truncated-text',
@@ -578,6 +580,7 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'caco.agent': setPath('content'),
   'caco.applet': setPath('content'),
   'caco.scheduler': setPath('content'),
+  'caco.skill': setPath('content'),
 
   'caco.agent_selected': (element, data) => {
     const agentId = str(data.agentId, 'agent');

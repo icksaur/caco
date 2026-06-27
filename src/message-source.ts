@@ -5,11 +5,12 @@
  * - [applet:slug] - from applet iframes
  * - [agent:sessionId] - from agent-to-agent tools
  * - [scheduler:slug] - from scheduled jobs
+ * - [skill:name] - from a skill slash-command invocation (shown purple)
  * 
  * Pure functions - no I/O, no side effects.
  */
 
-export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler';
+export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler' | 'skill';
 
 export interface ParsedMessage {
   source: MessageSource;
@@ -51,6 +52,16 @@ export function parseMessageSource(content: string): ParsedMessage {
       source: 'scheduler',
       identifier: schedulerMatch[1],
       cleanContent: content.slice(schedulerMatch[0].length)
+    };
+  }
+  
+  // Parse skill marker: [skill:name]
+  const skillMatch = content.match(/^\[skill:([^\]]+)\]\s*/);
+  if (skillMatch) {
+    return {
+      source: 'skill',
+      identifier: skillMatch[1],
+      cleanContent: content.slice(skillMatch[0].length)
     };
   }
   

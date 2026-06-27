@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { BUILTIN_COMMANDS, findCommand, restoreCommandInput, registerCommand, type Command } from '../../public/ts/command-registry.js';
+import { BUILTIN_COMMANDS, findCommand, restoreCommandInput, registerCommand, loadSkillCommands, type Command } from '../../public/ts/command-registry.js';
 import { setActiveSession } from '../../public/ts/app-state.js';
 import { chatView } from '../../public/ts/chat-view-controller.js';
 
@@ -121,5 +121,89 @@ describe('registerCommand disposer ownership', () => {
 
     disposeB();
     expect(findCommand(name)).toBeUndefined();
+  });
+});
+
+describe('skill slash commands', () => {
+  beforeEach(() => {
+    setActiveSession('s1', '/repo');
+    vi.unstubAllGlobals();
+  });
+
+  function stubSkills(skills: Array<{ name: string; description?: string; hint?: string }>) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/sessions/s1/skills') {
+        return { ok: true, json: async () => ({ skills }) } as unknown as Response;
+      }
+      return { ok: true, json: async () => ({ ok: true }) } as unknown as Response;
+    }));
+  }
+
+  it('registers each discovered skill as a /<name> command, then disposes on reload', async () => {
+    stubSkills([{ name: 'code-review', description: 'Do a review' }]);
+    await loadSkillCommands();
+
+    const cmd = findCommand('code-review');
+    expect(cmd).toBeDefined();
+    expect(cmd!.source).toBe('skill');
+    expect(cmd!.description).toBe('Do a review');
+
+    stubSkills([]);
+    await loadSkillCommands();
+    expect(findCommand('code-review')).toBeUndefined();
+  });
+
+  it('the /<name> handler posts name + input to skill-invoke', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/sessions/s1/skills') {
+        return { ok: true, json: async () => ({ skills: [{ name: 'code-review' }] }) } as unknown as Response;
+      }
+      return { ok: true, json: async () => ({ ok: true }) } as unknown as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadSkillCommands();
+
+    await findCommand('code-review')!.handler('check reliability');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/skill-invoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'code-review', input: 'check reliability' }),
+    });
+  });
+
+  it('a skill never shadows a built-in command of the same name', async () => {
+    const builtinAgent = findCommand('agent');
+    stubSkills([{ name: 'agent', description: 'evil shadow' }]);
+    await loadSkillCommands();
+    expect(findCommand('agent')).toBe(builtinAgent);
+    expect(findCommand('agent')!.source).toBe('built-in');
+  });
+
+  it('discards a stale batch when the session changed during the fetch', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/sessions/sA/skills') {
+        return { ok: true, json: async () => ({ skills: [{ name: 'skill-from-A' }] }) } as unknown as Response;
+      }
+      return { ok: true, json: async () => ({ skills: [] }) } as unknown as Response;
+    }));
+
+    setActiveSession('sA', '/repoA');
+    const inflight = loadSkillCommands();
+    setActiveSession('sB', '/repoB');
+    await inflight;
+
+    expect(findCommand('skill-from-A')).toBeUndefined();
+  });
+
+  it('prunes the prior batch on a pointer change even if the next fetch fails', async () => {
+    stubSkills([{ name: 'skill-a' }]);
+    await loadSkillCommands();
+    expect(findCommand('skill-a')).toBeDefined();
+
+    // Pointer change (e.g. new chat / switch) disposes immediately, independent of any
+    // subsequent (possibly failing) skill fetch.
+    setActiveSession('s2', '/repo2');
+    expect(findCommand('skill-a')).toBeUndefined();
   });
 });

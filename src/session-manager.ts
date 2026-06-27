@@ -23,7 +23,7 @@ import { broadcastEvent } from './event-bus.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
 import { thresholdForBudget, type ModelTokenLimits } from './context-budget.js';
 import { tokenLimitsForModel, effectiveContextTier } from './model-billing.js';
-import type { SdkAgentInfo } from './agent-command.js';
+import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './agent-command.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 
@@ -162,6 +162,10 @@ interface CopilotSessionInstance {
       list(): Promise<{ agents: SdkAgentInfo[] }>;
       select(params: { name: string }): Promise<{ agent: SdkAgentInfo }>;
     };
+    commands: {
+      list(params?: Record<string, unknown>): Promise<{ commands: SdkCommandInfo[] }>;
+      invoke(params: { name: string; input?: string }): Promise<SdkCommandInvokeResult>;
+    };
   };
 }
 
@@ -169,6 +173,7 @@ interface SendOptions {
   prompt: string;
   attachments?: Array<{ type: string; path: string }>;
   mode?: string;
+  displayPrompt?: string;
 }
 
 interface ActiveSession {
@@ -1091,6 +1096,19 @@ export class SessionManager {
     if (!active) throw new Error(`Session ${sessionId} is not active`);
     const result = await active.session.rpc.agent.select({ name });
     return result.agent;
+  }
+
+  async listCommands(sessionId: string): Promise<SdkCommandInfo[]> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) throw new Error(`Session ${sessionId} is not active`);
+    const result = await active.session.rpc.commands.list({});
+    return result.commands;
+  }
+
+  async invokeCommand(sessionId: string, name: string, input?: string): Promise<SdkCommandInvokeResult> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) throw new Error(`Session ${sessionId} is not active`);
+    return active.session.rpc.commands.invoke({ name, input });
   }
 
   /**

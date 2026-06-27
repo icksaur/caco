@@ -1,5 +1,5 @@
 import { newSessionClick } from './router.js';
-import { getActiveSessionId, getAvailableModels } from './app-state.js';
+import { getActiveSessionId, getAvailableModels, onSessionActivate, onActiveSessionChange } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
@@ -10,7 +10,7 @@ import type { PopupItem } from './input-popup.js';
 export interface Command {
   name: string;
   description: string;
-  source: 'built-in' | 'template' | 'extension';
+  source: 'built-in' | 'template' | 'extension' | 'skill';
   handler: (args: string) => void | Promise<void>;
   picker?: () => PopupItem[] | Promise<PopupItem[]>;
 }
@@ -446,6 +446,90 @@ async function fetchSessionAgents(): Promise<SessionAgent[] | null> {
     return null;
   }
 }
+
+interface SessionSkill { name: string; description?: string; hint?: string }
+
+/** Fetch the active session's discovered SDK skill commands (project + user dirs).
+ *  Returns null on error (after toasting), [] when none. */
+async function fetchSessionSkills(): Promise<SessionSkill[] | null> {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) return null;
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/skills`);
+    if (!res.ok) return null;
+    const data = await res.json() as { skills?: SessionSkill[] };
+    return data.skills ?? [];
+  } catch {
+    return null;
+  }
+}
+
+/** Invoke an SDK skill command for the active session. The server resolves the skill,
+ *  calls `commands.invoke`, and dispatches the resulting agent-prompt turn (the user
+ *  sees the skill's `displayPrompt`). On failure restores input + red toast. */
+async function invokeSkill(sessionId: string, name: string, input: string, originalCommand: string): Promise<void> {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/skill-invoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, input }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Skill invocation failed' }));
+      restoreActiveInput(originalCommand);
+      showToast(data.error || 'Skill invocation failed');
+    }
+  } catch (error) {
+    restoreActiveInput(originalCommand);
+    showToast(`Skill invocation failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// LIFECYCLE: per-session skill slash commands. Discovered SDK skills (~/.copilot/skills
+// or project .github/skills) are registered as native `/<name>` commands, matching the
+// Copilot CLI where skills (unlike agents) ARE slash commands. The skill set is
+// cwd-dependent, so the batch is pruned on any active-session pointer change
+// (`onActiveSessionChange`: switch, new chat, teardown) and re-derived on activation
+// (`onSessionActivate`). Skills never shadow a built-in/template/extension command.
+const skillCommandDisposers: Array<() => void> = [];
+
+function disposeSkillCommands(): void {
+  for (const dispose of skillCommandDisposers.splice(0)) {
+    try { dispose(); } catch { /* ignore */ }
+  }
+}
+
+export async function loadSkillCommands(): Promise<void> {
+  // Capture the activation we're loading for; discard a fetch that resolves after the
+  // user switched away (switches are not serialized).
+  const sessionId = getActiveSessionId();
+  const skills = await fetchSessionSkills();
+  if (!skills) return;
+  if (getActiveSessionId() !== sessionId) return; // superseded by a newer activation
+  disposeSkillCommands();
+  for (const skill of skills) {
+    const existing = findCommand(skill.name);
+    if (existing && existing.source !== 'skill') continue; // built-ins/templates win
+    const dispose = registerCommand({
+      name: skill.name,
+      description: skill.description || skill.hint || `Skill ${skill.name}`,
+      source: 'skill',
+      handler: async (arg) => {
+        const activeId = getActiveSessionId();
+        if (!activeId) { showToast('No active session'); return; }
+        const input = arg.trim();
+        await invokeSkill(activeId, skill.name, input, `/${skill.name}${input ? ` ${input}` : ''}`);
+      },
+    });
+    skillCommandDisposers.push(dispose);
+  }
+}
+
+// Prune on any pointer change (new chat, switch, teardown) so a prior session's skill
+// commands never linger in the menu — including when the next session's skill fetch
+// fails (loadSkillCommands early-returns before disposing in that case).
+onActiveSessionChange(() => disposeSkillCommands());
+onSessionActivate(() => { void loadSkillCommands(); });
 
 function formatTokenCount(n: number): string {
   if (n >= 1_000_000) {

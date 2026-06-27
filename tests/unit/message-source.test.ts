@@ -79,6 +79,24 @@ describe('parseMessageSource', () => {
     });
   });
 
+  describe('skill messages', () => {
+    it('parses [skill:name] prefix', () => {
+      const result = parseMessageSource('[skill:code-review] Use the skill tool to invoke the "code-review" skill');
+      expect(result.source).toBe('skill');
+      expect(result.identifier).toBe('code-review');
+      expect(result.cleanContent).toBe('Use the skill tool to invoke the "code-review" skill');
+    });
+
+    it('round-trips through prefixMessageSource', () => {
+      const prefixed = prefixMessageSource('skill', 'create-spec-plan', 'do the thing');
+      expect(prefixed).toBe('[skill:create-spec-plan] do the thing');
+      const parsed = parseMessageSource(prefixed);
+      expect(parsed.source).toBe('skill');
+      expect(parsed.identifier).toBe('create-spec-plan');
+      expect(parsed.cleanContent).toBe('do the thing');
+    });
+  });
+
   describe('edge cases', () => {
     it('handles empty content after prefix', () => {
       const result = parseMessageSource('[applet:test] ');

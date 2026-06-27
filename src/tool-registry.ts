@@ -85,3 +85,10 @@ export function parseExcludedBuiltins(defaults: string[], env: string | undefine
 export function excludedBuiltinNames(): string[] {
   return parseExcludedBuiltins(DEFAULT_EXCLUDED_BUILTINS, process.env.CACO_EXCLUDED_BUILTINS);
 }
+
+/** Whether the SDK `skill` built-in tool is available to sessions. Skills run by asking
+ *  the agent to call this tool, so a skill slash-command cannot work without it. Caco
+ *  never excludes it by default; this guards the CACO_EXCLUDED_BUILTINS misconfiguration. */
+export function skillToolEnabled(): boolean {
+  return !excludedBuiltinNames().includes('builtin:skill');
+}

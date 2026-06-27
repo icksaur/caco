@@ -346,6 +346,7 @@ function enrichUserMessageWithSource(event: SessionEvent): SessionEvent {
       ...(parsed.source === 'applet' && { appletSlug: parsed.identifier }),
       ...(parsed.source === 'agent' && { fromSession: parsed.identifier }),
       ...(parsed.source === 'scheduler' && { scheduleSlug: parsed.identifier }),
+      ...(parsed.source === 'skill' && { skillName: parsed.identifier }),
     }
   };
 }

@@ -244,11 +244,11 @@ export class DispatchHttpError extends Error {
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; beforeSend?: () => Promise<void> },
+  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; displayPrompt?: string; beforeSend?: () => Promise<void> },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePaths, correlationId, requestId, needsObservation, beforeSend } = options || {};
+  const { tempFilePaths, correlationId, requestId, needsObservation, displayPrompt, beforeSend } = options || {};
   const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
 
@@ -319,8 +319,13 @@ export async function dispatchMessage(
     
     const messageOptions: { 
       prompt: string; 
-      attachments?: Array<{ type: string; path: string }> 
+      attachments?: Array<{ type: string; path: string }>;
+      displayPrompt?: string;
     } = { prompt };
+
+    if (displayPrompt) {
+      messageOptions.displayPrompt = displayPrompt;
+    }
     
     if (tempFilePaths && tempFilePaths.length > 0) {
       messageOptions.attachments = tempFilePaths.map(p => ({ type: 'file', path: p }));

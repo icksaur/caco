@@ -12,6 +12,39 @@ export interface SdkAgentInfo {
   skills?: string[];
 }
 
+export interface SdkCommandInfo {
+  name: string;
+  description?: string;
+  kind?: string;
+  input?: { hint?: string; required?: boolean };
+  allowDuringAgentExecution?: boolean;
+  userInvocable?: boolean;
+}
+
+export interface SkillCommand {
+  name: string;
+  description: string;
+  hint?: string;
+}
+
+/** Keep only user-invocable skill commands from a raw `commands.list` result. */
+export function filterSkillCommands(commands: SdkCommandInfo[]): SkillCommand[] {
+  return commands
+    .filter(c => c.kind === 'skill' && c.userInvocable !== false && typeof c.name === 'string' && c.name.length > 0)
+    .map(c => ({ name: c.name, description: c.description ?? '', hint: c.input?.hint }));
+}
+
+/** SDK slash-command invocation result. A skill returns `kind:'agent-prompt'`; other
+ *  kinds (`text`, `completed`, `select-subcommand`) carry their own optional fields. */
+export interface SdkCommandInvokeResult {
+  kind: string;
+  prompt?: string;
+  displayPrompt?: string;
+  text?: string;
+  message?: string;
+  [k: string]: unknown;
+}
+
 /** A usable slug is the whitespace-free `id` the SDK derives from the agent filename.
  *  It is always a safe, parser-friendly invocation token. */
 export function isUsableSlug(id: unknown): id is string {

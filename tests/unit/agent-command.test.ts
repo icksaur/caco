@@ -3,7 +3,9 @@ import {
   resolveAgentSelection,
   visibleAgents,
   isUsableSlug,
+  filterSkillCommands,
   type SdkAgentInfo,
+  type SdkCommandInfo,
 } from '../../src/agent-command.js';
 
 function agent(partial: Partial<SdkAgentInfo> & { id: string }): SdkAgentInfo {
@@ -89,5 +91,27 @@ describe('resolveAgentSelection', () => {
     expect(resolveAgentSelection(list, 'hidden')).toEqual({
       ok: false, status: 404, error: 'Agent not found: hidden',
     });
+  });
+});
+
+describe('filterSkillCommands', () => {
+  const commands: SdkCommandInfo[] = [
+    { name: 'code-review', description: 'Do a review', kind: 'skill', input: { hint: 'what to review' } },
+    { name: 'plan', description: 'Builtin plan', kind: 'builtin' },
+    { name: 'mcp-thing', description: 'A client cmd', kind: 'client' },
+    { name: 'disabled-skill', kind: 'skill', userInvocable: false },
+    { name: '', kind: 'skill' },
+  ];
+
+  it('keeps only user-invocable skill commands with a name', () => {
+    expect(filterSkillCommands(commands)).toEqual([
+      { name: 'code-review', description: 'Do a review', hint: 'what to review' },
+    ]);
+  });
+
+  it('defaults a missing description to empty string', () => {
+    expect(filterSkillCommands([{ name: 'bare', kind: 'skill' }])).toEqual([
+      { name: 'bare', description: '', hint: undefined },
+    ]);
   });
 });

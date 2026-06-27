@@ -16,6 +16,8 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `POST /api/sessions/:id/observe` - Mark session as observed
 - `GET /api/sessions/:id/agents` - List SDK custom agents visible to `/agent`
 - `POST /api/sessions/:id/agent-select` - Select an SDK custom agent for the session
+- `GET /api/sessions/:id/skills` - List SDK skill commands visible as `/skill-name`
+- `POST /api/sessions/:id/skill-invoke` - Invoke an SDK skill command as an agent turn
 - `PATCH /api/sessions/:id` - Update session metadata (name, env hint, context)
 - `PATCH /api/sessions/:id/applet` - Update active applet params and panel visibility
 - `DELETE /api/sessions/:id` - Delete a session
@@ -232,6 +234,33 @@ event on success. Returns 409 if the session is busy, 404 for an unknown agent, 
 empty input.
 
 Returns: `{ "ok": true, "sessionId": "uuid", "agentId": "reviewer" }`
+
+**GET /api/sessions/:id/skills** - List SDK skill commands
+
+Returns the session's discovered `kind:'skill'` commands (from `~/.copilot/skills` and
+project `.github/skills`), surfaced as native `/skill-name` slash commands.
+
+Returns: `{ "skills": [{ "name": "code-review", "description": "...", "hint": "..." }] }`
+
+**POST /api/sessions/:id/skill-invoke** - Invoke an SDK skill command
+
+Body:
+```json
+{
+  "name": "code-review",
+  "input": "check reliability"
+}
+```
+
+Invokes the skill via `session.rpc.commands.invoke({ name, input })`. For the common
+`agent-prompt` result, dispatches the returned prompt (or a Caco-built equivalent that
+explicitly tells the agent to call its `skill` tool) as an agent turn. The timeline shows
+that prompt as a purple system-produced message (via a `[skill:name]` source marker), not
+the user's raw `/skill` text. A `text` result is broadcast as a `session.info` event.
+Returns 400 if the `skill` built-in tool is disabled, 409 if the session is busy, 404 for
+an unknown skill, 400 for a missing name.
+
+Returns: `{ "ok": true, "sessionId": "uuid" }`
 
 **POST /api/sessions/:id/messages** - Send message to session
 ```json

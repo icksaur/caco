@@ -24,12 +24,21 @@ import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
-import { dispatchMessage } from './session-messages.js';
+import { DispatchHttpError, dispatchMessage } from './session-messages.js';
 import { prefixMessageSource } from '../message-source.js';
 import { getSessionDraft, setSessionDraft, deleteSessionDraft } from '../chat-draft-store.js';
 import { modelCostSummary } from '../model-billing.js';
 import { snapshot as throughputSnapshot } from '../session-throughput.js';
-import { resolveAgentSelection, visibleAgents } from '../agent-command.js';
+import { resolveAgentSelection, visibleAgents, filterSkillCommands } from '../agent-command.js';
+import { skillToolEnabled } from '../tool-registry.js';
+
+/** Canonical wrapper instructing the agent to actually call its `skill` tool. Matches
+ *  the SDK's own `commands.invoke` agent-prompt; used as a fallback when the SDK result
+ *  omits a prompt so we never dispatch a bare slash command the agent has to guess at. */
+function buildSkillPrompt(name: string, input: string): string {
+  const tail = input ? ` ${input}` : '';
+  return `Use the skill tool to invoke the "${name}" skill, then follow the skill's instructions to help with:${tail}`;
+}
 
 const router = Router();
 
@@ -367,6 +376,98 @@ router.post('/sessions/:sessionId/agent-select', async (req: Request, res: Respo
     updateSessionMeta(sessionId, meta => { meta.lastUsedAt = new Date().toISOString(); }, { createIfMissing: false });
     res.json({ ok: true, sessionId, agentId: agent.id });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get('/sessions/:sessionId/skills', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+
+  if (!sessionManager.getSessionCwd(sessionId)) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+
+  try {
+    if (!sessionManager.isActive(sessionId)) {
+      await sessionManager.resume(sessionId, sessionState.getSessionConfig());
+    }
+    const skills = filterSkillCommands(await sessionManager.listCommands(sessionId));
+    res.json({ skills });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: `Failed to list skills: ${message}` });
+  }
+});
+
+router.post('/sessions/:sessionId/skill-invoke', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const requestId = (req.headers['x-request-id'] as string) || `skill-${Date.now().toString(36)}`;
+  const { name, input } = req.body as { name?: string; input?: string };
+
+  if (!name?.trim()) {
+    res.status(400).json({ error: 'name is required' });
+    return;
+  }
+  if (!skillToolEnabled()) {
+    res.status(400).json({ error: 'The skill tool is disabled in this Caco instance; skills cannot run' });
+    return;
+  }
+  if (!sessionManager.getSessionCwd(sessionId)) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+  if (sessionManager.isBusy(sessionId)) {
+    res.status(409).json({ error: 'Session is busy processing another message', code: 'SESSION_BUSY' });
+    return;
+  }
+
+  try {
+    if (!sessionManager.isActive(sessionId)) {
+      await sessionManager.resume(sessionId, sessionState.getSessionConfig());
+    }
+    const skills = filterSkillCommands(await sessionManager.listCommands(sessionId));
+    if (!skills.some(s => s.name === name)) {
+      res.status(404).json({ error: `Skill not found: ${name}` });
+      return;
+    }
+
+    const trimmedInput = input?.trim() ?? '';
+    const result = await sessionManager.invokeCommand(sessionId, name, trimmedInput || undefined);
+
+    if (result.kind === 'agent-prompt') {
+      // The agent must be told to actually call the skill tool. Prefer the SDK's
+      // canonical agent-prompt; fall back to our explicit wrapper so we never dispatch
+      // a bare slash the agent has to interpret.
+      const agentPrompt = typeof result.prompt === 'string' && result.prompt.trim()
+        ? result.prompt
+        : buildSkillPrompt(name, trimmedInput);
+      // Show the actual prompt the agent received, tagged `skill` so it renders as a
+      // purple system-produced message (transparent, not a parrot of the user's text).
+      const displayPrompt = prefixMessageSource('skill', name, agentPrompt);
+      await dispatchMessage(
+        sessionId,
+        agentPrompt,
+        { requestId, needsObservation: true, displayPrompt },
+        { onEvent: (evt) => broadcastEvent(sessionId, evt) }
+      );
+      res.json({ ok: true, sessionId });
+      return;
+    }
+
+    if (result.kind === 'text' && typeof result.text === 'string') {
+      broadcastEvent(sessionId, { type: 'session.info', data: { message: result.text } });
+      res.json({ ok: true, sessionId });
+      return;
+    }
+
+    res.json({ ok: true, sessionId, unsupported: result.kind });
+  } catch (error) {
+    if (error instanceof DispatchHttpError) {
+      res.status(error.status).json({ error: error.message, ...(error.code && { code: error.code }) });
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     res.status(500).json({ error: message });
   }

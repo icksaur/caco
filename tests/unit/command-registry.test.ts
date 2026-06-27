@@ -36,7 +36,7 @@ describe('BUILTIN_COMMANDS', () => {
     });
   }
 
-  it('/agent picker lists SDK agents by slug and fills a trailing prompt space', async () => {
+  it('/agent picker lists SDK agents by slug (select-only, no trailing prompt space)', async () => {
     setActiveSession('s1', '/repo');
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
@@ -55,12 +55,12 @@ describe('BUILTIN_COMMANDS', () => {
         id: 'reviewer',
         label: 'Reviewer (reviewer)',
         description: 'Reviews code · gpt-5.5',
-        value: 'reviewer ',
+        value: 'reviewer',
       },
     ]);
   });
 
-  it('/agent posts the raw input for the server to resolve', async () => {
+  it('/agent posts the raw identifier to agent-select for the server to resolve', async () => {
     setActiveSession('s1', '/repo');
     const fetchMock = vi.fn(async () => ({
       ok: true,
@@ -68,27 +68,26 @@ describe('BUILTIN_COMMANDS', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await findCommand('agent')!.handler('reviewer check reliability');
+    await findCommand('agent')!.handler('smoke user test');
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/agent-dispatch', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/agent-select', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: 'reviewer check reliability' }),
+      body: JSON.stringify({ input: 'smoke user test' }),
     });
   });
 
-  it('/agent saves the consumed command for async restorePrompt recovery', async () => {
+  it('/agent selection does not save a prompt (no turn is sent)', async () => {
     setActiveSession('s1', '/repo');
-    const fetchMock = vi.fn(async () => ({
+    vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({ ok: true }),
-    }));
-    vi.stubGlobal('fetch', fetchMock);
+    })));
     const savePrompt = vi.spyOn(chatView, 'savePrompt').mockImplementation(() => {});
 
-    await findCommand('agent')!.handler('reviewer check reliability');
+    await findCommand('agent')!.handler('reviewer');
 
-    expect(savePrompt).toHaveBeenCalledWith('/agent reviewer check reliability', 's1');
+    expect(savePrompt).not.toHaveBeenCalled();
     savePrompt.mockRestore();
   });
 

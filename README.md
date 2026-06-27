@@ -75,7 +75,7 @@ To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Star
 | Command | Description |
 |---------|-------------|
 | `/session-new` | New chat |
-| `/agent <name> <prompt>` | Dispatch prompt with an SDK custom agent |
+| `/agent <name>` | Select an SDK custom agent for your next message (no prompt; mirrors the Copilot CLI) |
 | `/session-rename <name>` | Rename current session |
 | `/session-cwd <path>` | Change session working directory |
 | `/session-folder <name>` | Move session to a folder (or "/" for root) |

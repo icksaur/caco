@@ -24,12 +24,12 @@ import { normalizeFolder, isValidFolder } from '../folder.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
-import { DispatchHttpError, dispatchMessage } from './session-messages.js';
+import { dispatchMessage } from './session-messages.js';
 import { prefixMessageSource } from '../message-source.js';
 import { getSessionDraft, setSessionDraft, deleteSessionDraft } from '../chat-draft-store.js';
 import { modelCostSummary } from '../model-billing.js';
 import { snapshot as throughputSnapshot } from '../session-throughput.js';
-import { resolveAgentDispatch, visibleAgents } from '../agent-command.js';
+import { resolveAgentSelection, visibleAgents } from '../agent-command.js';
 
 const router = Router();
 
@@ -327,9 +327,8 @@ router.get('/sessions/:sessionId/agents', async (req: Request, res: Response) =>
   }
 });
 
-router.post('/sessions/:sessionId/agent-dispatch', async (req: Request, res: Response) => {
+router.post('/sessions/:sessionId/agent-select', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const requestId = (req.headers['x-request-id'] as string) || `agent-${Date.now().toString(36)}`;
   const { input } = req.body as { input?: string };
 
   if (!input?.trim()) {
@@ -347,46 +346,29 @@ router.post('/sessions/:sessionId/agent-dispatch', async (req: Request, res: Res
 
   try {
     // The agent list is session/cwd-scoped, so resolve against the live list (the
-    // session must be active to list). Resolution must happen before dispatch because
-    // it produces the prompt that dispatchMessage sends.
+    // session must be active to list/select). `/agent <name>` SELECTS only — no prompt,
+    // no turn; the agent stays active for the user's next message (CLI semantics).
     if (!sessionManager.isActive(sessionId)) {
       await sessionManager.resume(sessionId, sessionState.getSessionConfig());
     }
     const agents = visibleAgents(await sessionManager.listAgents(sessionId));
-    const resolution = resolveAgentDispatch(agents, input);
+    const resolution = resolveAgentSelection(agents, input);
     if (!resolution.ok) {
       res.status(resolution.status).json({ error: resolution.error });
       return;
     }
 
-    let selectedAgentId = resolution.agentId;
-    await dispatchMessage(
-      sessionId,
-      resolution.prompt,
-      {
-        requestId,
-        needsObservation: true,
-        beforeSend: async () => {
-          const agent = await sessionManager.selectAgent(sessionId, resolution.agentId);
-          selectedAgentId = agent.id;
-          broadcastEvent(sessionId, {
-            type: 'caco.agent_selected',
-            data: { agentId: agent.id, displayName: agent.displayName },
-          });
-        },
-      },
-      {
-        onEvent: (evt) => broadcastEvent(sessionId, evt),
-      }
-    );
+    const agent = await sessionManager.selectAgent(sessionId, resolution.agentId);
+    broadcastEvent(sessionId, {
+      type: 'caco.agent_selected',
+      data: { agentId: agent.id, displayName: agent.displayName },
+    });
 
     updateSessionMeta(sessionId, meta => { meta.lastUsedAt = new Date().toISOString(); }, { createIfMissing: false });
-    res.json({ ok: true, sessionId, agentId: selectedAgentId });
+    res.json({ ok: true, sessionId, agentId: agent.id });
   } catch (error) {
-    const status = error instanceof DispatchHttpError ? error.status : 500;
-    const code = error instanceof DispatchHttpError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);
-    res.status(status).json({ error: message, ...(code && { code }) });
+    res.status(500).json({ error: message });
   }
 });
 

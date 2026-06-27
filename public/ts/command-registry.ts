@@ -1,5 +1,5 @@
 import { newSessionClick } from './router.js';
-import { getActiveSessionId, getAvailableModels, notifyMessageSent } from './app-state.js';
+import { getActiveSessionId, getAvailableModels } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
@@ -17,7 +17,7 @@ export interface Command {
 
 export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string }> = [
   { name: 'session-new', description: 'New chat' },
-  { name: 'agent', description: 'Dispatch prompt with an SDK custom agent' },
+  { name: 'agent', description: 'Select an SDK custom agent (applies to your next message)' },
   { name: 'session-rename', description: 'Rename current session' },
   { name: 'session-cwd', description: 'Change session working directory' },
   { name: 'session-folder', description: 'Move session to a folder (or "/" for root)' },
@@ -56,30 +56,29 @@ export function findCommand(name: string): Command | undefined {
 
 registerBuiltin('session-new', () => newSessionClick());
 
-/** Dispatch a raw `/agent` payload (`<token> <prompt>`) to the active session. The
- *  server resolves the token against the live agent list (by slug `id`, frontmatter
- *  `name`, or `displayName`) and selects it. On failure restores the original command
- *  text so the user can retry. */
-async function dispatchAgent(sessionId: string, input: string, originalCommand: string): Promise<void> {
+/** Select an SDK custom agent for the active session. `/agent <name>` SELECTS only — no
+ *  prompt, no turn; the agent stays active for the user's next message (CLI semantics).
+ *  The server resolves the identifier against the live agent list (slug `id`, frontmatter
+ *  `name`, or `displayName`). On success: green toast + a "Selected agent" transcript
+ *  line (the form already cleared the input). On failure: red toast + input restored. */
+async function selectAgentCommand(sessionId: string, input: string, originalCommand: string): Promise<void> {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/agent-dispatch`, {
+    const res = await fetch(`/api/sessions/${sessionId}/agent-select`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ input }),
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({ error: 'Agent dispatch failed' }));
+      const data = await res.json().catch(() => ({ error: 'Agent selection failed' }));
       restoreActiveInput(originalCommand);
-      showToast(data.error || 'Agent dispatch failed');
+      showToast(data.error || 'Agent selection failed');
     } else {
       const data = await res.json().catch(() => ({} as { agentId?: string }));
-      chatView.savePrompt(originalCommand, sessionId);
-      notifyMessageSent(sessionId);
-      if (data.agentId) showToast(`Dispatched to ${data.agentId}`, { type: 'success', autoHideMs: 2000 });
+      if (data.agentId) showToast(`Selected ${data.agentId}`, { type: 'success', autoHideMs: 2000 });
     }
   } catch (error) {
     restoreActiveInput(originalCommand);
-    showToast(`Agent dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
+    showToast(`Agent selection failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -89,11 +88,11 @@ registerBuiltin('agent', async (arg) => {
 
   const input = arg.trim();
   if (!input) {
-    showToast('Usage: /agent <agent-name> <prompt>');
+    showToast('Usage: /agent <agent-name>');
     return;
   }
 
-  await dispatchAgent(sessionId, input, `/agent ${input}`);
+  await selectAgentCommand(sessionId, input, `/agent ${input}`);
 }, async () => {
   const agents = await fetchSessionAgents();
   if (agents === null) return [];
@@ -102,7 +101,7 @@ registerBuiltin('agent', async (arg) => {
     id: agent.id,
     label: agent.displayName && agent.displayName !== agent.id ? `${agent.displayName} (${agent.id})` : agent.id,
     description: [agent.description, agent.model].filter(Boolean).join(' · '),
-    value: `${agent.id} `,
+    value: agent.id,
   }));
 });
 

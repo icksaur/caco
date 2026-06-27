@@ -15,7 +15,7 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `POST /api/sessions/:id/fork` - Fork session into a new side conversation
 - `POST /api/sessions/:id/observe` - Mark session as observed
 - `GET /api/sessions/:id/agents` - List SDK custom agents visible to `/agent`
-- `POST /api/sessions/:id/agent-dispatch` - Select an SDK custom agent and dispatch a prompt
+- `POST /api/sessions/:id/agent-select` - Select an SDK custom agent for the session
 - `PATCH /api/sessions/:id` - Update session metadata (name, env hint, context)
 - `PATCH /api/sessions/:id/applet` - Update active applet params and panel visibility
 - `DELETE /api/sessions/:id` - Delete a session
@@ -214,19 +214,24 @@ Returns:
 }
 ```
 
-**POST /api/sessions/:id/agent-dispatch** - Select an SDK custom agent and dispatch a prompt
+**POST /api/sessions/:id/agent-select** - Select an SDK custom agent for the session
 
 Body:
 ```json
 {
-  "agentName": "reviewer",
-  "prompt": "Check maintainability and reliability"
+  "input": "reviewer"
 }
 ```
 
-Selects `agentName` with `session.rpc.agent.select({ name })`, then sends `prompt` through the normal streaming dispatch path. Agent names must be whitespace-free. Returns 409 if the session is busy, 404 for unknown/non-invocable agents.
+`input` is the entire agent identifier — its slug `id`, frontmatter `name` (may contain
+spaces), or `displayName`. This SELECTS the agent (`session.rpc.agent.select({ name })`)
+and carries **no prompt**: the agent stays active for the user's next message, mirroring
+the Copilot CLI's `/agent <name>`. The server resolves `input` against the live
+user-invocable agent list (slug `id` wins on collision). Broadcasts a `caco.agent_selected`
+event on success. Returns 409 if the session is busy, 404 for an unknown agent, 400 for
+empty input.
 
-Returns: `{ "ok": true, "sessionId": "uuid" }`
+Returns: `{ "ok": true, "sessionId": "uuid", "agentId": "reviewer" }`
 
 **POST /api/sessions/:id/messages** - Send message to session
 ```json

@@ -150,26 +150,28 @@ Once R2 renders SDK-surfaced prompts/commands, the bespoke `scanPromptDir`
 `.caco/prompts` → `~/.copilot/prompts` + project prompt dirs (smaller change, still
 removes the non-standard `.caco/prompts`).
 
-### R4 — Agent invocation by name or slug (the `/agent` surface)
-`/agent` stays as the agent surface (the CLI has no per-agent slash command — see the
-reverted G1 below). This requirement fixes how `/agent` resolves an agent identifier.
+### R4 — Agent selection by name or slug (the `/agent` surface)
+`/agent` is the agent surface (the CLI has no per-agent slash command — see the reverted
+G1 below). **`/agent <name>` SELECTS an agent — it carries no prompt.** A frontmatter
+`name` may contain spaces, so a trailing prompt cannot be disambiguated from the name;
+the entire payload after `/agent` is therefore the agent identifier. This mirrors the
+Copilot CLI exactly (`● Selected custom agent: X`, no response). After selection the
+agent stays active on the session, so the user's **next** normal message runs as it.
 
 **SDK behavior (probe-confirmed, `@github/copilot-sdk@1.0.1`):** an agent file exposes
 three identifiers — frontmatter `name` (may contain spaces, e.g. `"smoke user test"`),
 SDK-derived slug `id` (always whitespace-free, e.g. `smoke-user`), and `displayName`.
 `rpc.agent.select({ name })` resolves **all three** to the same agent. An unknown value
-**throws** `Custom agent '<x>' not found` — so the SDK already "presents a failure if it
-doesn't exist." This matches the user's CLI finding: both `/agent <name-from-file>` and
-`/agent <slug-name>` succeed; only the slug is presented in the `/agent` picker.
+**throws** `Custom agent '<x>' not found`. `agent.select` is stateful — the selection
+persists on the session until re-selected/deselected, which is what makes the next
+message run as the agent.
 
-**Current Caco bugs (must fix):**
-- `isUsableAgent` (`agent-command.ts:24`) filters out any agent whose **`name`** has
-  whitespace → an agent like `name: "smoke user test"` (slug `smoke-user`) is **dropped
-  from the picker entirely**, despite being valid and SDK-selectable.
-- Everything is keyed on `name` (picker `value`/`id`, dispatch token, validation lookup,
-  `parseAgentDispatchInput`), and `agent-dispatch` **rejects whitespace agent names**
-  (`sessions.ts:343`, `validateAgentForUserDispatch:47`). The whitespace-free slug `id`
-  is the correct key and is never used.
+**Current Caco bugs (fixed):**
+- `isUsableAgent` filtered out any agent whose **`name`** had whitespace → an agent like
+  `name: "smoke user test"` (slug `smoke-user`) was **dropped from the picker entirely**,
+  despite being valid and SDK-selectable. Now filters on the whitespace-free slug `id`.
+- Everything was keyed on `name`, and the route rejected whitespace agent names. The slug
+  `id` is the correct key; selection is resolved server-side against the live list.
 
 **Required behavior:**
 - **Filter on `userInvocable` + a usable slug**, not on `name` whitespace. Define a
@@ -177,67 +179,54 @@ doesn't exist." This matches the user's CLI finding: both `/agent <name-from-fil
   !/\s/.test(id)`, plus `userInvocable !== false`. The slug is whitespace-free by
   construction, so usable agents are never dropped.
 - **Picker presents the slug.** Insert `id` as the command value (parser-safe, matches
-  the CLI); show `displayName`/`name` in the label/description for recognizability.
-- **Server is the single home for resolution.** The combined `/agent <token> <prompt>`
-  command means the client must NOT pre-split into `{agentName, prompt}` — a multi-word
-  frontmatter name (`smoke user test hello`) would lose everything after the first token
-  before the server could resolve it. The client sends the **raw** args
-  (`{ input: arg.trim() }`); the server fetches the live `agent.list()` and resolves.
-- **Deterministic resolution algorithm** (server, exact + case-sensitive, no
-  normalization), against the usable-agent list:
-  1. Let `firstToken` = input up to the first whitespace. If some agent's **slug `id`**
-     equals `firstToken` exactly → that agent; prompt = the remainder. (Slug always wins
-     first, so `id=foo` + `name="foo bar"` resolves `/agent foo bar do x` to slug `foo`
-     with prompt `bar do x`.)
-  2. Else greedily match the **longest** identifier among each agent's `id`, `name`,
-     `displayName` such that `input === identifier` **or** `input.startsWith(identifier +
-     ' ')` (the match must end on a whitespace/end-of-string boundary, so `name="agent"`
-     does NOT match input `agentic …`). Longest identifier wins; prompt = remainder.
-  3. Else no match → forward `firstToken` to the SDK; `agent.select` throws
-     `not found`, surfaced as a toast (existing `dispatchAgent` failure path).
-- **Prompt is required (no select-only).** Caco's `/agent` is combined select+dispatch;
-  it does **not** support CLI-style select-only `/agent <name>`. If resolution consumes
-  the entire input (no remainder), return `prompt is required`. Stateful select-only is
-  a separate future feature (selected-agent UX + route changes), explicitly out of scope.
-- **Server selects a resolved KNOWN identifier**, preferring the agent's `id`, and
-  enforces `userInvocable !== false`. Free-form whitespace names are never forwarded
-  raw — only a value matched against `agent.list()` reaches `agent.select` (this is why
-  dropping the client whitespace rejection is safe: it flows to an RPC, not a shell, and
-  the server only selects resolved known agents).
+  the CLI). No trailing space — there is no prompt to type after it. Show
+  `displayName`/`name` in the label for recognizability.
+- **Server is the single home for resolution.** The client sends the **raw** payload
+  (`{ input: arg.trim() }`) to `POST /api/sessions/:id/agent-select`; the server fetches
+  the live `agent.list()` and resolves. (A multi-word frontmatter name can't be split
+  client-side.)
+- **Resolution (server, exact, case-sensitive, no normalization)** against the
+  usable-agent list — the **entire** trimmed `input` is the identifier (no prompt
+  parsing):
+  1. Exact match against a slug `id` → that agent (slug wins on collision).
+  2. Else exact match against a `name` or `displayName` → that agent.
+  3. Else 404 `Agent not found: <input>`. Only a resolved known `id` reaches
+     `agent.select`; free-form input is never selected raw.
+  Empty input → 400.
+- **Select only — no prompt, no turn.** The route calls `selectAgent` and broadcasts
+  `caco.agent_selected`; it does **not** call `dispatchMessage`. The agent persists for
+  the user's next message (CLI semantics).
 
-This keeps the "pit of success": the picker only ever inserts the slug, so the common
-path is unambiguous; manual name-with-spaces entry is best-effort via the boundary-anchored
-greedy match and degrades to a clear SDK `not found` toast, never a silent mis-dispatch.
+This keeps the "pit of success": the picker inserts the unambiguous slug; manual entry of
+a full name/slug also works; anything else is a clear `not found`, never a mis-dispatch.
 
 **Success / failure feedback (what the user sees):**
-- **Failure → red toast** + input restored for retry. Already the behavior:
-  `showToast` defaults to the `error`/red variant and `dispatchAgent` restores the
-  command text. The SDK's `Custom agent '<x>' not found` (and `not invocable`) messages
-  surface verbatim. No transcript event on failure.
+- **Failure → red toast** + input restored for retry. `showToast` defaults to the
+  `error`/red variant; the client restores the command text. The SDK's
+  `Custom agent '<x>' not found` and Caco's `Agent not found` surface verbatim.
+  No transcript event on failure.
 - **Success → synthetic inline activity marker** "Selected agent: `<slug>`", rendered
-  exactly like the compaction notice ("Conversation compacted"), positioned immediately
-  before the agent's turn (echoes the CLI's `● Selected custom agent: <name>`). An
-  optional green (`type:'success'`) toast may accompany it as a near-input confirmation.
-- **Mechanism:** the server `agent-dispatch` route, after a successful `selectAgent` and
-  before/at `dispatchMessage`, emits `{ type: 'caco.agent_selected', data: { agentId,
-  displayName } }` through the session's `onEvent`. The client renders it via the
-  `dom-regions` maps: `EVENT_TO_OUTER['caco.agent_selected'] = 'assistant-activity'`,
+  exactly like the compaction notice ("Conversation compacted"), echoing the CLI's
+  `● Selected custom agent: <name>`. A green (`type:'success'`) toast accompanies it as
+  a near-input confirmation. No prompt is sent and no agent turn runs.
+- **Mechanism:** the server `agent-select` route, after a successful `selectAgent`, emits
+  `{ type: 'caco.agent_selected', data: { agentId, displayName } }` through
+  `broadcastEvent`. The client renders it via the `dom-regions` maps:
+  `EVENT_TO_OUTER['caco.agent_selected'] = 'assistant-activity'`,
   `EVENT_TO_INNER = 'compact-text'` (reuse compaction styling), formatter →
   `Selected agent: ${data.agentId}`. `caco.*` events already pass the event filter
   (`event-filter.ts:71`).
 - **Persistence caveat (explicit):** `caco.*` synthetic events are **broadcast-only**
   (not written to the SDK `events.jsonl`), so this marker shows **live but does not
   replay on resume/reload** — unlike the compaction notices, which are real SDK events.
-  The dispatched prompt (`user.message`) and the agent's reply DO persist, so the turn
-  itself survives; only the "Selected agent" line is ephemeral in v1. Persisting it
-  across resume is a deliberate follow-up (inject into the replayed history path) — out
-  of scope unless requested.
+  The SDK agent selection itself persists on the session; only the "Selected agent" line
+  is ephemeral in v1. Persisting it across resume is a deliberate follow-up (inject into
+  the replayed history path) — out of scope unless requested.
 
-**Divisible:** (a) server — raw-input route + resolver in `agent-command.ts` (pure,
-unit-testable: slug-first, boundary greedy, prompt-required, displayName) + `visibleAgents`
-slug filter + emit `caco.agent_selected` on success; (b) client — picker inserts `id`,
-`/agent` handler posts `{ input }`, render `caco.agent_selected` + green toast. Ship
-(a) first (it stands alone and is fully testable); (b) is a thin follow-up.
+**Divisible:** (a) server — raw-input `agent-select` route + `resolveAgentSelection` in
+`agent-command.ts` (pure, unit-testable) + `visibleAgents` slug filter + emit
+`caco.agent_selected` on success; (b) client — picker inserts `id`, `/agent` handler
+posts `{ input }`, render `caco.agent_selected` + green toast.
 
 ### R5 — Hook-queued startup prompts (optional, deferred)
 On session start/resume, `loadDeferredRepoHooks` returns "queued repo-level startup

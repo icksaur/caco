@@ -27,54 +27,30 @@ export function visibleAgents(agents: SdkAgentInfo[]): SdkAgentInfo[] {
 }
 
 export type AgentResolution =
-  | { ok: true; agentId: string; prompt: string }
+  | { ok: true; agentId: string }
   | { ok: false; status: 400 | 404; error: string };
 
 /**
- * Resolve a raw `/agent` payload (`<token> <prompt…>`) against the active agent list.
- * The SDK accepts an agent's slug `id`, frontmatter `name`, or `displayName`, but Caco's
- * combined select+dispatch command must split the identifier from the prompt itself.
+ * Resolve a raw `/agent` payload to an agent slug. `/agent <name>` **selects** an agent
+ * (loads its persona into the session); it carries **no prompt**. A frontmatter `name`
+ * may contain spaces, so a trailing prompt cannot be disambiguated from the name — hence
+ * the entire payload is the identifier. This mirrors the Copilot CLI's select-only
+ * `/agent <name>` (which emits "Selected custom agent: X" and does not respond). After
+ * selection the agent stays active, so the user's *next* normal message runs as it.
  *
- * Deterministic, exact, case-sensitive:
- *  1. If the first whitespace-delimited token is a known slug `id`, that agent wins;
- *     the remainder is the prompt. (The slug is whitespace-free, so this is the common,
- *     unambiguous path the picker produces.)
- *  2. Otherwise greedily match the LONGEST identifier (`name`/`displayName`) that equals
- *     the input or is a prefix ending on a whitespace boundary; the remainder is the
- *     prompt. (Boundary-anchored so `name "agent"` never matches input `agentic …`.)
- *  3. Otherwise no known agent matched → 404. Only a resolved, known agent id is ever
- *     forwarded to `agent.select`; free-form input is never selected raw.
- *
- * A resolved agent with an empty remaining prompt → 400 (Caco has no select-only mode).
+ * Exact, case-sensitive match of the full identifier against the slug `id`, frontmatter
+ * `name`, or `displayName` (slug `id` wins on collision). No match → 404. Only a known
+ * agent id is ever forwarded to `agent.select`.
  */
-export function resolveAgentDispatch(agents: SdkAgentInfo[], input: string): AgentResolution {
-  const trimmed = input.trim();
-  if (!trimmed) return { ok: false, status: 400, error: 'Usage: /agent <agent> <prompt>' };
+export function resolveAgentSelection(agents: SdkAgentInfo[], input: string): AgentResolution {
+  const id = input.trim();
+  if (!id) return { ok: false, status: 400, error: 'Usage: /agent <agent-name>' };
 
-  const match = trimmed.match(/^(\S+)(?:\s+([\s\S]+))?$/);
-  const firstToken = match ? match[1] : trimmed;
-  const rest = (match && match[2] ? match[2] : '').trim();
+  const bySlug = agents.find(agent => agent.id === id);
+  if (bySlug) return { ok: true, agentId: bySlug.id };
 
-  const bySlug = agents.find(agent => agent.id === firstToken);
-  if (bySlug) {
-    if (!rest) return { ok: false, status: 400, error: 'prompt is required' };
-    return { ok: true, agentId: bySlug.id, prompt: rest };
-  }
+  const byName = agents.find(agent => agent.name === id || agent.displayName === id);
+  if (byName) return { ok: true, agentId: byName.id };
 
-  let best: { len: number; agentId: string; prompt: string } | null = null;
-  for (const agent of agents) {
-    for (const identifier of [agent.name, agent.displayName]) {
-      if (!identifier) continue;
-      if (trimmed === identifier || trimmed.startsWith(identifier + ' ')) {
-        const prompt = trimmed.slice(identifier.length).trim();
-        if (!best || identifier.length > best.len) best = { len: identifier.length, agentId: agent.id, prompt };
-      }
-    }
-  }
-  if (best) {
-    if (!best.prompt) return { ok: false, status: 400, error: 'prompt is required' };
-    return { ok: true, agentId: best.agentId, prompt: best.prompt };
-  }
-
-  return { ok: false, status: 404, error: `Agent not found: ${firstToken}` };
+  return { ok: false, status: 404, error: `Agent not found: ${id}` };
 }

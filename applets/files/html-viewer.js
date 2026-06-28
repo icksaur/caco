@@ -2,7 +2,7 @@
  * HtmlViewer — ViewerInstance for HTML files (sandboxed iframe).
  *
  * V2.b port of applets/html-viewer/script.js into the V1.1
- * ViewerInstance contract (docs/files-applet-v2.md §4.2).
+ * ViewerInstance contract (docs/files-applet-viewers-spec.md).
  *
  * The iframe loads `/api/file?path=` directly; the server sets
  * CSP for HTML responses (src/routes/api.ts:414-417). The

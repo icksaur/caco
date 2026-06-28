@@ -6,7 +6,7 @@
  * (user saves in VSCode, shell tools) surface in the applet within
  * ~300ms instead of waiting for the next polling tick.
  *
- * See docs/file-edits-v3.3.md.
+ * See docs/files-applet-edits-spec.md.
  *
  * Failure mode: any chokidar `error` (ENOSPC, permission, etc.) detaches
  * the watcher for that session; the poller falls back to timer-only mode
@@ -43,7 +43,7 @@ interface SessionWatcher {
 
 /** Build a chokidar `ignored` predicate from the repo's .gitignore plus
  *  the hardcoded EXCLUDED_DIRS list. Used at watcher construction; not
- *  reloaded mid-run (see docs/file-edits-v3.3.md Failure modes #5). */
+ *  reloaded mid-run (see docs/files-applet-edits-spec.md). */
 async function buildIgnoredPredicate(repoRoot: string): Promise<(p: string) => boolean> {
   let ig: Ignore | null = null;
   try {

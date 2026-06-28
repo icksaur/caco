@@ -1,7 +1,7 @@
 {
   "slug": "files",
   "name": "Files",
-  "description": "Tabbed file viewer with multiple viewer types per tab. V4 added per-type icons + copy-path button in the Ctrl+P picker. See docs/files-applet-v4.md.",
+  "description": "Tabbed file viewer with multiple viewer types per tab. Ctrl+P opens a fuzzy file picker. See docs/files-applet-spec.md.",
   "params": {},
   "createdAt": "2026-05-29T22:00:00.000Z",
   "updatedAt": "2026-06-10T20:30:00.000Z",

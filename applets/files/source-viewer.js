@@ -2,7 +2,7 @@
  * SourceViewer — read-only, syntax-highlighted ViewerInstance for
  * plain-text / code files.
  *
- * Used by the "external files" feature (docs/files-applet-external.md)
+ * Used by the "external files" feature (docs/files-applet-viewers-spec.md)
  * to render code/text files outside the session cwd. The diff viewer
  * cannot open external files (it requires git + cwd containment), so
  * SourceViewer provides a lightweight current-state view with hljs

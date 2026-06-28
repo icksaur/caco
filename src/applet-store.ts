@@ -51,7 +51,7 @@ export interface AppletMeta {
   updatedAt: string;
   /** V5: when true, omit from agent prompt + applet-browser
    *  default. Old URLs still resolve via SLUG_ALIASES or stub
-   *  redirect. See docs/files-applet-v5.md §4.2 / §4.5. */
+   *  redirect. See docs/files-applet-spec.md */
   deprecated?: boolean;
   /** V5: slug of the replacement applet (informational). */
   replacedBy?: string;
@@ -235,7 +235,7 @@ export async function loadApplet(
     // Multi-file applets: sibling *.js files (other than script.js)
     // in the applet's root dir are concatenated BEFORE script.js so
     // shared classes / helpers are available to it. Loaded in
-    // alphabetical order for determinism. See docs/files-applet-v1.md
+    // alphabetical order for determinism. See docs/files-applet-spec.md
     // §4.0.1.
     try {
       const entries = await readdir(paths.root);

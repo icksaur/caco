@@ -1,7 +1,7 @@
 /**
  * File Edits applet — V3.2 (tabs + always-on edits).
  *
- * See docs/file-edits-v3.2.md. The UI is a tab strip + single content
+ * See docs/files-applet-spec.md. The UI is a tab strip + single content
  * pane. Tabs auto-open on agent edits (or user pick via +). A
  * `followEdits` boolean decides whether incoming edits auto-switch
  * tabs; user gestures (tab click, pane scroll, picker) turn it off;
@@ -31,7 +31,7 @@
    *  V1.1: TabInstance is a TabContainer wrapping one or more
    *  ViewerInstances. id == relativePath for diff-default
    *  containers; 'markdown:'+absPath for markdown-default.
-   *  See docs/files-applet-v1.1.md §4.0.C. */
+   *  See docs/files-applet-spec.md */
   var tabs = new Map();
   /** Most recent tab to receive a content-changing edit (not no-op). Drives
    *  jumpToMostRecent's primary target. */
@@ -92,7 +92,7 @@
 
   // V3.y.1: deep-link queue. cold-load fires onUrlParamsChange
   // before cachedCwd is set; queue the openPath and drain when
-  // cachedCwd arrives. See docs/files-applet-v3.y.md §4.1.B.
+  // cachedCwd arrives. See docs/files-applet-spec.md
   // V6: pending entry carries optional routeOpen opts (diffMode)
   // so a cold-load ?diffMode=staged URL doesn't lose its mode
   // when drained after cachedCwd lands.
@@ -186,7 +186,7 @@
   // ── DiffViewer + MarkdownViewer (loaded by sibling .js files) ────────
   // Concatenated by applet-store.ts before this script. Exposed at
   // window.__filesApplet.DiffViewer / .MarkdownViewer.
-  // See docs/files-applet-v1.1.md §4.0.B.
+  // See docs/files-applet-spec.md
   var DiffViewer = window.__filesApplet && window.__filesApplet.DiffViewer;
   var MarkdownViewer = window.__filesApplet && window.__filesApplet.MarkdownViewer;
   var ImageViewer = window.__filesApplet && window.__filesApplet.ImageViewer;
@@ -210,7 +210,7 @@
    *  handle. Binary content (and SVG, whose diff is line-noise)
    *  routes to ImageViewer / HtmlViewer / AudioViewer / future
    *  viewers instead. See spec §7.7 Q7 for why SVG is listed.
-   *  Audio extensions (docs/files-applet-audio.md) are listed so
+   *  Audio extensions (docs/files-applet-spec.md) are listed so
    *  Diff/Source never claim them — keep in sync with
    *  source-viewer.js BINARY_RE and the AudioViewer descriptor regex. */
   function isBinaryExtension(rel) {
@@ -278,7 +278,7 @@
    *  { mode } filter so the poller's caco.edit lookup never
    *  matches a staged tab, and user-initiated opens find
    *  the exact requested tab (not whichever same-path tab
-   *  happens to exist first). See docs/files-applet-v6.md §4.3.1.
+   *  happens to exist first). See docs/files-applet-spec.md
    */
   function findContainerByRelPath(relPath, opts) {
     opts = opts || {};
@@ -330,9 +330,9 @@
     return container.viewers.get('diff') || null;
   }
 
-  // ── Shell object — see docs/files-applet-v1.1.md §4.0.3 + §4.6 ───────
+  // ── Shell object — see docs/files-applet-spec.md + §4.6 ───────
   /** V3.x.2 eviction config. Read from localStorage at init; null
-   *  means disabled. See docs/files-applet-v3.x.md §4.2.A. */
+   *  means disabled. See docs/files-applet-spec.md */
   var _evictionTimeoutMs = null;
   try {
     var _evictRaw = window.localStorage && window.localStorage.getItem(
@@ -475,7 +475,7 @@
 
     // V2.d: Mode toggle. Lazy-shown when the active viewer's
     // getModes() returns ≥2 entries. Stacked below the viewer
-    // toggle. See docs/files-applet-v2.md §4.0.C / §4.4.3.
+    // toggle. See docs/files-applet-spec.md
     var modeBtn = document.createElement('button');
     modeBtn.className = 'files-mode-toggle';
     modeBtn.type = 'button';
@@ -1943,7 +1943,7 @@
     if (tabs.size === 0) return;
     // Diff-only: this jumps to a file with an unstaged change. Markdown
     // tabs and future non-diff types have no concept of "dirty" and
-    // are skipped. See docs/files-applet-v1.md Step 8.1.
+    // are skipped. See docs/files-applet-spec.md Step 8.1.
     var targetId = null;
     var primary = lastEditedTabId && tabs.get(lastEditedTabId);
     if (primary && primary.type === 'diff' && primary.edit && primary.edit.status !== 'clean') {
@@ -2089,7 +2089,7 @@
     // version 2 carries defaultViewerType + activeViewerType so the
     // user's tabs (and viewer-mode) survive applet close+reopen.
     // The Map iteration order is insertion order so tab-strip order
-    // is preserved across reload. See docs/files-applet-v2.md §4.3.
+    // is preserved across reload. See docs/files-applet-spec.md
     // V6: additive diffMode on the same schema. Older readers
     // ignore unknown fields. V6.1 dropped diffRef.
     tabs.forEach(function(container) {
@@ -2283,7 +2283,7 @@
 
   // ── V3.y.2 finder enhancements ────────────────────────────────────────
   // Recent files: last RECENT_FILES_CAP opens, persisted in
-  // localStorage. See docs/files-applet-v3.y.md §4.2.D.
+  // localStorage. See docs/files-applet-spec.md
   var RECENT_FILES_KEY = 'caco:files-applet:recentPaths';
   var RECENT_FILES_CAP = 20;
   function _loadRecentFiles() {
@@ -2362,7 +2362,7 @@
 
   // V4: per-type icons + hover copy-path. Deliberate verbatim copy
   // of applets/file-finder/script.js fileIcons (parity, not shared
-  // state). Roadmap V5+ consolidates. See docs/files-applet-v4.md.
+  // state). Roadmap V5+ consolidates. See docs/files-applet-spec.md.
   var _PICKER_FILE_ICONS = {
     js: '📜', ts: '📜', jsx: '📜', tsx: '📜',
     json: '📋', md: '📝', txt: '📝',
@@ -2838,7 +2838,7 @@
 
   /** Route an external (out-of-cwd) absolute path: open a read-only
    *  tab keyed by the absolute path. Never calls /file-edits/open or
-   *  the diff viewer. See docs/files-applet-external.md. */
+   *  the diff viewer. See docs/files-applet-spec.md. */
   async function routeOpenExternal(abs, openOpts) {
     openOpts = openOpts || {};
     var existing = findContainerByExternalAbs(abs);
@@ -3048,7 +3048,7 @@
   }
 
   /** Walk hunks and headLines/workLines into an ordered row list. See
-   *  docs/file-edits-v2.md §Phase 1 Render → Merge walk. Pure function. */
+   *  docs/files-applet-spec.md 1 Render → Merge walk. Pure function. */
   function buildRows(headLines, workLines, hunks) {
     var rows = [];
     var hasHead = Array.isArray(headLines);

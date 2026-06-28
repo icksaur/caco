@@ -1,5 +1,5 @@
 /**
- * File-edits HTTP routes. See docs/file-edits.md, docs/file-edits-v2.1.md.
+ * File-edits HTTP routes. See docs/files-applet-edits-spec.md, docs/files-applet-edits-spec.md.
  *
  * Thin wrapper around the GitEditPoller singleton (injected via init).
  */
@@ -154,7 +154,7 @@ function putCardsHandler(req: Request, res: Response): void {
     return;
   }
   // V2.c: accept v1 (legacy) AND v2 (current). Version-tolerant
-  // server keeps the rollout window safe. See docs/files-applet-v2.md §5.
+  // server keeps the rollout window safe. See docs/files-applet-edits-spec.md
   if (body.schemaVersion !== 1 && body.schemaVersion !== 2) {
     res.status(400).json({ error: `unknown schemaVersion: ${body.schemaVersion}` });
     return;

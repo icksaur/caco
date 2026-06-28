@@ -1,7 +1,7 @@
 /**
  * File-watch lease store.
  *
- * See docs/file-watch-leases.md. Manages opaque time-bounded leases backed by
+ * See docs/files-applet-edits-spec.md. Manages opaque time-bounded leases backed by
  * Node's fs.watch. Refcounts by canonical path so multiple leases on the same
  * file share one underlying watcher.
  *

@@ -35,10 +35,13 @@ interface TermEntry {
 
 const terms = new Map<string, TermEntry>();
 let panelEl: HTMLDivElement | null = null;
+let resizerEl: HTMLDivElement | null = null;
 let toggleBtn: HTMLButtonElement | null = null;
 let open = false;
 
 const LONG_PRESS_MS = 600;
+const MIN_TERM_HEIGHT = 120;
+const TERM_HEIGHT_KEY = 'caco:terminalPanelHeight';
 
 /** Max live client-side xterms. Each carries a canvas renderer + scrollback +
  *  xterm-internal listeners, so an unbounded set leaks as you browse sessions.
@@ -101,6 +104,20 @@ export function initTerminalPanel(): void {
   panelEl = document.createElement('div');
   panelEl.id = 'terminalPanel';
   panelEl.className = 'terminal-panel hidden';
+
+  // Top-edge vertical resize bar (blue on hover/drag, like the session/applet
+  // panel resizers but row-resize). Sits directly above the panel; visible only
+  // while the panel is open. Created dynamically and held by reference, so the
+  // drag logic lives here rather than the width-only, id-bound panel-resizer.
+  resizerEl = document.createElement('div');
+  resizerEl.id = 'terminalResizer';
+  resizerEl.className = 'terminal-resizer hidden';
+  setupTerminalResize(resizerEl);
+
+  const savedHeight = localStorage.getItem(TERM_HEIGHT_KEY);
+  if (savedHeight) applyTermHeight(parseInt(savedHeight, 10));
+
+  chatFooter.appendChild(resizerEl);
   chatFooter.appendChild(panelEl);
 
   document.addEventListener('keydown', e => {
@@ -130,11 +147,70 @@ export function initTerminalPanel(): void {
 
 function toggle(): void {
   if (!panelEl || !toggleBtn) return;
-  open = !open;
-  panelEl.classList.toggle('hidden', !open);
-  toggleBtn.classList.toggle('active', open);
+  setPanelChrome(!open);
   // Expanding the panel is an EXPLICIT action: start or continue the shell.
   if (open) startTerminal();
+}
+
+/** Single owner of the panel's open/closed visual state so the panel, its resize
+ *  bar, and the toggle glyph can never desync (toggle + restart both route here). */
+function setPanelChrome(next: boolean): void {
+  open = next;
+  panelEl?.classList.toggle('hidden', !open);
+  resizerEl?.classList.toggle('hidden', !open);
+  toggleBtn?.classList.toggle('active', open);
+}
+
+/** Clamp a desired panel height to [MIN_TERM_HEIGHT, 80vh] and apply it. Used by
+ *  the drag and the boot-time restore (a height saved on a taller display must not
+ *  exceed a now-smaller viewport). */
+function applyTermHeight(px: number): void {
+  if (!panelEl || !Number.isFinite(px)) return;
+  const max = window.innerHeight * 0.8;
+  panelEl.style.height = `${Math.min(max, Math.max(MIN_TERM_HEIGHT, px))}px`;
+}
+
+/** Wire the top-edge bar to drag the panel height. Mirrors panel-resizer.ts but
+ *  vertical: dragging up grows the panel. Refits the active xterm (rAF-throttled)
+ *  during the drag and on release so the pty winsize tracks the new viewport. */
+function setupTerminalResize(resizer: HTMLDivElement): void {
+  let startY = 0;
+  let startHeight = 0;
+  let rafPending = false;
+
+  const refit = () => {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => { rafPending = false; fitActive(); });
+  };
+
+  const onMove = (e: MouseEvent) => {
+    if (!panelEl) return;
+    applyTermHeight(startHeight + (startY - e.clientY)); // drag up => taller
+    refit();
+  };
+
+  const onUp = () => {
+    resizer.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    if (panelEl) localStorage.setItem(TERM_HEIGHT_KEY, panelEl.style.height);
+    fitActive();
+  };
+
+  resizer.addEventListener('mousedown', (e) => {
+    if (!panelEl) return;
+    e.preventDefault();
+    startY = e.clientY;
+    startHeight = panelEl.getBoundingClientRect().height;
+    resizer.classList.add('dragging');
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 }
 
 function showOnly(sid: string): void {
@@ -278,11 +354,7 @@ function restartTerminal(): void {
   // Kill first; the subsequent attach (in-order on the same ws) respawns.
   wsSendRaw({ type: 'caco.term.kill', data: {} });
   disposeEntry(sid);
-  if (!open) {
-    open = true;
-    panelEl?.classList.remove('hidden');
-    toggleBtn?.classList.add('active');
-  }
+  if (!open) setPanelChrome(true);
   startTerminal();
   showToast('Terminal restarted', { type: 'info', autoHideMs: 1500 });
 }

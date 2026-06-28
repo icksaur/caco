@@ -92,6 +92,23 @@ Caco's built-ins live in the reserved `caco.` namespace so they never collide wi
 skills (`/skill-name`) or agents. The legacy bare names (`/restart`, `/agent`, …) still
 work as aliases, but yield to a skill of the same name when one exists.
 
+### Terminal
+
+Each session has an integrated terminal — a real, user-identity shell (PowerShell on
+Windows; your login `$SHELL`, e.g. bash/fish/zsh, on macOS/Linux) running in the session's
+working directory.
+
+- **Toggle** with the `>` glyph mid-right in the context footer, or press `` Ctrl+` ``. The
+  panel opens below the footer; opening it is what starts the shell.
+- **Long-press the glyph to restart** the shell (kill + respawn) — an escape hatch for a
+  wedged terminal.
+- **One terminal per session.** Terminals **stay open regardless of visibility** — closing
+  the panel or switching sessions only hides it; the shell keeps running in the background
+  and its output is restored when you return. Merely browsing sessions never starts a shell.
+- A terminal ends only when: you **exit the shell** (e.g. `exit`), it is **evicted** (a cap
+  of 16 live terminals; the least-recently-used is closed beyond that), or the **Caco server
+  process stops** (e.g. `/caco.restart`).
+
 ### Portal
 
 Open `/portal.html` to aggregate multiple Caco instances in a single view. Each instance runs on a different machine or directory and is accessed by its URL.
@@ -194,6 +211,7 @@ See [docs/multi-provider.md](docs/multi-provider.md) for background and [docs/by
 
 | Shortcut | Action |
 |----------|--------|
+| `` Ctrl+` `` | Toggle the session terminal |
 | `Escape` | start leader timer |
 | `Escape` `l` | Toggle session panel |
 | `Escape` `.` | Toggle applet panel |

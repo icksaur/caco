@@ -2269,6 +2269,34 @@ main {
   overflow: hidden;
 }
 
+/* Vertical resize bar on the terminal panel's top edge. Mirrors .panel-resizer
+   (transparent → accent on hover/drag) but row-resize / height. */
+.terminal-resizer {
+  align-self: stretch;
+  width: 100%;
+  height: 5px;
+  margin-top: var(--space-sm);
+  cursor: row-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.terminal-resizer:hover,
+.terminal-resizer.dragging {
+  background: var(--color-accent);
+}
+
+.terminal-resizer.hidden {
+  display: none;
+}
+
+/* When the resizer is shown, it owns the top gap; drop the panel's own margin
+   so the two don't double-space. */
+.terminal-resizer:not(.hidden) + .terminal-panel {
+  margin-top: 0;
+}
+
 .terminal-panel.hidden {
   display: none;
 }

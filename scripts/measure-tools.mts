@@ -9,13 +9,10 @@
  */
 import { z } from 'zod';
 import { disabledToolNames } from '../src/tool-registry.js';
-import { createDisplayTools } from '../src/display-tools.js';
 import { createAppletTools } from '../src/applet-tools.js';
 import { createAgentTools } from '../src/agent-tools.js';
 import { createMcpAuthTools } from '../src/mcp-auth-tools.js';
-import { createDevDocsTool } from '../src/dev-docs-tool.js';
-import { createExtensionsTool } from '../src/extensions-tool.js';
-import { createSwarmTool } from '../src/swarm-tool.js';
+import { createDocsTool } from '../src/dev-docs-tool.js';
 import { createDelegateTool } from '../src/delegate-tool.js';
 import { createSessionHistoryTool } from '../src/session-history-tool.js';
 import { createMemoryTools } from '../src/memory-tool.js';
@@ -30,13 +27,10 @@ const ref = { id: 'measure' } as any;
 const noop = (() => {}) as any;
 
 const groups: Record<string, any[]> = {
-  display: createDisplayTools(noop, noop),
   applet: createAppletTools('/tmp', ref, noop),
   agent: createAgentTools(ref, () => undefined as any),
   'mcp-auth': createMcpAuthTools(),
-  'dev-docs': createDevDocsTool('/tmp'),
-  extensions: createExtensionsTool(),
-  swarm: createSwarmTool(ref),
+  'dev-docs': createDocsTool('/tmp'),
   delegate: createDelegateTool(ref),
   'session-history': createSessionHistoryTool(),
   memory: createMemoryTools(),

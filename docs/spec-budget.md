@@ -92,7 +92,7 @@ tuned, not gated; the savings model is the only objective read.
 - Observable: footer `↯` shows net credits + breakdown; negative shows `↯−Ncr`; tooltip math reconciles.
 - Budgets: post-diet ≤30 tools, ≤19 KB schema; no per-task turn/failure regression on B1–B5.
 - Gates: typecheck ×2, lint:strict, knip, full tests, build:client.
-- Oracles: `workflow-savings-model.test.ts` pins the pure 4-class math + deferral; footer pricing/replay-exclusion are NOT yet test-covered (by-construction). `measure-tools.mts` byte delta is broken (`ERR_MODULE_NOT_FOUND`) — fix before relying on the byte gate. `bench-report.mjs` averages all rows; same-task before/after is manual (snapshot the log between runs).
+- Oracles: `workflow-savings-model.test.ts` pins the pure 4-class math + deferral; footer pricing/replay-exclusion are NOT yet test-covered (by-construction). `measure-tools.mts` runs the byte delta (23 tools / ~21.6 KB registered). `bench-report.mjs` averages all rows; same-task before/after is manual (snapshot the log between runs).
 
 ## Plan
 

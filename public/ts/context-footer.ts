@@ -554,7 +554,7 @@ function renderSaved(data: ThroughputData): void {
   const n = (v: number) => v.toLocaleString();
   const turns = data.totalTurns ?? 0;
   const calls = data.totalToolCalls ?? 0;
-  const batch = turns > 0 && calls / turns > 1 ? calls / turns : 1;
+  const batch = turns >= 3 && calls / turns > 1 ? calls / turns : 1;
   const lines: string[] = [
     `${n(virtualCalls)} virtual tool calls → ${n(roundTrips)} round trips saved (batching ×${batch.toFixed(1)})`,
   ];

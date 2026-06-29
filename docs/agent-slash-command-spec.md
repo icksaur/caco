@@ -1,6 +1,6 @@
-# /agent slash command
+# spec-agent-slash-command
 
-## Goal
+## Goals
 
 Add a Caco slash command that discovers SDK-configured agents for the current
 session, lets the user pick one, and fills the input as:
@@ -26,6 +26,29 @@ selecting the named SDK agent.
 | Validation | Backend validates `agentName` against `agent.list()` immediately before selecting. Unknown, whitespace-containing, or `userInvocable === false` agents return 404/400 and do not select. |
 | Errors | Surface SDK/list/select/send failures as normal Caco command toasts; do not silently fall back to primary agent. |
 | Failure recovery | If `/agent ...` fails before dispatch starts, restore the full typed command to the textarea/draft instead of losing the prompt. |
+
+## Invariants
+
+- **Dispatch critical section** (invariant): agent select + send start inside the
+  one shared session lock used by normal messages; no concurrent message slips
+  between `agent.select` and send. Code rots toward a second unlocked path.
+- **Current-session only** (invariant): `/agent` acts on the active session; it is
+  not a background launcher.
+- **SDK is the agent source of truth** (fact): Caco lists exactly what
+  `agent.list()` reports; no Caco-side agent registry in V1.
+- **No fake selectable rows** (invariant): empty list → no rows + a toast, never a
+  synthesized agent.
+- **No prompt loss** (invariant): a pre-dispatch failure restores the full typed
+  command to its bound draft.
+- **Name-based selection** (mechanism): `agent.select({ name })`; `id` is
+  display/debug only. Swappable if the SDK adds id-based select.
+
+## Considerations
+
+`agent.select` is name-only and persists after dispatch (no one-shot override), so
+V1 is explicitly foreground selection. Whitespace-named agents are omitted from the
+picker and rejected backend-side (grammar is whitespace-delimited). Opening the
+picker may resume a cold session — accept a short loading row over caching in V1.
 
 ## Code analysis
 
@@ -85,7 +108,24 @@ The critical section must cover busy check/marking, selection, and send startup.
 If the session is busy, return the same status/error shape as normal message
 dispatch and do not call `agent.select`.
 
+## Risks and Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Opening picker resumes a cold session and feels slow. | Show a short loading/empty row; do not cache across sessions in V1. |
+| `agent.select` changes future turns unexpectedly. | Document V1 as foreground selection. Add one-shot restore only if SDK later exposes current selected agent. |
+| SDK agent id/name mismatch. | Return both `id` and `name`; test against installed SDK behavior during implementation. |
+| Custom-agent discovery may require additional SDK config. | V1 lists SDK-visible agents only; separate spec for Caco-shipped agent registry or plugin directory wiring. |
+| Race between selection and normal send. | Use one shared session dispatch critical section covering select and send startup. |
+| Prompt loss on slash-command failure. | Restore failed `/agent` commands to the correct bound draft/textarea. |
+
 ## Acceptance
+
+- Observable: typing `/agent` opens a picker of the session's SDK agents; selecting
+  fills `/agent <name> `; submitting dispatches the prompt under the selected agent.
+- Budgets: no new persistence; no second dispatch path (reuse the locked helper); n/a perf.
+- Gates: typecheck ×2, lint:strict, full tests, build:client.
+- Oracles:
 
 | Case | Oracle |
 |---|---|
@@ -101,27 +141,17 @@ dispatch and do not call `agent.select`.
 | Busy sessions are safe | Backend test: busy/concurrent dispatch returns busy error and does not call `agent.select`. |
 | Errors are visible | Route returns non-2xx JSON; frontend displays returned `error` and restores input when dispatch did not start. |
 
-## Risks
-
-| Risk | Mitigation |
-|---|---|
-| Opening picker resumes a cold session and feels slow. | Show a short loading/empty row; do not cache across sessions in V1. |
-| `agent.select` changes future turns unexpectedly. | Document V1 as foreground selection. Add one-shot restore only if SDK later exposes current selected agent. |
-| SDK agent id/name mismatch. | Return both `id` and `name`; test against installed SDK behavior during implementation. |
-| Custom-agent discovery may require additional SDK config. | V1 lists SDK-visible agents only; separate spec for Caco-shipped agent registry or plugin directory wiring. |
-| Race between selection and normal send. | Use one shared session dispatch critical section covering select and send startup. |
-| Prompt loss on slash-command failure. | Restore failed `/agent` commands to the correct bound draft/textarea. |
-
 ## Plan
 
-- [x] Add SDK agent types to `session-manager.ts`, including `rpc.agent.list/select`.
-- [x] Refactor normal message dispatch to expose one shared locked helper with a pre-send hook.
-- [x] Add backend helpers: list agents for a session, select agent, dispatch prompt after selection inside the shared lock.
-- [x] Add HTTP routes for agent list and agent dispatch with validation, busy safety, and JSON errors.
-- [x] Add `/agent` to `BUILTIN_COMMANDS` with a picker that fetches current-session agents.
-- [x] Update `FormPopups.openPicker` to use `PopupItem.value ?? PopupItem.id`; make `/agent` picker values include the trailing space.
-- [x] Add frontend restore-on-failure path for `/agent` command dispatch.
-- [x] Add frontend unit tests for picker population, exact command fill, usage validation, restore-on-failure, and dispatch POST payload.
-- [x] Add backend tests for list/select validation, hidden/unknown-agent rejection, busy safety, and locked select-before-send ordering.
-- [x] Add README slash-command row.
-- [x] Run typecheck, lint, unit tests, and client build.
+Status: all steps shipped. Files+Oracle preserved for traceability.
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | SDK agent types + list/select + shared locked dispatch helper | `src/session-manager.ts` | session-manager test: select-before-send under lock |
+| 2 | Refactor message dispatch to one locked helper with pre-send hook | `src/routes/session-messages.ts` | busy-safety test: concurrent dispatch returns busy, no select |
+| 3 | Backend list/select/dispatch helpers (validation, busy safety) | `src/session-manager.ts`, `src/routes/sessions.ts` | route test: unknown/hidden/whitespace names → 404/400, no select |
+| 4 | `GET /agents` + `POST /agent-dispatch` routes | `src/routes/sessions.ts` | route test: JSON error shapes |
+| 5 | `/agent` built-in + picker fetching session agents | `public/ts/command-registry.ts` | registry unit test contains `/agent` |
+| 6 | Picker uses `value ?? id` for trailing-space fill | `public/ts/chat-form-popups.ts` | hand-case: picked yields `/agent reviewer ` |
+| 7 | Frontend restore-on-failure | `public/ts/command-registry.ts` | unit: failed POST restores full command to draft |
+| 8 | README slash-command row | `README.md` | by-construction |

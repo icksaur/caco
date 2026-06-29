@@ -1,4 +1,4 @@
-# R4 — Make a session switch a single round trip
+# spec-r4-resume-bundle
 
 Status: Slice A implemented; Slice B deferred (not queue-safe); Slice C deferred
 (needs an applet-seed channel). Parent: `docs/session-lifecycle-architecture.md` §R4.
@@ -28,14 +28,14 @@ large win the roadmap implied, and it does not touch the dominant cost —
 `sdkResume` inside `/resume` (the cold-open `[PERF]` hotspot).** This spec rescopes
 R4 to what is actually true and useful.
 
-## Goal
+## Goals
 
-Make a session switch a **single HTTP round trip** by folding the always-fired
-secondary loads into the existing `POST /resume` response, eliminating per-switch
-background round trips that otherwise each pay tunnel RTT. Concretely: fold
-**throughput** (always fetched) and **draft** (fetched on bind) into `/resume`.
-Applet-payload bundling (the one with real tunnel UX value, for the files applet)
-is split out because it needs an applet-seed channel that does not exist yet.
+Make a session switch issue **no background `/throughput` round trip**: fold the
+always-fetched throughput snapshot into the existing `POST /resume` response so it
+renders from the resume payload. This is the only outcome R4 ships (Slice A). Draft
+folding (Slice B) and applet-payload bundling (Slice C) are deferred — documented,
+not built. Net: one fewer round trip per switch over the tunnel; behavior otherwise
+unchanged.
 
 ## Non-goals
 - No change to `sdkResume` / cold-open latency (the real cost; out of scope).
@@ -116,16 +116,22 @@ Slice C is therefore **out of scope here** and should be specced alongside that 
 channel. Documented so the value isn't lost: this is where the real files-applet
 switch latency lives over a tunnel.
 
-## Plan
-1. **Slice A** (throughput): server field + `seedThroughput` + `showChat` swap + test.
-   The only slice shipped by R4.
-2. Slice B (draft): **deferred** — not queue-safe; revisit only with a queue-routed
-   `seedDraft` + hydrated marker.
-3. Slice C: not in this spec — gated on an applet-seed channel.
+## Invariants
 
-Slice A ships on its own. B and C are documented-but-not-built.
+- **Latency-only, correctness-neutral** (invariant): folding throughput must not
+  change what renders or any dispatch behavior; only the round trip is removed.
+- **`/throughput` route stays** (invariant): the reconnect path and any tool caller
+  keep using it; only the *switch* path stops calling it (`restoreThroughput` remains).
+- **Resume payload is freshest** (fact): `snapshot()` is an in-memory read at switch
+  time — identical to what the dropped GET returned, so no staleness.
+- **Draft must stay queue-ordered** (invariant): Slice B is deferred precisely
+  because a naive draft seed is not queue-safe; do not seed draft without a
+  queue-routed `seedDraft` + hydrated marker.
+- **Applets need a seed channel** (fact): Slice C cannot consume a preloaded payload
+  until an applet-seed channel exists.
+- **In-memory snapshot read** (mechanism): `session-throughput.ts` `snapshot()`.
 
-## Risks & mitigations (Slice A)
+## Risks and Mitigations (Slice A)
 | Risk | Mitigation |
 |---|---|
 | `snapshot()` adds latency to the blocking `/resume` | `snapshot()` is an in-memory read (`session-throughput.ts:355`); negligible. Net round trips go **down** (the background `/throughput` GET is removed). Measure `/resume` timing before/after via existing `[PERF]` flight spans. |
@@ -141,8 +147,28 @@ Slice A ships on its own. B and C are documented-but-not-built.
 - Full gate (`npm run build`) green.
 
 ## Acceptance
+
+- Observable: a session switch fires `POST /resume` (now carrying throughput) + the
+  WS history stream, with **no** `/throughput` GET; throughput renders unchanged.
+- Budgets: correctness-neutral; no extra persistence; one fewer round trip per switch.
+- Gates: `npm run build` + full tests green.
+- Oracles: resume response includes `throughput` (correct shape); switch path asserts
+  `fetch` not called for `/throughput`; reconnect still uses `restoreThroughput`.
+
 A session switch issues `POST /resume` (now carrying throughput) plus the WS history
 stream, with **no background `/throughput` round trip**. Throughput renders from the
 resume payload with no observable change. (A switch that restores an applet still
 incurs the applet's own `POST /applets/:slug/load` + data fetch — that is Slice C
 territory, deferred.) Draft folding (Slice B) is deferred as not queue-safe.
+
+## Plan
+
+Slice A shipped; B/C deferred (not implementable steps until their preconditions exist).
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Add `throughput` to the `/resume` response (server) | `src/routes/sessions.ts`, `src/session-throughput.ts` | server unit: resume payload includes `throughput` with correct shape |
+| 2 | Seed throughput client-side on switch; drop the `/throughput` GET | `public/ts/*` (`seedThroughput`, `showChat`) | client test: no `/throughput` fetch on switch; reconnect still uses `restoreThroughput` |
+
+Deferred (documented, not built): **Slice B** (draft) — needs a queue-routed
+`seedDraft` + hydrated marker; **Slice C** (applet payload) — needs an applet-seed channel.

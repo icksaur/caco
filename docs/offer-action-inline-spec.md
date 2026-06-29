@@ -174,7 +174,7 @@ Mechanics:
   buttons as the tool did, the block text is absent from the transcript, and clicking
   sends the exact option text. Covered by a frontend test on the `code()` renderer +
   the existing button pipeline.
-- **No-regression (behavioural):** run the fixed D1 benchmark (`docs/tool-diet-bench.md`)
+- **No-regression (behavioural):** run the fixed D1 benchmark (`docs/spec-budget.md`)
   plus a few "offer actions" prompts before/after; confirm the model emits the block
   when appropriate and tool-call/turn counts do not rise (buttons still appear).
 - **Byte oracle:** `scripts/measure-tools.mts` shows `caco_offer_action` gone and the

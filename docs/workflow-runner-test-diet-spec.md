@@ -1,6 +1,6 @@
 # Workflow runner test diet
 
-Mini-spec. Parent: `docs/tool-diet-spec.md` (the workflow runner is the diet's core).
+Mini-spec. Parent: `docs/spec-budget.md` (the workflow runner is the budget's core).
 
 ## Problem
 

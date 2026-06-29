@@ -149,7 +149,7 @@ behavioral rules — trim lists, not behavior.
   reconcile (the narration-budget rule supersedes per-step narration).
 - **Measurement is the acceptance oracle.** Caco's savings model already tracks, per session:
   virtual tool calls avoided, round trips saved, fresh input, turns. Use a **fixed benchmark
-  task** (from `docs/tool-diet-bench.md`) run before/after to compare turns-per-request and
+  task** (from `docs/spec-budget.md`) run before/after to compare turns-per-request and
   fresh-input — comparing the *same* task is the oracle; ad-hoc pre/post on different work is
   noise.
 - **Reversibility.** All v1 changes are prompt text in `src/prompts.ts` + the workflow tool
@@ -169,7 +169,7 @@ behavioral rules — trim lists, not behavior.
   - **Controls:** one fixed model + version, fixed reasoning effort, fixed context tier,
     fresh sessions, metrics reset/snapshot per run (Caco savings model + `requestIn`,
     `requestTurns`, `requestToolFailures`, `requestWallMs`).
-  - **Tasks:** run ALL fixed benchmark prompts B1–B5 from `docs/tool-diet-bench.md` (note: B4
+  - **Tasks:** run ALL fixed benchmark prompts B1–B5 from `docs/spec-budget.md` (note: B4
     there is a *precise single-file edit*, not multi-file — **add a real multi-file edit
     benchmark** if one is wanted as a target case; do not mislabel B4).
   - **Repetition:** ≥3 runs per task; compare **per-task medians**.

@@ -1,7 +1,7 @@
 # Windows-proofing the workflow facade (rg degradation + path parity)
 
-Focused fix spec. Parent: `docs/tool-diet-spec.md` (the "diet" landed `caco_run_workflow` +
-the `caco` facade; it was built/tested on Linux). Index of record: tool-diet-spec.
+Focused fix spec. Parent: `docs/spec-budget.md` (the budget landed `caco_run_workflow` +
+the `caco` facade; it was built/tested on Linux). Index of record: spec-budget.
 
 ## Problem
 
@@ -93,7 +93,7 @@ was PowerShell-host-specific, not node).
   still see `src\...` from `caco.read(...).path` / `caco.index(...).path` while getting
   `src/...` from grep. To make the facade contract uniform, normalize those too (one shared
   `toPosix` helper). Small, and avoids mixed path styles from the same facade.
-- **`caco.rg` is an escape hatch, not a guarantee.** tool-diet-spec already frames rg as a
+- **`caco.rg` is an escape hatch, not a guarantee.** spec-budget already frames rg as a
   "speed bonus (auto-fallback in grepCore), not a requirement." So Gap 1 does not demand a
   full JS re-implementation of rg's flag surface — a clear failure (Option A) is contract-
   faithful. Vendoring (Option B) is the stronger "never degrade" choice if we want rg
@@ -185,7 +185,7 @@ PATH. Small; complements A or B (lets you point at a system rg without touching 
      out of scope (Non-goals) — or gate on `getHostShell().dialect === 'bash'`.
 5. **Docs.** Update `facade.ts` `FACADE_API_SUMMARY`/`FACADE_DTS`: `caco.rg` requires rg
    (A+D) or is always available (B); state `GrepMatch.file`, `read().path`, `glob()`,
-   `index().path` are POSIX `/` on all platforms. Mark tool-diet-spec's "Future/portability"
+   `index().path` are POSIX `/` on all platforms. Mark spec-budget's "Future/portability"
    `caco.sh` and `caco.rg` items resolved.
 
 ## Non-goals
@@ -225,5 +225,5 @@ PATH. Small; complements A or B (lets you point at a system rg without touching 
 - [x] Gap 1 — vendor @vscode/ripgrep + resolveRg + caco.rg
 - [x] Gap 3 — windowsHide:true on all facade/runner spawns (no console-window flashes)
 - [x] Tests updated + added
-- [x] Docs updated (facade summary, tool-diet-spec portability)
+- [x] Docs updated (facade summary, spec-budget portability)
 - [x] Build green on Windows + live verify (incl. no transient windows)

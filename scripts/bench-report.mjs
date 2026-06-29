@@ -14,7 +14,7 @@ import { homedir } from 'os';
 const LOG = join(process.env.CACO_HOME || join(homedir(), '.caco'), 'metrics', 'requests.jsonl');
 
 if (!existsSync(LOG)) {
-  console.log(`No metrics log at ${LOG}. Run some benchmark prompts first (see docs/tool-diet-bench.md).`);
+  console.log(`No metrics log at ${LOG}. Run some benchmark prompts first (see docs/spec-budget.md).`);
   process.exit(0);
 }
 

@@ -16,6 +16,10 @@ export interface WorkflowSavingsInput {
   codeBytes: number;
   /** Current context-window tokens (previous round trip's prompt), 0 when unknown. */
   windowTokens: number;
+  /** Avg tool calls per round trip (totalToolCalls/totalTurns), ≥1. 1 = serial
+   *  (full trip credit); higher = the model batches, so fewer trips were saved.
+   *  Defaults to 1 (full credit) when omitted/below warmup. */
+  batchFactor?: number;
 }
 
 export interface WorkflowSavingsBreakdown {
@@ -51,7 +55,8 @@ function toTokens(bytes: number): number {
 export function estimateWorkflowSavings(input: WorkflowSavingsInput): WorkflowSavingsBreakdown {
   const commandCount = Number.isFinite(input.commandCount) && input.commandCount > 0 ? Math.floor(input.commandCount) : 0;
   const virtualToolCallsAvoided = Math.min(Math.max(0, commandCount - 1), WORKFLOW_MAX_VIRTUAL_TOOLCALLS_PER_RUN);
-  const roundTripsSaved = virtualToolCallsAvoided;
+  const batchFactor = Number.isFinite(input.batchFactor) && (input.batchFactor as number) > 1 ? (input.batchFactor as number) : 1;
+  const roundTripsSaved = Math.min(virtualToolCallsAvoided, Math.max(0, Math.ceil(commandCount / batchFactor) - 1));
 
   const freshInputTokensSaved = estimateSavedTokens(input.observedBytes, input.injectedBytes);
 

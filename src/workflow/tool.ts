@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { storeOutput } from '../output-store.js';
 import { shapeOutput } from '../observe/shape.js';
 import { createLogger } from '../logger.js';
-import { recordWorkflowSavingsV2, recordWorkflowCode, currentWindowTokens } from '../session-throughput.js';
+import { recordWorkflowSavingsV2, recordWorkflowCode, currentWindowTokens, currentBatchFactor } from '../session-throughput.js';
 import { WORKFLOW_EMIT_CAP_BYTES, WORKFLOW_TIMEOUT_ADVERTISED_MS } from '../config.js';
 import { runWorkflow } from './runner.js';
 import { estimateWorkflowSavings } from './savings-model.js';
@@ -99,6 +99,7 @@ export function createWorkflowTool(sessionCwd: string, sessionRef: SessionIdRef)
           commandCount: result.commandCount,
           codeBytes: Buffer.byteLength(code, 'utf8'),
           windowTokens: currentWindowTokens(sessionId),
+          batchFactor: currentBatchFactor(sessionId),
         });
         recordWorkflowSavingsV2(sessionId, breakdown);
         return { textResultForLlm: out };

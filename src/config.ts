@@ -57,6 +57,8 @@ export const WORKFLOW_AVG_TOOLCALL_TOKENS = 40;
 export const WORKFLOW_AVG_ROUNDTRIP_MS = 8000;
 // Sanity cap so one pathological fan-out cannot dominate the headline.
 export const WORKFLOW_MAX_VIRTUAL_TOOLCALLS_PER_RUN = 1000;
+// Round trips before batchFactor (tool calls/turn) is trusted; below it, full credit.
+export const BATCH_WARMUP_TURNS = 3;
 
 // Extension→MIME mapping (single source of truth for file types)
 export const MIME_TYPES: Record<string, string> = {

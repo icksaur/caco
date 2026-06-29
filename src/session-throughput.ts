@@ -22,6 +22,8 @@
  * (footer tooltip). Nothing is persisted across restart.
  */
 
+import { BATCH_WARMUP_TURNS } from './config.js';
+
 interface SessionThroughput {
   requestIn: number;
   requestCache: number;
@@ -358,6 +360,19 @@ export function snapshot(sessionId: string): ThroughputSnapshot {
     return { ...blank(), known: false };
   }
   return { ...entry, known: true };
+}
+
+/**
+ * Average tool calls per round trip over the session lifetime, ≥1. A serial model
+ * (~1) gets full round-trip credit; a batching model (>1) saved fewer trips. Below
+ * BATCH_WARMUP_TURNS the ratio is noisy, so return 1 (full credit). Returns 1 for
+ * unknown sessions.
+ */
+export function currentBatchFactor(sessionId: string): number {
+  const entry = sessions.get(sessionId);
+  if (!entry || entry.totalTurns < BATCH_WARMUP_TURNS) return 1;
+  const b = entry.totalToolCalls / entry.totalTurns;
+  return b > 1 ? b : 1;
 }
 
 export function clearSession(sessionId: string): void {

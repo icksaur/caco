@@ -31,6 +31,23 @@ describe('estimateWorkflowSavings — math oracle', () => {
     expect(b.cacheReplayTokensSaved).toBe(50 * 1000);
   });
 
+  it('discounts round trips by batchFactor: B=4, C=49 → ceil(49/4)-1 = 12', () => {
+    const b = estimateWorkflowSavings({ observedBytes: 0, injectedBytes: 0, commandCount: 49, codeBytes: 0, windowTokens: 1000, batchFactor: 4 });
+    expect(b.virtualToolCallsAvoided).toBe(48);
+    expect(b.roundTripsSaved).toBe(12);
+    expect(b.cacheReplayTokensSaved).toBe(12 * 1000);
+  });
+
+  it('saves 0 trips when the model could batch all calls in one turn (C ≤ B)', () => {
+    const b = estimateWorkflowSavings({ observedBytes: 0, injectedBytes: 0, commandCount: 4, codeBytes: 0, windowTokens: 1000, batchFactor: 4 });
+    expect(b.roundTripsSaved).toBe(0);
+  });
+
+  it('clamps batchFactor < 1 to full credit', () => {
+    const b = estimateWorkflowSavings({ observedBytes: 0, injectedBytes: 0, commandCount: 11, codeBytes: 0, windowTokens: 100, batchFactor: 0.3 });
+    expect(b.roundTripsSaved).toBe(10);
+  });
+
   it('claims nothing for a 0- or 1-command workflow', () => {
     for (const c of [0, 1]) {
       const b = estimateWorkflowSavings({ observedBytes: 5000, injectedBytes: 100, commandCount: c, codeBytes: 200, windowTokens: 9000 });

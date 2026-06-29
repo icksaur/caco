@@ -7,11 +7,17 @@
  * macOS, Linux. Usage:
  *   node tools/check-spec-conformance.mjs [docsDir]   (default: docs)
  *   node tools/check-spec-conformance.mjs --json
+ *   node tools/check-spec-conformance.mjs --inventory [--json]
  *
- * Exit code: number of out-of-conformance specs (0 = all conform), capped at
- * 250 so it stays a valid POSIX status.
+ * --inventory classifies EVERY doc (spec / spec(unmarked) / guide / research /
+ * other), with cluster size, inbound-reference count, last-commit age (git,
+ * optional), conformance (specs), an obsolete flag, and a suggested disposition.
+ *
+ * Exit code (conformance mode): number of out-of-conformance specs (0 = all
+ * conform), capped at 250 so it stays a valid POSIX status. Inventory exits 0.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, basename } from 'node:path';
 
 // The fixed skeleton, in order. Trailing Rationale is optional.
@@ -107,9 +113,140 @@ function analyze(file) {
   };
 }
 
+// ── Inventory classification (Phase 0) ──────────────────────────────────────
+
+const GUIDE_RE = /\b(usage|quickstart|getting started|setup|install|how to|reference|shortcuts?|cookbook|tutorial|walkthrough)\b/i;
+const RESEARCH_RE = /\b(findings?|investigation|research|hypothesis|experiment|benchmark|measurements?|techniques?|analysis|notes)\b/i;
+const OBSOLETE_RE = /\b(superseded|obsolete|deprecated|replaced by|archived|abandoned|no longer|defunct)\b/i;
+const SPECISH = ['Goals', 'Goal', 'Design', 'Plan', 'Acceptance', 'Invariants', 'Considerations'];
+
+/** Last-commit date (YYYY-MM-DD) for a file, or null if git is unavailable. */
+function gitDate(file) {
+  try {
+    const out = execFileSync('git', ['log', '-1', '--format=%cs', '--', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function ageDays(dateStr) {
+  if (!dateStr) return null;
+  const t = Date.parse(dateStr + 'T00:00:00Z');
+  if (Number.isNaN(t)) return null;
+  return Math.round((Date.now() - t) / 86_400_000);
+}
+
+/** Classify ANY doc into: spec | spec(unmarked) | guide | research | other,
+ *  plus an obsolete flag. Marker filenames win; otherwise infer from structure. */
+function classify(file, text, h1, h2s) {
+  const name = basename(file);
+  const marked = name.endsWith('-spec.md') || name.startsWith('spec-') || /^#\s*spec\b/i.test(h1 || '');
+  const heads = h2s.map(s => s.toLowerCase());
+  const specishCount = SPECISH.filter(s => heads.includes(s.toLowerCase())).length;
+  const hay = `${h1}\n${h2s.join('\n')}`;
+  const statusLine = (text.match(/^\s*(?:>?\s*)?status\s*:\s*.+$/im) || [''])[0];
+  const obsolete = OBSOLETE_RE.test(statusLine) || OBSOLETE_RE.test(h1 || '');
+
+  let cls;
+  if (marked) cls = 'spec';
+  else if (specishCount >= 2 && (heads.includes('goals') || heads.includes('goal')) && (heads.includes('plan') || heads.includes('design'))) cls = 'spec(unmarked)';
+  else if (RESEARCH_RE.test(name) || RESEARCH_RE.test(hay)) cls = 'research';
+  else if (GUIDE_RE.test(name) || GUIDE_RE.test(hay)) cls = 'guide';
+  else cls = 'other';
+  return { cls, obsolete };
+}
+
+function h2List(text) {
+  return (text.match(/^##\s+(.+?)\s*$/gm) || []).map(s => s.replace(/^##\s+/, '').trim());
+}
+
+function disposition(rec) {
+  if (rec.obsolete) return 'ARCHIVE';
+  switch (rec.cls) {
+    case 'spec': return rec.conforms ? 'KEEP' : 'CONFORM';
+    case 'spec(unmarked)': return 'RENAME+CONFORM';
+    case 'guide': return 'MOVE→guides';
+    case 'research': return 'MOVE→research';
+    default: return 'REVIEW';
+  }
+}
+
+function runInventory(dir, entries, asJson) {
+  // Inbound-reference counts: how many OTHER docs mention this basename.
+  const texts = new Map();
+  for (const name of entries) texts.set(name, readFileSync(join(dir, name), 'utf8'));
+  const inbound = new Map();
+  for (const name of entries) {
+    const stem = name.replace(/\.md$/, '');
+    let count = 0;
+    for (const [other, t] of texts) {
+      if (other === name) continue;
+      if (t.includes(name) || t.includes(stem)) count++;
+    }
+    inbound.set(name, count);
+  }
+
+  const clusterSize = new Map();
+  for (const name of entries) {
+    const p = name.split('-')[0];
+    clusterSize.set(p, (clusterSize.get(p) || 0) + 1);
+  }
+
+  const recs = [];
+  for (const name of entries) {
+    const full = join(dir, name);
+    if (!statSync(full).isFile()) continue;
+    const text = texts.get(name);
+    const h1 = (text.match(/^#\s+.+$/m) || [''])[0];
+    const h2s = h2List(text);
+    const { cls, obsolete } = classify(full, text, h1, h2s);
+    const conforms = cls.startsWith('spec') ? analyze(full).severity === 'ok' : null;
+    const cluster = name.split('-')[0];
+    const date = gitDate(full);
+    const rec = {
+      file: name,
+      cls,
+      cluster: clusterSize.get(cluster) > 1 ? `${cluster}(${clusterSize.get(cluster)})` : '-',
+      inbound: inbound.get(name),
+      ageDays: ageDays(date),
+      obsolete,
+      conforms,
+    };
+    rec.disposition = disposition(rec);
+    recs.push(rec);
+  }
+
+  const order = { spec: 0, 'spec(unmarked)': 1, research: 2, guide: 3, other: 4 };
+  recs.sort((a, b) => (order[a.cls] - order[b.cls]) || a.cluster.localeCompare(b.cluster) || a.file.localeCompare(b.file));
+
+  if (asJson) {
+    console.log(JSON.stringify({ total: recs.length, recs }, null, 2));
+    return;
+  }
+
+  const counts = {};
+  for (const r of recs) counts[r.cls] = (counts[r.cls] || 0) + 1;
+  const dispo = {};
+  for (const r of recs) dispo[r.disposition] = (dispo[r.disposition] || 0) + 1;
+
+  console.log(`Doc inventory — ${recs.length} docs in ${dir}/\n`);
+  console.log('class:       ' + Object.entries(counts).map(([k, v]) => `${k}=${v}`).join('  '));
+  console.log('disposition: ' + Object.entries(dispo).map(([k, v]) => `${k}=${v}`).join('  ') + '\n');
+  const fp = Math.min(42, Math.max(...recs.map(r => r.file.length)));
+  console.log(`${'file'.padEnd(fp)}  ${'class'.padEnd(14)} ${'cluster'.padEnd(10)} ${'in'.padStart(3)} ${'age'.padStart(5)} ${'conf'.padStart(4)}  disposition`);
+  for (const r of recs) {
+    const age = r.ageDays == null ? '   -' : `${r.ageDays}d`;
+    const conf = r.conforms == null ? '  -' : (r.conforms ? ' ok' : 'BAD');
+    const obs = r.obsolete ? ' ⚑obsolete' : '';
+    console.log(`${r.file.padEnd(fp)}  ${r.cls.padEnd(14)} ${r.cluster.padEnd(10)} ${String(r.inbound).padStart(3)} ${age.padStart(5)} ${conf.padStart(4)}  ${r.disposition}${obs}`);
+  }
+}
+
 function main() {
   const args = process.argv.slice(2);
   const asJson = args.includes('--json');
+  const inventory = args.includes('--inventory');
   const dir = args.find(a => !a.startsWith('--')) || 'docs';
 
   let entries;
@@ -118,6 +255,11 @@ function main() {
   } catch {
     console.error(`Cannot read directory: ${dir}`);
     process.exit(255);
+  }
+
+  if (inventory) {
+    runInventory(dir, entries, asJson);
+    process.exit(0);
   }
 
   const specs = [];

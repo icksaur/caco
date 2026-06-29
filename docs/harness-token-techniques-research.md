@@ -21,7 +21,7 @@ touched 22% of tool-output tokens.
 | Technique | Consensus | Reported impact | Caco status |
 |---|---|---|---|
 | Bounded reads (range/grep-first, never dump whole files) | Universal | 78% of tokens; biggest surface | Partial — SDK `view`/`grep` support ranges; not enforced as default |
-| AST repo map / code skeleton | Strong (Aider, Cursor, Cline, Claude Code) | Tilth: −40% cost/correct, 76→86% acc, −25% turns; Cursor +12.5% acc | **Spec'd** (`docs/ast-index-tool-spec.md`), not built |
+| AST repo map / code skeleton | Strong (Aider, Cursor, Cline, Claude Code) | Tilth: −40% cost/correct, 76→86% acc, −25% turns; Cursor +12.5% acc | **Spec'd** (`docs/spec-ast-index-tool.md`), not built |
 | Prompt-cache alignment (stable prefix/order) | Strong (Anthropic/OpenAI/Claude Code) | OpenAI: −80% latency, −90% input cost; cache read = 0.1× | Prefix is stable; **but cache_control not exposed by Copilot SDK** |
 | Tool-output compression w/ raw recovery | Strong (RTK, Roo, Cline, Claude Code hooks) | Logs: 10k→100s tokens; total spend only 0.5–3.7% | SDK spill-to-disk @20KB only; no failure-aware shaping |
 | Context compaction / new-task handoff | Strong | Essential for long runs | **Have it** (SDK `infiniteSessions` 0.80/0.95 + `history.compact`) |

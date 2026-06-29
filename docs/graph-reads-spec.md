@@ -18,7 +18,7 @@ Build it on the existing `index` tree-sitter pipeline; expose it through the
 
 ## Why edges, and why now (with an honest caveat)
 
-The prior `docs/ast-index-tool-spec.md` cites independent research: **~78% of agent
+The prior `docs/spec-ast-index-tool.md` cites independent research: **~78% of agent
 tokens flow through file *Read* tools**, and skeleton-then-bounded-read patterns cut
 ~25% of turns. Reads are where the spend is. A dependency graph attacks a slice of that
 — but a **narrow, specialized slice** (structural navigation), not the general read

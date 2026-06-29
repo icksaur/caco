@@ -103,7 +103,7 @@ tuned, not gated; the savings model is the only objective read.
 | 3 | A5 trim descriptions/schemas, merge memory, fold applet-howto | tool factories | `measure-tools.mts` net-negative | done |
 | 4 | Per-tool call telemetry; cut genuinely unused | metrics log | usage data not intuition | pending |
 | 5 | offer_action → inline markup | `offer-action-inline-spec` | parity + reliability | see spec |
-| 6 | Graph reads via `index` | `ast-index-tool-spec` | edges not bodies | pending |
+| 6 | Graph reads via `index` | `spec-ast-index-tool` | edges not bodies | pending |
 | 7 | C1 facade routing (gate D1); L1/L2 lazy register | resume-time | net byte drop | pending |
 
 ## Benchmark prompts (fixed — do not edit casually)
@@ -125,4 +125,4 @@ completed request appends a row to `~/.caco/metrics/requests.jsonl`; report via
 History: V1 trimmed/removed tools and proved savings; V2 deepened the model from
 one-time output to four billing classes. Portability work (cross-platform
 `caco.sh`, vendored `rg`, POSIX paths) is done. Detail specs: `economy-prompt-spec`,
-`workflow-savings-model-spec`, `offer-action-inline-spec`, `ast-index-tool-spec`.
+`workflow-savings-model-spec`, `offer-action-inline-spec`, `spec-ast-index-tool`.

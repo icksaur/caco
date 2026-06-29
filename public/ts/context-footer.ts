@@ -11,6 +11,7 @@
 import { regions } from './dom-regions.js';
 import { formatContextFiles, formatStatusParts, escapeHtml } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
+import { computeNetCreditsSaved } from './saved-pricing.js';
 export interface SessionContext {
   files?: string[];
   [key: string]: string[] | undefined;
@@ -411,8 +412,7 @@ function priceSaved(d: ThroughputData): SavedPricing {
   const outputDelta = d.workflowOutputDelta ?? 0;
   const shaping = d.shapingSavedTokens ?? 0;
 
-  const netCredits =
-    ((fresh + shaping) * rates.input + (replay + compound) * rates.cache - outputDelta * rates.output) / 1_000_000;
+  const netCredits = computeNetCreditsSaved(rates, { fresh, shaping, compound, replay, outputDelta });
   return { netCredits, rates };
 }
 

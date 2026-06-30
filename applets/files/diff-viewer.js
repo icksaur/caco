@@ -4,7 +4,7 @@
  * V1.1: renamed from DiffTab. The class no longer owns its tab
  * button (TabContainer does); it owns only its content subtree
  * (a child of TabContainer.contentEl) and the per-viewer state
- * (selection, scrollTop, edit). See docs/files-applet-viewers-spec.md
+ * (selection, scrollTop, edit). See docs/spec-files-applet-viewers.md
  * §4.0.C / §4.0.D.
  *
  * The viewer is the **scroll container** for its content: the

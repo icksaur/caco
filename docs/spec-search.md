@@ -1,6 +1,6 @@
 # Session Search
 
-## Goal
+## Goals
 
 Search full text across all session conversation histories. Find which session discussed a topic, file, error message, or concept — useful when juggling 20+ sessions.
 

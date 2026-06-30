@@ -2,7 +2,7 @@
  * Git Edit Poller
  *
  * Polls `git status --porcelain` per session and broadcasts the diff
- * between consecutive snapshots as `caco.edit` events. See docs/files-applet-edits-spec.md.
+ * between consecutive snapshots as `caco.edit` events. See docs/spec-files-applet-edits.md.
  *
  * Triggered from two places:
  *   - internal timer (1.5s active / 5s idle)

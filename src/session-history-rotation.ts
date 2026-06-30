@@ -1,7 +1,7 @@
 /**
  * History rotation: front-truncate a session's append-only events.jsonl so the
  * SDK's resumeSession (which reads the whole file) stays fast on long-lived
- * "mega-sessions". See docs/history-rotation-spec.md.
+ * "mega-sessions". See docs/spec-history-rotation.md.
  *
  * Safety model (copy-verify-swap): the live events.jsonl is only ever replaced
  * by a candidate that already passed a REAL SDK load (on a throwaway staged

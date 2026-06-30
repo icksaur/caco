@@ -2,7 +2,7 @@
  * ImageViewer — ViewerInstance for raster + SVG images.
  *
  * V2.a port of applets/image-viewer/script.js into the V1.1
- * ViewerInstance contract (docs/files-applet-viewers-spec.md).
+ * ViewerInstance contract (docs/spec-files-applet-viewers.md).
  *
  * Zoom levels [1..6] via wheel/buttons; mouse-drag pan when
  * zoomed > 1. Cache-busting `&t=Date.now()` query string forces

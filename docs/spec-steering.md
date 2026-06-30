@@ -1,6 +1,6 @@
 # Steering
 
-## Goal
+## Goals
 
 Allow users to send guidance to the agent mid-turn without canceling. The SDK's `mode: "immediate"` injects messages into the current LLM turn.
 

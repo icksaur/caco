@@ -1,6 +1,6 @@
 # Persistent Memory
 
-## Goal
+## Goals
 
 Cross-session key-value memory that persists user preferences, project context, and learned facts. Agents can safely add/update/remove individual entries without needing context about other entries.
 

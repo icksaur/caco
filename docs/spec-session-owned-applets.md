@@ -1,6 +1,6 @@
 # Session-Owned Applets
 
-## Goal
+## Goals
 
 Every session owns its active applet. Switching sessions restores that session's last-active applet. Closing and reopening a session resumes you to exactly where you were — chat scrollback **and** applet panel.
 

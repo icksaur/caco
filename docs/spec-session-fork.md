@@ -1,6 +1,6 @@
 # Session Fork
 
-## Goal
+## Goals
 
 `/session-fork [optional message]` creates a new Caco session that branches off the current one. The new session inherits the full conversation history, metadata, and working directory but has its own session ID. Diverging changes don't affect the parent.
 

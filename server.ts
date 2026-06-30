@@ -173,7 +173,7 @@ app.use('/api/sessions/:sessionId/export', transferCors);
 // Same-origin guard: blocks foreign browser pages (CSRF/CSWSH) from driving the
 // local server, uniform across every route below. Mounted AFTER the portal transfer
 // carve-outs (which it skips) and BEFORE the /api routes. Unscoped so req.path is the
-// full path for the carve-out match. See docs/same-origin-guard-spec.md.
+// full path for the carve-out match. See docs/spec-same-origin-guard.md.
 app.use(requireSameOrigin);
 
 // API routes

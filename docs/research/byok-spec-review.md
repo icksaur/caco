@@ -43,11 +43,11 @@
 
 | Criterion | Rating | Notes |
 |---|---:|---|
-| Goal/problems | good | Clear goal/non-goals (`docs/byok-spec.md:5-9`). |
-| Use cases/UX | good | New chat, `/session-model`, model-info, bad key path covered (`docs/byok-spec.md:87-92`). |
-| Considerations/risks | medium | Good start (`docs/byok-spec.md:118-127`), but missing wire-model mapping, bearer tokens, env lifecycle, collision policy. |
+| Goal/problems | good | Clear goal/non-goals (`docs/spec-byok.md:5-9`). |
+| Use cases/UX | good | New chat, `/session-model`, model-info, bad key path covered (`docs/spec-byok.md:87-92`). |
+| Considerations/risks | medium | Good start (`docs/spec-byok.md:118-127`), but missing wire-model mapping, bearer tokens, env lifecycle, collision policy. |
 | Code analysis | medium | Main SDK/Caco claims verify; create/resume details need the fixes above. |
-| Divisible | good | R1-R4 order is sensible (`docs/byok-spec.md:129-136`). |
+| Divisible | good | R1-R4 order is sensible (`docs/spec-byok.md:129-136`). |
 | Self-contained | medium | Enough context for source locations, but not enough exact model/provider data shapes for implementation. |
 | Avoids transient state | yes | R1-R4 are requirements/order, not progress tracking. |
-| Edge cases | medium | Covers config/model basics (`docs/byok-spec.md:138-145`); add future GitHub colon collision, provider removal on active resume, missing bearer/header env, malformed per-provider model entries. |
+| Edge cases | medium | Covers config/model basics (`docs/spec-byok.md:138-145`); add future GitHub colon collision, provider removal on active resume, missing bearer/header env, malformed per-provider model entries. |

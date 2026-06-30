@@ -71,7 +71,7 @@ export function initInputRouter(): void {
     // both new-chat and active-session branches directly at
     // `files` (avoid stub flash) and pass cwd via
     // openFinderRoot so new-chat works without an active
-    // session. See docs/files-applet-spec.md
+    // session. See docs/spec-files-applet.md
     if ((e.ctrlKey || e.metaKey) && e.key === 'p' && !e.altKey && !e.shiftKey) {
       e.preventDefault();
       if (getViewState() === 'newChat') {

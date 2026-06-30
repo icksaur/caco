@@ -1,6 +1,6 @@
 # Image Gallery Applet
 
-## Goal
+## Goals
 
 Grid-based image browser for a directory. Shows thumbnails in rows (at least 4 wide), lazy-loaded as they scroll into view. Clicking a thumbnail opens the image-viewer applet. Image-viewer gets a "gallery" link back.
 

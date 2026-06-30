@@ -1,6 +1,6 @@
 # Chat Render Cap
 
-## Goal
+## Goals
 
 Reduce client-side history-render cost by capping the number of events Caco shows on session resume. The current behavior loads the last 10 turns (subject to a 2000-event hard cap) — for talkative sessions that's 700+ events to paint at once. Most users only look at the last few exchanges; the rest is scroll cost they never use.
 

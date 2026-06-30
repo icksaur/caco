@@ -1,6 +1,6 @@
 # Dev Tunnel `Host`/`Origin` header findings
 
-Research basis for the same-origin guard spec (`docs/same-origin-guard-spec.md`). Settles
+Research basis for the same-origin guard spec (`docs/spec-same-origin-guard.md`). Settles
 whether a loopback-default trusted-host guard works over a Microsoft Dev Tunnel.
 
 ## Headline

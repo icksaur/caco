@@ -5,7 +5,7 @@
  * rendered content with a raw-text <textarea>; Save commits to disk
  * via PUT /api/files/<path>.
  *
- * Per docs/files-applet-viewers-spec.md
+ * Per docs/spec-files-applet-viewers.md
  *
  * Lifecycle (extended from V1.1):
  *  - Constructor: builds detached contentEl with display:none.

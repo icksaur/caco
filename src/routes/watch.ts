@@ -1,7 +1,7 @@
 /**
  * File-watch lease HTTP routes.
  *
- * See docs/files-applet-edits-spec.md. Thin wrappers over the watch-store module
+ * See docs/spec-files-applet-edits.md. Thin wrappers over the watch-store module
  * plus a single broadcaster injection at startup.
  */
 

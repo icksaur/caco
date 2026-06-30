@@ -1,7 +1,7 @@
 {
   "slug": "files",
   "name": "Files",
-  "description": "Tabbed file viewer with multiple viewer types per tab. Ctrl+P opens a fuzzy file picker. See docs/files-applet-spec.md.",
+  "description": "Tabbed file viewer with multiple viewer types per tab. Ctrl+P opens a fuzzy file picker. See docs/spec-files-applet.md.",
   "params": {},
   "createdAt": "2026-05-29T22:00:00.000Z",
   "updatedAt": "2026-06-10T20:30:00.000Z",

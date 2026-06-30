@@ -9,9 +9,9 @@ consolidated, code-accurate spec set. The history lives in git if ever needed.
 
 | Spec | Covers |
 |---|---|
-| `docs/files-applet-spec.md` | Root: tabs, viewer switching, path routing (in-cwd vs external), file picker, state/persistence, the selection→agent bridge, server file API. |
-| `docs/files-applet-viewers-spec.md` | The viewer contract + per-viewer behavior (source, markdown, diff, image, audio, html; `editable-text` write encoder). |
-| `docs/files-applet-edits-spec.md` | The git diff-card system: `GitEditPoller`, the card store, `/file-edits/*` routes, and the line-selection bridge. |
+| `docs/spec-files-applet.md` | Root: tabs, viewer switching, path routing (in-cwd vs external), file picker, state/persistence, the selection→agent bridge, server file API. |
+| `docs/spec-files-applet-viewers.md` | The viewer contract + per-viewer behavior (source, markdown, diff, image, audio, html; `editable-text` write encoder). |
+| `docs/spec-files-applet-edits.md` | The git diff-card system: `GitEditPoller`, the card store, `/file-edits/*` routes, and the line-selection bridge. |
 
 ## Shipped history (summary)
 

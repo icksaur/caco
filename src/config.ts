@@ -50,7 +50,7 @@ export const WORKFLOW_EMIT_CAP_BYTES = 16 * 1024;
 // runaway emit() (e.g. a 1 GB string) can never exhaust the Caco process.
 export const WORKFLOW_RESULT_MAX_BYTES = 2 * 1024 * 1024;
 
-// Workflow savings model (see docs/workflow-savings-model-spec.md). Tunables.
+// Workflow savings model (see docs/spec-workflow-savings-model.md). Tunables.
 // Rough output tokens one tool-call arg block would have cost the model.
 export const WORKFLOW_AVG_TOOLCALL_TOKENS = 40;
 // Fallback per-round-trip latency before any request has completed (ms).

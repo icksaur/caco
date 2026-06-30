@@ -63,7 +63,6 @@ function isSpec(file, h1) {
 function analyze(file) {
   const text = readFileSync(file, 'utf8');
   const lines = text.split(/\r?\n/);
-  const h1 = (text.match(/^#\s+.+$/m) || [''])[0];
   // Ordered list of resolved canonical sections as they appear in the doc.
   const seen = [];         // canonical names in document order
   const synonymsUsed = []; // raw headings that drifted
@@ -86,21 +85,23 @@ function analyze(file) {
   const expectedOrder = CANONICAL.filter(s => docCanonSeq.includes(s));
   const orderOk = JSON.stringify(docCanonSeq) === JSON.stringify(expectedOrder);
 
-  // Title: canonical is `# spec-<slug>` (lowercase slug). Anything else is a
-  // soft flag (many legacy specs use `# Spec: Title`).
-  const titleCanonical = /^#\s+spec-[a-z0-9][a-z0-9-]*(\s+\(done\))?\s*$/.test(h1.trim());
+  // Naming: the user's goal is a `spec-` FILENAME prefix (not an H1 form), so a
+  // legacy `*-spec.md` file is flagged to drive the rename; descriptive H1s are
+  // fine. `*-spec.md` that already starts with `spec-` is impossible, so this
+  // cleanly distinguishes renamed-vs-legacy.
+  const nameCanonical = basename(file).startsWith('spec-');
 
   const issues = [];
   if (missingRequired.length) issues.push(`missing: ${missingRequired.join(', ')}`);
   if (!orderOk) issues.push(`order: ${docCanonSeq.join(' → ') || '(none)'}`);
   if (synonymsUsed.length) issues.push(`synonyms: ${[...new Set(synonymsUsed)].join(', ')}`);
-  if (!titleCanonical) issues.push('title not `# spec-<slug>`');
+  if (!nameCanonical) issues.push('filename not `spec-*`');
 
-  // Severity: missing required > broken order > synonym/title drift.
+  // Severity: missing required > broken order > synonym/name drift.
   let severity = 'ok';
   if (missingRequired.length) severity = 'major';
   else if (!orderOk) severity = 'moderate';
-  else if (synonymsUsed.length || !titleCanonical) severity = 'minor';
+  else if (synonymsUsed.length || !nameCanonical) severity = 'minor';
 
   return {
     file: basename(file),
@@ -108,7 +109,7 @@ function analyze(file) {
     missingRequired,
     orderOk,
     synonymsUsed: [...new Set(synonymsUsed)],
-    titleCanonical,
+    nameCanonical,
     issues,
   };
 }

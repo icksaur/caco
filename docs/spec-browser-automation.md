@@ -1,6 +1,6 @@
 # Browser Automation
 
-## Goal
+## Goals
 
 Let the Caco agent drive a **dedicated, signed-in browser profile** on the operator's behalf, so it can interact with web UIs that have no API. Primary use case: operator on a corporate Microsoft Dev Box needs the agent to update records in an internal web tool behind Entra SSO.
 

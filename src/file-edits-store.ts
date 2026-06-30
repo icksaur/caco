@@ -2,7 +2,7 @@
  * File Edits Card-List Store
  *
  * Per-session persisted card list for the file-edits applet.
- * See docs/files-applet-edits-spec.md
+ * See docs/spec-files-applet-edits.md
  *
  * Schema on disk (~/.caco/sessions/<sessionId>/file-edits-cards.json):
  *

@@ -470,7 +470,7 @@ async function showLastCommit(cwd = repoPath, isStale) {
     // git-diff with a ref-range and no file param — a multi-file
     // view that doesn't fit the files-applet one-file-per-tab
     // model). Per-file commit diffs are reachable from the
-    // unstaged file rows. See docs/files-applet-spec.md
+    // unstaged file rows. See docs/spec-files-applet.md
 
     if (typeof isStale === 'function' && isStale()) return;
     cleanMessage.innerHTML =

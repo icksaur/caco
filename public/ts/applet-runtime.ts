@@ -552,7 +552,7 @@ function appletFetchWithRetry(
 
 // ============================================================================
 // File-watch leases
-// See docs/files-applet-spec.md
+// See docs/spec-files-applet.md
 // ============================================================================
 
 /** Event delivered to a WatchHandle's onChange callback. */

@@ -205,7 +205,7 @@ This is a **Caco-owned** file; the Copilot CLI never reads it. With no file pres
 - A missing or malformed file, or a model with an unset key, never breaks GitHub models — listing continues and only the affected BYOK model fails (at session start, with a clear message).
 - Editing the file takes effect on the next server restart.
 
-See [docs/multi-provider.md](docs/multi-provider.md) for background and [docs/byok-spec.md](docs/byok-spec.md) for the design.
+See [docs/byok-spec.md](docs/byok-spec.md) for the design.
 
 ## Shortcuts
 

@@ -1,6 +1,6 @@
 # Spec: BYOK Multi-Provider Support
 
-**Status:** draft · **Depends on:** `docs/multi-provider.md` (research) · **SDK:** `@github/copilot-sdk@1.0.0-beta.7`
+**Status:** implemented (`src/provider-registry.ts`) · **SDK:** `@github/copilot-sdk` BYOK `provider` field. SDK-verification research folded in from the former `multi-provider.md`.
 
 ## Goal
 
@@ -21,6 +21,7 @@ These shape the entire design. All verified against `node_modules/@github/copilo
 | Runtime models reachable via raw RPC `models.list`. | `rpc.js:11–19`, exposed as `client.rpc.models.list({})` → `ModelList`. | Our `onListModels` can fetch GitHub models even while overriding `listModels()`. No chicken-and-egg. |
 | BYOK forces session telemetry off. | `types.d.ts:1225` | Acceptable; our own throughput accounting is independent. |
 | Static credentials only (apiKey / static bearerToken). | `byok.md`, `types.d.ts:1421` | Keys read from env at session-create time. No OAuth/refresh. |
+| SDK `ProviderConfig` (verified, `types.d.ts:1408`): `{ type?: "openai"\|"azure"\|"anthropic" (default openai), wireApi?: "completions"\|"responses", baseUrl (required), apiKey?, bearerToken? }`. | `types.d.ts:1408` | No homegrown abstraction needed; the SDK redirects only the LLM HTTP call. OpenRouter is just `type:"openai"` + `baseUrl: https://openrouter.ai/api/v1`. BYOK bypasses GitHub's proxy (no premium quota, no GitHub filters, telemetry off). |
 
 ### Answering the open questions directly
 
@@ -131,7 +132,7 @@ Same-provider switches keep the fast `setModel(model, options)` path, preserving
 | `src/model-billing.ts` | `modelCostSummary` already handles missing billing; ensure BYOK `models[]` metadata maps through `SDKModelInfo` shape (synthesize a `billing`-like or pass `*PerMtok` directly). |
 | `src/routes/sessions.ts:484` | `/session-model` handler tolerates the recreate path (already async). |
 | `public/ts/model-selector.ts` | Group rows by provider sub-header; already renders context/cost. |
-| Docs | Update `docs/multi-provider.md` cross-link; document `providers.json` in README/API. |
+| Docs | Document `providers.json` in README/API. |
 
 No tool-layer changes: `defineTool`, streaming, events, surfaces, MCP all work unchanged under BYOK (the runtime emits the same events regardless of provider).
 

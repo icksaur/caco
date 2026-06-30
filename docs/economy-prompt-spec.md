@@ -7,7 +7,7 @@ fewer fresh input tokens per turn — across all models (Claude, GPT-5.x, Gemini
 killers compound: fresh input ≈ (new content per turn) × (turn count), so cutting turns and
 trimming per-turn content both pay off, multiplicatively.
 
-Grounded in `docs/prompt-economy-research.md` (evidence-backed; sources cited there). This
+Grounded in `docs/research/prompt-economy-research.md` (evidence-backed; sources cited there). This
 spec turns that research into a concrete, layered, **measurable** change, honoring the hard
 constraint that the worst offenders are un-annotatable.
 

@@ -1,6 +1,6 @@
 # caco_run_workflow — code-execution orchestration (V2)
 
-Status: draft. Roadmap item 3. Read with `docs/harness-token-techniques-research.md`.
+Status: draft. Roadmap item 3. Read with `docs/research/harness-token-techniques-research.md`.
 
 ## Goal
 

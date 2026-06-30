@@ -209,6 +209,13 @@ A named file section's response begins with a heading TOC (H2/H3 with line numbe
           join(projectRoot, cleaned),
           join(docsDir, cleaned),
         ];
+        // Fall back to a recursive basename match so docs in docs/ subdirs
+        // (guides/, research/, archive/) are still fetchable by short name.
+        if (!candidates.some(p => existsSync(p))) {
+          const base = cleaned.toLowerCase();
+          const hit = scanDocs().find(f => f.toLowerCase().endsWith('/' + base) || f.toLowerCase().endsWith('\\' + base));
+          if (hit) candidates.push(hit);
+        }
         for (const path of candidates) {
           if (existsSync(path)) {
             try {

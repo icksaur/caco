@@ -6,7 +6,7 @@
  * and reflects state into class names. No async, no DOM, no fetch in this
  * module — pure data so it's unit-testable.
  *
- * See docs/panel-state-architecture.md for rationale.
+ * See docs/research/panel-state-architecture.md for rationale.
  */
 
 export interface PanelState {

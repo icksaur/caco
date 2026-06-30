@@ -69,7 +69,7 @@ function addSlot(
  *  guaranteed to be torn down, even if the extension forgot to
  *  return its own dispose or registered something it doesn't track.
  *
- *  L3 fix (docs/global-leak-audit.md): prior to this, the
+ *  L3 fix (docs/research/global-leak-audit.md): prior to this, the
  *  registerCommand wrapper returned a no-op disposer, so a reloaded
  *  extension that removed a command left the orphan command in the
  *  registry running stale closure-captured code. */

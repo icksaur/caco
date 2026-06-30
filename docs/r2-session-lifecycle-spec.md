@@ -23,7 +23,7 @@ The roadmap (§R2) proposed a *new* `SessionLifecycle` module with
 is wrong on three counts the code proves:
 1. `app-state.ts` **already is** the canonical lifecycle home — it exports
    `onActiveSessionChange(prev,next)`, `onMessageSent`, `onSessionArchived`, with
-   a documented convention (`docs/global-leak-audit.md`, `docs/code-quality.md`:
+   a documented convention (`docs/research/global-leak-audit.md`, `docs/code-quality.md`:
    "any module-level `let`/Map keyed by session id MUST declare its LIFECYCLE and
    subscribe to one of these events"). A second module would fork that
    convention.

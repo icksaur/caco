@@ -391,7 +391,7 @@ Returns:
 
 ## Session Surface
 
-Two-party collaborative document per session. See `docs/session-surface-applet.md`.
+Two-party collaborative document per session. See `docs/research/session-surface-applet.md`.
 
 - `GET /api/sessions/:id/surface` - Read full surface document
 - `GET /api/sessions/:id/surface/changes` - Read human-side `changes` map + `dataToken`

@@ -333,7 +333,7 @@ The intrusive-but-can-do-anything option is `visible`. The low-friction option f
 - `src/browser-config.ts` — config loader with defaults; reads `<STORAGE_ROOT>/browser-config.json`.
 - `scripts/start-browser.ps1` — operator launcher (Windows).
 - `scripts/start-browser.sh` — operator launcher (Linux).
-- `docs/browser-automation-quickstart.md` — operator-facing setup guide.
+- `docs/guides/browser-automation-quickstart.md` — operator-facing setup guide.
 - `tests/unit/browser-snapshot.test.ts` — fixture-based snapshot formatting tests.
 - `tests/unit/browser-config.test.ts` — defaulting and `CACO_HOME` override tests.
 

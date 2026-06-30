@@ -16,7 +16,7 @@
  * - host ∈ trustedHosts is the DNS-rebinding guard (after evil.com→127.0.0.1, Origin
  *   and Host both read evil.com and pass a pure same-origin check). trustedHosts is
  *   the loopback set by default; Dev Tunnels rewrite Host→localhost by default so this
- *   is zero-config over a tunnel too (see docs/devtunnel-host-findings.md).
+ *   is zero-config over a tunnel too (see docs/research/devtunnel-host-findings.md).
  */
 
 import type { Request, Response, NextFunction } from 'express';

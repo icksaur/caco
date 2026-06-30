@@ -203,7 +203,7 @@ Mechanics:
    without raising tool-call/turn counts or failures. Record before/after.
 6. **Remove the tool (only if step 5 passes):** delete `src/offer-action-tool.ts` +
    server registration + prompt tool mention; update every doc that references it
-   (`docs/archive/ui-session-interaction.md`, `docs/rich-interactions.md`, API.md, and the
+   (`docs/archive/ui-session-interaction.md`, `docs/research/rich-interactions.md`, API.md, and the
    chat-form-refactor docs) and any skill. Re-measure with the byte oracle (−616 B).
 
 A2 is the highlight; if step 3's streaming proof or step 5's reliability probe fails,

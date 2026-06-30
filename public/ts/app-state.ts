@@ -112,7 +112,7 @@ function notifyActiveSessionChange(prev: string | null, next: string | null): vo
 // state, staged images, swarm progress, etc.) should subscribe to
 // the relevant hook here to clear/prune at the right boundary.
 //
-// See `docs/global-leak-audit.md` for the audit that motivated
+// See `docs/research/global-leak-audit.md` for the audit that motivated
 // this consolidation and `docs/code-quality.md` for the rule that
 // any module-level `let`/Map keyed by session id MUST declare its
 // LIFECYCLE in a comment and subscribe to one of these events.

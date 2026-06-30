@@ -1,7 +1,7 @@
 /**
  * Surface store — two-party collaborative document per session.
  *
- * See docs/session-surface-applet.md for the protocol.
+ * See docs/research/session-surface-applet.md for the protocol.
  *
  * Document shape:
  *   { dataToken, style, items, changes, customScript?, customStyle? }

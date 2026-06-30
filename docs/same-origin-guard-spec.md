@@ -91,7 +91,7 @@ Their own `transferCors` continues to govern them.
   `origin.host === host` passes a rebinding attack (after `evil.com → 127.0.0.1`, both Origin
   and Host are `evil.com`) — and `/ws` is a live shell channel, so this is RCE-grade. The
   `trustedHosts` membership clause closes it. **Research settled the only objection** (tunnel
-  config cost — see `docs/devtunnel-host-findings.md`): Microsoft Dev Tunnels **rewrites both
+  config cost — see `docs/research/devtunnel-host-findings.md`): Microsoft Dev Tunnels **rewrites both
   `Host` and `Origin` to `localhost` by default**, so the loopback-default trusted set works
   over the tunnel at **zero config**, exactly like direct-localhost and SSH `-L`. So Y is
   zero-config on every normal topology AND closes rebinding — strictly better than same-origin

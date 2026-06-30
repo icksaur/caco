@@ -1,7 +1,7 @@
 /**
  * Surface routes — two-party collaborative document.
  *
- * See docs/session-surface-applet.md.
+ * See docs/research/session-surface-applet.md.
  *
  *   GET    /api/sessions/:sessionId/surface
  *   GET    /api/sessions/:sessionId/surface/changes

@@ -5,7 +5,7 @@ N1–N5). Grounded against `public/ts/chat-view-controller.ts`,
 `public/ts/message-streaming.ts`, `public/ts/multiline-input.ts`.
 
 Documents under review:
-- `docs/chat-form-refactor.md` (revised spec)
+- `chat-form-refactor.md` (revised spec)
 - `plan.md` (revised, Phases 2 and 3)
 
 ---
@@ -236,7 +236,7 @@ and must not be applied."
 
 Add the guard to plan step 3.4.3.
 
-**File:** `docs/chat-form-refactor.md:402-415`, `plan.md:601-617`
+**File:** `chat-form-refactor.md:402-415`, `plan.md:601-617`
 
 ---
 
@@ -388,7 +388,7 @@ to match reality, or (b) add a plan step to make `getLastInput()`
 newChat-aware by storing the last newChat prompt separately. Option
 (a) is honest and zero-cost. Option (b) is scope creep for R3 V1.
 
-**File:** `docs/chat-form-refactor.md:87`, `plan.md:592-599`
+**File:** `chat-form-refactor.md:87`, `plan.md:592-599`
 
 ---
 

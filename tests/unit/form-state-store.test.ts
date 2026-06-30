@@ -3,7 +3,7 @@
  *
  * Covers the contract relied on by message-streaming.ts's updateButton
  * subscriber and the chat-input typing path. See
- * docs/chat-form-refactor.md §"Phase R1".
+ * docs/spec-chat-form.md §"Phase R1".
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';

@@ -5,7 +5,7 @@ Reviewer: spec-review pass, "did NOT write" path of
 `~/.copilot/skills/create-spec-plan/code-quality.md`.
 
 Documents under review:
-- `docs/chat-form-refactor.md` (spec)
+- `chat-form-refactor.md` (spec)
 - `plan.md` (Phases 2 and 3 — Phase 1 not under review)
 
 Verdict: **Phase 2 has one BLOCKER (autoresize regression) plus

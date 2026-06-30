@@ -9,7 +9,7 @@
  *
  * Singleton scope: chatting view only. New-chat view has no busy
  * state or response options; its form is independent. See
- * docs/chat-form-refactor.md §"Per-form store vs singleton store".
+ * docs/spec-chat-form.md §"Per-form store vs singleton store".
  */
 
 export interface FormState {

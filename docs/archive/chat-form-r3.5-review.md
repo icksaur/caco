@@ -1,6 +1,6 @@
 # R3.5 spec review
 
-Reviewer: independent agent. Scope: `docs/chat-form-r3.5.md` against
+Reviewer: independent agent. Scope: `chat-form-r3.5.md` against
 the current tree (`public/ts/multiline-input.ts`,
 `public/ts/message-streaming.ts`, `public/ts/chat-form-controller.ts`,
 `public/ts/image-paste.ts`, `public/ts/main.ts`,
@@ -15,12 +15,12 @@ implementation. Several others need clarification.
 
 ### B1 — R3.5d Option A contradicts the spec's own thesis
 
-`docs/chat-form-r3.5.md:236-243` recommends Option A: leave
+`chat-form-r3.5.md:236-243` recommends Option A: leave
 `image-paste.ts:syncHiddenInput` (`image-paste.ts:119-122`) doing
 `document.getElementById('imageData')`, and add a session-switch
 clear.
 
-The spec's stated goal (`docs/chat-form-r3.5.md:22-32`): "no
+The spec's stated goal (`chat-form-r3.5.md:22-32`): "no
 module-level mutable in the chat-input layer holds state that is
 conceptually per-form … the bug class — 'second form introduced,
 module-singleton captures wrong instance' — becomes structurally
@@ -58,7 +58,7 @@ violation in place, and file the follow-up.
 
 ### B2 — R3.5b boundary is unspecified
 
-`docs/chat-form-r3.5.md:143-169` says "the shared
+`chat-form-r3.5.md:143-169` says "the shared
 network/streaming logic — `streamResponse`, `tryExecuteSlashCommand`,
 `setResponseOptions`, the busy-state push — stays at module scope.
 Only the form-specific state (steerCount, submitting, button
@@ -105,14 +105,14 @@ plus its own `steerCount`/`submitting`/`refreshButton` calls. Then
 the spec is unambiguous.
 
 Also note: the spec's R3.5a moves `tryExecuteSlashCommand` to the
-controller (`docs/chat-form-r3.5.md:132-136`), but R3.5b lists it
-under "stays at module scope" (`docs/chat-form-r3.5.md:167`). Pick
+controller (`chat-form-r3.5.md:132-136`), but R3.5b lists it
+under "stays at module scope" (`chat-form-r3.5.md:167`). Pick
 one. Per-controller is right (it needs `this.popups.openPicker` —
 see Q6 below).
 
 ### B3 — R3.5c boot order under-specified; existing init-race carries over
 
-Spec (`docs/chat-form-r3.5.md:198-217`) says "Move initialization
+Spec (`chat-form-r3.5.md:198-217`) says "Move initialization
 to `main.ts` (or `ChatViewController.init()`)" and "Mitigate by
 calling `initMessageStreaming()` after DOM-ready in `main.ts`
 (which is where `setupFormHandler` is called today — same timing)."
@@ -166,7 +166,7 @@ gating (`multiline-input.ts:79-89`). Three classes would triplicate
 that boilerplate inside `ChatFormController`. Wrapper is not
 premature — it has a single coherent responsibility ("popup trio
 attached to one textarea") and the interface in
-`docs/chat-form-r3.5.md:99-122` is small. Keep it.
+`chat-form-r3.5.md:99-122` is small. Keep it.
 
 Q6 (picker external trigger). After R3.5b moves the submit handler
 onto the controller, the picker invocation path becomes:
@@ -193,7 +193,7 @@ thin and lets `openPicker` own the popup lifecycle including
 
 ### I2 — Test cases must enumerate the three regressions
 
-Q9. Spec (`docs/chat-form-r3.5.md:341-343`) says "new
+Q9. Spec (`chat-form-r3.5.md:341-343`) says "new
 `chat-form-popups.test.ts` covers the trio of popups (mirror of
 existing pound/slash tests if any — currently none; add coverage)."
 That's not enough. The whole motivation of R3.5 is that these three
@@ -224,12 +224,12 @@ as named cases so a future regression has a named, owned test:
    in chatting, submit newchat — newchat POST body has empty
    `imageData`.
 
-Required change: replace `docs/chat-form-r3.5.md:341-343` with the
+Required change: replace `chat-form-r3.5.md:341-343` with the
 above enumeration.
 
 ### I3 — R3.5e: one guard removal is conditional on B1
 
-Guards listed for deletion at `docs/chat-form-r3.5.md:251-262`:
+Guards listed for deletion at `chat-form-r3.5.md:251-262`:
 
 - `slashPopupBoundTo` / `poundPopupBoundTo` and the rebuild-on-mismatch
   branch — safe to delete after R3.5a. ✓
@@ -250,7 +250,7 @@ Not listed but worth checking:
   `chatView.getActiveForm()?.textarea` — another get-at-event-time
   global lookup. Once R3.5b moves the callers (`message-streaming.ts:411,421,435,441,472`)
   onto the controller, callers can do `this.textarea.style.height
-  = 'auto'` directly. The spec's R3.5a (`docs/chat-form-r3.5.md:131-134`)
+  = 'auto'` directly. The spec's R3.5a (`chat-form-r3.5.md:131-134`)
   alludes to this ("becomes `ChatViewController.resetActiveTextareaHeight()`
   or moves into the form controller") — pick the latter and add
   it to R3.5e's deletion list. There's also one external caller in
@@ -304,7 +304,7 @@ regression of the same class while paying defensive-patch interest.
 ### N5 — Self-containment
 
 Q11. Spec correctly references prereqs
-(`docs/chat-form-r3.5.md:18-19`). A fresh agent can execute from
+(`chat-form-r3.5.md:18-19`). A fresh agent can execute from
 the spec + the two referenced docs without conversation history.
 Acceptable.
 

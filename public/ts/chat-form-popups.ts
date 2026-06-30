@@ -7,7 +7,7 @@
  * after R3 V1's two-form split). Per-form ownership makes that bug
  * class structurally impossible.
  *
- * See docs/chat-form-r3.5.md §R3.5a.
+ * See docs/spec-chat-form.md §R3.5a.
  */
 
 import { InputPopup, type PopupItem } from './input-popup.js';

@@ -2,7 +2,7 @@
  * chat-draft-store tests
  *
  * Verifies the per-session and new-chat draft stores. See
- * docs/chat-draft-persistence.md.
+ * docs/spec-chat-form.md.
  *
  * Critical invariant: setSessionDraft must NOT create the session
  * directory. The unconditional ensureDir pattern would resurrect

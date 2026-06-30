@@ -15,7 +15,7 @@ the per-form controller (or a per-form auxiliary), eliminate the
 correctly scope steerCount + chatRegion + image state to the
 chatting form.
 
-Prerequisite reading: `docs/chat-form-refactor.md` (R3 V1 spec),
+Prerequisite reading: `chat-form-refactor.md` (R3 V1 spec),
 `docs/archive/chat-draft-postmortem.md` (root-cause analysis).
 
 ## Goal

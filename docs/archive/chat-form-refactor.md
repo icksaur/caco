@@ -1,7 +1,7 @@
 # chat-form refactor (R1 + R3)
 
 **Status:** spec for review.
-**Background:** Follow-up to `docs/chat-draft-refactor.md` (QW1+QW2+QW3+R2).
+**Background:** Follow-up to `chat-draft-refactor.md` (QW1+QW2+QW3+R2).
 Postmortem: `docs/archive/chat-draft-postmortem.md`.
 
 ## Overview
@@ -15,7 +15,7 @@ order so each pays back the cost of the previous and de-risks the next:
   bus pattern entirely. The current code uses `dispatchEvent('input')`
   on the chat textarea as a side-effect signal that "options changed,
   recompute button state." Six remaining call sites use that idiom
-  (see `docs/chat-draft-refactor.md` §"Remaining `dispatchEvent('input')`
+  (see `chat-draft-refactor.md` §"Remaining `dispatchEvent('input')`
   sites"). Replace with a typed publish/subscribe store; the input
   listener stays for *real* user input only.
 

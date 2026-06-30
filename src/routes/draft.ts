@@ -2,7 +2,7 @@
  * Pre-session draft routes.
  *
  * Global new-chat draft buffer — not tied to any session. See
- * docs/chat-draft-persistence.md §API.
+ * docs/spec-chat-form.md §API.
  *
  *   GET    /api/draft/newchat    → 200 text/plain | 404
  *   PUT    /api/draft/newchat    ← text/plain     → 204 | 413

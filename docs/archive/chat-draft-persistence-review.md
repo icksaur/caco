@@ -1,6 +1,6 @@
 # review: chat-draft-persistence.md
 
-Reviewer pass against `docs/chat-draft-persistence.md`, the existing
+Reviewer pass against `chat-draft-persistence.md`, the existing
 codebase, and the personal code-quality bar. Verdict: **spec is close
 to ready**, but a few correctness gaps and one design question should
 be resolved before implementation.

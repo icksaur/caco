@@ -2,7 +2,7 @@
  * Chat-draft persistence store.
  *
  * Per-session and new-chat draft text, stored as plain UTF-8 files.
- * See docs/chat-draft-persistence.md.
+ * See docs/spec-chat-form.md.
  *
  *   ~/.caco/sessions/<sessionId>/chat-draft.txt    per-session
  *   ~/.caco/drafts/newchat.txt                     pre-session (global)

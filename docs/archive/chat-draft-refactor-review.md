@@ -1,6 +1,6 @@
 # chat-draft refactor — spec + plan review
 
-Reviewing `docs/chat-draft-refactor.md` (spec) and `plan.md` (impl plan)
+Reviewing `chat-draft-refactor.md` (spec) and `plan.md` (impl plan)
 against `~/.copilot/skills/create-spec-plan/code-quality.md` and the
 review-spec / implementation-plan skills.
 

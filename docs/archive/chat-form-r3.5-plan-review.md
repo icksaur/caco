@@ -1,7 +1,7 @@
 # R3.5 Implementation Plan — Review
 
 Scope: `plan.md` (R3.5 active plan) against the working tree at the
-start of R3.5. Spec is `docs/chat-form-r3.5.md` (locked); spec review
+start of R3.5. Spec is `chat-form-r3.5.md` (locked); spec review
 already incorporated. This review walks the focus questions from the
 user prompt and surfaces gaps that would cause a Sonnet executor to
 get stuck or ship a regression.
@@ -44,7 +44,7 @@ textarea.addEventListener('input', () => {
 After Step 1.7 deletes `setupMultilineInput` and Step 1.5 removes
 both calls to it from `main.ts`, **no input listener calls
 `autoResize`**. The textarea will stop growing as the user types.
-The spec at `docs/chat-form-r3.5.md:139-141` says "autoResize stays
+The spec at `chat-form-r3.5.md:139-141` says "autoResize stays
 (utility used by both FormPopups and the controller)" but the plan
 never wires it back into an input event.
 

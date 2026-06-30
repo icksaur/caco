@@ -1,7 +1,7 @@
 # chat-draft refactor
 
 **Status:** spec for review.
-**Background:** `docs/chat-draft-persistence.md` (the original feature spec) and
+**Background:** `chat-draft-persistence.md` (the original feature spec) and
 `docs/archive/chat-draft-postmortem.md` (analysis of the bleed bug shipped on the
 `chat-drafts` branch).
 

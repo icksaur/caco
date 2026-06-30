@@ -17,7 +17,7 @@
  * the cache key (session ID or NEWCHAT_KEY) is global. Disk
  * operations go through chat-draft-api which serializes per key.
  *
- * See docs/chat-form-refactor.md §"Phase R3".
+ * See docs/spec-chat-form.md §"Phase R3".
  */
 
 import { getDraft, putDraft, deleteDraft } from './chat-draft-api.js';

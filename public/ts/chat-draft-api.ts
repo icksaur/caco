@@ -2,7 +2,7 @@
  * Chat-draft persistence API client.
  *
  * Per-key serialized read/write/delete for the chat input textarea
- * draft. See docs/chat-draft-persistence.md.
+ * draft. See docs/spec-chat-form.md.
  *
  * The per-key queue is mandatory: it guarantees DELETE issued on the
  * send path always observes any in-flight PUT from the debounce timer

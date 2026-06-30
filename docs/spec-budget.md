@@ -3,7 +3,8 @@
 Caco's "budget" system: cut the two costs that dominate agent latency/spend
 (round trips and re-sent bytes) and make those costs + savings visible. This is
 the document of record; it absorbs the former `tool-diet-spec`, `tool-diet-audit-spec`,
-and `tool-diet-bench`. Open workstreams live in §Plan; their progress is transient.
+`tool-diet-bench`, and the cost/usage-display specs (`model-billing`,
+`session-throughput`, `transparent-usage`). Open workstreams live in §Plan; their progress is transient.
 
 ## Goals
 
@@ -49,6 +50,16 @@ Cost/savings render in the footer (`context-footer.ts`): `estimateCost` prices
 session in/cache/out at model rates; `priceSaved` prices net credits by class;
 glyph `↯` = net credits saved (negative shows `↯−Ncr`), tooltip = the full
 arithmetic. `⟲N` = round trips. Rates unknown (Auto) → tokens shown, no credit figure.
+
+**Billing rates & live signals.** Model rates derive from the SDK
+`billing.tokenPrices` `{inputPrice, outputPrice, cachePrice, batchSize}` (batchSize
+= 1M, so price ≈ credits/Mtok) via `src/model-billing.ts` — the single source of
+truth for billing display + throughput pricing. The legacy `billing.multiplier` is
+dead (absent → renders 1×); a separate `longContext` tier `{…, contextMax}` prices
+large windows, falling back to flat rates when absent. The footer also surfaces
+per-request token I/O from `assistant.usage` events and a **429 rate-limit count**
+(`recordRateLimit`, fed by `model.call_failure` `statusCode === 429` in
+`dispatch-events.ts`) so a stuck/throttled session is visible at a glance.
 
 ## Invariants
 
@@ -124,5 +135,9 @@ completed request appends a row to `~/.caco/metrics/requests.jsonl`; report via
 
 History: V1 trimmed/removed tools and proved savings; V2 deepened the model from
 one-time output to four billing classes. Portability work (cross-platform
-`caco.sh`, vendored `rg`, POSIX paths) is done. Detail specs: `economy-prompt-spec`,
-`workflow-savings-model-spec`, `offer-action-inline-spec`, `spec-ast-index-tool`.
+`caco.sh`, vendored `rg`, POSIX paths) is done. Absorbed (2026-06) the cost/usage
+specs `model-billing` (SDK token-price rates, dead multiplier), `session-throughput`
+(per-request token I/O + 429 count), and `transparent-usage` (footer/session-list
+consumption display) — all shipped; their still-true facts live in §Design. Detail
+specs: `economy-prompt-spec`, `workflow-savings-model-spec`, `offer-action-inline-spec`,
+`spec-ast-index-tool`.

@@ -21,6 +21,12 @@ silent drop). The two failure modes currently collapse into one, causing:
 - **Repair clobber:** `session-auto-repair` rewrites `events.jsonl` in place with
   no backup and no validation that the rewrite is parseable.
 
+## Design
+
+A shared `src/disk-read.ts` primitive introduces `DiskRead<T>` — a discriminated union of `{ ok: true; value: T }`, `{ ok: false; kind: 'missing' }`, and `{ ok: false; kind: 'corrupt'; error: Error }` — making the two failure modes distinct types. Callers can no longer conflate "file absent" with "file unreadable" at the type level.
+
+The primary write-ownership mechanism is `updateSessionMeta(sessionId, mutate, opts?)` in `session-meta-store.ts`: it reads fresh, applies the mutator synchronously, then writes — refusing to write on `corrupt` (backing up the corrupt file instead) and optionally creating on `missing`. All ~20 RMW sites in routes and session-manager migrate to this boundary. Four slices apply the primitive to the hot-path data-loss scenarios (metadata, events, auto-repair, schedules).
+
 ## Non-goals
 
 - Concurrent-writer atomicity for meta (token-refresh-style races) — that is P7's
@@ -252,7 +258,7 @@ deliberately, not forgotten. If review disagrees, the minimal change is a guard
 that ignores an `ok`-but-empty `quotaSnapshots` rather than treating it as a real
 zero.
 
-## Risks & mitigations
+## Risks and Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
@@ -297,12 +303,14 @@ zero.
 - New tests above present and verified RED→GREEN where a behaviour bug exists.
 - `plan.md` P5 updated per slice, including the quota-poller no-op decision.
 
-## Commit slicing
+## Plan
 
-1. `disk-read.ts` + slice 1a (meta-store boundary + in-module/unobserved migrations).
-2. Slice 1b (external route/tool/session-manager meta migrations + `false`-handling).
-3. Slice 2 (events + last-turns results, discovery/hasMessages, history diagnostic).
-4. Slice 4 (auto-repair backup+validate).
-5. Slice 3 (schedules) + slice 5 note.
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Add `disk-read.ts` + slice 1a: `updateSessionMeta` boundary + in-module RMW migrations (`markSessionObserved`, `markSessionIdle`, `setSessionIntent`, `unobserved-tracker`) | `src/disk-read.ts`, `src/session-meta-store.ts`, `src/unobserved-tracker.ts` | `tests/unit/disk-read.test.ts`, `tests/unit/session-meta-store.test.ts` |
+| 2 | Slice 1b: migrate external RMW sites in routes + session-manager; enforce `false`-return handling per class | `src/routes/api.ts`, `src/routes/sessions.ts`, `src/routes/session-messages.ts`, `src/session-manager.ts`, `src/offer-action-tool.ts` | corrupt-meta refuses write + route returns error (not silent success) |
+| 3 | Slice 2: `readSessionEventsResult` + `readLastTurnsResult`; discovery keeps corrupt sessions; `hasMessages` corrupt → true; `streamHistory` emits diagnostic on corrupt | `src/sdk-session-store.ts`, `src/session-manager.ts`, `src/routes/websocket.ts` | `tests/unit/sdk-session-store.test.ts`; discovery seam test |
+| 4 | Slice 4: `commitRepairedEvents` validates + backs up before overwrite | `src/session-auto-repair.ts` | `tests/unit/session-auto-repair.test.ts` |
+| 5 | Slice 3 + slice 5 note: schedules (corrupt last-run skips tick; corrupt definition skipped); quota-poller no-op documented | `src/schedule-store.ts`, `src/schedule-manager.ts`, `src/routes/schedule.ts` | corrupt-last-run does not force `nextRun=now`; corrupt definition skipped |
 
 Each commit compiles and passes gates independently.

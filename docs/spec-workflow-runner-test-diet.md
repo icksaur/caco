@@ -152,3 +152,14 @@ runs under tsx, so importing a `.ts` file URL is already proven by `facade.js`; 
   size-before-parse semantics the review flagged.
 - No production behavior change: `buildHarness` imports the extracted helpers by URL;
   full build green.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Extract harness-runtime helpers | `src/workflow/harness-runtime.ts` | `workflow-harness-runtime.test.ts` (by-construction) |
+| 2 | Factor `moduleUrl()`; rewrite `buildHarness` | `src/workflow/runner.ts` | build green; harness smoke |
+| 3 | Extract `readEnvelopeFile` + `classifyEnvelope` | `src/workflow/runner.ts` | `workflow-classify-envelope.test.ts` (by-construction) |
+| 4 | Add pure unit-test files | `tests/unit/workflow-harness-runtime.test.ts`, `tests/unit/workflow-classify-envelope.test.ts` | test green; spawn count ≤ 6 |
+| 5 | Trim integration smokes | `tests/unit/workflow-runner.test.ts` | wall-time ↓; no timeouts under load |
+| 6 | Gates | — | typecheck, lint:strict, knip, full tests green |

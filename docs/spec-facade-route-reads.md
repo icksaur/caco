@@ -125,7 +125,7 @@ Strengthen the prompt to prefer the workflow, exclude nothing. **Demoted:** this
 effectively the current state, and the D1 benchmark already showed the model ignores
 the nudge. Listed only for completeness; not a real option.
 
-## Recommended design: shell wrapping (the refocus)
+## Design
 
 Per the owner: **the primary driver is unbounded `bash`/`powershell` output**, and
 read/search tools are a *separate* concern (a future `index_multiread` that reads many

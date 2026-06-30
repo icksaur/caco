@@ -8,7 +8,7 @@ highlighting by reusing the SAME hljs path the code view uses (`_renderToPre` �
 `hljs.highlightElement`), via a highlighted backdrop behind a transparent textarea — no
 CodeMirror, no new dependency.
 
-## Design — backdrop overlay
+## Design
 In edit mode, stack two pixel-aligned layers inside `.fe-source-content` (already
 `position: relative`):
 - **Backdrop** = the existing `_preEl` (`<pre class="fe-source"><code class="hljs language-X">`),

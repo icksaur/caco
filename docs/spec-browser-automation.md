@@ -381,6 +381,16 @@ A new fresh chat session, on a clean install, should be able to:
 8. `caco_browser_eval` returns `eval_disabled` until operator flips config; with origin not in allowlist, returns `eval_origin_blocked`.
 9. Auto-dismissed JS dialog produces a logged event; next tool call succeeds.
 
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Browser connection + CDP client | `src/browser-connection.ts`, `src/browser-tools.ts` | `tests/unit/browser-snapshot.test.ts`, `tests/unit/browser-config.test.ts` |
+| 2 | Helper scripts (launch + readiness poll) | `scripts/start-browser.ps1`, `scripts/start-browser.sh` | visual: cold launch → `started:true`; Edge running |
+| 3 | Register tools in server | `src/server.ts` | by-construction |
+| 4 | Config read/write | `src/storage-paths.ts`, `~/.caco/browser-config.json` | by-construction |
+| 5 | Screenshot output path | `src/browser-tools.ts` | visual: path returned; image-viewer link opens image |
+
 ## Follow-ups (not v1)
 
 - Per-session tab isolation (separate `Page` per session, eliminate cross-session navigation races).

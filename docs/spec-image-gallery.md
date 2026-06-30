@@ -61,7 +61,7 @@ Each thumbnail click: `/?applet=image-viewer&path=<absolute_image_path>`
 
 Add a "📁 gallery" link to the image-viewer toolbar. Derives the directory from the current image path (`path.split('/').slice(0, -1).join('/')`). Links to `/?applet=image-gallery&path=<dir>`.
 
-## Implementation
+## Design
 
 ### Applet files: `applets/image-gallery/`
 
@@ -116,9 +116,25 @@ Both endpoints already exist:
 
 No new endpoints needed.
 
-## Risks
+## Risks and Mitigations
 
 1. **Large directories** — hundreds of images. IntersectionObserver handles this — only visible images load. Directory listing itself is fast (just filenames).
 2. **Thumbnail size** — full images served as thumbnails. No server-side resizing. `/api/file` rejects files > 10MB with 413 — gallery shows "too large" placeholder. For large photos below the limit, browser scales in CSS. Acceptable for v1.
 3. **Cross-platform paths** — directory derivation in viewer→gallery link must handle both `/` and `\` separators (use regex split like existing applets).
 4. **Symlinked directories** — `readdir` reports symlinks to directories as files, so they won't appear as browseable. Symlinks to image files work normally. Acceptable limitation.
+
+## Acceptance
+
+- Observable: Navigate to `/?applet=image-gallery&path=<dir>`. Thumbnails render in a 4+ column grid. Scrolling loads more images lazily (only visible cells fetch). Clicking a thumbnail opens `image-viewer`. Image-viewer shows a "📁 gallery" toolbar link.
+- Budgets: Only visible thumbnails fetch. Files >10 MB show "too large" placeholder (API 413).
+- Gates: `npm run build`, `npm test` green.
+- Oracles: by-construction (no dedicated unit test); visual signoff on grid, lazy-load, and viewer↔gallery round-trip.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Create applet: meta, HTML, CSS skeleton | `applets/image-gallery/meta.json`, `content.html`, `style.css` | by-construction |
+| 2 | Load directory + filter to image extensions | `applets/image-gallery/script.js` | visual: grid appears with filenames |
+| 3 | IntersectionObserver lazy-load | `applets/image-gallery/script.js` | visual: only scrolled-into-view cells load |
+| 4 | Add gallery link to image-viewer | `applets/image-viewer/content.html`, `script.js` | visual: 📁 link in toolbar navigates back |

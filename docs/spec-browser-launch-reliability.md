@@ -129,7 +129,7 @@ result fully diagnosed. Node's subsequent `waitForCdp` becomes a near-instant co
 - `start-browser.sh` (Linux, the path that already works) gets the same readiness-poll
   treatment for parity but is lower priority; the Windows path is the fix that matters.
 
-## Risks & mitigations
+## Risks and Mitigations
 - **Helper now lives ~up to 25 s instead of exiting instantly.** It is detached and
   `unref`'d; `spawnHelper` already awaits child exit, so this only means the happy path
   resolves when CDP is truly ready (a feature, not a regression). Worst case is bounded
@@ -139,7 +139,7 @@ result fully diagnosed. Node's subsequent `waitForCdp` becomes a near-instant co
 - **Deleting Singleton files while another Edge legitimately uses the profile** — guarded
   by the "no live msedge using this profile" check before any deletion.
 
-## Validation
+## Acceptance
 - Build green (`npm run build`).
 - Live: kill any debug Edge, call `caco_browser_ensure_running` cold → succeeds within a
   few seconds; `started:true`.
@@ -155,3 +155,12 @@ result fully diagnosed. Node's subsequent `waitForCdp` becomes a near-instant co
 - [x] sh parity (`scripts/start-browser.sh`)
 - [x] build + live verify — cold launch `started:true` CDP ~4s; reuse `started:false`;
       navigate to example.com → 200; success path now carries helper diagnostics
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Fix Windows spawn (`detached: !isWindows`) | `src/browser-connection.ts` | visual: cold launch `started:true` within ~5 s |
+| 2 | Thread diagnostics through timeout | `src/browser-connection.ts` | force-fail → non-empty `diagnostics` field in result |
+| 3 | Authoritative helper with readiness poll + lock cleanup | `scripts/start-browser.ps1` | helper exits only after CDP answers or emits specific exit code |
+| 4 | sh parity (readiness poll) | `scripts/start-browser.sh` | build green; existing Linux path unaffected |

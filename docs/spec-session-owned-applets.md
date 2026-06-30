@@ -6,6 +6,10 @@ Every session owns its active applet. Switching sessions restores that session's
 
 This aligns the UI hierarchy with the data model: session-list (left) → chat-view (middle) → applet-view (right). Sessions own everything to their right.
 
+## Design
+
+`SessionMeta` gains `activeApplet?: string` and `appletParams?: Record<string, string>`. On session switch the resume response includes these fields; the client loads the saved applet or defaults to `session-context`. Two persistence layers coexist: `panelHidden` is a global UI preference (not session-scoped, stored in `~/.caco/preferences.json`); `activeApplet`/`appletParams` are per-session in `meta.json`. Opening an applet calls `POST /api/applets/:slug/load` with `sessionId`; the server persists the applet identity to that session's meta before returning content. A new `DELETE /api/sessions/:id/applet` endpoint clears the active applet. Explicit open (link click, slash command) overrides `panelHidden=true`. URL format adds `?session=<id>&applet=<slug>&<params>`; old `?applet=` URLs remain valid against the active session.
+
 ## Mental model
 
 Today: the applet panel is a global view. Sessions and applets are orthogonal.
@@ -319,7 +323,7 @@ No reclassification needed for the flip — all applets remain functional under 
 - URL-stateful applets get their state restored via `appletParams`
 - Session-stateful applets read from `~/.caco/sessions/<id>/` which automatically tracks the active session
 
-## Risks
+## Risks and Mitigations
 
 1. **Phase 3 URL semantics.** Cross-session links that omit `session=` use the active session, which may not be what the agent meant. Mitigation: when emitting a link from a specific session's context (chat-footer, applet-runtime), always include `session=`.
 2. **Resume race.** Applet load may complete before session resume finishes, briefly showing the wrong session's state. Mitigation: session-stateful applets re-render on `onSessionChange` (already do).
@@ -332,3 +336,21 @@ No reclassification needed for the flip — all applets remain functional under 
 - Enforcing URL-stateful vs session-stateful patterns — both allowed, mixed allowed.
 - Auto-classification of applets — they classify themselves by which API they use.
 - Multi-applet panels — one applet at a time, as today.
+
+## Acceptance
+
+- Observable: Open session A → switch to session B → switch back to A → A's previously-open applet (e.g. `git-status`) is restored automatically. New session defaults to `session-context`. "×" button clears the active applet and hides the panel. `/applet-clear` slash command does the same.
+- Budgets: n/a
+- Gates: `npm run build`, `npm test` green.
+- Oracles: by-construction (meta persistence covered by storage tests); visual signoff on session-switch applet restoration and clear behavior.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Extend SessionMeta with activeApplet/appletParams | `src/types.ts` (or storage types) | by-construction |
+| 2 | Persist applet on load (POST /api/applets/:slug/load) | `src/routes/applet-routes.ts` | by-construction: meta updated with activeApplet |
+| 3 | Add DELETE /api/sessions/:id/applet | `src/routes/sessions.ts` | by-construction |
+| 4 | Restore applet on session switch (client) | `public/ts/chat-view-controller.ts`, `public/ts/router.ts` | visual: correct applet on switch |
+| 5 | × button + /applet-clear slash command | `public/ts/view-controller.ts`, `public/ts/command-registry.ts` | visual: clear works |
+| 6 | Global panelHidden preference | `src/storage.ts`, `public/ts/view-controller.ts` | by-construction |

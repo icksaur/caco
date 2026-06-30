@@ -11,6 +11,10 @@ templates, or commands). Spec Kit is merely the motivating consumer. The deliver
 is generic: *Caco consumes the same SDK-surfaced commands/agents/prompts/hooks the CLI
 does.*
 
+## Goals
+
+Bring Caco's interactive surface to parity with the Copilot CLI's own config consumption so that anything `specify init --integration copilot` (or any plugin/agent/prompt author) installs into `~/.copilot/` or a project **just works** in a Caco session. The deliverable is generic — no Spec-Kit-specific code. Caco consumes the same SDK-surfaced commands/agents/prompts/hooks the CLI does.
+
 ## The reframing this research forces
 
 The earlier assumption — "lean on the SDK's consumption of `~/.copilot/` and bolt on
@@ -315,7 +319,7 @@ existing trust posture rather than creating a new one — but it should be expli
 - **U3 (project `.github/agents`)** → **Discovered with the flag on**; appears in
   `agent.list` with a file `path`.
 
-## Plan (slices) — revised post-probe
+## Slices (prioritized)
 
 1. ✅ **Probe (DONE):** the gap is **two SDK config flags**, not a file parser.
 2. **R0 (do first, tiny):** fix `configDir` → `configDirectory`
@@ -344,7 +348,7 @@ existing trust posture rather than creating a new one — but it should be expli
    **Not required for Spec Kit.**
 8. R4 folded into RA; R5/R6 deferred.
 
-## Risks & mitigations
+## Risks and Mitigations
 | Risk | Mitigation |
 |---|---|
 | Renaming Caco commands breaks muscle memory/docs/extensions | One-release hidden aliases + deprecation toast; update README/API/EXTENSIONS |
@@ -355,13 +359,18 @@ existing trust posture rather than creating a new one — but it should be expli
 | Collisions between SDK command and a `caco.*` (none expected) | `caco.` prefix is reserved; SDK commands rendered in a separate group |
 
 ## Acceptance
-A `specify init --integration copilot` project opened in a Caco session can drive Spec
-Kit's **default (agent) mode** via `/agent speckit.specify <text>` — the discovered agent
-(slug `speckit.specify`) appears in the `/agent` picker and the dispatch runs the agent
-turn and writes the spec files — **with no Spec-Kit-specific code in Caco**. A custom
-agent is invocable by its slug `id` **or** frontmatter `name` (R4), and an unknown agent
-fails with a clear `not found` toast. Spec Kit's **skills mode** surfaces `/speckit-*` as
-SDK `commands.list` skill commands (R2). Custom agents do **not** get per-name slash
-commands (the reverted G1). Caco's own commands are `caco.*`-prefixed and never collide.
-`.caco/prompts` is gone (retired or repointed to `~/.copilot/prompts`). Plugin/hook
-parity (R5/R6) is documented and deferred.
+
+- Observable: a `specify init --integration copilot` project opened in Caco shows discovered agents (e.g. `speckit.specify`) in the `/agent` picker and the dispatch runs the agent turn end-to-end with no Spec-Kit-specific code. A custom agent is invocable by slug `id` or frontmatter `name`; an unknown agent fails with a clear `not found` toast. Caco commands are `caco.*`-prefixed and never collide with SDK commands.
+- Budgets: n/a.
+- Gates: `npm run typecheck`, `npm run lint:strict`, `npm run knip`, `npm test`, `npm run build:client`.
+- Oracles: `tests/unit/session-manager-config-discovery.test.ts` — fixture `.github/agents/*.agent.md` appears in `listAgents` after `enableConfigDiscovery: true`. `tests/unit/command-registry.test.ts` — `caco.*` prefix; SDK-command takes precedence over alias; deprecation toast fires on alias use. `tests/unit/agent-command.test.ts` — slug `id` resolution; whitespace-name agent not dropped from picker; unknown agent returns 404.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Fix config-dir option name (`configDir` → `configDirectory`) | `src/session-manager.ts:632,807` | config root honored; `session-manager-config-discovery.test.ts` |
+| 2 | Enable config discovery (`enableConfigDiscovery: true`) | `src/session-manager.ts:~625,~807` | `session-manager-config-discovery.test.ts`: fixture agent appears in `listAgents` |
+| 3 | `caco.*` prefix for built-in commands with SDK-precedence aliases | `src/command-registry.ts`, `public/ts/command-registry.ts` | `command-registry.test.ts`: no SDK command shadowed; alias triggers deprecation toast |
+| 4 | Render SDK `commands.list` with `list`/`invoke` routes + all four result-variant handlers | `src/session-manager.ts`, `src/routes/sessions.ts`, `public/ts/command-registry.ts` | `speckit-specify` works in skills mode end-to-end |
+| 5 | Retire `.caco/prompts` scanner (after confirming prompts surface via SDK) | `src/routes/api.ts:587-614`, `public/ts/main.ts:58-93` | - |

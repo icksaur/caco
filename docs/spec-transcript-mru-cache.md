@@ -173,7 +173,7 @@ falls back to a correct re-stream.
 N = 3 cached event arrays (plain data, not DOM) — far lighter than detached DOM
 trees. The `isShowingSession` short-circuit (re-click current session) is unaffected.
 
-## Plan (two slices)
+## Slice Details
 
 ### Slice A — server `eventVersion` (no caching yet)
 Add `getEventVersion(sessionId): { size, mtimeMs } | null` (one `statSync` of
@@ -193,7 +193,23 @@ worth it.
 
 A ships independently. B is the payoff.
 
-## Risks & mitigations
+
+## Invariants
+
+- The fast path is taken iff all guards hold: `version` deep-equals, `connectionId` matches, `isBusy === false`, and a cache entry exists.
+- A session loaded while busy (mid-stream) is never cached — its event array is incomplete.
+- The file-stat token (`{size, mtimeMs}`) is always read fresh at `/resume` from the real `events.jsonl` file; it is never computed in-memory or approximated.
+- The cache entry stays live after a hit (re-render doesn't consume it); a miss drops the stale entry before calling `load()`.
+
+## Considerations
+
+- **Interacted-session pessimism (v1 accepted):** a session you sent to has a grown `events.jsonl` → `version` differs → miss → re-stream (correct). Only idle, untouched sessions hit. Interacted-session hits require live-frame stamping (v2, deferred until measurement justifies it).
+- **Connection guard:** no persistence across WS reconnect — `connectionId` mismatch → miss. A restart changes the WS connection id, invalidating all cache entries.
+- **N = 3 MRU cap:** plain data arrays (not DOM trees); far lighter than detached DOM. `onSessionArchived` eviction frees entries for gone sessions.
+- **Re-render design over DOM detach:** re-renders the cached event array through the existing `renderEvent` path, so all normal `finish()` side-effects (busy/usage/form/scroll/`caco.context`) run naturally — no side-effect replication.
+- **False-hit probability is negligible:** identical `size` AND `mtimeMs` with different content is impossible in practice (rotation shrinks; any write bumps mtime).
+
+## Risks and Mitigations
 | Risk | Mitigation |
 |---|---|
 | Reusing a stale transcript (appends/background activity) | `events.jsonl` grew → `version` (size/mtime) differs → miss → re-stream. Correct by construction (token read from the real file). |
@@ -225,3 +241,12 @@ reconnect, busy, evicted, archived, uncached) falls back to today's exact re-str
 Zero added cost when not switching; no staleness possible. Measure the switch-back
 delta before considering a v2 (live-frame stamping for interacted sessions, or
 live-DOM detach to skip the local re-render).
+
+## Plan
+
+| # | Step | Files | Oracle | Invariants |
+|---|------|-------|--------|------------|
+| 1 | Add `getEventVersion(sessionId)` to `sdk-session-store.ts`; return `eventVersion` from `/resume` | `src/sdk-session-store.ts`, `src/routes/sessions.ts` | fresh session returns `{size,mtimeMs}`; append changes it; rotation changes it; missing file → null — `sdk-session-store-event-version.test.ts` | Token always read from real file |
+| 2 | `transcript-cache.ts`: MRU Map (N=3); accumulate events during load; cache on clean `historyComplete` | `public/ts/transcript-cache.ts` | busy-at-load not cached; LRU evicts beyond N=3; archived session drops entry — `transcript-cache.test.ts` | Never cache busy/incomplete load |
+| 3 | Fast path at load seam: version+connectionId+!busy hit → clear + local re-render, skip `requestHistory` | `public/ts/chat-view-controller.ts`, `public/ts/history-loader.ts` | hit → no `requestHistory` + identical transcript; miss (version/conn/busy/empty) → `load()` — `transcript-cache.test.ts` | All guards must hold for fast path |
+| 4 | Measure switch-back delta; decide if v2 (live-frame stamping / DOM detach) is warranted | — | measurement (manual) | - |

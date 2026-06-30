@@ -30,7 +30,7 @@ text behaviour, and persistence across session switch should be preserved.
   (`chat-view-controller` reads `data.responseOptions`).
 - The button label **is** the prompt — there is no separate label/payload today.
 
-## Design — proposals
+## Design
 
 All proposals replace the tool with a convention the model emits inline, taught via
 the system prompt (the user notes the model reliably follows tool/format

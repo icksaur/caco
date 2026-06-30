@@ -70,7 +70,7 @@ the user to the session list.
 - Listener hygiene: the `'activity'` listener and watchdog must be torn down on every exit
   path (idle/gone/timeout), mirroring the current cleanup.
 
-## Acceptance (oracle: fake timers + event injection)
+## Acceptance
 - **Idle gap resets, absolute cap doesn't**: emit activity every `idleTimeoutMs - ε` and
   assert no `'timeout'` until `maxTotalMs`, then assert `'timeout'` fires at `maxTotalMs`.
   (invariant + hand case, fake timers)

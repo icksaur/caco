@@ -125,7 +125,7 @@ Their own `transferCors` continues to govern them.
 - **`frame-ancestors *`** in the existing CSP (clickjacking) is unrelated and out of scope.
 - **`allowLocalhostCorsSimple`** on `/api/info` and `/api/favicon` (GET) is harmless and stays.
 
-## Acceptance (oracle-first)
+## Acceptance
 
 - **Predicate oracle (unit, write FIRST).** A reference table over `(origin, host, trusted)` →
   allow/deny, independently reimplemented: same-origin+trusted → allow; cross-origin → deny;

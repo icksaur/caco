@@ -137,3 +137,19 @@ All resolved:
 3. **No-name sessions:** Session ID is fine — matching text provides context.
 4. **Search history:** Not needed.
 5. **Session set:** Only sessions in sessionManager cache (same as session panel). Not raw SDK directory.
+
+## Acceptance
+
+- Observable: Ctrl+Shift+F opens the `session-search` applet. Type a query → sessions with matching text appear as cards with ≤5 snippets each (±40 chars context). Click a result → switches to that session.
+- Budgets: ≤3 s for a 40-session workspace on SSD. Sub-second typical.
+- Gates: `npm run build`, `npm test` green.
+- Oracles: `tests/unit/session-search.test.ts` — endpoint returns sessions with match count, snippets, and correct session ID; empty query returns empty results.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Search endpoint (readline streaming, message events only) | `src/routes/sessions.ts` | `tests/unit/session-search.test.ts` |
+| 2 | session-search applet (input, results, session cards) | `applets/session-search/meta.json`, `content.html`, `script.js`, `style.css` | visual: results render, click switches session |
+| 3 | Ctrl+Shift+F keyboard shortcut | `public/ts/input-router.ts` | visual: shortcut opens applet |
+| 4 | Document endpoint | `docs/API.md` | by-construction |

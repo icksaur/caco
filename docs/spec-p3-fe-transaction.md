@@ -196,7 +196,7 @@ the message must be routed to callbacks regardless of the active session.
     `historyLoader.load` (`:259`), so by completion the active id already equals
     `pending.sessionId`.
 
-## Risks & mitigations
+## Risks and Mitigations
 
 | Risk | Mitigation |
 |------|-----------|
@@ -207,38 +207,20 @@ the message must be routed to callbacks regardless of the active session.
 | Moving `historyComplete` ahead of the session-scope filter changes broadcast routing. | `historyComplete` is the only history frame and is now self-correlating via `msg.sessionId`; it must bypass the active-session filter precisely because completions for a just-superseded load must still resolve their pending promise. Other message types keep the filter. |
 | New `navGeneration` bumped in `showNewChat`/`onNewSessionCreated` could over-invalidate a legitimately concurrent activation. | That is the intended semantics: the latest surface claim wins. An activation superseded by a new-chat (or vice-versa) is exactly the bug being fixed. |
 
-## Test plan (Vitest, DOM-light unit tests with module mocks)
+## Acceptance
 
-- **3a**: two overlapping `activateSession` calls where the first resolves last
-  ⇒ assert `setActiveSession`/`showChat` are called with the **second** session
-  only; the first throws `SupersededError` internally and produces no
-  `showToast`. Plus: `activateSession(A)` in flight, then `showNewChat()` (or
-  `onNewSessionCreated`) bumps the generation ⇒ A's late completion mutates
-  nothing. Verify red without the generation guard.
-- **3b**: new-chat send where `getActiveSessionId()` changes during the create
-  await ⇒ assert the message is still POSTed to the created session,
-  `savePrompt(prompt,newId)`/`setBusy(newId,true)` ran, but `onNewSessionCreated`
-  did **not**. A `/messages` rejection after create ⇒ assert
-  `setBusy`/`restoreFailedPrompt` target the dispatch target, not the
-  now-active session. A `/api/sessions` rejection before create ⇒ assert
-  `restoreNewChatPrompt(prompt)` is used (no `setBusy(null)`).
-- **3c**: `historyComplete` for session A while B is active ⇒ assert it reaches
-  callbacks (not dropped by the filter), `finish` applies busy to A (the pending
-  load) and does **not** call `setFormEnabled` (A ≠ active B); a matching
-  completion ⇒ normal behavior; a completion for a non-pending session ⇒ ignored.
+- Observable: rapid session switch shows only the latest activation; a new-chat send that races a navigation dispatches to the created session without hijacking the current view; `historyComplete` for a non-active session applies busy/usage to that session only.
+- Budgets: n/a.
+- Gates: `npx tsc --noEmit -p tsconfig.frontend.json`, `npx tsc --noEmit`, `npx eslint . --max-warnings 0`, `npx vitest run`
+- Oracles (Vitest, DOM-light unit tests with module mocks):
+  - 3a: `tests/unit/chat-view-controller.test.ts` — two overlapping `activateSession` calls where first resolves last: only second session's `setActiveSession`/`showChat` fire; `showNewChat` generation bump suppresses in-flight activation. Verified RED without the generation guard.
+  - 3b: `tests/unit/message-streaming-send.test.ts` — new-chat send with mid-flight active-id change: `onNewSessionCreated` not called; catch targets created session id. Pre-create `/api/sessions` rejection: `restoreNewChatPrompt` used (no `setBusy(null)`).
+  - 3c: `tests/unit/history-loader.test.ts` — `historyComplete` for session A while B is active reaches callbacks; `finish` applies busy to A; `setFormEnabled` not called (A ≠ active B).
 
-## Commit order
+## Plan
 
-Three independent commits, in dependency order:
-1. **3c** — protocol forwarding + `HistoryLoader` correlation (touches
-   `websocket.ts` + `history-loader.ts`).
-2. **3a** — navigation generation + `SupersededError` (touches
-   `chat-view-controller.ts`).
-3. **3b** — send target capture + new-chat recovery (touches
-   `message-streaming.ts` + the new `restoreNewChatPrompt` in
-   `chat-view-controller.ts`).
-
-## Gates
-
-`npx tsc --noEmit -p tsconfig.frontend.json`, `npx tsc --noEmit`,
-`npx eslint . --max-warnings 0`, `npx vitest run`. Commit facts-only.
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | 3c: forward `msg.sessionId` before session-scope filter; correlate `HistoryLoader.finish` to request session | `src/routes/websocket.ts`, `public/ts/websocket.ts`, `public/ts/history-loader.ts` | `tests/unit/history-loader.test.ts` (3c cases) |
+| 2 | 3a: add `navGeneration` + `SupersededError` + `assertCurrent` to `ChatViewController`; bump on `showNewChat`/`onNewSessionCreated` | `public/ts/chat-view-controller.ts` | `tests/unit/chat-view-controller.test.ts` (3a cases) |
+| 3 | 3b: capture `launchActiveId`/`targetSessionId` at send entry; gate `onNewSessionCreated`; rework catch; add `restoreNewChatPrompt` | `public/ts/message-streaming.ts`, `public/ts/chat-view-controller.ts` | `tests/unit/message-streaming-send.test.ts` (3b cases) |

@@ -179,7 +179,7 @@ This is a smaller, honest claim than "4 guards → 1".
 set/render/restore run in the activate subscriber. `usageCache`/throughput maps
 unchanged (already session-keyed; already pruned via `onSessionArchived`).
 
-## Plan (three independently shippable, independently testable slices)
+## Implementation Slices
 
 ### Slice 1 — Add `onSessionActivate`; fold the late channel
 Add the hook to `app-state.ts`. Register applet-notify (folding Channel 3), menu
@@ -201,7 +201,7 @@ proves to add no clarity — flag for the implementer.)
 `chatView.footerSessionId`; repoint its four guards; move footer set/restore into
 the activate subscriber.
 
-## Risks & mitigations
+## Risks and Mitigations
 | Risk | Mitigation |
 |---|---|
 | Moving a late call changes order/timing | Slice 1 registers in the exact `showChat:347-357` order; assert via switch test that footer/applet/menu still update once, post-history |
@@ -237,3 +237,13 @@ co-located with the existing early hook; `notifySessionChange` is retired as a
 caller; footer has one owner; client guards (a)+(d) share one token while (b)+(c)
 keep their distinct, still-needed roles. No observable behavior change; adding a
 new per-session client subsystem is one registration.
+
+## Plan
+
+| # | Step | Files | Oracle | Invariants |
+|---|------|-------|--------|------------|
+| 1 | Add `onSessionActivate` hook + `notifySessionActivated` to `app-state.ts` | `public/ts/app-state.ts` | hook fires in registration order; handler throw isolated; `isCurrent()` false after newer token — `app-state-lifecycle.test.ts` | Single ordered home for late work |
+| 2 | Register applet-notify, menu-indicators, adhoc as subscribers; wire `showChat` + `onNewSessionCreated` to `notifySessionActivated`; retire `notifySessionChange` as a public caller | `public/ts/chat-view-controller.ts`, `public/ts/applet-runtime.ts` | switch: footer/applet/menu/adhoc each fire once, post-history — `chat-view-controller.test.ts` | `notifySessionChange` fn unchanged; only caller moves |
+| 3 | Thread `ctx.isCurrent()` into `restoreApplet` re-check (replaces microtask guard d) | `public/ts/chat-view-controller.ts` | stale-overwrite tests still green — existing P3 tests | Guard (a) and (d) share one token |
+| 4 | Footer ownership: `ownerSessionId` + `isFooterOwner()`; delete `chatView.footerSessionId`; move footer set/restore into activate subscriber | `public/ts/context-footer.ts`, `public/ts/chat-view-controller.ts` | non-owner `updateUsage`/`updateThroughput` dropped; owner repoints once — unit | Single footer owner |
+| 5 | Full gate per slice | `npm run build` | build green | No observable behavior change |

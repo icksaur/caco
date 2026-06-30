@@ -177,7 +177,7 @@ NOT be implemented here:
 Record this scoping in `plan.md`: P4 = idempotent-init hardening; the real
 append-frame dedup needs P7 sequencing.
 
-## Risks & mitigations
+## Risks and Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
@@ -208,3 +208,11 @@ append-frame dedup needs P7 sequencing.
   filters). If the server can register a browser twice, that is a separate BE
   item — not observed in current FE code.
 - Any change to delta rendering.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Add `wsHandlersRegistered` boolean guard + `wsHandlerDisposers` array + `disposeMessageStreaming()` export; wrap `registerWsHandlers` with guard-last pattern | `public/ts/message-streaming.ts` | tsc clean |
+| 2 | Add `sessionPanelInitialized` guard + named drag-listener consts + `disposeSessionPanel()` export; guard `initSessionPanel` with same pattern | `public/ts/session-panel.ts` | tsc clean |
+| 3 | Add double-init regression tests: call each initializer twice; assert each registration fn called exactly once across both inits | `tests/unit/idempotent-message-streaming.test.ts`, `tests/unit/idempotent-session-panel.test.ts` | oracle: registration count = 1 per fn; RED without guard |

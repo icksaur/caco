@@ -84,7 +84,9 @@ first. Today only `index` has a reusable Caco core (`treeSitterAdapter`); `view`
   cleared by `resetRequest`). The frontend prices saved tokens at the active model's
   input rate (never hardcoded). Recorded only on the `emitted` outcome.
 
-## Design — Part 1: the tool
+## Design
+
+### Part 1: the tool
 
 `caco_run_workflow({ code, timeoutMs?, description? })`
 
@@ -125,7 +127,7 @@ first. Today only `index` has a reusable Caco core (`treeSitterAdapter`); `view`
 **Concurrency.** Per-run random dirs make concurrent workflows independent; a small
 pool bounds simultaneous `tsx` processes. No shared result path, so no cross-run reads.
 
-## Design — Part 2: the read-oriented facade
+### Part 2: the read-oriented facade
 
 A typed module the harness imports (physical: `src/workflow/facade.ts`), built on the
 Slice-A cores, **all path-scoped to `sessionCwd` via the existing `validatePath`**.
@@ -177,7 +179,7 @@ and prompt so the model knows the surface without loading full defs.
 - **Scratch hygiene:** per-run dir removed in `finally`; startup/TTL sweep clears
   crash leftovers.
 
-## Risks & mitigations
+## Risks and Mitigations
 
 | Risk | Mitigation |
 |---|---|
@@ -192,7 +194,7 @@ and prompt so the model knows the surface without loading full defs.
 | Token win unproven | Opt-in flag; default-on only past a measured reduction threshold |
 | Path escape via facade | All facade reads go through `validatePath(sessionCwd, …)`; tested with `../../etc/passwd` |
 
-## Acceptance (oracle-first)
+## Acceptance
 
 | Behavior | Oracle | Type |
 |---|---|---|

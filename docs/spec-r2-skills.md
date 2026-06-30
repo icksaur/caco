@@ -1,98 +1,83 @@
 # R2 — Skills as `/skill-name` slash commands
 
-Status: spec (light). Goal: render the SDK's `commands.list` **skill** entries as native
-`/<skill-name>` slash commands, invoked via `commands.invoke`. This is the real
-Spec-Kit *skills-mode* deliverable (`/speckit-specify …`) and the last invocation gap.
+Status: spec (light). Goal: render the SDK's `commands.list` **skill** entries as native `/<skill-name>` slash commands, invoked via `commands.invoke`. This is the real Spec-Kit *skills-mode* deliverable and the last invocation gap.
 
-## Probe facts (confirmed, `@github/copilot-sdk@1.0.1`, discovery on)
+## Goals
 
-- `rpc.commands.list()` returns skill commands shaped:
-  `{ name, description, kind: 'skill', input?: { hint?, required? }, allowDuringAgentExecution }`.
-  (e.g. `code-review`, `cpp-project` from `~/.copilot/skills`.)
-- `rpc.commands.invoke({ name, input })` returns a `SlashCommandInvocationResult`. For a
-  skill it is `{ kind: 'agent-prompt', prompt, displayPrompt }`:
-  - `prompt` = the text to submit to the agent ("Use the skill tool to invoke the
-    \"code-review\" skill, then follow the skill's instructions to help with: <input>").
-  - `displayPrompt` = what the user should see in the timeline ("/code-review <input>").
-  - The SDK does **not** auto-submit — Caco owns the single send.
-- The SDK send already supports `displayPrompt`: *"If provided, this is shown in the
-  timeline instead of `prompt`."* (`types.d.ts:1818`; `session.send` passes it through).
+Render SDK skill commands as native slash commands in Caco so any skill in `~/.copilot/skills` can be invoked as `/<skill-name> <input>`, with the agent prompt dispatched transparently and the timeline showing what the agent actually received. After this change, skills are first-class commands indistinguishable in UX from built-ins.
 
-## Design (mirror the agent surface)
+## Design
 
-**Server**
-1. `session-manager.ts`: add to the rpc interface
-   `commands: { list(): Promise<{ commands: SdkCommandInfo[] }>; invoke(p:{name:string; input?:string}): Promise<SdkCommandInvokeResult>; }`
-   and thin `listCommands(sessionId)` / `invokeCommand(sessionId, name, input)` methods.
-   Add `displayPrompt?: string` to the local `SendOptions` interface (it already flows
-   through `sendStream(session.send({ ...options }))`).
-2. `session-messages.ts` `dispatchMessage`: add `displayPrompt?: string` to its options
-   and thread it into `messageOptions` (so the user sees `displayPrompt`, not the skill
-   wrapper prompt).
-3. `routes/sessions.ts`:
-   - `GET /sessions/:id/skills` → resume-if-needed, `listCommands`, filter
-     `kind === 'skill'`, return `{ skills: [{ name, description, hint }] }` (mirror
-     `/agents`).
-   - `POST /sessions/:id/skill-invoke` body `{ name, input }`:
-     resume-if-needed → confirm the named skill exists in `listCommands` (else 404) →
-     `invokeCommand(name, input)`:
-     - `agent-prompt` → `dispatchMessage(sessionId, result.prompt, { displayPrompt:
-       result.displayPrompt || \`/\${name} \${input}\`.trim(), requestId, needsObservation:true,
-       beforeSend? none }, { onEvent: broadcast })`. Respond `{ ok:true, sessionId }`.
-     - `text` → broadcast a `session.info` (or `caco.info`) with the text; respond ok.
-     - any other kind (`completed`/`select-subcommand`) → respond 200
-       `{ ok:true, unsupported: kind }` and toast client-side ("Unsupported skill result").
-     Reuse the `isBusy` 409 + 404 session guards from `agent-select`.
+**Server** — three new capabilities in `session-manager.ts`: `listCommands(sessionId)` (thin wrap of `rpc.commands.list()`), `invokeCommand(sessionId, name, input)` (thin wrap of `rpc.commands.invoke()`), and `displayPrompt` threading through `SendOptions` → `dispatchMessage`. Routes in `routes/sessions.ts`:
+- `GET /sessions/:id/skills` → filter `kind === 'skill'`, return `{ skills: [{ name, description, hint }] }`.
+- `POST /sessions/:id/skill-invoke` body `{ name, input }` → validate skill exists → `invokeCommand` → if `agent-prompt`: `dispatchMessage(prompt, { displayPrompt, needsObservation:true })` → `{ ok:true }`. If `text`: broadcast `caco.info`. Other kinds: `{ ok:true, unsupported: kind }`. Guards: `isBusy` → 409; session not found → 404.
 
-**Client** (`command-registry.ts`)
-4. `fetchSessionSkills()` (mirror `fetchSessionAgents`) → `GET /skills`.
-5. `loadSkillCommands()` — session-scoped registration (mirror the prompt-template
-   lifecycle): dispose the prior batch, fetch skills, register each as
-   `registerCommand({ name, description, source:'skill', handler })`. The handler posts
-   `{ name, input: arg.trim() }` to `/skill-invoke`; on !ok restore input + red toast; on
-   ok clear (the form already cleared) — no green toast (the turn itself is the feedback).
-   **Skills never shadow a built-in/extension command** (`findCommand` check, like the
-   reverted G1 did for agents). Add a **session-id staleness guard** around the async
-   fetch (capture `getActiveSessionId()` before, bail if it changed) — the same race fix.
-6. Add `'skill'` to `Command.source`. Subscribe `onSessionActivate(() =>
-   void loadSkillCommands())` (the agent set is cwd-scoped; skills are too).
+**Client** — `command-registry.ts` gains `fetchSessionSkills()` + `loadSkillCommands()` (session-scoped, mirroring the prompt-template lifecycle): dispose the prior batch, fetch skills, register each as a command with `source:'skill'`. Handler posts to `/skill-invoke`; on `!ok` restores input + red toast. A session-id staleness guard wraps the async fetch (capture before, bail if changed). `onSessionActivate(() => void loadSkillCommands())` (skills are cwd-scoped).
 
-## Out of scope (light)
-- Builtin (`kind:'builtin'`) and `client` commands — only `kind:'skill'` is rendered.
+**Skill display (R2.1)** — the timeline shows the actual agent prompt, rendered purple as a system-produced message. Mechanism: `MessageSource = 'skill'` (`[skill:<name>]` marker prefix); `enrichUserMessageWithSource` parses it on live + replay → `data.source='skill'` → `caco.skill` render → purple `agent-message` styling. `skillToolEnabled()` guards against `CACO_EXCLUDED_BUILTINS` misconfiguration (returns 400 if excluded).
+
+## Probe Facts
+
+Confirmed against `@github/copilot-sdk@1.0.1` with discovery on: `rpc.commands.list()` returns `{ name, description, kind: 'skill', input?: { hint?, required? }, allowDuringAgentExecution }`; `rpc.commands.invoke({ name, input })` returns `{ kind: 'agent-prompt', prompt, displayPrompt }`. The SDK does not auto-submit — Caco owns the send. `session.send` accepts `displayPrompt` (`types.d.ts:1818`).
+
+## Invariants
+
+- Skills never shadow a built-in or extension command; `loadSkillCommands` checks `findCommand` before registering.
+- A stale-session batch is fully discarded when the active session changes before the async fetch completes.
+- The `skill` tool being enabled is a precondition for invocation; misconfiguration is surfaced as a 400, not a silent failure.
+
+## Considerations
+
+- Only `kind:'skill'` is rendered; `builtin` and `client` commands are out of scope for v1.
+- Live `commands.changed` re-registration is out of scope; reload on session activate is sufficient.
+- `input.required`/`hint` UI affordances beyond passing typed text are out of scope.
+- `select-subcommand` interactive flow degrades to a toast (unsupported kind).
+- Skill display is transparent (purple, system-style) so the user can see the exact prompt dispatched to the agent.
+
+## Risks and Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Skill shadows a built-in | `findCommand` check before registration; skills cannot shadow built-ins. |
+| Stale session batch registers for the wrong session | Staleness guard captures `getActiveSessionId()` before fetch; discards if session changed. |
+| `skill` tool excluded via `CACO_EXCLUDED_BUILTINS` | `skillToolEnabled()` in `/skill-invoke`; returns 400 with clear message → red toast. |
+| Timeline shows raw wrapper prompt | `displayPrompt` threads through `dispatchMessage`; purple `[skill:<name>]` marker renders actual prompt. |
+
+## Acceptance
+
+- Observable: `/<skill-name>` appears in the command picker after session activation; invoking it dispatches the agent prompt and shows a purple system message in the timeline with the actual prompt the agent received.
+- Budgets: n/a.
+- Gates: `npm run build` green; `tests/unit/command-registry.test.ts` green.
+- Oracles:
+  - `loadSkillCommands` registers `/<name>` from a stubbed `/skills` response (`command-registry.test.ts`).
+  - Handler posts `{ name, input }` to `/skill-invoke` (`command-registry.test.ts`).
+  - A skill does not shadow an existing built-in (`command-registry.test.ts`).
+  - Stale-session batch is discarded when session changes mid-fetch (`command-registry.test.ts`).
+  - `skillToolEnabled()` returning false → `/skill-invoke` returns 400 (`tool-registry.test.ts`).
+  - `[skill:<name>]` prefix parsed by `enrichUserMessageWithSource` → `source:'skill'` (`message-source.test.ts`).
+
+## Plan
+
+| # | Step | Files | Oracle | Invariants |
+|---|------|-------|--------|------------|
+| 1 | Add `listCommands`/`invokeCommand` to `SessionManager` + `displayPrompt` threading | `src/session-manager.ts`, `src/session-messages.ts` | build green | - |
+| 2 | Add `GET /skills` and `POST /skill-invoke` routes | `src/routes/sessions.ts` | `isBusy` → 409; skill not found → 404 — by-construction | Busy guard |
+| 3 | Add `fetchSessionSkills()` + `loadSkillCommands()` + `onSessionActivate` wiring | `public/ts/command-registry.ts` | skills registered from stub; stale batch discarded — `command-registry.test.ts` | Skills never shadow; stale guard |
+| 4 | Add `skillToolEnabled()` guard | `src/tool-registry.ts` | 400 returned when tool excluded — `tool-registry.test.ts` | Tool enabled is precondition |
+| 5 | Add `MessageSource = 'skill'` + purple display | `src/session-messages.ts`, `public/ts/message-source.ts`, `public/style.css` | `[skill:<name>]` parsed → `source:'skill'` — `message-source.test.ts` | Transparent display |
+| 6 | Unit tests: filter, register, shadow, stale, display | `tests/unit/command-registry.test.ts`, `tests/unit/message-source.test.ts`, `tests/unit/tool-registry.test.ts` | all oracle cases green | - |
+
+## R2.1 — Invocation Refinements
+
+Three follow-ups after the first R2 cut:
+
+1. **Skill-tool guard.** `skillToolEnabled()` (`tool-registry.ts`) guards `CACO_EXCLUDED_BUILTINS` misconfiguration; `/skill-invoke` returns 400 with a clear message → red toast. Caco never excludes it by default.
+2. **Explicit wrapper prompt.** The dispatched agent prompt is the SDK's canonical agent-prompt with a `buildSkillPrompt` fallback so a bare slash is never dispatched.
+3. **Purple transparent display.** Timeline shows the actual prompt received by the agent, rendered purple as a system-produced message (`[skill:<name>]` marker, `enrichUserMessageWithSource`, `caco.skill` frontend, `agent-message`/`agent-text` styling). Survives reload (enrich runs on history replay).
+
+## Out of Scope
+
+- `builtin`/`client` SDK commands — only `kind:'skill'` is rendered.
 - Live `commands.changed` re-registration — reload on session activate is enough for v1.
-- `input.required`/`hint` UI affordances beyond passing the typed text as `input`.
-- Picker/argument-hint UX; `select-subcommand` interactive flow (degrade to a toast).
-
-## Tests
-- Unit (pure): a `filterSkillCommands(commands)` helper (keep only `kind:'skill'`,
-  `userInvocable !== false` if present) — table test.
-- `command-registry.test.ts`: `loadSkillCommands` registers `/<name>` from a stubbed
-  `/skills`; the handler posts `{ name, input }` to `/skill-invoke`; a skill does not
-  shadow a built-in; the stale-session batch is discarded (mirror the old G1 tests).
-- Build gate (`npm run build`) green.
-
-## R2.1 — invocation refinements (implemented)
-
-Three follow-ups after the first R2 cut, to make skill invocation explicit and transparent:
-
-1. **Skill-tool guard.** Skills run by asking the agent to call its built-in `skill` tool
-   (there is **no** direct skill-exec API — `rpc.skills` is only list/enable/disable/reload;
-   the `commands.invoke` → `agent-prompt` → agent-calls-`skill`-tool flow is the SDK's and
-   the CLI's only mechanism). `skillToolEnabled()` (`tool-registry.ts`) guards the
-   `CACO_EXCLUDED_BUILTINS` misconfiguration; `skill-invoke` returns 400 with a clear
-   message (→ red toast) if the tool is excluded. Caco never excludes it by default.
-
-2. **Explicit wrapper prompt.** The dispatched agent prompt is the SDK's canonical
-   agent-prompt ("Use the skill tool to invoke the \"<name>\" skill, then follow the
-   skill's instructions to help with: <input>"), with a Caco `buildSkillPrompt` fallback
-   so a bare slash is never dispatched. (Whether the agent then runs the skill is
-   non-deterministic — same as the CLI.)
-
-3. **Purple, transparent display.** Instead of echoing the user's `/skill …` text, the
-   timeline shows the **actual prompt the agent received**, rendered purple as a
-   system-produced message (like `/session-fork`). Mechanism: a new `skill`
-   `MessageSource` (`[skill:<name>]` marker) — `displayPrompt =
-   prefixMessageSource('skill', name, agentPrompt)`; `enrichUserMessageWithSource` parses
-   it (live + replay) → `data.source='skill'` → frontend `caco.skill` → reuses the purple
-   `agent-message`/`agent-text` styling. Survives reload (enrich runs on history replay).
-
+- `input.required`/`hint` UI affordances beyond passing typed text.
+- `select-subcommand` interactive flow (degrades to a toast).

@@ -69,7 +69,7 @@ If we wanted client-side cap or a settings knob: `public/ts/history-loader.ts` +
 
 No existing test asserts the magic "10". `readLastTurns` has unit tests on its own logic (counting user.message backwards), all of which take maxTurns as an arg and still pass. We add one new test that exercises the streamHistory path with a session containing >5 turns and verifies the client sees a `caco.truncated` event plus 5 user.message events.
 
-## Risks
+## Risks and Mitigations
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
@@ -102,3 +102,10 @@ No existing test asserts the magic "10". `readLastTurns` has unit tests on its o
 - Documentation: this spec.
 
 Total: maybe an hour including the test and a smoke-run.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Change default maxTurns 10 → 5 in streamHistory | `src/routes/websocket.ts` | test: >5-turn session returns `caco.truncated` + ≤5 user.message events |
+| 2 | Verify truncation banner renders | `public/ts/history-loader.ts` | visual: banner at top of chat for capped sessions |

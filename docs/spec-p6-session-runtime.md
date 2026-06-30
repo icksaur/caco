@@ -251,7 +251,7 @@ small and independent after B.
   their own stores and many are intentionally durable across stop; do not fold
   them into `SessionRuntime` in P6.
 
-## Risks & mitigations
+## Risks and Mitigations
 
 - **R: A tool stores output during session construction (ref still PENDING).**
   Mitigation: `requireSessionId(ref)` throws on `'PENDING'`; audit the 3 store
@@ -269,12 +269,23 @@ small and independent after B.
 
 ## Acceptance
 
-- Two sessions in the same cwd store and retrieve tool output independently.
-- After `stop`/delete, the session's CacoEventQueue is gone (no stale pending).
-- A forced client restart disposes every affected runtime and emits one boundary
-  event per affected session; no orphan dispatch/queue/cache entries remain.
-- Eviction never targets the most-recently-used session and `resume` does not
-  return before eviction cleanup completes.
-- ws close closes extension watchers (no fd growth across reconnects).
-- All gates green each slice: `tsc` (×2 configs), `eslint --max-warnings 0`,
-  `knip`, `vitest`.
+- Observable: two sessions in the same cwd store and retrieve tool output independently; after `stop`/delete, the session's CacoEventQueue is gone; a forced client restart emits one boundary event per affected session; eviction never targets the MRU session; ws close closes extension watchers.
+- Budgets: n/a.
+- Gates: `tsc` (×2 configs), `eslint --max-warnings 0`, `knip`, `vitest` — green after each slice.
+- Oracles:
+  - Slice A: two sessions same-cwd store + retrieve independently (sibling overwrite bug); legacy cwd-only output still retrievable after identity switch.
+  - Slice B: `tests/unit/session-runtime.test.ts` — `disposeRuntime` removes queue, throughput, and usage entries; no stale pending after stop.
+  - Slice C: forced `restartSharedClient` disposes runtimes + emits boundary event per affected session; no orphan dispatch/queue/usage entry remains.
+  - Slice D: MRU session is never the eviction victim; `resume` does not return before eviction cleanup settles.
+  - Slice E: ws close closes all `fs.watch` handles opened by `watchExtensions`; retry drop via `dropStaleSession` leaves no orphan runtime.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| A | Delete cwd map from `output-store`; thread `sessionRef`/sessionId through display/observe/workflow/retrieve tools + session-manager call sites; add `requireSessionId` guard | `src/output-store.ts`, `src/server.ts`, `src/observe/hook.ts`, `src/observe/retrieve-tool.ts`, `src/workflow/tool.ts`, `src/session-manager.ts`, `src/storage.ts` | Slice A oracles (sibling independence + legacy fallback) |
+| B | Introduce `src/session-runtime.ts` registry; `getRuntime`/`disposeRuntime` (idempotent); move `CacoEventQueue` onto runtime; export `clearUsage` seam; call `disposeRuntime` from stop/dropStale/eviction | `src/session-runtime.ts`, `src/session-manager.ts`, `src/routes/websocket.ts` | `tests/unit/session-runtime.test.ts` |
+| C | Replace inline `sharedClient=null; activeSessions.clear()` in 4 health-check sites with `restartSharedClient(reason)` transaction | `src/session-manager.ts` | Slice C oracle (boundary event per affected session) |
+| D | Add `lastUsedAt` to `ActiveSession`; sorted ascending eviction; `await` each `stop()` in `evictInactiveSessions` | `src/session-manager.ts` | MRU not evicted; resume awaits cleanup |
+| E | Return `{close()}` from `watchExtensions`; call on `wss.on('close')`; route retry drop through `dropStaleSession` | `src/session-manager.ts`, `src/routes/websocket.ts`, `src/dispatch-retry.ts` | ws close closes watchers; retry drop leaves no orphan |
+| F | Move `updatePreferences` read-modify-write inside `runTransition` per-client mutex (P1 carry-forward) | `src/session-state.ts` | concurrent preference update + transition do not interleave |

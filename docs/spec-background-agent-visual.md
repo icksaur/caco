@@ -1,12 +1,12 @@
 # Background Agent Visual Discriminator
 
-**Problem**: Work done by background `task`-tool sub-agents (explore, code-review,
-general-purpose, etc.) streams into the same chat as the primary session. Its
-assistant messages and tool calls render identically to primary content, so the
-two are visually indistinguishable.
+## Goals
 
-**Solution**: A 5px purple vertical bar on the left edge of every chat box that
-originates from a sub-agent.
+Work done by background `task`-tool sub-agents (explore, code-review, general-purpose, etc.) streams into the same chat as the primary session. Its assistant messages and tool calls render identically to primary content, so the two are visually indistinguishable. Add a 5px purple vertical bar on the left edge of every chat box that originates from a sub-agent, making background work immediately recognizable.
+
+## Design
+
+SDK events from a sub-agent carry a **top-level `agentId`** field (sibling to `type`/`data`), confirmed empirically. `renderEvent` in `dom-regions.ts` reads `event.agentId`; `ElementInserter.getElement` takes `agentId`, tags created outer boxes with `dataset.agentId`, and **refuses to reuse a box across an `agentId` boundary** — without this guard, a sub-agent box would merge into a preceding primary box. A primary → sub-agent → primary interleave yields three separate boxes: unmarked, marked, unmarked. CSS `::before` on `[data-agent-id]` renders the 5px bar using the existing `var(--purple)` palette variable (no per-theme additions). The server already forwards top-level `agentId` in both the live broadcast path and history replay (`readLastTurns` does a full `JSON.parse`).
 
 ## SDK signal (answer to "does the SDK flag these?")
 
@@ -57,12 +57,12 @@ sub-agent box would merge into the preceding primary box (and mis-mark it). The
 1:1 to "events by that background agent." A primary → sub-agent → primary
 interleave yields three boxes: unmarked, marked, unmarked.
 
-## Tests (tests/unit/dom-regions.test.ts)
+## Acceptance
 
-- Sub-agent message box is tagged `data-agentId`.
-- Primary box is not tagged.
-- Primary / sub-agent / primary activity splits into 3 separate boxes.
-- Consecutive same-agent events reuse one box.
+- Observable: background `task`-tool sub-agent messages and tool calls have a visible 5px purple bar on their left edge; primary messages have none. Visual signoff required.
+- Budgets: n/a (pure client-side CSS + one field read per event).
+- Gates: `npm run build:client`, full tests (`npm test`).
+- Oracles: `tests/unit/dom-regions.test.ts` — sub-agent message box tagged `data-agentId`; primary box untagged; primary/sub-agent/primary interleave splits into 3 separate boxes; consecutive same-agent events reuse one box. By-construction: server path unchanged (agentId forwarded transparently).
 
 ## Notes / future
 
@@ -71,3 +71,11 @@ interleave yields three boxes: unmarked, marked, unmarked.
 - `caco_session_delegate` posts a plain prompt (no `source: 'agent'`), so its
   replies render as normal `user.message` and won't get a bar. Separate follow-up
   if delegate visibility is wanted.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Add optional `agentId` to `SessionEvent` type | `public/ts/types.ts` | by-construction |
+| 2 | `ElementInserter.getElement` takes `agentId`, tags outer boxes with `dataset.agentId`, reuse guard across boundary | `public/ts/dom-regions.ts` | `dom-regions.test.ts`: tagging + 3-box split + same-agent reuse |
+| 3 | CSS `::before` 5px bar on `[data-agent-id]` using `var(--purple)` | `public/style.css` | visual signoff |

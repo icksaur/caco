@@ -82,7 +82,7 @@ When the user says "remember", "forget", "always", or "never" about a preference
 Memory is loaded into your context at session start. Use `caco_memory` action="read" for the latest version if memory may have changed since session start.
 ```
 
-## Implementation
+## Design
 
 ### Step 1: Memory tool
 
@@ -103,8 +103,24 @@ Wire into `server.ts` toolFactory.
 Unit tests: get/set/delete/capacity/invalid-key/ENOENT.
 Manual: "remember I prefer TypeScript" → check memory.json → new session → agent knows.
 
-## Risks
+## Risks and Mitigations
 
 1. **Resume systemMessage append** — SDK accepts it in types but untested in Caco. Verify empirically. Fallback: agent calls `caco_get_memory` manually.
 2. **Concurrent writes** — two agents writing different keys simultaneously could race on file read-write. Low probability (memory writes are rare). Mitigated by backup file.
 3. **Agent key collisions** — different agents may use different keys for the same concept. Acceptable — 50 slots is enough headroom, and agents seeing existing keys via `caco_get_memory` naturally avoids duplicates.
+
+## Acceptance
+
+- Observable: Agent says "remember I prefer TypeScript" → `~/.caco/memory.json` updated → new session → agent mentions the preference without being told. `caco_memory` action=read returns all entries + count + capacity.
+- Budgets: ≤50 entries. Prompt overhead ~500 tokens at capacity.
+- Gates: `npm run build`, `npm test` green.
+- Oracles: `tests/unit/memory-tool.test.ts` — read/set/delete/capacity enforcement/invalid-key/ENOENT paths.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Memory tool (read/set/delete + capacity + slug validation) | `src/memory-tool.ts` | `tests/unit/memory-tool.test.ts` |
+| 2 | Wire into server toolFactory | `src/server.ts` | by-construction |
+| 3 | Inject memory into new-session system message | `src/prompts.ts` | manual: new session sees `## User Memory` section |
+| 4 | Inject memory on session resume | `src/session-manager.ts` | manual: resumed session sees injected memory |

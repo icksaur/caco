@@ -10,6 +10,10 @@ Goal: determine what GitHub **Spec Kit**
 what Caco offers for *interactive* Spec Kit use, enumerate gaps, give a runnable test
 plan, and document how a user would drive the workflow inside a Caco session.
 
+## Goals
+
+Determine what GitHub Spec Kit needs from a harness, confirm the Copilot SDK provides it, assess what Caco offers for interactive Spec Kit use, enumerate gaps, give a runnable test plan, and document how a user would drive the workflow inside a Caco session.
+
 ## Invocation model (confirmed — empirical probe + official docs)
 
 | Type | File location | SDK surface | Slash command? | How invoked |
@@ -25,7 +29,7 @@ surface only exists in Spec Kit's *skills* mode** (`--integration-options="--ski
 which writes `.github/skills/speckit-{name}/SKILL.md` → `/speckit-specify`). In default
 (agent) mode you drive it via Caco's existing `/agent speckit.specify <text>` picker.
 
-## TL;DR verdict
+## Design
 
 Spec Kit is **slash-command-driven**, not hook-driven. Its Copilot integration has two
 install modes: **default (agents)** writes `.github/agents/speckit.*.agent.md`
@@ -128,7 +132,12 @@ semantics** — both empirical (below).
 | G5 | **Shell built-ins excluded.** Spec Kit `.agent.md`/`SKILL.md` bodies may call `bash` directly. | Medium — scripts may no-op | Re-include `bash` for these sessions (`CACO_EXCLUDED_BUILTINS`) or confirm the agent adapts via `caco_run_workflow`. Resolve via test T6. |
 | G7 | No hooks needed; only `onPostToolUse` exists. | Negligible for core SDD | None for v1. |
 
-## Test plan — make a Spec Kit project and verify it in Caco
+## Acceptance
+
+- Observable: T0–T8 steps (see below) constitute the end-to-end acceptance suite. Key gates: `speckit.specify` agent appears in the `/agent` picker (T3); `/agent speckit.specify <text>` creates a spec file whose content reflects the passed text (T5); the workflow state persists across session switch (T7).
+- Budgets: n/a.
+- Gates: `npm test`, `npm run build:client`; `npm run typecheck`; T3/T5/T6 manual probes pass.
+- Oracles: T3 → `listAgents` returns discovered `speckit.*` agents (by-construction via `enableConfigDiscovery`; confirmed by `tests/unit/session-manager-config-discovery.test.ts`). T5 → spec file written with user text substituted (manual). T6 → plan/tasks files written; G5 probe decides bash exclusion.
 
 Prereqs: `uv` (or `pipx`), the `specify` CLI, and a Caco server running.
 
@@ -200,7 +209,7 @@ with the picker showing them grouped as agent commands.
 - **U3 (T6, open):** Do Spec Kit bodies hard-depend on the excluded `bash` built-in, or
   adapt to available shell tooling? (Decides G5.)
 
-## Next steps
+## Plan
 1. **Revert G1** (agent→slash-command registration in `public/ts/command-registry.ts`):
    it does not match the CLI. Keep the `/agent <name>` picker as the agent surface.
 2. Implement **R2** (the real parity deliverable): render `commands.list` `kind:skill`

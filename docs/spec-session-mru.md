@@ -1,5 +1,9 @@
 # Session List MRU Sort
 
+## Goals
+
+Sessions sort by true last-use time, not SDK `updatedAt`. Frequently-used sessions stay at the top of the session list regardless of how old they are. Order freezes intra-day so the list doesn't shuffle while working; midnight re-sort captures the day's usage. New sessions always prepend above the frozen order.
+
 ## Problem
 
 The session list sorts by: unobserved first → kind → `updatedAt`. The SDK's `updatedAt` reflects creation/resume time, not actual usage. Long-lived sessions that are used daily end up buried below newer sessions that were used once.
@@ -91,3 +95,14 @@ Pattern: `setTimeout` to next midnight, then `setInterval(24h)`. Similar to how 
 ## Open Questions
 
 All resolved.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Write lastUsedAt on user message send | `src/routes/session-messages.ts` | by-construction: meta.lastUsedAt updated on user POST |
+| 2 | Add getSessionOrder/setSessionOrder to storage | `src/storage.ts` | by-construction |
+| 3 | computeSessionOrder + snapshotSessionOrder | `src/session-manager.ts` | by-construction |
+| 4 | Apply snapshot order to GET /api/sessions | `src/routes/sessions.ts` | visual: sessions sorted MRU on page load |
+| 5 | Simplify or remove client-side sort | `public/ts/ui-utils.ts`, `public/ts/session-panel.ts` | by-construction |
+| 6 | Schedule midnight re-sort timer | `server.ts` | by-construction |

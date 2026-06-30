@@ -4,6 +4,10 @@
 
 Allow users to send guidance to the agent mid-turn without canceling. The SDK's `mode: "immediate"` injects messages into the current LLM turn.
 
+## Design
+
+`computeFormState(sessionBusy, hasText)` is a pure function mapping to one of four states: send / stop / steer / hidden. When busy with text in the textarea, submit sends `mode: "immediate"` to `POST /api/sessions/:id/messages`; the server bypasses `dispatchMessage()` and calls `sendStream()` directly (no dispatch-state tracking, no retry). The frontend tracks a steer counter (client-side, resets on `session.idle`) and shows `Stop (N)` when N > 0. The `.streaming` CSS class is replaced by `.busy`. Steered messages appear immediately in chat (optimistic insert). Slash commands remain local UI actions regardless of busy state.
+
 ## SDK Behavior
 
 `session.send({ prompt, mode: "immediate" })` adds to the `ImmediatePromptProcessor` queue. Before the next LLM request within the current turn, all queued immediate messages are injected as user messages. The agent adjusts its response.
@@ -176,10 +180,28 @@ Create `tests/unit/form-state.test.ts`:
 - `npx tsc --noEmit`, `npm run build:client`, `npm test`
 - Manual test: send message, type while busy, Enter steers, button shows Steer/Stop correctly
 
-## Risks
+## Risks and Mitigations
 
 1. **`.streaming` class removal** — other code checks this class. Must audit and update all references.
 2. **Busy-guard bypass** — the `mode: 'immediate'` path must be precise. Only `immediate` mode skips the guard.
 3. **Optimistic insert** — user message appears in chat before SDK processes it. If the session dies, the message is orphaned in the DOM. Acceptable — same as current behavior for normal sends.
 4. **Steer counter desync** — counter is client-side, SDK processing is async. Off-by-one is harmless since it resets on idle.
 5. **Untested SDK behavior** — `mode: "immediate"` is documented but Caco hasn't used it. First steer in production is a live test.
+
+## Acceptance
+
+- Observable: Send a message → while agent responds, type text → button shows "Steer" → Enter sends it mid-turn, agent adjusts. Empty textarea while busy → button shows "Stop" → click aborts. Steer counter shows `Stop (N)` for N > 0.
+- Budgets: n/a
+- Gates: `npm run build`, `npm test` green.
+- Oracles: `tests/unit/form-state.test.ts` — all 4 state-table rows (busy×hasText); `tests/unit/form-state-store.test.ts` — store integration and counter reset on idle.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | computeFormState pure function + types | `public/ts/form-state.ts` | `tests/unit/form-state.test.ts` |
+| 2 | Backend steer path (mode: immediate bypass) | `src/routes/session-messages.ts` | by-construction |
+| 3 | Wire form state to UI; remove .streaming Enter guard | `public/ts/multiline-input.ts`, `public/ts/view-controller.ts` | `tests/unit/form-state-store.test.ts` |
+| 4 | Button text + steer counter badge | `public/ts/message-streaming.ts` | visual: Steer/Stop(N) renders correctly |
+| 5 | CSS: replace .streaming with .busy | `public/css/chat.css` | visual |
+| 6 | Audit .streaming references | `public/ts/**` | `grep -rn streaming public/ts` → 0 hits |

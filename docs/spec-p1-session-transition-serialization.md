@@ -140,3 +140,20 @@ directly, not only `savePreferences` call counts.
 
 `npx tsc --noEmit`, `npx eslint . --max-warnings 0`, `npx vitest run` (existing
 1130 + new cases). No behavior change for the single-request path.
+
+## Acceptance
+
+- Observable: concurrent session transitions for one client serialize — the session list shows no phantom sessions and final active session matches the user's last intent.
+- Budgets: n/a — single-request path is behaviorally unchanged.
+- Gates: `npx tsc --noEmit`, `npx eslint . --max-warnings 0`, `npx vitest run`
+- Oracles:
+  - `tests/unit/session-state-transition.test.ts` — (1) concurrent `ensureSession` calls with no active session: `sessionManager.create` called once, both resolve to same id, `getActiveSessionId()` === `lastSessionId` === that id. (2) concurrent `switchSession(A)` then `switchSession(B)`: final active = B, no overlap of resume bodies. (3) no second body starts before first settles. (4) a rejected transition propagates its rejection but does not wedge the chain; subsequent transition commits correctly.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Export `SessionState` class with `@internal` JSDoc; keep singleton export | `src/session-state.ts` | tsc clean |
+| 2 | Add `_clientTransition: Map<string, Promise<unknown>>` and `runTransition<T>` method | `src/session-state.ts` | tsc clean |
+| 3 | Wrap `ensureSession`, `switchSession`, `prepareNewChat`, `deleteSession` bodies in `runTransition`; re-evaluate `wasActive` inside body for `deleteSession` | `src/session-state.ts` | tsc clean |
+| 4 | Add `session-state-transition.test.ts` with mocked `sessionManager` + `preferences`; drive deferred-resolve mocks to observe overlap; assert 4 cases RED→GREEN | `tests/unit/session-state-transition.test.ts` | oracle: test file |

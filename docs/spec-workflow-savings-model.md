@@ -45,7 +45,7 @@ changing how shaping savings are measured (those stay exact).
   already prices a request's in/cache/out with the model's `inputPerMtok`, `cachePerMtok`,
   `outputPerMtok`. So three-rate pricing is already a proven pattern in the footer.
 
-## The model (per workflow run i)
+## Design
 
 Inputs available per run:
 - `C` = commandCount (facade calls in the run) — **new**, from the accounting hook.

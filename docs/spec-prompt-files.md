@@ -4,7 +4,7 @@ Status: spec. Goal: replace Caco's bespoke `.caco/prompts/*.md` prompt-template
 feature with the **standard Copilot prompt-file** location + format, so prompts live
 where agents/skills do and use the documented `.prompt.md` convention.
 
-## Why
+## Goals
 
 Prompt files are a real Copilot customization (`.github/prompts/*.prompt.md`), but they
 are an **IDE-only** feature — not surfaced by `@github/copilot-sdk@1.0.1` (no
@@ -87,7 +87,12 @@ asked to remove the Caco-specific location). No automatic migration — note in 
 - `agent`/`model`/`tools` honoring; `argument-hint` UI; `#tool:` references; referenced-
   file expansion. Possible later, none required for parity-of-location.
 
-## Test plan
+## Acceptance
+
+- Observable: `/foo` registered from `~/.copilot/prompts/foo.prompt.md`; `/foo arg` fills textarea with substituted body; frontmatter stripped from response; `.caco/prompts` files ignored.
+- Budgets: n/a.
+- Gates: `npm run build` + full test suite green.
+- Oracles: `parsePromptFile` and `applyPromptArgs` pure helpers — by-construction unit tests (write before implementation); existing prompts-route tests updated for new paths/extension.
 
 | T | Check |
 |---|---|

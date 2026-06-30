@@ -1,5 +1,13 @@
 # P8 — Smaller correctness / leak fixes
 
+## Goals
+
+Close five independent Med/Low findings from the brutal code review: make `calculateNextRun` throw on invalid schedule shapes instead of silently falling back to hourly; unify `CorrelationMetrics` onto real per-call timestamps eliminating the dual-representation rate bug; replace the `Proxy`-based workflow facade wrapper with a typed `wrapFacadeForAccounting` that enforces the `Facade` interface at compile time; add epoch guards to three applet async loaders to prevent stale-response DOM overwrites; fix command-disposer identity, CSS-scoping fail-closed, and remove dead `renderClientIdForm`.
+
+## Design
+
+Five independent slices (A–E) each touching disjoint files. Common rubric (`code-quality.md`): make-illegal-states-unrepresentable > encapsulate > assert > test-seam. Slice A makes `calculateNextRun` throw on invalid cron/shape instead of defaulting to +1h. Slice B replaces `chain: string[]` + `RateAggregator` in `CorrelationMetrics` with a single `{ sessionId, timestamp }[]` array so the rate check uses real recorded timestamps. Slice C replaces the `Proxy` over `Record<string, unknown>` in `runner.ts` with an explicit `wrapFacadeForAccounting(facade, account): Facade` typed wrapper that enforces the method surface at compile time. Slice D adds a monotonic epoch counter per applet async loader that gates every DOM-write on epoch+identity match. Slice E makes the command-disposer capture the registered `cmd` object for identity-safe deletion, makes `scopeAppletCSS` return `''` (not unscoped CSS) on null sheet, and deletes dead `renderClientIdForm`.
+
 Final phase of the brutal review remediation. A grab-bag of independent
 Med/Low findings from `code-review-backend.md` and `code-review-frontend.md`,
 grouped into 5 commit-sized slices. Rubric priority (`doc/code-quality.md`):
@@ -262,7 +270,7 @@ applet-runtime test if one exists for E2):
 - **No behavior change for valid inputs.** Slices A/B/C must be pure-internal:
   identical outputs for valid schedules, normal call flows, and facade calls.
 
-## Risks
+## Risks and Mitigations
 
 - **A:** a throw that escapes `executeSchedule` could crash a tick. Mitigation:
   wrap the persistence calc; `checkSchedules` already guards with try/finally.
@@ -275,6 +283,18 @@ applet-runtime test if one exists for E2):
 - **E2:** returning `''` removes styling for an applet whose CSS can't be
   parsed. Acceptable: that path indicates a real CSS/DOM failure and global
   leakage is worse.
+
+## Acceptance
+
+- Observable: all 5 slices compile and pass all gates; oracle tests per slice pass RED→GREEN.
+- Budgets: n/a — no behavior change for valid inputs in slices A/B/C.
+- Gates: `npx tsc --noEmit`, `npx tsc --noEmit -p tsconfig.frontend.json`, `npx eslint . --max-warnings 0`, `npm run knip`, `npx vitest run`
+- Oracles:
+  - Slice A: `tests/unit/schedule-next-run.test.ts` — invalid cron expression → throws; unknown shape → throws; valid cron/interval → correct next time.
+  - Slice B: extend `tests/unit/correlation-metrics.test.ts` — real-timestamp sliding window clears stale calls; `callCount` reflects in-window records only; RED under synthetic timestamps.
+  - Slice C: extend `tests/unit/workflow-facade.test.ts` — `wrapFacadeForAccounting` invokes `account` once per call with resolved value; compile error if a `Facade` method is missing from the wrapper.
+  - Slice D: by-construction (epoch guards are inspection-trivial DOM-bound code; text-editor Save `editorPath === currentFilePath` assertion makes stale write unrepresentable).
+  - Slice E: `tests/unit/command-ownership.test.ts` (new) — dispose of overwritten-name command is a no-op; dispose of current owner removes it. `tests/unit/command-registry.test.ts` extended if applicable.
 
 ## Plan
 

@@ -6,6 +6,10 @@
 
 This is for side conversations: "let me ask the agent a quick question about X without losing my main thread."
 
+## Design
+
+`POST /api/sessions/:id/fork` calls the Copilot SDK `client.rpc.sessions.fork({ sessionId, toEventId? })` (marked `@experimental`), then registers the child session in Caco's cache. Child inherits cwd, model, and folder from the parent; name gets a `[fork]` prefix; plan-state (roadmap, notes, intents) resets fresh. A shared `registerNewSession(sessionId, cwd, meta)` helper is used by both the create and fork routes. The frontend slash command `/session-fork [message]` calls the endpoint, activates the new session via `activateSession()`, then delivers `initialMessage` as a normal `/messages` POST after activation — ensuring the client is subscribed before the message arrives. `session.listChanged` is broadcast so all clients refresh.
+
 ## SDK support
 
 The Copilot SDK exposes `client.rpc.sessions.fork({ sessionId, toEventId? })` (marked `@experimental`):
@@ -210,7 +214,7 @@ These need empirical checks against the SDK rather than assumed:
 3. **Token cost** — the new session inherits all conversation events. When the model receives the next user message, does it process all parent events as context, or does it lazily compact?
    - Affects cost considerations for forking long sessions.
 
-## Risks
+## Risks and Mitigations
 
 1. **`@experimental` SDK API** — could change between SDK versions. Mitigation: route is one place to update.
 2. **Large event history copy time** — a session with 50MB events.jsonl takes a moment to fork. Acceptable for v1. "Forking session..." toast covers it.
@@ -233,3 +237,19 @@ These need empirical checks against the SDK rather than assumed:
 5. **Docs** — README slash command table.
 
 Estimated 250-350 lines including tests.
+
+## Acceptance
+
+- Observable: `/session-fork explore auth` → new session named `[fork] <parent>` appears in session list, chat switches to it, "explore auth" is sent as first message. Parent session unchanged.
+- Budgets: Fork completes within ~5 s for typical sessions.
+- Gates: `npm run build`, `npm test` green.
+- Oracles: route-level unit test (mocked SDK fork RPC) — asserts response shape, child meta (`[fork]` prefix, parentSessionId, kind=interactive), cache registration, `session.listChanged` broadcast, SDK-failure → 5xx with no side effects.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Extract registerNewSession helper | `src/routes/sessions.ts` | by-construction: create() still works |
+| 2 | Add POST /api/sessions/:id/fork route | `src/routes/sessions.ts` | unit test: happy path + SDK-fail + setup-fail |
+| 3 | Frontend slash command (/session-fork) | `public/ts/command-registry.ts` | visual: fork + switch + initialMessage |
+| 4 | Update README slash command table | `README.md` | by-construction |

@@ -2,11 +2,110 @@
 
 Make cold-resume of "mega-sessions" sub-second by front-truncating the append-only `events.jsonl`, with SDK-load-verified auto-revert. Telemetry + experiment in `cold-open-latency-findings.md`.
 
-## Problem
+## Goals
 
-`events.jsonl` is append-only; the SDK never prunes it. `resumeSession` reads the whole file: **4381ms for 505 MB / 187K lines** (73% of cold open). No SDK version (≤1.0.64) offers pruning/rotation/resume-from-tail; compaction reduces tokens, not disk (this session compacted 40× yet is 505 MB).
+Cold-resume of a mega-session (505 MB, 187K lines) takes ~4 s today; 73% is reading `events.jsonl`. After rotation, cold resume targets <1 s. The operation must never corrupt a session: if the truncated file fails an SDK load, it reverts to the original automatically. User messages are retained across the cut so the resumed session's recall is equivalent to the full history.
 
-## Empirical basis (experiment, real SDK)
+## Design
+
+**Cut point:** retain `session.start` (line 1) + every `user.message` event + everything from the last `session.compaction_complete` onward. The compaction tail preserves the freshest summary; user messages (~0.1% of bytes) retain cross-turn recall. No compaction event → retain from `MIN_TAIL_EVENTS` back. Skip if file < `ROTATE_THRESHOLD_BYTES` or saving < `MIN_SAVING`.
+
+**Transactional copy-verify-swap** (`rotateSessionHistory` in `src/session-history-rotation.ts`):
+
+1. **Guard + lock:** acquire per-session rotation lock (new `rotatingSession` state in `SessionManager`, honored by `resume`/`send`/`stop`/auto-repair). Session must be inactive. `statSync` size; bail if under threshold/savings. Bail if rotation marker/backup already exists (crash recovery).
+2. **Resolve & persist model FIRST** via `readModelFromEvents` semantics (prefer existing `meta.model`; fall back to parsed events). Abort rotation if meta write fails.
+3. **Build candidate OUTSIDE the live file:** `events.jsonl.candidate` = `[line0, ...lines.slice(cut)]`. Capture `srcStat` (size+mtime) of the live file.
+4. **Verify on a STAGED COPY with an ISOLATED client:** stage throwaway dir (`exp-<id>`); `new CopilotClient(...) → start → resumeSession(stagedId, {suppressResumeEvent:true}) → disconnect → stop` in `finally`. Do NOT use `SessionManager.resume()` or the shared client. On any throw → discard candidate, release lock, return `{ ok:false }`. Live file is byte-untouched.
+5. **Swap (atomic, re-checked):** still under lock, re-`statSync` live file; if changed since `srcStat` → abort. Else: append pruned head to `events-archive.jsonl` and fsync; only then `rename(events.jsonl → .prerotate)`, `rename(candidate → events.jsonl)`, delete `.prerotate`. Write cooldown marker to meta. Release lock. Return `{ ok:true, before, after, savedBytes }`.
+
+**Locking:** `SessionManager.rotatingSession: Set<sessionId>`. A resume requested while rotating **waits** for the rotation promise, then proceeds against the swapped file.
+
+**Trigger policy (phased):**
+- Phase 1 (manual): `POST /api/sessions/:id/rotate` route. User invokes on a chosen inactive session and validates coherence manually.
+- Phase 2 (automatic): `autoRotateIfEligible` (fire-and-forget) at end of `SessionManager.stop()`. `CACO_ROTATE_AUTO` defaults ON after coherence validation.
+
+**Config:** `CACO_ROTATE_THRESHOLD_BYTES=67108864` (64 MB), `CACO_ROTATE_MIN_TAIL_EVENTS=4000`, `CACO_ROTATE_MIN_SAVING_BYTES=33554432` (32 MB), `CACO_ROTATE_AUTO` ON by default.
+
+**Caco-side readers after rotation:**
+
+| Reader | Effect of rotation | Handling |
+|---|---|---|
+| `parseSessionModel` (reverse-scans for last model_change) | Pre-cut model_change with none after ⇒ wrong model | Step 2 persists model to meta first; `readModelFromEvents` reads meta before parse |
+| `readLastTurnsResult` (last 5 turns) | Tail retained | ✓ no change |
+| `lastTurnsCache` (size+mtime key) | Both change | ✓ auto-invalidates |
+| `searchSessionEvents` | Loses pre-cut history | Extend to also scan `events-archive.jsonl` |
+| `readSessionEvents` / `getHistoryFromDisk` (full event read) | Tail-only after rotation | Explicit decision; callers needing full history merge archive+live. Never on the hot resume path. |
+| SDK `/rewind` | Pre-cut rewind points lost | Accepted limitation |
+
+**Crash recovery:** write `events.jsonl.rotation` marker (phase + candidate stats) on boot:
+- Absent → nothing to do.
+- Marker present + `.prerotate` exists → verify current `events.jsonl` via isolated SDK load; if OK: archive/clear `.prerotate`; if bad or absent: restore from `.prerotate`.
+
+**Auto-rotate eligibility gates** (cheapest-first, before spinning the isolated verify client):
+1. `CACO_ROTATE_AUTO=1`.
+2. Unobserved check (skip if session result is unread — `unobservedTracker.isUnobserved`).
+3. Size ≥ threshold.
+4. Cooldown — `lastRotatedAt` older than 1 h.
+Then `rotateSessionHistory` enforces the exclusivity lock + saving threshold + real-SDK verify-before-swap.
+
+## Invariants
+
+- The live `events.jsonl` is replaced only by a candidate that already passed a real SDK load.
+- A rotation that fails at any step leaves the live file byte-identical to the original.
+- `session.start` (line 1) is always retained — the SDK requires it.
+- Archive append (fsync) precedes the rename swap; archive-append failure aborts the swap.
+- Rotation only starts when the session is inactive and not already rotating.
+- Meta model is persisted before truncation; if meta write fails, the rotation aborts.
+
+## Considerations
+
+- **Model-loss bug:** a pre-cut `model_change` with none after ⇒ wrong model on the rotated file. Fixed by Step 2 (meta-first persist via `readModelFromEvents` semantics — prefer existing `meta.model`, BYOK provider-namespace preserved).
+- **Verify isolation:** verification uses a separate short-lived `CopilotClient` against a staged copy, fully stopped in `finally` — never the server's `sharedClient` (which would register the session in `activeSessions`/client map).
+- **Archive over-count after crash-then-retry (accepted):** pruned head is fsync-appended before swap; a crash+retry re-appends the same head — `searchSessionEvents` may over-count. Duplication in non-authoritative search is safer than data loss.
+- **Archive growth:** cold data moved off the hot path. Optional later: compress archives.
+- **SDK `/rewind`:** pre-cut event IDs are lost; accepted, like old search results.
+
+## Risks and Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Soft context loss (model forgets pre-cut context) | Retain from last `compaction_complete` + all user messages; Phase 2 gate: probe-message coherence vs full-history baseline before enabling automation. |
+| Corrupt `events.jsonl` after crash mid-swap | `.prerotate` kept until archive fsynced + swapped file passes real load; crash recovery restores from `.prerotate`. |
+| Concurrent write between srcStat capture and swap | Re-`statSync` live file before rename; abort if changed. |
+| BYOK compaction summarization routes through user's provider (unverified) | Note in spec; failure surfaces as normal resume error + rollback. |
+| `searchSessionEvents` loses pre-cut history | Extend to scan `events-archive.jsonl`; non-critical data retained in archive. |
+
+## Acceptance
+
+- Observable: `POST /api/sessions/:id/rotate` on a mega-session returns `{ ok:true, before, after, savedBytes }`; subsequent cold resume completes in <1 s; a memory probe on the resumed session recalls pre-rotation goals and context.
+- Budgets: cold-resume < 1 s after rotation (vs ~4 s before).
+- Gates: `npm run build` green; `tests/unit/session-history-rotation.test.ts` green; `tests/unit/session-manager-rotation-lock.test.ts` green.
+- Oracles:
+  - Cut-point selection (compaction present/absent/too-near-head/below-threshold) — table-driven, no SDK (`session-history-rotation.test.ts`).
+  - Stub "loader" throws → live `events.jsonl` byte-identical, no `.prerotate` left (`session-history-rotation.test.ts`).
+  - Concurrent-write guard: stat changes → rotation aborts, original intact (`session-history-rotation.test.ts`).
+  - Rotation lock: resume waits for rotation promise then sees swapped file; rotation refused on active/dispatching session (`session-manager-rotation-lock.test.ts`).
+  - BYOK provider-prefixed `meta.model` preserved after rotation; abort if meta write fails (`session-history-rotation.test.ts`).
+  - Archive-append failure → swap aborted, original intact (`session-history-rotation.test.ts`).
+  - Crash recovery: `.prerotate` + bad `events.jsonl` → restored; + good `events.jsonl` → archived/cleared (`session-history-rotation.test.ts`).
+  - `searchSessionEvents` finds a pruned-head match via archive (`session-history-rotation.test.ts`).
+  - Real-SDK integration (manual/opt-in, not CI): rotate a copy of a mega-session, assert resume <1 s and probe reply requiring pre-cut knowledge is coherent.
+
+## Plan
+
+| # | Step | Files | Oracle | Invariants |
+|---|------|-------|--------|------------|
+| 1 | Cut-point selection + candidate build | `src/session-history-rotation.ts` | table-driven cut-point tests — `session-history-rotation.test.ts` | `session.start` always retained |
+| 2 | Persist model to meta before truncation (Step 2) | `src/session-history-rotation.ts`, `src/session-meta-store.ts` | BYOK model preserved; abort if meta write fails — unit | Meta write must succeed |
+| 3 | Isolated-client verify-before-swap | `src/session-history-rotation.ts` | stub-throws → live file byte-identical — unit | Replace only verified candidate |
+| 4 | Atomic swap with re-stat + archive-append-fsync | `src/session-history-rotation.ts` | concurrent-write guard aborts; archive-append failure aborts — unit | Archive fsync precedes rename |
+| 5 | Rotation lock in `SessionManager` | `src/session-manager.ts` | resume waits; rotation refused on active session — `session-manager-rotation-lock.test.ts` | Active/rotating exclusion |
+| 6 | Crash recovery (phase marker + `.prerotate`) | `src/session-history-rotation.ts` | pre-seeded marker scenarios — unit | `.prerotate` not deleted until verified |
+| 7 | Phase 1 manual route `POST /rotate` | `src/routes/sessions.ts` | by-construction (manual validation) | - |
+| 8 | Phase 2 `autoRotateIfEligible` at `stop()` | `src/session-manager.ts`, `src/session-history-rotation.ts` | eligibility gates fire before SDK spin-up; `CACO_ROTATE_AUTO=0` disables — unit | `CACO_ROTATE_AUTO` gate |
+| 9 | `searchSessionEvents` archive fallback | `src/session-history-rotation.ts` | pruned-head match found via archive — unit | - |
+
+## Empirical Basis
 
 | Retained | Size | Resume | OK |
 |---|---|---|---|
@@ -15,80 +114,4 @@ Make cold-resume of "mega-sessions" sub-second by front-truncating the append-on
 | start + last 5 turns | 1.4 MB | 29ms | ✓ |
 | tail only, NO session.start | 5 MB | — | ✗ "corrupted or incompatible" |
 
-⇒ Front-truncation → **~40ms (<1s met)**. `session.start` (line 1) is **mandatory**. SDK **throws cleanly** on a bad file ⇒ auto-revert is reliable.
-
-## Cut point
-
-Retain `session.start` (line 1) **+ every `user.message` event + everything from the last `session.compaction_complete` onward**. The compaction tail preserves the freshest summary; **all user messages are retained** because the SDK rebuilds a resumed session's context from the user-message digest scattered across the *whole* history — dropping them (an earlier `start + last-compaction` cut) made a rotated session recall materially less than the full history. User messages are ~0.1% of a mega-session's bytes, so retaining them is nearly free. Validated against a real SDK resume + memory probe: the user-message-retaining cut is memory-equivalent to the full 428 MB history (the bare last-compaction cut was not). Everything else before the cut is archived. Fallback if no compaction event: retain from `MIN_TAIL_EVENTS` back. Skip rotation if file < `ROTATE_THRESHOLD_BYTES` or saving < `MIN_SAVING`.
-
-## Operation: `rotateSessionHistory(sessionId)` (new module `src/session-history-rotation.ts`)
-
-Transactional **copy-verify-swap** (revised per review: never expose the live `events.jsonl` to an unverified candidate; never verify on the shared client). Auto-revert is structural — the live file is only ever replaced by an *already-verified* candidate.
-
-1. **Guard + lock:** acquire a per-session **rotation lock** (new state in `SessionManager`, honored by `resume`/`send`/`stop`/auto-repair — see §Locking). Under the lock: session must be inactive (not in `activeSessions`, no in-progress dispatch). `statSync` size; bail if under threshold or savings too small. Bail if a rotation marker/backup already exists (crash recovery, §Crash).
-2. **Resolve & persist model FIRST** (fixes model-loss bug, §Correctness): persist via `readModelFromEvents` **semantics** — prefer existing `meta.model` (keeps BYOK/provider-prefixed identity), only fall back to parsed events if meta lacks a model. If meta write fails, **abort** (don't truncate).
-3. **Build candidate OUTSIDE the live file:** `events.jsonl.candidate` = `[line0, ...lines.slice(cut)]`, where `cut` = reverse-scan for the last `"type":"session.compaction_complete"` (fallback: last `MIN_TAIL_EVENTS`). Capture `srcStat` (size+mtime) of the live file.
-4. **Verify on a STAGED COPY with an ISOLATED client:** stage a throwaway dir (`exp-<id>`) containing the candidate + sibling metadata; `const c = new CopilotClient(...); await c.start(); await c.resumeSession(stagedId, {suppressResumeEvent:true,...}); await c.disconnect(); await c.stop()` in a `finally`. **Do NOT use `SessionManager.resume()` or the shared client** (it would register in `activeSessions`, evict, sync meta, auto-repair, and pollute the live client's session map). On any throw → discard candidate, release lock, return `{ ok:false }` — **the live session is byte-untouched**.
-5. **Swap (atomic, re-checked):** still under the lock, re-`statSync` the live file; if it changed since `srcStat` (someone wrote to it) → discard candidate, abort (no data loss). Else: append the pruned head (`lines.slice(1, cut)`) to `events-archive.jsonl` and **fsync**; only if archive append succeeds, `rename(events.jsonl → events.jsonl.prerotate)`, `rename(candidate → events.jsonl)`, then delete `.prerotate`. Write `lastRotatedAt`/`rotatedToBytes` cooldown marker to meta. Release lock. Return `{ ok:true, before, after, savedBytes }`.
-
-The live `events.jsonl` is replaced only by a candidate that **already passed a real SDK load**, and only while no concurrent write has occurred — so there is no window where the live path holds an unverified or partially-written file.
-
-## Locking (new)
-
-`SessionManager` gains a `rotatingSession: Set<sessionId>` (or per-id promise). `resume`/`send`/`stop`/the auto-repair loop check it: a resume requested while rotating **waits** for the rotation promise (it finishes in ms), then proceeds against the swapped file. Rotation only starts when the session is inactive AND not already rotating. Phase 2 rotation holds the lock for the whole operation (not fire-and-forget mid-swap).
-
-## Trigger policy (phased)
-
-- **Phase 1 — manual/explicit.** A `POST /api/sessions/:id/rotate` route + a session-list action. User invokes on a chosen inactive session; result reported. Lets the user **validate coherence** (resume + send a probe; does the model still "remember" via the summary?) on real sessions before any automation. NOTE: `onSessionEnd` is **delete**, not idle — do NOT hook it.
-- **Phase 2 — automatic (gated, after validation).** Run `autoRotateIfEligible` (fire-and-forget) at the end of `SessionManager.stop()` (covers explicit stop AND `evictInactiveSessions`, i.e. the session is at rest). Cheap pre-gates (env `CACO_ROTATE_AUTO=1`, size ≥ threshold, `lastRotatedAt` cooldown) run before spinning the isolated verify client; errors swallowed so deactivation never breaks. Never inline on the resume path. **Phase 2 gate (DONE):** validated via a real SDK resume + memory-probe comparison — the full 428 MB history recalled the early goal / the two extraction techniques / the animation driver; the bare last-compaction cut recalled none; the **user-message-retaining cut matched the full history**. This drove the cut-point change above. Auto stays off (`CACO_ROTATE_AUTO=0`) by default.
-
-## Caco-side correctness
-
-| Reader | Effect of rotation | Handling |
-|---|---|---|
-| `parseSessionModel` (reverse-scans for last model_change) | **Bug:** a pre-cut model_change with none after ⇒ wrong model. | Step 2 persists model to caco-meta first via `readModelFromEvents` semantics (meta-first, BYOK provider-namespace preserved); `readModelFromEvents` reads meta before parse. Abort rotation if meta write fails. |
-| `readLastTurnsResult` (last 5 turns) | Tail retained | ✓ no change |
-| `lastTurnsCache` (size+mtime key) | Both change | ✓ auto-invalidates |
-| `searchSessionEvents` | Loses pre-cut history | Extend to also scan `events-archive.jsonl` (old search is non-critical but data is retained). |
-| `readSessionEvents` / `getHistoryFromDisk` (full event read; feeds debug/history helpers) | **Becomes tail-only** after rotation | Explicit decision: these become hot-tail-only. Callers needing full history merge `events-archive.jsonl + events.jsonl` (NEVER on the hot resume path). Document in the module. |
-| SDK `/rewind` (event ids) | Pre-cut rewind points lost | Accepted limitation (documented), like old search. |
-| Caco `checkpoints/` | Separate from events.jsonl | ✓ unaffected |
-
-## Crash recovery
-
-Write a small **rotation-state marker** (`events.jsonl.rotation`: phase + candidate stats) so a crash is reconcilable by phase, not guesswork. On session-discovery/boot:
-- marker absent ⇒ nothing to do.
-- marker present + `.prerotate` exists ⇒ a swap died mid-flight: **verify the current `events.jsonl` via a real isolated SDK load** (structural parse is only a precheck, never authoritative); if it loads, archive/remove `.prerotate` + clear marker; if it fails or is absent, restore from `.prerotate`.
-- Never delete `.prerotate` until the archive append is flushed AND the live file passed a real SDK load.
-
-## Config (env, defaults)
-
-`CACO_ROTATE_THRESHOLD_BYTES=67108864` (64 MB), `CACO_ROTATE_MIN_TAIL_EVENTS=4000`, `CACO_ROTATE_MIN_SAVING_BYTES=33554432` (32 MB), `CACO_ROTATE_AUTO` **ON by default** (set `=0` to disable; validated and enabled after coherence testing).
-
-## Auto-rotate eligibility gates (`autoRotateIfEligible`)
-
-Evaluated cheapest-first; all must pass before the isolated verify client spins up:
-1. `CACO_ROTATE_AUTO=1`.
-2. **Observed** — skip if the session is *unobserved* (went idle but the user hasn't viewed the result). Those are exactly the sessions a user is about to click open, so we never mutate them out from under an imminent read. O(1) via `unobservedTracker.isUnobserved`.
-3. Size ≥ threshold (`statSync`).
-4. Cooldown — `lastRotateAttemptAt`/`lastRotatedAt` older than 1 h (so a session that keeps failing verify doesn't re-spin the client).
-Then `rotateSessionHistory` still enforces the exclusivity lock (not active/busy/resuming/rotating), the saving threshold, and the real-SDK verify-before-swap.
-
-## Tests
-
-- Pure cut-point selection (compaction present / absent / too-near-head / below-threshold) — table-driven, no SDK.
-- **Copy-verify-swap transactional revert:** a stub "loader" that throws ⇒ live `events.jsonl` is **byte-identical** to the original and never replaced; candidate discarded; no `.prerotate` left.
-- **Concurrent-write guard:** simulate the live file's stat changing between capture and swap ⇒ rotation aborts, original intact.
-- **Rotation lock:** a `resume` requested during rotation waits for the rotation promise then sees the swapped file; rotation refuses to start on an active/dispatching session.
-- Model preserved: rotate a fixture whose operative model came from a pre-cut model_change ⇒ post-rotation `readModelFromEvents` correct; BYOK provider-prefixed `meta.model` preserved; abort if meta write fails.
-- Archive append+fsync precedes `.prerotate` deletion; archive-append failure ⇒ swap aborted, original intact. `searchSessionEvents` finds a pruned-head match via archive.
-- Crash recovery by phase marker: pre-seeded marker + `.prerotate` + bad `events.jsonl` ⇒ restored; + good `events.jsonl` ⇒ archived/cleared (authoritative real-load check).
-- Real-SDK integration (manual/opt-in, not CI): rotate a copy of a mega-session, assert resume <1s and a probe reply requiring pre-cut knowledge is coherent (Phase 2 gate).
-
-## Risks / open
-
-- **Soft context loss:** auto-revert only catches hard SDK throws, not "model forgot older context." Mitigated by retaining from last `compaction_complete` (summary preserved) — but it is **unverified** that the SDK treats `compaction_complete.summaryContent` as authoritative replay memory, or that the summary doesn't reference deleted pre-cut tool outputs. **Must be validated** (probe-message coherence vs full-history baseline) as the Phase 2 gate before any automation, especially on the user's primary session.
-- **Verify isolation:** verification uses a **separate short-lived `CopilotClient`** against a staged copy, fully stopped in `finally` — never the server's `sharedClient` (which would register the session in the live `activeSessions`/client map and could mutate the verified file). Confirmed viable by the experiment.
-- **Archive durability:** `.prerotate` is deleted only after the archive append is fsynced AND the swapped live file passed a real load. Archive append failure ⇒ abort the swap (no truncation), return partial/failed status.
-- Archive grows; acceptable (cold data moved off the hot path). Optional later: compress archives.
-- **Archive over-count after crash-then-retry (accepted):** the pruned head is fsync-appended to `events-archive.jsonl` *before* the swap (so it is never lost). If a crash lands after that append but before the swap, the original `events.jsonl` is intact and a later retry re-appends the same head — `searchSessionEvents` may then over-count/duplicate pre-cut snippets. Append-before-swap is chosen deliberately (duplication in non-authoritative search data is strictly safer than losing it); accepted, not fixed.
+`session.start` is mandatory. SDK throws cleanly on a bad file ⇒ auto-revert is reliable. Phase 2 gate: user-message-retaining cut matched full 428 MB history on a memory probe; bare last-compaction cut recalled none of the early goals.

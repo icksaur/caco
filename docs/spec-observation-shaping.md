@@ -51,7 +51,9 @@ Live run against the SDK (`claude-haiku-4.5`) settled the three blocking unknown
 - The session `largeOutput` config is now irrelevant to this feature; leave the
   existing `sdkLargeOutputConfig()` as-is.
 
-## Design — Part 1: Caco layer
+## Design
+
+### Part 1: Caco layer
 
 **Interception.** SDK `SessionHooks.onPostToolUse(input, invocation)` returns
 `{ modifiedResult?, additionalContext?, suppressOutput? }`. Register it on the
@@ -94,7 +96,7 @@ raw policy). A test must assert untouched fields survive.
 `SHAPED_OUTPUT_CAP_BYTES` (soft — see size/failure conflict below), `MAX_FAILURES`
 (cap on preserved failure entries).
 
-## Design — Part 2: shapers (the "known-output" parsers)
+### Part 2: shapers (the "known-output" parsers)
 
 A shaper is a self-contained module, not a loose function. Adding one is purely
 additive — no core change — which is the whole maintainability story.
@@ -184,7 +186,7 @@ generic shaper is always recoverable via the handle.
 - **Cost.** Shaping is local CPU (negligible). Win compounds like the index tool:
   smaller observations → slower window growth → fewer compactions.
 
-## Risks
+## Risks and Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
@@ -210,7 +212,7 @@ generic shaper is always recoverable via the handle.
 - Existing `src/output-store.ts` (`storeOutput`/`getOutput`, `type: 'raw'`, opaque
   `out_…` ids, per-session dirs, pruning) is the raw-recovery backend — reuse it.
 
-## Acceptance (oracles)
+## Acceptance
 
 - **Failure-signal superset (primary).** For each golden raw fixture (real
   failing `npm test`, `tsc`, `eslint` captures), assert the shaped output retains

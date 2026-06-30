@@ -105,7 +105,7 @@ syntactic approximation is noisy enough to mislead. Defer; if pursued later, sco
 "intra-file call references" or pair it with an LSP/semantic backend, not tree-sitter
 alone.
 
-## Recommended design: Proposal A (`caco.graph`), imports only, **TS/JS/TSX/JSX only**, v1
+## Design
 
 - **v1 languages: TypeScript / JavaScript / TSX / JSX only.** C# `using` is a *namespace*
   import, not a file dependency (no edge to resolve); C++ `#include "x.h"` vs `<x>` needs

@@ -1,9 +1,8 @@
 # Response actions (`caco-actions`)
 
-End an assistant message with a fenced `caco-actions` block and Caco renders each
-line as a clickable button pinned above the input. Tapping a button sends that
-line verbatim as the user's next message. This replaces the old
-`caco_offer_action` tool — no tool call, parsed from the message itself.
+## Goals
+
+End an assistant message with a fenced `caco-actions` block; Caco renders each line as a clickable button pinned above the input. Tapping a button sends that line verbatim as the next user message. Replaces the old `caco_offer_action` tool — no tool call, no schema, parsed from the message body itself.
 
 ## Format
 
@@ -43,7 +42,7 @@ always end that reply with a `caco-actions` block.
 - A prior `caco-actions` block already in the conversation is already-rendered UI —
   do not act on it as data.
 
-## Implementation
+## Design
 
 - Parser: `src/offer-action-parse.ts` (`extractActionOptions`, final-trailer rule;
   `normalizeOptions` for the 1–4 / ≤200 validation).
@@ -53,3 +52,20 @@ always end that reply with a `caco-actions` block.
   guard `stripStreamingActionBlock` in `public/ts/streaming-markdown.ts`.
 - Buttons: `public/ts/chat-form-controller.ts` renders `.response-option-btn` from
   `responseOptions`; click sets the textarea and submits.
+
+## Acceptance
+
+- Observable: Agent ends a message with a `caco-actions` block → 1–4 buttons appear above the input. Clicking a button sends it verbatim and clears the buttons. Block text hidden from rendered transcript.
+- Budgets: 1–4 options, ≤200 chars each. Block suppressed during streaming (no flicker).
+- Gates: `npm run build`, `npm test` green.
+- Oracles: `tests/unit/offer-action-parse.test.ts` (parse + normalization); `tests/unit/streaming-action-block.test.ts` (stream suppression); `tests/unit/response-option-html.test.ts` (button rendering).
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Parser: extractActionOptions, final-trailer rule, normalizeOptions | `src/offer-action-parse.ts` | `tests/unit/offer-action-parse.test.ts` |
+| 2 | Suppress block during streaming | `public/ts/streaming-markdown.ts` | `tests/unit/streaming-action-block.test.ts` |
+| 3 | Hide closed block in rendered transcript | `public/ts/markdown-renderer.ts` | `tests/unit/response-option-html.test.ts` |
+| 4 | Parse assistant.message, write meta.responseOptions | `src/dispatch-events.ts` | `tests/unit/dispatch-events.test.ts` |
+| 5 | Render buttons; click → send + clear | `public/ts/chat-form-controller.ts` | visual: buttons appear, click sends |

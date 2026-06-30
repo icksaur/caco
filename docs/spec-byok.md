@@ -8,7 +8,11 @@ Let a Caco user run sessions on non-GitHub model providers (OpenAI, Anthropic, A
 
 Non-goal: switching a *live* session across providers (SDK can't — see [Constraints](#hard-constraints)). Non-goal: a homegrown LLM abstraction layer (unnecessary — SDK already abstracts the provider).
 
-## Hard constraints (verified in SDK source)
+## Design
+
+`provider-registry.ts` is the single owner of `~/.caco/providers.json`. It loads and validates the file, exposes `hasProviders(): boolean` (gates handler attachment), `listByokModels()`, and `resolveModel(cacoId)` which returns `{ sdkModel, providerId?, provider? }`. `session-manager.ts` conditionally attaches an `onListModels` handler to `CopilotClient` **only** when `hasProviders()` is true — no-config users see zero code change. BYOK model ids are namespaced `<providerId>:<wireModel>`; the prefix makes resume self-sufficient (the persisted `model` encodes its provider). The aggregated model list from `onListModels` (GitHub via `client.rpc.models.list` + BYOK from the registry) feeds all UIs through `cachedModels`. See Model flow, Config, Namespacing, UX, and Cross-provider switch sections below.
+
+## Invariants
 
 These shape the entire design. All verified against `node_modules/@github/copilot-sdk/dist/`.
 
@@ -150,7 +154,7 @@ The overriding constraint: **a user with no BYOK config (the default, and the on
 
 Net: the feature is **additive and isolated.** Every failure mode of the BYOK layer collapses to "GitHub-only, as today." R1 can ship and sit dormant with zero observable change until a user opts in by writing the config file.
 
-## Risks & mitigations
+## Risks and Mitigations
 
 | Risk | Mitigation |
 |---|---|
@@ -161,7 +165,14 @@ Net: the feature is **additive and isolated.** Every failure mode of the BYOK la
 | Cross-provider switch mid-conversation replays history under a model that may reject it (context/format). | Surface resume errors via existing auto-repair + toast; switch is explicit user action. |
 | Runtime `models.list` latency added to every cold model fetch. | Already cached (`modelsCache`, `client.js:850`); merge happens once per client lifetime. |
 
-## Divisibility (suggested order)
+## Acceptance
+
+- Observable: BYOK models appear in the new-chat picker and `/session-model` grouped by provider sub-header; a session started on a BYOK model exchanges turns and shows throughput accounting. A user with no `~/.caco/providers.json` sees byte-for-byte identical behavior to today.
+- Budgets: model list merge adds latency once per client lifetime (cached); no-config path adds one `existsSync` check only.
+- Gates: `npm run typecheck`, `npm run lint:strict`, `npm run knip`, `npm test`, `npm run build:client`.
+- Oracles: `tests/unit/provider-registry.test.ts` covers `resolveModel` namespaced-id parsing and provider config assembly. The graceful-degradation table above is the design oracle for no-config behavior. Open-verification probes (R2) confirm `assistant.usage` field shape and cold `rpc.models.list`.
+
+## Plan
 
 1. **R1 — Registry + aggregated listing (read-only).** `provider-registry.ts`, `onListModels` merge, UI grouping. Outcome: BYOK models *appear* everywhere; creating one still uses GitHub (no provider passed yet). Safe, observable, no behavior change for existing users.
 2. **R2 — Create with provider.** Thread `provider` into `createSession`; new-chat can start a BYOK session. Throughput/cost verified.

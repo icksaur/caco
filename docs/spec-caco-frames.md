@@ -130,7 +130,7 @@ language server: clangd (needs `compile_commands.json`), tsserver, Roslyn/OmniSh
 covers shaders, and it violates the "simple, on the shoulders of giants" intent. Defer;
 if pursued, it is a per-stack opt-in layered behind the same `caco.frames` shape, not v1.
 
-## Recommended design: Proposal A v1 (definition + incoming), portable
+## Design
 
 - New module `src/index/frames.ts`: `buildFrames(cwd, symbol, opts)` — pure, tested,
   uses only `indexCore` + `grepCore` + `readFileRangeCore` (the same cores the facade

@@ -39,6 +39,10 @@ Close three correctness gaps the review flagged:
    in-flight turn the live stream owns**; it is explicitly deferred to its own
    phase (P9 candidate) and called out here, not silently implied as fixed.
 
+## Design
+
+Three independent slices, each shippable on its own. **Slice 1** adds `updateMcpServerAuth(serverId, fn)` to `mcp-auth-store.ts` — a synchronous read-modify-write (no `await` between read and write) that is atomic with respect to other JS callers in the single-threaded Node process; all 9+ RMW write sites in `mcp-auth-service.ts` and `routes/mcp-auth.ts` migrate to it. **Slice 2** wraps `clientMessageHandlers`/`extensionMetadata` in an `ExtensionRuntime` class with `load`/`unload`/`reload` lifecycle; duplicate `onClientMessage` registration throws instead of warn+overwrite; existing module-level exports become thin delegates to a singleton so call sites are unchanged. **Slice 3** adds a per-request `historyGeneration` counter: FE pre-increments and sends it with `requestHistory`; BE stamps every replay frame with it; FE `handleMessage` discards any frame carrying a mismatched generation (untagged live frames are never discarded); types the `ServerMessage` discriminated union and asserts `sessionId` on session-scoped frames.
+
 ## Slice 1 — atomic `updateMcpServerAuth`
 
 ### Design
@@ -221,7 +225,7 @@ silently pass it through.
 - **Slices are independent.** 1/2/3 touch disjoint files and can land in any
   order; each ships green on its own.
 
-## Risks & mitigations
+## Risks and Mitigations
 
 - *Throwing on duplicate extension registration could crash load* — mitigate:
   the throw is caught by the existing per-extension `try/catch` in the load loop

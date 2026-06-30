@@ -3,7 +3,17 @@
 Focused fix spec. Parent: `docs/spec-budget.md` (the budget landed `caco_run_workflow` +
 the `caco` facade; it was built/tested on Linux). Index of record: spec-budget.
 
-## Problem
+## Goals
+
+1. `caco.rg` degrades **gracefully and legibly** when rg is absent — a clear, actionable
+   error (or no error at all, if we make rg always present), never a bare ENOENT.
+2. `GrepMatch.file` and `globCore` paths are **POSIX `/`-separated on every platform**, so
+   the facade contract is identical on Windows and Linux and matches real rg output.
+3. No behavior change on Linux (where the diet was built and works).
+4. The new facade tests pass on Windows for the right reason (correct contract), not by
+   weakening assertions.
+
+## Design
 
 The diet routed reads/shell through the `caco` facade (`src/workflow/facade.ts`,
 `src/workflow/cores.ts`). On Windows two gaps surface (measured live on this box):
@@ -64,16 +74,6 @@ with default `detached:false` is exactly what the browser-launch fix landed on f
 PowerShell; and `restart-manager.ts:159` already runs detached node + `windowsHide:true`,
 so the runner's detached node spawn is safe too (the browser detached+windowsHide gotcha
 was PowerShell-host-specific, not node).
-
-## Goals
-
-1. `caco.rg` degrades **gracefully and legibly** when rg is absent — a clear, actionable
-   error (or no error at all, if we make rg always present), never a bare ENOENT.
-2. `GrepMatch.file` and `globCore` paths are **POSIX `/`-separated on every platform**, so
-   the facade contract is identical on Windows and Linux and matches real rg output.
-3. No behavior change on Linux (where the diet was built and works).
-4. The new facade tests pass on Windows for the right reason (correct contract), not by
-   weakening assertions.
 
 ## Considerations
 
@@ -144,50 +144,6 @@ PATH. Small; complements A or B (lets you point at a system rg without touching 
 - **Gap 2 = normalize all four model-facing relative paths** to POSIX `/`:
   `caco.grep` (`GrepMatch.file`), `caco.glob`, `caco.read().path`, `caco.index().path`.
 
-## Change plan
-
-1. **`src/workflow/cores.ts` — POSIX path normalization (Gap 2).**
-   - Add a tiny `toPosix(p) => p.replace(/\\/g, '/')` (shared util, or import frames').
-   - `rgGrep`: emit `toPosix(relative(base, resolve(base, file)))`.
-   - `jsGrep`: emit `toPosix(rel)`; keep the existing `..`/escape guard computed on the
-     **native** `rel` first, then posix-ify only for output (guard must not run on `/`-mixed
-     strings).
-   - `globCore`: push `toPosix(v.relative)`; sort **after** posix-ify so order is stable and
-     separator-independent.
-   - `readFileRangeCore`: return `toPosix(relative(base, resolved)) || '.'` (uniform contract).
-2. **`src/index/core.ts` — normalize `indexCore` path** (`toPosix(validation.relative)`) so
-   `caco.index(...).path` matches grep/read. (Confirm no test asserts native index paths.)
-3. **Gap 1 — `caco.rg` degradation (`facade.ts` + a small rg-resolver).**
-   - Add `resolveRg()` returning `CACO_RG_PATH` (if set & `existsSync`), else **vendored
-     `@vscode/ripgrep` `rgPath`** (if `existsSync`), else `null`. **No PATH scavenging.**
-     Existence-checked per call (no cached boolean).
-   - `facade.rg`: if `null`, throw `WorkflowInputError("ripgrep unavailable")` (degenerate
-     case only); else `execFileAsync(rgPath, …)`.
-   - `grepCore`/`rgGrep`: take the resolved `rgPath`; when `null`, go straight to `jsGrep`
-     (skips the wasted failed-spawn). Keep the `ENOENT` catch as belt-and-suspenders for a
-     stale vendored path.
-   - **Test seam:** `grepCore` accepts an optional injected `rg: string | null` (default
-     `resolveRg()`); passing `null` forces `jsGrep` deterministically. This replaces the old
-     `PATH=''` trick (which no longer disables the vendored binary).
-   - Add the `@vscode/ripgrep` dependency; note the ~4MB postinstall binary download.
-4. **Tests.**
-   - `tests/unit/workflow-cores.test.ts`: flip the `globCore` assertion to `'sub/b.txt'`; the
-     3 POSIX-assuming grep assertions pass once cores emit `/`. Replace the `PATH=''`
-     fallback-forcing trick with the new injected `rg=null` seam (vendored rg ignores PATH).
-     Point `directRg` + the rg-path `grepCore` calls at the vendored `rgPath` so the
-     direct-rg parity test runs everywhere (rg now always present).
-   - `tests/unit/workflow-facade.test.ts`: flip the subtree/path assertions that use
-     `join('sub', 'two.txt')` (lines ~31, ~36) to `'sub/two.txt'` (review-flagged blocker).
-   - Add: `jsGrep` (rg forced absent) returns `/`-separated paths identical to the rg path on
-     a subtree; `facade.rg` with rg unresolvable rejects with `WorkflowInputError` (not raw
-     ENOENT). If B chosen, instead assert it resolves the vendored binary.
-   - The Unix-shell pipeline test (`workflow-facade` "runs a pipeline", `ls | grep one`):
-     out of scope (Non-goals) — or gate on `getHostShell().dialect === 'bash'`.
-5. **Docs.** Update `facade.ts` `FACADE_API_SUMMARY`/`FACADE_DTS`: `caco.rg` requires rg
-   (A+D) or is always available (B); state `GrepMatch.file`, `read().path`, `glob()`,
-   `index().path` are POSIX `/` on all platforms. Mark spec-budget's "Future/portability"
-   `caco.sh` and `caco.rg` items resolved.
-
 ## Non-goals
 
 - Re-implementing rg flags in JS (Option C).
@@ -196,7 +152,7 @@ PATH. Small; complements A or B (lets you point at a system rg without touching 
   harness's shell assumptions, not product code; either gate on host dialect or leave for a
   separate test-portability pass. (Review confirmed there is no second shell-test failure.)
 
-## Risks & mitigations
+## Risks and Mitigations
 
 - **Changing the path contract could break an in-flight consumer.** Audited: only `frames`
   consumes grepCore and it already `toPosix`-normalizes (no-op after this). Model-authored
@@ -207,7 +163,7 @@ PATH. Small; complements A or B (lets you point at a system rg without touching 
 - **`CACO_RG_PATH` pointing at a non-rg binary.** Validate existence only; if it errors at
   exec, surface stderr in the thrown message.
 
-## Validation
+## Acceptance
 
 - `npm run build` green on Windows: `typecheck`, `lint:strict`, `knip`, **and** the 3
   previously-failing POSIX path tests now pass; new rg-degradation + posix-parity tests pass.
@@ -217,6 +173,17 @@ PATH. Small; complements A or B (lets you point at a system rg without touching 
     vendored binary (B).
   - `caco.sh('echo hi')` still code 0 (unchanged).
 - Linux unaffected: `relative` already yields `/`; `toPosix` is a no-op there.
+- Oracles: `tests/unit/workflow-cores.test.ts` — "emits POSIX (/) separators on every platform (rg and JS parity)", "restricts to a subtree via path", "returns base-relative POSIX paths even when opts.path is absolute"; `tests/unit/workflow-facade.test.ts` subtree/path assertions.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | POSIX path normalization in `rgGrep`, `jsGrep`, `globCore`, `readFileRangeCore` | `src/workflow/cores.ts` | `workflow-cores.test.ts` — POSIX assertions |
+| 2 | Normalize `indexCore` path | `src/index/core.ts` | `workflow-cores.test.ts` |
+| 3 | `resolveRg()` + vendor `@vscode/ripgrep`; update `facade.rg` + `grepCore`/`rgGrep` with injected rg seam | `src/workflow/facade.ts`, `src/workflow/cores.ts` | `workflow-facade.test.ts` `WorkflowInputError` case |
+| 4 | Flip glob/subtree/path assertions to POSIX; replace `PATH=''` trick with `rg=null` seam; add rg-degradation + posix-parity tests | `tests/unit/workflow-cores.test.ts`, `tests/unit/workflow-facade.test.ts` | all pass |
+| 5 | Update `facade.ts` `FACADE_API_SUMMARY`/`FACADE_DTS`; mark spec-budget portability items resolved | `src/workflow/facade.ts`, `docs/spec-budget.md` | - |
 
 ## Status
 - [x] Spec reviewed (GPT-5.5)

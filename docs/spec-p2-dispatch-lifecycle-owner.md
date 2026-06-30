@@ -142,3 +142,20 @@ busy=false never broadcast) and passes after the owner refactor.
 
 `npx tsc --noEmit`, `npx eslint . --max-warnings 0`, `npx vitest run`
 (existing 1134 + new). No behavior change on the happy path.
+
+## Acceptance
+
+- Observable: the `!session` path unlinks temp image files and broadcasts `session.busy` `isBusy:false`; every exit path produces exactly one `endDispatch` call.
+- Budgets: n/a — happy path is behaviorally unchanged.
+- Gates: `npx tsc --noEmit`, `npx eslint . --max-warnings 0`, `npx vitest run`
+- Oracles:
+  - `tests/unit/session-messages-dispatch.test.ts` — `!session` path: (a) temp files are unlinked, (b) `broadcastGlobalEvent` called with `session.busy` `isBusy:false`, (c) `endDispatch(sessionId)` called once, (d) `session.error` event emitted. All asserted RED against the pre-refactor branch.
+
+## Plan
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Hoist `watchdog` as `let ... \| null = null`; define `completeDispatch` owner above the `!session` check | `src/routes/session-messages.ts` | tsc clean |
+| 2 | Replace `cleanupAndComplete` call sites with `completeDispatch`; route `!session` branch through owner; optional-chain `watchdog?.cancel()` | `src/routes/session-messages.ts` | tsc clean |
+| 3 | Route outer `catch` through `completeDispatch`; add `if (dispatchCompleted) return` guard at top of `handleEvent` | `src/routes/session-messages.ts` | tsc clean |
+| 4 | Add `session-messages-dispatch.test.ts` `!session` path cases; verify RED→GREEN | `tests/unit/session-messages-dispatch.test.ts` | oracle: test file |

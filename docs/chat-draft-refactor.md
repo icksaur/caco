@@ -2,13 +2,13 @@
 
 **Status:** spec for review.
 **Background:** `docs/chat-draft-persistence.md` (the original feature spec) and
-`docs/chat-draft-postmortem.md` (analysis of the bleed bug shipped on the
+`docs/archive/chat-draft-postmortem.md` (analysis of the bleed bug shipped on the
 `chat-drafts` branch).
 
 ## Overview
 
 The chat-drafts feature works, but the bug we just fixed
-(`docs/chat-draft-postmortem.md`) exposed four architectural weaknesses in
+(`docs/archive/chat-draft-postmortem.md`) exposed four architectural weaknesses in
 the chat input layer:
 
 1. DOM `input` events are used as an in-process event bus — synthetic

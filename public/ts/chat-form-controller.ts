@@ -7,7 +7,7 @@
  * suppressNextInput / capWarning state.
  *
  * Eliminates the shared-textarea race that caused the chat-draft
- * bleed bug (docs/chat-draft-postmortem.md): each form's input
+ * bleed bug (docs/archive/chat-draft-postmortem.md): each form's input
  * listener routes to that form's own binding, set at view
  * activation. No mid-transition global mutation can reach across
  * to corrupt the other form's state.

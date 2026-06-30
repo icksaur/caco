@@ -104,7 +104,7 @@ The following patterns are buildable with Caco's existing primitives — applets
 
 **5. Multi-select queue.** Agent produces N candidates (files to refactor, tickets to triage, errors to investigate). User checkboxes which ones to act on. Selection becomes the agent's next-turn working set.
 
-**6. Pinned actions.** User-defined one-click prompts in `~/.caco/actions.json` rendered as pills near the input. Click sends the prompt. Zero cost when empty, tiny when populated. (Already specced in `ui-session-interaction.md`.)
+**6. Pinned actions.** User-defined one-click prompts in `~/.caco/actions.json` rendered as pills near the input. Click sends the prompt. Zero cost when empty, tiny when populated. (Already specced in `archive/ui-session-interaction.md`.)
 
 ### C. Approval & review (after agent work)
 

@@ -2,7 +2,7 @@
 
 Caco can drive a dedicated Microsoft Edge browser to interact with web UIs that have no API — read a record, click through a flow, fill a form. This is a **separate browser profile**, not your everyday Edge. You sign into it once; cookies persist across restarts.
 
-See `docs/browser-automation.md` for the full design.
+See `docs/spec-browser-automation.md` for the full design.
 
 ## Prerequisites
 

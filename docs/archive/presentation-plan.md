@@ -1,6 +1,6 @@
 # Presentation Applet — Implementation Plan
 
-> Plan for [docs/presentation-applet.md](presentation-applet.md)
+> Plan for [docs/archive/presentation-applet.md](presentation-applet.md)
 
 ## Phase 1: Generic Session Data API
 

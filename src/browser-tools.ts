@@ -2,7 +2,7 @@
  * Browser Tools
  *
  * Six caco_browser_* tools that drive an operator-launched Edge over CDP.
- * Spec: docs/browser-automation.md
+ * Spec: docs/spec-browser-automation.md
  */
 
 import { defineTool } from '@github/copilot-sdk';

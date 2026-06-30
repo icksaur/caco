@@ -2,7 +2,7 @@
 
 **Status:** spec for review.
 **Background:** Follow-up to `docs/chat-draft-refactor.md` (QW1+QW2+QW3+R2).
-Postmortem: `docs/chat-draft-postmortem.md`.
+Postmortem: `docs/archive/chat-draft-postmortem.md`.
 
 ## Overview
 

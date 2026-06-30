@@ -122,7 +122,7 @@ Plan [plan.md:16-33](../plan.md) chose option 1 (lift) and as a consequence
 needs to introduce `let formEl: HTMLFormElement | null = null;` plus a
 null-guard in every call. This is itself a code-quality regression of
 exactly the type the postmortem flags
-([postmortem.md:48-57](chat-draft-postmortem.md) — "global state / mutable
+([postmortem.md:48-57](archive/chat-draft-postmortem.md) — "global state / mutable
 objects"): a new module-level mutable singleton holding a DOM ref.
 
 Option (b) from the spec is strictly cleaner:

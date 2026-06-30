@@ -2,7 +2,7 @@
  * Typed form-state store for the chat-input form.
  *
  * Replaces the synthetic-`input`-event signalling pattern that
- * caused the chat-draft bleed bug (docs/chat-draft-postmortem.md).
+ * caused the chat-draft bleed bug (docs/archive/chat-draft-postmortem.md).
  * Callers that want to refresh the form's send/stop/options UI
  * push a typed update via `formStateStore.set({...})`; the
  * `updateButton` subscriber re-runs in response.

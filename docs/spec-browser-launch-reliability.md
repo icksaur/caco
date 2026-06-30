@@ -1,6 +1,6 @@
 # Browser launch reliability (caco_browser_ensure_running)
 
-Focused fix spec. Parent design: `docs/browser-automation.md`.
+Focused fix spec. Parent design: `docs/spec-browser-automation.md`.
 
 ## Problem
 
@@ -65,7 +65,7 @@ by the running browser broker and exit immediately** before opening port 9222 â€
 with a dedicated `--user-data-dir`. The helper still reports success (exit 0, log says
 "Launched"), so Node blocks for the full 30 s `waitForCdp` and then fails blind.
 
-A secondary divergence: `docs/browser-automation.md` says the helper consults
+A secondary divergence: `docs/spec-browser-automation.md` says the helper consults
 `<profile>/DevToolsActivePort` to decide reuse-vs-fresh-port, but the script never does
 â€” it only does a `Test-PortFree` increment. A stale debug Edge holding 9222 without
 serving CDP would push the helper to a different port; Node re-reads config so this is

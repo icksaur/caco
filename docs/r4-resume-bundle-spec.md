@@ -89,7 +89,7 @@ trade:
   Reading `getSessionDraft()` directly in the `/resume` handler reads **outside**
   that queue, so a resume that overlaps a just-sent message can seed **stale** text
   the queue would have suppressed — the exact draft-resurrection class
-  `docs/chat-draft-postmortem.md` exists to prevent
+  `docs/archive/chat-draft-postmortem.md` exists to prevent
   (`chat-form-controller.ts:408-414`).
 - The "seed empty so bind short-circuits" idea does not work as written:
   `setDraftCache('', …)` **deletes** the entry (`chat-view-controller.ts:101-103`),

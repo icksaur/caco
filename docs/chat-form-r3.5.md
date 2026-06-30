@@ -16,7 +16,7 @@ correctly scope steerCount + chatRegion + image state to the
 chatting form.
 
 Prerequisite reading: `docs/chat-form-refactor.md` (R3 V1 spec),
-`docs/chat-draft-postmortem.md` (root-cause analysis).
+`docs/archive/chat-draft-postmortem.md` (root-cause analysis).
 
 ## Goal
 

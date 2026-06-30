@@ -75,7 +75,7 @@ Why each clause:
 - WebSocket: `verifyClient` calls the same predicate.
 
 **Carve-out (intentional cross-origin):** the portal/transfer routes — `POST
-/api/sessions/import` and `GET /api/sessions/:id/export` (`docs/remote-instances.md`, existing
+/api/sessions/import` and `GET /api/sessions/:id/export` (`docs/archive/remote-instances.md`, existing
 `transferCors`) — are Caco-to-Caco cross-origin by design. The guard skips them by path:
 `req.path === '/api/sessions/import' || /^\/api\/sessions\/[^/]+\/export$/.test(req.path)`.
 Their own `transferCors` continues to govern them.
@@ -106,17 +106,17 @@ Their own `transferCors` continues to govern them.
   - `POST /api/sessions/import` is **CSRF-writable by any origin** (`sessions.ts:866`,
     `?force=true` overwrites); evil.com can plant/overwrite a session later opened by the user
     (attacker-controlled content fed to the agent). The portal needs cross-origin import
-    (`docs/remote-instances.md:13`), so the carve-out is necessary — but the residual is noted.
+    (`docs/archive/remote-instances.md:13`), so the carve-out is necessary — but the residual is noted.
   - `GET /api/sessions/:id/export?delete=true` **deletes the session** — a **state-changing
     GET**, contradicting this spec's own invariant (mutating routes must be non-GET). Carved
     out + GET ⇒ doubly unguarded (`<img src=".../export?delete=true">`; needs the v4 UUID, so
     practical risk is low). **Decision: accept + document, do not change.** It is the portal
-    migration path (cross-origin drag-drop, `docs/remote-instances.md`); converting it to POST
+    migration path (cross-origin drag-drop, `docs/archive/remote-instances.md`); converting it to POST
     would break the portal and only trades one carved-out shape for another. Recorded as a
     known residual; revisit if the portal is reworked.
   - `export` is cross-origin **readable** via `transferCors` `ACAO:*` → session exfil to any
     origin given a known UUID. Pre-existing; out of scope to change here, recorded as residual.
-- **Forward-compat (remote delegation).** `docs/remote-instances.md:14` plans cross-origin
+- **Forward-compat (remote delegation).** `docs/archive/remote-instances.md:14` plans cross-origin
   `POST /api/sessions/:id/messages` for remote delegation (local-only today). This guard will
   **403** those once cross-origin; that feature will need its own carve-out or a token. Noted
   so it doesn't silently break later.

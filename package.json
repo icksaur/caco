@@ -6,8 +6,9 @@
   "scripts": {
     "start": "tsx server.ts",
     "dev": "tsx watch server.ts",
-    "build": "npm run build:client && npm run typecheck && npm run lint:strict && npm run knip && npm run test && npm run scan:pii && npm run check:vendor",
+    "build": "npm run build:client && npm run typecheck && npm run lint:strict && npm run knip && npm run test && npm run scan:pii && npm run check:vendor && npm run check:specs",
     "check:vendor": "node scripts/check-vendor-versions.js",
+    "check:specs": "node tools/check-spec-conformance.mjs",
     "build:highlight": "node scripts/build-highlight.js",
     "build:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --minify --sourcemap",
     "watch:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --sourcemap --watch",

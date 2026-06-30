@@ -44,8 +44,10 @@ as docs change. The checker is zero-dep Node ESM (portable).
   `guides/`/`research/`/`archive/` never breaks by-name reads. Verify after any move.
 - **Checker surface = real specs only** (fact): non-specs leave `docs/` root so the
   checker judges specs, not guides/research.
-- **Ratchet** (mechanism): once clean, wire the checker into CI with a non-conforming
-  allowlist that may only shrink.
+- **Ratchet** (mechanism): the checker runs in the `build` script (`check:specs`),
+  so the pre-push hook and CI both fail on any non-conforming spec. At zero
+  out-of-conformance no allowlist is needed; `--no-verify` is the WIP escape hatch.
+  It gates STRUCTURE, not truth — a conforming spec can still lie about code.
 
 ## Considerations
 
@@ -80,7 +82,7 @@ as docs change. The checker is zero-dep Node ESM (portable).
 | 3 | Mechanical batch: rename + archive + relocate + repoint | `git mv`, `sed`; `dev-docs-tool.ts` if moving runtime docs | checker green + live fetch |
 | 4 | Consolidate each drifted cluster (serial) | new `spec-<root>.md`; archive series | spec review before delete |
 | 5 | Per-spec deep conform (fan-out) | each `docs/spec-*.md` | reviewer MUSTs folded |
-| 6 | Ratchet: CI gate with shrinking allowlist | CI config | checker exit code |
+| 6 | Ratchet: gate in `build` script (pre-push + CI) | `package.json` `check:specs` | checker exit code |
 
 ## Rationale
 
@@ -95,9 +97,9 @@ After Phases 0–2 + the five consolidations + relocations:
 | `docs/research/` | 13 |
 | `docs/guides/` | 3 |
 
-Conformance: **6 conforming, 59 out** (48 MAJOR missing-section, 11 MINOR
-heading-drift; moderates fixed). `spec(unmarked) = 0` — every spec is now marked.
-**Remaining: Phase 3** (deep conform the 59) and **Phase 6** (CI ratchet).
+Conformance: **66 conforming, 0 out** — every spec passes the skeleton check, now
+enforced by `npm run check:specs` in the `build` gate (pre-push + CI).
+`spec(unmarked) = 0` — every spec is marked. Phases 0–6 complete.
 
 History: this process was derived while consolidating the files-applet (~60 docs →
 3), tool-diet (3 → `spec-budget`, which later absorbed model-billing /

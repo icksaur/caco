@@ -8,7 +8,7 @@ the document of record; it absorbs the former `tool-diet-spec`, `tool-diet-audit
 
 ## Goals
 
-- **Save round trips.** Every tool call is one reasoning pass on the critical path
+- **Save round trips.** Every turn is one reasoning pass on the critical path
   whose result is re-sent (cached) every later turn. `caco_run_workflow` collapses
   decided, independent fan-out into one round trip — the biggest lever. Fewer
   registered tools and trimmed descriptions cut the per-turn schema tax too.
@@ -130,6 +130,127 @@ completed request appends a row to `~/.caco/metrics/requests.jsonl`; report via
 | B3-single-read | "Show me the `recordUsage` function in `src/session-throughput.ts`." | single read (must not regress) |
 | B4-multi-edit | "Rename local `entry` to `t` in `recordRateLimit` only, `src/session-throughput.ts`." | precise single edit |
 | B5-explore | "Explain how a request's wall-clock time is measured end to end." | exploratory round trips |
+
+## Future levers (research-backed)
+
+From `docs/research/harness-efficiency-landscape.md`. Recorded here so they are not
+forgotten. Caco has two mechanisms today: the **generic output shaper** (cuts input
+tokens from tool output) and **`caco_run_workflow`** (spends output tokens to cut round
+trips + keep raw bytes out of context). The negative finding that reframes everything:
+**shell-output shaping is only a few % of spend when native file *reads* dominate** —
+the bigger surfaces are **read/context selection** and **turn-count reduction**.
+
+### Top published evidence (best hard numbers found)
+
+| Lever | Best published number | Caco status |
+|---|---|---|
+| Code-as-action for tool composition | Anthropic MCP: 150k→2k tokens (98.7%) | have (workflow); extend to API/MCP facade |
+| Context editing (clear stale observations) | Anthropic: 84% token cut over 100 turns; +29% perf alone | missing |
+| Prompt caching (stable prefixes) | up to 90% cost / 85% latency on long prompts; cache input ~10× cheaper | partial — prefix stability is ours |
+| Learned model routing | RouteLLM: >85% cost cut at 95% GPT-4 quality | missing (sub-agent routing feasible) |
+| Repo map / bounded retrieval | Aider: 1k-token tree-sitter + PageRank map | partial — `index`/`caco.frames` exist, not policy |
+| Role tiering (planner/editor) | Aider Architect/Editor: 85.0% vs 79.7% solo | missing |
+| Token-efficient tools/editing | Anthropic: up to 70% output cut (14% avg); diffs over whole-file | have edit surfaces; budget schemas harder |
+
+### Ranked shortlist (ideas beyond shaper + workflow)
+
+| # | Idea | One-line |
+|---|------|----------|
+| 1 | Skeleton-first read policy | Ranked repo map; signatures+ranges first, bodies only on bounded reads |
+| 2 | Context editor for stale observations | Replace old reads/logs with summary+handle; keep window full of *relevant* context |
+| 3 | Prompt-cache alignment audit | Keep the prompt prefix byte-stable turn-to-turn to maximize cache hits |
+| 4 | Progressive tool discovery / API facade | Keep rarely-used schemas out of the hot path; workflow is the execution side |
+| 5 | Model-role policy | planner/explorer/editor/reviewer/verifier → model tiers |
+| 6 | Verifier-driven cheap-draft escalation | Cheap worker drafts; escalate only when an oracle (typecheck/test/review) fails |
+| 7 | Structured shapers with typed handles | Generalize shaping to reads/grep/GitHub/browser/applet state |
+| 8 | Turn-count budget gates | Per-task metrics flag when a batch/workflow should have been used |
+
+### Expansion (per idea)
+
+**1. Skeleton-first read policy.** Two parts: a **system-prompt directive** ("before a
+broad read, `index` the file / `caco.frames` the symbol; then `view_range` only the
+ranges you need") + the **tooling that makes it cheap** — which we already shipped
+(`index` per-file skeletons, `caco.frames` def+callers). The gap is *policy + a ranked
+repo map*: given a task, surface the likely-relevant symbols/files (imports, refs,
+recent edits, grep hits) as signatures+ranges first, bodies on demand. Attacks the
+dominant *read* surface, not shell output. Mostly prompt + wiring of existing primitives.
+
+**2. Context editor (≠ auto-compaction).** Auto-compaction waits until near the limit,
+then **summarizes the whole transcript** — lossy, late, and it degrades everything.
+Context *editing* is surgical and continuous: as the session runs, **replace individual
+stale observations** (an old file read now edited, superseded test output, a resolved
+command log) with a compact `summary + retrieve handle`, while **preserving decisions,
+the plan, current files, and failing locations**. Net effect (your insight, exactly):
+you reach the full context window filled with *relevant* content instead of stale
+scrollback — better results *and* fewer tokens. **SDK caveat (needs investigation):**
+the Copilot SDK owns conversation history; Caco may not be able to mutate past turns
+in place. Feasible avenues to verify: (a) an SDK history-edit API if one exists; (b)
+do it at the **resume boundary** — recreate-via-resume with an edited history (we
+already recreate on model/provider switch); (c) intercept tool *results* in the
+observation hook and store a lean form before they enter history. This is a design
+spike, not a known-mechanism — flag it as such.
+
+**3. Prompt caching = prefix stability (potentially the biggest, cheapest win).** Yes,
+cached input is already priced ~10× cheaper — but the *mechanism* that decides whether
+you get that rate is subtle. Providers cache a **prefix** of the prompt up to a
+breakpoint; a cache hit requires that prefix to be **byte-identical** to the previous
+turn. If anything early in the prompt changes — tool order, JSON-schema serialization,
+injected-memory order, a timestamp, session metadata, a random id — the cache is
+**invalidated from the change point onward**, and everything after it is re-billed at
+the full input rate. So the lever is: **keep the front of the prompt identical every
+turn.** Caco's system prompt is `mode:'replace'` at position 0 and memory is appended
+at the *end* (both already cache-friendly) — but we have never *audited* prefix
+stability. If any per-turn churn sits early in the prompt, we are silently paying full
+rate on the whole tail. Even without SDK cache-control knobs, **prefix content/ordering
+is 100% Caco-owned.** ⚠️ This directly conflicts with idea #4's dynamic tool-hiding —
+churning the tool list wrecks the cache prefix. Audit first (measure cache-hit rate vs
+prompt-prefix diffs across turns); the potential saving is large.
+
+**4. Progressive tool discovery / API facade (evolution of workflow).** Correction to a
+prior assumption: the SDK **does** expose tool names — `rpc.tools.list()` (used by
+`listAllTools`, `session-manager.ts`), returning name + description. What it does **not**
+expose is *mid-session mutation* — the tool set is fixed at create/resume, no
+`setTools`. So true "hide schema, reveal on demand mid-turn" is not possible. What *is*:
+(a) fold more tool *families* behind the **workflow facade** so their schemas leave the
+per-turn hot path (the facade is one schema for N operations — the 98.7% code-as-action
+number lives here); (b) **lazy-register** rarely-used groups (browser, mcp-auth) only at
+resume when enabled (already Plan rows L1/L2). Note the tension with #3: lazy
+registration changes the tool list between sessions, which is fine (new prefix per
+resume) but must never churn *within* a session.
+
+**5. Model-role policy.** Largely what you said: auto-select model by capability/cost,
+and trust the agent's `task`-tool model choice — so it's mostly **convention + defaults +
+prompt**, not a new mechanism. Two flavors: **main-loop routing** (cheap model for grunt,
+expensive for reasoning) is risky and needs quality gates — defer; **sub-agent/workflow
+routing** is safe and available today (the `task` tool already takes a per-agent model).
+The "policy" = documented role→tier defaults (explorer/summarizer→cheap, editor/
+reviewer→mid, planner→top) the agent applies when spawning sub-agents.
+
+**6. Verifier-driven cheap-draft escalation.** Your read is right: it's `task` with an
+economic twist. `workflow` already does the "caller writes the output filter explicitly"
+case (good for small tasks with known output). This idea covers the *other* case — a
+cheap worker attempts a bounded edit/summary, and we **escalate to an expensive model
+only when a hard oracle fails** (patch didn't apply, typecheck/test failed, schema
+invalid, review rejected). The oracle is what makes it safe (FrugalGPT economics with a
+real gate). You correctly identify the hard part: **the escalation criteria** — cheap
+for grunt, but detecting "the one interesting result buried in a status dump" reliably
+is the difficult design, and a wrong criterion either wastes the expensive model or
+ships a bad cheap result.
+
+**7. Structured shapers (acknowledged high-risk).** Agreed — shapers are hard to write
+and risky (a bad shaper hides the load-bearing line). The bounded-risk design we already
+use: the format shaper's output is a **superset of the generic floor** (by construction,
+not by test), and **every shape keeps a `retrieve_output` handle** so nothing is ever
+truly lost (and we just fixed `retrieve_output` to be exempt from re-shaping). Any new
+shaper (reads/grep/GitHub/browser) must inherit both guards. Lower priority than 1–3
+precisely because of the authoring risk you note.
+
+**8. Turn-count budget gates.** Cheapest to add, and it makes the "fewer tokens ≈ less
+time" thesis **falsifiable**: per task, track turns / prompt bytes / shaped bytes /
+workflow commands / cache-replay estimate (we already log most of these), and flag when
+an agent *should* have batched reads or used a workflow. Turns dominate latency (each
+replays the window), so a turn-count gate is the metric that tells us whether any of
+1–7 actually helped.
 
 ## Rationale
 

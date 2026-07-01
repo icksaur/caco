@@ -150,6 +150,14 @@ describe('orchestrator — thresholds and backstop', () => {
     expect(shapeOutput('glob', VITEST_FAIL)).toBeNull();
   });
 
+  it('passes retrieve_output through unshaped (never re-hide recovered bytes)', () => {
+    // A large retrieve_output response must not be re-shaped by the generic
+    // floor — that would re-truncate the very output the agent asked to un-hide.
+    const bigRecovered = Array.from({ length: 4000 }, (_, i) => `line ${i}`).join('\n');
+    expect(shapeOutput('retrieve_output', bigRecovered)).toBeNull();
+    expect(shapeOutput('retrieve_output', VITEST_FAIL)).toBeNull();
+  });
+
   it('uses the generic backstop for unbounded non-shell tools even on test-like text', () => {
     const decision = shapeOutput('web_fetch', VITEST_FAIL);
     expect(decision?.shaperId).toBe('generic');

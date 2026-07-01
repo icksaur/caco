@@ -45,9 +45,14 @@ Live run against the SDK (`claude-haiku-4.5`) settled the three blocking unknown
   ceiling the runtime still truncates (memory/transport safety net).
 - Because raising the threshold also stops the runtime pre-truncating **non-shell**
   tool output (`view`/`grep`/custom), `onPostToolUse` **must** apply a generic
-  size cap + raw-store handle to *every* successful text result over
+  size cap + raw-store handle to every successful text result over
   `SHAPE_THRESHOLD_BYTES` (shell-class → semantic shaping; others → generic
-  head/tail + handle). This is the mandatory backstop.
+  head/tail + handle) — **except** agent-bounded reads (`AGENT_BOUNDED_READ_TOOLS`:
+  `view`/`read_file`/`str_replace_editor`/`grep`/`glob`/`retrieve_output`), which
+  pass through unshaped because the agent already chose their extent. Critically
+  `retrieve_output` is in this set: it is the recovery path *from* shaping (self-capped
+  at `RETRIEVE_OUTPUT_CAP_BYTES`), so re-shaping it would re-hide the very bytes the
+  agent asked to recover. This is the mandatory backstop.
 - The session `largeOutput` config is now irrelevant to this feature; leave the
   existing `sdkLargeOutputConfig()` as-is.
 

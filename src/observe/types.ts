@@ -42,6 +42,11 @@ export const AGENT_BOUNDED_READ_TOOLS = new Set([
   'str_replace_editor',
   'grep',
   'glob',
+  // retrieve_output is the recovery path FROM shaping: the agent already chose
+  // the id and narrows with range/grep, and it is self-capped at
+  // RETRIEVE_OUTPUT_CAP_BYTES. Re-shaping it would re-hide the very bytes the
+  // agent asked to un-hide — so it must pass through unshaped.
+  'retrieve_output',
 ]);
 
 /** Below this, output passes through untouched (not worth shaping). */

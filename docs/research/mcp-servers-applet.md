@@ -1,5 +1,9 @@
 # MCP Servers Applet
 
+> **SUPERSEDED (2026-07) by `docs/spec-mcp-servers.md`.** The "Phase 2" server +
+> tool discovery described below shipped in commit `c6c487a`. This note is kept as
+> historical research; the conformant as-built spec is the source of truth.
+
 ## Goal
 
 Rebrand the `mcp-auth` applet to `mcp-servers`. Add a server + tool list section above the existing authentication UI. Provide visibility into which MCP servers are configured, their connection status, and what tools each exposes — enabling users to configure tool filters in `mcp-config.json`.

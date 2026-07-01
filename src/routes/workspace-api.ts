@@ -151,6 +151,31 @@ router.get('/tools', (_req: Request, res: Response) => {
   });
 });
 
+interface McpServerStatus {
+  name: string;
+  status: string;
+  source?: string;
+  error?: string;
+}
+
+/**
+ * Pure: assemble the /servers response payload from server status + a
+ * per-server tool map. Kept pure so the shape (null-normalized fields,
+ * empty-tools default) is unit-testable without the SDK.
+ */
+export function buildMcpServerPayload(
+  servers: McpServerStatus[],
+  toolsByName: Record<string, { name: string; description: string }[]>,
+): Array<{ name: string; status: string; source: string | null; error: string | null; tools: { name: string; description: string }[] }> {
+  return servers.map(s => ({
+    name: s.name,
+    status: s.status,
+    source: s.source ?? null,
+    error: s.error ?? null,
+    tools: toolsByName[s.name] ?? [],
+  }));
+}
+
 router.get('/servers', async (_req: Request, res: Response) => {
   const configPath = join(homedir(), '.copilot', 'mcp-config.json');
   const configExists = existsSync(configPath);
@@ -162,30 +187,14 @@ router.get('/servers', async (_req: Request, res: Response) => {
   }
 
   try {
-    const [mcpServers, allTools] = await Promise.all([
-      sessionManager.listMcpServers(),
-      sessionManager.listAllTools(),
-    ]);
-
-    const toolsByServer = new Map<string, Array<{ name: string; description: string }>>();
-    for (const tool of allTools) {
-      if (!tool.namespacedName || !tool.namespacedName.includes('/')) continue;
-      const slashIdx = tool.namespacedName.indexOf('/');
-      const serverName = tool.namespacedName.slice(0, slashIdx);
-      const toolName = tool.namespacedName.slice(slashIdx + 1);
-      let list = toolsByServer.get(serverName);
-      if (!list) { list = []; toolsByServer.set(serverName, list); }
-      list.push({ name: toolName, description: tool.description });
-    }
-
-    const servers = mcpServers.map(s => ({
-      name: s.name,
-      status: s.status,
-      source: s.source ?? null,
-      error: s.error ?? null,
-      tools: toolsByServer.get(s.name) || [],
-    }));
-
+    const mcpServers = await sessionManager.listMcpServers();
+    // Each server's tools come from the session-scoped mcp.listTools RPC, keyed
+    // by the same server name mcp.list reports — no namespacedName parsing.
+    const entries = await Promise.all(
+      mcpServers.map(async s => [s.name, await sessionManager.listMcpTools(s.name)] as const),
+    );
+    const toolsByName = Object.fromEntries(entries);
+    const servers = buildMcpServerPayload(mcpServers, toolsByName);
     res.json({ configPath, configExists, clientRunning: true, servers });
   } catch (e) {
     console.error('[MCP] Failed to list servers/tools:', e instanceof Error ? e.message : e);

@@ -154,6 +154,7 @@ interface CopilotSessionInstance {
     };
     mcp: {
       list(): Promise<{ servers: McpServerInfo[] }>;
+      listTools(params: { serverName: string }): Promise<{ tools: { name: string; description?: string }[] }>;
     };
     model: {
       setReasoningEffort(params: { reasoningEffort: string }): Promise<{ reasoningEffort: string }>;
@@ -1709,16 +1710,18 @@ export class SessionManager {
   }
 
   /**
-   * List all tools via client RPC. Returns tool name, namespacedName, description.
-   * Requires a running SDK client. Returns empty array if not available.
+   * List the tools exposed by ONE connected MCP server, via the session-scoped
+   * `mcp.listTools` RPC. (Client-level `tools.list` returns built-in model tools,
+   * NOT MCP server tools — see docs/spec-mcp-servers.md.) Empty on no session/error.
    */
-  async listAllTools(): Promise<ToolInfo[]> {
-    if (!this.sharedClient) return [];
+  async listMcpTools(serverName: string): Promise<{ name: string; description: string }[]> {
+    const firstSession = this.activeSessions.values().next().value;
+    if (!firstSession) return [];
     try {
-      const result = await this.sharedClient.rpc.tools.list({});
-      return result.tools;
+      const result = await firstSession.session.rpc.mcp.listTools({ serverName });
+      return result.tools.map(t => ({ name: t.name, description: t.description ?? '' }));
     } catch (e) {
-      console.error('[MCP] Failed to list tools:', e instanceof Error ? e.message : e);
+      console.error(`[MCP] Failed to list tools for ${serverName}:`, e instanceof Error ? e.message : e);
       return [];
     }
   }

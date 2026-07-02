@@ -36,12 +36,14 @@ deferLoading?}`. **Honesty rule:** the UI must never synthesize a schema or toke
 cost for an unobserved tool — its schema is genuinely unknown until observed.
 
 *Token cost (pure, server-computed, client-displayed).* Each tool's per-turn cost
-is estimated by `estimateToolTokens`: sum the character count of **all values (not
-keys)** in the tool's model-facing definition (name + description + `parameters`
-schema + `instructions`), ÷ 4 — a **lower-bound** (schema keys are also billed but
-not counted). Computed in the pure payload builder (real unit-test oracle) and
-surfaced as `tokenCost` per tool; the applet renders it as `≈N tokens` in yellow,
-tooltip labelling it a lower-bound. A tool is **observed** iff it appears in
+is estimated by `estimateToolTokens`: the model receives each tool as a
+**serialized JSON definition**, so we count the full JSON length of `{name,
+description, parameters(schema), instructions}` — **keys and values** (schema keys
+like `type`/`properties`/`enum` and parameter names dominate for schema-heavy
+tools) — ÷ 4. The char count is exact for the transmitted JSON; only the ÷4
+chars-per-token ratio is an approximation. Computed in the pure payload builder
+(real unit-test oracle) and surfaced as `tokenCost` per tool; the applet renders it
+as `≈N tokens` in yellow. A tool is **observed** iff it appears in
 `getCurrentMetadata()`; its `input_schema` is independently optional, so an observed
 tool with no schema shows `tokenCost:null` (not fabricated) yet is not "unobserved".
 An **unobserved** tool (absent from the resolved set — deferred/not-yet-loaded) shows
@@ -118,7 +120,7 @@ As-built (shipped `c6c487a`).
 | 1 | `listMcpServers()` + `listMcpTools(name)` (available) + `getCurrentToolMetadata()` (observed schema) + `listBuiltinTools()` via RPC | `src/session-manager.ts` | by-construction |
 | 2 | `GET /api/mcp/servers`: merge available+observed, prepend built-in, per-tool `observed` flag | `src/routes/workspace-api.ts` | `mcp-server-payload.test.ts` |
 | 3 | Applet: nested twisties (server→tool→props), model-info `dl` style, cached re-render | `applets/mcp-servers/{content.html,script.js,style.css}` | visual |
-| 4 | `estimateToolTokens` (values-only ÷4) → per-tool `tokenCost`; applet shows yellow `≈N` or grey `unobserved`+tooltip | `src/routes/workspace-api.ts`, `applets/mcp-servers/script.js` | `estimateToolTokens` unit test + visual |
+| 4 | `estimateToolTokens` (full serialized-JSON ÷4) → per-tool `tokenCost`; applet shows yellow `≈N` or grey `unobserved`+tooltip | `src/routes/workspace-api.ts`, `applets/mcp-servers/script.js` | `estimateToolTokens` unit test + visual |
 | 4 | OAuth auth section + flow | `src/routes/mcp-auth.ts`, `src/mcp-auth-store.ts` | mcp-auth-routes/store tests |
 
 ## Rationale

@@ -249,7 +249,7 @@ function renderMcpTool(tool) {
   var escapedNs = escapeAttr(tool.namespacedName);
 
   var costHtml = tool.observed
-    ? '<span class="mcp-token-cost" title="Lower-bound estimate of per-turn tokens (value characters ÷ 4; schema keys also cost tokens but are not counted)">' + escapeHtml(fmtTokens(tool.tokenCost)) + '</span>'
+    ? '<span class="mcp-token-cost" title="Estimated per-turn tokens: full serialized JSON tool definition (name + description + schema, keys and values) ÷ 4">' + escapeHtml(fmtTokens(tool.tokenCost)) + '</span>'
     : '<span class="mcp-unobserved" title="This tool is not in the current turn\'s resolved tool set. Its schema (and true token cost) is pulled after a request loads it — deferred/on-demand tools populate once used.">unobserved <span class="mcp-info">ⓘ</span></span>';
 
   var propsHtml = '';

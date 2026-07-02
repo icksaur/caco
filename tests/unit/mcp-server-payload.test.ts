@@ -1,21 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { buildMcpServerPayload, estimateToolTokens } from '../../src/routes/workspace-api.js';
 
-describe('estimateToolTokens — values-only char count ÷ 4', () => {
-  it('counts name + description + instructions + nested schema VALUES, not keys', () => {
-    const t = {
-      name: 'aaaa',
-      description: 'bbbb',
-      parameters: { properties: { id: { type: 'string', description: 'the id' } } },
-    };
-    // 'aaaa'(4)+'bbbb'(4)+'string'(6)+'the id'(6) = 20 ; keys NOT counted
-    expect(estimateToolTokens(t)).toBe(Math.round(20 / 4));
+describe('estimateToolTokens — full serialized-JSON char count ÷ 4', () => {
+  it('counts the whole JSON definition (keys AND values), matching the wire form', () => {
+    const tool = { name: 'aaaa', description: 'bbbb', parameters: { properties: { id: { type: 'string' } } } };
+    const expected = Math.round(JSON.stringify({ name: 'aaaa', description: 'bbbb', parameters: { properties: { id: { type: 'string' } } } }).length / 4);
+    expect(estimateToolTokens(tool)).toBe(expected);
   });
 
-  it('ignores null/undefined and counts numbers/booleans as text', () => {
-    const t = { name: 'x', description: '', parameters: { a: 10, b: true, c: null } };
-    // 'x'(1) + '10'(2) + 'true'(4) = 7 -> round(1.75)=2
-    expect(estimateToolTokens(t)).toBe(2);
+  it('includes schema keys (the undercount bug fix): keys materially raise the count', () => {
+    const withKeys = estimateToolTokens({ name: 'x', parameters: { properties: { a: { type: 'string' }, b: { type: 'number' } } } });
+    // values-only would have counted just "string"+"number" (~12 chars → 3 tokens);
+    // full JSON is far larger because of properties/a/b/type keys + punctuation.
+    expect(withKeys).toBeGreaterThan(10);
+  });
+
+  it('omits absent fields from the definition', () => {
+    expect(estimateToolTokens({ name: 'n' })).toBe(Math.round(JSON.stringify({ name: 'n' }).length / 4));
   });
 });
 

@@ -187,10 +187,12 @@ interface PayloadTool {
 }
 
 /**
- * Recursively sum the character count of all VALUES (not keys) in a tool's
- * model-facing definition, ÷ 4 — a **lower-bound** estimate of the per-turn token
- * cost (schema keys/property names are also billed but not counted; the true wire
- * cost is somewhat higher). Pure; the unit-test oracle for the "≈N tokens" display.
+ * Estimate a tool's per-turn token cost. The model receives each tool as a
+ * SERIALIZED JSON definition, so we count the full JSON length — keys AND values
+ * (schema keys like `type`/`properties`/`enum` and every parameter name are real
+ * tokens, and dominate for schema-heavy tools) — ÷ BYTES_PER_TOKEN. The char count
+ * is exact for the transmitted JSON; only the ÷4 chars-per-token ratio is an
+ * approximation (no tokenizer). Pure; the unit-test oracle for the "≈N tokens" display.
  */
 export function estimateToolTokens(tool: {
   name: string;
@@ -198,19 +200,11 @@ export function estimateToolTokens(tool: {
   parameters?: Record<string, unknown> | null;
   instructions?: string | null;
 }): number {
-  let chars = 0;
-  const walk = (v: unknown): void => {
-    if (v === null || v === undefined) return;
-    if (typeof v === 'string') { chars += v.length; return; }
-    if (typeof v === 'number' || typeof v === 'boolean') { chars += String(v).length; return; }
-    if (Array.isArray(v)) { for (const item of v) walk(item); return; }
-    if (typeof v === 'object') { for (const val of Object.values(v)) walk(val); return; }
-  };
-  chars += tool.name.length;
-  if (tool.description) chars += tool.description.length;
-  if (tool.instructions) chars += tool.instructions.length;
-  if (tool.parameters) walk(tool.parameters);
-  return Math.round(chars / 4);
+  const def: Record<string, unknown> = { name: tool.name };
+  if (tool.description) def.description = tool.description;
+  if (tool.parameters) def.parameters = tool.parameters;
+  if (tool.instructions) def.instructions = tool.instructions;
+  return Math.round(JSON.stringify(def).length / 4);
 }
 
 /**

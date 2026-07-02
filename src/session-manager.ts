@@ -1710,6 +1710,23 @@ export class SessionManager {
   }
 
   /**
+   * List Caco's built-in (model) tools via client RPC. These are surfaced as the
+   * synthetic "Built-in" pseudo-server in the mcp-servers applet. This is the ONLY
+   * sanctioned use of client `tools.list` — MCP-server tools come from
+   * `listMcpTools`. Empty on no client/error.
+   */
+  async listBuiltinTools(): Promise<{ name: string; description: string }[]> {
+    if (!this.sharedClient) return [];
+    try {
+      const result = await this.sharedClient.rpc.tools.list({});
+      return result.tools.map(t => ({ name: t.name, description: t.description ?? '' }));
+    } catch (e) {
+      console.error('[MCP] Failed to list built-in tools:', e instanceof Error ? e.message : e);
+      return [];
+    }
+  }
+
+  /**
    * List the tools exposed by ONE connected MCP server, via the session-scoped
    * `mcp.listTools` RPC. (Client-level `tools.list` returns built-in model tools,
    * NOT MCP server tools — see docs/spec-mcp-servers.md.) Empty on no session/error.

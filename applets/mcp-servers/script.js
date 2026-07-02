@@ -172,6 +172,8 @@ var STATUS_ICONS = {
   'not_configured': '<span class="status-icon status-disabled">○</span>'
 };
 
+var mcpServersCache = null;
+
 async function fetchMcpServers() {
   mcpServerContent.innerHTML = '<div class="loading">Loading servers...</div>';
   try {
@@ -184,19 +186,28 @@ async function fetchMcpServers() {
     }
 
     if (!data.clientRunning) {
+      mcpServersCache = null;
       mcpServerContent.innerHTML = '<div class="mcp-empty">Start a session to discover servers and tools</div>';
       return;
     }
 
-    if (data.servers.length === 0) {
-      mcpServerContent.innerHTML = '<div class="mcp-empty">No MCP servers configured</div>';
-      return;
-    }
-
-    mcpServerContent.innerHTML = data.servers.map(renderMcpServer).join('');
+    mcpServersCache = data.servers;
+    renderMcpServers();
   } catch (err) {
+    mcpServersCache = null;
     mcpServerContent.innerHTML = '<div class="mcp-empty">Failed to load: ' + escapeHtml(err.message) + '</div>';
   }
+}
+
+// Re-render from the cached payload — used by twist (expand/collapse) so a toggle
+// never re-fetches. Only fetchMcpServers() (initial load + refresh) hits the network.
+function renderMcpServers() {
+  if (!mcpServersCache) return;
+  if (mcpServersCache.length === 0) {
+    mcpServerContent.innerHTML = '<div class="mcp-empty">No MCP servers configured</div>';
+    return;
+  }
+  mcpServerContent.innerHTML = mcpServersCache.map(renderMcpServer).join('');
 }
 
 function renderMcpServer(server) {
@@ -237,7 +248,7 @@ function toggleMcpServer(name) {
   } else {
     mcpCollapsed[name] = false;
   }
-  fetchMcpServers();
+  renderMcpServers();
 }
 
 mcpServerContent.addEventListener('click', function(event) {

@@ -159,21 +159,31 @@ interface McpServerStatus {
 }
 
 /**
- * Pure: assemble the /servers response payload from server status + a
- * per-server tool map. Kept pure so the shape (null-normalized fields,
+ * Pure: assemble the /servers response payload. Prepends a synthetic `Built-in`
+ * server (Caco's own tools) so there is one tools list, then each MCP server with
+ * its tools. Kept pure so the shape (built-in entry, null-normalized fields,
  * empty-tools default) is unit-testable without the SDK.
  */
 export function buildMcpServerPayload(
   servers: McpServerStatus[],
   toolsByName: Record<string, { name: string; description: string }[]>,
+  builtinTools: { name: string; description: string }[] = [],
 ): Array<{ name: string; status: string; source: string | null; error: string | null; tools: { name: string; description: string }[] }> {
-  return servers.map(s => ({
+  const builtin = {
+    name: 'Built-in',
+    status: 'connected',
+    source: 'caco' as string | null,
+    error: null as string | null,
+    tools: builtinTools,
+  };
+  const mcp = servers.map(s => ({
     name: s.name,
     status: s.status,
     source: s.source ?? null,
     error: s.error ?? null,
     tools: toolsByName[s.name] ?? [],
   }));
+  return [builtin, ...mcp];
 }
 
 router.get('/servers', async (_req: Request, res: Response) => {
@@ -188,13 +198,14 @@ router.get('/servers', async (_req: Request, res: Response) => {
 
   try {
     const mcpServers = await sessionManager.listMcpServers();
-    // Each server's tools come from the session-scoped mcp.listTools RPC, keyed
-    // by the same server name mcp.list reports — no namespacedName parsing.
-    const entries = await Promise.all(
-      mcpServers.map(async s => [s.name, await sessionManager.listMcpTools(s.name)] as const),
-    );
+    // MCP tools: session-scoped mcp.listTools per server. Built-in tools: client
+    // tools.list (its only sanctioned use). Same payload, one endpoint.
+    const [entries, builtinTools] = await Promise.all([
+      Promise.all(mcpServers.map(async s => [s.name, await sessionManager.listMcpTools(s.name)] as const)),
+      sessionManager.listBuiltinTools(),
+    ]);
     const toolsByName = Object.fromEntries(entries);
-    const servers = buildMcpServerPayload(mcpServers, toolsByName);
+    const servers = buildMcpServerPayload(mcpServers, toolsByName, builtinTools);
     res.json({ configPath, configExists, clientRunning: true, servers });
   } catch (e) {
     console.error('[MCP] Failed to list servers/tools:', e instanceof Error ? e.message : e);

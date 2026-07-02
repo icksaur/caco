@@ -158,30 +158,108 @@ interface McpServerStatus {
   error?: string;
 }
 
+interface AvailableTool {
+  name: string;
+  description: string;
+}
+interface BuiltinTool {
+  name: string;
+  description: string;
+  parameters?: Record<string, unknown>;
+  instructions?: string;
+}
+/** Observed metadata keyed by `${serverName}/${toolName}` (MCP) or tool name (built-in). */
+interface ObservedMeta {
+  parameters?: Record<string, unknown>;
+  deferLoading?: boolean;
+}
+interface PayloadTool {
+  name: string;
+  description: string;
+  namespacedName: string;
+  observed: boolean;
+  parameters: Record<string, unknown> | null;
+  instructions: string | null;
+  deferLoading: boolean;
+  tokenCost: number | null;
+}
+
+/**
+ * Recursively sum the character count of all VALUES (not keys) in a tool's
+ * model-facing definition, ÷ 4 — an estimate of the per-turn token cost.
+ * Pure; the unit-test oracle for the "≈N tokens" display.
+ */
+export function estimateToolTokens(tool: {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown> | null;
+  instructions?: string | null;
+}): number {
+  let chars = 0;
+  const walk = (v: unknown): void => {
+    if (v === null || v === undefined) return;
+    if (typeof v === 'string') { chars += v.length; return; }
+    if (typeof v === 'number' || typeof v === 'boolean') { chars += String(v).length; return; }
+    if (Array.isArray(v)) { for (const item of v) walk(item); return; }
+    if (typeof v === 'object') { for (const val of Object.values(v)) walk(val); return; }
+  };
+  chars += tool.name.length;
+  if (tool.description) chars += tool.description.length;
+  if (tool.instructions) chars += tool.instructions.length;
+  if (tool.parameters) walk(tool.parameters);
+  return Math.round(chars / 4);
+}
+
 /**
  * Pure: assemble the /servers response payload. Prepends a synthetic `Built-in`
- * server (Caco's own tools) so there is one tools list, then each MCP server with
- * its tools. Kept pure so the shape (built-in entry, null-normalized fields,
- * empty-tools default) is unit-testable without the SDK.
+ * server (Caco's own tools, always observed-complete from tools.list), then each
+ * MCP server whose available tools (name+description) are enriched with OBSERVED
+ * schema (from getCurrentMetadata) when loaded — else marked `observed:false` with
+ * `tokenCost:null` (schema genuinely unknown until a request loads the tool).
+ * Kept pure so the merge + token math are unit-testable without the SDK.
  */
 export function buildMcpServerPayload(
   servers: McpServerStatus[],
-  toolsByName: Record<string, { name: string; description: string }[]>,
-  builtinTools: { name: string; description: string }[] = [],
-): Array<{ name: string; status: string; source: string | null; error: string | null; tools: { name: string; description: string }[] }> {
+  availableByServer: Record<string, AvailableTool[]>,
+  observedByKey: Record<string, ObservedMeta>,
+  builtinTools: BuiltinTool[] = [],
+): Array<{ name: string; status: string; source: string | null; error: string | null; tools: PayloadTool[] }> {
   const builtin = {
     name: 'Built-in',
     status: 'connected',
     source: 'caco' as string | null,
     error: null as string | null,
-    tools: builtinTools,
+    tools: builtinTools.map((t): PayloadTool => ({
+      name: t.name,
+      description: t.description,
+      namespacedName: t.name,
+      observed: true,
+      parameters: t.parameters ?? null,
+      instructions: t.instructions ?? null,
+      deferLoading: false,
+      tokenCost: estimateToolTokens(t),
+    })),
   };
   const mcp = servers.map(s => ({
     name: s.name,
     status: s.status,
     source: s.source ?? null,
     error: s.error ?? null,
-    tools: toolsByName[s.name] ?? [],
+    tools: (availableByServer[s.name] ?? []).map((t): PayloadTool => {
+      const nsName = `${s.name}/${t.name}`;
+      const obs = observedByKey[nsName];
+      const observed = !!(obs && obs.parameters);
+      return {
+        name: t.name,
+        description: t.description,
+        namespacedName: nsName,
+        observed,
+        parameters: observed ? (obs!.parameters ?? null) : null,
+        instructions: null,
+        deferLoading: obs?.deferLoading ?? false,
+        tokenCost: observed ? estimateToolTokens({ name: t.name, description: t.description, parameters: obs!.parameters }) : null,
+      };
+    }),
   }));
   return [builtin, ...mcp];
 }
@@ -198,14 +276,20 @@ router.get('/servers', async (_req: Request, res: Response) => {
 
   try {
     const mcpServers = await sessionManager.listMcpServers();
-    // MCP tools: session-scoped mcp.listTools per server. Built-in tools: client
-    // tools.list (its only sanctioned use). Same payload, one endpoint.
-    const [entries, builtinTools] = await Promise.all([
+    // Available tools (name+description) per MCP server; built-in tools (full
+    // schema) from tools.list; observed schema from the resolved per-turn snapshot.
+    const [entries, builtinTools, observed] = await Promise.all([
       Promise.all(mcpServers.map(async s => [s.name, await sessionManager.listMcpTools(s.name)] as const)),
       sessionManager.listBuiltinTools(),
+      sessionManager.getCurrentToolMetadata(),
     ]);
-    const toolsByName = Object.fromEntries(entries);
-    const servers = buildMcpServerPayload(mcpServers, toolsByName, builtinTools);
+    const availableByServer = Object.fromEntries(entries);
+    const observedByKey: Record<string, ObservedMeta> = {};
+    for (const m of observed) {
+      const key = (m.mcpServerName && m.mcpToolName) ? `${m.mcpServerName}/${m.mcpToolName}` : (m.namespacedName ?? m.name);
+      observedByKey[key] = { parameters: m.input_schema, deferLoading: m.deferLoading };
+    }
+    const servers = buildMcpServerPayload(mcpServers, availableByServer, observedByKey, builtinTools);
     res.json({ configPath, configExists, clientRunning: true, servers });
   } catch (e) {
     console.error('[MCP] Failed to list servers/tools:', e instanceof Error ? e.message : e);

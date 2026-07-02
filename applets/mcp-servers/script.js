@@ -210,6 +210,8 @@ function renderMcpServers() {
   mcpServerContent.innerHTML = mcpServersCache.map(renderMcpServer).join('');
 }
 
+var mcpToolCollapsed = {};
+
 function renderMcpServer(server) {
   var icon = STATUS_ICONS[server.status] || STATUS_ICONS['disabled'];
   var toolCount = server.tools.length;
@@ -220,12 +222,7 @@ function renderMcpServer(server) {
 
   var toolsHtml = '';
   if (!isCollapsed && toolCount > 0) {
-    toolsHtml = '<ul class="mcp-tool-list">' +
-      server.tools.map(function(t) {
-        return '<li><span class="mcp-tool-name">' + escapeHtml(t.name) + '</span>' +
-          (t.description ? ' <span class="mcp-tool-desc">— ' + escapeHtml(t.description) + '</span>' : '') +
-          '</li>';
-      }).join('') + '</ul>';
+    toolsHtml = '<div class="mcp-tool-list">' + server.tools.map(renderMcpTool).join('') + '</div>';
   }
 
   var errorHtml = server.error ? '<div class="server-error">' + escapeHtml(server.error) + '</div>' : '';
@@ -242,6 +239,47 @@ function renderMcpServer(server) {
   '</div>';
 }
 
+function fmtTokens(n) {
+  return '≈' + Number(n).toLocaleString() + ' token' + (n === 1 ? '' : 's');
+}
+
+function renderMcpTool(tool) {
+  var isCollapsed = mcpToolCollapsed[tool.namespacedName] !== false;
+  var chevron = isCollapsed ? '▸' : '▾';
+  var escapedNs = escapeAttr(tool.namespacedName);
+
+  var costHtml = tool.observed
+    ? '<span class="mcp-token-cost" title="Estimated per-turn tokens: value chars ÷ 4">' + escapeHtml(fmtTokens(tool.tokenCost)) + '</span>'
+    : '<span class="mcp-unobserved" title="This tool is not in the current turn\'s resolved tool set. Its schema (and true token cost) is pulled after a request loads it — deferred/on-demand tools populate once used.">unobserved <span class="mcp-info">ⓘ</span></span>';
+
+  var propsHtml = '';
+  if (!isCollapsed) {
+    var rows = '';
+    rows += toolPropRow('description', tool.description ? escapeHtml(tool.description) : '<span class="mcp-dim">(none)</span>');
+    if (tool.observed) {
+      var paramsStr = tool.parameters ? JSON.stringify(tool.parameters, null, 2) : '(none)';
+      rows += toolPropRow('parameters', '<pre class="mcp-schema">' + escapeHtml(paramsStr) + '</pre>');
+      if (tool.instructions) rows += toolPropRow('instructions', '<pre class="mcp-schema">' + escapeHtml(tool.instructions) + '</pre>');
+    } else {
+      rows += toolPropRow('parameters', '<span class="mcp-unobserved">unobserved <span class="mcp-info" title="Pulled after a request loads this tool.">ⓘ</span></span>');
+    }
+    propsHtml = '<dl class="mcp-tool-props">' + rows + '</dl>';
+  }
+
+  return '<div class="mcp-tool">' +
+    '<div class="mcp-tool-row" data-tool="' + escapedNs + '">' +
+      '<span class="mcp-chevron">' + chevron + '</span>' +
+      '<span class="mcp-tool-name">' + escapeHtml(tool.name) + '</span>' +
+      costHtml +
+    '</div>' +
+    propsHtml +
+  '</div>';
+}
+
+function toolPropRow(key, valHtml) {
+  return '<div class="mcp-prop-row"><dt class="mcp-prop-key">' + escapeHtml(key) + '</dt><dd class="mcp-prop-val">' + valHtml + '</dd></div>';
+}
+
 function toggleMcpServer(name) {
   if (mcpCollapsed[name] === false) {
     mcpCollapsed[name] = true;
@@ -251,7 +289,22 @@ function toggleMcpServer(name) {
   renderMcpServers();
 }
 
+function toggleMcpTool(ns) {
+  if (mcpToolCollapsed[ns] === false) {
+    mcpToolCollapsed[ns] = true;
+  } else {
+    mcpToolCollapsed[ns] = false;
+  }
+  renderMcpServers();
+}
+
 mcpServerContent.addEventListener('click', function(event) {
+  var toolRow = event.target.closest('.mcp-tool-row');
+  if (toolRow) {
+    var ns = toolRow.getAttribute('data-tool');
+    if (ns) toggleMcpTool(ns);
+    return;
+  }
   var row = event.target.closest('.mcp-server-row');
   if (!row) return;
   var name = row.getAttribute('data-server');

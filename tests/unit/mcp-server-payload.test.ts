@@ -1,42 +1,60 @@
 import { describe, it, expect } from 'vitest';
-import { buildMcpServerPayload } from '../../src/routes/workspace-api.js';
+import { buildMcpServerPayload, estimateToolTokens } from '../../src/routes/workspace-api.js';
 
-describe('buildMcpServerPayload — /api/mcp/servers response shape', () => {
-  it('prepends a Built-in pseudo-server with the client tools', () => {
-    const out = buildMcpServerPayload([], {}, [{ name: 'view', description: 'Read a file' }]);
-    expect(out[0]).toEqual({
-      name: 'Built-in', status: 'connected', source: 'caco', error: null,
-      tools: [{ name: 'view', description: 'Read a file' }],
-    });
-  });
-
-  it('attaches each server its own tools by name, after the built-in entry', () => {
-    const servers = [
-      { name: 'github', status: 'connected', source: 'config' },
-      { name: 'linear', status: 'needs-auth' },
-    ];
-    const toolsByName = {
-      github: [{ name: 'create_issue', description: 'Open an issue' }],
-      linear: [],
+describe('estimateToolTokens — values-only char count ÷ 4', () => {
+  it('counts name + description + instructions + nested schema VALUES, not keys', () => {
+    const t = {
+      name: 'aaaa',
+      description: 'bbbb',
+      parameters: { properties: { id: { type: 'string', description: 'the id' } } },
     };
-    const out = buildMcpServerPayload(servers, toolsByName, []);
-    expect(out.map(s => s.name)).toEqual(['Built-in', 'github', 'linear']);
-    expect(out[1]).toEqual({ name: 'github', status: 'connected', source: 'config', error: null, tools: [{ name: 'create_issue', description: 'Open an issue' }] });
-    expect(out[2]).toEqual({ name: 'linear', status: 'needs-auth', source: null, error: null, tools: [] });
+    // 'aaaa'(4)+'bbbb'(4)+'string'(6)+'the id'(6) = 20 ; keys NOT counted
+    expect(estimateToolTokens(t)).toBe(Math.round(20 / 4));
   });
 
-  it('defaults built-in tools to [] when omitted', () => {
-    const out = buildMcpServerPayload([], {});
-    expect(out).toEqual([{ name: 'Built-in', status: 'connected', source: 'caco', error: null, tools: [] }]);
+  it('ignores null/undefined and counts numbers/booleans as text', () => {
+    const t = { name: 'x', description: '', parameters: { a: 10, b: true, c: null } };
+    // 'x'(1) + '10'(2) + 'true'(4) = 7 -> round(1.75)=2
+    expect(estimateToolTokens(t)).toBe(2);
+  });
+});
+
+describe('buildMcpServerPayload — merge available + observed', () => {
+  it('prepends Built-in (always observed, full schema + token cost)', () => {
+    const out = buildMcpServerPayload([], {}, {}, [
+      { name: 'view', description: 'Read a file', parameters: { path: { type: 'string' } }, instructions: 'use it' },
+    ]);
+    expect(out[0].name).toBe('Built-in');
+    const t = out[0].tools[0];
+    expect(t).toMatchObject({ name: 'view', observed: true, deferLoading: false });
+    expect(t.tokenCost).toBe(estimateToolTokens({ name: 'view', description: 'Read a file', parameters: { path: { type: 'string' } }, instructions: 'use it' }));
   });
 
-  it('defaults tools to [] when a server has no entry (never undefined)', () => {
-    const out = buildMcpServerPayload([{ name: 'x', status: 'connected' }], {}, []);
-    expect(out[1].tools).toEqual([]);
+  it('enriches an available MCP tool with observed schema when loaded', () => {
+    const servers = [{ name: 'github', status: 'connected' }];
+    const available = { github: [{ name: 'create_issue', description: 'Open an issue' }] };
+    const observed = { 'github/create_issue': { parameters: { title: { type: 'string' } }, deferLoading: false } };
+    const out = buildMcpServerPayload(servers, available, observed);
+    const t = out[1].tools[0];
+    expect(t).toMatchObject({ name: 'create_issue', namespacedName: 'github/create_issue', observed: true });
+    expect(t.parameters).toEqual({ title: { type: 'string' } });
+    expect(t.tokenCost).not.toBeNull();
   });
 
-  it('normalizes missing source/error to null', () => {
-    const out = buildMcpServerPayload([{ name: 'x', status: 'failed', error: 'boom' }], { x: [] }, []);
-    expect(out[1]).toMatchObject({ source: null, error: 'boom' });
+  it('marks an available-but-unobserved tool observed:false with null schema/cost', () => {
+    const servers = [{ name: 'linear', status: 'connected' }];
+    const available = { linear: [{ name: 'search', description: 'Search issues' }] };
+    const out = buildMcpServerPayload(servers, available, {});
+    const t = out[1].tools[0];
+    expect(t).toMatchObject({ observed: false, parameters: null, tokenCost: null });
+    expect(t.description).toBe('Search issues');
+  });
+
+  it('carries deferLoading through from observed metadata', () => {
+    const servers = [{ name: 's', status: 'connected' }];
+    const available = { s: [{ name: 't', description: 'd' }] };
+    const observed = { 's/t': { parameters: { a: { type: 'number' } }, deferLoading: true } };
+    const out = buildMcpServerPayload(servers, available, observed);
+    expect(out[1].tools[0].deferLoading).toBe(true);
   });
 });

@@ -39,6 +39,20 @@ interface ToolInfo {
   name: string;
   namespacedName?: string;
   description: string;
+  parameters?: Record<string, unknown>;
+  instructions?: string;
+}
+
+/** Resolved per-turn tool metadata snapshot (session.tools.getCurrentMetadata).
+ *  Carries the input schema — the bulk of a tool's per-turn token weight. */
+export interface CurrentToolMetadata {
+  name: string;
+  namespacedName?: string;
+  mcpServerName?: string;
+  mcpToolName?: string;
+  description: string;
+  input_schema?: Record<string, unknown>;
+  deferLoading?: boolean;
 }
 
 interface CopilotClientInstance {
@@ -61,6 +75,7 @@ interface CopilotClientInstance {
     };
     tools: {
       list(params: { model?: string }): Promise<{ tools: ToolInfo[] }>;
+      getCurrentMetadata(): Promise<{ tools: CurrentToolMetadata[] | null }>;
     };
     sessions: {
       fork(params: { sessionId: string; toEventId?: string }): Promise<{ sessionId: string }>;
@@ -155,6 +170,9 @@ interface CopilotSessionInstance {
     mcp: {
       list(): Promise<{ servers: McpServerInfo[] }>;
       listTools(params: { serverName: string }): Promise<{ tools: { name: string; description?: string }[] }>;
+    };
+    tools: {
+      getCurrentMetadata(): Promise<{ tools: CurrentToolMetadata[] | null }>;
     };
     model: {
       setReasoningEffort(params: { reasoningEffort: string }): Promise<{ reasoningEffort: string }>;
@@ -1710,18 +1728,40 @@ export class SessionManager {
   }
 
   /**
-   * List Caco's built-in (model) tools via client RPC. These are surfaced as the
-   * synthetic "Built-in" pseudo-server in the mcp-servers applet. This is the ONLY
-   * sanctioned use of client `tools.list` — MCP-server tools come from
-   * `listMcpTools`. Empty on no client/error.
+   * List Caco's built-in (model) tools via client RPC, with full metadata
+   * (parameters + instructions) so their per-turn token cost is accurate. These
+   * are surfaced as the synthetic "Built-in" pseudo-server. ONLY sanctioned use of
+   * client `tools.list` — MCP-server tools come from `listMcpTools`. Empty on error.
    */
-  async listBuiltinTools(): Promise<{ name: string; description: string }[]> {
+  async listBuiltinTools(): Promise<{ name: string; description: string; parameters?: Record<string, unknown>; instructions?: string }[]> {
     if (!this.sharedClient) return [];
     try {
       const result = await this.sharedClient.rpc.tools.list({});
-      return result.tools.map(t => ({ name: t.name, description: t.description ?? '' }));
+      return result.tools.map(t => ({
+        name: t.name,
+        description: t.description ?? '',
+        parameters: t.parameters,
+        instructions: t.instructions,
+      }));
     } catch (e) {
       console.error('[MCP] Failed to list built-in tools:', e instanceof Error ? e.message : e);
+      return [];
+    }
+  }
+
+  /**
+   * Resolved per-turn tool metadata (session.tools.getCurrentMetadata) — the
+   * OBSERVED set, carrying `input_schema`. Deferred/unloaded tools are absent
+   * until a request loads them. Empty on no session/error/uninitialized.
+   */
+  async getCurrentToolMetadata(): Promise<CurrentToolMetadata[]> {
+    const firstSession = this.activeSessions.values().next().value;
+    if (!firstSession) return [];
+    try {
+      const result = await firstSession.session.rpc.tools.getCurrentMetadata();
+      return result.tools ?? [];
+    } catch (e) {
+      console.error('[MCP] Failed to get current tool metadata:', e instanceof Error ? e.message : e);
       return [];
     }
   }

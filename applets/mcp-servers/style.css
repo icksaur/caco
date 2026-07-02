@@ -6,9 +6,12 @@
 
 .mcp-servers-section h3,
 .mcp-auth-section h3 {
-  margin: 0 0 8px 0;
-  font-size: 1em;
-  color: var(--text-primary);
+  margin: 0 0 var(--space-sm) 0;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
 }
 
 .mcp-section-header {
@@ -25,7 +28,7 @@
 }
 
 .mcp-edit-link {
-  color: var(--color-accent, #5c9aff);
+  color: var(--color-accent);
   text-decoration: none;
   font-size: 0.85em;
 }
@@ -35,13 +38,13 @@
   background: none;
   border: 1px solid var(--color-border);
   border-radius: 4px;
-  color: var(--text-muted);
+  color: var(--color-text-muted);
   cursor: pointer;
   font-size: 1em;
   padding: 2px 6px;
   line-height: 1;
 }
-.mcp-refresh-btn:hover { color: var(--text-primary); }
+.mcp-refresh-btn:hover { color: var(--color-text); }
 
 .mcp-divider {
   border: none;
@@ -50,37 +53,38 @@
 }
 
 .mcp-empty {
-  color: var(--text-muted);
+  color: var(--color-text-muted);
   text-align: center;
   padding: 16px;
   font-size: 0.9em;
 }
 
 .mcp-server-card {
-  margin-bottom: 2px;
+  margin-bottom: var(--space-xs);
 }
 
 .mcp-server-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
-.mcp-server-row:hover { background: var(--color-bg-hover, rgba(255,255,255,0.05)); }
+.mcp-server-row:hover { background: var(--color-bg-hover); }
 
 .mcp-chevron {
   width: 14px;
   text-align: center;
   flex-shrink: 0;
   font-size: 0.8em;
-  color: var(--text-muted);
+  color: var(--color-text-muted);
 }
 
 .mcp-server-name {
   font-weight: 600;
   font-size: 0.95em;
+  color: var(--color-text-bright);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -88,34 +92,42 @@
 }
 
 .mcp-tool-count {
-  font-size: 0.8em;
-  color: var(--text-muted);
+  font-size: 0.72em;
+  color: var(--color-text-muted);
+  background: var(--color-selector-bg);
+  border-radius: var(--radius-lg);
+  padding: 1px var(--space-sm);
   flex-shrink: 0;
 }
 
 .mcp-tool-list {
   list-style: none;
-  margin: 0;
-  padding: 2px 0 6px 34px;
+  margin: 0 0 var(--space-sm) 0;
+  padding: var(--space-xs) 0 var(--space-xs) var(--space-md);
+  margin-left: 21px;
+  border-left: 1px solid var(--color-border);
 }
 
 .mcp-tool-list li {
-  padding: 2px 0;
+  padding: var(--space-xs) 0;
   font-size: 0.85em;
+  line-height: 1.35;
 }
 
 .mcp-tool-name {
   font-weight: 500;
+  color: var(--color-text);
+  font-family: var(--font-mono);
 }
 
 .mcp-tool-desc {
-  color: var(--text-muted);
+  color: var(--color-text-muted);
   font-size: 0.9em;
 }
 
-.status-pending { color: var(--text-muted); }
+.status-pending { color: var(--color-text-muted); }
 .status-auth { font-size: 0.85em; }
-.status-disabled { color: var(--text-muted); }
+.status-disabled { color: var(--color-text-muted); }
 
 .server-list {
   display: flex;
@@ -124,7 +136,7 @@
 }
 
 .loading {
-  color: var(--text-muted);
+  color: var(--color-text-muted);
   text-align: center;
   padding: 24px;
 }
@@ -145,11 +157,11 @@
 }
 
 .status-ok {
-  color: var(--color-success, #4caf50);
+  color: var(--color-success);
 }
 
 .status-bad {
-  color: var(--color-error, #e53935);
+  color: var(--color-error);
 }
 
 .server-id {
@@ -167,7 +179,7 @@
 }
 
 .auth-link {
-  color: var(--color-accent, #5c9aff);
+  color: var(--color-accent);
   text-decoration: none;
   font-size: 0.85em;
 }
@@ -178,14 +190,14 @@
 
 .server-url {
   font-size: 0.8em;
-  color: var(--text-muted);
+  color: var(--color-text-muted);
   padding-left: 22px;
   word-break: break-all;
 }
 
 .server-error {
   font-size: 0.8em;
-  color: var(--color-error, #e53935);
+  color: var(--color-error);
   padding-left: 22px;
   margin-top: 2px;
 }
@@ -205,17 +217,17 @@
   border: 1px solid var(--color-border);
   border-radius: 4px;
   font-size: 0.85em;
-  background: var(--bg-surface);
-  color: var(--text-primary);
+  background: var(--color-selector-bg);
+  color: var(--color-text);
 }
 
 .client-id-input::placeholder {
-  color: var(--text-muted);
+  color: var(--color-text-muted);
 }
 
 .client-id-hint {
   font-size: 0.75em;
-  color: var(--text-muted);
+  color: var(--color-text-muted);
   padding-left: 22px;
   margin-top: 2px;
 }
@@ -224,16 +236,19 @@
   padding: 4px 10px;
   border-radius: 4px;
   border: 1px solid var(--color-border);
-  background: var(--bg-surface);
-  color: var(--text-primary);
+  background: var(--color-selector-bg);
+  color: var(--color-text);
   cursor: pointer;
   font-size: 0.85em;
 }
 
 .auth-btn.primary {
-  background: var(--color-accent);
-  color: white;
-  border-color: var(--color-accent);
+  background: var(--color-menu-btn);
+  color: var(--color-text-bright);
+  border-color: var(--color-menu-btn-border);
+}
+.auth-btn.primary:hover {
+  background: var(--color-menu-btn-hover);
 }
 
 /* Empty and error states */
@@ -241,7 +256,7 @@
 .error-state {
   text-align: center;
   padding: 16px;
-  color: var(--text-muted);
+  color: var(--color-text-muted);
   font-size: 0.9em;
 }
 
@@ -250,6 +265,6 @@
 }
 
 .error-message {
-  color: var(--color-error, #e53935);
+  color: var(--color-error);
   margin-bottom: 12px;
 }

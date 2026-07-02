@@ -291,10 +291,19 @@ router.get('/servers', async (_req: Request, res: Response) => {
       sessionManager.getCurrentToolMetadata(),
     ]);
     const availableByServer = Object.fromEntries(entries);
+    // Index observed metadata under every alias it might be matched by, so a
+    // difference between the model-facing name (getCurrentMetadata) and the raw
+    // MCP name (mcp.listTools) doesn't leave a loaded tool showing "unobserved".
+    // Keys tried by the payload builder: `${server}/${toolName}`.
     const observedByKey: Record<string, ObservedMeta> = {};
     for (const m of observed) {
-      const key = (m.mcpServerName && m.mcpToolName) ? `${m.mcpServerName}/${m.mcpToolName}` : (m.namespacedName ?? m.name);
-      observedByKey[key] = { name: m.name, description: m.description, parameters: m.input_schema, deferLoading: m.deferLoading };
+      const meta: ObservedMeta = { name: m.name, description: m.description, parameters: m.input_schema, deferLoading: m.deferLoading };
+      const aliases = new Set<string>();
+      if (m.mcpServerName && m.mcpToolName) aliases.add(`${m.mcpServerName}/${m.mcpToolName}`);
+      if (m.mcpServerName) aliases.add(`${m.mcpServerName}/${m.name}`);
+      if (m.namespacedName) aliases.add(m.namespacedName);
+      if (aliases.size === 0) aliases.add(m.name);
+      for (const k of aliases) observedByKey[k] = meta;
     }
     const servers = buildMcpServerPayload(mcpServers, availableByServer, observedByKey, builtinTools);
     res.json({ configPath, configExists, clientRunning: true, servers });

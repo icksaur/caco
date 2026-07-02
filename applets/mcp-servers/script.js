@@ -161,6 +161,7 @@ function updateAppletState() {
 
 var mcpServerContent = document.getElementById('mcp-server-content');
 var editConfigLink = document.getElementById('edit-config-link');
+var mcpRefreshBtn = document.getElementById('refresh-btn');
 var mcpCollapsed = {};
 
 var STATUS_ICONS = {
@@ -310,6 +311,10 @@ mcpServerContent.addEventListener('click', function(event) {
   var name = row.getAttribute('data-server');
   if (name) toggleMcpServer(name);
 });
+
+// Refresh button: the applet is IIFE-wrapped, so the inline onclick in
+// content.html can't reach fetchMcpServers — wire it here instead.
+if (mcpRefreshBtn) mcpRefreshBtn.addEventListener('click', fetchMcpServers);
 
 // Listen for auth completion messages from popup
 // Only accept messages from same origin to prevent cross-origin attacks

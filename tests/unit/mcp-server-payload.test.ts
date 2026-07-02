@@ -50,6 +50,17 @@ describe('buildMcpServerPayload — merge available + observed', () => {
     expect(t.description).toBe('Search issues');
   });
 
+  it('treats presence in observed set as observed even with no input_schema (schema/cost null, not deferred)', () => {
+    const servers = [{ name: 'gh', status: 'connected' }];
+    const available = { gh: [{ name: 'ping', description: 'noop' }] };
+    const observed = { 'gh/ping': { deferLoading: false } }; // present, but no parameters
+    const out = buildMcpServerPayload(servers, available, observed);
+    const tool = out[1].tools[0];
+    expect(tool.observed).toBe(true);
+    expect(tool.parameters).toBeNull();
+    expect(tool.tokenCost).toBeNull();
+  });
+
   it('carries deferLoading through from observed metadata', () => {
     const servers = [{ name: 's', status: 'connected' }];
     const available = { s: [{ name: 't', description: 'd' }] };

@@ -170,6 +170,8 @@ interface BuiltinTool {
 }
 /** Observed metadata keyed by `${serverName}/${toolName}` (MCP) or tool name (built-in). */
 interface ObservedMeta {
+  name?: string;
+  description?: string;
   parameters?: Record<string, unknown>;
   deferLoading?: boolean;
 }
@@ -186,8 +188,9 @@ interface PayloadTool {
 
 /**
  * Recursively sum the character count of all VALUES (not keys) in a tool's
- * model-facing definition, ÷ 4 — an estimate of the per-turn token cost.
- * Pure; the unit-test oracle for the "≈N tokens" display.
+ * model-facing definition, ÷ 4 — a **lower-bound** estimate of the per-turn token
+ * cost (schema keys/property names are also billed but not counted; the true wire
+ * cost is somewhat higher). Pure; the unit-test oracle for the "≈N tokens" display.
  */
 export function estimateToolTokens(tool: {
   name: string;
@@ -248,16 +251,26 @@ export function buildMcpServerPayload(
     tools: (availableByServer[s.name] ?? []).map((t): PayloadTool => {
       const nsName = `${s.name}/${t.name}`;
       const obs = observedByKey[nsName];
-      const observed = !!(obs && obs.parameters);
+      // Presence in the observed set = observed (the tool resolved into the turn).
+      // Its schema is independently optional: an observed tool may carry no
+      // input_schema, in which case parameters/tokenCost are null but it is still
+      // observed (NOT deferred). tokenCost is null only when we have no schema to
+      // measure — never fabricated.
+      const observed = !!obs;
+      const params = obs?.parameters ?? null;
+      // Prefer the observed model-facing name/description (what the model actually
+      // sees) over the raw mcp.listTools values when present — accurate seam.
+      const estName = obs?.name ?? t.name;
+      const estDesc = obs?.description ?? t.description;
       return {
         name: t.name,
         description: t.description,
         namespacedName: nsName,
         observed,
-        parameters: observed ? (obs!.parameters ?? null) : null,
+        parameters: params,
         instructions: null,
         deferLoading: obs?.deferLoading ?? false,
-        tokenCost: observed ? estimateToolTokens({ name: t.name, description: t.description, parameters: obs!.parameters }) : null,
+        tokenCost: params ? estimateToolTokens({ name: estName, description: estDesc, parameters: params }) : null,
       };
     }),
   }));
@@ -287,7 +300,7 @@ router.get('/servers', async (_req: Request, res: Response) => {
     const observedByKey: Record<string, ObservedMeta> = {};
     for (const m of observed) {
       const key = (m.mcpServerName && m.mcpToolName) ? `${m.mcpServerName}/${m.mcpToolName}` : (m.namespacedName ?? m.name);
-      observedByKey[key] = { parameters: m.input_schema, deferLoading: m.deferLoading };
+      observedByKey[key] = { name: m.name, description: m.description, parameters: m.input_schema, deferLoading: m.deferLoading };
     }
     const servers = buildMcpServerPayload(mcpServers, availableByServer, observedByKey, builtinTools);
     res.json({ configPath, configExists, clientRunning: true, servers });

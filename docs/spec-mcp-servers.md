@@ -38,13 +38,14 @@ cost for an unobserved tool — its schema is genuinely unknown until observed.
 *Token cost (pure, server-computed, client-displayed).* Each tool's per-turn cost
 is estimated by `estimateToolTokens`: sum the character count of **all values (not
 keys)** in the tool's model-facing definition (name + description + `parameters`
-schema + `instructions`), ÷ 4. Computed in the pure payload builder (so it has a
-real unit-test oracle) and surfaced as `tokenCost` per tool; the applet renders it
-as `≈N tokens` in yellow. Only meaningful for **observed** tools — an unobserved
-tool has `tokenCost:null` and the applet shows a grey `unobserved` label + info-icon
-tooltip ("pulled after a request is made; deferred/on-demand tools populate their
-schema once loaded") instead of a fabricated number. This is what makes the
-invisible per-turn tool tax *visible* — the motivation for the whole feature.
+schema + `instructions`), ÷ 4 — a **lower-bound** (schema keys are also billed but
+not counted). Computed in the pure payload builder (real unit-test oracle) and
+surfaced as `tokenCost` per tool; the applet renders it as `≈N tokens` in yellow,
+tooltip labelling it a lower-bound. A tool is **observed** iff it appears in
+`getCurrentMetadata()`; its `input_schema` is independently optional, so an observed
+tool with no schema shows `tokenCost:null` (not fabricated) yet is not "unobserved".
+An **unobserved** tool (absent from the resolved set — deferred/not-yet-loaded) shows
+a grey `unobserved` label + info-icon tooltip instead of a number.
 
 *Client-side cache (twist behavior).* The `/servers` payload carries everything, so
 the applet **caches the last payload** and twists (server expand/collapse, tool

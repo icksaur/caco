@@ -75,7 +75,6 @@ interface CopilotClientInstance {
     };
     tools: {
       list(params: { model?: string }): Promise<{ tools: ToolInfo[] }>;
-      getCurrentMetadata(): Promise<{ tools: CurrentToolMetadata[] | null }>;
     };
     sessions: {
       fork(params: { sessionId: string; toEventId?: string }): Promise<{ sessionId: string }>;

@@ -121,6 +121,18 @@
 }
 .mcp-tool-row:hover { background: var(--color-bg-hover); }
 
+.mcp-tool-disabled .mcp-tool-name {
+  color: var(--color-text-dim);
+}
+
+.mcp-state-deferred,
+.mcp-state-off {
+  color: var(--color-text-dim);
+  font-size: 0.9em;
+  font-style: italic;
+  flex-shrink: 0;
+}
+
 .mcp-tool-name {
   font-weight: 500;
   color: var(--color-text);

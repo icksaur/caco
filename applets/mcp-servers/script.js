@@ -248,30 +248,41 @@ function renderMcpTool(tool) {
   var isCollapsed = mcpToolCollapsed[tool.namespacedName] !== false;
   var chevron = isCollapsed ? '▸' : '▾';
   var escapedNs = escapeAttr(tool.namespacedName);
+  var state = tool.state || 'enabled';
+  var disabled = state === 'deferred' || state === 'off';
 
-  var costHtml = tool.observed
-    ? '<span class="mcp-token-cost" title="Estimated per-turn tokens: full serialized JSON tool definition (name + description + schema, keys and values) ÷ 4">' + escapeHtml(fmtTokens(tool.tokenCost)) + '</span>'
-    : '<span class="mcp-unobserved" title="This tool is not in the current turn\'s resolved tool set. Its schema (and true token cost) is pulled after a request loads it — deferred/on-demand tools populate once used.">unobserved <span class="mcp-info">ⓘ</span></span>';
+  // Right-side badge: token cost (observed) / unobserved / disabled.
+  var badgeHtml;
+  if (state === 'off') {
+    badgeHtml = '<span class="mcp-state-off" title="Disabled: hard-disabled (DEFAULT_DISABLED_TOOLS), filtered before the session is created — not sent to the model and not re-enableable live.">(disabled)</span>';
+  } else if (state === 'deferred') {
+    badgeHtml = '<span class="mcp-state-deferred" title="Disabled: excluded from the model this session (its schema is not sent every turn), but re-enableable live.">(disabled)</span>';
+  } else if (tool.observed) {
+    badgeHtml = '<span class="mcp-token-cost" title="Estimated per-turn tokens: full serialized JSON tool definition (name + description + schema, keys and values) ÷ 4">' + escapeHtml(fmtTokens(tool.tokenCost)) + '</span>';
+  } else {
+    badgeHtml = '<span class="mcp-unobserved" title="This tool is not in the current turn\'s resolved tool set. Its schema (and true token cost) is pulled after a request loads it — deferred/on-demand tools populate once used.">unobserved <span class="mcp-info">ⓘ</span></span>';
+  }
 
   var propsHtml = '';
   if (!isCollapsed) {
     var rows = '';
     rows += toolPropRow('description', tool.description ? escapeHtml(tool.description) : '<span class="mcp-dim">(none)</span>');
-    if (tool.observed) {
-      var paramsStr = tool.parameters ? JSON.stringify(tool.parameters, null, 2) : '(none)';
-      rows += toolPropRow('parameters', '<pre class="mcp-schema">' + escapeHtml(paramsStr) + '</pre>');
+    if (tool.parameters) {
+      // Schema known (enabled-observed, or a deferred builtin whose schema we have).
+      rows += toolPropRow('parameters', '<pre class="mcp-schema">' + escapeHtml(JSON.stringify(tool.parameters, null, 2)) + '</pre>');
       if (tool.instructions) rows += toolPropRow('instructions', '<pre class="mcp-schema">' + escapeHtml(tool.instructions) + '</pre>');
-    } else {
+    } else if (state === 'enabled' && !tool.observed) {
       rows += toolPropRow('parameters', '<span class="mcp-unobserved">unobserved <span class="mcp-info" title="Pulled after a request loads this tool.">ⓘ</span></span>');
     }
     propsHtml = '<dl class="mcp-tool-props">' + rows + '</dl>';
   }
 
+  var rowClass = 'mcp-tool-row' + (disabled ? ' mcp-tool-disabled' : '');
   return '<div class="mcp-tool">' +
-    '<div class="mcp-tool-row" data-tool="' + escapedNs + '">' +
+    '<div class="' + rowClass + '" data-tool="' + escapedNs + '">' +
       '<span class="mcp-chevron">' + chevron + '</span>' +
       '<span class="mcp-tool-name">' + escapeHtml(tool.name) + '</span>' +
-      costHtml +
+      badgeHtml +
     '</div>' +
     propsHtml +
   '</div>';

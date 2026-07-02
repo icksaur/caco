@@ -12,6 +12,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
 import { sessionManager } from '../session-manager.js';
+import { excludedBuiltinNames } from '../tool-registry.js';
 
 const router = Router();
 
@@ -184,6 +185,15 @@ interface PayloadTool {
   instructions: string | null;
   deferLoading: boolean;
   tokenCost: number | null;
+  /** enablement axis: enabled (model sees it) / deferred (excludedTools, revealable)
+   *  / off (DEFAULT_DISABLED, filtered pre-registration, not revealable). */
+  state: 'enabled' | 'deferred' | 'off';
+}
+export interface CacoCatalogTool {
+  name: string;
+  description: string;
+  hardDisabled: boolean;
+  parameters?: Record<string, unknown>;
 }
 
 /**
@@ -220,21 +230,64 @@ export function buildMcpServerPayload(
   availableByServer: Record<string, AvailableTool[]>,
   observedByKey: Record<string, ObservedMeta>,
   builtinTools: BuiltinTool[] = [],
+  deferredBuiltins: string[] = [],
+  cacoCatalog: CacoCatalogTool[] = [],
 ): Array<{ name: string; status: string; source: string | null; error: string | null; tools: PayloadTool[] }> {
+  // client tools.list returns builtins with full schema regardless of exclusion, so
+  // mark each deferred-if-excluded here; only add bare entries for excluded builtins
+  // tools.list didn't return (e.g. powershell/local_shell on a non-Windows host).
+  const deferredSet = new Set(deferredBuiltins.map(n => n.toLowerCase()));
+  const listedNames = new Set(builtinTools.map(t => t.name.toLowerCase()));
   const builtin = {
     name: 'Built-in',
     status: 'connected',
     source: 'caco' as string | null,
     error: null as string | null,
-    tools: builtinTools.map((t): PayloadTool => ({
+    tools: [
+      ...builtinTools.map((t): PayloadTool => {
+        const deferred = deferredSet.has(t.name.toLowerCase());
+        return {
+          name: t.name,
+          description: t.description,
+          namespacedName: t.name,
+          observed: !deferred,
+          parameters: t.parameters ?? null,
+          instructions: t.instructions ?? null,
+          deferLoading: false,
+          // Even for a deferred builtin we keep the (would-be) token cost — the
+          // schema is known; the state badge conveys it's not currently sent.
+          tokenCost: estimateToolTokens(t),
+          state: deferred ? 'deferred' : 'enabled',
+        };
+      }),
+      // Excluded builtins tools.list did NOT return (no schema available here):
+      // bare deferred entries, deduped against the listed ones above.
+      ...deferredBuiltins
+        .filter(n => !listedNames.has(n.toLowerCase()))
+        .map((name): PayloadTool => ({
+          name, description: '', namespacedName: name, observed: false,
+          parameters: null, instructions: null, deferLoading: false, tokenCost: null,
+          state: 'deferred',
+        })),
+    ],
+  };
+  // Caco's own defineTool tools. hardDisabled = DEFAULT_DISABLED_TOOLS, filtered
+  // before session creation → 'off' (not live-revealable). Others are 'enabled'.
+  const caco = {
+    name: 'Caco',
+    status: 'connected',
+    source: 'caco' as string | null,
+    error: null as string | null,
+    tools: cacoCatalog.map((t): PayloadTool => ({
       name: t.name,
       description: t.description,
       namespacedName: t.name,
-      observed: true,
+      observed: !t.hardDisabled,
       parameters: t.parameters ?? null,
-      instructions: t.instructions ?? null,
+      instructions: null,
       deferLoading: false,
-      tokenCost: estimateToolTokens(t),
+      tokenCost: t.parameters ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters }) : null,
+      state: t.hardDisabled ? 'off' : 'enabled',
     })),
   };
   const mcp = servers.map(s => ({
@@ -265,10 +318,13 @@ export function buildMcpServerPayload(
         instructions: null,
         deferLoading: obs?.deferLoading ?? false,
         tokenCost: params ? estimateToolTokens({ name: estName, description: estDesc, parameters: params }) : null,
+        // Phase A: MCP tools are not yet excluded, so an available tool is enabled.
+        // Phase B will mark deferred those in the session exclusion set.
+        state: 'enabled',
       };
     }),
   }));
-  return [builtin, ...mcp];
+  return [builtin, caco, ...mcp];
 }
 
 router.get('/servers', async (_req: Request, res: Response) => {
@@ -305,7 +361,13 @@ router.get('/servers', async (_req: Request, res: Response) => {
       if (aliases.size === 0) aliases.add(m.name);
       for (const k of aliases) observedByKey[k] = meta;
     }
-    const servers = buildMcpServerPayload(mcpServers, availableByServer, observedByKey, builtinTools);
+    const servers = buildMcpServerPayload(
+      mcpServers, availableByServer, observedByKey, builtinTools,
+      // Deferred SDK builtins carry a `builtin:` prefix in the exclusion list; strip
+      // it for display (the model-facing name is e.g. `bash`, not `builtin:bash`).
+      excludedBuiltinNames().map(n => n.replace(/^builtin:/, '')),
+      sessionManager.getCacoToolCatalog(),
+    );
     res.json({ configPath, configExists, clientRunning: true, servers });
   } catch (e) {
     console.error('[MCP] Failed to list servers/tools:', e instanceof Error ? e.message : e);

@@ -6,6 +6,7 @@
  */
 
 import express from 'express';
+import { z } from 'zod';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -249,6 +250,26 @@ async function start(): Promise<void> {
     const browserTools = createBrowserTools(sessionRef);
     
     const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
+    // Capture the full Caco tool catalog (pre-filter, incl. hard-disabled) once, for
+    // the mcp-servers applet. See docs/spec-tool-reveal.md Phase A.
+    if (sessionManager.getCacoToolCatalog().length === 0) {
+      sessionManager.setCacoToolCatalog(
+        (allTools as Array<{ name: string; description?: string; parameters?: unknown }>).map(t => {
+          let parameters: Record<string, unknown> | undefined;
+          try {
+            // Caco tools carry a zod schema; convert to JSON Schema for an accurate
+            // token estimate (same conversion as scripts/measure-tools.mts).
+            if (t.parameters) parameters = (z as unknown as { toJSONSchema: (s: unknown) => Record<string, unknown> }).toJSONSchema(t.parameters);
+          } catch { /* tool with no/!zod params → no schema */ }
+          return {
+            name: t.name,
+            description: t.description ?? '',
+            hardDisabled: disabledTools.has(t.name.toLowerCase()),
+            parameters,
+          };
+        }),
+      );
+    }
     const { kept, removed } = filterDisabledTools(allTools as Array<{ name: string }>, disabledTools);
     if (removed.length) console.log(`[TOOLS] Disabled ${removed.length}: ${removed.join(', ')}`);
     return kept as typeof allTools;

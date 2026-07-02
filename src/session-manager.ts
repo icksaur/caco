@@ -203,6 +203,16 @@ interface ActiveSession {
   lastUsedAt: number;
 }
 
+/** A Caco-owned tool for the mcp-servers applet catalog. */
+export interface CacoToolCatalogEntry {
+  name: string;
+  description: string;
+  hardDisabled: boolean;
+  /** JSON-schema form of the tool's parameters (converted from zod at capture),
+   *  so the applet can estimate the tool's real per-turn token cost. */
+  parameters?: Record<string, unknown>;
+}
+
 interface CachedSession {
   cwd: string | null;
   summary: string | null;
@@ -289,6 +299,11 @@ export class SessionManager {
   
   // sessionId → { cwd, session }
   private activeSessions = new Map<string, ActiveSession>();
+
+  // Caco's own defineTool tools (name+description+hardDisabled), captured once at
+  // startup by server.ts BEFORE filterDisabledTools, so hard-disabled tools are
+  // still enumerable for the mcp-servers applet. See docs/spec-tool-reveal.md.
+  private cacoToolCatalog: CacoToolCatalogEntry[] = [];
   
   // sessionId → { cwd, summary } (cached from disk)
   private sessionCache = new Map<string, CachedSession>();
@@ -1724,6 +1739,17 @@ export class SessionManager {
       console.error('[MCP] Failed to list MCP servers:', e instanceof Error ? e.message : e);
       return [];
     }
+  }
+
+  /** Register Caco's own tool catalog (name+description+hardDisabled), captured
+   *  once at startup before filterDisabledTools. Used by the mcp-servers applet. */
+  setCacoToolCatalog(entries: CacoToolCatalogEntry[]): void {
+    this.cacoToolCatalog = entries;
+  }
+
+  /** The registered Caco tool catalog for the mcp-servers applet. */
+  getCacoToolCatalog(): CacoToolCatalogEntry[] {
+    return this.cacoToolCatalog;
   }
 
   /**

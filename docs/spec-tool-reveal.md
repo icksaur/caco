@@ -137,10 +137,26 @@ auto-defer a warm session.
 - **Usage signal (active-time, not calendar).** Calendar age is unreliable (a session
   idle overnight isn't "stale"). Track a monotonic **active-seconds clock** that
   advances only while ≥1 SDK session is active. Each tool invocation stamps the clock
-  for that tool (system-wide, keyed by tool/namespacedName). **v1 mechanism (flat
-  threshold):** persist a single per-tool `lastUsedActiveSeconds` stamp; on **cold
-  resume** only, defer tools whose stamp is older than one threshold. One number per
-  tool, no decay math.
+  for that tool (**system-wide**, keyed by `ToolKey`; fed by the R2 `recordToolUse`
+  seam). **v1 mechanism (flat threshold):** persist a single per-tool
+  `lastUsedActiveSeconds` stamp; on **cold resume** only, defer tools whose stamp is
+  older than the threshold. One number per tool, no decay math.
+- **Threshold: 2 active-hours.** A tool unused for more than 2 active-clock hours is a
+  defer candidate at the next cold resume. (Active hours, not wall-clock — an overnight
+  idle doesn't age a tool.)
+- **Eligibility (what auto-defer may hide).** Only these are candidates; everything else
+  is always kept:
+  - **All MCP-server tools** — the biggest per-turn cost.
+  - **All SDK builtins** already in the excludable set (the existing shell family and any
+    future ones).
+  - **A fixed allowlist of Caco tools: the browser tools, the applet tools, and the
+    surface tools ONLY.** No other Caco tool is auto-deferrable (the escape hatch
+    `caco_docs`/`caco_enable_tools`, session/agent/memory/workflow/index/retrieve tools
+    stay always-on). This allowlist lives beside `DEFAULT_EXCLUDED_BUILTINS` in
+    `tool-registry.ts` (`DEFER_ELIGIBLE_CACO_TOOLS`), keyed by tool name.
+- **Used-here is sticky (protection).** Any tool used in the resuming session's own
+  history (the R2 per-session used set) is NOT deferred even if system-wide-stale —
+  proven-relevant-here overrides the global verdict.
 - **Deferred rationale (NOT v1):** a budget/bump/cap model (each use grants +N
   active-hours up to a ceiling) is a later refinement if the flat threshold misfires;
   it is intentionally out of the implementable v1 design.
@@ -149,6 +165,7 @@ auto-defer a warm session.
   `computeColdResumeExclusions({ isCold, tools, lastUsed, nowActiveSeconds, threshold })`
   → the names to exclude, returning `[]` when `isCold` is false — so the "warm session
   is never auto-mutated" invariant is directly unit-testable, not just the age math.
+  (Already implemented + tested in R1.)
 - **Coldness is observable, not only inferred.** Three signals of increasing strength:
   (1) **turn 0** of a new session — definitionally cold; (2) **resume where
   `now − lastUsedAt > cache TTL`** (prefix evicted; we own `lastUsedAt`); (3)
@@ -156,13 +173,57 @@ auto-defer a warm session.
   *proves* the last request was cold. v1 gates auto-defer on (1)/(2); the telemetry from
   B0 lets a later refinement gate on observed (3) so we never defer a session whose cache
   is actually still warm.
-- **Per-session vs system-wide.** Usage is aggregated **system-wide** (a tool useful in
-  one session is likely useful again). A per-session override is a Phase-C+
-  consideration, not v1.
+- **System-wide staleness verdict.** Usage is aggregated **system-wide** (a tool useful
+  in one session is likely useful again anywhere); there is one staleness verdict per
+  tool, not a per-session profile. The per-session used-here set only *protects* (never
+  broadens) the deferral.
+
+### Phase D — manual defer (mcp-servers applet)
+
+Auto-defer (Phase C) is cold-only and free. The operator also needs a **deliberate,
+immediate** defer — "I'm not using github this session, hide it now" — even on a WARM
+session, accepting the one-time cost. This is an explicit override, not automation.
+
+- **UI.** In the mcp-servers applet, a **defer toggle button next to each MCP server
+  name**. Deferring hides that server's entire tool set (all its tools → `excludedTools`);
+  toggling off re-enables them. **The button represents the system-wide manual DEFAULT
+  for that server** (persisted preference), which is distinct from a given session's
+  *effective* live state — an agent may have per-session-revealed a manually-deferred
+  server via `caco_enable_tools`. The applet must label the toggle as the system-wide
+  default (not claim a per-session truth it doesn't own), so the two never appear to
+  disagree; the B0 banner already shows the effective live token cost.
+- **Tooltip (required, explicit).** Must clearly state: this removes the server's tool
+  definitions from every future turn (saving those tokens), AND **warns that applying it
+  to a live/warm session busts the prompt cache — costing a one-time re-process of the
+  entire context window on the next turn** (point at the B0 banner's cache-write/%miss so
+  the cost is observable). Framed as: cheap on a cold/idle session, expensive mid-conversation.
+- **Scope: system-wide, matching Phase C.** A manual server defer is persisted as a
+  system-wide preference (like the usage store) so it (a) applies live to every currently
+  active session via `setExcludedToolsLive` (each warm session pays one bust — the warning
+  covers this) and (b) seeds into every future/resumed session's exclusion set. Un-defer
+  reverses both. `ActiveSession.excludedTools` stays the single per-session runtime truth;
+  the manual set is a seed input + a broadcast action, never a competing runtime store.
+- **Interaction with `caco_enable_tools`.** The agent can still per-session reveal a
+  manually-deferred tool with `caco_enable_tools` (a transient override for that session);
+  the system-wide preference is unchanged and re-seeds future sessions. No conflict: enable
+  mutates the session's live set; the manual preference only affects seeds + explicit toggles.
 
 Mechanism choice: `excludedTools` + `session.rpc.options.update` over the SDK's native
 `defer`/tool-search because the latter has no client-facing enable in the installed
 SDK (verified through 1.0.5); this is the only client-controllable path today.
+
+**Caco-tool exclusion probe (hard gate for the Caco-allowlist part only).** Deferral of
+Caco `defineTool` tools via `excludedTools` is UNVERIFIED — `excludedTools` is proven for
+builtins (`builtin:x`) and MCP (`server/tool`), but Caco tools may only be removable by
+the pre-registration `filterDisabledTools` path. Before shipping Caco-tool auto-defer,
+probe whether excluding a Caco tool by its name via `rpc.options.update({excludedTools})`
+actually drops it (measure via `getContextInfo`/getCurrentMetadata). **If it does NOT,
+Caco-tool defer is CUT from v1 entirely** — the pre-registration fallback is rejected
+because it would make the "deferred" browser/applet/surface tools *hard-disabled*
+(non-revealable) for that session, breaking the feature's core contract that a deferred
+tool is always re-enableable via `caco_enable_tools`. A deferred tool that can't be
+revealed is a different (worse) thing than deferral. MCP + builtin defer proceed
+regardless (both proven excludable).
 
 ### Cross-cutting — the tool-state authority + single metering funnel
 
@@ -207,21 +268,20 @@ dumping ground, the authority is **four small modules**, layered leaf-first:
   `validateEnable(keys, catalog, excluded) → { ok; nextExcluded } | { error }` (atomic
   pre-validation); `computeColdResumeExclusions(...)` (cold-only defer math). No I/O, no
   SDK, no state — the whole decision surface is unit-testable in isolation.
-- **`src/session-tool-authority.ts` (the only stateful, SDK-touching module).** Holds the
-  authoritative per-session `excludedTools` truth (keyed by `ToolKey`); `enable(sessionId,
-  keys)` = `validateEnable` → `rpc.options.update` → mutate **only on `{success:true}`**;
-  `coldResume(sessionId)` = compute `isCold` + pure fn + apply; `seed`/`getExcluded`/
-  `clear` for lifecycle. It *reads* usage stamps; it does **not** subscribe to events, do
-  token accounting, or write applet state.
-
-**The `getSession(id)` seam is write-only.** SessionManager owns one authority instance
-and injects a `getSession(id)` accessor purely so the shell can issue the
-`rpc.options.update` write without importing SessionManager (breaks the cycle). This is
-deliberately narrow: the authority holds **no** create/resume/end/model-switch policy. If
-lifecycle *policy* ever needs to migrate into the authority, that is the signal to instead
-fold the shell *into* SessionManager as a private unit and keep only the three pure
-modules external — the injection is acceptable exactly while the authority stays
-lifecycle-ignorant.
+- **The stateful shell — folded INTO `src/session-manager.ts` (as built).** The spec
+  originally proposed a separate `src/session-tool-authority.ts`; per the coupling review's
+  documented escalation ("if lifecycle policy migrates into the authority, fold the shell
+  into SessionManager and keep only the pure modules external"), it was folded in — because
+  the exclusion set *is* session-lifecycle state (`ActiveSession.excludedTools`, already
+  threaded through every create/resume/model-switch path). SessionManager owns:
+  `getExcludedToolKeys` (read the single truth); `setExcludedToolsLive` (the ONLY
+  success-gated `rpc.options.update` writer — mutates `ActiveSession.excludedTools` only on
+  `{success:true}`); `enableTools` (resolve → reject hard-disabled → no-op already-enabled →
+  `validateEnable` → apply, under a per-session reveal mutex); and the cold-resume seed path
+  (Phase C). It consumes the pure modules; there is no second copy of the exclusion truth.
+- **The three pure modules stay external** (`tool-key`, `tool-catalog`, `session-tool-state`)
+  — no SDK, no state, fully unit-testable, imported by both SessionManager and the applet
+  payload / catalog so nothing re-derives keys/state.
 
 `workspace-api` (applet payload), `dev-docs-tool` (catalog) and the enable tool all
 *route through* `buildToolCatalog` + `classifyTool` + `toolKey` instead of re-deriving
@@ -237,22 +297,31 @@ the tool universe or the three-axis state in three places.
 - **State mutates only on SDK success** (invariant): the active `excludedTools` and
   applet only change after `rpc.options.update` returns `{success:true}`; a throw/false
   leaves state unchanged (and a failed/rejected enable never busts the cache).
-- **Reveal is monotonic within a warm session** (invariant): while a session is warm,
-  the visible tool set only ever *grows* — `caco_enable_tools` adds, and nothing
-  re-defers until the next cold boundary. This caps the warm cache-bust at ≤ one per
-  *revealed family* (over-reveal collapses repeated same-family reveals into one bust).
-  It does **not** cap total busts across *different* families revealed on separate turns
-  — that multi-family, multi-turn cost is accepted (never block) and measured, not
-  prevented (see Budgets). Monotonicity is what makes *re-defer* churn structurally
-  impossible mid-session, so churn is only ever *measured* (feedback to next
-  cold-boundary defer aggressiveness), never *gated*.
+- **Reveal/auto-defer is monotonic within a warm session** (invariant): the *agent
+  reveal* path (`caco_enable_tools`) and the *auto-expiry* system never shrink a warm
+  session's visible tool set — reveal only grows it, and auto-defer is cold-only. This
+  caps agent/automation-driven warm cache-busts at ≤ one per revealed family per session.
+  **Exception — operator manual defer (Phase D)** is a deliberate, explicitly-warned
+  override that MAY re-defer (shrink) a warm session; it is out of scope of this
+  monotonicity guarantee by design (the operator accepts the one-time cost via the tooltip
+  warning). It does **not** cap total busts across *different* families revealed on
+  separate turns — that multi-family, multi-turn cost is accepted (never block) and
+  measured, not prevented (see Budgets). Monotonicity (agent/auto) is what makes
+  automation-driven *re-defer* churn structurally impossible mid-session, so that churn is
+  only ever *measured*, never *gated*.
 - **`caco_enable_tools` never blocks** (invariant): a valid enable is always applied;
   rejection happens only for invalid input (unknown/hard-disabled/already-enabled), never
   as rate-limiting. Amortization is achieved by shaping (batching nudge, over-reveal,
   stickiness), not by gating.
 - **Auto-defer only on cold resume** (invariant): a warm session's tool set is never
-  mutated by the expiry system — enforced by `computeColdResumeExclusions` returning
-  `[]` when not cold.
+  mutated by the *expiry* system — enforced by `computeColdResumeExclusions` returning
+  `[]` when not cold. (Manual applet defer is a separate, explicit operator action that
+  MAY mutate a warm session, with an explicit cost warning — see Phase D.)
+- **Auto-defer eligibility is a fixed allowlist** (invariant): auto-defer may hide only
+  MCP tools, excludable SDK builtins, and the named Caco allowlist
+  (`DEFER_ELIGIBLE_CACO_TOOLS` = browser/applet/surface tools). `caco_docs`,
+  `caco_enable_tools`, and every other Caco tool are never auto-deferred; the resuming
+  session's own used-here set is additionally protected.
 - **Two axes stay distinct** (invariant): observed≠enabled. The applet must not conflate
   "not in this turn's resolved set" with "excluded from the model".
 - **Reveal is live, not resume** (fact): `session.rpc.options.update` accepts
@@ -275,23 +344,19 @@ the tool universe or the three-axis state in three places.
 - **One classifier / one state owner** (invariant): enabled/deferred/off is defined once
   (`classifyTool` in `session-tool-state.ts`) and consumed by the applet payload, the
   `caco_docs` catalog, and enable-validation; the per-session `excludedTools` truth and
-  the success-gated `enable()` mutation live only in `session-tool-authority.ts`.
+  the sole success-gated live mutator (`setExcludedToolsLive`) live only in SessionManager.
 - **One catalog assembly** (invariant): the "what tools exist" universe is built once by
   `buildToolCatalog` (keyed by `ToolKey`); the applet payload, the `caco_docs` catalog,
   and `validateEnable` all consume that one `ToolCatalog` — none re-stitches
   `cacoToolCatalog` + `listBuiltinTools` + `listMcpTools` itself.
-- **Authority lifecycle contract** (invariant): the per-session state in
-  `session-tool-authority.ts` has a strict, asserted lifecycle — the main hidden coupling
-  risk. (1) **Seed before read:** the exclusion set is `seed()`ed (from the initial
-  `excludedBuiltins`) at session create/resume *before* any catalog/payload/enable read;
-  a read for an unseeded session throws (never returns an empty set that reads as "nothing
-  excluded"). (2) **`coldResume()` fires exactly once on a cold resume and never on a warm
-  resume/model-switch** — the cold decision is made at one call site in the resume path,
-  not scattered. (3) **`getExcluded(id)` is preserved through every recreate/model-switch
-  path** (create/resume/setModel) by reading from the authority, not by copying a field.
-  (4) **`clear(id)` on session end**, so a later cold resume in the same process starts
-  from seed, not stale state. These four are enforced by assertions at the authority
-  boundary + a lifecycle seam test, not by convention.
+- **Exclusion-set lifecycle contract** (invariant): `ActiveSession.excludedTools` is the
+  single per-session truth, seeded at create/resume (from the initial `excludedBuiltins` ∪
+  the Phase-D manual preference ∪ Phase-C cold-resume auto-defer) BEFORE any read, and
+  threaded through every recreate/model-switch path (create/resume/setModel already
+  re-pass it). It is mutated live only by `setExcludedToolsLive`, and only on
+  `{success:true}`. Concurrent reveals are serialized by a per-session mutex so the
+  read-modify-write can't lose an update. Cold-resume auto-defer fires only on a genuinely
+  cold resume; a warm session is never auto-mutated (manual Phase-D defer excepted).
 
 ## Considerations
 
@@ -325,11 +390,12 @@ the tool universe or the three-axis state in three places.
   MCP tool by namespaced name actually removes its schema (not just blocks calls).
 - **What is even excludable.** Confirm MCP tools accept `excludedTools` the same way SDK
   builtins do (`DEFAULT_EXCLUDED_BUILTINS` already excludes builtins via `excludedTools`).
-- **Persistence.** Phase C usage stats persist under `~/.caco/` (system-wide, like
-  memory). The active-seconds clock is process-lifetime + persisted increment. **Live
-  reveals mutate only the in-memory `excludedTools`** — a cold resume in a *fresh process*
-  loses them and re-applies the cold-resume defer set. This is a fact, not a bug:
-  monotonic-within-warm is explicitly session/process-scoped.
+- **Persistence.** Phase C usage stats + the Phase D manual-defer preference persist under
+  `~/.caco/` (system-wide, like memory). The active-seconds clock is process-lifetime +
+  persisted increment. **Live reveals mutate only the in-memory `excludedTools`** — a cold
+  resume in a *fresh process* loses them and re-applies the seed (cold-resume auto-defer ∪
+  manual-defer preference). This is a fact, not a bug: agent reveals are session-scoped;
+  the durable defaults are the usage staleness + the manual preference.
 - **featureFlags lead (out of scope).** `SessionUpdateOptionsParams.featureFlags` might
   enable the SDK's native tool-search; a probe could make Phase C unnecessary, but this
   spec does not depend on it.
@@ -341,6 +407,9 @@ the tool universe or the three-axis state in three places.
 - Cache-bust overstated/understated → measured directly via `assistant.usage` (`cacheWriteTokens` spike on a reveal turn vs `cacheReadTokens`-dominated steady turns); ship Phase B behind the applet so the cost is observable before trusting it.
 - Auto-defer removes a tool a cold session immediately needs → it's re-enableable in one call; only defer below a conservative threshold; never on warm sessions.
 - MCP names not excludable → Phase A/B verification gate before Phase C automation.
+- **Caco tools not excludable via `excludedTools`** → C0 probe gates the Caco-allowlist part only; if it fails, Caco-tool defer is CUT from v1 (no non-revealable fallback). MCP + builtin defer proceed regardless.
+- **Cross-session over-defer (accepted footgun)** → system-wide 2-active-hour staleness + used-here protection can still defer a tool the user relies on in a *different* session if it wasn't used in the resuming session's own history. This matches the operator's chosen criteria; it is **accepted and fully recoverable** — the agent reveals it in one `caco_enable_tools` call, or the operator manual-un-defers. Called out so it isn't read as a bug.
+- **Manual defer of a warm session busts the whole window** → this is accepted and deliberate (operator override), NOT silent: the applet tooltip warns explicitly and the B0 banner shows the realized cache-write/%miss. Cheap on cold/idle sessions; the warning steers the operator to defer when not mid-conversation.
 - **Stamp/exclusion key mismatch ⇒ auto-defer silently mis-fires** (defers a just-used tool, or never defers) → costs money with no error. Mitigated by a single `toolKey()` used by the meter, the exclusion set, and the classifier; assert-throw on an unresolvable key; and a seam test over dispatch → usage-store stamp → `coldResume` exclusion (not just the pure defer math).
 - **Authority lifecycle mis-sequencing** (read-before-seed returns a false-empty exclusion set; `coldResume` on a warm session; `getExcluded` dropped on model-switch; stale state after end) → silent wrong tool set. Mitigated by the Authority-lifecycle-contract invariant: boundary assertions (unseeded read throws) + a lifecycle seam test. Escalation seam: if lifecycle *policy* migrates into the authority, fold the shell into SessionManager (keep the three pure modules external).
 
@@ -356,7 +425,8 @@ the tool universe or the three-axis state in three places.
   - `caco_enable_tools` validation → unit test: unknown / already-enabled / hard-disabled names reject atomically (no exclusion mutation); a **valid** enable is never rejected (never-block); state changes only on `rpc.options.update` success (throw/`{success:false}` leaves it unchanged); a valid batch produces the expected new `excludedTools`; two valid enables in one turn both apply (monotonic, no rejection).
   - **`toolKey` / `classifyTool` (the single-key & single-classifier oracles):** `toolKey` unit test covering **all origins** — MCP tool ⇒ `server/tool`, SDK builtin ⇒ `builtin:x`, Caco tool ⇒ its key form, and the `tool.execution_complete` event shape (`toolName`/`mcpServerName`/`mcpToolName`) resolving to the *same* key its `excludedTools` entry uses; unresolvable ⇒ throws. `classifyTool` unit test — excluded ⇒ deferred, hard-disabled ⇒ off, else enabled — the one definition the applet/catalog/validation all import.
   - Tool state in the payload → extend `mcp-server-payload.test.ts` (via `classifyTool`: excluded ⇒ deferred; `DEFAULT_DISABLED` ⇒ hard-disabled; else enabled).
-  - Phase C → the primary test is the **seam** dispatch-event → usage-store stamp → `coldResume` exclusion (code-quality "test the seam"), plus the pure `computeColdResumeExclusions` units: `isCold:false` ⇒ `[]` (warm never mutated); `isCold:true` ⇒ stale tools excluded, recently-used kept.
+  - Phase C → the primary test is the **seam** dispatch-event → usage-store stamp → cold-resume exclusion (code-quality "test the seam"), plus the pure `computeColdResumeExclusions` units: `isCold:false` ⇒ `[]` (warm never mutated); `isCold:true` ⇒ eligible+stale (>2 active-hours) excluded, used-here + non-eligible (caco_docs/enable/etc.) kept.
+  - Phase D (manual defer) → endpoint unit test: deferring a server adds exactly that server's ToolKeys to `excludedTools` (applied live per active session, persisted system-wide); un-defer removes exactly those; a manually-deferred server survives into a freshly-seeded session. **Conflict-order oracle (pins no-dual-truth):** (1) manual defer → `caco_enable_tools` reveals it in one session, live, WITHOUT clearing the persisted preference; (2) a future session is still seeded deferred; (3) a later manual-defer broadcast re-hides the revealed session; (4) manual un-defer removes both the persisted preference AND the live exclusion. Visual: per-server toggle labelled as the system-wide default + the cost-warning tooltip.
   - **B0 telemetry (measurement, not gate):** a before/after showing an excluded MCP tool's tokens absent from `toolDefinitionsTokens`/`mcpToolsTokens` (read via one `SessionManager.getContextInfo` → `session.rpc.metadata.contextInfo({ promptTokenLimit: 0, outputTokenLimit: 0 })`); a reveal turn shows a `cacheWriteTokens` spike in `assistant.usage`. Recorded as evidence; Phase B proceeds regardless (the SDK's accounting already documents the drop for deferred tools; B0 confirms it for the `excludedTools` path).
   - By-construction/visual: applet render, `rpc.options.update` wiring, the cache-bust magnitude (measured, not asserted).
 
@@ -373,10 +443,12 @@ the tool universe or the three-axis state in three places.
 | R3 | Capture the two silently-dropped signals in the existing funnels: `cacheWriteTokens` (assistant.usage) + `toolDefinitionsTokens` (usage_info) | `src/dispatch-events.ts`, `src/session-throughput.ts` (`recordUsage` param), `src/session-usage-cache.ts` (`SessionUsage` field), `src/routes/websocket.ts` | unit: cacheWrite recorded on `recordUsage`; `toolDefinitionsTokens` retained in `SessionUsage` |
 | B0 | **Telemetry harness** (measurement, not a gate): add one `SessionManager.getContextInfo` pull; measure excluded-MCP-tool token drop + reveal cache-bust from R3's captured signals — **no new subscription** | `src/session-manager.ts` (`getContextInfo`) | before/after `mcpToolsTokens` drop (via `contextInfo`) + `cacheWriteTokens` spike (evidence, non-blocking) |
 | B1 | `caco_docs section="tools"` full catalog from `buildToolCatalog` + `classifyTool` (name+desc+state, grouped) | `src/dev-docs-tool.ts` (consumes `tool-catalog` + `session-tool-state`) | pure catalog-builder unit test |
-| B2 | **Create `src/session-tool-authority.ts`** (stateful shell, owns per-session excludedTools + `seed`/`getExcluded`/`clear`); `caco_enable_tools` → `enable()` = `validateEnable(..., buildToolCatalog(), ...)` → `rpc.options.update` → mutate-on-success; **never blocks**; monotonic within warm session. SessionManager owns the instance + injects `getSession` (write-only seam) | new `src/session-tool-authority.ts`, new `src/tool-reveal-tool.ts` (thin wrapper), `src/session-manager.ts` (own instance, seed on create/resume, recreate reads `getExcluded`) | validation unit test (reject atomic incl. hard-disabled; valid enable never rejected; two-in-turn both apply; state only on success) |
+| B2 | `caco_enable_tools` reveal — **as built:** authority folded INTO SessionManager (per the coupling-review escalation), `ActiveSession.excludedTools` = single truth, one success-gated `setExcludedToolsLive`; `enableTools` = resolve → reject hard-disabled → no-op already-enabled → `validateEnable` → apply; per-session reveal mutex; session-scoped catalog | `src/tool-reveal-tool.ts`, `src/session-manager.ts` (`enableTools`/`setExcludedToolsLive`/`getExcludedToolKeys`), `src/session-tool-state.ts` (`resolveEnableTargets`) | validation + success-gating + concurrent-compose + never-block no-op unit tests |
 | B3 | System-prompt line: deferred tools exist; discover via `caco_docs`, enable via `caco_enable_tools` (batch, cache warning) | `src/prompts.ts`, tool description | by-construction |
-| C1 | Active-seconds clock + per-tool `lastUsedActiveSeconds` keyed by `toolKey` (persisted, system-wide) | new `src/tool-usage-store.ts` | store unit test |
-| C2 | `coldResume()` wires `computeColdResumeExclusions` (cold-only) into the resume path; assert the **authority lifecycle contract** (seed-before-read, coldResume once on cold only, `getExcluded` preserved through recreate/model-switch, `clear` on end) | `src/session-tool-authority.ts` (`coldResume`), `src/session-manager.ts` (resume/setModel/end), tool-usage-store | **lifecycle seam test**: seed→read; cold resume calls `coldResume` once (warm/model-switch never); model-switch preserves `getExcluded`; end clears; + dispatch → stamp → `coldResume` (warm ⇒ `[]`; cold ⇒ stale excluded, recently-used kept) |
+| C0 | **Caco-exclusion probe (hard gate for the Caco-allowlist part):** verify a Caco tool is dropped by `rpc.options.update({excludedTools:[name]})` (via `getContextInfo`/getCurrentMetadata). If NOT, **cut Caco-tool defer from v1** (no pre-registration fallback); MCP+builtin proceed | investigation | before/after Caco-tool token drop; documented evidence |
+| C1 | `DEFER_ELIGIBLE_CACO_TOOLS` allowlist (browser/applet/surface) + persistent system-wide usage store: active-seconds clock + per-tool `lastUsedActiveSeconds` keyed by `toolKey`, fed by R2 `recordToolUse` | `src/tool-registry.ts`, new `src/tool-usage-store.ts` | store unit test (stamp/advance/persist); eligibility set |
+| C2 | Cold-resume auto-defer: at cold resume compute `computeColdResumeExclusions` over eligible+stale tools (threshold **2 active-hours**), minus the session's used-here set, union the manual-defer set, seed into `excludedTools`. Warm/model-switch never auto-mutated | `src/session-manager.ts` (resume seed path), `src/tool-usage-store.ts` | **seam test**: dispatch → stamp → cold resume excludes stale eligible, keeps used-here + non-eligible; warm ⇒ unchanged |
+| D1 | **Manual defer (applet):** per-MCP-server defer toggle in mcp-servers applet; `setExcludedToolsLive` ADD path (`deferServer`), applied live to all active sessions + persisted system-wide seed; tooltip warns warm-session full-window cache cost | `applets/mcp-servers/{content.html,script.js,style.css}`, `src/routes/workspace-api.ts` (defer/undefer endpoint), `src/session-manager.ts` (`deferTools` broadcast), new system-wide manual-defer store | endpoint unit test (add/remove server tools to excluded); visual (button + tooltip) |
 
 ## Rationale
 

@@ -52,6 +52,68 @@
   margin: 16px 0;
 }
 
+.mcp-telemetry {
+  margin-bottom: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-selector-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.mcp-tele-title {
+  font-size: 0.68em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-sm);
+  cursor: help;
+}
+.mcp-tele-src { color: var(--color-context-usage); }
+.mcp-tele-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm) var(--space-lg);
+}
+.mcp-tele-context {
+  margin-top: var(--space-xs);
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--color-border);
+}
+.mcp-tele-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  cursor: help;
+}
+.mcp-tele-label {
+  font-size: 0.75em;
+  color: var(--color-text-muted);
+}
+.mcp-tele-val {
+  font-size: 0.92em;
+  font-weight: 600;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+.mcp-tele-primary .mcp-tele-val {
+  color: var(--color-context-usage);
+  font-size: 1.05em;
+}
+.mcp-tele-sub {
+  font-size: 0.75em;
+  color: var(--color-text-muted);
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+}
+.mcp-tele-cachelabel {
+  font-size: 0.75em;
+  color: var(--color-text-muted);
+  align-self: baseline;
+}
+.mcp-tele-miss .mcp-tele-val {
+  color: var(--color-context-usage);
+}
+
 .mcp-empty {
   color: var(--color-text-muted);
   text-align: center;

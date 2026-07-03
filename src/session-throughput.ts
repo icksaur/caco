@@ -38,6 +38,10 @@ interface SessionThroughput {
   requestCacheWrite: number;
   totalCacheWrite: number;
   lastCacheWriteTokens: number;
+  /** Cache-READ tokens on the most recent turn (the warm-cache HIT). Paired with
+   *  lastCacheWriteTokens it shows the last turn's hit/miss split: high read = warm,
+   *  high write = cold/busted cache. */
+  lastCacheReadTokens: number;
   rateLimitCount: number;
   lastRateLimitAt?: string;
   /** Session-lifetime estimate of context tokens saved by caco_run_workflow runs. */
@@ -147,6 +151,7 @@ function blank(): SessionThroughput {
     requestCacheWrite: 0,
     totalCacheWrite: 0,
     lastCacheWriteTokens: 0,
+    lastCacheReadTokens: 0,
     rateLimitCount: 0,
     workflowSavedTokens: 0,
     workflowRuns: 0,
@@ -207,6 +212,7 @@ export function recordUsage(
   entry.requestCacheWrite += cacheWrite;
   entry.totalCacheWrite += cacheWrite;
   entry.lastCacheWriteTokens = cacheWrite;
+  entry.lastCacheReadTokens = cache;
   // Each assistant.usage event is one model round trip on the critical path.
   entry.requestTurns += 1;
   entry.totalTurns += 1;
@@ -375,6 +381,7 @@ export function resetRequest(sessionId: string): void {
   entry.requestOut = 0;
   entry.requestCacheWrite = 0;
   entry.lastCacheWriteTokens = 0;
+  entry.lastCacheReadTokens = 0;
   entry.rateLimitCount = 0;
   entry.lastRateLimitAt = undefined;
   entry.requestTurns = 0;

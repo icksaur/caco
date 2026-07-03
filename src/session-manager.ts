@@ -214,7 +214,7 @@ interface MetadataContextInfoParams {
 
 /** Token breakdown for the current context window (subset Caco reads). `toolDefinitionsTokens`
  *  and `mcpToolsTokens` both EXCLUDE deferred tools — the proof that deferral saves tokens. */
-interface SessionContextInfo {
+export interface SessionContextInfo {
   conversationTokens: number;
   systemTokens: number;
   toolDefinitionsTokens: number;
@@ -1816,14 +1816,53 @@ export class SessionManager {
    * until a request loads them. Empty on no session/error/uninitialized.
    */
   async getCurrentToolMetadata(): Promise<CurrentToolMetadata[]> {
-    const firstSession = this.activeSessions.values().next().value;
-    if (!firstSession) return [];
+    const recent = this.mostRecentActiveSession();
+    if (!recent) return [];
     try {
-      const result = await firstSession.session.rpc.tools.getCurrentMetadata();
+      const result = await recent.active.session.rpc.tools.getCurrentMetadata();
       return result.tools ?? [];
     } catch (e) {
       console.error('[MCP] Failed to get current tool metadata:', e instanceof Error ? e.message : e);
       return [];
+    }
+  }
+
+  /**
+   * The most-recently-used active session (max lastUsedAt, bumped every send/
+   * sendStream), or null if none. The mcp-servers applet is global but reflects a
+   * single session; picking the most-recent one shows the session the operator is
+   * actually working in — NOT an arbitrary first-inserted (possibly idle) session,
+   * whose live contextInfo would be frozen and whose post-restart throughput is 0.
+   */
+  private mostRecentActiveSession(): { sessionId: string; active: ActiveSession } | null {
+    let best: { sessionId: string; active: ActiveSession } | null = null;
+    for (const [sessionId, active] of this.activeSessions) {
+      if (!best || active.lastUsedAt > best.active.lastUsedAt) best = { sessionId, active };
+    }
+    return best;
+  }
+
+  /**
+   * Ground-truth context-window token breakdown (session.metadata.contextInfo) for
+   * the most-recently-used active session — the SDK's OWN accounting, where
+   * `toolDefinitionsTokens` and `mcpToolsTokens` EXCLUDE deferred tools
+   * (spec-tool-reveal B0: the live proof that deferral shrinks the tool block).
+   * Returns the sessionId it read from so the caller can pair it with that session's
+   * cache-write throughput. `contextInfo` is null when there is no active session,
+   * the session is uninitialized (no cached system prompt/tool metadata yet), or the
+   * RPC errors.
+   */
+  async getContextInfo(): Promise<{ sessionId: string | null; contextInfo: SessionContextInfo | null }> {
+    const recent = this.mostRecentActiveSession();
+    if (!recent) return { sessionId: null, contextInfo: null };
+    try {
+      // Params required; 0 = runtime default. Result carries a nullable contextInfo
+      // (null until the session initializes its system prompt + tool metadata).
+      const result = await recent.active.session.rpc.metadata.contextInfo({ promptTokenLimit: 0, outputTokenLimit: 0 });
+      return { sessionId: recent.sessionId, contextInfo: result.contextInfo ?? null };
+    } catch (e) {
+      console.error('[MCP] Failed to get context info:', e instanceof Error ? e.message : e);
+      return { sessionId: recent.sessionId, contextInfo: null };
     }
   }
 

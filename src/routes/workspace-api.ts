@@ -16,6 +16,8 @@ import { excludedBuiltinNames } from '../tool-registry.js';
 import { toolKey, type ToolKey } from '../tool-key.js';
 import { buildToolCatalog } from '../tool-catalog.js';
 import { classifyTool } from '../session-tool-state.js';
+import { snapshot as throughputSnapshot } from '../session-throughput.js';
+import { getSessionUsage } from '../session-usage-cache.js';
 
 const router = Router();
 
@@ -352,11 +354,13 @@ router.get('/servers', async (_req: Request, res: Response) => {
   try {
     const mcpServers = await sessionManager.listMcpServers();
     // Available tools (name+description) per MCP server; built-in tools (full
-    // schema) from tools.list; observed schema from the resolved per-turn snapshot.
-    const [entries, builtinTools, observed] = await Promise.all([
+    // schema) from tools.list; observed schema from the resolved per-turn snapshot;
+    // ground-truth context-window token breakdown (SDK's own accounting).
+    const [entries, builtinTools, observed, ctx] = await Promise.all([
       Promise.all(mcpServers.map(async s => [s.name, await sessionManager.listMcpTools(s.name)] as const)),
       sessionManager.listBuiltinTools(),
       sessionManager.getCurrentToolMetadata(),
+      sessionManager.getContextInfo(),
     ]);
     const availableByServer = Object.fromEntries(entries);
     // Index observed metadata under every alias it might be matched by, so a
@@ -380,7 +384,26 @@ router.get('/servers', async (_req: Request, res: Response) => {
       excludedBuiltinNames().map(n => n.replace(/^builtin:/, '')),
       sessionManager.getCacoToolCatalog(),
     );
-    res.json({ configPath, configExists, clientRunning: true, servers });
+    // Telemetry (spec-tool-reveal B0): the SDK's ground-truth token breakdown +
+    // that same session's last-turn cache split (the reveal cache-bust signal). Both
+    // scoped to the first active session (like getCurrentToolMetadata above); null
+    // when uninitialized. `toolDefinitionsTokens`/`mcpToolsTokens` EXCLUDE deferred
+    // tools — so this number drops when deferral lands, the whole feature's payoff.
+    // The real model window comes from usage_info (contextInfo echoes the 0 we pass
+    // as its default 128k, which is NOT the true limit).
+    const tp = ctx.sessionId ? throughputSnapshot(ctx.sessionId) : null;
+    const usage = ctx.sessionId ? getSessionUsage(ctx.sessionId) : undefined;
+    const telemetry = ctx.contextInfo ? {
+      toolDefinitionsTokens: ctx.contextInfo.toolDefinitionsTokens,
+      mcpToolsTokens: ctx.contextInfo.mcpToolsTokens,
+      systemTokens: ctx.contextInfo.systemTokens,
+      conversationTokens: ctx.contextInfo.conversationTokens,
+      totalTokens: ctx.contextInfo.totalTokens,
+      tokenLimit: usage?.tokenLimit ?? 0,
+      lastCacheWriteTokens: tp ? tp.lastCacheWriteTokens : 0,
+      lastCacheReadTokens: tp ? tp.lastCacheReadTokens : 0,
+    } : null;
+    res.json({ configPath, configExists, clientRunning: true, servers, telemetry });
   } catch (e) {
     console.error('[MCP] Failed to list servers/tools:', e instanceof Error ? e.message : e);
     res.json({ configPath, configExists, clientRunning: true, servers: [], error: 'Failed to query SDK' });

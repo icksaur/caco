@@ -160,6 +160,7 @@ function updateAppletState() {
  */
 
 var mcpServerContent = document.getElementById('mcp-server-content');
+var mcpTelemetryEl = document.getElementById('mcp-telemetry');
 var editConfigLink = document.getElementById('edit-config-link');
 var mcpRefreshBtn = document.getElementById('refresh-btn');
 var mcpCollapsed = {};
@@ -188,16 +189,82 @@ async function fetchMcpServers() {
 
     if (!data.clientRunning) {
       mcpServersCache = null;
+      renderTelemetry(null);
       mcpServerContent.innerHTML = '<div class="mcp-empty">Start a session to discover servers and tools</div>';
       return;
     }
 
     mcpServersCache = data.servers;
+    renderTelemetry(data.telemetry);
     renderMcpServers();
   } catch (err) {
     mcpServersCache = null;
+    renderTelemetry(null);
     mcpServerContent.innerHTML = '<div class="mcp-empty">Failed to load: ' + escapeHtml(err.message) + '</div>';
   }
+}
+
+/**
+ * Ground-truth telemetry banner (spec-tool-reveal B0). Every value is a TOKEN
+ * count from the SDK's OWN accounting for the current context window — not our
+ * per-tool ÷4 estimate. `toolDefinitionsTokens`/`mcpToolsTokens` EXCLUDE deferred
+ * tools, so "tool definitions" is the number that drops when deferral lands.
+ * null when the session is uninitialized (no request has loaded tools yet).
+ */
+function renderTelemetry(t) {
+  if (!mcpTelemetryEl) return;
+  if (!t) {
+    mcpTelemetryEl.style.display = 'none';
+    mcpTelemetryEl.innerHTML = '';
+    return;
+  }
+  function tokens(n) { return Number(n || 0).toLocaleString(); }
+  function stat(label, val, title, extraClass) {
+    return '<span class="mcp-tele-stat ' + (extraClass || '') + '" title="' + escapeAttr(title) + '">' +
+      '<span class="mcp-tele-val">' + tokens(val) + '</span>' +
+      '<span class="mcp-tele-label">' + escapeHtml(label) + '</span>' +
+      '</span>';
+  }
+
+  // Line 1 — the point of this banner: what the tool definitions cost the model
+  // every turn (exact SDK count, excludes deferred tools). MCP shown as a subset.
+  var mcp = t.mcpToolsTokens || 0;
+  var toolsLine =
+    '<div class="mcp-tele-line">' +
+      stat('tool-definition tokens', t.toolDefinitionsTokens, 'Exact SDK token count of ALL tool definitions (name + description + schema) sent to the model this turn. EXCLUDES deferred tools — this is the number that drops when tools are deferred. Compare against the ÷4 estimates on each tool below.', 'mcp-tele-primary') +
+      '<span class="mcp-tele-sub" title="The portion of tool-definition tokens contributed by MCP-server tools (excludes deferred).">of which MCP ' + tokens(mcp) + '</span>' +
+    '</div>';
+
+  // Line 2 — the rest of the context window, so the tool cost has a denominator.
+  var windowLine =
+    '<div class="mcp-tele-line mcp-tele-context">' +
+      stat('system-prompt tokens', t.systemTokens, 'Tokens in the system prompt (Caco\'s instructions to the model).') +
+      stat('history tokens', t.conversationTokens, 'Tokens from the conversation so far (user + assistant + tool messages) currently in the context window.') +
+      stat('window total', t.totalTokens, 'System + history + tool definitions = the full prompt sent this turn.') +
+      (t.tokenLimit ? '<span class="mcp-tele-sub" title="The model\'s maximum prompt size (from the SDK usage_info event). window total / this = how full the context window is.">of ' + tokens(t.tokenLimit) + ' limit</span>' : '') +
+    '</div>';
+
+  // Line 3 — last-turn cache split: the DIRECT cache hit/miss signal. cache-read is
+  // the warm HIT (cheap); cache-write is the MISS (fresh tokens written). A warm turn
+  // is mostly read; a large write near window-total means a COLD/busted cache (the
+  // one-time cost a tool reveal incurs). Shown only once a turn has completed.
+  var cacheLine = '';
+  if (t.lastCacheReadTokens > 0 || t.lastCacheWriteTokens > 0) {
+    var cacheTotal = (t.lastCacheReadTokens || 0) + (t.lastCacheWriteTokens || 0);
+    var missPct = cacheTotal > 0 ? Math.round((t.lastCacheWriteTokens || 0) / cacheTotal * 100) : 0;
+    cacheLine =
+      '<div class="mcp-tele-line mcp-tele-context">' +
+        '<span class="mcp-tele-cachelabel">last turn:</span>' +
+        stat('cache-read (hit)', t.lastCacheReadTokens, 'Tokens READ from the prompt cache last turn — the warm, cheap part of the prompt. High = good (cache is warm).') +
+        stat('cache-write (miss)', t.lastCacheWriteTokens, 'Tokens WRITTEN to the prompt cache last turn — the cold part that had to be freshly processed. This is THE cache-miss number: small on a warm turn; large (near window total) means the cache was cold or busted (e.g. by a tool-block change). This is the one-time cost a tool reveal incurs.', 'mcp-tele-miss') +
+        '<span class="mcp-tele-sub" title="Share of the last turn\'s cached prompt that was a MISS (write / (read+write)). ~0% = fully warm; ~100% = cold turn.">' + missPct + '% miss</span>' +
+    '</div>';
+  }
+
+  mcpTelemetryEl.innerHTML =
+    '<div class="mcp-tele-title" title="Live token counts from the SDK for the first active session. The ≈ estimates under each tool are Caco\'s ÷4 approximation; these are the SDK\'s real numbers.">context window · all values are tokens · <span class="mcp-tele-src">SDK ground truth</span></div>' +
+    toolsLine + windowLine + cacheLine;
+  mcpTelemetryEl.style.display = 'block';
 }
 
 // Re-render from the cached payload — used by twist (expand/collapse) so a toggle

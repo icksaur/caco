@@ -405,7 +405,11 @@ export async function dispatchMessage(
 
       // Server-side side-effects: intent capture, auto-context, usage,
       // reload signal. Extracted so each event hook stays inspectable.
-      applyDispatchEventEffects(sessionId, event, { autoAddFileContext, onEvent });
+      applyDispatchEventEffects(sessionId, event, {
+        autoAddFileContext,
+        onEvent,
+        cacoToolNames: () => new Set(sessionManager.getCacoToolCatalog().map(t => t.name)),
+      });
 
       if (event.type === 'session.idle' || event.type === 'session.error') {
         if (event.type === 'session.idle' && needsObservation) {

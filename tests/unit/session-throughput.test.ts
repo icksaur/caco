@@ -5,6 +5,8 @@ import {
   recordWorkflowSavingsV2,
   recordShapingSavings,
   recordToolCall,
+  recordToolUse,
+  getToolsUsed,
   recordWorkflowCode,
   markRequestComplete,
   resetRequest,
@@ -12,11 +14,34 @@ import {
   snapshot,
   clearSession,
 } from '../../src/session-throughput.js';
+import { toolKey } from '../../src/tool-key.js';
 
 const SID = 'test-session-abc';
 
 beforeEach(() => {
   clearSession(SID);
+});
+
+describe('recordToolUse / getToolsUsed — per-session used-key set', () => {
+  it('records keys and dedupes; unknown session is empty', () => {
+    expect(getToolsUsed('nope').size).toBe(0);
+    const k1 = toolKey({ origin: 'mcp', serverName: 'github', toolName: 'list_issues' });
+    const k2 = toolKey({ origin: 'builtin', name: 'view' });
+    recordToolUse(SID, k1);
+    recordToolUse(SID, k2);
+    recordToolUse(SID, k1); // dupe
+    const used = getToolsUsed(SID);
+    expect(used.size).toBe(2);
+    expect(used.has(k1)).toBe(true);
+    expect(used.has(k2)).toBe(true);
+  });
+
+  it('clearSession drops the used set (no stale carryover on session end)', () => {
+    recordToolUse(SID, toolKey({ origin: 'caco', name: 'caco_docs' }));
+    expect(getToolsUsed(SID).size).toBe(1);
+    clearSession(SID);
+    expect(getToolsUsed(SID).size).toBe(0);
+  });
 });
 
 describe('recordUsage', () => {

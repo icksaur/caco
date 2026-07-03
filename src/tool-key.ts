@@ -47,3 +47,33 @@ export function toolKey(d: ToolDescriptor): ToolKey {
 function stripBuiltinPrefix(name: string): string {
   return name.startsWith('builtin:') ? name.slice('builtin:'.length) : name;
 }
+
+/** Shape of a `tool.execution_start` event's data that identifies the tool.
+ *  `mcpServerName`/`mcpToolName` are present only for MCP-backed tools. */
+export interface ToolStartEventShape {
+  toolName?: string;
+  mcpServerName?: string;
+  mcpToolName?: string;
+}
+
+/**
+ * Resolve a `tool.execution_start` event to its canonical ToolKey — the SAME key
+ * the tool's `excludedTools` entry and catalog entry use. This is the risky seam
+ * the whole feature hinges on: a mis-resolved key silently mis-fires auto-defer.
+ *
+ * Disambiguation (only `tool.execution_start` carries identity — `complete` does not):
+ * - MCP: `mcpServerName` AND `mcpToolName` present → `server/tool` (raw MCP name, not
+ *   the model-facing `toolName`, so it matches the namespacedName in `excludedTools`).
+ * - Caco vs builtin: a bare `toolName` is a Caco tool iff it is in `cacoToolNames`
+ *   (the known registered set) → `caco:name`; otherwise a SDK builtin → `builtin:name`.
+ * Throws on a missing `toolName` rather than fabricating a key.
+ */
+export function toolKeyFromEvent(evt: ToolStartEventShape, cacoToolNames: ReadonlySet<string>): ToolKey {
+  if (evt.mcpServerName && evt.mcpToolName) {
+    return toolKey({ origin: 'mcp', serverName: evt.mcpServerName, toolName: evt.mcpToolName });
+  }
+  const name = evt.toolName;
+  if (!name) throw new Error('toolKeyFromEvent: event carries no toolName');
+  if (cacoToolNames.has(name)) return toolKey({ origin: 'caco', name });
+  return toolKey({ origin: 'builtin', name });
+}

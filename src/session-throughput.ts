@@ -23,6 +23,7 @@
  */
 
 import { BATCH_WARMUP_TURNS } from './config.js';
+import type { ToolKey } from './tool-key.js';
 
 interface SessionThroughput {
   requestIn: number;
@@ -108,6 +109,14 @@ export interface ThroughputSnapshot extends SessionThroughput {
 }
 
 const sessions = new Map<string, SessionThroughput>();
+
+// Per-session "used-here" set: the canonical ToolKeys the agent has invoked this
+// session. Kept SEPARATE from the throughput accumulator (and out of the broadcast
+// snapshot) because it is a Set, not a numeric metric. Consumed by the tool-reveal
+// C-phase: a tool used in this session is sticky-enabled and never auto-deferred here.
+// This is the per-session layer; the system-wide persistent active-seconds store is
+// a separate concern (tool-usage-store, C1).
+const toolsUsedBySession = new Map<string, Set<ToolKey>>();
 
 function now(): string {
   return new Date().toISOString();
@@ -217,6 +226,24 @@ export function recordToolCall(sessionId: string, failed: boolean): void {
     entry.totalToolFailures += 1;
   }
   entry.updatedAt = now();
+}
+
+/** Stamp that a tool was invoked this session, keyed by its canonical ToolKey (the
+ *  SAME key `excludedTools` uses). The per-session "used-here" set — the reveal
+ *  C-phase reads it so a tool used here is never auto-deferred out from under the
+ *  agent. Idempotent per key. */
+export function recordToolUse(sessionId: string, key: ToolKey): void {
+  let used = toolsUsedBySession.get(sessionId);
+  if (!used) {
+    used = new Set<ToolKey>();
+    toolsUsedBySession.set(sessionId, used);
+  }
+  used.add(key);
+}
+
+/** The set of ToolKeys used this session (empty for an unknown session). */
+export function getToolsUsed(sessionId: string): ReadonlySet<ToolKey> {
+  return toolsUsedBySession.get(sessionId) ?? new Set<ToolKey>();
 }
 
 /** Record bytes of caco_run_workflow code submitted this request (an output-token cost). */
@@ -377,4 +404,5 @@ export function currentBatchFactor(sessionId: string): number {
 
 export function clearSession(sessionId: string): void {
   sessions.delete(sessionId);
+  toolsUsedBySession.delete(sessionId);
 }

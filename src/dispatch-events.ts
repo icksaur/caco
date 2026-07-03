@@ -12,7 +12,8 @@ import { broadcastGlobalEvent } from './event-bus.js';
 import type { SessionEvent } from './event-bus.js';
 import type { GitEditPoller } from './git-edit-poller.js';
 import { extractProperty } from './sdk-normalizer.js';
-import { recordUsage, recordRateLimit, recordToolCall, snapshot } from './session-throughput.js';
+import { recordUsage, recordRateLimit, recordToolCall, recordToolUse, snapshot } from './session-throughput.js';
+import { toolKeyFromEvent } from './tool-key.js';
 import { extractActionOptions } from './offer-action-parse.js';
 import { updateSessionMeta } from './storage.js';
 
@@ -32,6 +33,12 @@ export interface DispatchEventDeps {
   autoAddFileContext: (sessionId: string, path: string) => void;
   /** Forward a synthetic event back to the client (e.g. caco.throughput). */
   onEvent: (event: SessionEvent) => void;
+  /** Registered Caco tool names, for disambiguating a bare toolName (caco vs
+   *  builtin) when stamping tool usage. REQUIRED — the type system enforces that
+   *  every caller wires the usage meter, so it can't silently fail closed (a
+   *  "measurement with no error path"). Tests with no interest in stamping pass
+   *  `() => new Set()`. */
+  cacoToolNames: () => ReadonlySet<string>;
 }
 
 /**
@@ -60,6 +67,24 @@ export function applyDispatchEventEffects(
     // Auto-populate session context from file-modifying tools only.
     if (typeof args?.path === 'string' && (toolName === 'create' || toolName === 'edit')) {
       deps.autoAddFileContext(sessionId, args.path);
+    }
+    // Stamp tool usage under the canonical ToolKey (the SAME key excludedTools
+    // uses), so the reveal C-phase never mis-keys a used tool. Only tool.execution_start
+    // carries the tool identity (mcpServerName/mcpToolName/toolName); complete does not.
+    // A resolution failure must not crash dispatch — log loudly (a measurement WITH an
+    // error path) rather than fabricate or swallow silently.
+    try {
+      const key = toolKeyFromEvent(
+        {
+          toolName,
+          mcpServerName: eventData.mcpServerName as string | undefined,
+          mcpToolName: eventData.mcpToolName as string | undefined,
+        },
+        deps.cacoToolNames(),
+      );
+      recordToolUse(sessionId, key);
+    } catch (e) {
+      console.error(`[TOOLS] could not resolve tool key for usage stamp (tool=${String(toolName)}):`, e instanceof Error ? e.message : e);
     }
   }
 

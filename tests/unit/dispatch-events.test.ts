@@ -14,6 +14,7 @@ const broadcastGlobalEvent = vi.fn();
 const recordUsage = vi.fn();
 const recordRateLimit = vi.fn();
 const recordToolCall = vi.fn();
+const recordToolUse = vi.fn();
 const updateSessionMeta = vi.fn();
 const snapshotMock = vi.fn(() => ({ requestIn: 0, requestCache: 0, requestOut: 0, totalIn: 0, totalCache: 0, totalOut: 0, rateLimitCount: 0, updatedAt: 'now', known: true }));
 
@@ -34,10 +35,12 @@ vi.mock('../../src/session-throughput.js', () => ({
   recordUsage: (...args: unknown[]) => recordUsage(...(args as [])),
   recordRateLimit: (...args: unknown[]) => recordRateLimit(...(args as [])),
   recordToolCall: (...args: unknown[]) => recordToolCall(...(args as [])),
+  recordToolUse: (...args: unknown[]) => recordToolUse(...(args as [])),
   snapshot: (...args: unknown[]) => snapshotMock(...(args as [])),
 }));
 
 import { applyDispatchEventEffects, setGitEditPoller } from '../../src/dispatch-events.js';
+import { toolKey } from '../../src/tool-key.js';
 
 const SID = 'session-1';
 
@@ -45,6 +48,7 @@ function makeDeps() {
   return {
     autoAddFileContext: vi.fn(),
     onEvent: vi.fn(),
+    cacoToolNames: () => new Set<string>(),
   };
 }
 
@@ -58,6 +62,7 @@ beforeEach(() => {
   recordUsage.mockClear();
   recordRateLimit.mockClear();
   recordToolCall.mockClear();
+  recordToolUse.mockClear();
   updateSessionMeta.mockClear();
   snapshotMock.mockClear();
   setGitEditPoller(null);
@@ -308,6 +313,52 @@ describe('applyDispatchEventEffects', () => {
         data: {},
       } as never, deps);
       expect(recordRateLimit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tool-usage stamping (tool.execution_start → recordToolUse under the excludedTools key)', () => {
+    const cacoNames = new Set(['caco_run_workflow', 'caco_docs']);
+    function depsWithCaco() {
+      return { autoAddFileContext: vi.fn(), onEvent: vi.fn(), cacoToolNames: () => cacoNames };
+    }
+
+    it('stamps an MCP tool under the SAME key excludedTools uses (server/tool)', () => {
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_start',
+        data: { toolName: 'github-mcp-server-list_issues', mcpServerName: 'github-mcp-server', mcpToolName: 'list_issues' },
+      } as never, depsWithCaco());
+      expect(recordToolUse).toHaveBeenCalledWith(SID, toolKey({ origin: 'mcp', serverName: 'github-mcp-server', toolName: 'list_issues' }));
+    });
+
+    it('stamps a bare Caco tool as caco:name (disambiguated)', () => {
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_start', data: { toolName: 'caco_docs' },
+      } as never, depsWithCaco());
+      expect(recordToolUse).toHaveBeenCalledWith(SID, toolKey({ origin: 'caco', name: 'caco_docs' }));
+    });
+
+    it('stamps a bare non-Caco tool as builtin:name', () => {
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_start', data: { toolName: 'grep' },
+      } as never, depsWithCaco());
+      expect(recordToolUse).toHaveBeenCalledWith(SID, toolKey({ origin: 'builtin', name: 'grep' }));
+    });
+
+    it('with an empty cacoToolNames set, a bare tool stamps as builtin (not caco)', () => {
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_start', data: { toolName: 'grep' },
+      } as never, makeDeps());
+      expect(recordToolUse).toHaveBeenCalledWith(SID, toolKey({ origin: 'builtin', name: 'grep' }));
+    });
+
+    it('logs but does not throw when the tool key is unresolvable (no toolName)', () => {
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      expect(() => applyDispatchEventEffects(SID, {
+        type: 'tool.execution_start', data: { arguments: {} },
+      } as never, depsWithCaco())).not.toThrow();
+      expect(recordToolUse).not.toHaveBeenCalled();
+      expect(errSpy).toHaveBeenCalled();
+      errSpy.mockRestore();
     });
   });
 

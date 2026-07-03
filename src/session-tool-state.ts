@@ -75,3 +75,40 @@ export function computeColdResumeExclusions(args: {
   }
   return out;
 }
+
+/**
+ * Render a ToolCatalog as grouped, state-annotated discovery text for
+ * `caco_docs section="tools"` — the agent's way to find a deferred capability by
+ * name+description without paying its schema in every turn. Groups: Caco,
+ * Built-in, then one section per MCP server. Each line is
+ * `- <camel_name> — <first-line description> [<state>]`, state from the single
+ * `classifyTool`. Pure. Ordered by origin then insertion (catalog order).
+ */
+export function formatToolCatalog(catalog: ToolCatalog, excluded: ReadonlySet<ToolKey>): string {
+  const groups = new Map<string, string[]>();
+  const order: string[] = [];
+  const push = (group: string, line: string): void => {
+    let lines = groups.get(group);
+    if (!lines) { lines = []; groups.set(group, lines); order.push(group); }
+    lines.push(line);
+  };
+  for (const t of catalog.values()) {
+    const state = classifyTool(t.key, { excluded, hardDisabled: t.hardDisabled });
+    const desc = (t.description || '').split('\n')[0].trim();
+    const group = t.origin === 'caco' ? 'Caco' : t.origin === 'builtin' ? 'Built-in' : `MCP: ${t.key.split('/')[0]}`;
+    push(group, `- \`${t.name}\` — ${desc || '(no description)'} [${state}]`);
+  }
+  const header = [
+    '# Caco Tool Catalog',
+    '',
+    'Every tool available to this session. **enabled** = the model sees it now; ' +
+      '**deferred** = excluded this session to save per-turn tokens (re-enable it with ' +
+      '`caco_enable_tools({ names: ["<name>"] })` when you need it); **off** = ' +
+      'hard-disabled and NOT re-enableable.',
+    '',
+    'To use a deferred tool: call `caco_enable_tools` with its name(s) in ONE call ' +
+      '(batch related tools together), then call the tool on a later turn.',
+  ].join('\n');
+  const body = order.map(g => `## ${g}\n${(groups.get(g) as string[]).join('\n')}`).join('\n\n');
+  return `${header}\n\n${body}`;
+}

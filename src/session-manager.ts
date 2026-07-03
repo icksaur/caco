@@ -24,6 +24,9 @@ import { hasProviders, listByokModels, resolveModel } from './provider-registry.
 import { thresholdForBudget, type ModelTokenLimits } from './context-budget.js';
 import { tokenLimitsForModel, effectiveContextTier } from './model-billing.js';
 import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './agent-command.js';
+import { buildToolCatalog, type ToolCatalog } from './tool-catalog.js';
+import { toolKey, type ToolKey } from './tool-key.js';
+import { excludedBuiltinNames } from './tool-registry.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 
@@ -1881,6 +1884,40 @@ export class SessionManager {
       console.error(`[MCP] Failed to list tools for ${serverName}:`, e instanceof Error ? e.message : e);
       return [];
     }
+  }
+
+  /**
+   * Assemble the unified ToolCatalog (via the single `buildToolCatalog`) + the current
+   * exclusion set, for the tool-reveal catalog (`caco_docs section="tools"`). Gathers
+   * Caco tools (captured at startup), SDK builtins, and every connected MCP server's
+   * tools. `excluded` is the process-level builtin exclusion set as ToolKeys; live
+   * session-level MCP exclusions join it in a later phase.
+   */
+  async getToolCatalog(): Promise<{ catalog: ToolCatalog; excluded: Set<ToolKey> }> {
+    const mcpServers = await this.listMcpServers();
+    const mcp = await Promise.all(
+      mcpServers.map(async s => ({ serverName: s.name, tools: await this.listMcpTools(s.name) })),
+    );
+    const listedBuiltins = await this.listBuiltinTools();
+    const excludedRaw = excludedBuiltinNames();
+    const excluded = new Set<ToolKey>(excludedRaw.map(n => toolKey({ origin: 'builtin', name: n })));
+    // An excluded builtin that tools.list doesn't return (e.g. the powershell family
+    // on a non-Windows host) would otherwise be ABSENT from the catalog rather than
+    // shown as deferred. Append bare entries for those, deduped against the listed
+    // ones (buildToolCatalog keeps the first, schema-bearing, entry). Mirrors the
+    // applet's bare-deferred handling so both consumers show the same tool universe.
+    const listedKeys = new Set(listedBuiltins.map(t => toolKey({ origin: 'builtin', name: t.name })));
+    const bareExcluded = excludedRaw
+      .filter(n => !listedKeys.has(toolKey({ origin: 'builtin', name: n })))
+      .map(n => ({ name: n.replace(/^builtin:/, ''), description: '' }));
+    const catalog = buildToolCatalog({
+      caco: this.getCacoToolCatalog().map(c => ({
+        name: c.name, description: c.description, hardDisabled: c.hardDisabled, parameters: c.parameters,
+      })),
+      builtins: [...listedBuiltins, ...bareExcluded],
+      mcp,
+    });
+    return { catalog, excluded };
   }
 
   isClientRunning(): boolean {

@@ -184,7 +184,43 @@ interface CopilotSessionInstance {
       list(params?: Record<string, unknown>): Promise<{ commands: SdkCommandInfo[] }>;
       invoke(params: { name: string; input?: string }): Promise<SdkCommandInvokeResult>;
     };
+    // Live, no-resume mutation of the session's tool filter (spec-tool-reveal B2).
+    // toolFilterPrecedence "excluded" applies the denylist (allow-all-except-X);
+    // returns whether the patch was accepted.
+    options: {
+      update(params: SessionUpdateOptionsPatch): Promise<{ success: boolean }>;
+    };
+    // Current context-window token breakdown (spec-tool-reveal B0). The MCP-specific
+    // mcpToolsTokens lives ONLY here (not on usage events). Params are required;
+    // 0 = runtime default. Returns null contextInfo until the session is initialized.
+    metadata: {
+      contextInfo(params: MetadataContextInfoParams): Promise<{ contextInfo?: SessionContextInfo | null }>;
+    };
   };
+}
+
+/** Mutable session-options patch accepted by `rpc.options.update` (subset Caco uses). */
+interface SessionUpdateOptionsPatch {
+  excludedTools?: string[];
+  availableTools?: string[];
+  toolFilterPrecedence?: 'available' | 'excluded';
+}
+
+interface MetadataContextInfoParams {
+  promptTokenLimit: number;
+  outputTokenLimit: number;
+  selectedModel?: string;
+}
+
+/** Token breakdown for the current context window (subset Caco reads). `toolDefinitionsTokens`
+ *  and `mcpToolsTokens` both EXCLUDE deferred tools — the proof that deferral saves tokens. */
+interface SessionContextInfo {
+  conversationTokens: number;
+  systemTokens: number;
+  toolDefinitionsTokens: number;
+  mcpToolsTokens: number;
+  totalTokens: number;
+  promptTokenLimit: number;
 }
 
 interface SendOptions {

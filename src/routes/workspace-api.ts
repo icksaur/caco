@@ -13,6 +13,9 @@ import { homedir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
 import { sessionManager } from '../session-manager.js';
 import { excludedBuiltinNames } from '../tool-registry.js';
+import { toolKey, type ToolKey } from '../tool-key.js';
+import { buildToolCatalog } from '../tool-catalog.js';
+import { classifyTool } from '../session-tool-state.js';
 
 const router = Router();
 
@@ -218,11 +221,13 @@ export function estimateToolTokens(tool: {
 }
 
 /**
- * Pure: assemble the /servers response payload. Prepends a synthetic `Built-in`
- * server (Caco's own tools, always observed-complete from tools.list), then each
- * MCP server whose available tools (name+description) are enriched with OBSERVED
- * schema (from getCurrentMetadata) when loaded — else marked `observed:false` with
- * `tokenCost:null` (schema genuinely unknown until a request loads the tool).
+ * Pure: assemble the /servers response payload. Consumes the unified
+ * `buildToolCatalog` (the single "what tools exist" view) for the Built-in and
+ * Caco groups, and `classifyTool` for every tool's enabled/deferred/off state, so
+ * the three-axis truth and the tool universe are defined once (spec-tool-reveal:
+ * "one catalog assembly" + "one classifier"). MCP tools are grouped per server and
+ * enriched with OBSERVED schema (from getCurrentMetadata) when loaded — else
+ * `observed:false`/`tokenCost:null` (schema unknown until a request loads it).
  * Kept pure so the merge + token math are unit-testable without the SDK.
  */
 export function buildMcpServerPayload(
@@ -233,62 +238,68 @@ export function buildMcpServerPayload(
   deferredBuiltins: string[] = [],
   cacoCatalog: CacoCatalogTool[] = [],
 ): Array<{ name: string; status: string; source: string | null; error: string | null; tools: PayloadTool[] }> {
-  // client tools.list returns builtins with full schema regardless of exclusion, so
-  // mark each deferred-if-excluded here; only add bare entries for excluded builtins
-  // tools.list didn't return (e.g. powershell/local_shell on a non-Windows host).
-  const deferredSet = new Set(deferredBuiltins.map(n => n.toLowerCase()));
-  const listedNames = new Set(builtinTools.map(t => t.name.toLowerCase()));
+  // The exclusion set as canonical ToolKeys (what classifyTool compares against).
+  const excluded = new Set<ToolKey>(deferredBuiltins.map(n => toolKey({ origin: 'builtin', name: n })));
+  // Builtins present in tools.list carry a real schema → a real tokenCost; a builtin
+  // known only by an excluded name (e.g. powershell on a non-Windows host) has no
+  // schema → tokenCost stays null (never fabricated).
+  const listedBuiltinKeys = new Set<ToolKey>(builtinTools.map(t => toolKey({ origin: 'builtin', name: t.name })));
+  const bareDeferred = deferredBuiltins
+    .filter(n => !listedBuiltinKeys.has(toolKey({ origin: 'builtin', name: n })))
+    .map(n => ({ name: n, description: '' }));
+
+  const catalog = buildToolCatalog({
+    caco: cacoCatalog.map(c => ({ name: c.name, description: c.description, hardDisabled: c.hardDisabled, parameters: c.parameters })),
+    builtins: [...builtinTools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters, instructions: t.instructions })), ...bareDeferred],
+    mcp: servers.map(s => ({ serverName: s.name, tools: availableByServer[s.name] ?? [] })),
+  });
+  const entries = [...catalog.values()];
+
   const builtin = {
     name: 'Built-in',
     status: 'connected',
     source: 'caco' as string | null,
     error: null as string | null,
-    tools: [
-      ...builtinTools.map((t): PayloadTool => {
-        const deferred = deferredSet.has(t.name.toLowerCase());
-        return {
-          name: t.name,
-          description: t.description,
-          namespacedName: t.name,
-          observed: !deferred,
-          parameters: t.parameters ?? null,
-          instructions: t.instructions ?? null,
-          deferLoading: false,
-          // Even for a deferred builtin we keep the (would-be) token cost — the
-          // schema is known; the state badge conveys it's not currently sent.
-          tokenCost: estimateToolTokens(t),
-          state: deferred ? 'deferred' : 'enabled',
-        };
-      }),
-      // Excluded builtins tools.list did NOT return (no schema available here):
-      // bare deferred entries, deduped against the listed ones above.
-      ...deferredBuiltins
-        .filter(n => !listedNames.has(n.toLowerCase()))
-        .map((name): PayloadTool => ({
-          name, description: '', namespacedName: name, observed: false,
-          parameters: null, instructions: null, deferLoading: false, tokenCost: null,
-          state: 'deferred',
-        })),
-    ],
+    tools: entries.filter(t => t.origin === 'builtin').map((t): PayloadTool => {
+      const state = classifyTool(t.key, { excluded, hardDisabled: false });
+      const listed = listedBuiltinKeys.has(t.key);
+      return {
+        name: t.name,
+        description: t.description,
+        namespacedName: t.name,
+        observed: state !== 'deferred',
+        parameters: t.parameters ?? null,
+        instructions: t.instructions ?? null,
+        deferLoading: false,
+        // Keep the (would-be) token cost for a deferred-but-listed builtin — the
+        // schema is known; the state badge conveys it's not currently sent. A bare
+        // (unlisted) builtin has no schema, so cost is genuinely unknown → null.
+        tokenCost: listed
+          ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters ?? null, instructions: t.instructions ?? null })
+          : null,
+        state,
+      };
+    }),
   };
-  // Caco's own defineTool tools. hardDisabled = DEFAULT_DISABLED_TOOLS, filtered
-  // before session creation → 'off' (not live-revealable). Others are 'enabled'.
   const caco = {
     name: 'Caco',
     status: 'connected',
     source: 'caco' as string | null,
     error: null as string | null,
-    tools: cacoCatalog.map((t): PayloadTool => ({
-      name: t.name,
-      description: t.description,
-      namespacedName: t.name,
-      observed: !t.hardDisabled,
-      parameters: t.parameters ?? null,
-      instructions: null,
-      deferLoading: false,
-      tokenCost: t.parameters ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters }) : null,
-      state: t.hardDisabled ? 'off' : 'enabled',
-    })),
+    tools: entries.filter(t => t.origin === 'caco').map((t): PayloadTool => {
+      const state = classifyTool(t.key, { excluded, hardDisabled: t.hardDisabled });
+      return {
+        name: t.name,
+        description: t.description,
+        namespacedName: t.name,
+        observed: !t.hardDisabled,
+        parameters: t.parameters ?? null,
+        instructions: null,
+        deferLoading: false,
+        tokenCost: t.parameters ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters }) : null,
+        state,
+      };
+    }),
   };
   const mcp = servers.map(s => ({
     name: s.name,
@@ -296,7 +307,8 @@ export function buildMcpServerPayload(
     source: s.source ?? null,
     error: s.error ?? null,
     tools: (availableByServer[s.name] ?? []).map((t): PayloadTool => {
-      const nsName = `${s.name}/${t.name}`;
+      const key = toolKey({ origin: 'mcp', serverName: s.name, toolName: t.name });
+      const nsName = key as string;
       const obs = observedByKey[nsName];
       // Presence in the observed set = observed (the tool resolved into the turn).
       // Its schema is independently optional: an observed tool may carry no
@@ -318,9 +330,9 @@ export function buildMcpServerPayload(
         instructions: null,
         deferLoading: obs?.deferLoading ?? false,
         tokenCost: params ? estimateToolTokens({ name: estName, description: estDesc, parameters: params }) : null,
-        // Phase A: MCP tools are not yet excluded, so an available tool is enabled.
-        // Phase B will mark deferred those in the session exclusion set.
-        state: 'enabled',
+        // classifyTool over the shared exclusion set: Phase A has no excluded MCP
+        // tools, so these are enabled; Phase B marks session-excluded ones deferred.
+        state: classifyTool(key, { excluded, hardDisabled: false }),
       };
     }),
   }));

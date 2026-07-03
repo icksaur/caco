@@ -27,6 +27,32 @@ export type ValidateEnableResult =
   | { ok: true; nextExcluded: Set<ToolKey> }
   | { ok: false; error: string };
 
+export type ResolveEnableResult =
+  | { ok: true; keys: ToolKey[] }
+  | { ok: false; error: string };
+
+/** Resolve agent-typed tool identifiers to canonical ToolKeys against the catalog.
+ *  An identifier matches either a catalog entry's exact key (`server/tool`, `builtin:x`,
+ *  `caco:x`) or its display name. Errors atomically (naming the offender) on an unknown
+ *  identifier, or an ambiguous display name shared across origins (asks for the full
+ *  key). Pure — the name→key seam for `caco_enable_tools`, kept out of the tool handler. */
+export function resolveEnableTargets(names: string[], catalog: ToolCatalog): ResolveEnableResult {
+  const keys: ToolKey[] = [];
+  for (const name of names) {
+    if (catalog.has(name as ToolKey)) {
+      keys.push(name as ToolKey);
+      continue;
+    }
+    const byName = [...catalog.values()].filter(t => t.name === name);
+    if (byName.length === 0) return { ok: false, error: `unknown tool: ${name}` };
+    if (byName.length > 1) {
+      return { ok: false, error: `ambiguous tool name "${name}" (matches ${byName.map(t => t.key).join(', ')}); use the full key` };
+    }
+    keys.push(byName[0].key);
+  }
+  return { ok: true, keys };
+}
+
 /** Atomic pre-validation for `caco_enable_tools`: every key must exist, be
  *  currently deferred, and not be hard-disabled. Any invalid key rejects the
  *  WHOLE call with no mutation (a syntax mistake costs no cache-bust). On success

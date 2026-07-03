@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyTool, validateEnable, computeColdResumeExclusions } from '../../src/session-tool-state.js';
+import { classifyTool, validateEnable, computeColdResumeExclusions, resolveEnableTargets } from '../../src/session-tool-state.js';
 import { toolKey, type ToolKey } from '../../src/tool-key.js';
 import type { CatalogTool, ToolCatalog } from '../../src/tool-catalog.js';
 
@@ -99,3 +99,44 @@ describe('computeColdResumeExclusions — cold-only defer math', () => {
     expect(out).not.toContain(k.bash);
   });
 });
+
+describe('resolveEnableTargets — agent-typed name/key → ToolKey', () => {
+  const catalog = cat([
+    { key: k.bash, name: 'bash', origin: 'builtin' },
+    { key: k.view, name: 'view', origin: 'builtin' },
+    { key: k.issues, name: 'list_issues', origin: 'mcp' },
+    { key: k.oauth, name: 'register_mcp_server', origin: 'caco', hardDisabled: true },
+  ]);
+
+  it('resolves a bare display name to its key', () => {
+    const r = resolveEnableTargets(['bash'], catalog);
+    expect(r).toEqual({ ok: true, keys: [k.bash] });
+  });
+
+  it('resolves a full ToolKey verbatim', () => {
+    const r = resolveEnableTargets(['github/list_issues'], catalog);
+    expect(r).toEqual({ ok: true, keys: [k.issues] });
+  });
+
+  it('resolves a batch (display + key mixed)', () => {
+    const r = resolveEnableTargets(['bash', 'github/list_issues'], catalog);
+    expect(r).toEqual({ ok: true, keys: [k.bash, k.issues] });
+  });
+
+  it('errors on an unknown name (atomic — reports the offender)', () => {
+    const r = resolveEnableTargets(['bash', 'nope'], catalog);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('nope');
+  });
+
+  it('errors on an ambiguous display name shared across origins (asks for the full key)', () => {
+    const dup = cat([
+      { key: toolKey({ origin: 'builtin', name: 'search' }), name: 'search', origin: 'builtin' },
+      { key: toolKey({ origin: 'mcp', serverName: 'gh', toolName: 'search' }), name: 'search', origin: 'mcp' },
+    ]);
+    const r = resolveEnableTargets(['search'], dup);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/ambiguous/i);
+  });
+});
+

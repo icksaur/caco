@@ -29,6 +29,7 @@ import { disabledToolNames, filterDisabledTools, excludedBuiltinNames } from './
 import { isWorkflowRunnerAvailable, sweepWorkflowScratch } from './src/workflow/runner.js';
 import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
+import { createToolRevealTool } from './src/tool-reveal-tool.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes, draftRoutes } from './src/routes/index.js';
 import { initWatchRoutes } from './src/routes/watch.js';
@@ -248,8 +249,9 @@ async function start(): Promise<void> {
     const workflowTools = workflowAvailable ? createWorkflowTool(sessionCwd, sessionRef) : [];
     const surfaceTools = createSurfaceTools(sessionRef);
     const browserTools = createBrowserTools(sessionRef);
+    const toolRevealTools = createToolRevealTool(sessionRef);
     
-    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools];
+    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools, ...toolRevealTools];
     // Capture the full Caco tool catalog (pre-filter, incl. hard-disabled) once, for
     // the mcp-servers applet. See docs/spec-tool-reveal.md Phase A.
     if (sessionManager.getCacoToolCatalog().length === 0) {

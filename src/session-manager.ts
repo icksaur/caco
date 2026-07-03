@@ -26,6 +26,7 @@ import { tokenLimitsForModel, effectiveContextTier } from './model-billing.js';
 import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './agent-command.js';
 import { buildToolCatalog, type ToolCatalog } from './tool-catalog.js';
 import { toolKey, type ToolKey } from './tool-key.js';
+import { validateEnable, resolveEnableTargets } from './session-tool-state.js';
 import { excludedBuiltinNames } from './tool-registry.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
@@ -344,6 +345,10 @@ export class SessionManager {
   // still enumerable for the mcp-servers applet. See docs/spec-tool-reveal.md.
   private cacoToolCatalog: CacoToolCatalogEntry[] = [];
   
+  // sessionId → Promise (serializes concurrent caco_enable_tools reveals so the
+  // read-modify-write of excludedTools is atomic; two enables in one turn compose).
+  private revealLocks = new Map<string, Promise<unknown>>();
+
   // sessionId → { cwd, summary } (cached from disk)
   private sessionCache = new Map<string, CachedSession>();
   
@@ -1768,11 +1773,11 @@ export class SessionManager {
    * List MCP servers via session RPC. Returns server name, status, source, error.
    * Requires at least one active session. Returns empty array if none available.
    */
-  async listMcpServers(): Promise<McpServerInfo[]> {
-    const firstSession = this.activeSessions.values().next().value;
-    if (!firstSession) return [];
+  async listMcpServers(sessionId?: string): Promise<McpServerInfo[]> {
+    const target = sessionId ? this.activeSessions.get(sessionId) : this.activeSessions.values().next().value;
+    if (!target) return [];
     try {
-      const result = await firstSession.session.rpc.mcp.list();
+      const result = await target.session.rpc.mcp.list();
       return result.servers;
     } catch (e) {
       console.error('[MCP] Failed to list MCP servers:', e instanceof Error ? e.message : e);
@@ -1874,11 +1879,11 @@ export class SessionManager {
    * `mcp.listTools` RPC. (Client-level `tools.list` returns built-in model tools,
    * NOT MCP server tools — see docs/spec-mcp-servers.md.) Empty on no session/error.
    */
-  async listMcpTools(serverName: string): Promise<{ name: string; description: string }[]> {
-    const firstSession = this.activeSessions.values().next().value;
-    if (!firstSession) return [];
+  async listMcpTools(serverName: string, sessionId?: string): Promise<{ name: string; description: string }[]> {
+    const target = sessionId ? this.activeSessions.get(sessionId) : this.activeSessions.values().next().value;
+    if (!target) return [];
     try {
-      const result = await firstSession.session.rpc.mcp.listTools({ serverName });
+      const result = await target.session.rpc.mcp.listTools({ serverName });
       return result.tools.map(t => ({ name: t.name, description: t.description ?? '' }));
     } catch (e) {
       console.error(`[MCP] Failed to list tools for ${serverName}:`, e instanceof Error ? e.message : e);
@@ -1893,21 +1898,30 @@ export class SessionManager {
    * tools. `excluded` is the process-level builtin exclusion set as ToolKeys; live
    * session-level MCP exclusions join it in a later phase.
    */
-  async getToolCatalog(): Promise<{ catalog: ToolCatalog; excluded: Set<ToolKey> }> {
-    const mcpServers = await this.listMcpServers();
+  async getToolCatalog(sessionId?: string): Promise<{ catalog: ToolCatalog; excluded: Set<ToolKey> }> {
+    const mcpServers = await this.listMcpServers(sessionId);
     const mcp = await Promise.all(
-      mcpServers.map(async s => ({ serverName: s.name, tools: await this.listMcpTools(s.name) })),
+      mcpServers.map(async s => ({ serverName: s.name, tools: await this.listMcpTools(s.name, sessionId) })),
     );
     const listedBuiltins = await this.listBuiltinTools();
-    const excludedRaw = excludedBuiltinNames();
-    const excluded = new Set<ToolKey>(excludedRaw.map(n => toolKey({ origin: 'builtin', name: n })));
-    // An excluded builtin that tools.list doesn't return (e.g. the powershell family
+    // The exclusion set for classifyTool display: the target session's live set when a
+    // session is given (enable path), else the process-level builtin default (the global
+    // applet/catalog view before any session-specific reveals).
+    const excludedRaw = sessionId
+      ? this.getExcludedToolKeys(sessionId).map(k => k as string)
+      : excludedBuiltinNames();
+    // Canonicalize each exclusion entry: MCP keys (contain '/') pass through as-is;
+    // builtin names normalize to `builtin:x` (tolerating a missing/duplicate prefix).
+    // Caco tools are hard-disabled (never excluded), so only builtin/mcp appear here.
+    const asKey = (n: string): ToolKey => (n.includes('/') ? (n as ToolKey) : toolKey({ origin: 'builtin', name: n }));
+    const excluded = new Set<ToolKey>(excludedRaw.map(asKey));
+    // An excluded BUILTIN that tools.list doesn't return (e.g. the powershell family
     // on a non-Windows host) would otherwise be ABSENT from the catalog rather than
-    // shown as deferred. Append bare entries for those, deduped against the listed
-    // ones (buildToolCatalog keeps the first, schema-bearing, entry). Mirrors the
-    // applet's bare-deferred handling so both consumers show the same tool universe.
+    // shown as deferred. Append bare entries for those (builtins only — MCP tools come
+    // from listMcpTools), deduped against the listed ones. Mirrors the applet.
     const listedKeys = new Set(listedBuiltins.map(t => toolKey({ origin: 'builtin', name: t.name })));
     const bareExcluded = excludedRaw
+      .filter(n => !n.includes('/'))
       .filter(n => !listedKeys.has(toolKey({ origin: 'builtin', name: n })))
       .map(n => ({ name: n.replace(/^builtin:/, ''), description: '' }));
     const catalog = buildToolCatalog({
@@ -1918,6 +1932,92 @@ export class SessionManager {
       mcp,
     });
     return { catalog, excluded };
+  }
+
+  /** The session's current exclusion set as ToolKeys (the live truth; starts as the
+   *  seeded builtins, shrinks as caco_enable_tools reveals). Empty for unknown sessions. */
+  getExcludedToolKeys(sessionId: string): ToolKey[] {
+    const active = this.activeSessions.get(sessionId);
+    return (active?.excludedTools ?? []) as ToolKey[];
+  }
+
+  /**
+   * The SOLE success-gated live mutator of a session's tool exclusion set. Applies the
+   * new set via `rpc.options.update` and updates the stored `ActiveSession.excludedTools`
+   * truth ONLY when the SDK reports `{success:true}` — so a throw/false leaves the state
+   * (and the model's actual tool set) unchanged, and a failed enable never busts the
+   * cache. `ActiveSession.excludedTools` remains the single source of truth (it is what
+   * every recreate/model-switch path already re-passes to the SDK), so there is no second
+   * copy to drift.
+   */
+  async setExcludedToolsLive(sessionId: string, excluded: ToolKey[]): Promise<{ success: boolean; error?: string }> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) return { success: false, error: 'session is not active' };
+    try {
+      const result = await active.session.rpc.options.update({ excludedTools: excluded });
+      if (result.success) active.excludedTools = excluded;
+      return { success: result.success };
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /**
+   * Reveal deferred tools for a session (the `caco_enable_tools` path). Resolves the
+   * agent's names to ToolKeys, atomically rejects unknown/hard-disabled names, treats
+   * already-enabled names as idempotent no-ops (never blocks a partially-redundant
+   * batch), then applies the shrunk exclusion set live. Monotonic-within-session: only
+   * ever REMOVES from the exclusion set. Serialized per session so two concurrent enables
+   * in one assistant message compose instead of clobbering each other (each computes from
+   * the latest stored set inside the lock). Returns a structured result for the tool.
+   */
+  async enableTools(sessionId: string, names: string[]): Promise<
+    | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[] }
+    | { ok: false; error: string }
+  > {
+    // Per-session mutex: chain onto any in-flight reveal so the read-modify-write of
+    // excludedTools is atomic across concurrent calls (spec monotonic-within-warm).
+    const prior = this.revealLocks.get(sessionId) ?? Promise.resolve();
+    const run = prior.catch(() => {}).then(() => this.enableToolsLocked(sessionId, names));
+    this.revealLocks.set(sessionId, run);
+    try {
+      return await run;
+    } finally {
+      if (this.revealLocks.get(sessionId) === run) this.revealLocks.delete(sessionId);
+    }
+  }
+
+  private async enableToolsLocked(sessionId: string, names: string[]): Promise<
+    | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[] }
+    | { ok: false; error: string }
+  > {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) return { ok: false, error: 'session is not active' };
+    // Session-scoped catalog: MCP tools must come from THIS session, not an arbitrary one.
+    const { catalog } = await this.getToolCatalog(sessionId);
+    const resolved = resolveEnableTargets(names, catalog);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    // Read the CURRENT set inside the lock (a prior queued reveal may have shrunk it).
+    const current = new Set<ToolKey>(this.getExcludedToolKeys(sessionId));
+    // Atomically reject hard-disabled (not revealable); no-op already-enabled; enable the
+    // deferred remainder. A mixed batch never blocks the valid reveals.
+    const toEnable: ToolKey[] = [];
+    const alreadyEnabled: ToolKey[] = [];
+    for (const key of resolved.keys) {
+      const tool = catalog.get(key);
+      if (tool?.hardDisabled) return { ok: false, error: `tool is disabled and not revealable: ${key}` };
+      if (current.has(key)) toEnable.push(key);
+      else alreadyEnabled.push(key);
+    }
+    if (toEnable.length === 0) {
+      // Everything requested is already enabled — no cache-busting mutation needed.
+      return { ok: true, enabled: [], alreadyEnabled };
+    }
+    const validated = validateEnable(toEnable, catalog, current);
+    if (!validated.ok) return { ok: false, error: validated.error };
+    const applied = await this.setExcludedToolsLive(sessionId, [...validated.nextExcluded]);
+    if (!applied.success) return { ok: false, error: applied.error ?? 'rpc.options.update did not succeed' };
+    return { ok: true, enabled: toEnable, alreadyEnabled };
   }
 
   isClientRunning(): boolean {

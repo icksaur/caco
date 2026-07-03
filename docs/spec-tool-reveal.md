@@ -180,43 +180,48 @@ metrics. This rule exists because event capture is *already* split across two co
 (`applyDispatchEventEffects` and the websocket `broadcastEvent`); a third would be the
 parallel funnel that silently diverges from the others.
 
-**One tool-state authority — `src/session-tool-state.ts`.** A pure core plus a thin
-session-bound shell:
-- *Pure (no SDK, unit-testable):* `toolKey(tool|event) → ToolKey` — the single key
-  function shared by the usage meter, the `excludedTools` set, and the applet classifier.
-  `ToolKey` is a **branded string type** (`string & { __brand: 'ToolKey' }`) so a raw
-  string cannot be used where a key is required — "forgot to route through `toolKey()`"
-  becomes a *compile* error, not a runtime mis-key (leverage-1: make the wrong thing
-  unrepresentable). Forms: MCP `server/tool`, builtin `builtin:x`, Caco `caco:x`;
-  resolving the `tool.execution_complete` event shape (`toolName`/`mcpServerName`/
-  `mcpToolName`) yields the *same* key the tool's `excludedTools` entry uses; an
-  unresolvable input **throws**. Also pure: `classifyTool(key, { excluded, hardDisabled })
-  → 'enabled'|'deferred'|'off'` (the single definition of the three axes);
-  `validateEnable(keys, catalog, excluded) → { ok; nextExcluded } | { error }` (atomic
-  pre-validation); `computeColdResumeExclusions(...)` (cold-only defer math).
-- *Shell (the only code touching `rpc.options.update`):* owns the authoritative
-  per-session `excludedTools` truth (keyed by `ToolKey`); `enable(sessionId, keys)` =
-  `validateEnable` → `rpc.options.update` → mutate state **only on `{success:true}`**;
-  `coldResume(sessionId)` = compute `isCold` + pure fn + apply. It *reads* usage stamps;
-  it does **not** subscribe to events, do token accounting, or write applet state.
-  SessionManager owns one instance and injects a `getSession(id)` accessor (the shell
-  needs the SDK session but must not import SessionManager — avoids a cycle); the recreate
-  paths read `getExcluded(id)` from it instead of copying the ad-hoc
-  `ActiveSession.excludedTools` field.
+**One tool-state authority, split by purpose (SRP, four modules — not one).** To keep
+each concern with one purpose and prevent `session-tool-state.ts` from becoming a
+dumping ground, the authority is **four small modules**, layered leaf-first:
 
-**One unified catalog — `buildToolCatalog`.** Today no single "what tools exist" view
-exists: `buildMcpServerPayload` (`workspace-api.ts`) stitches three sources ad-hoc
-(`cacoToolCatalog` field + `listBuiltinTools()` + `listMcpTools(server)`). Both the
-`caco_docs` catalog (B1) and `validateEnable` (B2) need that same stitched view, so it
-becomes a first-class builder — the single assembly site, keyed by `ToolKey`:
-```
-interface CatalogTool { key: ToolKey; name: string; description: string;
-  origin: 'caco'|'builtin'|'mcp'; hardDisabled: boolean; parameters?: JSONSchema; }
-type ToolCatalog = ReadonlyMap<ToolKey, CatalogTool>;
-buildToolCatalog(sources) → ToolCatalog
-```
-`buildMcpServerPayload`, the `caco_docs` catalog, and `validateEnable` all consume this
-one `ToolCatalog` rather than re-assembling the sources.
+- **`src/tool-key.ts` (leaf, pure).** The branded `ToolKey`
+  (`string & { __brand: 'ToolKey' }`) + `toolKey(tool|event) → ToolKey`. Branding makes
+  "forgot to route through `toolKey()`" a *compile* error, not a runtime mis-key
+  (leverage-1). Forms: MCP `server/tool`, builtin `builtin:x`, Caco `caco:x`; resolving
+  the `tool.execution_complete` event shape (`toolName`/`mcpServerName`/`mcpToolName`)
+  yields the *same* key the tool's `excludedTools` entry uses; an unresolvable input
+  **throws**. **Leaf on purpose:** the usage meter (`dispatch-events`/`session-throughput`)
+  imports *only* this — so metering never depends on the catalog or the shell.
+- **`src/tool-catalog.ts` (pure).** `CatalogTool`, `ToolCatalog = ReadonlyMap<ToolKey,
+  CatalogTool>`, and `buildToolCatalog(sources) → ToolCatalog` — the single "what tools
+  exist" view. Today no such view exists: `buildMcpServerPayload` stitches three sources
+  ad-hoc (`cacoToolCatalog` + `listBuiltinTools()` + `listMcpTools(server)`). Now the
+  applet payload, the `caco_docs` catalog, and `validateEnable` all consume this one
+  catalog instead of re-assembling sources.
+  ```
+  interface CatalogTool { key: ToolKey; name: string; description: string;
+    origin: 'caco'|'builtin'|'mcp'; hardDisabled: boolean; parameters?: JSONSchema; }
+  ```
+- **`src/session-tool-state.ts` (pure decision core).** `classifyTool(key, { excluded,
+  hardDisabled }) → 'enabled'|'deferred'|'off'` (the single 3-axis definition);
+  `validateEnable(keys, catalog, excluded) → { ok; nextExcluded } | { error }` (atomic
+  pre-validation); `computeColdResumeExclusions(...)` (cold-only defer math). No I/O, no
+  SDK, no state — the whole decision surface is unit-testable in isolation.
+- **`src/session-tool-authority.ts` (the only stateful, SDK-touching module).** Holds the
+  authoritative per-session `excludedTools` truth (keyed by `ToolKey`); `enable(sessionId,
+  keys)` = `validateEnable` → `rpc.options.update` → mutate **only on `{success:true}`**;
+  `coldResume(sessionId)` = compute `isCold` + pure fn + apply; `seed`/`getExcluded`/
+  `clear` for lifecycle. It *reads* usage stamps; it does **not** subscribe to events, do
+  token accounting, or write applet state.
+
+**The `getSession(id)` seam is write-only.** SessionManager owns one authority instance
+and injects a `getSession(id)` accessor purely so the shell can issue the
+`rpc.options.update` write without importing SessionManager (breaks the cycle). This is
+deliberately narrow: the authority holds **no** create/resume/end/model-switch policy. If
+lifecycle *policy* ever needs to migrate into the authority, that is the signal to instead
+fold the shell *into* SessionManager as a private unit and keep only the three pure
+modules external — the injection is acceptable exactly while the authority stays
+lifecycle-ignorant.
 
 `workspace-api` (applet payload), `dev-docs-tool` (catalog) and the enable tool all
 *route through* `buildToolCatalog` + `classifyTool` + `toolKey` instead of re-deriving
@@ -270,11 +275,23 @@ the tool universe or the three-axis state in three places.
 - **One classifier / one state owner** (invariant): enabled/deferred/off is defined once
   (`classifyTool` in `session-tool-state.ts`) and consumed by the applet payload, the
   `caco_docs` catalog, and enable-validation; the per-session `excludedTools` truth and
-  the success-gated `enable()` mutation live only in that module.
+  the success-gated `enable()` mutation live only in `session-tool-authority.ts`.
 - **One catalog assembly** (invariant): the "what tools exist" universe is built once by
   `buildToolCatalog` (keyed by `ToolKey`); the applet payload, the `caco_docs` catalog,
   and `validateEnable` all consume that one `ToolCatalog` — none re-stitches
   `cacoToolCatalog` + `listBuiltinTools` + `listMcpTools` itself.
+- **Authority lifecycle contract** (invariant): the per-session state in
+  `session-tool-authority.ts` has a strict, asserted lifecycle — the main hidden coupling
+  risk. (1) **Seed before read:** the exclusion set is `seed()`ed (from the initial
+  `excludedBuiltins`) at session create/resume *before* any catalog/payload/enable read;
+  a read for an unseeded session throws (never returns an empty set that reads as "nothing
+  excluded"). (2) **`coldResume()` fires exactly once on a cold resume and never on a warm
+  resume/model-switch** — the cold decision is made at one call site in the resume path,
+  not scattered. (3) **`getExcluded(id)` is preserved through every recreate/model-switch
+  path** (create/resume/setModel) by reading from the authority, not by copying a field.
+  (4) **`clear(id)` on session end**, so a later cold resume in the same process starts
+  from seed, not stale state. These four are enforced by assertions at the authority
+  boundary + a lifecycle seam test, not by convention.
 
 ## Considerations
 
@@ -325,6 +342,7 @@ the tool universe or the three-axis state in three places.
 - Auto-defer removes a tool a cold session immediately needs → it's re-enableable in one call; only defer below a conservative threshold; never on warm sessions.
 - MCP names not excludable → Phase A/B verification gate before Phase C automation.
 - **Stamp/exclusion key mismatch ⇒ auto-defer silently mis-fires** (defers a just-used tool, or never defers) → costs money with no error. Mitigated by a single `toolKey()` used by the meter, the exclusion set, and the classifier; assert-throw on an unresolvable key; and a seam test over dispatch → usage-store stamp → `coldResume` exclusion (not just the pure defer math).
+- **Authority lifecycle mis-sequencing** (read-before-seed returns a false-empty exclusion set; `coldResume` on a warm session; `getExcluded` dropped on model-switch; stale state after end) → silent wrong tool set. Mitigated by the Authority-lifecycle-contract invariant: boundary assertions (unseeded read throws) + a lifecycle seam test. Escalation seam: if lifecycle *policy* migrates into the authority, fold the shell into SessionManager (keep the three pure modules external).
 
 ## Acceptance
 
@@ -350,15 +368,15 @@ the tool universe or the three-axis state in three places.
 | A2 | Compute per-tool state inline (enabled/deferred/hard-disabled) — **as built in Phase A**; R1 retrofits this onto `classifyTool` | `src/routes/workspace-api.ts` | `mcp-server-payload.test.ts` (excluded ⇒ deferred; DEFAULT_DISABLED ⇒ hard-disabled) |
 | A3 | Applet: grey + `(disabled)` for deferred, `(off)` for hard-disabled, distinct from unobserved | `applets/mcp-servers/{script.js,style.css}` | visual |
 | R0 | **SDK surface:** extend Caco `CopilotSessionInstance` with `rpc.options.update` + `rpc.metadata.contextInfo` (compile prerequisite for B0/B2; `rpc.usage.getMetrics` only if a later step needs cumulative metrics) | `src/session-manager.ts` | compiles (tsc) |
-| R1 | **Create the tool-state authority** `src/session-tool-state.ts` pure core (branded `ToolKey` + `toolKey`, `classifyTool`, `validateEnable`, `computeColdResumeExclusions`) **and** the unified `buildToolCatalog` (single "what tools exist" view, keyed by `ToolKey`); retrofit the Phase-A payload to consume `buildToolCatalog` + `classifyTool` (removes the inline stitch/copy) | `src/session-tool-state.ts`, `src/routes/workspace-api.ts` | `toolKey` (all origins incl. event shape, unresolvable throws) + `classifyTool` + `validateEnable` + `buildToolCatalog` unit tests; payload test still green |
-| R2 | **Tool-call metering audit** (gates C): extend `recordToolCall`/`dispatch-events` tool.execution_complete branch to carry the namespaced key via `toolKey()` (from R1); assert-throw on unresolvable | `src/dispatch-events.ts`, `src/session-throughput.ts` | seam test: a tool call stamps under the same key `excludedTools` uses |
+| R1 | **Create the tool-state modules (SRP split):** `src/tool-key.ts` (branded `ToolKey` + `toolKey`, leaf), `src/tool-catalog.ts` (`buildToolCatalog` + `CatalogTool`/`ToolCatalog`), `src/session-tool-state.ts` (pure `classifyTool`/`validateEnable`/`computeColdResumeExclusions`). Retrofit the Phase-A payload onto `buildToolCatalog` + `classifyTool` (removes the inline stitch/copy) | `src/tool-key.ts`, `src/tool-catalog.ts`, `src/session-tool-state.ts`, `src/routes/workspace-api.ts` | `toolKey` (all origins incl. event shape, unresolvable throws) + `classifyTool` + `validateEnable` + `buildToolCatalog` unit tests; payload test still green |
+| R2 | **Tool-call metering audit** (gates C): extend `recordToolCall`/`dispatch-events` tool.execution_complete branch to carry the key via `toolKey()` (imports **only** `tool-key.ts`); assert-throw on unresolvable | `src/dispatch-events.ts`, `src/session-throughput.ts` | seam test: a tool call stamps under the same key `excludedTools` uses |
 | R3 | Capture the two silently-dropped signals in the existing funnels: `cacheWriteTokens` (assistant.usage) + `toolDefinitionsTokens` (usage_info) | `src/dispatch-events.ts`, `src/session-throughput.ts` (`recordUsage` param), `src/session-usage-cache.ts` (`SessionUsage` field), `src/routes/websocket.ts` | unit: cacheWrite recorded on `recordUsage`; `toolDefinitionsTokens` retained in `SessionUsage` |
 | B0 | **Telemetry harness** (measurement, not a gate): add one `SessionManager.getContextInfo` pull; measure excluded-MCP-tool token drop + reveal cache-bust from R3's captured signals — **no new subscription** | `src/session-manager.ts` (`getContextInfo`) | before/after `mcpToolsTokens` drop (via `contextInfo`) + `cacheWriteTokens` spike (evidence, non-blocking) |
-| B1 | `caco_docs section="tools"` full catalog from `buildToolCatalog` + `classifyTool` (name+desc+state, grouped) | `src/dev-docs-tool.ts` (consumes `session-tool-state`) | pure catalog-builder unit test |
-| B2 | `caco_enable_tools({names})`: the authority's `enable()` = `validateEnable(..., buildToolCatalog(), ...)` → `rpc.options.update` → mutate-on-success; **never blocks** a valid enable; monotonic within warm session | new `src/tool-reveal-tool.ts` (thin wrapper), `src/session-tool-state.ts` (`enable`) | validation unit test (reject atomic incl. hard-disabled; valid enable never rejected; two-in-turn both apply; state only on success) |
+| B1 | `caco_docs section="tools"` full catalog from `buildToolCatalog` + `classifyTool` (name+desc+state, grouped) | `src/dev-docs-tool.ts` (consumes `tool-catalog` + `session-tool-state`) | pure catalog-builder unit test |
+| B2 | **Create `src/session-tool-authority.ts`** (stateful shell, owns per-session excludedTools + `seed`/`getExcluded`/`clear`); `caco_enable_tools` → `enable()` = `validateEnable(..., buildToolCatalog(), ...)` → `rpc.options.update` → mutate-on-success; **never blocks**; monotonic within warm session. SessionManager owns the instance + injects `getSession` (write-only seam) | new `src/session-tool-authority.ts`, new `src/tool-reveal-tool.ts` (thin wrapper), `src/session-manager.ts` (own instance, seed on create/resume, recreate reads `getExcluded`) | validation unit test (reject atomic incl. hard-disabled; valid enable never rejected; two-in-turn both apply; state only on success) |
 | B3 | System-prompt line: deferred tools exist; discover via `caco_docs`, enable via `caco_enable_tools` (batch, cache warning) | `src/prompts.ts`, tool description | by-construction |
 | C1 | Active-seconds clock + per-tool `lastUsedActiveSeconds` keyed by `toolKey` (persisted, system-wide) | new `src/tool-usage-store.ts` | store unit test |
-| C2 | `coldResume()` wires `computeColdResumeExclusions` (cold-only) into the resume path | `src/session-tool-state.ts` (`coldResume`), `src/session-manager.ts` (resume), tool-usage-store | seam test: dispatch → stamp → `coldResume`; warm ⇒ `[]`; cold ⇒ stale excluded, recently-used kept |
+| C2 | `coldResume()` wires `computeColdResumeExclusions` (cold-only) into the resume path; assert the **authority lifecycle contract** (seed-before-read, coldResume once on cold only, `getExcluded` preserved through recreate/model-switch, `clear` on end) | `src/session-tool-authority.ts` (`coldResume`), `src/session-manager.ts` (resume/setModel/end), tool-usage-store | **lifecycle seam test**: seed→read; cold resume calls `coldResume` once (warm/model-switch never); model-switch preserves `getExcluded`; end clears; + dispatch → stamp → `coldResume` (warm ⇒ `[]`; cold ⇒ stale excluded, recently-used kept) |
 
 ## Rationale
 

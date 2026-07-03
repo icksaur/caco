@@ -100,8 +100,9 @@ export function applyDispatchEventEffects(
     const inputTokens = extractProperty(event, 'inputTokens');
     const outputTokens = extractProperty(event, 'outputTokens');
     const cacheReadTokens = extractProperty(event, 'cacheReadTokens');
+    const cacheWriteTokens = extractProperty(event, 'cacheWriteTokens');
     const reasoningTokens = extractProperty(event, 'reasoningTokens');
-    recordUsage(sessionId, { inputTokens, outputTokens, cacheReadTokens, reasoningTokens });
+    recordUsage(sessionId, { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens });
     deps.onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> });
   }
 

@@ -24,7 +24,7 @@ import type { SessionEvent } from '../types.js';
 export type { SessionEvent };
 import { getClientMessageHandler } from '../extension-runtime.js';
 import { watchExtensions } from '../extension-store.js';
-import { setSessionUsage, getSessionUsage } from '../session-usage-cache.js';
+import { setSessionUsage, getSessionUsage, extractSessionUsage } from '../session-usage-cache.js';
 import { ensureTerminal, writeTerminalInput, resizeTerminal, detachTerminal, killTerminal } from '../terminal-manager.js';
 import { verifyWsUpgrade } from '../security/same-origin.js';
 import { addViewer, removeViewer, getViewers } from '../session-viewers.js';
@@ -461,10 +461,8 @@ export function broadcastEvent(
   event: SessionEvent
 ): void {
   if (event.type === 'session.usage_info' && event.data) {
-    const d = event.data as { tokenLimit?: number; currentTokens?: number };
-    if (d.tokenLimit && d.currentTokens) {
-      setSessionUsage(sessionId, { tokenLimit: d.tokenLimit, currentTokens: d.currentTokens });
-    }
+    const usage = extractSessionUsage(event.data);
+    if (usage) setSessionUsage(sessionId, usage);
   }
   
   const subscribers = getViewers(sessionId);

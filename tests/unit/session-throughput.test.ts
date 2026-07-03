@@ -73,6 +73,23 @@ describe('recordUsage', () => {
     expect(t.requestCache).toBe(80);
   });
 
+  it('captures cacheWriteTokens: request + total accumulate, last = most recent turn', () => {
+    recordUsage(SID, { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 1200 });
+    recordUsage(SID, { inputTokens: 100, outputTokens: 10, cacheReadTokens: 90, cacheWriteTokens: 5 });
+    const t = getThroughput(SID)!;
+    // cache-bust oracle: a reveal turn shows a cacheWrite spike; steady turns are small.
+    expect(t.requestCacheWrite).toBe(1205);
+    expect(t.totalCacheWrite).toBe(1205);
+    expect(t.lastCacheWriteTokens).toBe(5); // most recent turn only
+  });
+
+  it('cacheWriteTokens defaults to 0 when absent (no NaN)', () => {
+    recordUsage(SID, { inputTokens: 100, outputTokens: 10 });
+    const t = getThroughput(SID)!;
+    expect(t.requestCacheWrite).toBe(0);
+    expect(t.lastCacheWriteTokens).toBe(0);
+  });
+
   it('coerces missing fields to 0 (no NaN)', () => {
     recordUsage(SID, {});
     const t = getThroughput(SID)!;

@@ -32,6 +32,12 @@ interface SessionThroughput {
   totalIn: number;
   totalCache: number;
   totalOut: number;
+  /** Cache-WRITE tokens (fresh prefix written to cache) this request + lifetime, and
+   *  the most recent turn's value. A reveal that busts the prompt-cache shows up as a
+   *  spike in lastCacheWriteTokens — the cache-bust oracle for spec-tool-reveal B0/C. */
+  requestCacheWrite: number;
+  totalCacheWrite: number;
+  lastCacheWriteTokens: number;
   rateLimitCount: number;
   lastRateLimitAt?: string;
   /** Session-lifetime estimate of context tokens saved by caco_run_workflow runs. */
@@ -138,6 +144,9 @@ function blank(): SessionThroughput {
     totalIn: 0,
     totalCache: 0,
     totalOut: 0,
+    requestCacheWrite: 0,
+    totalCacheWrite: 0,
+    lastCacheWriteTokens: 0,
     rateLimitCount: 0,
     workflowSavedTokens: 0,
     workflowRuns: 0,
@@ -180,11 +189,12 @@ function getOrCreate(sessionId: string): SessionThroughput {
 
 export function recordUsage(
   sessionId: string,
-  tokens: { inputTokens?: unknown; outputTokens?: unknown; cacheReadTokens?: unknown; reasoningTokens?: unknown },
+  tokens: { inputTokens?: unknown; outputTokens?: unknown; cacheReadTokens?: unknown; cacheWriteTokens?: unknown; reasoningTokens?: unknown },
 ): void {
   const entry = getOrCreate(sessionId);
   const input = safeInt(tokens.inputTokens);
   const cache = safeInt(tokens.cacheReadTokens);
+  const cacheWrite = safeInt(tokens.cacheWriteTokens);
   const out = safeInt(tokens.outputTokens);
   const reasoning = safeInt(tokens.reasoningTokens);
   const fresh = Math.max(0, input - cache);
@@ -194,6 +204,9 @@ export function recordUsage(
   entry.totalIn += fresh;
   entry.totalCache += cache;
   entry.totalOut += out;
+  entry.requestCacheWrite += cacheWrite;
+  entry.totalCacheWrite += cacheWrite;
+  entry.lastCacheWriteTokens = cacheWrite;
   // Each assistant.usage event is one model round trip on the critical path.
   entry.requestTurns += 1;
   entry.totalTurns += 1;
@@ -360,6 +373,8 @@ export function resetRequest(sessionId: string): void {
   entry.requestIn = 0;
   entry.requestCache = 0;
   entry.requestOut = 0;
+  entry.requestCacheWrite = 0;
+  entry.lastCacheWriteTokens = 0;
   entry.rateLimitCount = 0;
   entry.lastRateLimitAt = undefined;
   entry.requestTurns = 0;

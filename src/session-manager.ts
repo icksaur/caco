@@ -26,9 +26,10 @@ import { tokenLimitsForModel, effectiveContextTier } from './model-billing.js';
 import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './agent-command.js';
 import { buildToolCatalog, type ToolCatalog } from './tool-catalog.js';
 import { builtinKey, type ToolKey } from './tool-key.js';
-import { lookupMcpKey, learnFromMetadata } from './tool-key-registry.js';
+import { lookupMcpKey, learnFromMetadata, keysForServer } from './tool-key-registry.js';
 import { validateEnable, resolveEnableTargets } from './session-tool-state.js';
 import { excludedBuiltinNames } from './tool-registry.js';
+import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 
@@ -706,6 +707,9 @@ export class SessionManager {
     
     const sessionRef = { id: 'PENDING' };
     const tools = config.toolFactory(cwd, sessionRef);
+    // Seed exclusions = base (builtins) ∪ operator manual-defer preference (Phase D), so
+    // a manually-deferred server is hidden from a brand-new session too.
+    const seededExclusions = [...new Set<string>([...(config.excludedTools ?? []), ...this.manualDeferredKeys()])];
     
     let session: CopilotSessionInstance;
     try {
@@ -714,7 +718,7 @@ export class SessionManager {
         streaming: true,
         systemMessage: config.systemMessage,
         tools,
-        excludedTools: config.excludedTools,
+        excludedTools: seededExclusions,
         onPermissionRequest: approveAll,
         // configDirectory is the SDK's public option name (it maps internally to
         // the wire field configDir). Passing `configDir` here was silently dropped,
@@ -752,7 +756,7 @@ export class SessionManager {
       session,
       providerId: resolved.providerId,
       toolFactory: config.toolFactory,
-      excludedTools: config.excludedTools,
+      excludedTools: seededExclusions,
       lastUsedAt: Date.now(),
     });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
@@ -899,10 +903,13 @@ export class SessionManager {
     const tMcp0 = performance.now();
     const mcpServers = await loadMcpServers();
     const tMcp = performance.now() - tMcp0;
+    // Seed exclusions = base ∪ operator manual-defer preference (Phase D), re-applied on
+    // resume so a manually-deferred server stays hidden across restarts/recreations.
+    const seededExclusions = [...new Set<string>([...(config.excludedTools ?? []), ...this.manualDeferredKeys()])];
     const resumeArgs = {
       streaming: true,
       tools,
-      excludedTools: config.excludedTools,
+      excludedTools: seededExclusions,
       onPermissionRequest: approveAll,
       // See createSession: correct option name + enable file-based agent/skill/MCP
       // discovery so resumed sessions keep parity with the Copilot CLI.
@@ -990,7 +997,7 @@ export class SessionManager {
       session,
       providerId: resolved?.providerId,
       toolFactory: config.toolFactory,
-      excludedTools: config.excludedTools,
+      excludedTools: seededExclusions,
       lastUsedAt: Date.now(),
     });
     
@@ -1988,6 +1995,42 @@ export class SessionManager {
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  /** The manual-defer seed: the union of learned exclusion keys for every operator-
+   *  deferred MCP server (Phase D). Resolved from the persisted registry, so it needs no
+   *  active session and picks up any already-learned tool of a deferred server. */
+  manualDeferredKeys(): ToolKey[] {
+    const keys = new Set<ToolKey>();
+    for (const server of getDeferredServers()) for (const k of keysForServer(server)) keys.add(k);
+    return [...keys];
+  }
+
+  /**
+   * Operator manual defer/undefer of a whole MCP server (Phase D). Persists the
+   * system-wide preference, then applies it LIVE to every active session (each warm
+   * session pays a one-time cache-bust — the applet tooltip warns of this). Future
+   * sessions pick it up via the create/resume seed (`manualDeferredKeys`). Monotonic
+   * exception: unlike agent reveal/auto-defer, this MAY shrink a warm session, by
+   * explicit operator intent. Returns how many sessions were updated.
+   */
+  async setServerDeferred(serverName: string, deferred: boolean): Promise<{ affectedSessions: number; failedSessions: string[]; keys: ToolKey[] }> {
+    setServerDeferred(serverName, deferred);
+    const serverKeys = keysForServer(serverName);
+    const keySet = new Set(serverKeys);
+    let affected = 0;
+    const failedSessions: string[] = [];
+    for (const [sessionId, active] of this.activeSessions) {
+      const current = new Set<ToolKey>((active.excludedTools ?? []) as ToolKey[]);
+      const before = current.size;
+      if (deferred) for (const k of serverKeys) current.add(k);
+      else for (const k of current) if (keySet.has(k)) current.delete(k);
+      if (current.size === before) continue; // no change for this session
+      const applied = await this.setExcludedToolsLive(sessionId, [...current]);
+      if (applied.success) affected++;
+      else failedSessions.push(sessionId);
+    }
+    return { affectedSessions: affected, failedSessions, keys: serverKeys };
   }
 
   /**

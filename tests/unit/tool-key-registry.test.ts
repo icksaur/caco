@@ -8,7 +8,7 @@ vi.mock('fs', () => ({
   mkdirSync: vi.fn(),
 }));
 
-import { learnMcpKey, lookupMcpKey, learnFromMetadata, _resetRegistryForTest } from '../../src/tool-key-registry.js';
+import { learnMcpKey, lookupMcpKey, learnFromMetadata, keysForServer, _resetRegistryForTest } from '../../src/tool-key-registry.js';
 
 beforeEach(() => { _resetRegistryForTest(); store.data.clear(); });
 
@@ -42,5 +42,14 @@ describe('tool-key-registry — discovered (server,raw) → model-facing key', (
     learnMcpKey('s', 't', 'old-name');
     learnMcpKey('s', 't', 'new-name');
     expect(lookupMcpKey('s', 't')).toBe('new-name');
+  });
+
+  it('keysForServer returns all learned keys for one server (for defer-whole-server)', () => {
+    learnMcpKey('github-mcp-server', 'list_issues', 'github-mcp-server-list_issues');
+    learnMcpKey('github-mcp-server', 'web_search', 'web_search');
+    learnMcpKey('other-server', 'foo', 'other-server-foo');
+    const keys = keysForServer('github-mcp-server').sort();
+    expect(keys).toEqual(['github-mcp-server-list_issues', 'web_search'].sort());
+    expect(keysForServer('nope')).toEqual([]);
   });
 });

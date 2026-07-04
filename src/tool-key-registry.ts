@@ -77,6 +77,18 @@ export function learnFromMetadata(
   }
 }
 
+/** All learned model-facing keys for one MCP server (used by manual/auto defer to
+ *  resolve "defer this whole server" into its currently-known exclusion keys). */
+export function keysForServer(serverName: string): ToolKey[] {
+  ensureLoaded();
+  const prefix = `${serverName}\u0000`;
+  const out: ToolKey[] = [];
+  for (const [composite, key] of registry) {
+    if (composite.startsWith(prefix)) out.push(key);
+  }
+  return out;
+}
+
 /** Test-only: clear in-memory state + force reload on next access. */
 export function _resetRegistryForTest(): void {
   registry.clear();

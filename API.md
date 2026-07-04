@@ -638,6 +638,7 @@ Returns: `{ slug: "daily-backup", status: "executed", sessionId: "uuid" }`
 HTTP endpoints for applet JS to call MCP tools directly.
 
 - `GET /api/mcp/servers` - List MCP servers with status and tools (requires active SDK client)
+- `POST /api/mcp/servers/:server/defer` - Manually defer/undefer an entire MCP server's tools
 - `GET /api/mcp/tools` - List available MCP tools
 - `POST /api/mcp/read_file` - Read file contents
 - `POST /api/mcp/write_file` - Write file contents
@@ -671,6 +672,14 @@ Returns:
 ```
 
 When no SDK client is running: `{ clientRunning: false, servers: [] }`.
+
+**POST /api/mcp/servers/:server/defer** - Manually defer or undefer an entire MCP server
+
+Body: `{ "deferred": true }`
+
+Adds (or removes) every discovered tool key for the named server to the excluded-tools set of all active sessions, applied live. Deferring an MCP server drops its tool definitions from every subsequent model request (saving per-turn tokens) but costs a full context-window cache-bust on the next turn of each live session. The state is persisted so it survives restarts.
+
+Returns: `{ ok: true, server: "github", deferred: true }` (plus any fields from the manager result). On bad input: `{ ok: false, error: "deferred (boolean) required" }` (400).
 
 **GET /api/mcp/tools** - List available tools
 

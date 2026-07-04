@@ -17,6 +17,7 @@ import { builtinKey, type ToolKey } from '../tool-key.js';
 import { lookupMcpKey, learnFromMetadata } from '../tool-key-registry.js';
 import { buildToolCatalog } from '../tool-catalog.js';
 import { classifyTool } from '../session-tool-state.js';
+import { getDeferredServers } from '../manual-defer-store.js';
 import { snapshot as throughputSnapshot } from '../session-throughput.js';
 import { getSessionUsage } from '../session-usage-cache.js';
 
@@ -244,7 +245,9 @@ export function buildMcpServerPayload(
   builtinTools: BuiltinTool[] = [],
   deferredBuiltins: string[] = [],
   cacoCatalog: CacoCatalogTool[] = [],
-): Array<{ name: string; status: string; source: string | null; error: string | null; tools: PayloadTool[] }> {
+  deferredServers: string[] = [],
+): Array<{ name: string; status: string; source: string | null; error: string | null; deferred?: boolean; tools: PayloadTool[] }> {
+  const deferredServerSet = new Set(deferredServers);
   // The exclusion set as canonical ToolKeys (what classifyTool compares against).
   const excluded = new Set<ToolKey>(deferredBuiltins.map(n => builtinKey(n)));
   // Builtins present in tools.list carry a real schema → a real tokenCost; a builtin
@@ -313,6 +316,7 @@ export function buildMcpServerPayload(
     status: s.status,
     source: s.source ?? null,
     error: s.error ?? null,
+    deferred: deferredServerSet.has(s.name),
     tools: (availableByServer[s.name] ?? []).map((t): PayloadTool => {
       const key = t.key;
       const nsName = key as string;
@@ -399,6 +403,7 @@ router.get('/servers', async (_req: Request, res: Response) => {
       // it for display (the model-facing name is e.g. `bash`, not `builtin:bash`).
       excludedBuiltinNames().map(n => n.replace(/^builtin:/, '')),
       sessionManager.getCacoToolCatalog(),
+      getDeferredServers(),
     );
     // Telemetry (spec-tool-reveal B0): the SDK's ground-truth token breakdown +
     // that same session's last-turn cache split (the reveal cache-bust signal). Both
@@ -423,6 +428,27 @@ router.get('/servers', async (_req: Request, res: Response) => {
   } catch (e) {
     console.error('[MCP] Failed to list servers/tools:', e instanceof Error ? e.message : e);
     res.json({ configPath, configExists, clientRunning: true, servers: [], error: 'Failed to query SDK' });
+  }
+});
+
+/**
+ * POST /api/mcp/servers/:server/defer  { deferred: boolean }
+ * Manually defer/undefer a whole MCP server (spec-tool-reveal Phase D). Persists the
+ * system-wide preference and applies it live to every active session (each warm session
+ * pays a one-time cache-bust — the applet warns). Returns how many sessions changed.
+ */
+router.post('/servers/:server/defer', async (req: Request, res: Response) => {
+  const server = String(req.params.server);
+  const { deferred } = req.body as { deferred?: boolean };
+  if (typeof deferred !== 'boolean') {
+    res.status(400).json({ ok: false, error: 'deferred (boolean) required' });
+    return;
+  }
+  try {
+    const result = await sessionManager.setServerDeferred(server, deferred);
+    res.json({ ok: true, server, deferred, ...result });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 });
 

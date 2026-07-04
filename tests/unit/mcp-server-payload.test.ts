@@ -34,6 +34,19 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
     expect(out.map(s => s.name)).toEqual(['Built-in', 'Caco', 'github']);
   });
 
+  it('marks a manually-deferred MCP server deferred:true (only that server)', () => {
+    const out = buildMcpServerPayload(
+      [{ name: 'github', status: 'connected' }, { name: 'linear', status: 'connected' }],
+      { github: [{ key: mcpKey('github-x'), name: 'x', description: 'd', excludable: true }], linear: [] },
+      {}, [], [], [],
+      ['github'], // deferredServers
+    );
+    const github = out.find(s => s.name === 'github')!;
+    const linear = out.find(s => s.name === 'linear')!;
+    expect(github.deferred).toBe(true);
+    expect(linear.deferred).toBe(false);
+  });
+
   it('Built-in: excluded builtin from tools.list is one deferred entry (deduped), not two', () => {
     const out = buildMcpServerPayload(
       [], {}, {},

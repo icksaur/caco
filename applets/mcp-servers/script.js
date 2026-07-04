@@ -295,12 +295,26 @@ function renderMcpServer(server) {
 
   var errorHtml = server.error ? '<div class="server-error">' + escapeHtml(server.error) + '</div>' : '';
 
+  // Manual defer toggle — real MCP servers only (Built-in/Caco pseudo-servers have
+  // source:'caco'). Reflects the system-wide manual-defer DEFAULT for this server.
+  var deferHtml = '';
+  if (server.source !== 'caco') {
+    var isDeferred = server.deferred === true;
+    var deferTitle = isDeferred
+      ? 'This MCP server is manually deferred: its tool definitions are removed from every turn (saving those tokens) and it is seeded deferred into new sessions. Click to RE-ENABLE. Applies live to all active sessions.'
+      : 'Manually defer this MCP server: remove all its tool definitions from every future turn to save tokens. WARNING: applying this to a live/warm session busts the prompt cache — a one-time re-process of the ENTIRE context window of every active session on its next turn (see the token banner above). Cheap on an idle session, expensive mid-conversation. Deferred servers are re-enableable and seed into new sessions.';
+    deferHtml = '<button type="button" class="mcp-defer-btn' + (isDeferred ? ' mcp-defer-on' : '') +
+      '" data-defer-server="' + escapedName + '" data-deferred="' + (isDeferred ? '1' : '0') +
+      '" title="' + escapeAttr(deferTitle) + '">' + (isDeferred ? 'deferred' : 'defer') + '</button>';
+  }
+
   return '<div class="mcp-server-card">' +
     '<div class="mcp-server-row" data-server="' + escapedName + '">' +
       '<span class="mcp-chevron">' + chevron + '</span>' +
       icon +
       '<span class="mcp-server-name">' + escapeHtml(server.name) + '</span>' +
       '<span class="mcp-tool-count">' + toolLabel + '</span>' +
+      deferHtml +
     '</div>' +
     errorHtml +
     toolsHtml +
@@ -378,6 +392,15 @@ function toggleMcpTool(ns) {
 }
 
 mcpServerContent.addEventListener('click', function(event) {
+  // Defer toggle takes precedence and must not also collapse the row.
+  var deferBtn = event.target.closest('.mcp-defer-btn');
+  if (deferBtn) {
+    event.stopPropagation();
+    var server = deferBtn.getAttribute('data-defer-server');
+    var makeDeferred = deferBtn.getAttribute('data-deferred') !== '1';
+    setServerDeferred(server, makeDeferred, deferBtn);
+    return;
+  }
   var toolRow = event.target.closest('.mcp-tool-row');
   if (toolRow) {
     var ns = toolRow.getAttribute('data-tool');
@@ -389,6 +412,27 @@ mcpServerContent.addEventListener('click', function(event) {
   var name = row.getAttribute('data-server');
   if (name) toggleMcpServer(name);
 });
+
+async function setServerDeferred(server, deferred, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = deferred ? 'deferring…' : 'enabling…'; }
+  try {
+    var res = await fetch('/api/mcp/servers/' + encodeURIComponent(server) + '/defer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deferred: deferred })
+    });
+    var data = await res.json();
+    if (!data.ok) { alert('Defer failed: ' + (data.error || 'unknown')); }
+    else if (data.failedSessions && data.failedSessions.length) {
+      alert('Defer saved, but ' + data.failedSessions.length +
+        ' active session(s) could not be updated live — restart them to apply.');
+    }
+  } catch (err) {
+    alert('Defer failed: ' + err.message);
+  }
+  // Re-fetch to reflect the new state + updated token banner (the whole point).
+  fetchMcpServers();
+}
 
 // Refresh button: the applet is IIFE-wrapped, so the inline onclick in
 // content.html can't reach fetchMcpServers — wire it here instead.

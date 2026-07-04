@@ -246,13 +246,16 @@ each concern with one purpose and prevent `session-tool-state.ts` from becoming 
 dumping ground, the authority is **four small modules**, layered leaf-first:
 
 - **`src/tool-key.ts` (leaf, pure).** The branded `ToolKey`
-  (`string & { __brand: 'ToolKey' }`) + `toolKey(tool|event) → ToolKey`. Branding makes
-  "forgot to route through `toolKey()`" a *compile* error, not a runtime mis-key
-  (leverage-1). Forms: MCP `server/tool`, builtin `builtin:x`, Caco `caco:x`; resolving
-  the `tool.execution_complete` event shape (`toolName`/`mcpServerName`/`mcpToolName`)
-  yields the *same* key the tool's `excludedTools` entry uses; an unresolvable input
-  **throws**. **Leaf on purpose:** the usage meter (`dispatch-events`/`session-throughput`)
-  imports *only* this — so metering never depends on the catalog or the shell.
+  (`string & { __brand: 'ToolKey' }`). **A `ToolKey` IS the exact string
+  `excludedTools` matches** (verified empirically — see "Key discovery" below):
+  builtin → `builtin:<modelName>`; MCP → `<modelName>` (the model-facing name, which the
+  CLI has already server-prefixed into the flat tool namespace — e.g.
+  `github-mcp-server-actions_get`); Caco → `<modelName>` (bare). Branding makes "forgot to
+  route through the key producer" a *compile* error. **Builtin/Caco keys are derivable
+  from the model-facing name synchronously; an MCP key is NOT reconstructable from
+  `server`+`rawTool`** (the CLI's model-facing name is authoritative and irregular — e.g.
+  `web_search` has no server prefix). MCP keys are therefore **discovered**, not built (see
+  below). **Leaf on purpose:** the usage meter imports *only* this.
 - **`src/tool-catalog.ts` (pure).** `CatalogTool`, `ToolCatalog = ReadonlyMap<ToolKey,
   CatalogTool>`, and `buildToolCatalog(sources) → ToolCatalog` — the single "what tools
   exist" view. Today no such view exists: `buildMcpServerPayload` stitches three sources
@@ -287,7 +290,48 @@ dumping ground, the authority is **four small modules**, layered leaf-first:
 *route through* `buildToolCatalog` + `classifyTool` + `toolKey` instead of re-deriving
 the tool universe or the three-axis state in three places.
 
-## Invariants
+### Key discovery (Phase K) — a prerequisite correction for MCP/Caco defer
+
+**Problem (found by the C0 probe).** `excludedTools` matches a tool's **model-facing
+name**. For builtins that's `builtin:<name>` and for Caco it's the bare tool name — both
+synchronously derivable. But an **MCP tool's model-facing name is assigned by the CLI and
+is NOT reconstructable** from the `mcpServerName`/`mcpToolName` that `mcp.listTools`
+returns: it is *usually* `<server>-<rawTool>` but not always (observed: `web_search` is
+exposed bare, with no server prefix). The R1 `toolKey` MCP form (`server/tool`) therefore
+does **not** match `excludedTools` — MCP exclusion silently no-ops today (never caught
+because only builtins were ever excluded before C0). This must be fixed before any MCP
+defer (Phase C/D) can work, and it must **scale to arbitrary MCP servers**, not a
+hardcoded name set.
+
+**Design — discover keys from observation, never reconstruct.** The model-facing name is
+authoritative from exactly two runtime sources Caco already sees:
+- `getCurrentToolMetadata()` — every currently-loaded tool's `name` (model-facing) +
+  `mcpServerName`/`mcpToolName` (raw).
+- the `tool.execution_start` event — `toolName` (model-facing) + `mcpServerName`/
+  `mcpToolName` (raw). (The R2 usage-stamp seam ALREADY receives these.)
+
+Introduce a **key registry** (`src/tool-key-registry.ts`): a persisted, system-wide map
+`(mcpServerName, mcpToolName) → modelFacingKey`, learned from both sources continuously.
+The registry is the single authority that turns the catalog's raw MCP identities into real
+exclusion keys. Rules:
+- **MCP `ToolKey` = the learned model-facing name.** `toolKeyFromEvent` uses the event's
+  `toolName` directly (it *is* the model-facing name) — trivially correct, no
+  reconstruction. `getCurrentToolMetadata` populates the registry for all loaded tools.
+- **You can only defer a tool whose key is known.** A tool is only a defer candidate after
+  it has been observed at least once (its key learned). This is not a real limitation for
+  auto-defer: Phase C defers **stale** (previously-used, now-unused) tools — which are by
+  definition already observed. A never-observed tool costs nothing to leave enabled until
+  first use, at which point it becomes learnable.
+- **Deferred tools keep their learned key.** Once deferred, a tool is absent from
+  `getCurrentToolMetadata`; the persisted registry retains its key so it can be displayed
+  and re-enabled.
+- **Builtin/Caco keys stay derivable** (no registry needed): `builtin:<name>` / bare name.
+- **`toolKey({origin:'mcp', ...})` reconstruction is removed** — replaced by registry
+  lookup; a catalog entry with no learned key is marked "unknown key" (not excludable yet),
+  never given a fabricated `server/tool` key.
+
+This replaces the current guess with measured truth and scales to any server, because the
+CLI itself tells us each tool's name the first time we see it.
 
 - **`caco_enable_tools` and `caco_docs` are never excluded** (invariant): the escape
   hatch and the catalog must always be visible, or the agent can't recover a capability.
@@ -332,15 +376,14 @@ the tool universe or the three-axis state in three places.
   pull-metrics via dedicated `SessionManager` accessors (one per RPC, e.g.
   `getContextInfo`). No feature adds a second event subscription for metrics — a second
   funnel silently diverges from the first.
-- **One tool key** (invariant): the usage-stamp key, the `excludedTools` entry, and the
-  applet classification key are all produced by a single `toolKey()` returning the
-  **branded `ToolKey` type** — for **every** tool origin (MCP `server/tool`, SDK builtin
-  `builtin:x`, Caco `caco:x`, and the `tool.execution_complete` event shape that carries
-  `toolName`/`mcpServerName`/`mcpToolName`). Branding makes "used a raw string instead of
-  `toolKey()`" a compile error; an unresolvable input **throws** (never stamps/excludes
-  under a fallback). A key mismatch would make auto-defer silently mis-fire — defer a
-  just-used tool or never defer — costing money with no error path (a "measurement with no
-  error path" smell).
+- **One tool key = the `excludedTools` string** (invariant): the usage-stamp key, the
+  `excludedTools` entry, and the applet classification key are the SAME branded `ToolKey`
+  for a given tool — and that key is exactly what the CLI's `excludedTools` denylist
+  matches (the model-facing name; `builtin:<name>` for builtins). Builtin/Caco keys derive
+  from the model-facing name; **MCP keys are looked up from the learned key registry
+  (Phase K), never reconstructed** from `server`+`rawTool`. A key mismatch would make
+  defer silently mis-fire — the exact failure C0 exposed — so an MCP tool with no learned
+  key is marked "unknown/not-excludable-yet", never given a fabricated key.
 - **One classifier / one state owner** (invariant): enabled/deferred/off is defined once
   (`classifyTool` in `session-tool-state.ts`) and consumed by the applet payload, the
   `caco_docs` catalog, and enable-validation; the per-session `excludedTools` truth and
@@ -406,7 +449,14 @@ the tool universe or the three-axis state in three places.
 - Reveal thrashing (N busts) → **not** gated (never block agent work); bounded by design instead: monotonic-within-warm + batching nudge + over-reveal cap it at ≤1 bust per family per session, and the `assistant.usage` stream *measures* any residual churn to tune defer-aggressiveness at the next cold boundary.
 - Cache-bust overstated/understated → measured directly via `assistant.usage` (`cacheWriteTokens` spike on a reveal turn vs `cacheReadTokens`-dominated steady turns); ship Phase B behind the applet so the cost is observable before trusting it.
 - Auto-defer removes a tool a cold session immediately needs → it's re-enableable in one call; only defer below a conservative threshold; never on warm sessions.
-- MCP names not excludable → Phase A/B verification gate before Phase C automation.
+- MCP names not excludable → **RESOLVED by C0 probe:** `excludedTools` matches the
+  model-facing name; MCP keys are discovered via the Phase-K registry (not the broken
+  `server/tool` form). The old `server/tool` key silently no-op'd exclusion — the exact
+  "measurement with no error path" the design feared; caught by the C0 probe before ship.
+- **Unknown MCP key (never-observed tool)** → cannot be deferred until first observed
+  (its model-facing name is only knowable from the CLI at load/use time). Accepted: a
+  never-used tool isn't a defer target anyway; auto-defer only touches stale = observed
+  tools. The registry persists learned keys so deferred tools stay re-enableable.
 - **Caco tools not excludable via `excludedTools`** → C0 probe gates the Caco-allowlist part only; if it fails, Caco-tool defer is CUT from v1 (no non-revealable fallback). MCP + builtin defer proceed regardless.
 - **Cross-session over-defer (accepted footgun)** → system-wide 2-active-hour staleness + used-here protection can still defer a tool the user relies on in a *different* session if it wasn't used in the resuming session's own history. This matches the operator's chosen criteria; it is **accepted and fully recoverable** — the agent reveals it in one `caco_enable_tools` call, or the operator manual-un-defers. Called out so it isn't read as a bug.
 - **Manual defer of a warm session busts the whole window** → this is accepted and deliberate (operator override), NOT silent: the applet tooltip warns explicitly and the B0 banner shows the realized cache-write/%miss. Cheap on cold/idle sessions; the warning steers the operator to defer when not mid-conversation.
@@ -445,7 +495,9 @@ the tool universe or the three-axis state in three places.
 | B1 | `caco_docs section="tools"` full catalog from `buildToolCatalog` + `classifyTool` (name+desc+state, grouped) | `src/dev-docs-tool.ts` (consumes `tool-catalog` + `session-tool-state`) | pure catalog-builder unit test |
 | B2 | `caco_enable_tools` reveal — **as built:** authority folded INTO SessionManager (per the coupling-review escalation), `ActiveSession.excludedTools` = single truth, one success-gated `setExcludedToolsLive`; `enableTools` = resolve → reject hard-disabled → no-op already-enabled → `validateEnable` → apply; per-session reveal mutex; session-scoped catalog | `src/tool-reveal-tool.ts`, `src/session-manager.ts` (`enableTools`/`setExcludedToolsLive`/`getExcludedToolKeys`), `src/session-tool-state.ts` (`resolveEnableTargets`) | validation + success-gating + concurrent-compose + never-block no-op unit tests |
 | B3 | System-prompt line: deferred tools exist; discover via `caco_docs`, enable via `caco_enable_tools` (batch, cache warning) | `src/prompts.ts`, tool description | by-construction |
-| C0 | **Caco-exclusion probe (hard gate for the Caco-allowlist part):** verify a Caco tool is dropped by `rpc.options.update({excludedTools:[name]})` (via `getContextInfo`/getCurrentMetadata). If NOT, **cut Caco-tool defer from v1** (no pre-registration fallback); MCP+builtin proceed | investigation | before/after Caco-tool token drop; documented evidence |
+| C0 | **Excludability probe — DONE (findings recorded):** `excludedTools` matches the model-facing name. Caco tools ARE droppable (bare name) ✓; builtins via `builtin:<name>` ✓; MCP via model-facing name (NOT `server/tool`) ✓; the name is not reconstructable (`web_search` exception) → keys must be discovered (Phase K). Caco-tool defer stays in v1 | investigation (probe removed after) | before/after token drop measured (Caco −238, MCP only on model-facing key) |
+| K1 | **Key registry:** `src/tool-key-registry.ts` — persisted system-wide `(mcpServerName,mcpToolName)→modelFacingKey`, learned from `getCurrentToolMetadata` + `tool.execution_start`. **Fix `tool-key.ts`:** MCP key = registry lookup (remove `server/tool` reconstruction); `toolKeyFromEvent` MCP branch uses `evt.toolName` directly. Update R1/R2 tests to the model-facing MCP key form | new `src/tool-key-registry.ts`, `src/tool-key.ts`, `src/dispatch-events.ts` (learn on start-event), `src/session-manager.ts` (learn on getCurrentToolMetadata), tests | registry unit test (learn/persist/lookup); event key == excludedTools key (model-facing); an MCP exclusion via the learned key actually drops the tool (integration/probe-style) |
+| K2 | **Catalog uses learned keys:** `buildToolCatalog` MCP entries resolve their `ToolKey` via the registry; entries with no learned key are flagged not-yet-excludable (shown, not fabricated). Applet/enable/defer consume real keys | `src/tool-catalog.ts`, `src/session-manager.ts` (`getToolCatalog`) | catalog test: MCP key = learned model-facing; unknown-key entry flagged, not `server/tool` |
 | C1 | `DEFER_ELIGIBLE_CACO_TOOLS` allowlist (browser/applet/surface) + persistent system-wide usage store: active-seconds clock + per-tool `lastUsedActiveSeconds` keyed by `toolKey`, fed by R2 `recordToolUse` | `src/tool-registry.ts`, new `src/tool-usage-store.ts` | store unit test (stamp/advance/persist); eligibility set |
 | C2 | Cold-resume auto-defer: at cold resume compute `computeColdResumeExclusions` over eligible+stale tools (threshold **2 active-hours**), minus the session's used-here set, union the manual-defer set, seed into `excludedTools`. Warm/model-switch never auto-mutated | `src/session-manager.ts` (resume seed path), `src/tool-usage-store.ts` | **seam test**: dispatch → stamp → cold resume excludes stale eligible, keeps used-here + non-eligible; warm ⇒ unchanged |
 | D1 | **Manual defer (applet):** per-MCP-server defer toggle in mcp-servers applet; `setExcludedToolsLive` ADD path (`deferServer`), applied live to all active sessions + persisted system-wide seed; tooltip warns warm-session full-window cache cost | `applets/mcp-servers/{content.html,script.js,style.css}`, `src/routes/workspace-api.ts` (defer/undefer endpoint), `src/session-manager.ts` (`deferTools` broadcast), new system-wide manual-defer store | endpoint unit test (add/remove server tools to excluded); visual (button + tooltip) |

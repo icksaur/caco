@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { classifyTool, validateEnable, computeColdResumeExclusions, resolveEnableTargets } from '../../src/session-tool-state.js';
-import { toolKey, type ToolKey } from '../../src/tool-key.js';
+import { builtinKey, cacoKey, mcpKey, type ToolKey } from '../../src/tool-key.js';
 import type { CatalogTool, ToolCatalog } from '../../src/tool-catalog.js';
 
 const k = {
-  bash: toolKey({ origin: 'builtin', name: 'bash' }),
-  view: toolKey({ origin: 'builtin', name: 'view' }),
-  oauth: toolKey({ origin: 'caco', name: 'register_mcp_server' }),
-  issues: toolKey({ origin: 'mcp', serverName: 'github', toolName: 'list_issues' }),
+  bash: builtinKey('bash'),
+  view: builtinKey('view'),
+  oauth: cacoKey('register_mcp_server'),
+  issues: mcpKey('github-list_issues'),
 };
 
 function cat(entries: Array<Partial<CatalogTool> & { key: ToolKey }>): ToolCatalog {
@@ -114,12 +114,12 @@ describe('resolveEnableTargets — agent-typed name/key → ToolKey', () => {
   });
 
   it('resolves a full ToolKey verbatim', () => {
-    const r = resolveEnableTargets(['github/list_issues'], catalog);
+    const r = resolveEnableTargets(['github-list_issues'], catalog);
     expect(r).toEqual({ ok: true, keys: [k.issues] });
   });
 
   it('resolves a batch (display + key mixed)', () => {
-    const r = resolveEnableTargets(['bash', 'github/list_issues'], catalog);
+    const r = resolveEnableTargets(['bash', 'github-list_issues'], catalog);
     expect(r).toEqual({ ok: true, keys: [k.bash, k.issues] });
   });
 
@@ -131,8 +131,8 @@ describe('resolveEnableTargets — agent-typed name/key → ToolKey', () => {
 
   it('errors on an ambiguous display name shared across origins (asks for the full key)', () => {
     const dup = cat([
-      { key: toolKey({ origin: 'builtin', name: 'search' }), name: 'search', origin: 'builtin' },
-      { key: toolKey({ origin: 'mcp', serverName: 'gh', toolName: 'search' }), name: 'search', origin: 'mcp' },
+      { key: builtinKey('search'), name: 'search', origin: 'builtin' },
+      { key: mcpKey('gh-search'), name: 'search', origin: 'mcp' },
     ]);
     const r = resolveEnableTargets(['search'], dup);
     expect(r.ok).toBe(false);

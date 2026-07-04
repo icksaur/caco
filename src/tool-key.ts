@@ -1,55 +1,54 @@
 /**
  * The one canonical tool identity. A branded string so a raw string cannot be
- * used where a key is required — routing through `toolKey()` is enforced at
+ * used where a key is required — routing through the key producers is enforced at
  * compile time (spec-tool-reveal: "one tool key" invariant). Leaf module: the
  * usage meter, the exclusion set, the catalog, and the classifier all import
- * ONLY this, so metering never depends on the catalog or the authority shell.
+ * ONLY this, so metering never depends on the catalog or the shell.
  *
- * Canonical forms are IDENTICAL to the SDK's `excludedTools` strings for the two
- * excludable origins, so a ToolKey is the exclusion string with no boundary
- * conversion: MCP → `server/tool` (the SDK namespacedName), builtin →
- * `builtin:name` (the DEFAULT_EXCLUDED_BUILTINS form). Caco → `caco:name`
- * (Caco tools are hard-disabled pre-registration, not excluded, but still get a
- * stable stamp key).
+ * A ToolKey IS the exact string the CLI's `excludedTools` denylist matches (verified
+ * empirically via the C0 probe):
+ *   - builtin → `builtin:<name>`   (the documented DEFAULT_EXCLUDED_BUILTINS form)
+ *   - caco    → `<name>`           (bare model-facing name = the defineTool name)
+ *   - mcp     → `<modelFacingName>` (the CLI-assigned model-facing name)
+ *
+ * Builtin and Caco keys are derivable here. An MCP key is NOT reconstructable from
+ * (server, rawTool) — the model-facing name is authoritative and irregular (e.g.
+ * `web_search` has no server prefix) — so MCP keys are DISCOVERED via tool-key-registry
+ * and passed in as already-resolved model-facing names. This module never invents an MCP
+ * key from parts.
  */
 
 export type ToolKey = string & { readonly __brand: 'ToolKey' };
 
 export type ToolOrigin = 'mcp' | 'builtin' | 'caco';
 
-export type ToolDescriptor =
-  | { origin: 'mcp'; serverName: string; toolName: string }
-  | { origin: 'builtin'; name: string }
-  | { origin: 'caco'; name: string };
-
-/** Resolve a tool descriptor (origin known) to its canonical key. Throws on
- *  missing identity fields rather than fabricating a key under a fallback. */
-export function toolKey(d: ToolDescriptor): ToolKey {
-  switch (d.origin) {
-    case 'mcp': {
-      if (!d.serverName || !d.toolName) {
-        throw new Error(`toolKey: mcp descriptor missing serverName/toolName (${d.serverName}/${d.toolName})`);
-      }
-      return `${d.serverName}/${d.toolName}` as ToolKey;
-    }
-    case 'builtin': {
-      const bare = stripBuiltinPrefix(d.name);
-      if (!bare) throw new Error('toolKey: builtin descriptor missing name');
-      return `builtin:${bare}` as ToolKey;
-    }
-    case 'caco': {
-      if (!d.name) throw new Error('toolKey: caco descriptor missing name');
-      return `caco:${d.name}` as ToolKey;
-    }
-  }
-}
-
 function stripBuiltinPrefix(name: string): string {
   return name.startsWith('builtin:') ? name.slice('builtin:'.length) : name;
 }
 
+/** Builtin exclusion key: `builtin:<name>` (idempotent if already prefixed). Throws empty. */
+export function builtinKey(name: string): ToolKey {
+  const bare = stripBuiltinPrefix(name);
+  if (!bare) throw new Error('builtinKey: empty name');
+  return `builtin:${bare}` as ToolKey;
+}
+
+/** Caco exclusion key: the bare model-facing (defineTool) name. Throws empty. */
+export function cacoKey(name: string): ToolKey {
+  if (!name) throw new Error('cacoKey: empty name');
+  return name as ToolKey;
+}
+
+/** MCP exclusion key: the model-facing name verbatim (as DISCOVERED from observation —
+ *  never reconstructed from server/tool here). Throws empty. */
+export function mcpKey(modelFacingName: string): ToolKey {
+  if (!modelFacingName) throw new Error('mcpKey: empty model-facing name');
+  return modelFacingName as ToolKey;
+}
+
 /** Shape of a `tool.execution_start` event's data that identifies the tool.
- *  `mcpServerName`/`mcpToolName` are present only for MCP-backed tools. */
+ *  `mcpServerName`/`mcpToolName` are present only for MCP-backed tools; `toolName`
+ *  is the model-facing name for ALL origins. */
 export interface ToolStartEventShape {
   toolName?: string;
   mcpServerName?: string;
@@ -57,23 +56,16 @@ export interface ToolStartEventShape {
 }
 
 /**
- * Resolve a `tool.execution_start` event to its canonical ToolKey — the SAME key
- * the tool's `excludedTools` entry and catalog entry use. This is the risky seam
- * the whole feature hinges on: a mis-resolved key silently mis-fires auto-defer.
- *
- * Disambiguation (only `tool.execution_start` carries identity — `complete` does not):
- * - MCP: `mcpServerName` AND `mcpToolName` present → `server/tool` (raw MCP name, not
- *   the model-facing `toolName`, so it matches the namespacedName in `excludedTools`).
- * - Caco vs builtin: a bare `toolName` is a Caco tool iff it is in `cacoToolNames`
- *   (the known registered set) → `caco:name`; otherwise a SDK builtin → `builtin:name`.
- * Throws on a missing `toolName` rather than fabricating a key.
+ * Resolve a `tool.execution_start` event to its canonical ToolKey — the SAME key the
+ * tool's `excludedTools` entry uses. `toolName` IS the model-facing name for every origin,
+ * so MCP and Caco resolve to it directly and only builtins take the `builtin:` prefix.
+ * Disambiguation: MCP iff `mcpServerName` present; else Caco iff the name is a known Caco
+ * tool; else builtin. Throws on a missing `toolName` (never fabricates).
  */
 export function toolKeyFromEvent(evt: ToolStartEventShape, cacoToolNames: ReadonlySet<string>): ToolKey {
-  if (evt.mcpServerName && evt.mcpToolName) {
-    return toolKey({ origin: 'mcp', serverName: evt.mcpServerName, toolName: evt.mcpToolName });
-  }
   const name = evt.toolName;
   if (!name) throw new Error('toolKeyFromEvent: event carries no toolName');
-  if (cacoToolNames.has(name)) return toolKey({ origin: 'caco', name });
-  return toolKey({ origin: 'builtin', name });
+  if (evt.mcpServerName) return mcpKey(name);
+  if (cacoToolNames.has(name)) return cacoKey(name);
+  return builtinKey(name);
 }

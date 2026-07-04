@@ -121,7 +121,7 @@ export function formatToolCatalog(catalog: ToolCatalog, excluded: ReadonlySet<To
   for (const t of catalog.values()) {
     const state = classifyTool(t.key, { excluded, hardDisabled: t.hardDisabled });
     const desc = (t.description || '').split('\n')[0].trim();
-    const group = t.origin === 'caco' ? 'Caco' : t.origin === 'builtin' ? 'Built-in' : `MCP: ${t.key.split('/')[0]}`;
+    const group = t.origin === 'caco' ? 'Caco' : t.origin === 'builtin' ? 'Built-in' : `MCP: ${t.server ?? 'unknown'}`;
     push(group, `- \`${t.name}\` — ${desc || '(no description)'} [${state}]`);
   }
   const header = [

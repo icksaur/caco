@@ -14,6 +14,7 @@ import type { GitEditPoller } from './git-edit-poller.js';
 import { extractProperty } from './sdk-normalizer.js';
 import { recordUsage, recordRateLimit, recordToolCall, recordToolUse, snapshot } from './session-throughput.js';
 import { toolKeyFromEvent } from './tool-key.js';
+import { learnMcpKey } from './tool-key-registry.js';
 import { extractActionOptions } from './offer-action-parse.js';
 import { updateSessionMeta } from './storage.js';
 
@@ -74,14 +75,12 @@ export function applyDispatchEventEffects(
     // A resolution failure must not crash dispatch — log loudly (a measurement WITH an
     // error path) rather than fabricate or swallow silently.
     try {
-      const key = toolKeyFromEvent(
-        {
-          toolName,
-          mcpServerName: eventData.mcpServerName as string | undefined,
-          mcpToolName: eventData.mcpToolName as string | undefined,
-        },
-        deps.cacoToolNames(),
-      );
+      const mcpServerName = eventData.mcpServerName as string | undefined;
+      const mcpToolName = eventData.mcpToolName as string | undefined;
+      // Learn this MCP tool's model-facing key (toolName IS the model-facing name) so
+      // the catalog/defer paths can resolve its exclusion key even after it's deferred.
+      if (mcpServerName && mcpToolName && toolName) learnMcpKey(mcpServerName, mcpToolName, toolName);
+      const key = toolKeyFromEvent({ toolName, mcpServerName, mcpToolName }, deps.cacoToolNames());
       recordToolUse(sessionId, key);
     } catch (e) {
       console.error(`[TOOLS] could not resolve tool key for usage stamp (tool=${String(toolName)}):`, e instanceof Error ? e.message : e);

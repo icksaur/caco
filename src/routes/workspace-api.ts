@@ -13,7 +13,8 @@ import { homedir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
 import { sessionManager } from '../session-manager.js';
 import { excludedBuiltinNames } from '../tool-registry.js';
-import { toolKey, type ToolKey } from '../tool-key.js';
+import { builtinKey, type ToolKey } from '../tool-key.js';
+import { lookupMcpKey, learnFromMetadata } from '../tool-key-registry.js';
 import { buildToolCatalog } from '../tool-catalog.js';
 import { classifyTool } from '../session-tool-state.js';
 import { snapshot as throughputSnapshot } from '../session-throughput.js';
@@ -165,6 +166,8 @@ interface McpServerStatus {
 }
 
 interface AvailableTool {
+  /** Pre-resolved model-facing ToolKey (from the tool-key-registry). */
+  key: ToolKey;
   name: string;
   description: string;
 }
@@ -241,13 +244,13 @@ export function buildMcpServerPayload(
   cacoCatalog: CacoCatalogTool[] = [],
 ): Array<{ name: string; status: string; source: string | null; error: string | null; tools: PayloadTool[] }> {
   // The exclusion set as canonical ToolKeys (what classifyTool compares against).
-  const excluded = new Set<ToolKey>(deferredBuiltins.map(n => toolKey({ origin: 'builtin', name: n })));
+  const excluded = new Set<ToolKey>(deferredBuiltins.map(n => builtinKey(n)));
   // Builtins present in tools.list carry a real schema → a real tokenCost; a builtin
   // known only by an excluded name (e.g. powershell on a non-Windows host) has no
   // schema → tokenCost stays null (never fabricated).
-  const listedBuiltinKeys = new Set<ToolKey>(builtinTools.map(t => toolKey({ origin: 'builtin', name: t.name })));
+  const listedBuiltinKeys = new Set<ToolKey>(builtinTools.map(t => builtinKey(t.name)));
   const bareDeferred = deferredBuiltins
-    .filter(n => !listedBuiltinKeys.has(toolKey({ origin: 'builtin', name: n })))
+    .filter(n => !listedBuiltinKeys.has(builtinKey(n)))
     .map(n => ({ name: n, description: '' }));
 
   const catalog = buildToolCatalog({
@@ -309,7 +312,7 @@ export function buildMcpServerPayload(
     source: s.source ?? null,
     error: s.error ?? null,
     tools: (availableByServer[s.name] ?? []).map((t): PayloadTool => {
-      const key = toolKey({ origin: 'mcp', serverName: s.name, toolName: t.name });
+      const key = t.key;
       const nsName = key as string;
       const obs = observedByKey[nsName];
       // Presence in the observed set = observed (the tool resolved into the turn).
@@ -352,30 +355,37 @@ router.get('/servers', async (_req: Request, res: Response) => {
   }
 
   try {
-    const mcpServers = await sessionManager.listMcpServers();
+    // Thread ONE consistent target session (most-recent) through the MCP listing,
+    // observed metadata (key learning), and context-info calls, so a tool loaded in
+    // that session isn't omitted because a different session's metadata was inspected.
+    const target = sessionManager.mostRecentActiveSessionId() ?? undefined;
+    const mcpServers = await sessionManager.listMcpServers(target);
     // Available tools (name+description) per MCP server; built-in tools (full
     // schema) from tools.list; observed schema from the resolved per-turn snapshot;
     // ground-truth context-window token breakdown (SDK's own accounting).
     const [entries, builtinTools, observed, ctx] = await Promise.all([
-      Promise.all(mcpServers.map(async s => [s.name, await sessionManager.listMcpTools(s.name)] as const)),
+      Promise.all(mcpServers.map(async s => [s.name, await sessionManager.listMcpTools(s.name, target)] as const)),
       sessionManager.listBuiltinTools(),
-      sessionManager.getCurrentToolMetadata(),
+      sessionManager.getCurrentToolMetadata(target),
       sessionManager.getContextInfo(),
     ]);
-    const availableByServer = Object.fromEntries(entries);
-    // Index observed metadata under every alias it might be matched by, so a
-    // difference between the model-facing name (getCurrentMetadata) and the raw
-    // MCP name (mcp.listTools) doesn't leave a loaded tool showing "unobserved".
-    // Keys tried by the payload builder: `${server}/${toolName}`.
+    const rawByServer = Object.fromEntries(entries);
+    // Learn model-facing MCP keys from the resolved metadata, then resolve each listed
+    // raw MCP tool to its discovered key (omit — never fabricate — any not yet learned).
+    learnFromMetadata(observed);
+    const availableByServer: Record<string, AvailableTool[]> = {};
+    for (const [server, tools] of Object.entries(rawByServer)) {
+      availableByServer[server] = tools
+        .map(t => { const key = lookupMcpKey(server, t.name); return key ? { key, name: t.name, description: t.description } : null; })
+        .filter((t): t is AvailableTool => t !== null);
+    }
+    // Index observed metadata by the canonical model-facing key (what the payload's MCP
+    // branch looks up) plus its raw name as a fallback alias.
     const observedByKey: Record<string, ObservedMeta> = {};
     for (const m of observed) {
       const meta: ObservedMeta = { name: m.name, description: m.description, parameters: m.input_schema, deferLoading: m.deferLoading };
-      const aliases = new Set<string>();
-      if (m.mcpServerName && m.mcpToolName) aliases.add(`${m.mcpServerName}/${m.mcpToolName}`);
-      if (m.mcpServerName) aliases.add(`${m.mcpServerName}/${m.name}`);
-      if (m.namespacedName) aliases.add(m.namespacedName);
-      if (aliases.size === 0) aliases.add(m.name);
-      for (const k of aliases) observedByKey[k] = meta;
+      observedByKey[m.name] = meta; // model-facing name == the MCP ToolKey
+      if (m.namespacedName) observedByKey[m.namespacedName] = meta;
     }
     const servers = buildMcpServerPayload(
       mcpServers, availableByServer, observedByKey, builtinTools,

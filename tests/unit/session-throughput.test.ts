@@ -14,7 +14,8 @@ import {
   snapshot,
   clearSession,
 } from '../../src/session-throughput.js';
-import { toolKey } from '../../src/tool-key.js';
+import { mcpKey, builtinKey, cacoKey } from '../../src/tool-key.js';
+
 
 const SID = 'test-session-abc';
 
@@ -25,8 +26,8 @@ beforeEach(() => {
 describe('recordToolUse / getToolsUsed — per-session used-key set', () => {
   it('records keys and dedupes; unknown session is empty', () => {
     expect(getToolsUsed('nope').size).toBe(0);
-    const k1 = toolKey({ origin: 'mcp', serverName: 'github', toolName: 'list_issues' });
-    const k2 = toolKey({ origin: 'builtin', name: 'view' });
+    const k1 = mcpKey('github-list_issues');
+    const k2 = builtinKey('view');
     recordToolUse(SID, k1);
     recordToolUse(SID, k2);
     recordToolUse(SID, k1); // dupe
@@ -37,7 +38,7 @@ describe('recordToolUse / getToolsUsed — per-session used-key set', () => {
   });
 
   it('clearSession drops the used set (no stale carryover on session end)', () => {
-    recordToolUse(SID, toolKey({ origin: 'caco', name: 'caco_docs' }));
+    recordToolUse(SID, cacoKey('caco_docs'));
     expect(getToolsUsed(SID).size).toBe(1);
     clearSession(SID);
     expect(getToolsUsed(SID).size).toBe(0);

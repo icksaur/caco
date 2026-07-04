@@ -56,6 +56,12 @@ vi.mock('../../src/provider-registry.js', () => ({
 }));
 vi.mock('../../src/quota-poller.js', () => ({ pollQuota: vi.fn() }));
 vi.mock('../../src/memory-tool.js', () => ({ formatMemoryForPrompt: vi.fn(() => '') }));
+// Registry: resolve the github list_issues raw identity to its model-facing key.
+vi.mock('../../src/tool-key-registry.js', () => ({
+  lookupMcpKey: vi.fn((server: string, raw: string) => (server === 'github' && raw === 'list_issues' ? 'github-list_issues' : undefined)),
+  learnMcpKey: vi.fn(),
+  learnFromMetadata: vi.fn(),
+}));
 
 interface FakeActive {
   cwd: string;
@@ -76,6 +82,7 @@ function stubCatalog(manager: unknown) {
     async () => [{ name: 'list_issues', description: 'List issues.' }];
   (manager as { listBuiltinTools: () => Promise<unknown[]> }).listBuiltinTools =
     async () => [{ name: 'bash', description: 'Run a shell command.' }, { name: 'view', description: 'Read.' }];
+  (manager as { getCurrentToolMetadata: () => Promise<unknown[]> }).getCurrentToolMetadata = async () => [];
 }
 
 async function makeManager(update: ReturnType<typeof vi.fn>, excluded: string[]) {
@@ -184,10 +191,10 @@ describe('SessionManager.enableTools — reveal path (B2)', () => {
     expect(active.get(SID)!.excludedTools).toEqual(['builtin:powershell']);
   });
 
-  it('enables an MCP tool by full key', async () => {
+  it('enables an MCP tool by its model-facing key', async () => {
     const update = vi.fn(async () => ({ success: true }));
-    const { manager } = await makeManager(update, ['github/list_issues']);
-    const r = await manager.enableTools(SID, ['github/list_issues']);
+    const { manager } = await makeManager(update, ['github-list_issues']);
+    const r = await manager.enableTools(SID, ['github-list_issues']);
     expect(r.ok).toBe(true);
     expect(update).toHaveBeenCalledWith({ excludedTools: [] });
   });

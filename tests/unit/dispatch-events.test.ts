@@ -38,9 +38,14 @@ vi.mock('../../src/session-throughput.js', () => ({
   recordToolUse: (...args: unknown[]) => recordToolUse(...(args as [])),
   snapshot: (...args: unknown[]) => snapshotMock(...(args as [])),
 }));
+vi.mock('../../src/tool-key-registry.js', () => ({
+  learnMcpKey: vi.fn(),
+  lookupMcpKey: vi.fn(() => undefined),
+  learnFromMetadata: vi.fn(),
+}));
 
 import { applyDispatchEventEffects, setGitEditPoller } from '../../src/dispatch-events.js';
-import { toolKey } from '../../src/tool-key.js';
+import { mcpKey, cacoKey, builtinKey } from '../../src/tool-key.js';
 
 const SID = 'session-1';
 
@@ -322,33 +327,33 @@ describe('applyDispatchEventEffects', () => {
       return { autoAddFileContext: vi.fn(), onEvent: vi.fn(), cacoToolNames: () => cacoNames };
     }
 
-    it('stamps an MCP tool under the SAME key excludedTools uses (server/tool)', () => {
+    it('stamps an MCP tool under the model-facing key (what excludedTools matches)', () => {
       applyDispatchEventEffects(SID, {
         type: 'tool.execution_start',
         data: { toolName: 'github-mcp-server-list_issues', mcpServerName: 'github-mcp-server', mcpToolName: 'list_issues' },
       } as never, depsWithCaco());
-      expect(recordToolUse).toHaveBeenCalledWith(SID, toolKey({ origin: 'mcp', serverName: 'github-mcp-server', toolName: 'list_issues' }));
+      expect(recordToolUse).toHaveBeenCalledWith(SID, mcpKey('github-mcp-server-list_issues'));
     });
 
-    it('stamps a bare Caco tool as caco:name (disambiguated)', () => {
+    it('stamps a bare Caco tool as its bare name (disambiguated)', () => {
       applyDispatchEventEffects(SID, {
         type: 'tool.execution_start', data: { toolName: 'caco_docs' },
       } as never, depsWithCaco());
-      expect(recordToolUse).toHaveBeenCalledWith(SID, toolKey({ origin: 'caco', name: 'caco_docs' }));
+      expect(recordToolUse).toHaveBeenCalledWith(SID, cacoKey('caco_docs'));
     });
 
     it('stamps a bare non-Caco tool as builtin:name', () => {
       applyDispatchEventEffects(SID, {
         type: 'tool.execution_start', data: { toolName: 'grep' },
       } as never, depsWithCaco());
-      expect(recordToolUse).toHaveBeenCalledWith(SID, toolKey({ origin: 'builtin', name: 'grep' }));
+      expect(recordToolUse).toHaveBeenCalledWith(SID, builtinKey('grep'));
     });
 
     it('with an empty cacoToolNames set, a bare tool stamps as builtin (not caco)', () => {
       applyDispatchEventEffects(SID, {
         type: 'tool.execution_start', data: { toolName: 'grep' },
       } as never, makeDeps());
-      expect(recordToolUse).toHaveBeenCalledWith(SID, toolKey({ origin: 'builtin', name: 'grep' }));
+      expect(recordToolUse).toHaveBeenCalledWith(SID, builtinKey('grep'));
     });
 
     it('logs but does not throw when the tool key is unresolvable (no toolName)', () => {

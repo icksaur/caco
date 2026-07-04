@@ -25,7 +25,8 @@ import { thresholdForBudget, type ModelTokenLimits } from './context-budget.js';
 import { tokenLimitsForModel, effectiveContextTier } from './model-billing.js';
 import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './agent-command.js';
 import { buildToolCatalog, type ToolCatalog } from './tool-catalog.js';
-import { toolKey, type ToolKey } from './tool-key.js';
+import { builtinKey, type ToolKey } from './tool-key.js';
+import { lookupMcpKey, learnFromMetadata } from './tool-key-registry.js';
 import { validateEnable, resolveEnableTargets } from './session-tool-state.js';
 import { excludedBuiltinNames } from './tool-registry.js';
 
@@ -1821,13 +1822,15 @@ export class SessionManager {
   /**
    * Resolved per-turn tool metadata (session.tools.getCurrentMetadata) — the
    * OBSERVED set, carrying `input_schema`. Deferred/unloaded tools are absent
-   * until a request loads them. Empty on no session/error/uninitialized.
+   * until a request loads them. Empty on no session/error/uninitialized. Reads the
+   * given session when `sessionId` is provided (so callers that scope other queries
+   * to a target session learn keys from the SAME session), else the most-recent.
    */
-  async getCurrentToolMetadata(): Promise<CurrentToolMetadata[]> {
-    const recent = this.mostRecentActiveSession();
-    if (!recent) return [];
+  async getCurrentToolMetadata(sessionId?: string): Promise<CurrentToolMetadata[]> {
+    const active = sessionId ? this.activeSessions.get(sessionId) : this.mostRecentActiveSession()?.active;
+    if (!active) return [];
     try {
-      const result = await recent.active.session.rpc.tools.getCurrentMetadata();
+      const result = await active.session.rpc.tools.getCurrentMetadata();
       return result.tools ?? [];
     } catch (e) {
       console.error('[MCP] Failed to get current tool metadata:', e instanceof Error ? e.message : e);
@@ -1848,6 +1851,13 @@ export class SessionManager {
       if (!best || active.lastUsedAt > best.active.lastUsedAt) best = { sessionId, active };
     }
     return best;
+  }
+
+  /** The most-recently-used active session's id (or null). Public so route/catalog
+   *  callers can thread ONE consistent target session through listMcpServers +
+   *  getCurrentToolMetadata + getContextInfo (avoids mixing sessions when learning keys). */
+  mostRecentActiveSessionId(): string | null {
+    return this.mostRecentActiveSession()?.sessionId ?? null;
   }
 
   /**
@@ -1899,30 +1909,43 @@ export class SessionManager {
    * session-level MCP exclusions join it in a later phase.
    */
   async getToolCatalog(sessionId?: string): Promise<{ catalog: ToolCatalog; excluded: Set<ToolKey> }> {
-    const mcpServers = await this.listMcpServers(sessionId);
-    const mcp = await Promise.all(
-      mcpServers.map(async s => ({ serverName: s.name, tools: await this.listMcpTools(s.name, sessionId) })),
-    );
+    // Resolve ONE target session and thread it through every query below, so key
+    // learning (from that session's getCurrentToolMetadata) matches the MCP tools we
+    // list — otherwise a tool loaded in the target session could be omitted because a
+    // DIFFERENT session's metadata was inspected.
+    const target = sessionId ?? this.mostRecentActiveSessionId() ?? undefined;
+    const mcpServers = await this.listMcpServers(target);
     const listedBuiltins = await this.listBuiltinTools();
-    // The exclusion set for classifyTool display: the target session's live set when a
-    // session is given (enable path), else the process-level builtin default (the global
-    // applet/catalog view before any session-specific reveals).
+    // Learn model-facing MCP keys from the resolved metadata of currently-loaded tools
+    // (the authoritative source) before resolving the catalog. Persisted keys cover
+    // previously-observed tools that are now deferred/absent.
+    const observed = await this.getCurrentToolMetadata(target);
+    learnFromMetadata(observed);
+    const mcp = await Promise.all(
+      mcpServers.map(async s => {
+        const raw = await this.listMcpTools(s.name, target);
+        // Resolve each raw MCP tool to its discovered model-facing key; omit (don't
+        // fabricate) any not yet learned — they appear once first observed.
+        const tools = raw
+          .map(t => { const key = lookupMcpKey(s.name, t.name); return key ? { key, name: t.name, description: t.description } : null; })
+          .filter((t): t is { key: ToolKey; name: string; description: string } => t !== null);
+        return { serverName: s.name, tools };
+      }),
+    );
+    // The exclusion set for classifyTool: the target session's live set (already ToolKeys)
+    // when a session is given, else the process-level builtin default (`builtin:x` forms).
     const excludedRaw = sessionId
       ? this.getExcludedToolKeys(sessionId).map(k => k as string)
       : excludedBuiltinNames();
-    // Canonicalize each exclusion entry: MCP keys (contain '/') pass through as-is;
-    // builtin names normalize to `builtin:x` (tolerating a missing/duplicate prefix).
-    // Caco tools are hard-disabled (never excluded), so only builtin/mcp appear here.
-    const asKey = (n: string): ToolKey => (n.includes('/') ? (n as ToolKey) : toolKey({ origin: 'builtin', name: n }));
-    const excluded = new Set<ToolKey>(excludedRaw.map(asKey));
-    // An excluded BUILTIN that tools.list doesn't return (e.g. the powershell family
-    // on a non-Windows host) would otherwise be ABSENT from the catalog rather than
-    // shown as deferred. Append bare entries for those (builtins only — MCP tools come
-    // from listMcpTools), deduped against the listed ones. Mirrors the applet.
-    const listedKeys = new Set(listedBuiltins.map(t => toolKey({ origin: 'builtin', name: t.name })));
+    const excluded = new Set<ToolKey>(excludedRaw as ToolKey[]);
+    // An excluded BUILTIN that tools.list doesn't return (e.g. the powershell family on a
+    // non-Windows host) would otherwise be ABSENT from the catalog rather than shown as
+    // deferred. Append bare entries for those (builtin exclusions = `builtin:` forms),
+    // deduped against the listed ones. Mirrors the applet.
+    const listedKeys = new Set(listedBuiltins.map(t => builtinKey(t.name)));
     const bareExcluded = excludedRaw
-      .filter(n => !n.includes('/'))
-      .filter(n => !listedKeys.has(toolKey({ origin: 'builtin', name: n })))
+      .filter(n => n.startsWith('builtin:'))
+      .filter(n => !listedKeys.has(builtinKey(n)))
       .map(n => ({ name: n.replace(/^builtin:/, ''), description: '' }));
     const catalog = buildToolCatalog({
       caco: this.getCacoToolCatalog().map(c => ({

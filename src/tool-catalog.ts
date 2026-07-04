@@ -12,7 +12,7 @@
  */
 
 import type { ToolKey } from './tool-key.js';
-import { toolKey } from './tool-key.js';
+import { builtinKey, cacoKey } from './tool-key.js';
 
 export interface CatalogTool {
   key: ToolKey;
@@ -20,6 +20,9 @@ export interface CatalogTool {
   name: string;
   description: string;
   origin: 'caco' | 'builtin' | 'mcp';
+  /** MCP server name (origin==='mcp' only) — for grouping, since the key (a model-facing
+   *  name) is no longer parseable into server+tool. */
+  server?: string;
   /** DEFAULT_DISABLED_TOOLS (filtered pre-registration) → not live-revealable. */
   hardDisabled: boolean;
   parameters?: Record<string, unknown>;
@@ -33,7 +36,10 @@ export type ToolCatalog = ReadonlyMap<ToolKey, CatalogTool>;
 export interface CatalogSources {
   caco: Array<{ name: string; description: string; hardDisabled: boolean; parameters?: Record<string, unknown> }>;
   builtins: Array<{ name: string; description: string; parameters?: Record<string, unknown>; instructions?: string }>;
-  mcp: Array<{ serverName: string; tools: Array<{ name: string; description: string }> }>;
+  /** MCP tools carry a PRE-RESOLVED model-facing `key` (from the tool-key-registry, via
+   *  the caller). A tool whose key has not yet been learned is omitted by the caller
+   *  rather than given a fabricated key — the catalog never reconstructs an MCP key. */
+  mcp: Array<{ serverName: string; tools: Array<{ key: ToolKey; name: string; description: string }> }>;
 }
 
 export function buildToolCatalog(sources: CatalogSources): ToolCatalog {
@@ -42,18 +48,15 @@ export function buildToolCatalog(sources: CatalogSources): ToolCatalog {
     if (!map.has(t.key)) map.set(t.key, t);
   };
   for (const c of sources.caco) {
-    const key = toolKey({ origin: 'caco', name: c.name });
-    add({ key, name: c.name, description: c.description, origin: 'caco', hardDisabled: c.hardDisabled, parameters: c.parameters });
+    add({ key: cacoKey(c.name), name: c.name, description: c.description, origin: 'caco', hardDisabled: c.hardDisabled, parameters: c.parameters });
   }
   for (const b of sources.builtins) {
-    const key = toolKey({ origin: 'builtin', name: b.name });
     const name = b.name.startsWith('builtin:') ? b.name.slice('builtin:'.length) : b.name;
-    add({ key, name, description: b.description, origin: 'builtin', hardDisabled: false, parameters: b.parameters, instructions: b.instructions });
+    add({ key: builtinKey(b.name), name, description: b.description, origin: 'builtin', hardDisabled: false, parameters: b.parameters, instructions: b.instructions });
   }
   for (const s of sources.mcp) {
     for (const t of s.tools) {
-      const key = toolKey({ origin: 'mcp', serverName: s.serverName, toolName: t.name });
-      add({ key, name: t.name, description: t.description, origin: 'mcp', hardDisabled: false });
+      add({ key: t.key, name: t.name, description: t.description, origin: 'mcp', server: s.serverName, hardDisabled: false });
     }
   }
   return map;

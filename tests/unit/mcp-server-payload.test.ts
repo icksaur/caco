@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildMcpServerPayload, estimateToolTokens } from '../../src/routes/workspace-api.js';
+import { mcpKey } from '../../src/tool-key.js';
 
 describe('estimateToolTokens — full serialized-JSON char count ÷ 4', () => {
   it('counts the whole JSON definition (keys AND values), matching the wire form', () => {
@@ -24,7 +25,7 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
   it('prepends Built-in then Caco, then MCP servers', () => {
     const out = buildMcpServerPayload(
       [{ name: 'github', status: 'connected' }],
-      { github: [{ name: 'x', description: 'd' }] },
+      { github: [{ key: mcpKey('github-x'), name: 'x', description: 'd' }] },
       {},
       [{ name: 'view', description: 'Read a file' }],
       ['bash'],
@@ -66,18 +67,18 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
 
   it('enriches an available MCP tool with observed schema when loaded (state enabled)', () => {
     const servers = [{ name: 'github', status: 'connected' }];
-    const available = { github: [{ name: 'create_issue', description: 'Open an issue' }] };
-    const observed = { 'github/create_issue': { parameters: { title: { type: 'string' } }, deferLoading: false } };
+    const available = { github: [{ key: mcpKey('github-create_issue'), name: 'create_issue', description: 'Open an issue' }] };
+    const observed = { 'github-create_issue': { parameters: { title: { type: 'string' } }, deferLoading: false } };
     const out = buildMcpServerPayload(servers, available, observed);
     const t = out[2].tools[0];
-    expect(t).toMatchObject({ name: 'create_issue', namespacedName: 'github/create_issue', observed: true, state: 'enabled' });
+    expect(t).toMatchObject({ name: 'create_issue', namespacedName: 'github-create_issue', observed: true, state: 'enabled' });
     expect(t.parameters).toEqual({ title: { type: 'string' } });
     expect(t.tokenCost).not.toBeNull();
   });
 
   it('marks an available-but-unobserved MCP tool observed:false with null schema/cost', () => {
     const servers = [{ name: 'linear', status: 'connected' }];
-    const available = { linear: [{ name: 'search', description: 'Search issues' }] };
+    const available = { linear: [{ key: mcpKey('linear-search'), name: 'search', description: 'Search issues' }] };
     const out = buildMcpServerPayload(servers, available, {});
     const t = out[2].tools[0];
     expect(t).toMatchObject({ observed: false, parameters: null, tokenCost: null });
@@ -86,8 +87,8 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
 
   it('treats presence in observed set as observed even with no input_schema (schema/cost null, not deferred)', () => {
     const servers = [{ name: 'gh', status: 'connected' }];
-    const available = { gh: [{ name: 'ping', description: 'noop' }] };
-    const observed = { 'gh/ping': { deferLoading: false } };
+    const available = { gh: [{ key: mcpKey('gh-ping'), name: 'ping', description: 'noop' }] };
+    const observed = { 'gh-ping': { deferLoading: false } };
     const out = buildMcpServerPayload(servers, available, observed);
     const tool = out[2].tools[0];
     expect(tool.observed).toBe(true);
@@ -97,8 +98,8 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
 
   it('carries deferLoading through from observed metadata', () => {
     const servers = [{ name: 's', status: 'connected' }];
-    const available = { s: [{ name: 't', description: 'd' }] };
-    const observed = { 's/t': { parameters: { a: { type: 'number' } }, deferLoading: true } };
+    const available = { s: [{ key: mcpKey('s-t'), name: 't', description: 'd' }] };
+    const observed = { 's-t': { parameters: { a: { type: 'number' } }, deferLoading: true } };
     const out = buildMcpServerPayload(servers, available, observed);
     expect(out[2].tools[0].deferLoading).toBe(true);
   });

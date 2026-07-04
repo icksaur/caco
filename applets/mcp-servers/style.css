@@ -182,6 +182,14 @@
 }
 .mcp-defer-btn:disabled { opacity: 0.6; cursor: default; }
 
+.mcp-age {
+  flex-shrink: 0;
+  font-size: 0.68em;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.mcp-age-stale { color: var(--color-context-usage); }
+
 .mcp-tool-list {
   margin: 0 0 var(--space-sm) 21px;
   padding: var(--space-xs) 0 var(--space-xs) var(--space-sm);

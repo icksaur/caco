@@ -116,4 +116,48 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
     const out = buildMcpServerPayload(servers, available, observed);
     expect(out[2].tools[0].deferLoading).toBe(true);
   });
+
+  it('attaches usage age + cold-resume verdict per tool from the shared threshold', () => {
+    const servers = [{ name: 'gh', status: 'connected' }];
+    const fresh = mcpKey('gh-fresh');
+    const stale = mcpKey('gh-stale');
+    const available = {
+      gh: [
+        { key: fresh, name: 'fresh', description: 'd', excludable: true },
+        { key: stale, name: 'stale', description: 'd', excludable: true },
+        { key: 'gh/unlearned' as ReturnType<typeof mcpKey>, name: 'unlearned', description: 'd', excludable: false }, // no key ⇒ not eligible
+      ],
+    };
+    const nowActiveSeconds = 3 * 60 * 60; // 3 active-hours
+    const lastUsed = new Map([[fresh, nowActiveSeconds - 60], [stale, nowActiveSeconds - 3 * 60 * 60]]);
+    const out = buildMcpServerPayload(servers, available, {}, [], [], [], [], { nowActiveSeconds, lastUsed });
+    const tools = Object.fromEntries(out[2].tools.map(t => [t.name, t]));
+    // fresh: used 60 active-seconds ago ⇒ eligible, not stale, kept
+    expect(tools.fresh.deferEligible).toBe(true);
+    expect(tools.fresh.stale).toBe(false);
+    expect(tools.fresh.wouldDefer).toBe(false);
+    // stale: unused 3 active-hours (> 2h threshold) ⇒ would defer
+    expect(tools.stale.stale).toBe(true);
+    expect(tools.stale.wouldDefer).toBe(true);
+    // unlearned MCP tool (no exclusion key) is never eligible, so never would-defer
+    expect(tools.unlearned.deferEligible).toBe(false);
+    expect(tools.unlearned.wouldDefer).toBe(false);
+    // never-used eligible tool is maximally stale ⇒ would defer (matches cold-resume math)
+    const neverServers = [{ name: 'gh', status: 'connected' }];
+    const neverAvail = { gh: [{ key: mcpKey('gh-never'), name: 'never', description: 'd', excludable: true }] };
+    const neverOut = buildMcpServerPayload(neverServers, neverAvail, {}, [], [], [], [], { nowActiveSeconds, lastUsed: new Map() });
+    const never = neverOut[2].tools[0];
+    expect(never.ageActiveSeconds).toBeNull();
+    expect(never.wouldDefer).toBe(true);
+  });
+
+  it('omits usage fields (age null, no verdict) when no usage snapshot is passed', () => {
+    const servers = [{ name: 'gh', status: 'connected' }];
+    const available = { gh: [{ key: mcpKey('gh-x'), name: 'x', description: 'd', excludable: true }] };
+    const out = buildMcpServerPayload(servers, available, {});
+    const t = out[2].tools[0];
+    expect(t.ageActiveSeconds).toBeNull();
+    expect(t.stale).toBe(false);
+    expect(t.wouldDefer).toBe(false);
+  });
 });

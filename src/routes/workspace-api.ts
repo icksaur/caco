@@ -12,12 +12,13 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
 import { sessionManager } from '../session-manager.js';
-import { excludedBuiltinNames } from '../tool-registry.js';
+import { excludedBuiltinNames, isDeferEligibleCacoTool } from '../tool-registry.js';
 import { builtinKey, type ToolKey } from '../tool-key.js';
 import { lookupMcpKey, learnFromMetadata } from '../tool-key-registry.js';
 import { buildToolCatalog } from '../tool-catalog.js';
 import { classifyTool } from '../session-tool-state.js';
 import { getDeferredServers } from '../manual-defer-store.js';
+import { getNowActiveSeconds, getLastUsedActiveSeconds, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS } from '../tool-usage-store.js';
 import { snapshot as throughputSnapshot } from '../session-throughput.js';
 import { getSessionUsage } from '../session-usage-cache.js';
 
@@ -199,6 +200,17 @@ interface PayloadTool {
   /** enablement axis: enabled (model sees it) / deferred (excludedTools, revealable)
    *  / off (DEFAULT_DISABLED, filtered pre-registration, not revealable). */
   state: 'enabled' | 'deferred' | 'off';
+  /** Active-clock seconds since this tool was last used, or null if never used
+   *  (system-wide; Phase C1 usage store). null renders as "never". */
+  ageActiveSeconds: number | null;
+  /** Whether cold-resume auto-defer MAY hide this tool (MCP / excludable builtin /
+   *  Caco allowlist). Non-eligible tools are always kept. */
+  deferEligible: boolean;
+  /** Unused longer than the stale threshold (never-used = maximally stale). */
+  stale: boolean;
+  /** The cold-resume verdict: eligible AND stale ⇒ would auto-defer at the next
+   *  cold resume (per-session used-here protection is applied at resume, not here). */
+  wouldDefer: boolean;
 }
 export interface CacoCatalogTool {
   name: string;
@@ -246,10 +258,22 @@ export function buildMcpServerPayload(
   deferredBuiltins: string[] = [],
   cacoCatalog: CacoCatalogTool[] = [],
   deferredServers: string[] = [],
+  usage?: { nowActiveSeconds: number; lastUsed: ReadonlyMap<ToolKey, number> },
 ): Array<{ name: string; status: string; source: string | null; error: string | null; deferred?: boolean; tools: PayloadTool[] }> {
   const deferredServerSet = new Set(deferredServers);
   // The exclusion set as canonical ToolKeys (what classifyTool compares against).
   const excluded = new Set<ToolKey>(deferredBuiltins.map(n => builtinKey(n)));
+
+  // Per-tool usage/age + cold-resume verdict, from the shared threshold so the
+  // applet view can't disagree with what auto-defer would actually do. `eligible`
+  // is the origin-based defer candidacy the caller determines.
+  function usageFields(key: ToolKey, eligible: boolean): Pick<PayloadTool, 'ageActiveSeconds' | 'deferEligible' | 'stale' | 'wouldDefer'> {
+    if (!usage) return { ageActiveSeconds: null, deferEligible: eligible, stale: false, wouldDefer: false };
+    const everUsed = usage.lastUsed.has(key);
+    const ageActiveSeconds = everUsed ? Math.max(0, usage.nowActiveSeconds - (usage.lastUsed.get(key) as number)) : null;
+    const stale = !everUsed || (ageActiveSeconds as number) > DEFER_STALE_THRESHOLD_ACTIVE_SECONDS;
+    return { ageActiveSeconds, deferEligible: eligible, stale, wouldDefer: eligible && stale };
+  }
   // Builtins present in tools.list carry a real schema → a real tokenCost; a builtin
   // known only by an excluded name (e.g. powershell on a non-Windows host) has no
   // schema → tokenCost stays null (never fabricated).
@@ -288,6 +312,7 @@ export function buildMcpServerPayload(
           ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters ?? null, instructions: t.instructions ?? null })
           : null,
         state,
+        ...usageFields(t.key, excluded.has(t.key)),
       };
     }),
   };
@@ -308,6 +333,7 @@ export function buildMcpServerPayload(
         deferLoading: false,
         tokenCost: t.parameters ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters }) : null,
         state,
+        ...usageFields(t.key, isDeferEligibleCacoTool(t.name)),
       };
     }),
   };
@@ -344,6 +370,9 @@ export function buildMcpServerPayload(
         // classifyTool over the shared exclusion set: Phase A has no excluded MCP
         // tools, so these are enabled; Phase B marks session-excluded ones deferred.
         state: classifyTool(key, { excluded, hardDisabled: false }),
+        // MCP tools are defer-eligible only once their exclusion key is learned
+        // (excludable) — we can't defer what we can't key.
+        ...usageFields(key, t.excludable),
       };
     }),
   }));
@@ -404,6 +433,7 @@ router.get('/servers', async (_req: Request, res: Response) => {
       excludedBuiltinNames().map(n => n.replace(/^builtin:/, '')),
       sessionManager.getCacoToolCatalog(),
       getDeferredServers(),
+      { nowActiveSeconds: getNowActiveSeconds(), lastUsed: getLastUsedActiveSeconds() },
     );
     // Telemetry (spec-tool-reveal B0): the SDK's ground-truth token breakdown +
     // that same session's last-turn cache split (the reveal cache-bust signal). Both

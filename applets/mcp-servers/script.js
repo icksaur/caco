@@ -325,6 +325,30 @@ function fmtTokens(n) {
   return '≈' + Number(n).toLocaleString() + ' token' + (n === 1 ? '' : 's');
 }
 
+// Humanize an active-clock age (seconds of real tool-use time, not calendar time).
+function fmtAge(seconds) {
+  if (seconds < 60) return '<1m';
+  if (seconds < 3600) return Math.round(seconds / 60) + 'm';
+  return (seconds / 3600).toFixed(1) + 'h';
+}
+
+// Age badge: how long since this tool was last used (active-clock), plus the
+// cold-resume auto-defer verdict. Not-eligible tools are always kept.
+function ageBadge(tool) {
+  if (tool.ageActiveSeconds === undefined) return ''; // usage data absent
+  var age = tool.ageActiveSeconds;
+  if (!tool.deferEligible) {
+    var kept = age === null ? 'never used' : fmtAge(age) + ' idle';
+    return '<span class="mcp-age" title="Always kept — not auto-defer-eligible. Last used: ' + kept + ' (active-clock).">' + escapeHtml(kept) + '</span>';
+  }
+  var label = age === null ? 'never used' : fmtAge(age) + ' idle';
+  if (tool.wouldDefer) {
+    var why = age === null ? 'never used' : 'unused >2 active-hours';
+    return '<span class="mcp-age mcp-age-stale" title="Defer-eligible and stale (' + why + ') → would auto-defer on the next cold session resume (per-session used-here protection applies at resume).">' + escapeHtml(label) + ' · would defer</span>';
+  }
+  return '<span class="mcp-age" title="Defer-eligible but still fresh (used within 2 active-hours) — kept for now.">' + escapeHtml(label) + '</span>';
+}
+
 function renderMcpTool(tool) {
   var isCollapsed = mcpToolCollapsed[tool.namespacedName] !== false;
   var chevron = isCollapsed ? '▸' : '▾';
@@ -363,6 +387,7 @@ function renderMcpTool(tool) {
     '<div class="' + rowClass + '" data-tool="' + escapedNs + '">' +
       '<span class="mcp-chevron">' + chevron + '</span>' +
       '<span class="mcp-tool-name">' + escapeHtml(tool.name) + '</span>' +
+      ageBadge(tool) +
       badgeHtml +
     '</div>' +
     propsHtml +

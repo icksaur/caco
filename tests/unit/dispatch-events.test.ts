@@ -43,6 +43,12 @@ vi.mock('../../src/tool-key-registry.js', () => ({
   lookupMcpKey: vi.fn(() => undefined),
   learnFromMetadata: vi.fn(),
 }));
+// Mock the usage store so tool.execution_start effects don't write unit-test tool
+// stamps into the real ~/.caco/tool-usage.json (which would pollute the C2 signal).
+const stampToolUsage = vi.fn();
+vi.mock('../../src/tool-usage-store.js', () => ({
+  stampToolUsage: (...args: unknown[]) => stampToolUsage(...(args as [])),
+}));
 
 import { applyDispatchEventEffects, setGitEditPoller } from '../../src/dispatch-events.js';
 import { mcpKey, cacoKey, builtinKey } from '../../src/tool-key.js';
@@ -68,6 +74,7 @@ beforeEach(() => {
   recordRateLimit.mockClear();
   recordToolCall.mockClear();
   recordToolUse.mockClear();
+  stampToolUsage.mockClear();
   updateSessionMeta.mockClear();
   snapshotMock.mockClear();
   setGitEditPoller(null);
@@ -354,6 +361,17 @@ describe('applyDispatchEventEffects', () => {
         type: 'tool.execution_start', data: { toolName: 'grep' },
       } as never, makeDeps());
       expect(recordToolUse).toHaveBeenCalledWith(SID, builtinKey('grep'));
+    });
+
+    it('stamps the usage store under the SAME key as recordToolUse (seam key-equality)', () => {
+      applyDispatchEventEffects(SID, {
+        type: 'tool.execution_start',
+        data: { toolName: 'github-mcp-server-list_issues', mcpServerName: 'github-mcp-server', mcpToolName: 'list_issues' },
+      } as never, depsWithCaco());
+      const usedKey = recordToolUse.mock.calls.at(-1)?.[1];
+      expect(usedKey).toEqual(mcpKey('github-mcp-server-list_issues'));
+      // The system-wide usage stamp MUST use the identical key, or auto-defer mis-fires.
+      expect(stampToolUsage).toHaveBeenCalledWith(usedKey);
     });
 
     it('logs but does not throw when the tool key is unresolvable (no toolName)', () => {

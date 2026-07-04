@@ -86,6 +86,31 @@ export function excludedBuiltinNames(): string[] {
   return parseExcludedBuiltins(DEFAULT_EXCLUDED_BUILTINS, process.env.CACO_EXCLUDED_BUILTINS);
 }
 
+/**
+ * Caco `defineTool` tools that cold-resume auto-defer (Phase C) MAY hide. A fixed
+ * allowlist keyed by tool name — everything NOT listed is always kept, so the
+ * escape-hatch (`caco_docs`/`caco_enable_tools`) and the session/agent/memory/
+ * workflow/index/retrieve tools can never auto-defer themselves out of reach.
+ *
+ * Contents = the browser tools (`src/browser-tools.ts`), the applet-state tools
+ * (`src/applet-tools.ts`), and the surface tools (`src/surface-tools.ts`). Kept in
+ * sync with those three modules by hand (spec-tool-reveal C1). `restart_server`
+ * lives in applet-tools.ts but is deliberately EXCLUDED: it's a privileged
+ * control-plane action used mid-workflow, and keeping it always-on avoids an
+ * enable round-trip before a restart at the cost of a single always-sent tool.
+ */
+export const DEFER_ELIGIBLE_CACO_TOOLS: string[] = [
+  'caco_browser_ensure_running', 'caco_browser_navigate', 'caco_browser_snapshot',
+  'caco_browser_screenshot', 'caco_browser_action', 'caco_browser_eval',
+  'get_applet_state', 'set_applet_state',
+  'caco_get_surface', 'caco_get_surface_changes', 'caco_mutate_surface', 'caco_set_surface_style',
+];
+
+/** Whether a Caco tool (by name) is eligible for cold-resume auto-defer. */
+export function isDeferEligibleCacoTool(name: string): boolean {
+  return DEFER_ELIGIBLE_CACO_TOOLS.includes(name);
+}
+
 /** Whether the SDK `skill` built-in tool is available to sessions. Skills run by asking
  *  the agent to call this tool, so a skill slash-command cannot work without it. Caco
  *  never excludes it by default; this guards the CACO_EXCLUDED_BUILTINS misconfiguration. */

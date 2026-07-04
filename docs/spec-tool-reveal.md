@@ -136,11 +136,20 @@ auto-defer a warm session.
 
 - **Usage signal (active-time, not calendar).** Calendar age is unreliable (a session
   idle overnight isn't "stale"). Track a monotonic **active-seconds clock** that
-  advances only while ≥1 SDK session is active. Each tool invocation stamps the clock
-  for that tool (**system-wide**, keyed by `ToolKey`; fed by the R2 `recordToolUse`
-  seam). **v1 mechanism (flat threshold):** persist a single per-tool
-  `lastUsedActiveSeconds` stamp; on **cold resume** only, defer tools whose stamp is
-  older than the threshold. One number per tool, no decay math.
+  advances with real tool-use activity, not wall-clock. **Realization
+  (`tool-usage-store.ts`):** the clock advances lazily on each interaction by the real
+  elapsed time since the previous tick, **capped per gap** at `MAX_ACTIVE_GAP_SECONDS`
+  (5 min) — so an idle stretch (lunch, overnight, process-down) counts as at most one
+  cap and does not age tools. In active work (some tool fires every few seconds/
+  minutes) this tracks real elapsed time; it diverges from wall-clock only during
+  genuine idle, which is exactly what we exclude. This is self-contained (no session-
+  lifecycle coupling) and faithful to the "advances only while active" intent. On
+  process restart the tick anchor resets to now, so downtime never advances the clock.
+  Each tool invocation stamps the clock for that tool (**system-wide**, keyed by
+  `ToolKey`; written from the R2 `tool.execution_start` seam via `stampToolUsage`).
+  **v1 mechanism (flat threshold):** persist a single per-tool `lastUsedActiveSeconds`
+  stamp; on **cold resume** only, defer tools whose stamp is older than the threshold.
+  One number per tool, no decay math.
 - **Threshold: 2 active-hours.** A tool unused for more than 2 active-clock hours is a
   defer candidate at the next cold resume. (Active hours, not wall-clock — an overnight
   idle doesn't age a tool.)
@@ -149,11 +158,14 @@ auto-defer a warm session.
   - **All MCP-server tools** — the biggest per-turn cost.
   - **All SDK builtins** already in the excludable set (the existing shell family and any
     future ones).
-  - **A fixed allowlist of Caco tools: the browser tools, the applet tools, and the
-    surface tools ONLY.** No other Caco tool is auto-deferrable (the escape hatch
+  - **A fixed allowlist of Caco tools: the browser tools, the applet-state tools, and
+    the surface tools ONLY.** No other Caco tool is auto-deferrable (the escape hatch
     `caco_docs`/`caco_enable_tools`, session/agent/memory/workflow/index/retrieve tools
-    stay always-on). This allowlist lives beside `DEFAULT_EXCLUDED_BUILTINS` in
-    `tool-registry.ts` (`DEFER_ELIGIBLE_CACO_TOOLS`), keyed by tool name.
+    stay always-on). `restart_server` lives in `applet-tools.ts` but is deliberately
+    kept always-on (privileged control-plane action used mid-workflow; a single
+    always-sent tool is cheaper than an enable round-trip before every restart). This
+    allowlist lives beside `DEFAULT_EXCLUDED_BUILTINS` in `tool-registry.ts`
+    (`DEFER_ELIGIBLE_CACO_TOOLS`), keyed by tool name.
 - **Used-here is sticky (protection).** Any tool used in the resuming session's own
   history (the R2 per-session used set) is NOT deferred even if system-wide-stale —
   proven-relevant-here overrides the global verdict.
@@ -498,7 +510,7 @@ CLI itself tells us each tool's name the first time we see it.
 | C0 | **Excludability probe — DONE (findings recorded):** `excludedTools` matches the model-facing name. Caco tools ARE droppable (bare name) ✓; builtins via `builtin:<name>` ✓; MCP via model-facing name (NOT `server/tool`) ✓; the name is not reconstructable (`web_search` exception) → keys must be discovered (Phase K). Caco-tool defer stays in v1 | investigation (probe removed after) | before/after token drop measured (Caco −238, MCP only on model-facing key) |
 | K1 | **Key registry:** `src/tool-key-registry.ts` — persisted system-wide `(mcpServerName,mcpToolName)→modelFacingKey`, learned from `getCurrentToolMetadata` + `tool.execution_start`. **Fix `tool-key.ts`:** MCP key = registry lookup (remove `server/tool` reconstruction); `toolKeyFromEvent` MCP branch uses `evt.toolName` directly. Update R1/R2 tests to the model-facing MCP key form | new `src/tool-key-registry.ts`, `src/tool-key.ts`, `src/dispatch-events.ts` (learn on start-event), `src/session-manager.ts` (learn on getCurrentToolMetadata), tests | registry unit test (learn/persist/lookup); event key == excludedTools key (model-facing); an MCP exclusion via the learned key actually drops the tool (integration/probe-style) |
 | K2 | **Catalog uses learned keys:** `buildToolCatalog` MCP entries resolve their `ToolKey` via the registry; entries with no learned key are flagged not-yet-excludable (shown, not fabricated). Applet/enable/defer consume real keys | `src/tool-catalog.ts`, `src/session-manager.ts` (`getToolCatalog`) | catalog test: MCP key = learned model-facing; unknown-key entry flagged, not `server/tool` |
-| C1 | `DEFER_ELIGIBLE_CACO_TOOLS` allowlist (browser/applet/surface) + persistent system-wide usage store: active-seconds clock + per-tool `lastUsedActiveSeconds` keyed by `toolKey`, fed by R2 `recordToolUse` | `src/tool-registry.ts`, new `src/tool-usage-store.ts` | store unit test (stamp/advance/persist); eligibility set |
+| C1 | `DEFER_ELIGIBLE_CACO_TOOLS` allowlist (browser/applet-state/surface tools; `restart_server` deliberately excluded) + `isDeferEligibleCacoTool` + persistent system-wide usage store: lazy capped **active-seconds clock** (`MAX_ACTIVE_GAP_SECONDS`) + per-tool `lastUsedActiveSeconds` keyed by `toolKey`, fed from the R2 `tool.execution_start` seam (`stampToolUsage` beside `recordToolUse`). **Diagnosability:** `/servers` payload carries per-tool `ageActiveSeconds`/`deferEligible`/`stale`/`wouldDefer` (verdict from the shared `DEFER_STALE_THRESHOLD_ACTIVE_SECONDS`, so the applet view can't disagree with C2); the mcp-servers applet shows an age badge + "would defer" marker on every tool | `src/tool-registry.ts`, new `src/tool-usage-store.ts`, `src/dispatch-events.ts`, `src/routes/workspace-api.ts` (payload usage fields), `applets/mcp-servers/{script.js,style.css}` | store unit test (stamp/advance/cap/persist/reload-ignores-downtime); eligibility set; payload usage-fields test (fresh kept / stale would-defer / unlearned never-eligible / never-used maximally stale); applet age visual |
 | C2 | Cold-resume auto-defer: at cold resume compute `computeColdResumeExclusions` over eligible+stale tools (threshold **2 active-hours**), minus the session's used-here set, union the manual-defer set, seed into `excludedTools`. Warm/model-switch never auto-mutated | `src/session-manager.ts` (resume seed path), `src/tool-usage-store.ts` | **seam test**: dispatch → stamp → cold resume excludes stale eligible, keeps used-here + non-eligible; warm ⇒ unchanged |
 | D1 | **Manual defer (applet):** per-MCP-server defer toggle in mcp-servers applet; `setExcludedToolsLive` ADD path (`deferServer`), applied live to all active sessions + persisted system-wide seed; tooltip warns warm-session full-window cache cost | `applets/mcp-servers/{content.html,script.js,style.css}`, `src/routes/workspace-api.ts` (defer/undefer endpoint), `src/session-manager.ts` (`deferTools` broadcast), new system-wide manual-defer store | endpoint unit test (add/remove server tools to excluded); visual (button + tooltip) |
 

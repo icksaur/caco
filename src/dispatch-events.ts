@@ -15,6 +15,7 @@ import { extractProperty } from './sdk-normalizer.js';
 import { recordUsage, recordRateLimit, recordToolCall, recordToolUse, snapshot } from './session-throughput.js';
 import { toolKeyFromEvent } from './tool-key.js';
 import { learnMcpKey } from './tool-key-registry.js';
+import { stampToolUsage } from './tool-usage-store.js';
 import { extractActionOptions } from './offer-action-parse.js';
 import { updateSessionMeta } from './storage.js';
 
@@ -82,6 +83,7 @@ export function applyDispatchEventEffects(
       if (mcpServerName && mcpToolName && toolName) learnMcpKey(mcpServerName, mcpToolName, toolName);
       const key = toolKeyFromEvent({ toolName, mcpServerName, mcpToolName }, deps.cacoToolNames());
       recordToolUse(sessionId, key);
+      stampToolUsage(key);
     } catch (e) {
       console.error(`[TOOLS] could not resolve tool key for usage stamp (tool=${String(toolName)}):`, e instanceof Error ? e.message : e);
     }

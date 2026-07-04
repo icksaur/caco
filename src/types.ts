@@ -62,6 +62,12 @@ export interface ResumeConfig {
   excludedTools?: string[];
   /** Internal: override the persisted model (used by cross-provider switch recreate). */
   modelOverride?: string;
+  /** Internal: this resume RECREATES a currently/recently-active session (model switch,
+   *  context-budget change) rather than opening a cold one. Suppresses cold-resume
+   *  auto-defer (Phase C2) so a warm working session is never silently shrunk — the
+   *  "warm/model-switch never auto-mutated" invariant. Genuine user cold-opens (the route
+   *  resume paths) leave it unset. */
+  warmRecreate?: boolean;
 }
 
 export interface ResumeResult {

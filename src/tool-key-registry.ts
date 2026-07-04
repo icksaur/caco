@@ -89,6 +89,14 @@ export function keysForServer(serverName: string): ToolKey[] {
   return out;
 }
 
+/** All learned model-facing keys across every MCP server (the auto-defer candidate
+ *  universe for MCP: only tools whose exclusion key has been discovered can be
+ *  deferred). Deduped. */
+export function allLearnedKeys(): ToolKey[] {
+  ensureLoaded();
+  return [...new Set(registry.values())];
+}
+
 /** Test-only: clear in-memory state + force reload on next access. */
 export function _resetRegistryForTest(): void {
   registry.clear();

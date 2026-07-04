@@ -25,11 +25,13 @@ import { thresholdForBudget, type ModelTokenLimits } from './context-budget.js';
 import { tokenLimitsForModel, effectiveContextTier } from './model-billing.js';
 import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './agent-command.js';
 import { buildToolCatalog, type ToolCatalog } from './tool-catalog.js';
-import { builtinKey, type ToolKey } from './tool-key.js';
-import { lookupMcpKey, learnFromMetadata, keysForServer } from './tool-key-registry.js';
-import { validateEnable, resolveEnableTargets } from './session-tool-state.js';
-import { excludedBuiltinNames } from './tool-registry.js';
+import { builtinKey, cacoKey, type ToolKey } from './tool-key.js';
+import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys } from './tool-key-registry.js';
+import { validateEnable, resolveEnableTargets, computeColdResumeExclusions } from './session-tool-state.js';
+import { excludedBuiltinNames, DEFER_ELIGIBLE_CACO_TOOLS } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
+import { getNowActiveSeconds, getLastUsedActiveSeconds, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS, COLD_RESUME_STALE_MS } from './tool-usage-store.js';
+import { getToolsUsed } from './session-throughput.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 
@@ -903,9 +905,17 @@ export class SessionManager {
     const tMcp0 = performance.now();
     const mcpServers = await loadMcpServers();
     const tMcp = performance.now() - tMcp0;
-    // Seed exclusions = base ∪ operator manual-defer preference (Phase D), re-applied on
-    // resume so a manually-deferred server stays hidden across restarts/recreations.
-    const seededExclusions = [...new Set<string>([...(config.excludedTools ?? []), ...this.manualDeferredKeys()])];
+    // Seed exclusions = base (builtins from config) ∪ operator manual-defer preference
+    // (Phase D) ∪ cold-resume auto-defer (Phase C2). Manual defer is re-applied on every
+    // resume so a manually-deferred server stays hidden across restarts. Auto-defer fires
+    // ONLY on a genuinely cold resume (see computeColdResumeAutoDefer) — free because the
+    // provider prefix cache is already evicted — and never on a warm recreate/model-switch.
+    const autoDeferred = this.computeColdResumeAutoDefer(sessionId, config);
+    const seededExclusions = [...new Set<string>([
+      ...(config.excludedTools ?? []),
+      ...this.manualDeferredKeys(),
+      ...autoDeferred,
+    ])];
     const resumeArgs = {
       streaming: true,
       tools,
@@ -1448,13 +1458,13 @@ export class SessionManager {
     this.activeSessions.delete(sessionId);
 
     try {
-      await this.resume(sessionId, { toolFactory, excludedTools, modelOverride: model });
+      await this.resume(sessionId, { toolFactory, excludedTools, modelOverride: model, warmRecreate: true });
       console.log(`[MODEL] Recreated session ${sessionId.slice(0, 8)} on ${model} (provider switch from ${active.providerId ?? 'github'})`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (previousModel && previousModel !== model) {
         try {
-          await this.resume(sessionId, { toolFactory, excludedTools, modelOverride: previousModel });
+          await this.resume(sessionId, { toolFactory, excludedTools, modelOverride: previousModel, warmRecreate: true });
           console.warn(`[MODEL] Switch to ${model} failed; reverted ${sessionId.slice(0, 8)} to ${previousModel}`);
           throw new Error(`Model switch to ${model} failed (${msg}); reverted to ${previousModel}`);
         } catch (rollbackErr) {
@@ -1509,14 +1519,14 @@ export class SessionManager {
     this.activeSessions.delete(sessionId);
 
     try {
-      await this.resume(sessionId, { toolFactory, excludedTools });
+      await this.resume(sessionId, { toolFactory, excludedTools, warmRecreate: true });
       console.log(`[CTXWIN] Recreated session ${sessionId.slice(0, 8)} with budget ${newBudget ?? 'default'}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // Restore the previous meta budget, then attempt to bring the session back.
       updateSessionMeta(sessionId, meta => { meta.contextBudgetTokens = previousBudget; });
       try {
-        await this.resume(sessionId, { toolFactory, excludedTools });
+        await this.resume(sessionId, { toolFactory, excludedTools, warmRecreate: true });
         console.warn(`[CTXWIN] Budget change failed; reverted ${sessionId.slice(0, 8)} to ${previousBudget ?? 'default'}`);
         throw new Error(`Context budget change failed (${msg}); reverted`);
       } catch (rollbackErr) {
@@ -2004,6 +2014,71 @@ export class SessionManager {
     const keys = new Set<ToolKey>();
     for (const server of getDeferredServers()) for (const k of keysForServer(server)) keys.add(k);
     return [...keys];
+  }
+
+  /**
+   * Whether a RESUME is "cold" for the purpose of auto-defer (Phase C2). Cold = safe to
+   * apply exclusions for free because the provider's prompt-cache prefix is already
+   * evicted. Two structural gates (spec coldness signals (1)/(2)):
+   *   - An internal warm recreate (`config.warmRecreate`, or a model switch via
+   *     `config.modelOverride`) is NEVER cold: it rebuilds a session the user is actively
+   *     working in, so auto-defer must not shrink its tool set ("warm/model-switch never
+   *     auto-mutated" invariant). Explicit and timing-independent — a stale `lastUsedAt`
+   *     on an active session can't misfire it.
+   *   - Otherwise cold iff the persisted last activity is older than the provider cache
+   *     TTL (`COLD_RESUME_STALE_MS`). A fresh/absent stamp ⇒ NOT cold (conservative: a
+   *     recreate right after activity — rotation, dispatch-retry — keeps the full set).
+   */
+  private isColdResume(sessionId: string, config: ResumeConfig): boolean {
+    // Internal warm recreates (model switch, context-budget change) rebuild a session the
+    // user is actively working in — never auto-defer them, regardless of lastUsedAt.
+    if (config.warmRecreate || config.modelOverride !== undefined) return false;
+    const lastUsedIso = getSessionMeta(sessionId)?.lastUsedAt;
+    if (!lastUsedIso) return false;
+    const lastUsedMs = new Date(lastUsedIso).getTime();
+    if (!Number.isFinite(lastUsedMs)) return false;
+    return Date.now() - lastUsedMs > COLD_RESUME_STALE_MS;
+  }
+
+  /**
+   * Cold-resume auto-defer keys (Phase C2): on a genuinely cold resume, the defer-eligible
+   * tools that are system-wide STALE (unused > 2 active-hours; never-used = maximally
+   * stale) MINUS anything the resuming session used here (used-here protection). Returns
+   * `[]` on a warm resume, so the seed is unchanged. The verdict is the pure
+   * `computeColdResumeExclusions` fed the shared threshold — the SAME math the applet's
+   * per-tool `wouldDefer` badge shows, so the diagnostic view can't disagree with what
+   * fires here. Eligible candidate universe = every learned MCP key (only tools we can
+   * key are deferrable) ∪ the fixed Caco allowlist; builtins are omitted because they are
+   * already excluded via the base seed (including them would be an idempotent no-op).
+   */
+  private computeColdResumeAutoDefer(sessionId: string, config: ResumeConfig): ToolKey[] {
+    if (!this.isColdResume(sessionId, config)) return [];
+    const candidates = [
+      ...allLearnedKeys(),
+      ...DEFER_ELIGIBLE_CACO_TOOLS.map(n => cacoKey(n)),
+    ];
+    const nowActiveSeconds = getNowActiveSeconds();
+    const stale = computeColdResumeExclusions({
+      isCold: true,
+      tools: [...new Set(candidates)],
+      lastUsed: getLastUsedActiveSeconds(),
+      nowActiveSeconds,
+      threshold: DEFER_STALE_THRESHOLD_ACTIVE_SECONDS,
+    });
+    // Used-here protection: never defer a tool this session invoked. In a fresh process
+    // this set is empty (in-memory, per-session) so cold-resume auto-defer is driven by
+    // the system-wide staleness verdict alone — an accepted, fully-recoverable footgun
+    // (the agent reveals a needed tool in one caco_enable_tools call). See spec risk note.
+    const usedHere = getToolsUsed(sessionId);
+    const deferred = stale.filter(k => !usedHere.has(k));
+    if (deferred.length) {
+      console.log(
+        `[DEFER] cold-resume auto-defer ${sessionId.slice(0, 8)}: deferred=${deferred.length} ` +
+        `candidates=${candidates.length} keptUsedHere=${usedHere.size} ` +
+        `thresholdSec=${DEFER_STALE_THRESHOLD_ACTIVE_SECONDS} clockSec=${Math.round(nowActiveSeconds)}`,
+      );
+    }
+    return deferred;
   }
 
   /**

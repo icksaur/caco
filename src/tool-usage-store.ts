@@ -42,6 +42,18 @@ export const MAX_ACTIVE_GAP_SECONDS = 5 * 60;
  *  candidate at the next cold resume (spec: "2 active-hours"). */
 export const DEFER_STALE_THRESHOLD_ACTIVE_SECONDS = 2 * 60 * 60;
 
+/**
+ * Wall-clock staleness that makes a RESUME "cold" for auto-defer (spec coldness
+ * signal (2): `now − lastUsedAt > cache TTL` — the provider prompt-cache prefix is
+ * evicted, so applying an exclusion is free). Set to the provider prompt-cache TTL
+ * (Anthropic ephemeral cache default is ~5 min); resuming a session untouched for
+ * longer than this is provably cold, so auto-defer costs no cache-bust. Conservative
+ * by design: a resume WITHIN the window is treated as possibly-warm and NOT
+ * auto-deferred. A later refinement can use the B0 ground-truth `cacheReadTokens≈0`
+ * signal to defer even inside the window when coldness is proven. ms.
+ */
+export const COLD_RESUME_STALE_MS = 5 * 60 * 1000;
+
 let accumulatedActiveSeconds = 0;
 const lastUsed = new Map<ToolKey, number>();
 let lastTickMs = Date.now();

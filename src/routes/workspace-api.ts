@@ -166,10 +166,12 @@ interface McpServerStatus {
 }
 
 interface AvailableTool {
-  /** Pre-resolved model-facing ToolKey (from the tool-key-registry). */
+  /** Exclusion key when learned, else a display-only `server/tool` id (excludable:false). */
   key: ToolKey;
   name: string;
   description: string;
+  /** Whether `key` is the real exclusion string (learned) vs a display placeholder. */
+  excludable: boolean;
 }
 interface BuiltinTool {
   name: string;
@@ -371,13 +373,17 @@ router.get('/servers', async (_req: Request, res: Response) => {
     ]);
     const rawByServer = Object.fromEntries(entries);
     // Learn model-facing MCP keys from the resolved metadata, then resolve each listed
-    // raw MCP tool to its discovered key (omit — never fabricate — any not yet learned).
+    // raw MCP tool to its discovered key. If not yet learned, keep a display-only
+    // `server/tool` id (excludable:false) so the tool is still SHOWN — never dropped.
     learnFromMetadata(observed);
     const availableByServer: Record<string, AvailableTool[]> = {};
     for (const [server, tools] of Object.entries(rawByServer)) {
-      availableByServer[server] = tools
-        .map(t => { const key = lookupMcpKey(server, t.name); return key ? { key, name: t.name, description: t.description } : null; })
-        .filter((t): t is AvailableTool => t !== null);
+      availableByServer[server] = tools.map(t => {
+        const learned = lookupMcpKey(server, t.name);
+        return learned
+          ? { key: learned, name: t.name, description: t.description, excludable: true }
+          : { key: `${server}/${t.name}` as ToolKey, name: t.name, description: t.description, excludable: false };
+      });
     }
     // Index observed metadata by the canonical model-facing key (what the payload's MCP
     // branch looks up) plus its raw name as a fallback alias.

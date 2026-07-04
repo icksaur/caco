@@ -1924,11 +1924,16 @@ export class SessionManager {
     const mcp = await Promise.all(
       mcpServers.map(async s => {
         const raw = await this.listMcpTools(s.name, target);
-        // Resolve each raw MCP tool to its discovered model-facing key; omit (don't
-        // fabricate) any not yet learned — they appear once first observed.
-        const tools = raw
-          .map(t => { const key = lookupMcpKey(s.name, t.name); return key ? { key, name: t.name, description: t.description } : null; })
-          .filter((t): t is { key: ToolKey; name: string; description: string } => t !== null);
+        // Resolve each raw MCP tool to its discovered model-facing key. If not yet
+        // learned, still SHOW it (display-only `server/tool` id, excludable:false) so it
+        // never silently vanishes from the catalog/applet — it just can't be deferred
+        // until first observed. Never fabricate an exclusion key.
+        const tools = raw.map(t => {
+          const learned = lookupMcpKey(s.name, t.name);
+          return learned
+            ? { key: learned, name: t.name, description: t.description, excludable: true }
+            : { key: `${s.name}/${t.name}` as ToolKey, name: t.name, description: t.description, excludable: false };
+        });
         return { serverName: s.name, tools };
       }),
     );

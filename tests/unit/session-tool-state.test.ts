@@ -13,7 +13,7 @@ const k = {
 function cat(entries: Array<Partial<CatalogTool> & { key: ToolKey }>): ToolCatalog {
   const m = new Map<ToolKey, CatalogTool>();
   for (const e of entries) {
-    m.set(e.key, { key: e.key, name: e.name ?? 'n', description: e.description ?? '', origin: e.origin ?? 'builtin', hardDisabled: e.hardDisabled ?? false, parameters: e.parameters });
+    m.set(e.key, { key: e.key, name: e.name ?? 'n', description: e.description ?? '', origin: e.origin ?? 'builtin', excludable: e.excludable ?? true, hardDisabled: e.hardDisabled ?? false, parameters: e.parameters });
   }
   return m;
 }

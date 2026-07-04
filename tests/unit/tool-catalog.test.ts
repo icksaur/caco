@@ -8,7 +8,7 @@ describe('buildToolCatalog — the one "what tools exist" view, keyed by ToolKey
     const cat = buildToolCatalog({
       caco: [{ name: 'caco_docs', description: 'docs', hardDisabled: false }],
       builtins: [{ name: 'view', description: 'read' }],
-      mcp: [{ serverName: 'github', tools: [{ key: mcpKey('github-list_issues'), name: 'list_issues', description: 'issues' }] }],
+      mcp: [{ serverName: 'github', tools: [{ key: mcpKey('github-list_issues'), name: 'list_issues', description: 'issues', excludable: true }] }],
     });
     expect(cat.get(cacoKey('caco_docs'))?.origin).toBe('caco');
     expect(cat.get(builtinKey('view'))?.origin).toBe('builtin');
@@ -48,6 +48,19 @@ describe('buildToolCatalog — the one "what tools exist" view, keyed by ToolKey
   });
 });
 
+describe('buildToolCatalog — unlearned MCP tool visibility', () => {
+  it('shows an MCP tool whose key is not yet learned (display key, excludable:false)', () => {
+    const cat = buildToolCatalog({
+      caco: [], builtins: [],
+      mcp: [{ serverName: 'github', tools: [{ key: mcpKey('github/list_issues'), name: 'list_issues', description: 'issues', excludable: false }] }],
+    });
+    const t = [...cat.values()].find(x => x.origin === 'mcp')!;
+    expect(t.name).toBe('list_issues');
+    expect(t.excludable).toBe(false);
+    expect(t.key).toBe('github/list_issues'); // display-only id, NOT sent to excludedTools
+  });
+});
+
 describe('formatToolCatalog — grouped, state-annotated discovery text', () => {
   const cat = buildToolCatalog({
     caco: [
@@ -59,7 +72,7 @@ describe('formatToolCatalog — grouped, state-annotated discovery text', () => 
       { name: 'bash', description: 'Run a shell command.\nSecond line ignored.' },
     ],
     mcp: [
-      { serverName: 'github', tools: [{ key: mcpKey('github-list_issues'), name: 'list_issues', description: 'List issues.' }] },
+      { serverName: 'github', tools: [{ key: mcpKey('github-list_issues'), name: 'list_issues', description: 'List issues.', excludable: true }] },
     ],
   });
   const excluded = new Set([builtinKey('bash')]);

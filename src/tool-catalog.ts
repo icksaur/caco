@@ -23,6 +23,11 @@ export interface CatalogTool {
   /** MCP server name (origin==='mcp' only) — for grouping, since the key (a model-facing
    *  name) is no longer parseable into server+tool. */
   server?: string;
+  /** Whether `key` is the tool's REAL exclusion string (learned/derivable). False only
+   *  for an MCP tool whose model-facing key hasn't been observed yet: it is shown (so the
+   *  operator/agent sees it exists) but cannot be deferred/enabled until first observed —
+   *  `key` is then a display-only `server/tool` id, never sent to excludedTools. */
+  excludable: boolean;
   /** DEFAULT_DISABLED_TOOLS (filtered pre-registration) → not live-revealable. */
   hardDisabled: boolean;
   parameters?: Record<string, unknown>;
@@ -36,10 +41,12 @@ export type ToolCatalog = ReadonlyMap<ToolKey, CatalogTool>;
 export interface CatalogSources {
   caco: Array<{ name: string; description: string; hardDisabled: boolean; parameters?: Record<string, unknown> }>;
   builtins: Array<{ name: string; description: string; parameters?: Record<string, unknown>; instructions?: string }>;
-  /** MCP tools carry a PRE-RESOLVED model-facing `key` (from the tool-key-registry, via
-   *  the caller). A tool whose key has not yet been learned is omitted by the caller
-   *  rather than given a fabricated key — the catalog never reconstructs an MCP key. */
-  mcp: Array<{ serverName: string; tools: Array<{ key: ToolKey; name: string; description: string }> }>;
+  /** MCP tools carry a `key` and `excludable`. When the model-facing key has been learned
+   *  (from the tool-key-registry) `key` is that real exclusion string and `excludable` is
+   *  true; otherwise `key` is a display-only `server/tool` id and `excludable` is false
+   *  (shown, but not deferrable until observed). The catalog never fabricates an
+   *  *exclusion* key. */
+  mcp: Array<{ serverName: string; tools: Array<{ key: ToolKey; name: string; description: string; excludable: boolean }> }>;
 }
 
 export function buildToolCatalog(sources: CatalogSources): ToolCatalog {
@@ -48,15 +55,15 @@ export function buildToolCatalog(sources: CatalogSources): ToolCatalog {
     if (!map.has(t.key)) map.set(t.key, t);
   };
   for (const c of sources.caco) {
-    add({ key: cacoKey(c.name), name: c.name, description: c.description, origin: 'caco', hardDisabled: c.hardDisabled, parameters: c.parameters });
+    add({ key: cacoKey(c.name), name: c.name, description: c.description, origin: 'caco', excludable: true, hardDisabled: c.hardDisabled, parameters: c.parameters });
   }
   for (const b of sources.builtins) {
     const name = b.name.startsWith('builtin:') ? b.name.slice('builtin:'.length) : b.name;
-    add({ key: builtinKey(b.name), name, description: b.description, origin: 'builtin', hardDisabled: false, parameters: b.parameters, instructions: b.instructions });
+    add({ key: builtinKey(b.name), name, description: b.description, origin: 'builtin', excludable: true, hardDisabled: false, parameters: b.parameters, instructions: b.instructions });
   }
   for (const s of sources.mcp) {
     for (const t of s.tools) {
-      add({ key: t.key, name: t.name, description: t.description, origin: 'mcp', server: s.serverName, hardDisabled: false });
+      add({ key: t.key, name: t.name, description: t.description, origin: 'mcp', server: s.serverName, excludable: t.excludable, hardDisabled: false });
     }
   }
   return map;

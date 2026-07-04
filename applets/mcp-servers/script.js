@@ -332,21 +332,41 @@ function fmtAge(seconds) {
   return (seconds / 3600).toFixed(1) + 'h';
 }
 
-// Age badge: how long since this tool was last used (active-clock), plus the
-// cold-resume auto-defer verdict. Not-eligible tools are always kept.
-function ageBadge(tool) {
-  if (tool.ageActiveSeconds === undefined) return ''; // usage data absent
+// Single right-side status badge — exactly one of four presentation states:
+//   active     (yellow) enabled + observed, shows its known per-turn token cost
+//   unobserved (grey)   enabled but schema not yet resolved — cost unknown
+//   deferred   (green)  dynamically excluded this session (auto/manual defer), saving
+//                       tokens, re-enableable live
+//   disabled   (grey)   permanent policy (hard-disabled Caco / policy-excluded builtin);
+//                       no cost, NOT re-enableable
+// Age ("22m idle" / "never used") is shown as a muted prefix where it is meaningful
+// (active/deferred), never on disabled tools. No double-labeling.
+function stateBadge(tool) {
+  var state = tool.state || 'enabled';
   var age = tool.ageActiveSeconds;
-  if (!tool.deferEligible) {
-    var kept = age === null ? 'never used' : fmtAge(age) + ' idle';
-    return '<span class="mcp-age" title="Always kept — not auto-defer-eligible. Last used: ' + kept + ' (active-clock).">' + escapeHtml(kept) + '</span>';
+  var hasAge = age !== undefined;
+  var ageLabel = !hasAge ? '' : (age === null ? 'never used' : fmtAge(age) + ' idle');
+  var agePrefix = ageLabel ? '<span class="mcp-age">' + escapeHtml(ageLabel) + '</span> ' : '';
+
+  if (state === 'disabled') {
+    return '<span class="mcp-state-disabled" title="Disabled by Caco policy: not sent to the model and not re-enableable (a hard-disabled Caco tool, or a policy-excluded / platform-absent built-in such as the shell family). Contributes no per-turn tokens.">(disabled)</span>';
   }
-  var label = age === null ? 'never used' : fmtAge(age) + ' idle';
-  if (tool.wouldDefer) {
-    var why = age === null ? 'never used' : 'unused >2 active-hours';
-    return '<span class="mcp-age mcp-age-stale" title="Defer-eligible and stale (' + why + ') → would auto-defer on the next cold session resume (per-session used-here protection applies at resume).">' + escapeHtml(label) + ' · would defer</span>';
+  if (state === 'deferred') {
+    var dt = 'Deferred: excluded from the model this session to save per-turn tokens; re-enableable live via caco_enable_tools.' + (ageLabel ? ' Last used: ' + ageLabel + ' (active-clock).' : '');
+    return agePrefix + '<span class="mcp-state-deferred" title="' + escapeAttr(dt) + '">deferred</span>';
   }
-  return '<span class="mcp-age" title="Defer-eligible but still fresh (used within 2 active-hours) — kept for now.">' + escapeHtml(label) + '</span>';
+  // enabled:
+  if (tool.observed) {
+    var wouldDefer = tool.wouldDefer ? ' Eligible + stale — would auto-defer on the next cold session resume.' : '';
+    // Observed and priceable → show the token cost. Observed but schema-less (some MCP
+    // tools carry no input_schema) → it IS active/in-model, just not priceable: show
+    // "active" rather than mislabeling it "unobserved".
+    if (tool.tokenCost != null) {
+      return agePrefix + '<span class="mcp-token-cost" title="Estimated per-turn tokens: full serialized JSON tool definition (name + description + schema) ÷ 4.' + escapeAttr(wouldDefer) + '">' + escapeHtml(fmtTokens(tool.tokenCost)) + '</span>';
+    }
+    return agePrefix + '<span class="mcp-active" title="Active: in the current turn\'s resolved tool set, but it carries no input schema to price (per-turn cost is negligible).' + escapeAttr(wouldDefer) + '">active</span>';
+  }
+  return '<span class="mcp-unobserved" title="Enabled, but not in the current turn\'s resolved tool set — its schema (and true token cost) is pulled after a request loads it.">unobserved <span class="mcp-info">ⓘ</span></span>';
 }
 
 function renderMcpTool(tool) {
@@ -354,19 +374,11 @@ function renderMcpTool(tool) {
   var chevron = isCollapsed ? '▸' : '▾';
   var escapedNs = escapeAttr(tool.namespacedName);
   var state = tool.state || 'enabled';
-  var disabled = state === 'deferred' || state === 'off';
+  // Grey the row name only for policy-disabled tools; deferred stays normal (its green
+  // badge is a positive, money-saving state, not an error).
+  var dim = state === 'disabled';
 
-  // Right-side badge: token cost (observed) / unobserved / disabled.
-  var badgeHtml;
-  if (state === 'off') {
-    badgeHtml = '<span class="mcp-state-off" title="Disabled: hard-disabled (DEFAULT_DISABLED_TOOLS), filtered before the session is created — not sent to the model and not re-enableable live.">(disabled)</span>';
-  } else if (state === 'deferred') {
-    badgeHtml = '<span class="mcp-state-deferred" title="Disabled: excluded from the model this session (its schema is not sent every turn), but re-enableable live.">(disabled)</span>';
-  } else if (tool.observed) {
-    badgeHtml = '<span class="mcp-token-cost" title="Estimated per-turn tokens: full serialized JSON tool definition (name + description + schema, keys and values) ÷ 4">' + escapeHtml(fmtTokens(tool.tokenCost)) + '</span>';
-  } else {
-    badgeHtml = '<span class="mcp-unobserved" title="This tool is not in the current turn\'s resolved tool set. Its schema (and true token cost) is pulled after a request loads it — deferred/on-demand tools populate once used.">unobserved <span class="mcp-info">ⓘ</span></span>';
-  }
+  var badgeHtml = stateBadge(tool);
 
   var propsHtml = '';
   if (!isCollapsed) {
@@ -382,12 +394,11 @@ function renderMcpTool(tool) {
     propsHtml = '<dl class="mcp-tool-props">' + rows + '</dl>';
   }
 
-  var rowClass = 'mcp-tool-row' + (disabled ? ' mcp-tool-disabled' : '');
+  var rowClass = 'mcp-tool-row' + (dim ? ' mcp-tool-disabled' : '');
   return '<div class="mcp-tool">' +
     '<div class="' + rowClass + '" data-tool="' + escapedNs + '">' +
       '<span class="mcp-chevron">' + chevron + '</span>' +
       '<span class="mcp-tool-name">' + escapeHtml(tool.name) + '</span>' +
-      ageBadge(tool) +
       badgeHtml +
     '</div>' +
     propsHtml +

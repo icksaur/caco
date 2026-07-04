@@ -53,9 +53,32 @@ Add:
   **Note** hard-disabled Caco tools were filtered pre-registration, so the catalog is
   built from the *registered* set for enabled/deferred, plus the *known factory* set
   to also surface hard-disabled ones (marked non-revealable).
-- **State marker.** Per tool, render **enabled** (normal), **deferred** (greyed +
-  `(disabled)`, revealable), **hard-disabled** (greyed + `(off)`, not revealable).
-  Keep the existing observed/unobserved orthogonal (a deferred tool is unobserved).
+- **State marker.** Per tool, render one of four presentation states (single badge, no
+  double-labeling): **active** (enabled + observed, shows its known token cost in the
+  cost tint), **unobserved** (enabled but schema not yet resolved — grey, cost unknown),
+  **deferred** (dynamically excluded this session — auto/manual defer — green, saving
+  per-turn tokens, re-enableable live), **disabled** (grey `(disabled)`, no cost, NOT
+  re-enableable). Keep the observed/unobserved distinction orthogonal only within the
+  enabled axis.
+
+**Policy-disabled vs dynamically-deferred (a required distinction).** Two populations
+end up in `excludedTools`, and the applet + the enable path MUST NOT conflate them:
+- **Policy-disabled** = permanent, application-layer, contributes no cost, NOT
+  re-enableable: `DEFAULT_DISABLED_TOOLS` (hard-disabled Caco tools, filtered
+  pre-registration) AND `DEFAULT_EXCLUDED_BUILTINS` (the shell family Caco excludes to
+  force `caco_run_workflow`, plus platform-absent builtins like powershell-on-Linux /
+  bash-on-Windows, which are listed but never enabled). These render **disabled** (grey)
+  and `classifyTool` returns `'disabled'`; `caco_enable_tools`/`validateEnable` reject
+  them ("disabled and not re-enableable"). Because the base resume seed re-applies them
+  every resume, they are permanent in effect anyway — the rejection just makes it
+  explicit and avoids a pointless one-turn cache-bust.
+- **Dynamically-deferred** = session-level auto-defer (C2) or manual defer (D1); WAS
+  contributing cost, now saving it; **re-enableable** live. Renders **deferred** (green).
+- The discriminator is a `policyDisabled` key set (= `hardDisabled` ∪
+  `excludedBuiltinNames()`), threaded into `classifyTool`/`validateEnable`. Builtins are
+  never dynamically deferred (C2's candidate universe excludes them), so an excluded
+  builtin is always policy-disabled; an excluded MCP/Caco-allowlist tool is always
+  dynamic.
 
 ### Phase B — manual reveal (probe → catalog + enable)
 
@@ -279,9 +302,12 @@ dumping ground, the authority is **four small modules**, layered leaf-first:
     origin: 'caco'|'builtin'|'mcp'; hardDisabled: boolean; parameters?: JSONSchema; }
   ```
 - **`src/session-tool-state.ts` (pure decision core).** `classifyTool(key, { excluded,
-  hardDisabled }) → 'enabled'|'deferred'|'off'` (the single 3-axis definition);
-  `validateEnable(keys, catalog, excluded) → { ok; nextExcluded } | { error }` (atomic
-  pre-validation); `computeColdResumeExclusions(...)` (cold-only defer math). No I/O, no
+  hardDisabled, policyDisabled }) → 'enabled'|'deferred'|'disabled'` (the single
+  presentation-axis definition: hardDisabled or policyDisabled ⇒ `disabled`; a dynamic
+  exclusion ⇒ `deferred`; else `enabled`); `validateEnable(keys, catalog, excluded,
+  policyDisabled) → { ok; nextExcluded } | { error }` (atomic pre-validation, rejects
+  policy-disabled as not re-enableable); `computeColdResumeExclusions(...)` (cold-only
+  defer math). No I/O, no
   SDK, no state — the whole decision surface is unit-testable in isolation.
 - **The stateful shell — folded INTO `src/session-manager.ts` (as built).** The spec
   originally proposed a separate `src/session-tool-authority.ts`; per the coupling review's
@@ -396,8 +422,9 @@ CLI itself tells us each tool's name the first time we see it.
   (Phase K), never reconstructed** from `server`+`rawTool`. A key mismatch would make
   defer silently mis-fire — the exact failure C0 exposed — so an MCP tool with no learned
   key is marked "unknown/not-excludable-yet", never given a fabricated key.
-- **One classifier / one state owner** (invariant): enabled/deferred/off is defined once
-  (`classifyTool` in `session-tool-state.ts`) and consumed by the applet payload, the
+- **One classifier / one state owner** (invariant): enabled/deferred/disabled is defined
+  once (`classifyTool` in `session-tool-state.ts`, with a `policyDisabled` set separating
+  permanent policy exclusions from dynamic defers) and consumed by the applet payload, the
   `caco_docs` catalog, and enable-validation; the per-session `excludedTools` truth and
   the sole success-gated live mutator (`setExcludedToolsLive`) live only in SessionManager.
 - **One catalog assembly** (invariant): the "what tools exist" universe is built once by
@@ -485,7 +512,7 @@ CLI itself tells us each tool's name the first time we see it.
 - Oracles:
   - Pure catalog builder → `buildToolCatalog` unit test: all origins present, keyed by `ToolKey`, no duplicates when the same tool appears via `tools.list` and the exclusion set; hard-disabled tools included with `hardDisabled:true`.
   - `caco_enable_tools` validation → unit test: unknown / already-enabled / hard-disabled names reject atomically (no exclusion mutation); a **valid** enable is never rejected (never-block); state changes only on `rpc.options.update` success (throw/`{success:false}` leaves it unchanged); a valid batch produces the expected new `excludedTools`; two valid enables in one turn both apply (monotonic, no rejection).
-  - **`toolKey` / `classifyTool` (the single-key & single-classifier oracles):** `toolKey` unit test covering **all origins** — MCP tool ⇒ `server/tool`, SDK builtin ⇒ `builtin:x`, Caco tool ⇒ its key form, and the `tool.execution_complete` event shape (`toolName`/`mcpServerName`/`mcpToolName`) resolving to the *same* key its `excludedTools` entry uses; unresolvable ⇒ throws. `classifyTool` unit test — excluded ⇒ deferred, hard-disabled ⇒ off, else enabled — the one definition the applet/catalog/validation all import.
+  - **`toolKey` / `classifyTool` (the single-key & single-classifier oracles):** `toolKey` unit test covering **all origins** — MCP tool ⇒ `server/tool`, SDK builtin ⇒ `builtin:x`, Caco tool ⇒ its key form, and the `tool.execution_complete` event shape (`toolName`/`mcpServerName`/`mcpToolName`) resolving to the *same* key its `excludedTools` entry uses; unresolvable ⇒ throws. `classifyTool` unit test — dynamic exclusion ⇒ deferred, hard-disabled or policy-disabled ⇒ disabled, else enabled — the one definition the applet/catalog/validation all import.
   - Tool state in the payload → extend `mcp-server-payload.test.ts` (via `classifyTool`: excluded ⇒ deferred; `DEFAULT_DISABLED` ⇒ hard-disabled; else enabled).
   - Phase C → the primary test is the **seam** dispatch-event → usage-store stamp → cold-resume exclusion (code-quality "test the seam"), plus the pure `computeColdResumeExclusions` units: `isCold:false` ⇒ `[]` (warm never mutated); `isCold:true` ⇒ eligible+stale (>2 active-hours) excluded, used-here + non-eligible (caco_docs/enable/etc.) kept.
   - Phase D (manual defer) → endpoint unit test: deferring a server adds exactly that server's ToolKeys to `excludedTools` (applied live per active session, persisted system-wide); un-defer removes exactly those; a manually-deferred server survives into a freshly-seeded session. **Conflict-order oracle (pins no-dual-truth):** (1) manual defer → `caco_enable_tools` reveals it in one session, live, WITHOUT clearing the persisted preference; (2) a future session is still seeded deferred; (3) a later manual-defer broadcast re-hides the revealed session; (4) manual un-defer removes both the persisted preference AND the live exclusion. Visual: per-server toggle labelled as the system-wide default + the cost-warning tooltip.
@@ -498,7 +525,7 @@ CLI itself tells us each tool's name the first time we see it.
 |---|------|-------|--------|
 | A1 | Add `Caco` pseudo-server (Caco `defineTool` tools: name+desc) to `/api/mcp/servers` | `src/routes/workspace-api.ts`, `src/session-manager.ts` (list Caco tools) | payload test: Caco server present |
 | A2 | Compute per-tool state inline (enabled/deferred/hard-disabled) — **as built in Phase A**; R1 retrofits this onto `classifyTool` | `src/routes/workspace-api.ts` | `mcp-server-payload.test.ts` (excluded ⇒ deferred; DEFAULT_DISABLED ⇒ hard-disabled) |
-| A3 | Applet: grey + `(disabled)` for deferred, `(off)` for hard-disabled, distinct from unobserved | `applets/mcp-servers/{script.js,style.css}` | visual |
+| A3 | Applet: grey `(disabled)` for policy-disabled (hard-disabled Caco + policy-excluded builtins), green `deferred` for dynamic defers, distinct from active/unobserved | `applets/mcp-servers/{script.js,style.css}` | visual |
 | R0 | **SDK surface:** extend Caco `CopilotSessionInstance` with `rpc.options.update` + `rpc.metadata.contextInfo` (compile prerequisite for B0/B2; `rpc.usage.getMetrics` only if a later step needs cumulative metrics) | `src/session-manager.ts` | compiles (tsc) |
 | R1 | **Create the tool-state modules (SRP split):** `src/tool-key.ts` (branded `ToolKey` + `toolKey`, leaf), `src/tool-catalog.ts` (`buildToolCatalog` + `CatalogTool`/`ToolCatalog`), `src/session-tool-state.ts` (pure `classifyTool`/`validateEnable`/`computeColdResumeExclusions`). Retrofit the Phase-A payload onto `buildToolCatalog` + `classifyTool` (removes the inline stitch/copy) | `src/tool-key.ts`, `src/tool-catalog.ts`, `src/session-tool-state.ts`, `src/routes/workspace-api.ts` | `toolKey` (all origins incl. event shape, unresolvable throws) + `classifyTool` + `validateEnable` + `buildToolCatalog` unit tests; payload test still green |
 | R2 | **Tool-call metering audit** (gates C): extend `recordToolCall`/`dispatch-events` tool.execution_complete branch to carry the key via `toolKey()` (imports **only** `tool-key.ts`); assert-throw on unresolvable | `src/dispatch-events.ts`, `src/session-throughput.ts` | seam test: a tool call stamps under the same key `excludedTools` uses |

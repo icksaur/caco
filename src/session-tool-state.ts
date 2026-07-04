@@ -8,17 +8,25 @@
 import type { ToolKey } from './tool-key.js';
 import type { ToolCatalog } from './tool-catalog.js';
 
-export type ToolState = 'enabled' | 'deferred' | 'off';
+export type ToolState = 'enabled' | 'deferred' | 'disabled';
 
-/** The single definition of the three tool axes. hardDisabled (filtered
- *  pre-registration) is not live-revealable → 'off'; a registered-but-excluded
- *  tool is 'deferred' (revealable); everything else the model currently sees is
- *  'enabled'. */
+/** The single definition of the tool presentation axes.
+ *  - `'disabled'`: permanent application-layer policy — a hard-disabled Caco tool
+ *    (`DEFAULT_DISABLED_TOOLS`, filtered pre-registration) OR a policy-excluded /
+ *    platform-absent builtin (`policyDisabled`, e.g. the shell family or
+ *    powershell-on-Linux). Not sent to the model, contributes no per-turn tokens, and
+ *    NOT re-enableable.
+ *  - `'deferred'`: dynamically excluded this session (C2 auto-defer / D1 manual defer).
+ *    Was contributing cost, now saving it; re-enableable live.
+ *  - `'enabled'`: the model currently sees it.
+ *  Policy is checked before the dynamic exclusion set, so a builtin that appears in both
+ *  the base seed and `policyDisabled` classifies as `'disabled'`, never `'deferred'`. */
 export function classifyTool(
   key: ToolKey,
-  ctx: { excluded: ReadonlySet<ToolKey>; hardDisabled: boolean },
+  ctx: { excluded: ReadonlySet<ToolKey>; hardDisabled: boolean; policyDisabled?: ReadonlySet<ToolKey> },
 ): ToolState {
-  if (ctx.hardDisabled) return 'off';
+  if (ctx.hardDisabled) return 'disabled';
+  if (ctx.policyDisabled?.has(key)) return 'disabled';
   if (ctx.excluded.has(key)) return 'deferred';
   return 'enabled';
 }
@@ -54,18 +62,21 @@ export function resolveEnableTargets(names: string[], catalog: ToolCatalog): Res
 }
 
 /** Atomic pre-validation for `caco_enable_tools`: every key must exist, be
- *  currently deferred, and not be hard-disabled. Any invalid key rejects the
- *  WHOLE call with no mutation (a syntax mistake costs no cache-bust). On success
- *  returns the next exclusion set (current minus the enabled keys). Pure. */
+ *  currently deferred, and not be policy-disabled (hard-disabled Caco tool or a
+ *  policy-excluded builtin — those are permanent app-layer policy, not re-enableable).
+ *  Any invalid key rejects the WHOLE call with no mutation (a syntax mistake costs no
+ *  cache-bust). On success returns the next exclusion set (current minus the enabled
+ *  keys). Pure. */
 export function validateEnable(
   keys: ToolKey[],
   catalog: ToolCatalog,
   excluded: ReadonlySet<ToolKey>,
+  policyDisabled?: ReadonlySet<ToolKey>,
 ): ValidateEnableResult {
   for (const key of keys) {
     const tool = catalog.get(key);
     if (!tool) return { ok: false, error: `unknown tool: ${key}` };
-    if (tool.hardDisabled) return { ok: false, error: `tool is disabled and not revealable: ${key}` };
+    if (tool.hardDisabled || policyDisabled?.has(key)) return { ok: false, error: `tool is disabled and not re-enableable: ${key}` };
     if (!excluded.has(key)) return { ok: false, error: `tool is already enabled: ${key}` };
   }
   const nextExcluded = new Set(excluded);
@@ -110,7 +121,7 @@ export function computeColdResumeExclusions(args: {
  * `- <camel_name> — <first-line description> [<state>]`, state from the single
  * `classifyTool`. Pure. Ordered by origin then insertion (catalog order).
  */
-export function formatToolCatalog(catalog: ToolCatalog, excluded: ReadonlySet<ToolKey>): string {
+export function formatToolCatalog(catalog: ToolCatalog, excluded: ReadonlySet<ToolKey>, policyDisabled?: ReadonlySet<ToolKey>): string {
   const groups = new Map<string, string[]>();
   const order: string[] = [];
   const push = (group: string, line: string): void => {
@@ -119,7 +130,7 @@ export function formatToolCatalog(catalog: ToolCatalog, excluded: ReadonlySet<To
     lines.push(line);
   };
   for (const t of catalog.values()) {
-    const state = classifyTool(t.key, { excluded, hardDisabled: t.hardDisabled });
+    const state = classifyTool(t.key, { excluded, hardDisabled: t.hardDisabled, policyDisabled });
     const desc = (t.description || '').split('\n')[0].trim();
     const group = t.origin === 'caco' ? 'Caco' : t.origin === 'builtin' ? 'Built-in' : `MCP: ${t.server ?? 'unknown'}`;
     push(group, `- \`${t.name}\` — ${desc || '(no description)'} [${state}]`);
@@ -129,8 +140,8 @@ export function formatToolCatalog(catalog: ToolCatalog, excluded: ReadonlySet<To
     '',
     'Every tool available to this session. **enabled** = the model sees it now; ' +
       '**deferred** = excluded this session to save per-turn tokens (re-enable it with ' +
-      '`caco_enable_tools({ names: ["<name>"] })` when you need it); **off** = ' +
-      'hard-disabled and NOT re-enableable.',
+      '`caco_enable_tools({ names: ["<name>"] })` when you need it); **disabled** = ' +
+      'hard-disabled or policy-excluded (e.g. the shell family) and NOT re-enableable.',
     '',
     'To use a deferred tool: call `caco_enable_tools` with its name(s) in ONE call ' +
       '(batch related tools together), then call the tool on a later turn.',

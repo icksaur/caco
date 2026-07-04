@@ -1925,7 +1925,7 @@ export class SessionManager {
    * tools. `excluded` is the process-level builtin exclusion set as ToolKeys; live
    * session-level MCP exclusions join it in a later phase.
    */
-  async getToolCatalog(sessionId?: string): Promise<{ catalog: ToolCatalog; excluded: Set<ToolKey> }> {
+  async getToolCatalog(sessionId?: string): Promise<{ catalog: ToolCatalog; excluded: Set<ToolKey>; policyDisabled: Set<ToolKey> }> {
     // Resolve ONE target session and thread it through every query below, so key
     // learning (from that session's getCurrentToolMetadata) matches the MCP tools we
     // list — otherwise a tool loaded in the target session could be omitted because a
@@ -1976,7 +1976,13 @@ export class SessionManager {
       builtins: [...listedBuiltins, ...bareExcluded],
       mcp,
     });
-    return { catalog, excluded };
+    // Policy-disabled keys = the process-level builtin exclusions (the shell family Caco
+    // forces through caco_run_workflow, plus platform-absent builtins). These are
+    // permanent app-layer policy: shown 'disabled', never 'deferred', and not
+    // re-enableable — distinct from a dynamic session defer. (hardDisabled Caco tools are
+    // carried per-entry on the catalog, so they need no separate set.)
+    const policyDisabled = new Set<ToolKey>(excludedBuiltinNames() as ToolKey[]);
+    return { catalog, excluded, policyDisabled };
   }
 
   /** The session's current exclusion set as ToolKeys (the live truth; starts as the
@@ -2140,18 +2146,19 @@ export class SessionManager {
     const active = this.activeSessions.get(sessionId);
     if (!active) return { ok: false, error: 'session is not active' };
     // Session-scoped catalog: MCP tools must come from THIS session, not an arbitrary one.
-    const { catalog } = await this.getToolCatalog(sessionId);
+    const { catalog, policyDisabled } = await this.getToolCatalog(sessionId);
     const resolved = resolveEnableTargets(names, catalog);
     if (!resolved.ok) return { ok: false, error: resolved.error };
     // Read the CURRENT set inside the lock (a prior queued reveal may have shrunk it).
     const current = new Set<ToolKey>(this.getExcludedToolKeys(sessionId));
-    // Atomically reject hard-disabled (not revealable); no-op already-enabled; enable the
-    // deferred remainder. A mixed batch never blocks the valid reveals.
+    // Atomically reject hard-disabled + policy-disabled (not re-enableable); no-op
+    // already-enabled; enable the deferred remainder. A mixed batch never blocks the
+    // valid reveals.
     const toEnable: ToolKey[] = [];
     const alreadyEnabled: ToolKey[] = [];
     for (const key of resolved.keys) {
       const tool = catalog.get(key);
-      if (tool?.hardDisabled) return { ok: false, error: `tool is disabled and not revealable: ${key}` };
+      if (tool?.hardDisabled || policyDisabled.has(key)) return { ok: false, error: `tool is disabled and not re-enableable: ${key}` };
       if (current.has(key)) toEnable.push(key);
       else alreadyEnabled.push(key);
     }
@@ -2159,7 +2166,7 @@ export class SessionManager {
       // Everything requested is already enabled — no cache-busting mutation needed.
       return { ok: true, enabled: [], alreadyEnabled };
     }
-    const validated = validateEnable(toEnable, catalog, current);
+    const validated = validateEnable(toEnable, catalog, current, policyDisabled);
     if (!validated.ok) return { ok: false, error: validated.error };
     const applied = await this.setExcludedToolsLive(sessionId, [...validated.nextExcluded]);
     if (!applied.success) return { ok: false, error: applied.error ?? 'rpc.options.update did not succeed' };

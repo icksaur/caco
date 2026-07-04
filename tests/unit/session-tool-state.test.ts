@@ -18,9 +18,15 @@ function cat(entries: Array<Partial<CatalogTool> & { key: ToolKey }>): ToolCatal
   return m;
 }
 
-describe('classifyTool — the one 3-axis definition', () => {
-  it('hardDisabled → off (takes precedence even if somehow excluded)', () => {
-    expect(classifyTool(k.oauth, { excluded: new Set([k.oauth]), hardDisabled: true })).toBe('off');
+describe('classifyTool — the one presentation-axis definition', () => {
+  it('hardDisabled → disabled (takes precedence even if somehow excluded)', () => {
+    expect(classifyTool(k.oauth, { excluded: new Set([k.oauth]), hardDisabled: true })).toBe('disabled');
+  });
+  it('policy-disabled builtin → disabled, not deferred (even though it is in the excluded set)', () => {
+    expect(classifyTool(k.bash, { excluded: new Set([k.bash]), hardDisabled: false, policyDisabled: new Set([k.bash]) })).toBe('disabled');
+  });
+  it('in excluded set but NOT policy → deferred (dynamic defer)', () => {
+    expect(classifyTool(k.issues, { excluded: new Set([k.issues]), hardDisabled: false, policyDisabled: new Set([k.bash]) })).toBe('deferred');
   });
   it('in excluded set → deferred', () => {
     expect(classifyTool(k.bash, { excluded: new Set([k.bash]), hardDisabled: false })).toBe('deferred');
@@ -39,11 +45,11 @@ describe('validateEnable — atomic, reveal-only', () => {
   ]);
 
   it('valid: removes the named keys from the exclusion set', () => {
-    const r = validateEnable([k.bash], catalog, new Set([k.bash, k.issues]));
+    const r = validateEnable([k.issues], catalog, new Set([k.bash, k.issues]));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.nextExcluded.has(k.bash)).toBe(false);
-      expect(r.nextExcluded.has(k.issues)).toBe(true);
+      expect(r.nextExcluded.has(k.issues)).toBe(false);
+      expect(r.nextExcluded.has(k.bash)).toBe(true);
     }
   });
 
@@ -59,9 +65,15 @@ describe('validateEnable — atomic, reveal-only', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('rejects a hard-disabled name (not revealable)', () => {
+  it('rejects a hard-disabled name (not re-enableable)', () => {
     const r = validateEnable([k.oauth], catalog, new Set([k.bash]));
     expect(r.ok).toBe(false);
+  });
+
+  it('rejects a policy-disabled builtin (not re-enableable), even though it is excluded', () => {
+    const r = validateEnable([k.bash], catalog, new Set([k.bash, k.issues]), new Set([k.bash]));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/disabled and not re-enableable/);
   });
 
   it('rejects an already-enabled name (not currently excluded)', () => {

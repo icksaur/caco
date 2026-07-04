@@ -197,9 +197,10 @@ interface PayloadTool {
   instructions: string | null;
   deferLoading: boolean;
   tokenCost: number | null;
-  /** enablement axis: enabled (model sees it) / deferred (excludedTools, revealable)
-   *  / off (DEFAULT_DISABLED, filtered pre-registration, not revealable). */
-  state: 'enabled' | 'deferred' | 'off';
+  /** presentation axis: enabled (model sees it) / deferred (dynamically excluded this
+   *  session, re-enableable) / disabled (policy: hard-disabled or policy-excluded builtin,
+   *  no cost, NOT re-enableable). */
+  state: 'enabled' | 'deferred' | 'disabled';
   /** Active-clock seconds since this tool was last used, or null if never used
    *  (system-wide; Phase C1 usage store). null renders as "never". */
   ageActiveSeconds: number | null;
@@ -243,7 +244,7 @@ export function estimateToolTokens(tool: {
 /**
  * Pure: assemble the /servers response payload. Consumes the unified
  * `buildToolCatalog` (the single "what tools exist" view) for the Built-in and
- * Caco groups, and `classifyTool` for every tool's enabled/deferred/off state, so
+ * Caco groups, and `classifyTool` for every tool's enabled/deferred/disabled state, so
  * the three-axis truth and the tool universe are defined once (spec-tool-reveal:
  * "one catalog assembly" + "one classifier"). MCP tools are grouped per server and
  * enriched with OBSERVED schema (from getCurrentMetadata) when loaded — else
@@ -259,10 +260,21 @@ export function buildMcpServerPayload(
   cacoCatalog: CacoCatalogTool[] = [],
   deferredServers: string[] = [],
   usage?: { nowActiveSeconds: number; lastUsed: ReadonlyMap<ToolKey, number> },
+  sessionExcludedKeys: ToolKey[] = [],
 ): Array<{ name: string; status: string; source: string | null; error: string | null; deferred?: boolean; tools: PayloadTool[] }> {
   const deferredServerSet = new Set(deferredServers);
-  // The exclusion set as canonical ToolKeys (what classifyTool compares against).
-  const excluded = new Set<ToolKey>(deferredBuiltins.map(n => builtinKey(n)));
+  // The exclusion set as canonical ToolKeys (what classifyTool compares against): the
+  // process-default deferred builtins PLUS the target session's LIVE exclusion set (its
+  // auto/manual-deferred MCP + Caco keys). Without the live set, MCP/Caco tools would
+  // always classify `enabled` (the builtin-only set never contains their keys), so an
+  // actually-deferred tool would mis-render as enabled/unobserved. classifyTool over the
+  // real live set is what lets the applet show a true "deferred" state, not a prediction.
+  const excluded = new Set<ToolKey>([...deferredBuiltins.map(n => builtinKey(n)), ...sessionExcludedKeys]);
+  // Policy-disabled = the builtin exclusions (shell family + platform-absent builtins):
+  // permanent app-layer policy, shown 'disabled' (not 'deferred') and not re-enableable.
+  // MCP tools are never policy-disabled (C2 never defers builtins), so an excluded MCP/
+  // Caco-allowlist tool classifies 'deferred' while an excluded builtin classifies 'disabled'.
+  const policyDisabled = new Set<ToolKey>(deferredBuiltins.map(n => builtinKey(n)));
 
   // Per-tool usage/age + cold-resume verdict, from the shared threshold so the
   // applet view can't disagree with what auto-defer would actually do. `eligible`
@@ -295,13 +307,15 @@ export function buildMcpServerPayload(
     source: 'caco' as string | null,
     error: null as string | null,
     tools: entries.filter(t => t.origin === 'builtin').map((t): PayloadTool => {
-      const state = classifyTool(t.key, { excluded, hardDisabled: false });
+      const state = classifyTool(t.key, { excluded, hardDisabled: false, policyDisabled });
       const listed = listedBuiltinKeys.has(t.key);
       return {
         name: t.name,
         description: t.description,
         namespacedName: t.name,
-        observed: state !== 'deferred',
+        // Only an ENABLED tool is actually in the turn's resolved set; deferred and
+        // policy-disabled builtins are not sent to the model.
+        observed: state === 'enabled',
         parameters: t.parameters ?? null,
         instructions: t.instructions ?? null,
         deferLoading: false,
@@ -322,12 +336,14 @@ export function buildMcpServerPayload(
     source: 'caco' as string | null,
     error: null as string | null,
     tools: entries.filter(t => t.origin === 'caco').map((t): PayloadTool => {
-      const state = classifyTool(t.key, { excluded, hardDisabled: t.hardDisabled });
+      const state = classifyTool(t.key, { excluded, hardDisabled: t.hardDisabled, policyDisabled });
       return {
         name: t.name,
         description: t.description,
         namespacedName: t.name,
-        observed: !t.hardDisabled,
+        // Only an ENABLED Caco tool is in the turn's set; deferred (auto-deferred
+        // allowlist) and disabled (hard-disabled) ones are not sent.
+        observed: state === 'enabled',
         parameters: t.parameters ?? null,
         instructions: null,
         deferLoading: false,
@@ -369,7 +385,7 @@ export function buildMcpServerPayload(
         tokenCost: params ? estimateToolTokens({ name: estName, description: estDesc, parameters: params }) : null,
         // classifyTool over the shared exclusion set: Phase A has no excluded MCP
         // tools, so these are enabled; Phase B marks session-excluded ones deferred.
-        state: classifyTool(key, { excluded, hardDisabled: false }),
+        state: classifyTool(key, { excluded, hardDisabled: false, policyDisabled }),
         // MCP tools are defer-eligible only once their exclusion key is learned
         // (excludable) — we can't defer what we can't key.
         ...usageFields(key, t.excludable),
@@ -434,6 +450,10 @@ router.get('/servers', async (_req: Request, res: Response) => {
       sessionManager.getCacoToolCatalog(),
       getDeferredServers(),
       { nowActiveSeconds: getNowActiveSeconds(), lastUsed: getLastUsedActiveSeconds() },
+      // The target session's LIVE exclusion set (auto/manual-deferred MCP + Caco keys),
+      // so actually-deferred tools classify as `deferred` rather than mis-rendering as
+      // enabled. Empty when no session is active (falls back to builtin defaults only).
+      target ? sessionManager.getExcludedToolKeys(target) : [],
     );
     // Telemetry (spec-tool-reveal B0): the SDK's ground-truth token breakdown +
     // that same session's last-turn cache split (the reveal cache-bust signal). Both

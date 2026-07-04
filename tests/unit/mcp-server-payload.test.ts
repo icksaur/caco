@@ -34,6 +34,23 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
     expect(out.map(s => s.name)).toEqual(['Built-in', 'Caco', 'github']);
   });
 
+  it('marks an MCP tool in the session live exclusion set as state:deferred', () => {
+    const excludedKey = mcpKey('github-list_issues');
+    const out = buildMcpServerPayload(
+      [{ name: 'github', status: 'connected' }],
+      { github: [
+        { key: excludedKey, name: 'list_issues', description: 'd', excludable: true },
+        { key: mcpKey('github-get_pr'), name: 'get_pr', description: 'd', excludable: true },
+      ] },
+      {}, [], [], [], [],
+      { nowActiveSeconds: 0, lastUsed: new Map() },
+      [excludedKey], // session live exclusion set
+    );
+    const tools = Object.fromEntries(out[2].tools.map(t => [t.name, t]));
+    expect(tools.list_issues.state).toBe('deferred'); // actually excluded
+    expect(tools.get_pr.state).toBe('enabled');       // not excluded
+  });
+
   it('marks a manually-deferred MCP server deferred:true (only that server)', () => {
     const out = buildMcpServerPayload(
       [{ name: 'github', status: 'connected' }, { name: 'linear', status: 'connected' }],
@@ -47,26 +64,26 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
     expect(linear.deferred).toBe(false);
   });
 
-  it('Built-in: excluded builtin from tools.list is one deferred entry (deduped), not two', () => {
+  it('Built-in: a policy-excluded builtin is one disabled entry (deduped), not two, and never deferred', () => {
     const out = buildMcpServerPayload(
       [], {}, {},
       [{ name: 'bash', description: 'Run a shell command', parameters: { cmd: { type: 'string' } } }, { name: 'view', description: 'Read' }],
       ['bash', 'powershell'],
     );
     const bi = out[0].tools;
-    // bash: listed AND excluded → single deferred entry keeping its schema
+    // bash: listed AND policy-excluded → single DISABLED entry (policy, not dynamic defer)
     const bashEntries = bi.filter(t => t.name === 'bash');
     expect(bashEntries).toHaveLength(1);
-    expect(bashEntries[0]).toMatchObject({ state: 'deferred', observed: false });
+    expect(bashEntries[0]).toMatchObject({ state: 'disabled', observed: false });
     expect(bashEntries[0].parameters).toEqual({ cmd: { type: 'string' } });
     // view: enabled
     expect(bi.find(t => t.name === 'view')).toMatchObject({ state: 'enabled', observed: true });
-    // powershell: excluded but NOT in tools.list → bare deferred entry
+    // powershell: policy-excluded but NOT in tools.list → bare disabled entry
     const ps = bi.find(t => t.name === 'powershell');
-    expect(ps).toMatchObject({ state: 'deferred', observed: false, description: '', tokenCost: null });
+    expect(ps).toMatchObject({ state: 'disabled', observed: false, description: '', tokenCost: null });
   });
 
-  it('Caco: hardDisabled → off, else enabled; token cost from parameters', () => {
+  it('Caco: hardDisabled → disabled, else enabled; token cost from parameters', () => {
     const out = buildMcpServerPayload([], {}, {}, [], [], [
       { name: 'caco_docs', description: 'docs', hardDisabled: false, parameters: { properties: { section: { type: 'string' } } } },
       { name: 'register_mcp_server', description: 'oauth', hardDisabled: true },
@@ -75,7 +92,7 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
     const docs = caco.find(t => t.name === 'caco_docs')!;
     expect(docs).toMatchObject({ state: 'enabled' });
     expect(docs.tokenCost!).toBeGreaterThan(0);
-    expect(caco.find(t => t.name === 'register_mcp_server')).toMatchObject({ state: 'off', observed: false });
+    expect(caco.find(t => t.name === 'register_mcp_server')).toMatchObject({ state: 'disabled', observed: false });
   });
 
   it('enriches an available MCP tool with observed schema when loaded (state enabled)', () => {

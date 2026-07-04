@@ -11,7 +11,7 @@ import { sessionManager } from './session-manager.js';
  */
 export function createToolRevealTool(sessionRef: SessionIdRef) {
   const enableTools = defineTool('caco_enable_tools', {
-    description: `Re-enable one or more DEFERRED tools for this session so you can call them on a later turn. Deferred tools are excluded from every turn's tool list to save tokens; discover them (and their exact names) with \`caco_docs section="tools"\` — anything marked [deferred] can be enabled here. [off] tools cannot.
+    description: `Re-enable one or more DEFERRED tools for this session so you can call them on a later turn. Deferred tools are excluded from every turn's tool list to save tokens; discover them (and their exact names) with \`caco_docs section="tools"\` — anything marked [deferred] can be enabled here. [disabled] tools cannot.
 
 COST: enabling changes the tool block, which busts the prompt cache for ONE turn (a one-time cost, then normal). So batch ALL the tools you expect to need into a SINGLE call — enabling in one call costs one cache-bust; drip-feeding across turns costs one per turn. This never blocks you; it's only about cost.
 
@@ -28,7 +28,7 @@ Names may be the bare display name (e.g. "bash") or the full key (e.g. "github-m
       }
       const result = await sessionManager.enableTools(sessionId, names);
       if (!result.ok) {
-        return { textResultForLlm: `caco_enable_tools failed: ${result.error}. Nothing was changed. Use \`caco_docs section="tools"\` to see exact names and which tools are [deferred] (re-enableable) vs [off] (not).` };
+        return { textResultForLlm: `caco_enable_tools failed: ${result.error}. Nothing was changed. Use \`caco_docs section="tools"\` to see exact names and which tools are [deferred] (re-enableable) vs [disabled] (not).` };
       }
       const parts: string[] = [];
       if (result.enabled.length > 0) {

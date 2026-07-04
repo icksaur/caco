@@ -86,10 +86,15 @@ describe('formatToolCatalog — grouped, state-annotated discovery text', () => 
 
   it('annotates each tool with its classifyTool state', () => {
     expect(out).toMatch(/caco_run_workflow.*\benabled\b/);
-    expect(out).toMatch(/register_mcp_server.*\boff\b/);
+    expect(out).toMatch(/register_mcp_server.*\bdisabled\b/);
     expect(out).toMatch(/\bbash\b.*\bdeferred\b/);
     expect(out).toMatch(/\bview\b.*\benabled\b/);
     expect(out).toMatch(/list_issues.*\benabled\b/);
+  });
+
+  it('with a policyDisabled set, a policy-excluded builtin reads disabled (not deferred)', () => {
+    const text = formatToolCatalog(cat, excluded, new Set([builtinKey('bash')]));
+    expect(text).toMatch(/\bbash\b.*\bdisabled\b/);
   });
 
   it('uses only the first line of a multi-line description', () => {

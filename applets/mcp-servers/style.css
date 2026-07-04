@@ -188,7 +188,6 @@
   color: var(--color-text-muted);
   white-space: nowrap;
 }
-.mcp-age-stale { color: var(--color-context-usage); }
 
 .mcp-tool-list {
   margin: 0 0 var(--space-sm) 21px;
@@ -215,11 +214,16 @@
   color: var(--color-text-dim);
 }
 
-.mcp-state-deferred,
-.mcp-state-off {
+.mcp-state-disabled {
   color: var(--color-text-dim);
   font-size: 0.9em;
   font-style: italic;
+  flex-shrink: 0;
+}
+.mcp-state-deferred {
+  color: var(--color-success-bright, #3fb950);
+  font-size: 0.9em;
+  font-weight: 500;
   flex-shrink: 0;
 }
 
@@ -244,6 +248,11 @@
   color: var(--color-text-dim);
   font-size: 0.9em;
   font-style: italic;
+  flex-shrink: 0;
+}
+.mcp-active {
+  color: var(--color-text-muted);
+  font-size: 0.9em;
   flex-shrink: 0;
 }
 .mcp-info {

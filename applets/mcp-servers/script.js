@@ -352,8 +352,11 @@ function stateBadge(tool) {
     return '<span class="mcp-state-disabled" title="Disabled by Caco policy: not sent to the model and not re-enableable (a hard-disabled Caco tool, or a policy-excluded / platform-absent built-in such as the shell family). Contributes no per-turn tokens.">(disabled)</span>';
   }
   if (state === 'deferred') {
-    var dt = 'Deferred: excluded from the model this session to save per-turn tokens; re-enableable live via caco_enable_tools.' + (ageLabel ? ' Last used: ' + ageLabel + ' (active-clock).' : '');
-    return agePrefix + '<span class="mcp-state-deferred" title="' + escapeAttr(dt) + '">deferred</span>';
+    var known = tool.knownTokenCost != null ? ' · ' + fmtTokens(tool.knownTokenCost) : '';
+    var dt = 'Deferred: excluded from the model this session to save per-turn tokens; re-enableable live via caco_enable_tools.'
+      + (tool.knownTokenCost != null ? ' Last-known per-turn definition size: ' + fmtTokens(tool.knownTokenCost) + '.' : ' Size not yet known (never observed).')
+      + (ageLabel ? ' Last used: ' + ageLabel + ' (active-clock).' : '');
+    return agePrefix + '<span class="mcp-state-deferred" title="' + escapeAttr(dt) + '">deferred' + escapeHtml(known) + '</span>';
   }
   // enabled:
   if (tool.observed) {

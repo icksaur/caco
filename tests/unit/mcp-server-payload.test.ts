@@ -1,4 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Control the observed-size cache so knownTokenCost for a schema-less deferred MCP
+// tool is deterministic (else buildMcpServerPayload would read ~/.caco/tool-size.json).
+const sizeMock = vi.hoisted(() => ({ sizes: new Map<string, number>() }));
+vi.mock('../../src/tool-size-store.js', () => ({
+  getToolSize: (k: string) => sizeMock.sizes.get(k),
+  recordObservedSizes: vi.fn(),
+}));
+
 import { buildMcpServerPayload, estimateToolTokens } from '../../src/routes/workspace-api.js';
 import { mcpKey } from '../../src/tool-key.js';
 
@@ -49,6 +58,29 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
     const tools = Object.fromEntries(out[2].tools.map(t => [t.name, t]));
     expect(tools.list_issues.state).toBe('deferred'); // actually excluded
     expect(tools.get_pr.state).toBe('enabled');       // not excluded
+  });
+
+  it('a deferred MCP tool with no live schema carries its last-observed knownTokenCost', () => {
+    const deferredKey = mcpKey('github-list_issues');
+    sizeMock.sizes.set(deferredKey as string, 250); // learned in a prior session
+    const out = buildMcpServerPayload(
+      [{ name: 'github', status: 'connected' }],
+      { github: [
+        { key: deferredKey, name: 'list_issues', description: 'd', excludable: true },
+        { key: mcpKey('github-get_pr'), name: 'get_pr', description: 'd', excludable: true }, // no cached size
+      ] },
+      {}, // no observed metadata → no live schema
+      [], [], [], [],
+      { nowActiveSeconds: 0, lastUsed: new Map() },
+      [deferredKey],
+    );
+    const tools = Object.fromEntries(out[2].tools.map(t => [t.name, t]));
+    // deferred + cached size ⇒ knownTokenCost surfaces (live tokenCost stays null)
+    expect(tools.list_issues.tokenCost).toBeNull();
+    expect(tools.list_issues.knownTokenCost).toBe(250);
+    // deferred + no cached size ⇒ knownTokenCost null (never fabricated)
+    expect(tools.get_pr.knownTokenCost).toBeNull();
+    sizeMock.sizes.clear();
   });
 
   it('marks a manually-deferred MCP server deferred:true (only that server)', () => {

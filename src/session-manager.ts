@@ -27,6 +27,7 @@ import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './age
 import { buildToolCatalog, type ToolCatalog } from './tool-catalog.js';
 import { builtinKey, cacoKey, type ToolKey } from './tool-key.js';
 import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys } from './tool-key-registry.js';
+import { recordObservedSizes } from './tool-size-store.js';
 import { validateEnable, resolveEnableTargets, computeColdResumeExclusions } from './session-tool-state.js';
 import { excludedBuiltinNames, DEFER_ELIGIBLE_CACO_TOOLS } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
@@ -1938,6 +1939,7 @@ export class SessionManager {
     // previously-observed tools that are now deferred/absent.
     const observed = await this.getCurrentToolMetadata(target);
     learnFromMetadata(observed);
+    recordObservedSizes(observed);
     const mcp = await Promise.all(
       mcpServers.map(async s => {
         const raw = await this.listMcpTools(s.name, target);

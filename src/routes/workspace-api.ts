@@ -19,6 +19,8 @@ import { buildToolCatalog } from '../tool-catalog.js';
 import { classifyTool } from '../session-tool-state.js';
 import { getDeferredServers } from '../manual-defer-store.js';
 import { getNowActiveSeconds, getLastUsedActiveSeconds, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS } from '../tool-usage-store.js';
+import { estimateToolTokens } from '../tool-size.js';
+import { getToolSize, recordObservedSizes } from '../tool-size-store.js';
 import { snapshot as throughputSnapshot } from '../session-throughput.js';
 import { getSessionUsage } from '../session-usage-cache.js';
 
@@ -197,6 +199,11 @@ interface PayloadTool {
   instructions: string | null;
   deferLoading: boolean;
   tokenCost: number | null;
+  /** Best-known per-turn definition size, independent of current observation: for a
+   *  DEFERRED tool (no live schema) this is its last-observed size (MCP, from the size
+   *  store) or its local estimate (Caco-allowlist), so the applet can show
+   *  "deferred · ~N tokens". null when never observed / not knowable. */
+  knownTokenCost: number | null;
   /** presentation axis: enabled (model sees it) / deferred (dynamically excluded this
    *  session, re-enableable) / disabled (policy: hard-disabled or policy-excluded builtin,
    *  no cost, NOT re-enableable). */
@@ -220,26 +227,9 @@ export interface CacoCatalogTool {
   parameters?: Record<string, unknown>;
 }
 
-/**
- * Estimate a tool's per-turn token cost. The model receives each tool as a
- * SERIALIZED JSON definition, so we count the full JSON length — keys AND values
- * (schema keys like `type`/`properties`/`enum` and every parameter name are real
- * tokens, and dominate for schema-heavy tools) — ÷ BYTES_PER_TOKEN. The char count
- * is exact for the transmitted JSON; only the ÷4 chars-per-token ratio is an
- * approximation (no tokenizer). Pure; the unit-test oracle for the "≈N tokens" display.
- */
-export function estimateToolTokens(tool: {
-  name: string;
-  description?: string;
-  parameters?: Record<string, unknown> | null;
-  instructions?: string | null;
-}): number {
-  const def: Record<string, unknown> = { name: tool.name };
-  if (tool.description) def.description = tool.description;
-  if (tool.parameters) def.parameters = tool.parameters;
-  if (tool.instructions) def.instructions = tool.instructions;
-  return Math.round(JSON.stringify(def).length / 4);
-}
+// estimateToolTokens now lives in the leaf module `tool-size.ts` (shared with the
+// observed-size capture path); imported above and re-exported for existing importers.
+export { estimateToolTokens };
 
 /**
  * Pure: assemble the /servers response payload. Consumes the unified
@@ -325,6 +315,10 @@ export function buildMcpServerPayload(
         tokenCost: listed
           ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters ?? null, instructions: t.instructions ?? null })
           : null,
+        // Builtins are never dynamically deferred (policy only), so known == live cost.
+        knownTokenCost: listed
+          ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters ?? null, instructions: t.instructions ?? null })
+          : null,
         state,
         ...usageFields(t.key, excluded.has(t.key)),
       };
@@ -337,6 +331,9 @@ export function buildMcpServerPayload(
     error: null as string | null,
     tools: entries.filter(t => t.origin === 'caco').map((t): PayloadTool => {
       const state = classifyTool(t.key, { excluded, hardDisabled: t.hardDisabled, policyDisabled });
+      // Caco schemas are locally available, so a deferred Caco-allowlist tool still
+      // prices directly from its params — no observed-size cache needed.
+      const cacoCost = t.parameters ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters }) : null;
       return {
         name: t.name,
         description: t.description,
@@ -347,7 +344,8 @@ export function buildMcpServerPayload(
         parameters: t.parameters ?? null,
         instructions: null,
         deferLoading: false,
-        tokenCost: t.parameters ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters }) : null,
+        tokenCost: cacoCost,
+        knownTokenCost: cacoCost,
         state,
         ...usageFields(t.key, isDeferEligibleCacoTool(t.name)),
       };
@@ -383,6 +381,12 @@ export function buildMcpServerPayload(
         instructions: null,
         deferLoading: obs?.deferLoading ?? false,
         tokenCost: params ? estimateToolTokens({ name: estName, description: estDesc, parameters: params }) : null,
+        // Known size independent of current observation: the live estimate when the
+        // schema is present, else the last-observed size from the persisted store — so
+        // a DEFERRED MCP tool (no live schema) still shows "deferred · ~N tokens".
+        knownTokenCost: params
+          ? estimateToolTokens({ name: estName, description: estDesc, parameters: params })
+          : getToolSize(key) ?? null,
         // classifyTool over the shared exclusion set: Phase A has no excluded MCP
         // tools, so these are enabled; Phase B marks session-excluded ones deferred.
         state: classifyTool(key, { excluded, hardDisabled: false, policyDisabled }),
@@ -425,6 +429,7 @@ router.get('/servers', async (_req: Request, res: Response) => {
     // raw MCP tool to its discovered key. If not yet learned, keep a display-only
     // `server/tool` id (excludable:false) so the tool is still SHOWN — never dropped.
     learnFromMetadata(observed);
+    recordObservedSizes(observed);
     const availableByServer: Record<string, AvailableTool[]> = {};
     for (const [server, tools] of Object.entries(rawByServer)) {
       availableByServer[server] = tools.map(t => {

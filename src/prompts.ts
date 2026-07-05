@@ -57,7 +57,6 @@ export async function buildSystemMessage(): Promise<SystemMessage> {
 - **Interface**: Rich HTML chat with markdown rendering, syntax highlighting, and media embeds
 - **Scope**: Full filesystem access - general-purpose assistant, not limited to any project
 - **Home directory**: ${process.env.HOME || process.env.USERPROFILE || homedir()}
-- **Current directory**: {{SESSION_CWD}} (but not limited to this)
 
 ## Work Economy (most important)
 Get enough context fast, then act. Parallelize discovery and stop as soon as you can name the exact change — prefer acting over another read. Trace only symbols you'll modify; widen search only when validation fails or a real unknown appears. Default to terse: spend prose only at phase boundaries and the final summary. Resolve uncertainty yourself and note assumptions rather than handing back.
@@ -148,9 +147,12 @@ Memory is loaded into your context at session start. Use \`caco_memory\` action=
 ## Remember
 Batch independent tool calls into one response. Don't re-read what's already in context. Don't narrate in a turn of its own. Act over searching once you can name the change to make.`
     + formatMemoryForPrompt()
+    // Per-session cwd goes LAST: it is the ONLY per-session-variable token, so keeping
+    // it after the stable body + system-wide memory lets sessions in different
+    // directories still share the entire prefix up to here (spec-prompt-stable-prefix).
+    + '\n\n## Session Context\n- **Current directory**: {{SESSION_CWD}} (but not limited to this)'
   };
 }
-
 /**
  * Resolve a cached system message template for a specific session CWD.
  * Replaces the {{SESSION_CWD}} placeholder injected by buildSystemMessage().

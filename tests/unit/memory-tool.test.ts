@@ -37,6 +37,19 @@ describe('memory-tool', () => {
     expect(result).toContain('## User Memory');
   });
 
+  it('formatMemoryForPrompt sorts keys so identical content serializes identically (cache-prefix stability)', async () => {
+    const cacoDir = join(testDir, '.caco');
+    const { formatMemoryForPrompt } = await import('../../src/memory-tool.js');
+    // Same three entries, two different insertion orders (as a set+delete churn would produce).
+    writeFileSync(join(cacoDir, 'memory.json'), JSON.stringify({ zebra: '1', apple: '2', mango: '3' }));
+    const a = formatMemoryForPrompt();
+    writeFileSync(join(cacoDir, 'memory.json'), JSON.stringify({ mango: '3', zebra: '1', apple: '2' }));
+    const b = formatMemoryForPrompt();
+    expect(a).toBe(b); // byte-identical regardless of insertion order
+    expect(a.indexOf('apple')).toBeLessThan(a.indexOf('mango'));
+    expect(a.indexOf('mango')).toBeLessThan(a.indexOf('zebra'));
+  });
+
   // The merged caco_memory tool uses an explicit action enum; the critical
   // invariant is that read can never delete (the old arg-presence overloading
   // was the misfire risk flagged in the tool-diet spec review).

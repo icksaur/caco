@@ -31,7 +31,11 @@ function writeMemory(store: MemoryStore): void {
 
 export function formatMemoryForPrompt(): string {
   const store = readMemory();
-  const keys = Object.keys(store);
+  // Sort keys so identical memory CONTENT always serializes to identical BYTES,
+  // regardless of set/delete insertion order — this block sits in the cacheable
+  // system-prompt prefix, so a reordered key would bust cross-session cache reuse
+  // (spec-prompt-stable-prefix).
+  const keys = Object.keys(store).sort();
   if (keys.length === 0) return '';
   const lines = keys.map(k => `- **${k}**: ${store[k]}`);
   return `\n\n## User Memory\n${lines.join('\n')}`;

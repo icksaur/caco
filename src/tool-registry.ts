@@ -23,6 +23,16 @@ export const DEFAULT_DISABLED_TOOLS: string[] = [
   'register_mcp_server',
 ];
 
+/**
+ * Tools that must NEVER be hard-disabled, whatever `DEFAULT_DISABLED_TOOLS` or
+ * `CACO_DISABLED_TOOLS` say. `caco_enable_tools` is the SOLE always-on escape hatch
+ * (it both lists deferred tools and re-enables them); disabling it would make every
+ * deferred capability — including `caco_docs` — unrecoverable. Stripped from the
+ * disabled set in `parseDisabledToolNames` so an operator misconfig cannot deadlock
+ * capability recovery. Mirrors `skillToolEnabled`'s guard against a bad
+ * `CACO_EXCLUDED_BUILTINS`. */
+export const PROTECTED_TOOLS: string[] = ['caco_enable_tools'];
+
 export function parseDisabledToolNames(defaults: string[], env: string | undefined): Set<string> {
   const names = [...defaults];
   if (env) {
@@ -31,7 +41,8 @@ export function parseDisabledToolNames(defaults: string[], env: string | undefin
       if (name) names.push(name);
     }
   }
-  return new Set(names.map(n => n.toLowerCase()));
+  const protectedLower = new Set(PROTECTED_TOOLS.map(n => n.toLowerCase()));
+  return new Set(names.map(n => n.toLowerCase()).filter(n => !protectedLower.has(n)));
 }
 
 export interface NamedTool { name: string; }
@@ -100,6 +111,7 @@ export function excludedBuiltinNames(): string[] {
  * enable round-trip before a restart at the cost of a single always-sent tool.
  */
 export const DEFER_ELIGIBLE_CACO_TOOLS: string[] = [
+  'caco_docs',
   'caco_browser_ensure_running', 'caco_browser_navigate', 'caco_browser_snapshot',
   'caco_browser_screenshot', 'caco_browser_action', 'caco_browser_eval',
   'get_applet_state', 'set_applet_state',

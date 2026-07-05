@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildToolCatalog } from '../../src/tool-catalog.js';
-import { formatToolCatalog } from '../../src/session-tool-state.js';
+import { formatDeferredTools } from '../../src/session-tool-state.js';
 import { builtinKey, cacoKey, mcpKey } from '../../src/tool-key.js';
 
 describe('buildToolCatalog — the one "what tools exist" view, keyed by ToolKey', () => {
@@ -61,58 +61,76 @@ describe('buildToolCatalog — unlearned MCP tool visibility', () => {
   });
 });
 
-describe('formatToolCatalog — grouped, state-annotated discovery text', () => {
+describe('formatDeferredTools — deferred-only discovery text for caco_enable_tools', () => {
+  // A catalog spanning all origins: a deferred Caco tool (caco_docs), an enabled
+  // Caco tool, a policy-disabled builtin (bash), a hard-disabled Caco tool
+  // (register_mcp_server), a deferred builtin (view excluded), and two deferred MCP.
   const cat = buildToolCatalog({
     caco: [
+      { name: 'caco_docs', description: 'Project + tool docs.', hardDisabled: false },
       { name: 'caco_run_workflow', description: 'Run a workflow.', hardDisabled: false },
       { name: 'register_mcp_server', description: 'OAuth MCP registration.', hardDisabled: true },
     ],
     builtins: [
-      { name: 'view', description: 'Read a file.' },
-      { name: 'bash', description: 'Run a shell command.\nSecond line ignored.' },
+      { name: 'view', description: 'Read a file.\nSecond line ignored.' },
+      { name: 'bash', description: 'Run a shell command.' },
     ],
     mcp: [
-      { serverName: 'github', tools: [{ key: mcpKey('github-list_issues'), name: 'list_issues', description: 'List issues.', excludable: true }] },
+      { serverName: 'github', tools: [
+        { key: mcpKey('github-list_issues'), name: 'list_issues', description: 'List issues.', excludable: true },
+        { key: mcpKey('github-get_commit'), name: 'get_commit', description: 'Get a commit.', excludable: true },
+      ] },
     ],
   });
-  const excluded = new Set([builtinKey('bash')]);
-  const out = formatToolCatalog(cat, excluded);
+  // Deferred: caco_docs, view, list_issues, get_commit. Enabled: caco_run_workflow.
+  // Disabled: bash (policy) + register_mcp_server (hard) = 2.
+  const excluded = new Set([cacoKey('caco_docs'), builtinKey('view'), mcpKey('github-list_issues'), mcpKey('github-get_commit'), builtinKey('bash')]);
+  const policyDisabled = new Set([builtinKey('bash')]);
+  const out = formatDeferredTools(cat, excluded, policyDisabled);
 
-  it('groups by Caco / Built-in / MCP:server', () => {
-    expect(out).toContain('## Caco');
-    expect(out).toContain('## Built-in');
-    expect(out).toContain('## MCP: github');
+  it('matches an independent expected rendering (deferred only, grouped, ordered)', () => {
+    const expected = [
+      '# Deferred Tools',
+      '',
+      'These tools are excluded this session to save per-turn tokens. Re-enable the ones you need with `caco_enable_tools({ names: ["<name>"] })` (batch related tools in ONE call); they become callable on your NEXT turn.',
+      '',
+      '## Caco',
+      '- `caco_docs` — Project + tool docs.',
+      '',
+      '## Built-in',
+      '- `view` — Read a file.',
+      '',
+      '## MCP: github',
+      '- `list_issues` — List issues.',
+      '- `get_commit` — Get a commit.',
+      '',
+      '2 tool(s) are disabled by policy (e.g. the shell family) and cannot be enabled.',
+    ].join('\n');
+    expect(out).toBe(expected);
   });
 
-  it('annotates each tool with its classifyTool state', () => {
-    expect(out).toMatch(/caco_run_workflow.*\benabled\b/);
-    expect(out).toMatch(/register_mcp_server.*\bdisabled\b/);
-    expect(out).toMatch(/\bbash\b.*\bdeferred\b/);
-    expect(out).toMatch(/\bview\b.*\benabled\b/);
-    expect(out).toMatch(/list_issues.*\benabled\b/);
-  });
-
-  it('with a policyDisabled set, a policy-excluded builtin reads disabled (not deferred)', () => {
-    const text = formatToolCatalog(cat, excluded, new Set([builtinKey('bash')]));
-    expect(text).toMatch(/\bbash\b.*\bdisabled\b/);
+  it('omits enabled tools and every disabled tool by name', () => {
+    expect(out).not.toContain('caco_run_workflow'); // enabled → already visible
+    expect(out).not.toContain('bash');               // policy-disabled → count only
+    expect(out).not.toContain('register_mcp_server'); // hard-disabled → count only
   });
 
   it('uses only the first line of a multi-line description', () => {
-    expect(out).toContain('Run a shell command.');
     expect(out).not.toContain('Second line ignored.');
   });
 
-  it('shows an excluded-only builtin (bare, absent from tools.list) as deferred', () => {
-    const c = buildToolCatalog({
-      caco: [], mcp: [],
-      builtins: [{ name: 'view', description: 'Read.' }, { name: 'powershell', description: '' }],
-    });
-    const excl = new Set([builtinKey('powershell')]);
-    const text = formatToolCatalog(c, excl);
-    expect(text).toMatch(/powershell.*\bdeferred\b/);
+  it('returns an explicit message when nothing is deferred', () => {
+    const text = formatDeferredTools(cat, new Set(), policyDisabled);
+    expect(text).toContain('No deferred tools');
+    expect(text).toContain('2 tool(s) are disabled by policy');
   });
 
-  it('mentions the enable path so a deferred tool is actionable', () => {
-    expect(out).toContain('caco_enable_tools');
+  it('omits the disabled footer when there are no policy/hard-disabled tools', () => {
+    const clean = buildToolCatalog({
+      caco: [{ name: 'caco_docs', description: 'docs', hardDisabled: false }], builtins: [], mcp: [],
+    });
+    const text = formatDeferredTools(clean, new Set([cacoKey('caco_docs')]));
+    expect(text).toContain('- `caco_docs` — docs');
+    expect(text).not.toContain('disabled by policy');
   });
 });

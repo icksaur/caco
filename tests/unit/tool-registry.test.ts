@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { filterDisabledTools, parseDisabledToolNames, parseExcludedBuiltins, DEFAULT_EXCLUDED_BUILTINS } from '../../src/tool-registry.js';
+import { filterDisabledTools, parseDisabledToolNames, parseExcludedBuiltins, DEFAULT_EXCLUDED_BUILTINS, isDeferEligibleCacoTool } from '../../src/tool-registry.js';
 
 interface FakeTool { name: string; }
 const t = (name: string): FakeTool => ({ name });
@@ -19,6 +19,15 @@ describe('parseDisabledToolNames', () => {
 
   it('returns just the defaults when env is unset', () => {
     expect([...parseDisabledToolNames(['a', 'b'], undefined)].sort()).toEqual(['a', 'b']);
+  });
+
+  it('never disables the protected escape hatch, from defaults OR env', () => {
+    const fromDefaults = parseDisabledToolNames(['caco_enable_tools', 'a'], undefined);
+    expect(fromDefaults.has('caco_enable_tools')).toBe(false);
+    expect(fromDefaults.has('a')).toBe(true);
+    const fromEnv = parseDisabledToolNames([], 'caco_enable_tools, b');
+    expect(fromEnv.has('caco_enable_tools')).toBe(false);
+    expect(fromEnv.has('b')).toBe(true);
   });
 });
 
@@ -40,6 +49,16 @@ describe('filterDisabledTools', () => {
   it('only reports removed names that were actually present', () => {
     const { removed } = filterDisabledTools([t('a')], new Set(['a', 'ghost']));
     expect(removed).toEqual(['a']);
+  });
+});
+
+describe('isDeferEligibleCacoTool', () => {
+  it('caco_docs is defer-eligible (discovery moved to caco_enable_tools)', () => {
+    expect(isDeferEligibleCacoTool('caco_docs')).toBe(true);
+  });
+
+  it('the escape hatch caco_enable_tools is NOT defer-eligible', () => {
+    expect(isDeferEligibleCacoTool('caco_enable_tools')).toBe(false);
   });
 });
 

@@ -65,7 +65,7 @@ vi.mock('../../src/provider-registry.js', () => ({
 }));
 vi.mock('../../src/quota-poller.js', () => ({ pollQuota: vi.fn() }));
 vi.mock('../../src/memory-tool.js', () => ({ formatMemoryForPrompt: vi.fn(() => '') }));
-vi.mock('../../src/session-throughput.js', () => ({ clearSession: vi.fn() }));
+vi.mock('../../src/session-throughput.js', () => ({ clearSession: vi.fn(), setDeferredDefsProvider: vi.fn() }));
 
 describe('SessionManager large-output config', () => {
   beforeEach(() => {

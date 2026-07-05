@@ -8,8 +8,25 @@ vi.mock('../../src/tool-size-store.js', () => ({
   recordObservedSizes: vi.fn(),
 }));
 
-import { buildMcpServerPayload, estimateToolTokens } from '../../src/routes/workspace-api.js';
+import { buildMcpServerPayload, estimateToolTokens, resolveServersTarget } from '../../src/routes/workspace-api.js';
 import { mcpKey } from '../../src/tool-key.js';
+
+describe('resolveServersTarget — viewed-session vs most-recent fallback', () => {
+  it('honors an explicit sessionId when it names an active session', () => {
+    expect(resolveServersTarget('viewed', id => id === 'viewed', 'recent')).toBe('viewed');
+  });
+  it('falls back to most-recent-active when the requested session is inactive', () => {
+    expect(resolveServersTarget('cold', () => false, 'recent')).toBe('recent');
+  });
+  it('falls back to most-recent-active when no sessionId is requested', () => {
+    expect(resolveServersTarget(undefined, () => true, 'recent')).toBe('recent');
+  });
+  it('returns undefined when neither a valid request nor a most-recent session exists', () => {
+    expect(resolveServersTarget(undefined, () => false, null)).toBeUndefined();
+    expect(resolveServersTarget('cold', () => false, null)).toBeUndefined();
+  });
+});
+
 
 describe('estimateToolTokens — full serialized-JSON char count ÷ 4', () => {
   it('counts the whole JSON definition (keys AND values), matching the wire form', () => {
@@ -208,5 +225,39 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
     expect(t.ageActiveSeconds).toBeNull();
     expect(t.stale).toBe(false);
     expect(t.wouldDefer).toBe(false);
+  });
+});
+
+describe('buildMcpServerPayload — auto-defer latch awareness (spec-auto-defer-latch)', () => {
+  it('marks a server deferred when ANY of its keys is latched (partial latch shows the clear path)', () => {
+    const a = mcpKey('gh-a'), b = mcpKey('gh-b');
+    const servers = [{ name: 'gh', status: 'connected', source: 'mcp' }];
+    const available = { gh: [
+      { key: a, name: 'a', description: 'd', excludable: true },
+      { key: b, name: 'b', description: 'd', excludable: true },
+    ] };
+    // Only ONE of the two keys is latched — server must still report deferred:true so the
+    // operator's only CLEAR path (the re-enable button) is reachable.
+    const out = buildMcpServerPayload(servers, available, {}, [], [], [], [], undefined, [], new Set([a]));
+    expect(out[2].deferred).toBe(true);
+  });
+
+  it('does NOT mark an unkeyable (empty-key) server deferred — no vacuous truth', () => {
+    const servers = [{ name: 'gh', status: 'connected', source: 'mcp' }];
+    const available = { gh: [] as { key: ReturnType<typeof mcpKey>; name: string; description: string; excludable: boolean }[] };
+    const out = buildMcpServerPayload(servers, available, {}, [], [], [], [], undefined, [], new Set([mcpKey('gh-a')]));
+    expect(out[2].deferred).toBe(false);
+  });
+
+  it('reports wouldDefer:true for a latched-but-FRESH tool (badge never lies about the next seam)', () => {
+    const fresh = mcpKey('gh-fresh');
+    const servers = [{ name: 'gh', status: 'connected', source: 'mcp' }];
+    const available = { gh: [{ key: fresh, name: 'fresh', description: 'd', excludable: true }] };
+    const nowActiveSeconds = 3 * 60 * 60;
+    const lastUsed = new Map([[fresh, nowActiveSeconds - 60]]); // used 60s ago ⇒ live-fresh
+    const out = buildMcpServerPayload(servers, available, {}, [], [], [], [], { nowActiveSeconds, lastUsed }, [], new Set([fresh]));
+    const t = out[2].tools[0];
+    expect(t.stale).toBe(false);      // raw staleness stays honest
+    expect(t.wouldDefer).toBe(true);  // but it IS latched ⇒ seeded deferred next seam
   });
 });

@@ -18,6 +18,7 @@ import { lookupMcpKey, learnFromMetadata } from '../tool-key-registry.js';
 import { buildToolCatalog } from '../tool-catalog.js';
 import { classifyTool } from '../session-tool-state.js';
 import { getDeferredServers } from '../manual-defer-store.js';
+import { getAutoDeferred } from '../auto-defer-store.js';
 import { getNowActiveSeconds, getLastUsedActiveSeconds, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS } from '../tool-usage-store.js';
 import { estimateToolTokens } from '../tool-size.js';
 import { getToolSize, recordObservedSizes } from '../tool-size-store.js';
@@ -231,6 +232,19 @@ export interface CacoCatalogTool {
 // observed-size capture path); imported above and re-exported for existing importers.
 export { estimateToolTokens };
 
+/** Pure: resolve the `/servers` target session. Honors an explicit requested id when
+ *  it names an ACTIVE session (a cold/unknown session has no in-memory exclusion set
+ *  to read); otherwise falls back to the most-recent-active session. Keeps the
+ *  viewed-session-vs-fallback decision unit-testable without the SDK. */
+export function resolveServersTarget(
+  requested: string | undefined,
+  isActive: (id: string) => boolean,
+  mostRecentActive: string | null,
+): string | undefined {
+  if (requested && isActive(requested)) return requested;
+  return mostRecentActive ?? undefined;
+}
+
 /**
  * Pure: assemble the /servers response payload. Consumes the unified
  * `buildToolCatalog` (the single "what tools exist" view) for the Built-in and
@@ -251,6 +265,7 @@ export function buildMcpServerPayload(
   deferredServers: string[] = [],
   usage?: { nowActiveSeconds: number; lastUsed: ReadonlyMap<ToolKey, number> },
   sessionExcludedKeys: ToolKey[] = [],
+  autoDeferredKeys: ReadonlySet<ToolKey> = new Set(),
 ): Array<{ name: string; status: string; source: string | null; error: string | null; deferred?: boolean; tools: PayloadTool[] }> {
   const deferredServerSet = new Set(deferredServers);
   // The exclusion set as canonical ToolKeys (what classifyTool compares against): the
@@ -266,15 +281,19 @@ export function buildMcpServerPayload(
   // Caco-allowlist tool classifies 'deferred' while an excluded builtin classifies 'disabled'.
   const policyDisabled = new Set<ToolKey>(deferredBuiltins.map(n => builtinKey(n)));
 
-  // Per-tool usage/age + cold-resume verdict, from the shared threshold so the
-  // applet view can't disagree with what auto-defer would actually do. `eligible`
-  // is the origin-based defer candidacy the caller determines.
+  // Per-tool usage/age + defer verdict, from the shared threshold so the applet view
+  // can't disagree with what auto-defer would actually do. `eligible` is the origin-
+  // based defer candidacy the caller determines. `wouldDefer` is LATCH-AWARE
+  // (spec-auto-defer-latch): a tool already in the persisted auto-defer latch is seeded
+  // deferred at the next seam regardless of current freshness, so the badge must show it
+  // even when live staleness is false. `stale` stays the raw live staleness signal.
   function usageFields(key: ToolKey, eligible: boolean): Pick<PayloadTool, 'ageActiveSeconds' | 'deferEligible' | 'stale' | 'wouldDefer'> {
-    if (!usage) return { ageActiveSeconds: null, deferEligible: eligible, stale: false, wouldDefer: false };
+    const latched = autoDeferredKeys.has(key);
+    if (!usage) return { ageActiveSeconds: null, deferEligible: eligible, stale: false, wouldDefer: latched };
     const everUsed = usage.lastUsed.has(key);
     const ageActiveSeconds = everUsed ? Math.max(0, usage.nowActiveSeconds - (usage.lastUsed.get(key) as number)) : null;
     const stale = !everUsed || (ageActiveSeconds as number) > DEFER_STALE_THRESHOLD_ACTIVE_SECONDS;
-    return { ageActiveSeconds, deferEligible: eligible, stale, wouldDefer: eligible && stale };
+    return { ageActiveSeconds, deferEligible: eligible, stale, wouldDefer: latched || (eligible && stale) };
   }
   // Builtins present in tools.list carry a real schema → a real tokenCost; a builtin
   // known only by an excluded name (e.g. powershell on a non-Windows host) has no
@@ -351,12 +370,19 @@ export function buildMcpServerPayload(
       };
     }),
   };
-  const mcp = servers.map(s => ({
+  const mcp = servers.map(s => {
+    const serverKeys = (availableByServer[s.name] ?? []).map(t => t.key);
+    // System-wide deferred verdict the applet button reflects: operator manual defer OR
+    // ANY of the server's keys latched (spec-auto-defer-latch). ANY (not "fully") so a
+    // partially-latched server still exposes the operator's only CLEAR path; the non-
+    // empty guard avoids the vacuous-truth trap (an unkeyable server isn't "deferred").
+    const hasAutoLatched = serverKeys.length > 0 && serverKeys.some(k => autoDeferredKeys.has(k));
+    return {
     name: s.name,
     status: s.status,
     source: s.source ?? null,
     error: s.error ?? null,
-    deferred: deferredServerSet.has(s.name),
+    deferred: deferredServerSet.has(s.name) || hasAutoLatched,
     tools: (availableByServer[s.name] ?? []).map((t): PayloadTool => {
       const key = t.key;
       const nsName = key as string;
@@ -395,11 +421,12 @@ export function buildMcpServerPayload(
         ...usageFields(key, t.excludable),
       };
     }),
-  }));
+    };
+  });
   return [builtin, caco, ...mcp];
 }
 
-router.get('/servers', async (_req: Request, res: Response) => {
+router.get('/servers', async (req: Request, res: Response) => {
   const configPath = join(homedir(), '.copilot', 'mcp-config.json');
   const configExists = existsSync(configPath);
   const clientRunning = sessionManager.isClientRunning();
@@ -410,10 +437,16 @@ router.get('/servers', async (_req: Request, res: Response) => {
   }
 
   try {
-    // Thread ONE consistent target session (most-recent) through the MCP listing,
-    // observed metadata (key learning), and context-info calls, so a tool loaded in
-    // that session isn't omitted because a different session's metadata was inspected.
-    const target = sessionManager.mostRecentActiveSessionId() ?? undefined;
+    // Thread ONE consistent target session through the MCP listing, observed metadata
+    // (key learning), and exclusion set, so the applet reflects the session the operator
+    // is VIEWING. Honor an explicit ?sessionId when it names an active session (a cold/
+    // unknown one has no in-memory exclusion set); else fall back to most-recent-active.
+    const requested = typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined;
+    const target = resolveServersTarget(
+      requested,
+      id => sessionManager.isActive(id),
+      sessionManager.mostRecentActiveSessionId(),
+    );
     const mcpServers = await sessionManager.listMcpServers(target);
     // Available tools (name+description) per MCP server; built-in tools (full
     // schema) from tools.list; observed schema from the resolved per-turn snapshot;
@@ -459,14 +492,16 @@ router.get('/servers', async (_req: Request, res: Response) => {
       // so actually-deferred tools classify as `deferred` rather than mis-rendering as
       // enabled. Empty when no session is active (falls back to builtin defaults only).
       target ? sessionManager.getExcludedToolKeys(target) : [],
+      getAutoDeferred(),
     );
     // Telemetry (spec-tool-reveal B0): the SDK's ground-truth token breakdown +
-    // that same session's last-turn cache split (the reveal cache-bust signal). Both
-    // scoped to the first active session (like getCurrentToolMetadata above); null
-    // when uninitialized. `toolDefinitionsTokens`/`mcpToolsTokens` EXCLUDE deferred
-    // tools — so this number drops when deferral lands, the whole feature's payoff.
-    // The real model window comes from usage_info (contextInfo echoes the 0 we pass
-    // as its default 128k, which is NOT the true limit).
+    // that session's last-turn cache split (the reveal cache-bust signal). Scoped to
+    // getContextInfo()'s first-active session — deliberately NOT the viewed `target`
+    // used for the server list above (getContextInfo takes no target); null when
+    // uninitialized. `toolDefinitionsTokens`/`mcpToolsTokens` EXCLUDE deferred tools —
+    // so this number drops when deferral lands, the whole feature's payoff. The real
+    // model window comes from usage_info (contextInfo echoes the 0 we pass as its
+    // default 128k, which is NOT the true limit).
     const tp = ctx.sessionId ? throughputSnapshot(ctx.sessionId) : null;
     const usage = ctx.sessionId ? getSessionUsage(ctx.sessionId) : undefined;
     const telemetry = ctx.contextInfo ? {

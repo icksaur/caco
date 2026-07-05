@@ -1,7 +1,7 @@
 # spec-deferred-savings
 
-Status: draft (feature). Branch: `feature/tool-reveal-r0-r1`. Depends on: Phases
-C1/C2/D1 (usage store, cold-resume auto-defer, manual defer) — all landed.
+Status: Slice A + Slice B implemented; Slice C (accrual) in progress. Branch: `feature/tool-reveal-r0-r1`.
+Depends on: Phases C1/C2/D1 (usage store, cold-resume auto-defer, manual defer) — all landed.
 
 ## Goals
 
@@ -12,9 +12,12 @@ workflow + output-shaping savings — deferral contributes nothing. After this:
 - A deferred tool in the mcp-servers applet reads e.g. **`deferred · ~200 tokens`**
   (its known per-turn definition size), not a bare "deferred".
 - The context footer surfaces an **estimate of the per-turn definition tokens
-  currently omitted by deferral** — a gross, clearly-estimated figure, distinct
-  from the net-credit headline (see Footer claim for why it is NOT folded into net
-  credits in v1), with an honest unknown-count caveat.
+  currently omitted by deferral** — a gross, clearly-estimated figure, with an
+  honest unknown-count caveat.
+- **(Slice C)** Those omitted definition tokens **accrue once per model round
+  trip** into a session-lifetime total and **contribute to the credit headline**
+  (priced at the cache rate). Deferral is only worthwhile if its payoff compounds
+  every turn; the footer must reflect that, not just show an instantaneous rate.
 
 The enabling fact, **scoped to MCP tools**: an MCP tool's definition size is
 knowable only when its schema was **observed** (resolved into a turn and sent to
@@ -92,14 +95,14 @@ holes the v1 must avoid:
    expensive.
 
 v1 resolution (honest and still useful): present the figure as a **gross,
-per-turn, clearly-estimated line in the footer tooltip — NOT folded into the
-net-credit headline**. Concretely: `deferred defs (est): ~X tok/turn omitted
-(N tools[, M unknown])`, where X = Σ known size of the session's current dynamic
-exclusions. This is a *current-turn rate*, not a cumulative accumulator, so it
-needs no per-turn accumulation seam and cannot double-count or misattribute
-cache-bust costs. Pricing note: label it "priced at cache rate" (tool defs sit in
-the cacheable prefix; most turns are warm) rather than asserting a token *class*;
-if credits are shown, compute at the cache rate and mark "est".
+per-turn, clearly-estimated line in the footer tooltip**. Concretely: `deferred
+defs (est): ~X tok/turn omitted (N tools[, M unknown])`, where X = Σ known size of
+the session's current dynamic exclusions. Pricing note: label it "priced at cache
+rate" (tool defs sit in the cacheable prefix; most turns are warm); if credits are
+shown, compute at the cache rate and mark "est". **Slice C (below) then accrues
+this rate once per turn and folds the accrued credit value into the headline** —
+the two honesty holes above are ACCEPTED as estimate-optimism (the headline is
+already a sum of estimated classes), not solved.
 
 Deferred to a later spec (explicitly out of v1 scope): a cumulative,
 net-of-cache-bust "credits saved by deferral" headline. It requires (a) tying the
@@ -117,6 +120,41 @@ dynamic exclusions" = the session's `excludedTools` MINUS the policy set
 (`excludedBuiltinNames()`) — only C2/D1 defers, never policy-disabled builtins —
 reusing the exact policy/dynamic split from the 4-state classifier.
 
+**Slice C — accrued deferral credit (supersedes v1's "no accumulation").** v1
+deliberately showed only the instantaneous per-turn rate to sidestep two honesty
+holes. Slice C keeps the honesty caveats (below) but adds the missing accrual: the
+per-turn omitted-definition estimate is **summed once per model round trip** and
+its credit value is **folded into the net-credit headline** at the cache rate.
+
+- **Accrual seam = the per-turn usage event.** `recordUsage` in
+  `session-throughput.ts` fires exactly once per `assistant.usage` (one model round
+  trip = one sent tool block). It reads the same `deferredDefsProvider` the snapshot
+  uses and adds the current-turn `deferredDefsTokens` to a new session-lifetime
+  accumulator `deferredDefsTokensAccrued`. This is a TURN accrual, not a request
+  accrual — steering turns and subagent turns each omit the block and each accrue.
+  Nothing is persisted across restart (matches every other `total*` counter).
+- **Pricing = cache rate, folded into the headline.** Tool definitions sit in the
+  cacheable prefix, so the accrued tokens price at the model's cache rate and are
+  added to the cache class of `computeNetCreditsSaved` (the same class as
+  window-replay + compounding). The credit headline therefore rises by
+  `deferredDefsTokensAccrued × cacheRate / 1e6`. When rates are unknown (Auto), the
+  accrued tokens add to the token-only glyph like every other class.
+- **The gross per-turn line stays** (informational: "current rate"), and a new
+  accrued line reports the lifetime total so the tooltip shows both rate and
+  running sum.
+- **Honesty caveats retained, not erased.** The two holes v1 cited still exist and
+  are accepted, not solved: (1) "ever observed" ≠ "would be sent this turn" — the
+  accrued figure is an OPTIMISTIC estimate of omitted-definition tokens, still
+  labelled "est", never a proven lower bound; (2) the accrual does NOT net out the
+  warm defer/reveal cache-write bust — a reveal turn still bills its bust through
+  the normal in/cache/out counters, so on a reveal turn the headline can rise from
+  accrual while the true cost was higher. This is the same optimism every other
+  estimated class in the headline already carries; the copy says "est".
+
+The rigorous measured version (tie to the SDK's `mcpToolsTokens`/
+`toolDefinitionsTokens` delta and subtract measured cache-write busts) remains
+future work; Slice C is the estimated-but-accrued figure the user asked for.
+
 ## Invariants
 
 - **One token-estimate definition.** After extraction, `estimateToolTokens` has a
@@ -133,10 +171,16 @@ reusing the exact policy/dynamic split from the 4-state classifier.
   "deferred dynamic tools" set = live `excludedTools` − `excludedBuiltinNames()`,
   matching `classifyTool`'s policy/dynamic rule. Policy-disabled tools contribute
   ZERO to the figure.
-- **The footer figure is gross + estimated, not net + proven.** v1 surfaces an
-  "est. omitted definition tokens / turn" figure, kept OUT of the net-credit
-  headline; it never claims a proven lower bound and never silently absorbs the
-  defer/reveal cache-bust cost.
+- **The footer figure is gross + estimated, not net + proven.** The per-turn line
+  and the Slice-C accrued total are both "est. omitted definition tokens"; neither
+  claims a proven lower bound. The accrued value contributes to the credit headline
+  at the cache rate (Slice C) but does NOT net out the defer/reveal cache-bust —
+  that cost is still billed through the normal in/cache/out counters. The estimate
+  is optimistic by the same measure as every other estimated class in the headline.
+- **Accrual is once per turn, never per request.** `deferredDefsTokensAccrued`
+  increments exactly once per `recordUsage` (one model round trip). It is a
+  session-lifetime `total*`-style counter, reset only by process restart, never by
+  `resetRequest`.
 - **Persistence is best-effort.** A failed size-store write logs and continues; a
   lost size only makes a tool show "unknown" until re-observed. Never throws into
   a request/turn path.
@@ -152,8 +196,19 @@ reusing the exact policy/dynamic split from the 4-state classifier.
   v1 keeps it gross and clearly-labeled to stay honest; the measured version
   (mcpToolsTokens delta) is deferred.
 - **Cache-bust asymmetry.** Cold C2 auto-defer is free; warm D1 manual defer and
-  agent reveal cost a one-turn cache write. v1 does not fold the figure into net
-  credits, so it can't misrepresent a net-expensive warm action as a gain.
+  agent reveal cost a one-turn cache write. Slice C folds the accrued estimate into
+  the headline at the cache rate but does NOT net out that bust — the reveal/defer
+  turn still bills its cache-write through the normal in/cache/out counters, so the
+  headline is optimistic on such a turn. Accepted as estimate-optimism (labelled
+  "est"), same as every other estimated class in the headline.
+- **Accrual reads the post-turn live set, not a send-time latch.** S8 accrues by
+  calling the live `deferredDefsProvider` inside `recordUsage`, which runs at the
+  `assistant.usage` event — after any mid-turn reveal/defer already mutated
+  `excludedTools`. A tool revealed mid-turn (it WAS sent, busting cache) has already
+  left the excluded set, so it is correctly NOT accrued that turn; a rare mid-turn
+  manual defer is under-counted by one turn. This drift is bounded by one turn and
+  absorbed by the estimate's optimism; no send-time latch is built (simplicity over
+  a correctness a gross estimate does not warrant).
 - **Schema drift.** A server updating a tool changes its size; re-observation
   overwrites the cached value. Last-valid-observed wins; no versioning needed.
 - **Pricing label.** Tool defs sit in the cacheable prefix (warm turns → cache
@@ -167,10 +222,11 @@ reusing the exact policy/dynamic split from the 4-state classifier.
   session's ACTUAL live dynamic exclusions with a known size; surface the unknown
   count. The rigorous measured version (mcpToolsTokens delta) is deferred, not
   faked.
-- **Inflated net-credit headline** (warm defer/reveal cache-bust ignored) → do NOT
-  fold the figure into `computeNetCreditsSaved` in v1; it is a separate tooltip
-  line. The cumulative net headline is a later spec that must subtract measured
-  cache-write busts.
+- **Inflated headline** (warm defer/reveal cache-bust ignored) → Slice C folds the
+  accrued figure into `computeNetCreditsSaved` at the cache rate and ACCEPTS this
+  optimism: the estimate is labelled "est", the reveal bust is still billed through
+  the normal counters, and the headline is already a sum of estimated classes. The
+  rigorous net-of-measured-bust headline (mcpToolsTokens delta) remains later work.
 - **Garbage size from a one-off schema** → `recordToolSize` validates
   finite/positive and caps at a ceiling; last-valid-observed overwrites; surfaced
   as "≈/est", never billed.
@@ -181,8 +237,11 @@ reusing the exact policy/dynamic split from the 4-state classifier.
 
 - Observable (needs signoff): a deferred MCP tool shows `deferred · ~N tokens` in
   the applet (and a deferred Caco-allowlist tool shows its local size); the footer
-  tooltip gains a gross line like `deferred defs (est): ~X tok/turn omitted (N
-  tools · M unknown)`. The net-credit headline is UNCHANGED by this figure.
+  tooltip gains a gross per-turn line `deferred defs (est): ~X tok/turn omitted (N
+  tools · M unknown)` AND a Slice-C accrued line reporting the lifetime sum. The
+  credit headline INCLUDES the accrued deferral value (cache rate). With a nonzero
+  cache rate, ≥1 known-size deferred definition, and ≥1 accrued turn, the ↯ glyph is
+  non-zero (an all-unknown deferred set or a zero cache rate leaves it unchanged).
 - Budgets: n/a (telemetry only; one map lookup per observed tool + one sum at
   snapshot time).
 - Gates: `npm run typecheck`, `npm run lint:strict`, `npx knip`, `npx vitest run`,
@@ -207,11 +266,19 @@ reusing the exact policy/dynamic split from the 4-state classifier.
 | # | Step | Files | Oracle | Invariants |
 |---|------|-------|--------|------------|
 | S6 | Compute the CURRENT-turn gross figure at snapshot time: `deferredDefsTokens` = Σ known size of the session's live dynamic exclusions (`excludedTools` − `excludedBuiltinNames()`), `deferredDefsCount`, `deferredDefsUnknown`. No accumulation, no dispatch seam | `src/session-manager.ts` (helper reading excluded set + size store + cacoCatalog), `src/routes/*` snapshot/telemetry path | unit: sum counts only dynamic-exclusion known sizes; a policy builtin contributes 0; an uncached MCP key bumps unknown, not tokens | policy/dynamic split reused; gross+estimated not net+proven |
-| S7 | Footer: surface the gross line `deferred defs (est): ~X tok/turn omitted (N · M unknown)` in the savings tooltip; do NOT fold into `computeNetCreditsSaved` | `public/ts/context-footer.ts` (`ThroughputData` fields, `renderSaved`) | render unit: tooltip line shows X/N/M with "est"; net-credit headline unchanged by the figure | footer figure gross+estimated, not net+proven |
+| S7 | Footer: surface the gross line `deferred defs (est): ~X tok/turn omitted (N · M unknown)` in the savings tooltip | `public/ts/context-footer.ts` (`ThroughputData` fields, `renderSaved`) | render unit: tooltip line shows X/N/M with "est" | footer figure gross+estimated |
 
-Out of v1 scope (later spec): a cumulative net-of-cache-bust "credits saved by
-deferral" headline, tied to the measured `mcpToolsTokens`/`toolDefinitionsTokens`
-delta and net of measured defer/reveal cache-write busts.
+**Slice C — accrue omitted defs per turn + fold into credit headline (this update).**
+
+| # | Step | Files | Oracle | Invariants |
+|---|------|-------|--------|------------|
+| S8 | Add `deferredDefsTokensAccrued` session-lifetime counter; in `recordUsage` add the current-turn `deferredDefsProvider` tokens to it (once per turn); expose in `blank()`/snapshot | `src/session-throughput.ts` | unit: N `recordUsage` calls with provider=K accrue N×K; no provider ⇒ 0; a `resetRequest` does NOT clear it | accrual once per turn, never per request |
+| S9 | Footer: add `deferredDefsTokensAccrued` to `ThroughputData`; price it at the cache rate inside `computeNetCreditsSaved` (new `deferredDefs` field on `SavedTokens`, cache class); add an accrued tooltip line; token-only glyph includes it when rates unknown | `public/ts/context-footer.ts`, `public/ts/saved-pricing.ts` | pricing unit: `deferredDefs` priced at cache rate; render unit: accrued line + headline rises by accrued×cacheRate | footer figure gross+estimated; accrual once per turn |
+
+Out of scope (later spec): a measured net-of-cache-bust "credits saved by
+deferral" tied to the SDK's `mcpToolsTokens`/`toolDefinitionsTokens` delta and net
+of measured defer/reveal cache-write busts. Slice C accrues the ESTIMATE and
+prices it optimistically; it does not measure the bust.
 
 ## Rationale (skippable)
 

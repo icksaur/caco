@@ -11,7 +11,7 @@
 import { regions } from './dom-regions.js';
 import { formatContextFiles, formatStatusParts, escapeHtml } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
-import { computeNetCreditsSaved } from './saved-pricing.js';
+import { computeNetCreditsSaved, resolveModelRates } from './saved-pricing.js';
 export interface SessionContext {
   files?: string[];
   [key: string]: string[] | undefined;
@@ -358,6 +358,16 @@ export interface ThroughputData {
   totalReasoning?: number;
   totalToolCalls?: number;
   totalToolFailures?: number;
+  /** Gross per-turn definition tokens currently omitted by dynamic deferral (spec
+   *  -deferred-savings). An ESTIMATE of omitted known definitions, shown as a
+   *  current-turn rate line in the tooltip. */
+  deferredDefsTokens?: number;
+  deferredDefsCount?: number;
+  deferredDefsUnknown?: number;
+  /** Session-lifetime SUM of the per-turn omitted-definition estimate (Slice C).
+   *  Priced at the cache rate and folded into the credit headline; also shown as an
+   *  accrued tooltip line. */
+  deferredDefsTokensAccrued?: number;
   updatedAt: string;
   known?: boolean;
 }
@@ -375,17 +385,13 @@ export function setActiveThroughputModel(modelId: string | null): void {
   activeModelId = modelId;
 }
 
-/** Compute approximate session-accumulated cost in AI credits from the model's
- *  per-MTOK prices. Returns null when prices are unknown (e.g. Auto). */
+/** Compute approximate session-accumulated cost in AI credits from the active
+ *  model's per-MTOK rates. Returns null when rates are unknown (e.g. Auto). Shares
+ *  resolveModelRates with priceSaved so spent and saved never disagree. */
 function estimateCost(d: ThroughputData): number | null {
-  const model = getAvailableModels().find(m => m.id === activeModelId);
-  if (!model || model.inputPerMtok === undefined || model.outputPerMtok === undefined) return null;
-  const cacheRate = model.cachePerMtok ?? 0;
-  const credits =
-    (d.totalIn * model.inputPerMtok +
-      d.totalCache * cacheRate +
-      d.totalOut * model.outputPerMtok) / 1_000_000;
-  return credits;
+  const rates = resolveModelRates(getAvailableModels(), activeModelId);
+  if (!rates) return null;
+  return (d.totalIn * rates.input + d.totalCache * rates.cache + d.totalOut * rates.output) / 1_000_000;
 }
 
 
@@ -397,22 +403,20 @@ interface SavedPricing {
 }
 
 /** Price saved tokens by billing class (input for fresh + shaping; cache for
- *  window-replay + compounding; output for the net code delta). Returns null
- *  rates/credits when the model's rates are unknown (e.g. Auto). */
+ *  window-replay + compounding + accrued deferral; output for the net code delta).
+ *  Returns null rates/credits when the model's rates are unknown (e.g. Auto). */
 function priceSaved(d: ThroughputData): SavedPricing {
-  const model = getAvailableModels().find(m => m.id === activeModelId);
-  if (!model || model.inputPerMtok === undefined) {
-    return { netCredits: null, rates: null };
-  }
-  const rates = { input: model.inputPerMtok, cache: model.cachePerMtok ?? 0, output: model.outputPerMtok ?? 0 };
+  const rates = resolveModelRates(getAvailableModels(), activeModelId);
+  if (!rates) return { netCredits: null, rates: null };
 
   const fresh = d.workflowSavedTokens ?? 0;
   const compound = d.workflowCacheCompoundSaved ?? 0;
   const replay = d.workflowCacheReplaySaved ?? 0;
   const outputDelta = d.workflowOutputDelta ?? 0;
   const shaping = d.shapingSavedTokens ?? 0;
+  const deferredDefs = d.deferredDefsTokensAccrued ?? 0;
 
-  const netCredits = computeNetCreditsSaved(rates, { fresh, shaping, compound, replay, outputDelta });
+  const netCredits = computeNetCreditsSaved(rates, { fresh, shaping, compound, replay, outputDelta, deferredDefs });
   return { netCredits, rates };
 }
 
@@ -538,9 +542,13 @@ function renderSaved(data: ThroughputData): void {
   const roundTrips = data.workflowRoundTripsSaved ?? 0;
   const outputDelta = data.workflowOutputDelta ?? 0;
   const shaping = data.shapingSavedTokens ?? 0;
+  const deferredAccrued = data.deferredDefsTokensAccrued ?? 0;
   const inputSaved = fresh + shaping;
   const cacheSaved = replay + compound;
-  const totalTokens = inputSaved + cacheSaved;
+  // Cache class priced in the headline = workflow cache savings + accrued deferral
+  // (both sit in the cacheable prefix). Slice C folds deferral into this class.
+  const cacheClass = cacheSaved + deferredAccrued;
+  const totalTokens = inputSaved + cacheClass;
   const timeSavedMs = data.workflowTimeSavedMs ?? 0;
 
   const { netCredits, rates } = priceSaved(data);
@@ -565,9 +573,25 @@ function renderSaved(data: ThroughputData): void {
     `output spent (script est): ${n(outputDelta)} tok`,
   );
 
+  // Deferred tool definitions omitted from each sent tool block — a GROSS estimate of
+  // omitted known definitions (see spec-deferred-savings). The per-turn rate line is
+  // informational; the accrued sum (Slice C) is priced at the cache rate and folded
+  // into the headline. The estimate is optimistic: "ever observed" ≠ "would be sent
+  // this turn", and a warm defer/reveal cache-bust is billed separately, not netted.
+  const deferredDefs = data.deferredDefsTokens ?? 0;
+  const deferredCount = data.deferredDefsCount ?? 0;
+  if (deferredCount > 0) {
+    const unknown = data.deferredDefsUnknown ?? 0;
+    const unknownNote = unknown > 0 ? ` · ${n(unknown)} unknown` : '';
+    lines.push(`deferred defs (est): ~${n(deferredDefs)} tok/turn omitted (${n(deferredCount)} tool${deferredCount === 1 ? '' : 's'}${unknownNote})`);
+  }
+  if (deferredAccrued > 0) {
+    lines.push(`deferred defs saved (accum est): ${n(deferredAccrued)} tok @ cache rate`);
+  }
+
   if (rates) {
     const PER = 1_000_000;
-    const cacheCr = cacheSaved * rates.cache / PER;
+    const cacheCr = cacheClass * rates.cache / PER;
     const inputCr = inputSaved * rates.input / PER;
     const outputCr = outputDelta * rates.output / PER;
     const net = cacheCr + inputCr - outputCr;
@@ -575,7 +599,7 @@ function renderSaved(data: ThroughputData): void {
     const outSymOp = outputDelta >= 0 ? '−' : '+';
     const outCrOp = outputCr >= 0 ? '−' : '+';
     lines.push(
-      `${n(cacheSaved)}×${rates.cache}/${PER} + ${n(inputSaved)}×${rates.input}/${PER} ${outSymOp} ${n(Math.abs(outputDelta))}×${rates.output}/${PER}`,
+      `${n(cacheClass)}×${rates.cache}/${PER} + ${n(inputSaved)}×${rates.input}/${PER} ${outSymOp} ${n(Math.abs(outputDelta))}×${rates.output}/${PER}`,
       `= ${fmtCr(cacheCr)} + ${fmtCr(inputCr)} ${outCrOp} ${fmtCr(outputCr)} = ${net < 0 ? '−' : ''}${fmtCr(net)} cr`,
     );
   } else {

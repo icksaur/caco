@@ -11,8 +11,6 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { APPLET_HOWTO, buildAppletUsage } from './applet-tools.js';
 import { buildExtensionsGuide } from './extensions-tool.js';
-import { sessionManager } from './session-manager.js';
-import { formatToolCatalog } from './session-tool-state.js';
 
 const DEV_DOCS = `# Caco Documentation
 
@@ -158,7 +156,7 @@ Sections:
 - \`section: "applets:create"\` — how to CREATE applets (HTML/JS/CSS widgets).
 - \`section: "applets:usage"\` — applet URL patterns for linking users to panels; pass \`slug\` to filter to one applet.
 - \`section: "extensions"\` — loaded extensions + the extension API.
-- \`section: "tools"\` — catalog of every tool available to this session (name + one-line description + state: enabled/deferred/disabled). Use this to discover a DEFERRED tool (excluded to save per-turn tokens) and then re-enable it with \`caco_enable_tools\`.
+- \`section: "tools"\` — redirects to \`caco_enable_tools\` (no args), which lists this session's deferred (re-enableable) tools.
 
 A named file section's response begins with a heading TOC (H2/H3 with line numbers); use \`viewRange: [startLine, endLine]\` to paginate (1-indexed, inclusive, mirrors the \`view\` tool). For general usage/setup, read \`README.md\`.`,
 
@@ -179,8 +177,7 @@ A named file section's response begins with a heading TOC (H2/H3 with line numbe
         return { textResultForLlm: buildExtensionsGuide() };
       }
       if (section === 'tools') {
-        const { catalog, excluded, policyDisabled } = await sessionManager.getToolCatalog();
-        return { textResultForLlm: formatToolCatalog(catalog, excluded, policyDisabled) };
+        return { textResultForLlm: 'The tool catalog moved. Call `caco_enable_tools` with no arguments to list this session\'s deferred (re-enableable) tools, then `caco_enable_tools({ names: [...] })` to enable them.' };
       }
       const rootCandidates = ['README.md', 'API.md', 'APPLETS.md', 'EXTENSIONS.md', 'code-quality.md'];
       const docsDir = join(projectRoot, 'docs');

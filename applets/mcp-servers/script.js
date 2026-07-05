@@ -179,7 +179,12 @@ var mcpServersCache = null;
 async function fetchMcpServers() {
   mcpServerContent.innerHTML = '<div class="loading">Loading servers...</div>';
   try {
-    var res = await fetch('/api/mcp/servers');
+    // Scope to the VIEWED session so the applet shows its per-session tool state
+    // (deferred/enabled), not the most-recently-active session's. getSessionId may be
+    // null (no active session) — then the server falls back to its default target.
+    var sid = window.appletAPI && window.appletAPI.getSessionId ? window.appletAPI.getSessionId() : null;
+    var url = sid ? '/api/mcp/servers?sessionId=' + encodeURIComponent(sid) : '/api/mcp/servers';
+    var res = await fetch(url);
     var data = await res.json();
 
     if (data.configExists && editConfigLink) {
@@ -297,15 +302,21 @@ function renderMcpServer(server) {
 
   // Manual defer toggle — real MCP servers only (Built-in/Caco pseudo-servers have
   // source:'caco'). Reflects the system-wide manual-defer DEFAULT for this server.
+  // Hidden when it has no purpose: nothing is manually deferred AND every tool is
+  // already deferred/disabled this session (no enabled tool left to defer). The
+  // re-enable action stays visible whenever the manual default is on.
   var deferHtml = '';
   if (server.source !== 'caco') {
     var isDeferred = server.deferred === true;
-    var deferTitle = isDeferred
-      ? 'This MCP server is manually deferred: its tool definitions are removed from every turn (saving those tokens) and it is seeded deferred into new sessions. Click to RE-ENABLE. Applies live to all active sessions.'
-      : 'Manually defer this MCP server: remove all its tool definitions from every future turn to save tokens. WARNING: applying this to a live/warm session busts the prompt cache — a one-time re-process of the ENTIRE context window of every active session on its next turn (see the token banner above). Cheap on an idle session, expensive mid-conversation. Deferred servers are re-enableable and seed into new sessions.';
-    deferHtml = '<button type="button" class="mcp-defer-btn' + (isDeferred ? ' mcp-defer-on' : '') +
-      '" data-defer-server="' + escapedName + '" data-deferred="' + (isDeferred ? '1' : '0') +
-      '" title="' + escapeAttr(deferTitle) + '">' + (isDeferred ? 'deferred' : 'defer') + '</button>';
+    var hasEnabledTool = server.tools.some(function (t) { return (t.state || 'enabled') === 'enabled'; });
+    if (isDeferred || hasEnabledTool) {
+      var deferTitle = isDeferred
+        ? 'This MCP server is deferred system-wide (operator defer or auto-deferred after going unused): its tool definitions are removed from every turn (saving those tokens) and it stays deferred in new sessions until you re-enable here. Click to RE-ENABLE for all sessions. Applies live to all active sessions.'
+        : 'Manually defer this MCP server: remove all its tool definitions from every future turn to save tokens. WARNING: applying this to a live/warm session busts the prompt cache — a one-time re-process of the ENTIRE context window of every active session on its next turn (see the token banner above). Cheap on an idle session, expensive mid-conversation. Deferred servers are re-enableable and seed into new sessions.';
+      deferHtml = '<button type="button" class="mcp-defer-btn' + (isDeferred ? ' mcp-defer-on' : '') +
+        '" data-defer-server="' + escapedName + '" data-deferred="' + (isDeferred ? '1' : '0') +
+        '" title="' + escapeAttr(deferTitle) + '">' + (isDeferred ? 'deferred' : 'defer') + '</button>';
+    }
   }
 
   return '<div class="mcp-server-card">' +
@@ -476,6 +487,20 @@ async function setServerDeferred(server, deferred, btn) {
 // Refresh button: the applet is IIFE-wrapped, so the inline onclick in
 // content.html can't reach fetchMcpServers — wire it here instead.
 if (mcpRefreshBtn) mcpRefreshBtn.addEventListener('click', fetchMcpServers);
+
+// Re-fetch on session switch so the applet reflects the newly-viewed session's
+// per-session tool state (matches git-status / files / session-surface).
+// onSessionChange fires an immediate callback with the CURRENT session at
+// registration time; dedupe it against the initial load below so opening the applet
+// on an active session doesn't double-fetch (each fetch fans out SDK metadata calls).
+var lastFetchedSid = window.appletAPI && window.appletAPI.getSessionId ? window.appletAPI.getSessionId() : null;
+if (window.appletAPI && window.appletAPI.onSessionChange) {
+  window.appletAPI.onSessionChange(function (sid) {
+    if (sid === lastFetchedSid) return; // immediate initial callback / no-op repeat
+    lastFetchedSid = sid;
+    fetchMcpServers();
+  });
+}
 
 // Listen for auth completion messages from popup
 // Only accept messages from same origin to prevent cross-origin attacks

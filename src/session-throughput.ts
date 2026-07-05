@@ -97,6 +97,12 @@ interface SessionThroughput {
   totalToolCalls: number;
   /** Session-lifetime failed tool calls. */
   totalToolFailures: number;
+  /** Session-lifetime SUM of the per-turn omitted-definition estimate (spec
+   *  -deferred-savings S8). Accrued once per model round trip in recordUsage from
+   *  the injected deferredDefsProvider — an OPTIMISTIC estimate of deferred tool
+   *  definition tokens omitted from each sent tool block, priced at the cache rate
+   *  in the footer. Not persisted across restart; never reset by resetRequest. */
+  deferredDefsTokensAccrued: number;
   updatedAt: string;
 }
 
@@ -116,6 +122,32 @@ export interface RequestMetricsRow {
 
 export interface ThroughputSnapshot extends SessionThroughput {
   known: boolean;
+  /** Gross per-turn definition tokens CURRENTLY omitted by dynamic deferral (spec
+   *  -deferred-savings S6). An estimate of omitted known definitions — NOT a proven
+   *  saving and deliberately NOT folded into the net-credit headline. Populated by an
+   *  injected provider (session-manager owns the excluded set + size store); absent
+   *  when no provider is registered. */
+  deferredDefsTokens?: number;
+  /** Count of the session's currently dynamically-deferred tools. */
+  deferredDefsCount?: number;
+  /** How many of those have no known size yet (never observed) — the honesty caveat. */
+  deferredDefsUnknown?: number;
+}
+
+/** The gross deferred-definition figure for a session. Injected (not imported) so
+ *  session-throughput stays free of a session-manager dependency (which imports it). */
+export type DeferredDefsProvider = (sessionId: string) => {
+  deferredDefsTokens: number;
+  deferredDefsCount: number;
+  deferredDefsUnknown: number;
+};
+
+let deferredDefsProvider: DeferredDefsProvider | null = null;
+
+/** Register the provider that enriches each snapshot with the current-turn deferred
+ *  definition figure. Called once at wiring time by the owner of the tool state. */
+export function setDeferredDefsProvider(fn: DeferredDefsProvider): void {
+  deferredDefsProvider = fn;
 }
 
 const sessions = new Map<string, SessionThroughput>();
@@ -179,6 +211,7 @@ function blank(): SessionThroughput {
     totalReasoning: 0,
     totalToolCalls: 0,
     totalToolFailures: 0,
+    deferredDefsTokensAccrued: 0,
     updatedAt: now(),
   };
 }
@@ -232,6 +265,13 @@ export function recordUsage(
     entry.avoidedContextTokens += entry.pendingAvoidedContext;
     entry.pendingAvoidedContext = 0;
   }
+  // Accrue this turn's omitted tool-definition estimate (spec-deferred-savings S8).
+  // The tool block is sent every round trip, so the omitted defs save tokens every
+  // turn; sum the current-turn provider figure once per usage event. Reads the
+  // post-turn live excluded set (a tool revealed mid-turn has already left it and is
+  // correctly not counted this turn) — an accepted one-turn approximation.
+  const deferred = deferredDefsProvider?.(sessionId);
+  if (deferred) entry.deferredDefsTokensAccrued += deferred.deferredDefsTokens;
   entry.updatedAt = now();
 }
 
@@ -405,10 +445,11 @@ export function getThroughput(sessionId: string): SessionThroughput | undefined 
 
 export function snapshot(sessionId: string): ThroughputSnapshot {
   const entry = sessions.get(sessionId);
+  const deferred = deferredDefsProvider?.(sessionId);
   if (!entry) {
-    return { ...blank(), known: false };
+    return { ...blank(), known: false, ...deferred };
   }
-  return { ...entry, known: true };
+  return { ...entry, known: true, ...deferred };
 }
 
 /**

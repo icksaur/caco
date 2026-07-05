@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   recordUsage,
   recordRateLimit,
@@ -13,6 +13,7 @@ import {
   getThroughput,
   snapshot,
   clearSession,
+  setDeferredDefsProvider,
 } from '../../src/session-throughput.js';
 import { mcpKey, builtinKey, cacoKey } from '../../src/tool-key.js';
 
@@ -303,6 +304,41 @@ describe('request round-trip metrics', () => {
     expect(t.totalReasoning).toBe(7);
     expect(t.totalToolCalls).toBe(1);
     expect(t.totalToolFailures).toBe(1);
+  });
+});
+
+describe('deferred-defs accrual — per-turn omitted-definition estimate (Slice C)', () => {
+  const ZERO = { deferredDefsTokens: 0, deferredDefsCount: 0, deferredDefsUnknown: 0 };
+  afterEach(() => {
+    setDeferredDefsProvider(() => ZERO); // isolate: no accrual for later tests
+  });
+
+  it('accrues the current-turn provider figure once per usage event (turn, not request)', () => {
+    setDeferredDefsProvider(() => ({ deferredDefsTokens: 500, deferredDefsCount: 3, deferredDefsUnknown: 1 }));
+    recordUsage(SID, { inputTokens: 100, outputTokens: 50 });
+    recordUsage(SID, { inputTokens: 80, outputTokens: 40 });
+    recordUsage(SID, { inputTokens: 60, outputTokens: 30 });
+    expect(getThroughput(SID)!.deferredDefsTokensAccrued).toBe(1500); // 3 turns × 500
+  });
+
+  it('does not accrue when the provider yields 0', () => {
+    setDeferredDefsProvider(() => ZERO);
+    recordUsage(SID, { inputTokens: 100, outputTokens: 50 });
+    expect(getThroughput(SID)!.deferredDefsTokensAccrued).toBe(0);
+  });
+
+  it('survives resetRequest (a session-lifetime total, not a request counter)', () => {
+    setDeferredDefsProvider(() => ({ deferredDefsTokens: 200, deferredDefsCount: 1, deferredDefsUnknown: 0 }));
+    recordUsage(SID, { inputTokens: 10, outputTokens: 5 });
+    resetRequest(SID);
+    expect(getThroughput(SID)!.deferredDefsTokensAccrued).toBe(200);
+  });
+
+  it('exposes the accrued total on the snapshot', () => {
+    setDeferredDefsProvider(() => ({ deferredDefsTokens: 300, deferredDefsCount: 2, deferredDefsUnknown: 0 }));
+    recordUsage(SID, { inputTokens: 10, outputTokens: 5 });
+    recordUsage(SID, { inputTokens: 10, outputTokens: 5 });
+    expect(snapshot(SID).deferredDefsTokensAccrued).toBe(600);
   });
 });
 

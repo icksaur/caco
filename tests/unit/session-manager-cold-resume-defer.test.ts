@@ -40,7 +40,7 @@ const storage = vi.hoisted(() => {
 });
 
 // Controlled leaf deps for the auto-defer decision.
-const registry = vi.hoisted(() => ({ learned: [] as string[] }));
+const registry = vi.hoisted(() => ({ learned: [] as string[], serverKeys: [] as string[] }));
 const usedHere = vi.hoisted(() => ({ set: new Set<string>() }));
 
 vi.mock('@github/copilot-sdk', () => sdk);
@@ -60,7 +60,7 @@ vi.mock('../../src/provider-registry.js', () => ({
 vi.mock('../../src/quota-poller.js', () => ({ pollQuota: vi.fn() }));
 vi.mock('../../src/memory-tool.js', () => ({ formatMemoryForPrompt: vi.fn(() => '') }));
 vi.mock('../../src/tool-key-registry.js', () => ({
-  lookupMcpKey: vi.fn(), learnFromMetadata: vi.fn(), keysForServer: vi.fn(() => []),
+  lookupMcpKey: vi.fn(), learnFromMetadata: vi.fn(), keysForServer: vi.fn(() => registry.serverKeys),
   allLearnedKeys: vi.fn(() => registry.learned),
 }));
 vi.mock('../../src/manual-defer-store.js', () => ({
@@ -69,9 +69,11 @@ vi.mock('../../src/manual-defer-store.js', () => ({
 // Real session-throughput would need many exports; mock just what C2 reads.
 vi.mock('../../src/session-throughput.js', () => ({
   getToolsUsed: vi.fn(() => usedHere.set),
+  setDeferredDefsProvider: vi.fn(),
 }));
 
 import { stampToolUsage, _resetUsageStoreForTest, _setClockForTest, COLD_RESUME_STALE_MS } from '../../src/tool-usage-store.js';
+import { getAutoDeferred, _resetAutoDeferForTest } from '../../src/auto-defer-store.js';
 
 const nowMs = 2_000_000_000_000; // fixed active-clock anchor
 
@@ -88,6 +90,10 @@ async function makeManager() {
   const { SessionManager } = await import('../../src/session-manager.js');
   return new SessionManager() as unknown as {
     computeColdResumeAutoDefer: (sessionId: string, config: { modelOverride?: string; warmRecreate?: boolean }) => ToolKey[];
+    computeNewSessionAutoDefer: () => ToolKey[];
+    setServerDeferred: (server: string, deferred: boolean) => Promise<{ affectedSessions: number; failedSessions: string[]; keys: ToolKey[] }>;
+    create: (cwd: string, config: { model: string; toolFactory: () => unknown[]; excludedTools?: string[] }) => Promise<string>;
+    sharedClient: unknown;
   };
 }
 
@@ -95,11 +101,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   storage.meta.clear();
   registry.learned = [];
+  registry.serverKeys = [];
   usedHere.set = new Set<string>();
   fsMock.readFileSync.mockImplementation(() => { throw new Error('no file'); });
   vi.spyOn(console, 'log').mockImplementation(() => {});
   _setClockForTest(() => nowMs);
   _resetUsageStoreForTest();
+  _resetAutoDeferForTest();
   _setClockForTest(() => nowMs);
 });
 
@@ -171,5 +179,112 @@ describe('SessionManager cold-resume auto-defer (C2 seam)', () => {
     const deferred = mgr.computeColdResumeAutoDefer(SID, {});
     // Only the fixed Caco allowlist remains as candidates; no MCP keys present.
     expect(deferred).not.toContain(MCP_A);
+  });
+});
+
+describe('SessionManager new-session auto-defer (C3 create seam)', () => {
+  it('defers never-used eligible MCP tools with NO coldness gate (no lastUsedAt, no config)', async () => {
+    registry.learned = [MCP_A, MCP_B];
+    // Deliberately NO storage.meta entry — proves create has no isColdResume gate
+    // (computeColdResumeAutoDefer returns [] without lastUsedAt; this must NOT).
+    const mgr = await makeManager();
+    const deferred = mgr.computeNewSessionAutoDefer();
+    expect(deferred).toContain(MCP_A);
+    expect(deferred).toContain(MCP_B);
+  });
+
+  it('keeps a fresh (recently stamped) tool and defers the never-used one', async () => {
+    registry.learned = [MCP_A, MCP_B];
+    stampToolUsage(MCP_A); // used somewhere just now → fresh system-wide
+    const mgr = await makeManager();
+    const deferred = mgr.computeNewSessionAutoDefer();
+    expect(deferred).not.toContain(MCP_A); // cross-session freshness → kept
+    expect(deferred).toContain(MCP_B);     // never used → deferred
+  });
+
+  it('an unlearned MCP key is never a candidate', async () => {
+    registry.learned = []; // nothing learned
+    const mgr = await makeManager();
+    const deferred = mgr.computeNewSessionAutoDefer();
+    expect(deferred).not.toContain(MCP_A);
+  });
+
+  it('create() seeds excludedTools with base ∪ manual-defer ∪ new-session auto-defer (seam)', async () => {
+    // MCP_A used just now (fresh, kept), MCP_B never used (auto-deferred at create).
+    registry.learned = [MCP_A, MCP_B];
+    stampToolUsage(MCP_A);
+    const mgr = await makeManager();
+    mgr.sharedClient = sdk.fakeClient; // skip ensureClient's health-timer/quota path
+    await mgr.create('/tmp/c3', { model: 'gpt-5.5', toolFactory: () => [], excludedTools: ['builtin:powershell'] });
+    const seeded = (sdk.fakeClient.createSession.mock.calls.at(-1) as unknown as [{ excludedTools: string[] }])[0].excludedTools;
+    expect(seeded).toContain('builtin:powershell'); // base seed preserved
+    expect(seeded).toContain(MCP_B);                // never-used → auto-deferred at create
+    expect(seeded).not.toContain(MCP_A);            // fresh → kept (proves the union is wired, not a no-op)
+  });
+});
+
+describe('SessionManager auto-defer LATCH (spec-auto-defer-latch)', () => {
+  it('SET grows the persisted latch with the newly-stale keys', async () => {
+    registry.learned = [MCP_A, MCP_B];
+    const mgr = await makeManager();
+    mgr.computeNewSessionAutoDefer();
+    const latch = new Set(getAutoDeferred());
+    expect(latch.has(MCP_A)).toBe(true);
+    expect(latch.has(MCP_B)).toBe(true);
+  });
+
+  it('is a LATCH not a live function: a key stays deferred after it becomes fresh', async () => {
+    registry.learned = [MCP_A];
+    const mgr = await makeManager();
+    const first = mgr.computeNewSessionAutoDefer();
+    expect(first).toContain(MCP_A); // never used → stale → latched + returned
+    stampToolUsage(MCP_A);          // now fresh system-wide (a reveal-use elsewhere)
+    const second = mgr.computeNewSessionAutoDefer();
+    expect(second).toContain(MCP_A); // STILL returned — freshness does not un-latch
+  });
+
+  it('Caco-allowlist tools are NOT latched (no operator clear path) — they stay LIVE', async () => {
+    registry.learned = [];
+    const cacoKeyOf = (await import('../../src/tool-key.js')).cacoKey;
+    const { DEFER_ELIGIBLE_CACO_TOOLS } = await import('../../src/tool-registry.js');
+    const cacoName = DEFER_ELIGIBLE_CACO_TOOLS[0];
+    const cacoK = cacoKeyOf(cacoName) as unknown as ToolKey;
+    const mgr = await makeManager();
+    const first = mgr.computeNewSessionAutoDefer();
+    expect(first).toContain(cacoK);                  // never used → live-stale → deferred
+    expect([...getAutoDeferred()]).not.toContain(cacoK); // but NOT persisted into the latch
+    stampToolUsage(cacoK);                           // used somewhere → fresh
+    const second = mgr.computeNewSessionAutoDefer();
+    expect(second).not.toContain(cacoK);             // live recompute → freshness un-defers it
+  });
+
+  it('used-here filters the RETURN but the key is still latched system-wide', async () => {
+    registry.learned = [MCP_A];
+    usedHere.set = new Set<string>([MCP_A]);
+    storage.meta.set(SID, { lastUsedAt: metaLastUsedAgoMs(COLD) });
+    const mgr = await makeManager();
+    const deferred = mgr.computeColdResumeAutoDefer(SID, {});
+    expect(deferred).not.toContain(MCP_A);              // this session's seed is protected
+    expect([...getAutoDeferred()]).toContain(MCP_A);    // but the system-wide latch holds it
+  });
+
+  it('manual un-defer clears the latch for the server keys and stamps recency so they do not re-latch', async () => {
+    registry.learned = [MCP_A];
+    registry.serverKeys = [MCP_A];
+    const mgr = await makeManager();
+    mgr.computeNewSessionAutoDefer();                    // latch MCP_A (never used → stale)
+    expect([...getAutoDeferred()]).toContain(MCP_A);
+    await mgr.setServerDeferred('github-mcp-server', false); // operator un-defer
+    expect([...getAutoDeferred()]).not.toContain(MCP_A);     // CLEAR
+    const after = mgr.computeNewSessionAutoDefer();
+    expect(after).not.toContain(MCP_A);                 // recency stamp prevents immediate re-latch
+  });
+
+  it('a warm resume never touches the latch (warm never auto-mutated)', async () => {
+    registry.learned = [MCP_A, MCP_B];
+    storage.meta.set(SID, { lastUsedAt: metaLastUsedAgoMs(60_000) }); // warm
+    const mgr = await makeManager();
+    expect(mgr.computeColdResumeAutoDefer(SID, {})).toEqual([]);
+    expect([...getAutoDeferred()]).toEqual([]); // no SET on a warm seam
   });
 });

@@ -114,14 +114,17 @@ export function computeColdResumeExclusions(args: {
 }
 
 /**
- * Render a ToolCatalog as grouped, state-annotated discovery text for
- * `caco_docs section="tools"` — the agent's way to find a deferred capability by
- * name+description without paying its schema in every turn. Groups: Caco,
- * Built-in, then one section per MCP server. Each line is
- * `- <camel_name> — <first-line description> [<state>]`, state from the single
- * `classifyTool`. Pure. Ordered by origin then insertion (catalog order).
+ * Render the session's DEFERRED tools as grouped discovery text for the
+ * `caco_enable_tools` no-args mode — the agent's way to find a deferred capability
+ * by name+description and re-enable it, without paying every tool's schema each
+ * turn. Lists ONLY `deferred` tools (enabled ones are already visible; disabled
+ * ones are not re-enableable). Groups: Caco, Built-in, then one section per MCP
+ * server. Each line is `- <name> — <first-line description>`. A trailing footer
+ * notes the COUNT of policy-disabled tools (names withheld — they cannot be
+ * enabled). Empty deferred set ⇒ an explicit "no deferred tools" message. Pure.
+ * Ordered by origin then insertion (catalog order).
  */
-export function formatToolCatalog(catalog: ToolCatalog, excluded: ReadonlySet<ToolKey>, policyDisabled?: ReadonlySet<ToolKey>): string {
+export function formatDeferredTools(catalog: ToolCatalog, excluded: ReadonlySet<ToolKey>, policyDisabled?: ReadonlySet<ToolKey>): string {
   const groups = new Map<string, string[]>();
   const order: string[] = [];
   const push = (group: string, line: string): void => {
@@ -129,23 +132,28 @@ export function formatToolCatalog(catalog: ToolCatalog, excluded: ReadonlySet<To
     if (!lines) { lines = []; groups.set(group, lines); order.push(group); }
     lines.push(line);
   };
+  let disabledCount = 0;
   for (const t of catalog.values()) {
     const state = classifyTool(t.key, { excluded, hardDisabled: t.hardDisabled, policyDisabled });
+    if (state === 'disabled') { disabledCount++; continue; }
+    if (state !== 'deferred') continue;
     const desc = (t.description || '').split('\n')[0].trim();
     const group = t.origin === 'caco' ? 'Caco' : t.origin === 'builtin' ? 'Built-in' : `MCP: ${t.server ?? 'unknown'}`;
-    push(group, `- \`${t.name}\` — ${desc || '(no description)'} [${state}]`);
+    push(group, `- \`${t.name}\` — ${desc || '(no description)'}`);
+  }
+  const footer = disabledCount > 0
+    ? `\n\n${disabledCount} tool(s) are disabled by policy (e.g. the shell family) and cannot be enabled.`
+    : '';
+  if (order.length === 0) {
+    return `# Deferred Tools\n\nNo deferred tools — every available tool is already enabled for this session.${footer}`;
   }
   const header = [
-    '# Caco Tool Catalog',
+    '# Deferred Tools',
     '',
-    'Every tool available to this session. **enabled** = the model sees it now; ' +
-      '**deferred** = excluded this session to save per-turn tokens (re-enable it with ' +
-      '`caco_enable_tools({ names: ["<name>"] })` when you need it); **disabled** = ' +
-      'hard-disabled or policy-excluded (e.g. the shell family) and NOT re-enableable.',
-    '',
-    'To use a deferred tool: call `caco_enable_tools` with its name(s) in ONE call ' +
-      '(batch related tools together), then call the tool on a later turn.',
+    'These tools are excluded this session to save per-turn tokens. Re-enable the ' +
+      'ones you need with `caco_enable_tools({ names: ["<name>"] })` (batch related ' +
+      'tools in ONE call); they become callable on your NEXT turn.',
   ].join('\n');
   const body = order.map(g => `## ${g}\n${(groups.get(g) as string[]).join('\n')}`).join('\n\n');
-  return `${header}\n\n${body}`;
+  return `${header}\n\n${body}${footer}`;
 }

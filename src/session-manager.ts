@@ -27,12 +27,15 @@ import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './age
 import { buildToolCatalog, type ToolCatalog } from './tool-catalog.js';
 import { builtinKey, cacoKey, type ToolKey } from './tool-key.js';
 import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys } from './tool-key-registry.js';
-import { recordObservedSizes } from './tool-size-store.js';
+import { recordObservedSizes, getToolSize } from './tool-size-store.js';
+import { estimateToolTokens } from './tool-size.js';
 import { validateEnable, resolveEnableTargets, computeColdResumeExclusions } from './session-tool-state.js';
 import { excludedBuiltinNames, DEFER_ELIGIBLE_CACO_TOOLS } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
-import { getNowActiveSeconds, getLastUsedActiveSeconds, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS, COLD_RESUME_STALE_MS } from './tool-usage-store.js';
-import { getToolsUsed } from './session-throughput.js';
+import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-defer-store.js';
+import { getNowActiveSeconds, getLastUsedActiveSeconds, stampToolUsage, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS, COLD_RESUME_STALE_MS } from './tool-usage-store.js';
+import { getToolsUsed, setDeferredDefsProvider } from './session-throughput.js';
+
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 
@@ -710,9 +713,15 @@ export class SessionManager {
     
     const sessionRef = { id: 'PENDING' };
     const tools = config.toolFactory(cwd, sessionRef);
-    // Seed exclusions = base (builtins) ∪ operator manual-defer preference (Phase D), so
-    // a manually-deferred server is hidden from a brand-new session too.
-    const seededExclusions = [...new Set<string>([...(config.excludedTools ?? []), ...this.manualDeferredKeys()])];
+    // Seed exclusions = base (builtins) ∪ operator manual-defer preference (Phase D) ∪
+    // new-session auto-defer (Phase C3). A brand-new session has no prompt-cache prefix,
+    // so applying the system-wide staleness verdict here is free — this is why a
+    // short-lived process that never goes cold still gets lean sessions.
+    const seededExclusions = [...new Set<string>([
+      ...(config.excludedTools ?? []),
+      ...this.manualDeferredKeys(),
+      ...this.computeNewSessionAutoDefer(),
+    ])];
     
     let session: CopilotSessionInstance;
     try {
@@ -2025,6 +2034,36 @@ export class SessionManager {
   }
 
   /**
+   * The gross per-turn definition tokens CURRENTLY omitted by DYNAMIC deferral for a
+   * session (spec-deferred-savings S6). Dynamic = the session's live `excludedTools`
+   * MINUS the policy set (`excludedBuiltinNames()`) — only C2 auto-defer / D1 manual
+   * defer, never policy-disabled builtins (which were never an avoidable cost). For each
+   * dynamic key: a Caco-allowlist tool prices from the local catalog (schema is local, so
+   * always known); an MCP tool prices from the persisted observed-size store, or counts
+   * as `unknown` if never observed. Returns a GROSS estimate of omitted known definitions
+   * — NOT a proven saving; the caller must not fold it into net credits. Pure read of
+   * current state (no accumulation): the figure changes only on defer/reveal or when a
+   * size is learned.
+   */
+  deferredDefsSavings(sessionId: string): { deferredDefsTokens: number; deferredDefsCount: number; deferredDefsUnknown: number } {
+    const policy = new Set<string>(excludedBuiltinNames());
+    const dynamic = this.getExcludedToolKeys(sessionId).filter(k => !policy.has(k as string));
+    // Local Caco sizes by cacoKey, so a deferred Caco-allowlist tool is always priced.
+    const cacoSizeByKey = new Map<ToolKey, number>();
+    for (const c of this.getCacoToolCatalog()) {
+      if (c.parameters) cacoSizeByKey.set(cacoKey(c.name), estimateToolTokens({ name: c.name, description: c.description, parameters: c.parameters }));
+    }
+    let deferredDefsTokens = 0;
+    let deferredDefsUnknown = 0;
+    for (const key of dynamic) {
+      const size = cacoSizeByKey.get(key) ?? getToolSize(key);
+      if (size === undefined) deferredDefsUnknown++;
+      else deferredDefsTokens += size;
+    }
+    return { deferredDefsTokens, deferredDefsCount: dynamic.length, deferredDefsUnknown };
+  }
+
+  /**
    * Whether a RESUME is "cold" for the purpose of auto-defer (Phase C2). Cold = safe to
    * apply exclusions for free because the provider's prompt-cache prefix is already
    * evicted. Two structural gates (spec coldness signals (1)/(2)):
@@ -2049,44 +2088,80 @@ export class SessionManager {
   }
 
   /**
-   * Cold-resume auto-defer keys (Phase C2): on a genuinely cold resume, the defer-eligible
-   * tools that are system-wide STALE (unused > 2 active-hours; never-used = maximally
-   * stale) MINUS anything the resuming session used here (used-here protection). Returns
-   * `[]` on a warm resume, so the seed is unchanged. The verdict is the pure
-   * `computeColdResumeExclusions` fed the shared threshold — the SAME math the applet's
-   * per-tool `wouldDefer` badge shows, so the diagnostic view can't disagree with what
-   * fires here. Eligible candidate universe = every learned MCP key (only tools we can
-   * key are deferrable) ∪ the fixed Caco allowlist; builtins are omitted because they are
-   * already excluded via the base seed (including them would be an idempotent no-op).
+   * Shared auto-defer verdict for the two cache-free seams (cold resume, create).
+   * MCP auto-defer is a one-way LATCH, not a live function of recency (spec-auto-defer
+   * -latch): a currently-STALE MCP tool (unused > 2 active-hours; never-used = maximally
+   * stale) is UNIONED into the persisted system-wide auto-defer set (the SET transition —
+   * the only place `lastUsed` drives an MCP defer decision), and then the WHOLE MCP latch
+   * (not just this seam's fresh-stale set) is returned. So a latched MCP tool stays
+   * deferred through later cross-session freshness; a passive reveal-use elsewhere can no
+   * longer un-defer it. The latch is cleared ONLY by operator manual un-defer (see
+   * setServerDeferred).
+   *
+   * Caco-allowlist tools are deliberately NOT latched: the only CLEAR path is the
+   * per-MCP-server un-defer, and a Caco pseudo-server has no such operator control, so
+   * latching them would strand them deferred forever (invariant: latched ⇒ operator-
+   * clearable). They stay on the LIVE staleness recompute — their pre-latch behaviour —
+   * so cross-session freshness still governs the small fixed Caco set.
+   *
+   * Staleness is the pure `computeColdResumeExclusions` fed the shared threshold — the
+   * SAME math the applet's per-tool `wouldDefer` badge shows. Builtins are omitted
+   * (already excluded via the base seed). Calling `getNowActiveSeconds()` advances the
+   * shared active clock — an intentional, cap-bounded tick (tool-usage-store
+   * MAX_ACTIVE_GAP_SECONDS): rapid repeat calls cannot over-age tools.
    */
-  private computeColdResumeAutoDefer(sessionId: string, config: ResumeConfig): ToolKey[] {
-    if (!this.isColdResume(sessionId, config)) return [];
-    const candidates = [
-      ...allLearnedKeys(),
-      ...DEFER_ELIGIBLE_CACO_TOOLS.map(n => cacoKey(n)),
-    ];
+  private computeStaleDeferCandidates(usedHere: ReadonlySet<ToolKey>, logLabel: string): ToolKey[] {
+    const mcpCandidates = [...new Set(allLearnedKeys())];
+    const cacoCandidates = DEFER_ELIGIBLE_CACO_TOOLS.map(n => cacoKey(n));
     const nowActiveSeconds = getNowActiveSeconds();
-    const stale = computeColdResumeExclusions({
-      isCold: true,
-      tools: [...new Set(candidates)],
-      lastUsed: getLastUsedActiveSeconds(),
-      nowActiveSeconds,
-      threshold: DEFER_STALE_THRESHOLD_ACTIVE_SECONDS,
+    const lastUsed = getLastUsedActiveSeconds();
+    const staleOf = (tools: ToolKey[]) => computeColdResumeExclusions({
+      isCold: true, tools, lastUsed, nowActiveSeconds, threshold: DEFER_STALE_THRESHOLD_ACTIVE_SECONDS,
     });
-    // Used-here protection: never defer a tool this session invoked. In a fresh process
-    // this set is empty (in-memory, per-session) so cold-resume auto-defer is driven by
-    // the system-wide staleness verdict alone — an accepted, fully-recoverable footgun
-    // (the agent reveals a needed tool in one caco_enable_tools call). See spec risk note.
-    const usedHere = getToolsUsed(sessionId);
-    const deferred = stale.filter(k => !usedHere.has(k));
+    // SET: only MCP keys enter the persisted latch. The latch's ONLY CLEAR path is the
+    // operator's per-MCP-server un-defer (setServerDeferred), so latching a Caco-allowlist
+    // tool — which has no per-server operator control — would strand it deferred forever.
+    // Caco tools therefore stay on the LIVE staleness recompute (their pre-latch behaviour):
+    // recomputed each seam, never persisted, so cross-session freshness still governs them.
+    const staleMcp = staleOf(mcpCandidates);
+    addAutoDeferred(staleMcp);
+    const staleCacoLive = staleOf(cacoCandidates);
+    // Seed = the WHOLE MCP latch (sticky across later freshness) ∪ live-stale Caco tools,
+    // minus per-session used-here protection.
+    const deferred = [...new Set<ToolKey>([...getAutoDeferred(), ...staleCacoLive])].filter(k => !usedHere.has(k));
     if (deferred.length) {
       console.log(
-        `[DEFER] cold-resume auto-defer ${sessionId.slice(0, 8)}: deferred=${deferred.length} ` +
-        `candidates=${candidates.length} keptUsedHere=${usedHere.size} ` +
-        `thresholdSec=${DEFER_STALE_THRESHOLD_ACTIVE_SECONDS} clockSec=${Math.round(nowActiveSeconds)}`,
+        `[DEFER] ${logLabel}: deferred=${deferred.length} ` +
+        `newlyStaleMcp=${staleMcp.length} mcpLatch=${getAutoDeferred().size} staleCaco=${staleCacoLive.length} ` +
+        `keptUsedHere=${usedHere.size} thresholdSec=${DEFER_STALE_THRESHOLD_ACTIVE_SECONDS} clockSec=${Math.round(nowActiveSeconds)}`,
       );
     }
     return deferred;
+  }
+
+  /**
+   * Cold-resume auto-defer keys (Phase C2): on a genuinely cold resume, the shared
+   * staleness verdict minus the resuming session's used-here set. Returns `[]` on a warm
+   * resume/model-switch/recreate, so the seed is unchanged. In a fresh process the
+   * used-here set is empty (in-memory, per-session) so cold-resume auto-defer is driven by
+   * the system-wide staleness verdict alone — an accepted, fully-recoverable footgun (the
+   * agent reveals a needed tool in one caco_enable_tools call). See spec risk note.
+   */
+  private computeColdResumeAutoDefer(sessionId: string, config: ResumeConfig): ToolKey[] {
+    if (!this.isColdResume(sessionId, config)) return [];
+    return this.computeStaleDeferCandidates(getToolsUsed(sessionId), `cold-resume auto-defer ${sessionId.slice(0, 8)}`);
+  }
+
+  /**
+   * New-session auto-defer keys (Phase C3): the shared staleness verdict applied at
+   * `create()`. A brand-new session has no prompt-cache prefix to bust, so deferral is
+   * unconditionally free — there is NO coldness gate here (unlike resume). Used-here is
+   * empty (the session does not exist yet); cross-session freshness is still honored via
+   * the shared active clock. This is why a short-lived process that never goes cold still
+   * gets lean sessions.
+   */
+  private computeNewSessionAutoDefer(): ToolKey[] {
+    return this.computeStaleDeferCandidates(new Set<ToolKey>(), 'new-session auto-defer');
   }
 
   /**
@@ -2101,6 +2176,15 @@ export class SessionManager {
     setServerDeferred(serverName, deferred);
     const serverKeys = keysForServer(serverName);
     const keySet = new Set(serverKeys);
+    // Un-defer is the ONLY auto-defer-latch CLEAR path: drop the server's keys from the
+    // latch, then stamp them freshly-used so the immediate next cache-free seam does not
+    // re-latch a tool the operator just enabled (a bounded ~2-active-hour window; see
+    // spec-auto-defer-latch). Operator intent legitimately stamps recency — a passive
+    // per-session reveal does not.
+    if (!deferred) {
+      removeAutoDeferred(serverKeys);
+      for (const k of serverKeys) stampToolUsage(k);
+    }
     let affected = 0;
     const failedSessions: string[] = [];
     for (const [sessionId, active] of this.activeSessions) {
@@ -2227,3 +2311,8 @@ export class SessionManager {
 }
 
 export const sessionManager = new SessionManager();
+
+// Wire the throughput snapshot's deferred-definition figure to the manager that owns
+// the exclusion set + size store (injection, so session-throughput needs no import of
+// session-manager). One registration; every snapshot() thereafter is enriched.
+setDeferredDefsProvider(sessionId => sessionManager.deferredDefsSavings(sessionId));

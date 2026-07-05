@@ -38,6 +38,7 @@ import { getToolsUsed, setDeferredDefsProvider } from './session-throughput.js';
 
 
 import { formatMemoryForPrompt } from './memory-tool.js';
+import { buildSystemMessage, resolveSystemMessage } from './prompts.js';
 
 
 interface McpServerInfo {
@@ -155,7 +156,7 @@ interface ResumeSessionConfig {
   streaming?: boolean;
   tools?: unknown[];
   excludedTools?: string[];
-  systemMessage?: { mode: 'append'; content: string };
+  systemMessage?: { mode: 'append' | 'replace'; content: string };
   model?: string;
   reasoningEffort?: string;
   provider?: ProviderConfig;
@@ -164,6 +165,43 @@ interface ResumeSessionConfig {
   contextTier?: ContextTier;
   configDirectory?: string;
   enableConfigDiscovery?: boolean;
+}
+
+/**
+ * Whether a session's resume should reuse the parent's exact `mode:'replace'` system
+ * message for fork cache preservation (spec-session-fork). True only for a forked
+ * INTERACTIVE child's FIRST genuine activation:
+ *   - `parentSessionId` set AND `kind === 'interactive'` — a fork, not a swarm/agent
+ *     child (those also set parentSessionId but want their own agent prompt).
+ *   - NOT already active — first activation only.
+ *   - NOT a warm recreate / model switch — those delete `activeSessions` then resume,
+ *     so `!alreadyActive` alone would misfire and bust a warm forked child's cache.
+ * Pure so the full gate is unit-testable without a resume harness.
+ */
+export function shouldUseForkReplaceSystemMessage(
+  meta: { parentSessionId?: string; kind?: string } | undefined,
+  guards: { alreadyActive: boolean; warmRecreate?: boolean; modelOverride?: string },
+): boolean {
+  if (guards.alreadyActive || guards.warmRecreate || guards.modelOverride !== undefined) return false;
+  return !!meta?.parentSessionId && meta.kind === 'interactive';
+}
+
+/**
+ * Build the resume-time `systemMessage` for `_doResume` (fork cache preservation,
+ * spec-session-fork). A forked interactive child's first activation reuses the
+ * parent's exact `mode:'replace'` content (so its prefix matches the parent's cache);
+ * every other resume keeps the historical behaviour — a `mode:'append'` memory block
+ * when memory is present, else nothing. Pure so the exact object the call site sends
+ * to `resumeSession` is unit-testable without a resume harness.
+ */
+export function resolveResumeSystemMessage(opts: {
+  useForkReplace: boolean;
+  replaceContent: string;
+  memoryContent: string;
+}): { mode: 'append' | 'replace'; content: string } | undefined {
+  if (opts.useForkReplace) return { mode: 'replace', content: opts.replaceContent };
+  if (opts.memoryContent) return { mode: 'append', content: opts.memoryContent };
+  return undefined;
 }
 
 interface CopilotSessionInstance {
@@ -912,6 +950,26 @@ export class SessionManager {
     
     let repairMessage: string | undefined;
     const memoryContent = formatMemoryForPrompt();
+    // Fork cache preservation: a forked child copies the parent's system.message event
+    // into its history at fork time, and on a plain resume the runtime ALSO generates
+    // its own default foundation prompt — a double system message (~2x tokens, 0%
+    // cache). For a forked INTERACTIVE child's first (cold) resume, pass the SAME
+    // mode:'replace' content the parent was created with, so the runtime's system block
+    // matches the parent's cached [replace-sys] prefix (fresh-billed tokens drop, cache
+    // prefix restored). Gate on kind==='interactive': swarm/agent children ALSO set
+    // parentSessionId but want their own agent prompt, so they must NOT be caught here.
+    const forkMeta = getSessionMeta(sessionId);
+    const useForkReplace = shouldUseForkReplaceSystemMessage(forkMeta, {
+      alreadyActive: !!existingActive,
+      warmRecreate: config.warmRecreate,
+      modelOverride: config.modelOverride,
+    });
+    const resumeSystemMessage = resolveResumeSystemMessage({
+      useForkReplace,
+      // Only rebuild the ~13k replace prompt when we actually need it (forked child).
+      replaceContent: useForkReplace ? resolveSystemMessage(await buildSystemMessage(), cwd).content : '',
+      memoryContent,
+    });
     const tMcp0 = performance.now();
     const mcpServers = await loadMcpServers();
     const tMcp = performance.now() - tMcp0;
@@ -939,7 +997,7 @@ export class SessionManager {
       workingDirectory: cwd,
       largeOutput: sdkLargeOutputConfig(),
       hooks: { onPostToolUse: createObservationHook(cwd, sessionRef) },
-      ...(memoryContent && { systemMessage: { mode: 'append' as const, content: memoryContent } }),
+      ...(resumeSystemMessage && { systemMessage: resumeSystemMessage }),
       ...(applyModel && { model: resolved.sdkModel }),
       ...(resolved?.provider && { provider: resolved.provider }),
       ...(infinite && { infiniteSessions: infinite }),

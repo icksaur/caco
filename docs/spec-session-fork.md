@@ -170,6 +170,77 @@ Behavior: log the orphan session ID prominently (`console.error('[FORK] Caco-sid
 ### Frontend `initialMessage` send fails
 The new session exists and is switched-to. User sees toast with error. User can retype message manually. No state corruption.
 
+## Prompt-cache preservation (fork double-system-message)
+
+**Problem (measured).** A naive fork produces a child whose first-turn prompt is ~2x
+the parent's input tokens AND reads **zero** prompt cache (fully cold), where a
+normal fresh same-cwd/same-model session reuses ~97% of its ~13k system prefix from
+the provider's cross-session prompt cache. Measured, `/tmp` + `claude-opus-4.6`,
+first-turn `cacheReadTokens`:
+
+| Fork child variant | Fresh in | Cache read | Total |
+|---|---:|---:|---:|
+| Naive (baseline) | 27,569 | 0 | 27,569 |
+| Skip resume-time memory append | 26,689 | 0 | 26,689 |
+| Fix, **cold** parent (first-of-kind, e.g. post-restart) | 24,130 | 0 | 24,130 |
+| **Fix, warm parent (the real fork scenario)** | **595** | **23,511** | 24,106 |
+
+The fix requires the parent's prefix to be WARM in the provider cache — which is the
+real fork scenario (you fork a conversation you have been actively using). A cold
+parent (its prefix not yet cached, e.g. the first session of its kind after a server
+restart) leaves the child cold too; that is an accepted artifact, not the workflow.
+
+**Root cause.** The parent is CREATED with `systemMessage: { mode:'replace' }` (Caco's
+~13k prompt, `src/prompts.ts`). `sessions.fork` copies the parent's full event log —
+including that `system.message` event — into the child. When Caco then RESUMES the
+child, the runtime generates its OWN default foundation system prompt (Caco passed
+only a `mode:'append'` memory message, not the replace prompt). The child's wire
+prompt becomes `[runtime foundation sys][copied Caco replace-sys as history][…]` — a
+double system message (~2x tokens) whose LEADING bytes (the runtime foundation) no
+longer match the parent's cached `[Caco replace-sys …]` prefix, so longest-common
+-prefix matching yields 0% (the provider caches `tools → system → messages`; a
+divergent leading system block invalidates everything after).
+
+**Fix.** On a forked INTERACTIVE child's FIRST (cold) resume, pass
+`systemMessage: { mode:'replace', content: <parent-identical system message> }`
+(rebuilt via `buildSystemMessage()` + `resolveSystemMessage(cwd)`, the same content
+the parent was created with). The runtime's system block then matches the parent's,
+so the parent's cached system+history prefix is served from cache instead of
+re-billed as fresh. Measured effect (warm parent): fresh (full-price) input
+`27,569 → 595` (~98% fewer fresh tokens), cache read `0 → 23,511`; total input
+`27,569 → ~24,100`. Note the total only dropped slightly — the copied history is
+still present, but now **cache-hit (cheap) rather than fresh**; the win is the
+fresh-token collapse + cache prefix restoration, not eliminating the duplication on
+the wire.
+
+**Gate.** `!alreadyActive && !warmRecreate && modelOverride===undefined &&
+meta.parentSessionId && meta.kind === 'interactive'` (the pure
+`shouldUseForkReplaceSystemMessage(meta, guards)` predicate). Three exclusions matter:
+- `kind === 'interactive'` — swarm/agent children also set `parentSessionId` (see
+  "Audit: parentSessionId consumers") but want their own agent prompt.
+- `!warmRecreate && modelOverride===undefined` — a warm recreate (model switch,
+  context-budget change) deletes `activeSessions` then resumes, so `!alreadyActive`
+  alone would misfire and re-inject `mode:'replace'` on a warm forked child, busting
+  its warm cache. These flags (the same ones `isColdResume` excludes) keep the fix to
+  a genuine first activation.
+- `!alreadyActive` — first activation only.
+
+**"Parent-identical" caveat.** `buildSystemMessage()` is rebuilt from the CURRENT
+applet list, host/env, config, prompt code, AND `formatMemoryForPrompt()` — so the
+child keeps memory, but "parent-identical" holds only if NONE of those inputs changed
+since the parent was created (a memory edit, an applet install, or a Caco prompt-code
+change between create and fork shifts the content and lowers — does not eliminate —
+the cache hit). Accepted: these rarely change within a session's fork window.
+
+**Why replace-not-skip.** Skipping the resume systemMessage entirely (relying on the
+copied `system.message` event) does NOT work — the runtime still emits its own
+foundation prompt when no replace is given (measured: 26,689 / 0 cache). The child
+must be given the replace content explicitly.
+
+This resolves Open Question #3 (token cost): the child processes all parent events,
+but with the fix the bulk (parent system + history) is served from cache rather than
+re-billed as fresh.
+
 ## Audit: parentSessionId consumers
 
 Before implementing, grep `parentSessionId` and confirm no consumer treats its presence as "this is a sub-agent" without also checking `meta.kind`. Known good consumers:
@@ -211,8 +282,12 @@ These need empirical checks against the SDK rather than assumed:
    - If immediately resumable: the frontend's `activateSession()` works directly.
    - If not: need additional API calls between fork and resume.
 
-3. **Token cost** — the new session inherits all conversation events. When the model receives the next user message, does it process all parent events as context, or does it lazily compact?
-   - Affects cost considerations for forking long sessions.
+3. **Token cost** — RESOLVED (see "Prompt-cache preservation" above). The child
+   processes all parent events; a naive fork double-counts the system message and
+   busts cache (2x tokens, 0% cache read). Fixed by resuming a forked child's first
+   activation with `mode:'replace'` + parent-identical system content, which makes
+   the parent's system+history prefix cache-hit instead of re-billing as fresh
+   (measured ~98% fewer fresh tokens against a warm parent).
 
 ## Risks and Mitigations
 
@@ -253,3 +328,4 @@ Estimated 250-350 lines including tests.
 | 2 | Add POST /api/sessions/:id/fork route | `src/routes/sessions.ts` | unit test: happy path + SDK-fail + setup-fail |
 | 3 | Frontend slash command (/session-fork) | `public/ts/command-registry.ts` | visual: fork + switch + initialMessage |
 | 4 | Update README slash command table | `README.md` | by-construction |
+| 5 | **Cache-preserving fork:** resume a forked child's first activation with `mode:'replace'` + parent-identical system content, via two pure helpers: `shouldUseForkReplaceSystemMessage(meta, guards)` (the gate) and `resolveResumeSystemMessage({useForkReplace, replaceContent, memoryContent})` (the exact object sent to `resumeSession`) | `src/session-manager.ts` (`_doResume` + the two helpers), `ResumeSessionConfig.systemMessage` widened to allow `replace` | unit: gate TRUE only for interactive fork on first plain activation, FALSE for agent/swarm, normal, already-active, warm-recreate/model-switch; resolver returns mode:replace for a fork, mode:append memory otherwise, undefined with no memory; plus manual measurement (warm parent → forked child fresh input ≈98% lower, `cacheReadTokens` ≫ 0) |

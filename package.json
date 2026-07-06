@@ -17,7 +17,7 @@
     "lint:strict": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "knip": "knip",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "scan:pii": "node scripts/scan-pii.js",

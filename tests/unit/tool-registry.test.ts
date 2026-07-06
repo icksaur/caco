@@ -76,6 +76,14 @@ describe('parseExcludedBuiltins', () => {
     expect(DEFAULT_EXCLUDED_BUILTINS).toContain('builtin:ask_user');
   });
 
+  it('defaults exclude fetch_copilot_cli_documentation (CLI docs, unused; caco_docs covers project docs)', () => {
+    expect(DEFAULT_EXCLUDED_BUILTINS).toContain('builtin:fetch_copilot_cli_documentation');
+  });
+
+  it('does NOT exclude str_replace_editor (it is the SDK edit tool — excluding it breaks editing)', () => {
+    expect(DEFAULT_EXCLUDED_BUILTINS).not.toContain('builtin:str_replace_editor');
+  });
+
   it('unions the env override with the defaults, de-duped', () => {
     const out = parseExcludedBuiltins(['builtin:bash'], 'builtin:grep, builtin:bash ,builtin:glob');
     expect(out).toEqual(['builtin:bash', 'builtin:grep', 'builtin:glob']);

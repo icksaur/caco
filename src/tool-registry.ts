@@ -80,12 +80,19 @@ export function disabledToolNames(): Set<string> {
  * (~800 tokens of pure per-turn tax). See docs/research/ask-user-tool.md. If Caco
  * later wants a blocking in-turn clarification UX, this exclusion is removed as part
  * of that feature.
+ *
+ * `fetch_copilot_cli_documentation` is excluded: it fetches Copilot *CLI* docs, which
+ * Caco does not use — Caco has its own `caco_docs` tool for project documentation. Pure
+ * per-turn schema tax. NOTE: `str_replace_editor` is deliberately NOT excluded — it is
+ * the SDK's actual view/edit/create tool (Caco has no replacement), so excluding it
+ * would remove the agent's ability to edit files.
  */
 export const DEFAULT_EXCLUDED_BUILTINS: string[] = [
   'builtin:bash', 'builtin:read_bash', 'builtin:stop_bash', 'builtin:list_bash',
   'builtin:powershell', 'builtin:read_powershell', 'builtin:stop_powershell', 'builtin:list_powershell',
   'builtin:local_shell',
   'builtin:ask_user',
+  'builtin:fetch_copilot_cli_documentation',
 ];
 
 /** Parse CACO_EXCLUDED_BUILTINS (comma-separated) and union with the defaults. */

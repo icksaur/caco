@@ -2362,7 +2362,7 @@ main {
 }
 
 .context-footer .tp-cost {
-  color: var(--color-text-bright, white);
+  color: var(--color-context-usage, var(--yellow));
   margin-left: var(--space-xs);
 }
 

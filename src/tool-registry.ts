@@ -73,11 +73,19 @@ export function disabledToolNames(): Set<string> {
  * output, fewer calls, in-script summarization). Reverting is one config edit or
  * CACO_EXCLUDED_BUILTINS="". Search/read tools (grep/glob/view) are intentionally
  * NOT excluded here — a separate future effort (index_multiread).
+ *
+ * `ask_user` is excluded too: it's a mid-turn "ask the human a question" tool that
+ * Caco never wires up (no `onUserInputRequest` handler; `user_input.*` events are
+ * filtered out), yet the CLI sends its full schema + instructions every turn
+ * (~800 tokens of pure per-turn tax). See docs/research/ask-user-tool.md. If Caco
+ * later wants a blocking in-turn clarification UX, this exclusion is removed as part
+ * of that feature.
  */
 export const DEFAULT_EXCLUDED_BUILTINS: string[] = [
   'builtin:bash', 'builtin:read_bash', 'builtin:stop_bash', 'builtin:list_bash',
   'builtin:powershell', 'builtin:read_powershell', 'builtin:stop_powershell', 'builtin:list_powershell',
   'builtin:local_shell',
+  'builtin:ask_user',
 ];
 
 /** Parse CACO_EXCLUDED_BUILTINS (comma-separated) and union with the defaults. */

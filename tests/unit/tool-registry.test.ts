@@ -72,6 +72,10 @@ describe('parseExcludedBuiltins', () => {
     expect(DEFAULT_EXCLUDED_BUILTINS).not.toContain('builtin:str_replace_editor');
   });
 
+  it('defaults exclude the unused ask_user tool (per-turn schema tax, never wired up)', () => {
+    expect(DEFAULT_EXCLUDED_BUILTINS).toContain('builtin:ask_user');
+  });
+
   it('unions the env override with the defaults, de-duped', () => {
     const out = parseExcludedBuiltins(['builtin:bash'], 'builtin:grep, builtin:bash ,builtin:glob');
     expect(out).toEqual(['builtin:bash', 'builtin:grep', 'builtin:glob']);

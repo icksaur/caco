@@ -2362,7 +2362,7 @@ main {
 }
 
 .context-footer .tp-cost {
-  color: var(--color-context-usage, var(--yellow));
+  color: var(--color-text-bright, white);
   margin-left: var(--space-xs);
 }
 
@@ -2372,7 +2372,7 @@ main {
 }
 
 .context-footer .tp-cache-miss {
-  color: var(--color-error, var(--red));
+  color: var(--orange, #d4956a);
   margin-left: var(--space-xs);
 }
 

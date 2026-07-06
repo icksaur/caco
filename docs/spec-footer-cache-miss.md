@@ -93,12 +93,14 @@ rate, the Auto-hide, and the zero-hide behaviors without a DOM.
 ```
 
 `×` marks a miss; the number is formatted identically to the yellow cost
-(`< 10 → toFixed(2)`, else `Math.round().toLocaleString()`). Styled red via a new
-`.context-footer .tp-cache-miss` CSS rule using `var(--color-error, var(--red))` (the
-theme-aware red already used across applets). The throughput tooltip gains one line:
+(`< 10 → toFixed(2)`, else `Math.round().toLocaleString()`). Styled orange via a new
+`.context-footer .tp-cache-miss` CSS rule using `var(--orange, #d4956a)` (the
+theme-aware orange). The existing yellow `tp-cost` spend is recolored to white
+(`var(--color-text-bright, white)`) so the two figures don't compete for attention —
+the orange miss figure is the eye-catch. The throughput tooltip gains one line:
 `cache misses: <coldMissTurns> turns · <coldMissInputTokens> tok re-encoded (≈<credits>cr)`.
 
-Footer layout order becomes: `… out  ≈Ncr(yellow)  ×≈Mcr(red)  ⟲Turns`.
+Footer layout order becomes: `… out  ≈Ncr(white)  ×≈Mcr(orange)  ⟲Turns`.
 
 ## Invariants
 
@@ -158,6 +160,6 @@ Footer layout order becomes: `… out  ≈Ncr(yellow)  ×≈Mcr(red)  ⟲Turns`.
 |---|------|-------|--------|
 | P1 | Add `coldMissInputTokens` + `coldMissTurns` to `SessionThroughput`; init in `blank()`; accrue in `recordUsage` under `if (input > 0 && cachePresent && cache === 0)` where `cachePresent` tests the raw `cacheReadTokens` is a finite number; leave untouched by `resetRequest` | `src/session-throughput.ts` | unit: explicit zero-cache turn accrues; warm/empty/absent-cache don't; `≤ totalIn`; snapshot exposes; reset preserves |
 | P2 | Add pure `cacheMissCredits(rates, coldMissInputTokens)` (null on Auto/zero) | `public/ts/saved-pricing.ts` | unit: priced → credit; Auto → null; zero → null |
-| P3 | Thread the two fields into `ThroughputData`; render red `×≈Ncr` via `resolveModelRates` + `cacheMissCredits` next to `tp-cost` (hidden when null); add the tooltip line | `public/ts/context-footer.ts` | build; visual signoff |
-| P4 | Add `.context-footer .tp-cache-miss` red rule (`var(--color-error, var(--red))`, `margin-left: var(--space-xs)`) | `public/style.css` | visual signoff |
+| P3 | Thread the two fields into `ThroughputData`; render orange `×≈Ncr` via `resolveModelRates` + `cacheMissCredits` next to `tp-cost` (hidden when null); recolor `tp-cost` to white; add the tooltip line | `public/ts/context-footer.ts`, `public/style.css` | build; visual signoff |
+| P4 | Add `.context-footer .tp-cache-miss` orange rule (`var(--orange, #d4956a)`, `margin-left: var(--space-xs)`); recolor `.tp-cost` to `var(--color-text-bright, white)` | `public/style.css` | visual signoff |
 | P5 | Unit-test the P1 + P2 oracles | `tests/unit/session-throughput.test.ts`, `tests/unit/saved-pricing.test.ts` | P1/P2 oracles green |

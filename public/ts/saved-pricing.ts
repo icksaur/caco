@@ -49,3 +49,12 @@ export function computeNetCreditsSaved(rates: Rates, t: SavedTokens): number {
     t.outputDelta * rates.output
   ) / 1_000_000;
 }
+
+/** Credit cost of the cache-miss input tokens (spec-footer-cache-miss): the slice of
+ *  input spend billed fresh because those turns read zero cache. Returns null when
+ *  rates are unknown (Auto) or there are no miss tokens, so the red footer figure
+ *  hides in lockstep with the yellow spend. */
+export function cacheMissCredits(rates: Rates | null, coldMissInputTokens: number): number | null {
+  if (!rates || coldMissInputTokens <= 0) return null;
+  return coldMissInputTokens * rates.input / 1_000_000;
+}

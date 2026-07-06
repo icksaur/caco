@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeNetCreditsSaved, resolveModelRates } from '../../public/ts/saved-pricing.js';
+import { computeNetCreditsSaved, resolveModelRates, cacheMissCredits } from '../../public/ts/saved-pricing.js';
 import type { ModelInfo } from '../../public/ts/types.js';
 
 const rates = { input: 10, cache: 1, output: 30 };
@@ -87,5 +87,21 @@ describe('computeNetCreditsSaved — footer headline math', () => {
 
   it('zero rates yield zero credits (Auto-like)', () => {
     expect(computeNetCreditsSaved({ input: 0, cache: 0, output: 0 }, { fresh: 9e9, shaping: 9e9, compound: 9e9, replay: 9e9, outputDelta: 9e9, deferredDefs: 9e9 })).toBe(0);
+  });
+});
+
+describe('cacheMissCredits — footer red cache-miss figure', () => {
+  it('prices miss tokens at the input rate only', () => {
+    // 1M miss tokens × input(10)/1e6 = 10 cr (never the cache rate)
+    expect(cacheMissCredits(rates, 1_000_000)).toBeCloseTo(10, 9);
+  });
+
+  it('returns null for Auto (null rates) regardless of tokens', () => {
+    expect(cacheMissCredits(null, 1_000_000)).toBeNull();
+  });
+
+  it('returns null when there are no miss tokens (hides in lockstep with zero misses)', () => {
+    expect(cacheMissCredits(rates, 0)).toBeNull();
+    expect(cacheMissCredits(rates, -5)).toBeNull();
   });
 });

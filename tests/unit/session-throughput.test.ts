@@ -119,6 +119,71 @@ describe('recordUsage', () => {
   });
 });
 
+describe('recordUsage — cache-miss slice (spec-footer-cache-miss)', () => {
+  it('accrues fresh + a turn on an explicit zero-cache turn', () => {
+    recordUsage(SID, { inputTokens: 5000, outputTokens: 10, cacheReadTokens: 0 });
+    const t = getThroughput(SID)!;
+    expect(t.coldMissInputTokens).toBe(5000);
+    expect(t.coldMissTurns).toBe(1);
+  });
+
+  it('does NOT count a warm turn (cacheReadTokens > 0)', () => {
+    recordUsage(SID, { inputTokens: 5000, outputTokens: 10, cacheReadTokens: 4000 });
+    const t = getThroughput(SID)!;
+    expect(t.coldMissInputTokens).toBe(0);
+    expect(t.coldMissTurns).toBe(0);
+  });
+
+  it('does NOT count a turn with absent cacheReadTokens (unknown telemetry, not classified)', () => {
+    recordUsage(SID, { inputTokens: 5000, outputTokens: 10 });
+    const t = getThroughput(SID)!;
+    expect(t.coldMissInputTokens).toBe(0);
+    expect(t.coldMissTurns).toBe(0);
+  });
+
+  it('does NOT count a turn with non-numeric / NaN cacheReadTokens', () => {
+    recordUsage(SID, { inputTokens: 5000, outputTokens: 10, cacheReadTokens: NaN });
+    recordUsage(SID, { inputTokens: 5000, outputTokens: 10, cacheReadTokens: 'x' as unknown as number });
+    const t = getThroughput(SID)!;
+    expect(t.coldMissInputTokens).toBe(0);
+    expect(t.coldMissTurns).toBe(0);
+  });
+
+  it('does NOT count an empty (input=0) usage event even with cacheReadTokens=0', () => {
+    recordUsage(SID, { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 });
+    const t = getThroughput(SID)!;
+    expect(t.coldMissInputTokens).toBe(0);
+    expect(t.coldMissTurns).toBe(0);
+  });
+
+  it('over a mixed sequence, coldMissInputTokens <= totalIn and equals the miss turns fresh sum', () => {
+    recordUsage(SID, { inputTokens: 3000, outputTokens: 10, cacheReadTokens: 0 });    // miss: fresh 3000
+    recordUsage(SID, { inputTokens: 8000, outputTokens: 10, cacheReadTokens: 7500 }); // warm: fresh 500
+    recordUsage(SID, { inputTokens: 2000, outputTokens: 10, cacheReadTokens: 0 });    // miss: fresh 2000
+    recordUsage(SID, { inputTokens: 1000, outputTokens: 10 });                        // unknown cache: fresh 1000, not a miss
+    const t = getThroughput(SID)!;
+    expect(t.coldMissInputTokens).toBe(5000);          // 3000 + 2000
+    expect(t.coldMissTurns).toBe(2);
+    expect(t.totalIn).toBe(3000 + 500 + 2000 + 1000);  // 6500
+    expect(t.coldMissInputTokens).toBeLessThanOrEqual(t.totalIn);
+  });
+
+  it('snapshot exposes the cache-miss fields', () => {
+    recordUsage(SID, { inputTokens: 5000, outputTokens: 10, cacheReadTokens: 0 });
+    const s = snapshot(SID);
+    expect(s.coldMissInputTokens).toBe(5000);
+    expect(s.coldMissTurns).toBe(1);
+  });
+
+  it('resetRequest preserves the session-lifetime cache-miss counters', () => {
+    recordUsage(SID, { inputTokens: 5000, outputTokens: 10, cacheReadTokens: 0 });
+    resetRequest(SID);
+    const t = getThroughput(SID)!;
+    expect(t.coldMissInputTokens).toBe(5000);
+    expect(t.coldMissTurns).toBe(1);
+  });
+});
+
 describe('recordRateLimit', () => {
   it('increments rateLimitCount', () => {
     recordRateLimit(SID);

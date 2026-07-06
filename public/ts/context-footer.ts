@@ -11,7 +11,7 @@
 import { regions } from './dom-regions.js';
 import { formatContextFiles, formatStatusParts, escapeHtml } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
-import { computeNetCreditsSaved, resolveModelRates } from './saved-pricing.js';
+import { computeNetCreditsSaved, resolveModelRates, cacheMissCredits } from './saved-pricing.js';
 export interface SessionContext {
   files?: string[];
   [key: string]: string[] | undefined;
@@ -368,6 +368,11 @@ export interface ThroughputData {
    *  Priced at the cache rate and folded into the credit headline; also shown as an
    *  accrued tooltip line. */
   deferredDefsTokensAccrued?: number;
+  /** Session-lifetime fresh input tokens on cache-miss turns (zero cache read) and
+   *  the miss-turn count (spec-footer-cache-miss). Priced at the input rate as the
+   *  footer's red figure — a subset of totalIn. */
+  coldMissInputTokens?: number;
+  coldMissTurns?: number;
   updatedAt: string;
   known?: boolean;
 }
@@ -376,6 +381,13 @@ function kAbbrev(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
+}
+
+/** Format a credit cost for the footer figures: two decimals under 10 credits,
+ *  else a rounded, comma-grouped integer. Shared by the yellow spend and red
+ *  cache-miss figures so they read identically. */
+function fmtCostCr(c: number): string {
+  return c < 10 ? c.toFixed(2) : Math.round(c).toLocaleString();
 }
 
 /** Active session's model id, stashed by updateStatus so renderThroughput
@@ -509,12 +521,25 @@ function renderThroughput(data: ThroughputData): void {
 
   const cost = estimateCost(data);
   const costHtml = cost !== null
-    ? ` <span class="tp-cost">≈${cost < 10 ? cost.toFixed(2) : Math.round(cost).toLocaleString()}cr</span>`
+    ? ` <span class="tp-cost">≈${fmtCostCr(cost)}cr</span>`
+    : '';
+
+  // Cache-miss slice: the portion of the yellow input spend billed fresh because those
+  // turns read zero cache. Priced through the same resolveModelRates path, so the red
+  // figure hides in lockstep with the yellow cost (Auto) and when there is no miss.
+  const missTok = data.coldMissInputTokens ?? 0;
+  const missTurns = data.coldMissTurns ?? 0;
+  const missCredits = cacheMissCredits(resolveModelRates(getAvailableModels(), activeModelId), missTok);
+  const missHtml = missCredits !== null
+    ? ` <span class="tp-cache-miss">×≈${fmtCostCr(missCredits)}cr</span>`
+    : '';
+  const missLine = missCredits !== null
+    ? `\ncache misses: ${missTurns} turn${missTurns !== 1 ? 's' : ''} · ${missTok.toLocaleString()} tok re-encoded (≈${fmtCostCr(missCredits)}cr)`
     : '';
 
   const turnHtml = turns > 0 ? ` <span class="tp-turns">⟲${turns}</span>` : '';
 
-  const tokenHtml = `<span title="${escapeHtml(tooltip)}">${parts}${costHtml}${turnHtml}</span>`;
+  const tokenHtml = `<span title="${escapeHtml(tooltip + missLine)}">${parts}${costHtml}${missHtml}${turnHtml}</span>`;
 
   let rateLimitHtml = '';
   if (data.rateLimitCount > 0) {

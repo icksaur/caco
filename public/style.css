@@ -2371,6 +2371,11 @@ main {
   margin-left: var(--space-xs);
 }
 
+.context-footer .tp-cache-miss {
+  color: var(--color-error, var(--red));
+  margin-left: var(--space-xs);
+}
+
 .context-footer .context-saved {
   flex-shrink: 0;
   color: var(--green, #3fb950);

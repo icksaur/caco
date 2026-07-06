@@ -103,6 +103,14 @@ interface SessionThroughput {
    *  definition tokens omitted from each sent tool block, priced at the cache rate
    *  in the footer. Not persisted across restart; never reset by resetRequest. */
   deferredDefsTokensAccrued: number;
+  /** Session-lifetime SUM of fresh input tokens on CACHE-MISS turns — a turn that
+   *  read explicitly zero cached tokens (present, finite `cacheReadTokens === 0`) on a
+   *  non-empty prompt, so its whole prompt was billed fresh (spec-footer-cache-miss).
+   *  A subset of `totalIn` by construction; priced at the input rate as the footer's
+   *  red figure. Not persisted across restart; never reset by resetRequest. */
+  coldMissInputTokens: number;
+  /** Count of cache-miss turns (companion to coldMissInputTokens). */
+  coldMissTurns: number;
   updatedAt: string;
 }
 
@@ -212,6 +220,8 @@ function blank(): SessionThroughput {
     totalToolCalls: 0,
     totalToolFailures: 0,
     deferredDefsTokensAccrued: 0,
+    coldMissInputTokens: 0,
+    coldMissTurns: 0,
     updatedAt: now(),
   };
 }
@@ -236,6 +246,10 @@ export function recordUsage(
   const out = safeInt(tokens.outputTokens);
   const reasoning = safeInt(tokens.reasoningTokens);
   const fresh = Math.max(0, input - cache);
+  // A cache miss is a turn that read EXPLICITLY zero cache on a non-empty prompt.
+  // Gate on the raw field being a present finite number, not the safeInt-normalized
+  // `cache` (which turns absent/invalid telemetry into 0 and would mis-count a gap).
+  const cachePresent = typeof tokens.cacheReadTokens === 'number' && isFinite(tokens.cacheReadTokens);
   entry.requestIn += fresh;
   entry.requestCache += cache;
   entry.requestOut += out;
@@ -272,6 +286,13 @@ export function recordUsage(
   // correctly not counted this turn) — an accepted one-turn approximation.
   const deferred = deferredDefsProvider?.(sessionId);
   if (deferred) entry.deferredDefsTokensAccrued += deferred.deferredDefsTokens;
+  // Cache-miss slice: this turn read explicitly zero cache, so `fresh === input` was
+  // billed at the full input rate. Accrue the miss (spec-footer-cache-miss); a subset
+  // of totalIn since `fresh` was already added to it above.
+  if (input > 0 && cachePresent && cache === 0) {
+    entry.coldMissInputTokens += fresh;
+    entry.coldMissTurns += 1;
+  }
   entry.updatedAt = now();
 }
 

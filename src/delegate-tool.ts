@@ -9,38 +9,60 @@ import { getSessionMeta } from './storage.js';
 const DELEGATE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const DELEGATE_MAX_TOTAL_MS = 60 * 60 * 1000;
 
-/** Per-delegate response character cap. With up to 2 delegates, keeping each reply
- *  under this keeps the combined JSON tool result below the generic output-shaper
- *  threshold (SHAPE_THRESHOLD_BYTES = 8 KB). Above that the shaper truncates by
- *  head/tail LINES, which mangles the pretty-printed JSON into unparseable output —
- *  the caller then sees a broken result and gives up. */
-export const DELEGATE_RESPONSE_CHAR_CAP = 3000;
+/** Total byte budget for the combined delegate JSON result. Kept below the generic
+ *  output-shaper threshold (SHAPE_THRESHOLD_BYTES = 8 KB), with margin for the JSON
+ *  structure (keys, braces, session ids, pretty-print whitespace). Above the shaper
+ *  threshold the hook truncates by head/tail LINES, mangling the pretty-printed JSON
+ *  into unparseable output — so responses are byte-bounded to stay under it. */
+export const DELEGATE_TOTAL_BYTE_BUDGET = 7000;
 
-/** Bound a single delegate response so the combined tool output stays parseable (see
- *  DELEGATE_RESPONSE_CHAR_CAP). Oversized replies are cut with a clear marker pointing
- *  to the session's full history rather than silently truncated by the shaper. */
-export function boundDelegateResponse(text: string, sessionId8: string, cap = DELEGATE_RESPONSE_CHAR_CAP): string {
-  if (text.length <= cap) return text;
-  return text.slice(0, cap) + `\n\n[…response truncated to ${cap} chars; read the full reply in session ${sessionId8}'s history]`;
+/** UTF-8 byte length of a string AS IT WILL APPEAR escaped inside JSON (quotes,
+ *  backslashes, control chars, multibyte all accounted for). This is the size that
+ *  actually counts toward the shaper threshold — a plain char count does not, since
+ *  `"\n"`, `"\uXXXX"`, and multibyte chars all expand. */
+function jsonEscapedBytes(s: string): number {
+  return Buffer.byteLength(JSON.stringify(s), 'utf8');
+}
+
+/** Bound a single delegate response so its escaped JSON size fits `byteBudget`, keeping
+ *  the combined tool result parseable and under the shaper threshold (see
+ *  DELEGATE_TOTAL_BYTE_BUDGET). Truncates by BYTES (not chars) via binary search on the
+ *  escaped size, appending a marker that points to the session's full history. */
+export function boundDelegateResponse(text: string, sessionId8: string, byteBudget = DELEGATE_TOTAL_BYTE_BUDGET): string {
+  if (jsonEscapedBytes(text) <= byteBudget) return text;
+  const marker = `\n\n[…response truncated; read the full reply in session ${sessionId8}'s history]`;
+  const contentBudget = Math.max(0, byteBudget - jsonEscapedBytes(marker));
+  // Largest char-prefix whose escaped byte size fits contentBudget.
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (jsonEscapedBytes(text.slice(0, mid)) <= contentBudget) lo = mid;
+    else hi = mid - 1;
+  }
+  return text.slice(0, lo) + marker;
 }
 
 /** Classify a delegate target into an actionable error message, or null when it is OK
- *  to send. Distinguishes a session that truly does not exist from one that merely
- *  exists on disk but is INACTIVE (not loaded) — the latter cannot receive a delegated
- *  message until it is resumed, which this tool cannot do, so the caller must wake it
- *  first. The old code reported both as "not found", which left the agent stuck. */
+ *  to send. `loaded` MUST mirror the messages endpoint's own gate (getSessionCwd — the
+ *  session is in the runtime cache); that is exactly the condition under which a POST
+ *  will be accepted, so this never diverges from the endpoint. A session that exists on
+ *  disk but is not loaded (`loaded=false`, `existsOnDisk=true`) cannot receive a
+ *  delegated message until it is resumed — which this tool cannot do — so the caller
+ *  must wake it first. The old code reported both missing and not-loaded as "not found",
+ *  leaving the agent stuck. (Note: NOT isActive/activeSessions — a cached-but-not-active
+ *  session still accepts sends, so gating on isActive would falsely reject it.) */
 export function delegateTargetError(opts: {
   sessionId8: string;
-  active: boolean;
+  loaded: boolean;
   existsOnDisk: boolean;
   busy: boolean;
   name?: string;
 }): string | null {
   const label = opts.name ? ` ("${opts.name}")` : '';
-  if (!opts.active) {
+  if (!opts.loaded) {
     if (opts.existsOnDisk) {
-      return `Session ${opts.sessionId8}${label} exists but is INACTIVE (not loaded), so it cannot receive a delegated message. ` +
-        'Open/resume it first (in the UI, or ask the user to) and then retry — caco_session_delegate cannot wake an inactive session.';
+      return `Session ${opts.sessionId8}${label} exists but is not loaded, so it cannot receive a delegated message. ` +
+        'Open/resume it first (in the UI, or ask the user to) and then retry — caco_session_delegate cannot wake a session that is not loaded.';
     }
     return `Session ${opts.sessionId8} does not exist. Check the ID (with or without the caco-session: prefix), or create one with create_caco_session.`;
   }
@@ -96,7 +118,7 @@ Use to have a reviewer/research session check work or look something up. Don't d
         const meta = getSessionMeta(p.sessionId);
         const error = delegateTargetError({
           sessionId8: id8,
-          active: !!sessionManager.getSessionCwd(p.sessionId),
+          loaded: !!sessionManager.getSessionCwd(p.sessionId),
           existsOnDisk: !!meta,
           busy: sessionManager.isBusy(p.sessionId),
           name: meta?.name,
@@ -155,9 +177,10 @@ Use to have a reviewer/research session check work or look something up. Don't d
 
       await Promise.all(waitPromises);
 
+      const perResponseBudget = Math.floor(DELEGATE_TOTAL_BYTE_BUDGET / Math.max(1, delegates.length));
       const results = delegates.map(d => ({
         sessionId: d.sessionId,
-        response: boundDelegateResponse(d.result || '(no response)', d.sessionId.slice(0, 8)),
+        response: boundDelegateResponse(d.result || '(no response)', d.sessionId.slice(0, 8), perResponseBudget),
       }));
 
       return {

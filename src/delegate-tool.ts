@@ -9,6 +9,47 @@ import { getSessionMeta } from './storage.js';
 const DELEGATE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const DELEGATE_MAX_TOTAL_MS = 60 * 60 * 1000;
 
+/** Per-delegate response character cap. With up to 2 delegates, keeping each reply
+ *  under this keeps the combined JSON tool result below the generic output-shaper
+ *  threshold (SHAPE_THRESHOLD_BYTES = 8 KB). Above that the shaper truncates by
+ *  head/tail LINES, which mangles the pretty-printed JSON into unparseable output —
+ *  the caller then sees a broken result and gives up. */
+export const DELEGATE_RESPONSE_CHAR_CAP = 3000;
+
+/** Bound a single delegate response so the combined tool output stays parseable (see
+ *  DELEGATE_RESPONSE_CHAR_CAP). Oversized replies are cut with a clear marker pointing
+ *  to the session's full history rather than silently truncated by the shaper. */
+export function boundDelegateResponse(text: string, sessionId8: string, cap = DELEGATE_RESPONSE_CHAR_CAP): string {
+  if (text.length <= cap) return text;
+  return text.slice(0, cap) + `\n\n[…response truncated to ${cap} chars; read the full reply in session ${sessionId8}'s history]`;
+}
+
+/** Classify a delegate target into an actionable error message, or null when it is OK
+ *  to send. Distinguishes a session that truly does not exist from one that merely
+ *  exists on disk but is INACTIVE (not loaded) — the latter cannot receive a delegated
+ *  message until it is resumed, which this tool cannot do, so the caller must wake it
+ *  first. The old code reported both as "not found", which left the agent stuck. */
+export function delegateTargetError(opts: {
+  sessionId8: string;
+  active: boolean;
+  existsOnDisk: boolean;
+  busy: boolean;
+  name?: string;
+}): string | null {
+  const label = opts.name ? ` ("${opts.name}")` : '';
+  if (!opts.active) {
+    if (opts.existsOnDisk) {
+      return `Session ${opts.sessionId8}${label} exists but is INACTIVE (not loaded), so it cannot receive a delegated message. ` +
+        'Open/resume it first (in the UI, or ask the user to) and then retry — caco_session_delegate cannot wake an inactive session.';
+    }
+    return `Session ${opts.sessionId8} does not exist. Check the ID (with or without the caco-session: prefix), or create one with create_caco_session.`;
+  }
+  if (opts.busy) {
+    return `Session ${opts.sessionId8}${label} is busy processing another message. Wait and retry, or choose another session.`;
+  }
+  return null;
+}
+
 async function getLastAssistantMessage(sessionId: string): Promise<string> {
   try {
     const events = await sessionManager.getHistory(sessionId);
@@ -51,12 +92,17 @@ Use to have a reviewer/research session check work or look something up. Don't d
       }> = [];
 
       for (const p of prompts) {
-        if (!sessionManager.getSessionCwd(p.sessionId)) {
-          return { textResultForLlm: `Session ${p.sessionId.slice(0, 8)} not found.`, resultType: 'error' as const };
-        }
-        if (sessionManager.isBusy(p.sessionId)) {
-          const meta = getSessionMeta(p.sessionId);
-          return { textResultForLlm: `Session ${p.sessionId.slice(0, 8)} ("${meta?.name || 'unnamed'}") is busy. Wait or choose another session.`, resultType: 'error' as const };
+        const id8 = p.sessionId.slice(0, 8);
+        const meta = getSessionMeta(p.sessionId);
+        const error = delegateTargetError({
+          sessionId8: id8,
+          active: !!sessionManager.getSessionCwd(p.sessionId),
+          existsOnDisk: !!meta,
+          busy: sessionManager.isBusy(p.sessionId),
+          name: meta?.name,
+        });
+        if (error) {
+          return { textResultForLlm: error, resultType: 'error' as const };
         }
 
         delegates.push({ sessionId: p.sessionId, startedAt: Date.now(), done: false, result: null });
@@ -74,7 +120,7 @@ Use to have a reviewer/research session check work or look something up. Don't d
           if (!res.ok) {
             const err = await res.json().catch(() => ({ error: res.statusText }));
             d.done = true;
-            d.result = `(send failed: ${err.error})`;
+            d.result = `(send failed: HTTP ${res.status} — ${err.error || res.statusText})`;
           }
         } catch (e) {
           d.done = true;
@@ -101,7 +147,8 @@ Use to have a reviewer/research session check work or look something up. Don't d
             console.log(`[DELEGATE] Session ${d.sessionId.slice(0, 8)} gone`);
           } else {
             d.done = true;
-            d.result = '(delegate still running — check the session list)';
+            const idleMin = Math.round(DELEGATE_IDLE_TIMEOUT_MS / 60000);
+            d.result = `(delegate still running after ${idleMin}m idle timeout — it may finish later; check the session list / its history rather than re-delegating)`;
             console.log(`[DELEGATE] Session ${d.sessionId.slice(0, 8)} timed out`);
           }
         });
@@ -110,7 +157,7 @@ Use to have a reviewer/research session check work or look something up. Don't d
 
       const results = delegates.map(d => ({
         sessionId: d.sessionId,
-        response: d.result || '(no response)',
+        response: boundDelegateResponse(d.result || '(no response)', d.sessionId.slice(0, 8)),
       }));
 
       return {

@@ -584,6 +584,16 @@ router.get('/project-files', async (req: Request, res: Response) => {
 
 // --- Prompts API ---
 
+/** Ordered prompt-file search paths for a name: the workspace-local `.caco/prompts`
+ *  first, then the global `~/.caco/prompts`, so a local prompt overrides a global one
+ *  of the same name. Pure — the actual read tries each in order. */
+export function promptSearchPaths(name: string, cwd: string, home: string): string[] {
+  return [
+    join(cwd, '.caco', 'prompts', `${name}.md`),
+    join(home, '.caco', 'prompts', `${name}.md`),
+  ];
+}
+
 export async function scanPromptDir(dir: string): Promise<Map<string, { name: string; description: string; path: string }>> {
   const prompts = new Map<string, { name: string; description: string; path: string }>();
   let entries;
@@ -631,10 +641,7 @@ router.get('/prompts/:name', async (req: Request, res: Response) => {
   const { name } = req.params;
 
   try {
-    const localPath = join(programCwd, '.caco', 'prompts', `${name}.md`);
-    const globalPath = join(homedir(), '.caco', 'prompts', `${name}.md`);
-
-    for (const filePath of [localPath, globalPath]) {
+    for (const filePath of promptSearchPaths(name as string, programCwd, homedir())) {
       try {
         const content = await readFile(filePath, 'utf-8');
         return res.json({ name, content });

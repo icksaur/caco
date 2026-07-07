@@ -22,6 +22,23 @@ import { calculateNextRun, triggerSchedule } from '../schedule-manager.js';
 
 const router = Router();
 
+/** Pure validation for the PUT /schedule/:slug body. Returns an error message string
+ *  (the exact text the route returns as a 400), or null when the body is valid.
+ *  Combines the required-field shape checks with the min-interval rule
+ *  (validateScheduleInterval), so the whole PUT contract is one testable unit. */
+export function validateSchedulePutBody(body: {
+  prompt?: string;
+  schedule?: { type: 'cron' | 'interval'; expression?: string; intervalMinutes?: number };
+}): string | null {
+  if (!body.prompt) return 'prompt is required';
+  const schedule = body.schedule;
+  if (!schedule || (schedule.type === 'cron' && !schedule.expression) ||
+      (schedule.type === 'interval' && !schedule.intervalMinutes)) {
+    return 'schedule with type and expression/intervalMinutes is required';
+  }
+  return validateScheduleInterval(schedule);
+}
+
 /**
  * GET /api/schedule
  * List all schedules
@@ -111,21 +128,9 @@ router.put('/schedule/:slug', async (req: Request, res: Response) => {
     };
     
     // Validation
-    if (!prompt) {
-      res.status(400).json({ error: 'prompt is required' });
-      return;
-    }
-    
-    if (!schedule || (schedule.type === 'cron' && !schedule.expression) || 
-        (schedule.type === 'interval' && !schedule.intervalMinutes)) {
-      res.status(400).json({ error: 'schedule with type and expression/intervalMinutes is required' });
-      return;
-    }
-    
-    // Enforce minimum 1 hour interval
-    const intervalError = validateScheduleInterval(schedule);
-    if (intervalError) {
-      res.status(400).json({ error: intervalError });
+    const validationError = validateSchedulePutBody({ prompt, schedule });
+    if (validationError) {
+      res.status(400).json({ error: validationError });
       return;
     }
     
@@ -147,9 +152,9 @@ router.put('/schedule/:slug', async (req: Request, res: Response) => {
 
     const definition: ScheduleDefinition = {
       slug,
-      prompt,
+      prompt: prompt!,
       enabled: enabled !== false,
-      schedule,
+      schedule: schedule!,
       sessionConfig: {
         model: sessionConfig?.model,
         persistSession: sessionConfig?.persistSession !== false

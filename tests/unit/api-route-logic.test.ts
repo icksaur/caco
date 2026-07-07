@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { walkProjectFiles, scanPromptDir } from '../../src/routes/api.js';
+import { walkProjectFiles, scanPromptDir, promptSearchPaths } from '../../src/routes/api.js';
 
 // Sort both sides with a fixed comparator so membership is asserted exactly without
 // depending on the impl's localeCompare ordering (locale punctuation-sort is fragile).
@@ -100,5 +100,19 @@ describe('scanPromptDir', () => {
   it('returns an empty map for a missing directory', async () => {
     const map = await scanPromptDir(join(tmpdir(), 'prompts-missing-xyz-123'));
     expect(map.size).toBe(0);
+  });
+});
+
+describe('promptSearchPaths', () => {
+  it('returns local-then-global .md paths for name resolution (local overrides global)', () => {
+    expect(promptSearchPaths('review', '/work/proj', '/home/u')).toEqual([
+      join('/work/proj', '.caco', 'prompts', 'review.md'),
+      join('/home/u', '.caco', 'prompts', 'review.md'),
+    ]);
+  });
+
+  it('appends the .md extension exactly once and keeps the name verbatim', () => {
+    const [local] = promptSearchPaths('my-prompt', '/w', '/h');
+    expect(local).toBe(join('/w', '.caco', 'prompts', 'my-prompt.md'));
   });
 });

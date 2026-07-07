@@ -21,21 +21,22 @@ export default defineConfig({
       exclude: ['**/types.ts', '**/main.ts'],
       reporter: ['text', 'html'],
       // Ratcheting floors. Global floor set at the 2026-07-06 baseline minus a ~1.5pt
-      // churn margin (tightened after adding fuzzy-score / fetch-timeout / hostname-hash
-      // tests raised the floor to ~40.9% stmts). Per-directory locks keep the well-tested
-      // core (security/index/observe/workflow) from rotting down to the global floor.
-      // Raise these as coverage improves; do NOT lower without cause. Weak areas
-      // (src/routes ~11%, public/ts ~30%) are only protected by the global floor
-      // today — add dir locks for them once their coverage climbs.
+      // churn margin (raised as fuzzy-score / fetch-timeout / hostname-hash and the
+      // route-logic tests lifted coverage). Per-directory locks keep well-tested dirs
+      // from rotting down to the global floor. Raise these as coverage improves; do NOT
+      // lower without cause. src/routes is the weakest backend area (~15%): its lock is
+      // a low floor that only protects the route-logic tests added in the coverage push
+      // (spec-routes-coverage-push) — raise it as more handler logic gets extracted.
       thresholds: {
-        statements: 39,
-        branches: 34,
-        functions: 40,
-        lines: 40,
+        statements: 40,
+        branches: 35,
+        functions: 41,
+        lines: 41,
         'src/security/**': { statements: 90, branches: 80, functions: 95, lines: 90 },
         'src/index/**': { statements: 83, branches: 70, functions: 92, lines: 87 },
         'src/observe/**': { statements: 80, branches: 66, functions: 88, lines: 84 },
         'src/workflow/**': { statements: 80, branches: 72, functions: 80, lines: 86 },
+        'src/routes/**': { statements: 13, branches: 9, functions: 13, lines: 13 },
       },
     },
     

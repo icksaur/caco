@@ -501,7 +501,7 @@ const FILE_LIST_TTL_MS = 30_000;
 const FILE_LIST_CAP = 10_000;
 const fileListCache = new Map<string, { files: string[]; timestamp: number }>();
 
-async function walkProjectFiles(rootDir: string, showDotfiles = false, respectGitignore = true): Promise<string[]> {
+export async function walkProjectFiles(rootDir: string, showDotfiles = false, respectGitignore = true): Promise<string[]> {
   const cacheKey = `${rootDir}\0${showDotfiles ? '1' : '0'}\0${respectGitignore ? '1' : '0'}`;
   const cached = fileListCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < FILE_LIST_TTL_MS) {
@@ -584,7 +584,7 @@ router.get('/project-files', async (req: Request, res: Response) => {
 
 // --- Prompts API ---
 
-async function scanPromptDir(dir: string): Promise<Map<string, { name: string; description: string; path: string }>> {
+export async function scanPromptDir(dir: string): Promise<Map<string, { name: string; description: string; path: string }>> {
   const prompts = new Map<string, { name: string; description: string; path: string }>();
   let entries;
   try {

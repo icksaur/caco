@@ -187,6 +187,8 @@ function isCardPersist(v: unknown): v is CardPersist {
   return true;
 }
 
+export { isCardPersist };
+
 /** Called from server shutdown / session detach so we don't lose the
  *  last pending PUT. */
 export function flushFileEditsCardList(sessionId: string): void {

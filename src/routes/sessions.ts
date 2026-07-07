@@ -40,6 +40,8 @@ function buildSkillPrompt(name: string, input: string): string {
   return `Use the skill tool to invoke the "${name}" skill, then follow the skill's instructions to help with:${tail}`;
 }
 
+export { buildSkillPrompt };
+
 const router = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -66,6 +68,8 @@ function allowLocalhostCors(req: Request, res: Response): boolean {
   }
   return false;
 }
+
+export { readGitBranch, allowLocalhostCors };
 
 router.options('/sessions/:sessionId/export', (req, res) => { allowLocalhostCors(req, res); });
 router.options('/sessions/import', (req, res) => { allowLocalhostCors(req, res); });

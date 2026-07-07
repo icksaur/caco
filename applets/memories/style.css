@@ -1,0 +1,103 @@
+* { box-sizing: border-box; }
+
+.mem-container {
+  font-family: var(--font-sans);
+  max-width: 900px;
+  margin: 0 auto;
+  padding: var(--space-lg);
+  color: var(--color-text);
+}
+
+.mem-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.mem-title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.mem-count {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.mem-refresh {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+}
+
+.mem-refresh:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.mem-status {
+  text-align: center;
+  padding: var(--space-xl);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.mem-error { color: var(--color-error); }
+
+.mem-list { display: flex; flex-direction: column; }
+
+.mem-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.mem-row:hover { background: var(--color-bg-hover); }
+
+.mem-body { flex: 1; min-width: 0; }
+
+.mem-key {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.mem-value {
+  margin-top: var(--space-xs);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mem-delete {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-danger);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+}
+
+.mem-delete:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-danger-hover);
+  border-color: var(--color-danger);
+}

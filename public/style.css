@@ -32,6 +32,10 @@
   --color-context-dim: color-mix(in srgb, var(--text), var(--base) 50%);
   --color-border: var(--border);
   --color-link: var(--cyan);
+  /* Subtle row/control hover lift. Referenced by the reference surfaces (folder
+   *  view, response options) and applets; defined here so those hovers actually
+   *  render (previously undefined → silent no-op). */
+  --color-bg-hover: color-mix(in srgb, var(--text), var(--base) 92%);
 
   /* ---- DERIVED: Accent ---- */
   --color-accent: var(--accent);

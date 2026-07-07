@@ -15,3 +15,4 @@ export { router as surfaceRoutes } from './surface.js';
 export { router as watchRoutes } from './watch.js';
 export { router as fileEditsRoutes } from './file-edits.js';
 export { router as draftRoutes } from './draft.js';
+export { router as memoryRoutes } from './memory.js';

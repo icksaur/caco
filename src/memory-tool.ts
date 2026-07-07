@@ -6,12 +6,12 @@ import { homedir } from 'os';
 
 const MEMORY_FILE = join(homedir(), '.caco', 'memory.json');
 const MEMORY_BACKUP = join(homedir(), '.caco', 'memory.json.bak');
-const MAX_ENTRIES = 50;
-const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+export const MAX_ENTRIES = 50;
+export const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 type MemoryStore = Record<string, string>;
 
-function readMemory(): MemoryStore {
+export function readMemory(): MemoryStore {
   try {
     if (!existsSync(MEMORY_FILE)) return {};
     return JSON.parse(readFileSync(MEMORY_FILE, 'utf-8'));
@@ -20,7 +20,7 @@ function readMemory(): MemoryStore {
   }
 }
 
-function writeMemory(store: MemoryStore): void {
+export function writeMemory(store: MemoryStore): void {
   const dir = join(homedir(), '.caco');
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const tempFile = MEMORY_FILE + '.tmp';

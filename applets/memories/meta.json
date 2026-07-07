@@ -1,0 +1,15 @@
+{
+  "slug": "memories",
+  "name": "Memories",
+  "description": "View and remove persistent cross-session memory entries",
+  "params": {},
+  "createdAt": "2026-07-06T00:00:00.000Z",
+  "updatedAt": "2026-07-06T00:00:00.000Z",
+  "agentUsage": {
+    "purpose": "User views and prunes persistent memory entries"
+  },
+  "stateSchema": {
+    "get": { "count": "number" },
+    "set": null
+  }
+}

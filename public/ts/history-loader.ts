@@ -18,6 +18,7 @@ import { scrollToBottom } from './ui-utils.js';
 import { sessionTracker } from './session-state-tracker.js';
 import { loadModels } from './model-selector.js';
 import { getCachedTranscript, putCachedTranscript, versionsEqual, type EventVersion } from './transcript-cache.js';
+import { markSessionObserved } from './session-observed.js';
 
 const TIMEOUT_MS = 30000;
 
@@ -147,6 +148,14 @@ class HistoryLoader {
     // loadingHistory set, so handleEvent renders identically to a real replay
     // (rebuilds footer context + usage, no per-event scroll).
     replayEvents(events);
+    // The slow path marks the session observed via the historyComplete WS
+    // message (websocket.ts); the fast path issues no requestHistory and its
+    // replayed session.idle is suppressed by the loadingHistory guard, so it
+    // must clear the unobserved dot itself — otherwise switching back to a
+    // cached session leaves its dot stranded.
+    if (sessionId === getActiveSessionId()) {
+      void markSessionObserved(sessionId);
+    }
     this.settle(sessionId, { isBusy: false });
   }
 

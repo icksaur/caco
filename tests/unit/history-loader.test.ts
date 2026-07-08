@@ -19,6 +19,10 @@ vi.mock('../../public/ts/model-selector.js', () => ({
   loadModels: vi.fn(),
 }));
 
+vi.mock('../../public/ts/session-observed.js', () => ({
+  markSessionObserved: vi.fn(),
+}));
+
 vi.mock('../../public/ts/session-state-tracker.js', () => ({
   sessionTracker: { setBusy: vi.fn() },
 }));
@@ -57,6 +61,7 @@ import { requestHistory, subscribeToSession, replayEvents, advanceHistoryGenerat
 import { sessionTracker } from '../../public/ts/session-state-tracker.js';
 import { regions } from '../../public/ts/dom-regions.js';
 import { putCachedTranscript, getCachedTranscript, clearTranscriptCache } from '../../public/ts/transcript-cache.js';
+import { markSessionObserved } from '../../public/ts/session-observed.js';
 import type { SessionEvent } from '../../public/ts/types.js';
 
 function ev(id: string): SessionEvent {
@@ -228,6 +233,20 @@ describe('HistoryLoader', () => {
       expect(setLoadingHistory).toHaveBeenCalledWith(true);
       expect(setLoadingHistory).toHaveBeenCalledWith(false);
       expect(setFormEnabled).toHaveBeenCalledWith(true);
+    });
+
+    it('marks the session observed on the fast path (clears the unobserved dot, matching the slow path)', async () => {
+      putCachedTranscript('session-1', { events: [ev('a')], version: V, connectionId: 1 });
+      await loader.load('session-1', V, false);
+      expect(markSessionObserved).toHaveBeenCalledWith('session-1');
+    });
+
+    it('does not observe a cached background load for a non-active session', async () => {
+      vi.mocked(getActiveSessionId).mockReturnValue('session-B');
+      putCachedTranscript('session-A', { events: [ev('a')], version: V, connectionId: 1 });
+      await loader.load('session-A', V, false);
+      expect(replayEvents).toHaveBeenCalled();
+      expect(markSessionObserved).not.toHaveBeenCalled();
     });
 
     it('re-streams when the events.jsonl version differs', async () => {

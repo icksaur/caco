@@ -28,6 +28,8 @@ import { retryWithFreshClient } from '../dispatch-retry.js';
 import { applyDispatchEventEffects } from '../dispatch-events.js';
 import { resetRequest, snapshot, markRequestComplete } from '../session-throughput.js';
 import { appendRequestMetrics } from '../request-metrics-log.js';
+import { buildUsageRecord, emitUsageRecord, resolveUsageRates, type UsageRates } from '../usage-metrics.js';
+import { modelCostSummary } from '../model-billing.js';
 
 const router = Router();
 
@@ -234,6 +236,16 @@ export class DispatchHttpError extends Error {
   }
 }
 
+/** Snapshot the pricing context for a request at dispatch start: the session's
+ *  model slug + its resolved per-MTOK rates + context window. Frozen here so a
+ *  concurrent model change can never re-price the in-flight request's usage
+ *  record (spec-usage-metrics). Unknown/unpriced model → null rates. */
+function capturePriceContext(sessionId: string): { model: string | null; rates: UsageRates | null; contextWindow: number | null } {
+  const model = getSessionMeta(sessionId)?.model ?? null;
+  const priced = sessionManager.getModels().map(m => ({ id: m.id, ...modelCostSummary(m) }));
+  return resolveUsageRates(priced, model);
+}
+
 /**
  * Dispatch a message to a session and forward SDK events.
  * 
@@ -271,6 +283,13 @@ export async function dispatchMessage(
   resetRequest(sessionId);
   onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> } as unknown as SessionEvent);
 
+  // Capture the pricing context at dispatch START — the model that actually
+  // produces this request's tokens. A model change mid-request is rejected by
+  // the busy guard on PATCH /sessions/:id, so this stays valid to completion;
+  // freezing it here means the durable usage record can never be mispriced by a
+  // later swap (spec-usage-metrics).
+  const priceCtx = capturePriceContext(sessionId);
+
   // Guard against double cleanup (completeDispatch vs outer catch)
   let dispatchCompleted = false;
   let sendStarted = false;
@@ -293,6 +312,20 @@ export async function dispatchMessage(
     const metrics = markRequestComplete(sessionId);
     if (metrics && metrics.requestTurns > 0) {
       appendRequestMetrics(sessionId, metrics);
+      // Durable usage record — one per completed request, priced by the
+      // dispatch-start model. Best-effort (emitUsageRecord swallows sink errors).
+      emitUsageRecord(buildUsageRecord({
+        sessionId,
+        model: priceCtx.model,
+        tokens: {
+          inputTokens: metrics.requestIn,
+          cachedTokens: metrics.requestCache,
+          outputTokens: metrics.requestOut,
+          turns: metrics.requestTurns,
+        },
+        rates: priceCtx.rates,
+        contextWindow: priceCtx.contextWindow,
+      }));
     }
     onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> } as unknown as SessionEvent);
     console.log(`[DISPATCH:${rid}] Completed: ${reason}`);

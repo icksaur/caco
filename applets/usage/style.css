@@ -1,0 +1,105 @@
+* { box-sizing: border-box; }
+
+.usage-container {
+  font-family: var(--font-sans);
+  max-width: 900px;
+  margin: 0 auto;
+  padding: var(--space-lg);
+  color: var(--color-text);
+}
+
+.usage-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.usage-title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.usage-summary {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+}
+
+.usage-refresh {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+}
+
+.usage-refresh:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.usage-status {
+  text-align: center;
+  padding: var(--space-xl);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.usage-error { color: var(--color-error); }
+
+.usage-chart-caption {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.usage-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 220px;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+}
+
+.usage-bar-col {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.usage-bar {
+  width: 100%;
+  min-height: 1px;
+  background: var(--color-accent);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.usage-bar:hover {
+  background: var(--color-accent-hover);
+}
+
+/* An all-unpriced hour: full-height hatch in a muted token so it reads as
+   "activity, cost unknown" rather than zero spend. */
+.usage-bar-unpriced {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--color-text-muted),
+    var(--color-text-muted) 2px,
+    transparent 2px,
+    transparent 4px
+  );
+}

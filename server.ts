@@ -31,7 +31,7 @@ import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
 import { createToolRevealTool } from './src/tool-reveal-tool.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
-import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes, draftRoutes, memoryRoutes } from './src/routes/index.js';
+import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes, draftRoutes, memoryRoutes, usageRoutes } from './src/routes/index.js';
 import { initWatchRoutes } from './src/routes/watch.js';
 import { flushAll as flushAllFileEditsCardLists } from './src/file-edits-store.js';
 import { initFileEditsRoutes, flushFileEditsCardList } from './src/routes/file-edits.js';
@@ -44,6 +44,8 @@ import { startRotationSweeper } from './src/session-history-rotation.js';
 import { requireSameOrigin } from './src/security/same-origin.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
+import { registerUsageSink } from './src/usage-metrics.js';
+import { appendUsageRecord } from './src/usage-store.js';
 import { buildSystemMessage } from './src/prompts.js';
 import { loadServerExtensions } from './src/extension-runtime.js';
 import { onAllIdle } from './src/restart-manager.js';
@@ -191,6 +193,7 @@ app.use('/api', watchRoutes);
 app.use('/api', fileEditsRoutes);
 app.use('/api', draftRoutes);
 app.use('/api', memoryRoutes);
+app.use('/api', usageRoutes);
 
 // Server Lifecycle
 
@@ -306,6 +309,11 @@ async function start(): Promise<void> {
   });
   
   startScheduleManager();
+
+  // Durable usage metrics: persist one record per completed request to the
+  // date-partitioned store (spec-usage-metrics). The record is built + emitted
+  // in completeDispatch; this registers the durable sink.
+  registerUsageSink({ emit: appendUsageRecord });
   
   // Background history-rotation sweeper (no-op unless CACO_ROTATE_AUTO=1): one
   // delayed boot sweep + every 4h, rotating only cold/unviewed/observed large

@@ -1,0 +1,15 @@
+{
+  "slug": "usage",
+  "name": "Usage",
+  "description": "System-wide usage metrics — hourly credit consumption for the past week",
+  "params": {},
+  "createdAt": "2026-07-07T00:00:00.000Z",
+  "updatedAt": "2026-07-07T00:00:00.000Z",
+  "agentUsage": {
+    "purpose": "User views durable usage metrics (hourly credit spend over time)"
+  },
+  "stateSchema": {
+    "get": { "days": "number" },
+    "set": null
+  }
+}

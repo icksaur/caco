@@ -672,6 +672,13 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
 
   // Handle model change via SDK
   if (model) {
+    // Reject a model change while a dispatch is in flight: the in-flight
+    // request's tokens were produced by the current model, and a mid-request
+    // swap would misprice the durable usage record (spec-usage-metrics).
+    if (sessionManager.isBusy(sessionId)) {
+      res.status(409).json({ error: 'Session busy — try again when idle', code: 'SESSION_BUSY' });
+      return;
+    }
     try {
       await sessionManager.setSessionModel(sessionId, model);
     } catch (e) {

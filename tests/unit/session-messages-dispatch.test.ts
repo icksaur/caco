@@ -22,6 +22,7 @@ const sm = vi.hoisted(() => ({
   getSession: vi.fn((): unknown => null),
   resume: vi.fn(async () => {}),
   pollQuota: vi.fn(async () => {}),
+  getModels: vi.fn((): unknown[] => []),
 }));
 
 const broadcastGlobalEvent = vi.hoisted(() => vi.fn());
@@ -38,6 +39,7 @@ vi.mock('../../src/routes/websocket.js', () => ({
 vi.mock('../../src/session-throughput.js', () => ({
   resetRequest: vi.fn(),
   snapshot: vi.fn(() => ({})),
+  markRequestComplete: vi.fn(() => null),
 }));
 
 import { dispatchMessage } from '../../src/routes/session-messages.js';

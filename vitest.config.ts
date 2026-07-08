@@ -36,7 +36,7 @@ export default defineConfig({
         'src/index/**': { statements: 83, branches: 70, functions: 92, lines: 87 },
         'src/observe/**': { statements: 80, branches: 66, functions: 88, lines: 84 },
         'src/workflow/**': { statements: 80, branches: 72, functions: 80, lines: 86 },
-        'src/routes/**': { statements: 14, branches: 10, functions: 14, lines: 14 },
+        'src/routes/**': { statements: 18, branches: 14, functions: 18, lines: 18 },
       },
     },
     

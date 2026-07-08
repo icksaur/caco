@@ -21,6 +21,9 @@ the document of record; it absorbs the former `tool-diet-spec`, `tool-diet-audit
 ## Design
 
 Three subsystems, all in-memory per session (nothing persisted across restart).
+Durable persistence of per-request usage (a record at each request's completion,
+queryable from disk, with a `usage` applet + HTTP API) is a separate layer
+specified in `spec-usage-metrics.md`.
 
 **1. Workflow savings (round-trip lever).** A workflow run reports four signals:
 `observedBytes` (facade output that would have entered context), `injectedBytes`

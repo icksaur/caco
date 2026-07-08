@@ -390,6 +390,8 @@ export async function dispatchMessage(
             sessionId,
             messageOptions,
             handleEvent,
+            abortOriginal: () => sessionManager.abortStaleGeneration(sessionId),
+            isCompleted: () => dispatchCompleted,
             dropStaleSession: (id) => sessionManager.dropStaleSession(id),
             ensureClientHealthy: () => sessionManager.ensureClientHealthy(),
             resume: () => sessionManager.resume(sessionId, sessionState.getSessionConfig()).then(() => {}),
@@ -400,7 +402,9 @@ export async function dispatchMessage(
           }).then((newUnsubscribe) => {
             if (newUnsubscribe) {
               unsubscribe = newUnsubscribe;
-            } else {
+            } else if (!dispatchCompleted) {
+              // A null result means we did NOT resend. If the dispatch already
+              // completed, the original finished on its own — nothing to report.
               console.error(`[DISPATCH:${rid}] Retry failed`);
               onEvent({ type: 'session.error', data: { message: 'Session not responding after retry', restorePrompt: true } });
               void completeDispatch('retry-failed');
@@ -485,6 +489,8 @@ export async function dispatchMessage(
             sessionId,
             messageOptions,
             handleEvent,
+            abortOriginal: () => sessionManager.abortStaleGeneration(sessionId),
+            isCompleted: () => dispatchCompleted,
             dropStaleSession: (id) => sessionManager.dropStaleSession(id),
             ensureClientHealthy: () => sessionManager.ensureClientHealthy(),
             resume: () => sessionManager.resume(sessionId, sessionState.getSessionConfig()).then(() => {}),
@@ -495,7 +501,9 @@ export async function dispatchMessage(
           }).then((newUnsubscribe) => {
             if (newUnsubscribe) {
               unsubscribe = newUnsubscribe;
-            } else {
+            } else if (!dispatchCompleted) {
+              // A null result means we did NOT resend. If the dispatch already
+              // completed, the original finished on its own — nothing to report.
               console.error(`[DISPATCH:${rid}] Retry failed`);
               onEvent({ type: 'session.error', data: { message: 'Session not responding after retry', restorePrompt: true } });
               void completeDispatch('retry-failed');

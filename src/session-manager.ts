@@ -1125,6 +1125,36 @@ export class SessionManager {
   }
 
   /**
+   * Best-effort abort of the ORIGINAL in-flight generation before a dispatch
+   * retry drops+resumes+resends it. A cold session that merely stalled (no first
+   * event within the watchdog window) may still be running server-side and
+   * writing to events.jsonl; without this abort the original and the retry both
+   * persist, doubling the transcript on every later replay. Bounded by a timeout.
+   *
+   * Returns true when it is SAFE to resend — the original was stopped or was
+   * already absent (nothing writing). Returns false when a live session was
+   * present but we could NOT confirm it stopped (abort threw/timed out): the
+   * caller must then NOT resend, because a second writer would contaminate
+   * events.jsonl. Leaving the single original writer in place is correct.
+   */
+  async abortStaleGeneration(sessionId: string): Promise<boolean> {
+    const active = this.activeSessions.get(sessionId);
+    if (!active) return true; // absent — nothing is writing, safe to resend
+    const ABORT_TIMEOUT_MS = 5_000;
+    try {
+      await Promise.race([
+        active.session.abort(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('abort timeout')), ABORT_TIMEOUT_MS)),
+      ]);
+      console.log(`[RETRY] Aborted stale generation for ${sessionId.slice(0, 8)} before retry`);
+      return true;
+    } catch (e) {
+      console.warn(`[RETRY] abort of stale generation for ${sessionId.slice(0, 8)} failed: ${e instanceof Error ? e.message : e}`);
+      return false; // could not confirm the original stopped — unsafe to resend
+    }
+  }
+
+  /**
    * Stop an active session (releases lock)
    */
   async stop(sessionId: string): Promise<void> {

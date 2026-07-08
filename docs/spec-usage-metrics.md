@@ -1,0 +1,92 @@
+# spec-usage-metrics
+
+Durable, system-wide usage metrics: one record per completed request, persisted to disk and aggregatable for an applet, an HTTP API, and future automation. Extends the in-memory budget subsystem (`spec-budget.md`) with the persistence + query layer it lacks (spec-budget §Design: "all in-memory per session (nothing persisted across restart)").
+
+## Goals
+
+At the end of every request, durably record what it cost — tokens (fresh/cached/output), credits per class, model, and context window — keyed by session and timestamp. Aggregate that history performantly from disk (bounded I/O per query), expose it over HTTP, and surface it in a `usage` applet whose first view is hourly credit consumption for the past week. The data model supports arbitrary later pivots (per-model, per-session, per-hour spend) without a schema change.
+
+## Design
+
+**Collection point (single finalizer).** `completeDispatch` in `src/routes/session-messages.ts` is the request-completion owner for every route-observed exit: normal `session.idle`/`session.error` (session-messages.ts:414-421), watchdog timeout, no-session, and retry-failed all route through it. A **normal** cancel also flows here — `cancelSession` waits for the SDK's `session.idle`/`error`, which the dispatch subscription catches (session-manager.ts:1750-1755). Two bypasses exist and are handled deliberately (review finding): (a) **cross-provider model switch** tears down dispatch directly (session-manager.ts:1525) — closed by Plan 4's busy guard, so a switch can no longer happen mid-dispatch and there is nothing to finalize; (b) **forced-clear of an SDK-unresponsive session** (`cancelSession` → `endDispatch`, session-manager.ts:1732-1735,1757-1760) — **explicitly excluded** from durable usage: the session is wedged and its request counters are unreliable, and this already matches the existing bench-log behavior (which also only logs from `completeDispatch`). The usage record is built + emitted inside `completeDispatch`, alongside the existing bench-log append, under the same `requestTurns > 0` guard (so pre-send aborts emit nothing).
+
+**Pricing context captured at dispatch START, not completion.** `getSessionMeta(sessionId).model` read only at completion is unsafe: model changes were allowed while busy (sessions.ts:674-682 had no busy guard, unlike the context-budget change at :686-688) and the fast path rewrites meta immediately (session-manager.ts:1507-1512), so a request's tokens could be priced under a model swapped in mid-flight. Fix (two parts): (1) **add a busy guard** to the model-change route — reject with 409 while a dispatch is in flight, matching the context-budget guard; (2) **capture `{ model, rates, contextWindow }` into the dispatch closure at dispatch start** (right after the `getSessionMeta` read at session-messages.ts:337, before `sendStream`) and price the record from that frozen context. The record's model/cost therefore describe the model that actually produced the tokens, independent of any concurrent change.
+
+**Emit abstraction (one record, many consumers).** A `UsageRecord` is built once in `completeDispatch` and handed to consumers:
+- `src/usage-metrics.ts` owns `buildUsageRecord(...)` (pure) + a global sink registry: `registerUsageSink(sink: UsageSink)` and `emitUsageRecord(record)` which fans out best-effort (a throwing sink never disturbs dispatch — same contract as `request-metrics-log`).
+- Concrete sinks registered at server boot (`server.ts`): **`usageStoreSink`** (durable, this spec) and room for future sinks (rollups, external export) — the "any other consumers" extension point.
+- The **footer** is the second consumer of the same record but is NOT a global sink: its broadcast target is the request-scoped `onEvent` callback, so it stays inline in `completeDispatch` (the existing throughput broadcast, now fed the same figures). Documented, not forced into the global registry.
+- The existing **bench log** (`request-metrics-log.ts` → `requests.jsonl`, consumed by `scripts/bench-report.mjs`) is left untouched; the usage store is additive and richer. Not folded into a sink to avoid churning the bench row shape.
+
+**`UsageRecord` shape** (the queryable columns; superset of the user's list):
+`ts` (ISO), `sessionId`, `model` (slug | null when Auto/unknown — the model **captured at dispatch start**), `contextWindow` (number | null), `inputTokens` (fresh = requestIn), `cachedTokens` (requestCache), `outputTokens` (requestOut), `inputTokenCost`, `cachedTokenCost`, `outputTokenCost`, `requestCredits` (sum of the three, `null` when unpriced), `turns` (requestTurns). Costs are **credits, computed at finalize time** from the request tokens × the **captured** per-Mtok rates, then frozen into the record — rates drift, so cost is captured, never recomputed on read. When rates are unknown (Auto / unpriced), all four cost fields are `null` and only token counts persist (aggregation treats this distinctly — see below).
+
+**Pure builder.** `buildUsageRecord({ sessionId, model, snapshot, rates, contextWindow, ts })` → `UsageRecord`. No I/O, no lookups — snapshot + rates in, record out. Cost math mirrors the footer's class pricing (fresh×input + cached×cache + output×output, per-Mtok / 1e6). `rates: null` → all cost fields null. Server-side rate resolution reuses the footer's segment-boundary **variant fallback** (the `resolveModelRates` logic, so `-1m` / `-internal` variant ids still price); an oracle pins the arithmetic AND the variant/null/missing-rate behavior against footer golden numbers.
+
+**Durable store (bounded-partition aggregation).** `src/usage-store.ts`. Append-only JSONL **partitioned by UTC day**: `~/.caco/metrics/usage/YYYY-MM-DD.jsonl`. Rationale for partitioning over a single flat log: a time-window query (e.g. "past week") reads only the ≤ (window-days + 1) day-files intersecting the window instead of scanning all history — a **bounded partition count** (not literally bounded bytes; a single day-file is unbounded, but a day of local requests is small). Chosen over SQLite because the repo is deliberately zero-dep / file-based (schedule, memory, session-meta, bench log are all plain JSON/JSONL); a native DB dep is unjustified at this scale.
+- `appendUsageRecord(record)` — `mkdir -p`, then **synchronous** `appendFileSync` of one `JSON.stringify(record) + '\n'` in append mode to the record's UTC-day file (exactly the atomic single-line-append the bench log uses — so concurrent appends from parallel sessions to the same day-file never interleave within a line). Best-effort; single-process assumption (no cross-process lock — documented, not built).
+- `readUsageRecords(fromTs, toTs)` — read only the day-files whose date intersects `[from, to]`, parse (skip corrupt/partial lines like the bench log), filter to the exact window. Returns records ascending by `ts`. A small in-process cache keyed by `{path, mtime, size}` avoids re-parsing unchanged (completed, past-day) files on frequent applet polls.
+- `aggregateHourly(fromTs, toTs)` — bucket `readUsageRecords` output into UTC-hour buckets; returns a **dense** array (every hour in the window present). Each bucket is `{ hour, credits: number | null, pricedRequests, unpricedRequests, inputTokens, cachedTokens, outputTokens }`: `credits` sums only priced requests; a bucket with requests but none priced has `credits: null` (distinct from a truly empty bucket's `credits: 0, pricedRequests: 0`). Null-safe summation — an unpriced record never coerces into a 0 that hides real usage. Pure over the read rows.
+
+**HTTP API** (`src/routes/usage.ts`, mounted `/api` via `routes/index.ts`):
+- `GET /api/usage/hourly?days=N` (default 7, clamped) → `{ from, to, buckets: [{ hour, credits, pricedRequests, unpricedRequests, inputTokens, cachedTokens, outputTokens }] }` (`credits` may be `null` for an all-unpriced bucket). The applet's first view.
+- `GET /api/usage/records?from=&to=&limit=` → raw records for investigation/automation; `limit` clamped, window validated. Exported testable helpers: `parseHourlyQuery` (days→[from,to] + clamp) and `parseRecordsQuery` (window/limit validation → 400 message | params).
+
+**Applet (`applets/usage/`).** Bundled 4-file applet (`meta.json`/`content.html`/`script.js`/`style.css`), opened at `/?applet=usage`, styled to `spec-style.md` tokens only (semantic `--color-*`/`--space-*`/`--radius-*`/`--font-*`; the `jobs`/`memories` applets are the clean references). First view: a bar chart of hourly credits for the past 7 days from `GET /api/usage/hourly`, rendered with pure CSS/inline-SVG bars (no chart dep — none exists in the repo). Header + refresh; loading/empty/error states. An **all-unpriced bucket** (`credits: null` but nonzero tokens) is rendered distinctly from an empty hour (e.g. a hatched/"unpriced" marker) so Auto usage never reads as zero spend. Other metrics (per-model, per-session pivots) are stubbed as "pending" — the API already returns the raw columns for them.
+
+## Invariants
+
+- **Best-effort telemetry** (invariant): emission and disk writes never throw into the dispatch path — every sink and store call is guarded (matches `request-metrics-log`). A metrics failure must never fail a request.
+- **Single durable collection point** (invariant): all persisted usage flows through `emitUsageRecord` inside `completeDispatch` (the sole route finalizer). No other call site appends usage records — a second emitter would double-count. Forced-clear of a wedged session is a documented exclusion, not a second path.
+- **Priced by the model that ran** (invariant): a record's model/rates are captured at dispatch start and frozen; a model change mid-request (guarded to reject while busy) never re-prices already-produced tokens.
+- **Cost frozen at completion** (invariant): `requestCredits` and the per-class costs are computed once, in `completeDispatch`, from the captured dispatch-start rates and stored. Readers never re-price (rates drift; historical spend must stay stable).
+- **Pure builder + pure aggregation** (invariant): `buildUsageRecord` and `aggregateHourly` do no I/O, so both are ref-impl testable without a session or disk.
+- **Bounded partition count** (invariant): a windowed read touches only the ≤ (window-days + 1) day-partition files intersecting the window, never the whole history.
+
+## Considerations
+
+- **Cost-math parity with the footer.** The footer prices client-side (`public/ts/saved-pricing.ts`, `ModelInfo`→rates); the store prices server-side (`src/model-billing.ts`, `SDKModelInfo`→rates). The two runtimes are separate builds (`tsconfig.frontend.json` scopes `public/ts/**` only; `tsconfig.json` excludes `public`), so importing `model-billing` into browser code is not clean — the pure *arithmetic* is duplicated, not shared. Mitigation: the parity oracle asserts identical costs given identical resolved rates AND covers the divergence-prone cases — segment-boundary **variant fallback**, `null` rates, and **missing cache/output rate** — not just the happy path. (Extracting one isomorphic node-free pricing module is an option deliberately not taken now to avoid build-graph churn.)
+- **Model resolution at dispatch start.** Capture the model from the resolved dispatch config (the model the SDK session is actually running), not `getSessionMeta` at completion; `sessionManager.getModels().find(id)` → `modelCostSummary(m)` gives rates + `contextWindow`, with the variant fallback for `-1m`/`-internal` ids; unresolved → null costs (token-only record), never a crash.
+- **UTC partitioning vs local display.** Records store UTC `ts`; day-files are UTC dates; `aggregateHourly` buckets in UTC. The applet renders bucket labels in the browser's local time. Keeping storage UTC avoids DST/timezone drift in the partition key (the scheduler's missing-TZ handling is a cautionary precedent).
+- **Request vs turn granularity.** One record per request (send→idle), not per turn — matches the in-memory request-scoped counters (`requestIn/Cache/Out`, reset by `resetRequest`). Steering (`sendStream`) adds to the ongoing request without reset, so a steered request emits exactly one combined record at final idle. `completeDispatch` reads the request-scoped figures (via `markRequestComplete` / `snapshot`) before the next send's `resetRequest` clears them.
+- **Concurrency & corruption.** Appends are synchronous single-line `appendFileSync` in append mode (atomic per line on POSIX), so parallel sessions writing the same day-file don't interleave within a line; a partially-written line (crash mid-append) is skipped on read, not fatal. Single-process assumption — no cross-process lock (documented, not built).
+- **Retention.** Not implemented now; day-partitioning makes a future prune trivial (delete files older than N days). A configurable prune (default off / conservative) is a noted non-blocking follow-up.
+
+## Risks and Mitigations
+
+- Teardown path bypasses completion (forced-clear / model switch) → model switch is blocked mid-dispatch by the busy guard; forced-clear of a wedged session is a documented exclusion (unreliable counters); tests: normal cancel emits one record, pre-send abort emits none.
+- Mid-request model swap misprices → busy guard rejects model change during dispatch + rates captured at start; test that a swap-while-busy is 409 and the record prices under the original model.
+- Double-counting if a second emit site appears → single-collection-point invariant + a test asserting `completeDispatch` is the only caller.
+- Cost/behavior drift vs footer → parity oracle covering arithmetic + variant fallback + null + missing-rate cases.
+- Unpriced usage read as zero spend → aggregation returns `credits: null` + `priced/unpricedRequests`; applet renders unpriced distinctly.
+- Unbounded scan as history grows → day-partitioned reads bound the file count to the window; mtime/size cache avoids re-parsing unchanged past-day files on frequent polls.
+- Applet mis-theming → tokens-only CSS, greppable for hex/undefined-vars (spec-style oracle); visual signoff under ≥1 dark + 1 light theme.
+
+## Acceptance
+
+- Observable: after several sends, `GET /api/usage/hourly?days=7` returns non-empty hourly buckets whose summed credits match the footer's spend for those requests; the `usage` applet renders a week of hourly credit bars. Visual signoff required (applet is user-visible).
+- Budgets: a windowed query reads ≤ (window-days + 1) partition files; emission adds no measurable dispatch latency (best-effort, post-completion).
+- Gates: typecheck, lint:strict, knip, full tests (`npm test`, coverage thresholds enforced), build:client.
+- Oracles:
+  - `buildUsageRecord` — ref-impl: tokens × rates → per-class costs + `requestCredits`; golden inputs reproduce footer numbers; **variant-id fallback** resolves rates; unknown rates AND missing cache/output rate → null costs.
+  - `aggregateHourly` — hand case: synthetic records across known UTC hours → expected dense bucket sums; a record on a day-partition boundary lands in the right bucket; an all-unpriced bucket → `credits: null` with nonzero tokens + `unpricedRequests` (distinct from an empty hour).
+  - `usage-store` round-trip — append N records spanning ≥2 UTC days → `readUsageRecords(window)` returns exactly the in-window rows ascending; corrupt line skipped; only intersecting day-files read; concurrent single-line appends never interleave.
+  - completion wiring (integration) — normal idle emits exactly one record; steering contributes to the same one record; pre-send abort emits none; a model change **while busy is rejected (409)** and a completed request prices under its dispatch-start model.
+  - `parseHourlyQuery` / `parseRecordsQuery` — bad/absent `days`, inverted or malformed window, over-limit → clamped value or exact 400 message.
+  - `/api/usage/hourly` route — response shape (`buckets` incl. `credits|null`, `priced/unpricedRequests`), not only the parser helper.
+
+## Plan
+
+| # | Step | Files | Oracle | Invariants |
+|---|------|-------|--------|------------|
+| 1 | Pure `buildUsageRecord` + `UsageRecord` type + sink registry (`registerUsageSink`/`emitUsageRecord`, best-effort). Server rate resolution w/ variant fallback | `src/usage-metrics.ts` | test: tokens×rates→costs vs footer golden; variant fallback; null + missing-rate→null costs | best-effort, pure builder |
+| 2 | Date-partitioned durable store: sync single-line append + windowed read (+mtime cache) + `aggregateHourly` (null-cost buckets) | `src/usage-store.ts` | test: round-trip across ≥2 UTC days, corrupt-skip, dense buckets, all-unpriced bucket null, bounded file count, concurrent append no-interleave | bounded partition count, cost frozen |
+| 3 | Build+emit `UsageRecord` inside `completeDispatch` (turns>0 guard, alongside bench-log); capture `{model,rates,contextWindow}` at dispatch start; register `usageStoreSink` at boot; footer broadcast fed same record | `src/routes/session-messages.ts`, `server.ts` | test: idle=1 record, steer=same record, abort=none; single caller | single collection point, priced-by-model-that-ran |
+| 4 | Add busy guard (409) to the model-change route | `src/routes/sessions.ts` | test: model change while busy → 409, matching context-budget guard | priced-by-model-that-ran |
+| 5 | HTTP API `GET /api/usage/hourly`, `GET /api/usage/records` + query parsers | `src/routes/usage.ts`, `src/routes/index.ts` | test: parsers clamp + 400; `/hourly` response shape | - |
+| 6 | `usage` applet: hourly-credit bar chart (past week), CSS/SVG bars, spec-style tokens, unpriced-bucket marker, loading/empty/error | `applets/usage/{meta.json,content.html,script.js,style.css}` | grep tokens-only (no hex/undefined var); visual signoff ≥2 themes | tokens-only |
+| 7 | Cross-link from `spec-budget.md` (persistence lives here) | `docs/spec-budget.md` | by-construction | - |
+
+## Rationale
+
+`spec-budget.md` built a rich in-memory per-session model (`session-throughput.ts`) and an ephemeral bench log (`requests.jsonl`) but explicitly persists nothing across restart. This spec adds the durable, queryable layer so spend is analyzable over time and across sessions. The date-partitioned JSONL store mirrors the repo's existing file-store pattern (schedule/memory/session-meta) rather than introducing a database, and the sink abstraction keeps the collection point single while letting future consumers (rollups, export, alerting) attach without touching dispatch.

@@ -41,8 +41,10 @@ A viewer sees a session's transcript render correctly in two situations: (1) **l
 
 ## Risks and Mitigations
 
-- **Live/replay double-render** (the reported bug): live frames are unfenced (no `generation`), so a history replay overlapping a live dispatch double-renders the in-flight message. Mitigation is the subject of §Plan (a fence extension). Until then, users on cold/reconnecting sessions see doubled reasoning/response text.
-- Over-fencing could **drop live events** during a load window (truncate a message tail) — any fix must preserve every live event, not merely suppress it.
+- **Doubled deltas** (the reported bug): the dominant cause is **dual-writer contamination of `events.jsonl`** — a cold-session retry does not abort the original generation (`dropStaleSession` skips `disconnect`, `src/session-manager.ts:1114-1125`), so two generations persist and every render doubles (§Plan A). Secondary: live frames are unfenced against a same-epoch replay (§Plan B). Mitigation: abort-before-retry (primary) + a live stream epoch + a reconnect-overlap guard (§Plan).
+- **Wasted tokens**: even with the render fixed, an un-aborted original generation burns tokens to completion — the abort-before-retry prong stops this at the source, not just the display.
+- Over-fencing could **drop legitimate live events**; the epoch discards only *superseded* dispatches, and the reconnect guard must preserve the current dispatch's message tail.
+- The abort must be applied to **both** retry triggers (watchdog `no-first-event` and async `isSessionLost`) or contamination persists on one path.
 - Fast-path/observe and other `isLoadingHistory`-gated behaviors must not regress when the fence changes.
 
 ## Acceptance
@@ -53,12 +55,27 @@ A viewer sees a session's transcript render correctly in two situations: (1) **l
 
 ## Plan
 
-Overview spec (this document) captures existing behavior. The concrete fix for the live/replay double-render is specced and implemented as a follow-up change layered here:
+Overview spec (§Design/§Invariants above) captures existing behavior. The concrete fix for the doubled-delta bug is specced here.
 
-| # | Step | Files | Oracle | Status |
-|---|------|-------|--------|--------|
-| 1 | Document the streaming + replay pipeline (this spec) | `docs/spec-replay.md` | by-construction | done |
-| 2 | Fix live/replay double-render (fence live frames against an overlapping current replay, without dropping events) | `public/ts/websocket.ts`, `public/ts/message-streaming.ts`, `public/ts/history-loader.ts` (TBD by fix spec) | test: reconnect during an active stream → no duplicated `*_delta` text | pending |
+**Root cause — dual-writer disk contamination (primary), with two render-level gaps.** The symptom is doubled text in reasoning/assistant divs on **cold** sessions. The dominant cause is at the persistence layer, not just rendering:
+
+- **(A) Dual-writer contamination of `events.jsonl` (primary).** A cold/slow session whose first SDK event exceeds the 45s watchdog triggers `retryWithFreshClient` (`src/routes/session-messages.ts` watchdog `no-first-event`; also the async `isSessionLost` path). The retry `unsubscribe()`s and `dropStaleSession()`s — but `dropStaleSession` **deliberately does not `session.disconnect()`/abort** the original (`src/session-manager.ts:1114-1125`). If the original prompt was already accepted by the SDK (merely slow, not lost), that original generation **keeps running and writing to `events.jsonl`** while the retry resumes and re-sends a **second** generation. Both persist to the same file, so the transcript itself is doubled — and **every later replay/load renders it doubled** (persistent, not transient). The `unsubscribe()` before the retry means the original's *live* frames don't reach the client, so this is a **disk** double, not a concurrent-live-paint double — which is why it survives reconnects and re-opens.
+- **(B) Live/replay overlap (secondary, same-epoch).** Live broadcast frames carry no `generation`, so `isStaleReplay` never fences them (`public/ts/websocket.ts:396-398`). A reconnect `reloadHistory` (`public/ts/message-streaming.ts:189-195`) can overlap a same-epoch live stream + replay. Lower-frequency than (A) but a real render-level hole.
+
+**Fix mechanism — abort-before-retry, plus a live stream epoch.** Three prongs, in priority order:
+1. **Abort the original generation before retrying (the primary fix).** Before `dropStaleSession` + resume + resend, the retry must abort/disconnect the original SDK session so it stops writing to `events.jsonl` — exactly one generation persists, killing the disk double at the source. Applied **symmetrically** to both retry triggers (watchdog `no-first-event` and async `isSessionLost`).
+2. **Per-dispatch live stream epoch (render fence).** A monotonic token bumped on dispatch start and on retry re-send; live broadcast frames are stamped with it and the client discards superseded-epoch frames (the live analogue of `isStaleReplay`). Defends against any concurrent-live double that abort-before-retry doesn't cover.
+3. **Same-epoch reconnect-overlap guard.** During a history load, gate/suppress same-epoch live frames from double-painting the replayed region, without dropping the current dispatch's ongoing frames (§Considerations: preserve the message tail). Closes gap (B).
+
+The rejected alternative — epoch fence *alone* — does not fix (A): the two generations are already on disk, so a stale-epoch discard of live frames leaves the contaminated file to re-double on the next load.
+
+| # | Step | Files | Oracle |
+|---|------|-------|--------|
+| 1 | Confirm dual-writer contamination: log generation/epoch on every persisted event; force a slow first event (cold sim) and assert `events.jsonl` gains a SECOND generation across a retry | `src/routes/session-messages.ts`, `src/dispatch-retry.ts` | repro: file shows two generations for one send |
+| 2 | Abort/disconnect the original SDK session before drop+resume+resend, in the shared retry helper (both triggers) | `src/dispatch-retry.ts`, `src/session-manager.ts` | test: retry calls abort on the stale session before resend; only one generation persists |
+| 3 | Add a per-session live stream epoch; bump on dispatch start + retry; stamp live frames; client drops superseded epochs | `src/routes/session-messages.ts`, `src/routes/websocket.ts`, `public/ts/websocket.ts` | test: stale-epoch live frame dropped, current renders |
+| 4 | Same-epoch reconnect-overlap guard for the load window (no dropped tail) | `public/ts/websocket.ts`, `public/ts/message-streaming.ts`, `public/ts/history-loader.ts` | test: reconnect during an active stream → no duplicated `*_delta` text |
+| 5 | Regression oracle: retry mid-stream AND reconnect-during-stream both yield a single copy of each delta on disk and in the DOM | `tests/unit/*` (dispatch + websocket harnesses) | test RED before, GREEN after |
 
 ## Rationale
 

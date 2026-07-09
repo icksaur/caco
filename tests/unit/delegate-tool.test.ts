@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   boundDelegateResponse,
   delegateTargetError,
+  buildDelegateSendBody,
   DELEGATE_TOTAL_BYTE_BUDGET,
 } from '../../src/delegate-tool.js';
 
@@ -54,6 +55,24 @@ describe('delegateTargetError', () => {
 
   it('allows a normal (unbonded) loaded idle session', () => {
     expect(delegateTargetError({ ...base, orchestratedBy: undefined })).toBeNull();
+  });
+});
+
+describe('buildDelegateSendBody', () => {
+  it('always emits source:agent + fromSession + correlationId together (route contract)', () => {
+    const body = buildDelegateSendBody('do the thing', 'caller-1234', 'corr-5678');
+    expect(body).toEqual({
+      prompt: 'do the thing',
+      source: 'agent',
+      fromSession: 'caller-1234',
+      correlationId: 'corr-5678',
+    });
+  });
+
+  it('never yields fromSession without correlationId (the 400 that broke delegate)', () => {
+    const body = buildDelegateSendBody('m', 'caller', 'corr');
+    expect(body.fromSession).toBeTruthy();
+    expect(body.correlationId).toBeTruthy();
   });
 });
 

@@ -1,5 +1,6 @@
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
+import { randomUUID } from 'crypto';
 import { SERVER_URL } from './config.js';
 import type { SessionIdRef } from './types.js';
 import { sessionManager } from './session-manager.js';
@@ -80,6 +81,22 @@ export function delegateTargetError(opts: {
   return null;
 }
 
+/** The POST body for a delegate send. Delegating uses the agent-message path
+ *  (`source:'agent'` + `fromSession`) so the prompt persists an `[agent:<id>]`
+ *  prefix and renders in the agent color. INVARIANT (route contract,
+ *  session-messages.ts `fromSession && !correlationId → 400`): whenever
+ *  `fromSession` is set a `correlationId` MUST accompany it — so this builder
+ *  takes a REQUIRED correlationId and always emits both, making the 400 that
+ *  broke an earlier version unrepresentable. Also enables the runaway-guard /
+ *  correlation-chain bookkeeping the route keys on `correlationId`. */
+export function buildDelegateSendBody(
+  message: string,
+  fromSession: string,
+  correlationId: string,
+): { prompt: string; source: 'agent'; fromSession: string; correlationId: string } {
+  return { prompt: message, source: 'agent', fromSession, correlationId };
+}
+
 export function createDelegateTool(sessionRef: SessionIdRef) {
   const cacoSessionDelegate = defineTool('caco_session_delegate', {
     description: `Delegate work to 1-2 existing Caco sessions and wait for their responses, returned to you. This blocks until they reply — the preferred tool for cross-session collaboration. Sessions must already exist (caco-session:UUID); verify with get_session_state if unsure. Delegates persist after replying and see the message as coming from your session.
@@ -131,12 +148,17 @@ Use to have a reviewer/research session check work or look something up. Don't d
           const res = await fetch(`${SERVER_URL}/api/sessions/${d.sessionId}/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            // source:'agent' + fromSession persists an [agent:<callerId>] content
-            // prefix, so the delegated prompt renders in the agent color (not the
-            // user color) — matching herd child prompts (spec-session-orchestration
-            // §Child-prompt rendering / Plan A3). Both fields are required: the
-            // prefix is applied only when source==='agent' AND fromSession is set.
-            body: JSON.stringify({ prompt: prompts[i].message, source: 'agent', fromSession: sessionRef.id }),
+            // Agent-message path (source:'agent' + fromSession) → the prompt
+            // persists an [agent:<callerId>] prefix and renders agent-colored,
+            // matching herd child prompts (spec-session-orchestration A3). The
+            // route REQUIRES a correlationId whenever fromSession is set, so we
+            // thread the caller's live correlation (enabling the runaway guard),
+            // falling back to a fresh id if the caller has none.
+            body: JSON.stringify(buildDelegateSendBody(
+              prompts[i].message,
+              sessionRef.id,
+              dispatchState.getCorrelationId(sessionRef.id) ?? randomUUID(),
+            )),
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({ error: res.statusText }));

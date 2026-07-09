@@ -20,6 +20,12 @@ export interface SessionMeta {
   name: string;
   kind?: SessionKind;
   parentSessionId?: string;
+  /** Herd bond (spec-session-orchestration): the session id of this session's
+   *  parent/orchestrator. Set by caco_herd create/acquire, cleared by disown or
+   *  self-heal. The ONLY durable herd state — a session is a "parent" iff some
+   *  session claims it here (role is derived, never stored on the parent).
+   *  Distinct from parentSessionId, which tracks fork/agent lineage. */
+  orchestratedBy?: string;
   lastObservedAt?: string;
   lastIdleAt?: string;
   lastUsedAt?: string;

@@ -162,6 +162,20 @@ describe('session metadata (ensureSessionMeta, getSessionMeta, setSessionMeta)',
     expect(getSessionMeta(TEST_SESSION_ID)?.name).toBe('');
   });
 
+  it('persists an orchestratedBy herd bond that survives a fresh read (restart-equivalent)', () => {
+    // spec-session-orchestration A1: the herd bond is the only durable herd state;
+    // it must round-trip through disk so a parent is re-derivable after restart.
+    setSessionMeta(TEST_SESSION_ID, { name: 'child', orchestratedBy: 'parent-abcdef' });
+    expect(getSessionMeta(TEST_SESSION_ID)?.orchestratedBy).toBe('parent-abcdef');
+  });
+
+  it('clears orchestratedBy on disown (round-trips to undefined)', () => {
+    setSessionMeta(TEST_SESSION_ID, { name: 'child', orchestratedBy: 'parent-abcdef' });
+    const meta = getSessionMeta(TEST_SESSION_ID) ?? { name: '' };
+    setSessionMeta(TEST_SESSION_ID, { ...meta, orchestratedBy: undefined });
+    expect(getSessionMeta(TEST_SESSION_ID)?.orchestratedBy).toBeUndefined();
+  });
+
   it('persists a cwd override that survives a fresh read (restart-equivalent)', () => {
     // Regression: /session-cwd changes were lost on restart because the cwd
     // override was never persisted to meta. _discoverSessions now prefers

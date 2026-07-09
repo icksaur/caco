@@ -37,6 +37,24 @@ describe('delegateTargetError', () => {
     const err = delegateTargetError({ ...base, loaded: false, existsOnDisk: true });
     expect(err).not.toContain('("');
   });
+
+  it('rejects a herd child (orchestratedBy set) with actionable guidance', () => {
+    const err = delegateTargetError({ ...base, orchestratedBy: 'parent-9999', name: 'worker' });
+    expect(err).toMatch(/herd child/i);
+    expect(err).toContain('parent-9');
+    expect(err).toMatch(/disown/i);
+    expect(err).toContain('"worker"');
+  });
+
+  it('reports the child bond BEFORE busy (a busy child is still a child)', () => {
+    const err = delegateTargetError({ ...base, orchestratedBy: 'parent-9999', busy: true });
+    expect(err).toMatch(/herd child/i);
+    expect(err).not.toMatch(/busy processing/i);
+  });
+
+  it('allows a normal (unbonded) loaded idle session', () => {
+    expect(delegateTargetError({ ...base, orchestratedBy: undefined })).toBeNull();
+  });
 });
 
 describe('boundDelegateResponse (byte-aware)', () => {

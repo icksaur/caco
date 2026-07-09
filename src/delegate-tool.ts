@@ -5,6 +5,7 @@ import type { SessionIdRef } from './types.js';
 import { sessionManager } from './session-manager.js';
 import { dispatchState } from './dispatch-state.js';
 import { getSessionMeta } from './storage.js';
+import { getLastAssistantMessage } from './session-history.js';
 
 const DELEGATE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const DELEGATE_MAX_TOTAL_MS = 60 * 60 * 1000;
@@ -57,6 +58,10 @@ export function delegateTargetError(opts: {
   existsOnDisk: boolean;
   busy: boolean;
   name?: string;
+  /** The target's herd bond (spec-session-orchestration). A session that is a
+   *  herd child is owned by its parent's drain loop; a blocking third-party
+   *  delegate would fight it, so delegating to a child is rejected. */
+  orchestratedBy?: string;
 }): string | null {
   const label = opts.name ? ` ("${opts.name}")` : '';
   if (!opts.loaded) {
@@ -66,25 +71,13 @@ export function delegateTargetError(opts: {
     }
     return `Session ${opts.sessionId8} does not exist. Check the ID (with or without the caco-session: prefix), or create one with create_caco_session.`;
   }
+  if (opts.orchestratedBy) {
+    return `Session ${opts.sessionId8}${label} is a herd child (orchestrated by ${opts.orchestratedBy.slice(0, 8)}), so it cannot be delegated to — its parent supervises it. Disown it from the herd first, or choose another session.`;
+  }
   if (opts.busy) {
     return `Session ${opts.sessionId8}${label} is busy processing another message. Wait and retry, or choose another session.`;
   }
   return null;
-}
-
-async function getLastAssistantMessage(sessionId: string): Promise<string> {
-  try {
-    const events = await sessionManager.getHistory(sessionId);
-    for (let i = events.length - 1; i >= 0; i--) {
-      if (events[i].type === 'assistant.message') {
-        const content = events[i].data?.content;
-        if (typeof content === 'string') return content;
-      }
-    }
-    return '(no assistant response found)';
-  } catch (e) {
-    return `(error reading history: ${e instanceof Error ? e.message : e})`;
-  }
 }
 
 export function createDelegateTool(sessionRef: SessionIdRef) {
@@ -122,6 +115,7 @@ Use to have a reviewer/research session check work or look something up. Don't d
           existsOnDisk: !!meta,
           busy: sessionManager.isBusy(p.sessionId),
           name: meta?.name,
+          orchestratedBy: meta?.orchestratedBy,
         });
         if (error) {
           return { textResultForLlm: error, resultType: 'error' as const };
@@ -137,7 +131,12 @@ Use to have a reviewer/research session check work or look something up. Don't d
           const res = await fetch(`${SERVER_URL}/api/sessions/${d.sessionId}/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: prompts[i].message }),
+            // source:'agent' + fromSession persists an [agent:<callerId>] content
+            // prefix, so the delegated prompt renders in the agent color (not the
+            // user color) — matching herd child prompts (spec-session-orchestration
+            // §Child-prompt rendering / Plan A3). Both fields are required: the
+            // prefix is applied only when source==='agent' AND fromSession is set.
+            body: JSON.stringify({ prompt: prompts[i].message, source: 'agent', fromSession: sessionRef.id }),
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({ error: res.statusText }));

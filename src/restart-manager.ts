@@ -38,12 +38,25 @@ let idleListenerInstalled = false;
 let exitHandler: (() => void) | null = null;
 let spawnHandler: (() => void) | null = null;
 
+// Injected predicate (spec-idle-suppression-central): whether ANY session is about
+// to auto-continue. requestRestart()/checkAndRestart() run an IMMEDIATE check that
+// bypasses dispatchState's idle emit, so the central idle suppressor can't protect
+// them; this gate defers the restart while a reveal-continuation is pending. Null
+// until wired (treated as "none pending").
+let anyPendingAutoContinue: (() => boolean) | null = null;
+
+/** Wire the pending-auto-continue predicate (once, at startup). */
+export function setAnyPendingProvider(fn: () => boolean): void {
+  anyPendingAutoContinue = fn;
+}
+
 /** Reset state (for testing only). */
 export function _resetForTest(): void {
   restartRequested = false;
   onAllIdleCallback = null;
   exitHandler = null;
   spawnHandler = null;
+  anyPendingAutoContinue = null;
   if (idleListenerInstalled) {
     dispatchState.removeAllListeners('idle');
     idleListenerInstalled = false;
@@ -92,6 +105,15 @@ function checkAndRestart(): void {
   const active = dispatchState.getActiveCount();
   if (active > 0) {
     log(`Waiting for ${active} active dispatches`);
+    return;
+  }
+  // Defer while a reveal-continuation is pending: getActiveCount() can be 0 in the
+  // window between a reveal-dispatch's end() and its continuation's start(), so
+  // without this gate the immediate check would restart mid-continuation
+  // (spec-idle-suppression-central). The continuation's own end() re-fires 'idle',
+  // re-running this check.
+  if (anyPendingAutoContinue?.()) {
+    log('Waiting for pending auto-continue before restart');
     return;
   }
 

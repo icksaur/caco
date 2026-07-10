@@ -5,7 +5,8 @@ import {
   isRestartRequested,
   onAllIdle,
   _resetForTest,
-  _setTestHandlers
+  _setTestHandlers,
+  setAnyPendingProvider
 } from '../../src/restart-manager.js';
 import { dispatchState } from '../../src/dispatch-state.js';
 
@@ -133,6 +134,44 @@ describe('restart-manager', () => {
       });
 
       expect(() => requestRestart()).not.toThrow();
+      expect(spawned).toBe(true);
+    });
+  });
+
+  describe('pending auto-continue gate (spec-idle-suppression-central)', () => {
+    it('defers the immediate restart check while a reveal-continuation is pending', () => {
+      let spawned = false;
+      _setTestHandlers({ onSpawn: () => { spawned = true; }, onExit: () => {} });
+      // getActiveCount()===0 but a continuation is pending — must NOT restart.
+      const pending = true;
+      setAnyPendingProvider(() => pending);
+
+      requestRestart();
+
+      expect(spawned).toBe(false);
+      expect(isRestartRequested()).toBe(true);
+    });
+
+    it('restarts once the pending continuation clears and a later idle re-fires', () => {
+      let spawned = false;
+      _setTestHandlers({ onSpawn: () => { spawned = true; }, onExit: () => {} });
+      let pending = true;
+      setAnyPendingProvider(() => pending);
+
+      // Reveal dispatch running, restart requested mid-flight.
+      start('s1');
+      requestRestart();
+      expect(spawned).toBe(false);
+
+      // Reveal-dispatch end() emit is suppressed by the central suppressor in prod,
+      // so drive the interleaving directly: dispatch ends (count→0) while pending.
+      end('s1');
+      expect(spawned).toBe(false); // gated on anyPending
+
+      // Continuation reaches its real idle: pending clears, then idle re-fires.
+      pending = false;
+      dispatchState.signalIdle('s1');
+
       expect(spawned).toBe(true);
     });
   });

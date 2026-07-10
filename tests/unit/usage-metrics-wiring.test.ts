@@ -34,13 +34,14 @@ const sm = vi.hoisted(() => ({
   sendStream: vi.fn(async () => {}),
   getCacoToolCatalog: vi.fn(() => [] as { name: string }[]),
   getModels: vi.fn(() => [{ id: 'claude-opus-4.6' }] as unknown[]),
-  // Auto-continuation hook runs on idle; no reveal in these tests ⇒ empty pending
-  // so triggerAutoContinue short-circuits before touching anything else.
+  // Idle authority runs on idle; no reveal in these tests ⇒ empty pending +
+  // hasPendingAutoContinue false ⇒ real-idle path with no continuation.
   getPendingTools: vi.fn(() => [] as string[]),
+  hasPendingAutoContinue: vi.fn(() => false),
   resetAutoContinue: vi.fn(),
 }));
 
-vi.mock('../../src/session-manager.js', () => ({ sessionManager: sm }));
+vi.mock('../../src/session-manager.js', () => ({ sessionManager: sm, setAutoContinuePrefProvider: vi.fn() }));
 vi.mock('../../src/session-state.js', () => ({ sessionState: { getSessionConfig: vi.fn(() => ({})) } }));
 vi.mock('../../src/routes/websocket.js', () => ({
   broadcastGlobalEvent: vi.fn(),

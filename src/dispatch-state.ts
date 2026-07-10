@@ -31,12 +31,32 @@ export interface WaitForActiveOptions {
 export class DispatchState extends EventEmitter {
   private dispatches = new Map<string, ActiveDispatch>();
 
+  // Injected idle suppressor (spec-idle-suppression-central): returns true when a
+  // session is about to auto-continue (a caco_enable_tools reveal-idle), so this
+  // idle must NOT be signalled to dispatch-emit consumers (waitForActive,
+  // waitForIdle, restart-manager). Injected — dispatch-state imports no
+  // SessionManager (layering). The single dispatch-emit-side consumption of the
+  // reveal-continuation predicate.
+  private idleSuppressor: ((sessionId: string) => boolean) | null = null;
+
   constructor() {
     super();
     // Each waitForActive adds an 'activity' + 'idle' listener; many concurrent
     // delegate waits would trip the default 10-listener warning. Unbounded is
     // safe here — listeners are always removed on resolution.
     this.setMaxListeners(0);
+  }
+
+  /** Wire the idle-suppression predicate (once, at startup). */
+  setIdleSuppressor(fn: (sessionId: string) => boolean): void {
+    this.idleSuppressor = fn;
+  }
+
+  /** True when the session is truly idle for completion purposes: no active
+   *  dispatch AND not about to auto-continue. The single internal definition every
+   *  wait path resolves on. */
+  private isEffectivelyIdle(sessionId: string): boolean {
+    return !this.isBusy(sessionId) && !this.idleSuppressor?.(sessionId);
   }
 
   start(sessionId: string, correlationId: string): void {
@@ -51,6 +71,18 @@ export class DispatchState extends EventEmitter {
 
   end(sessionId: string): void {
     this.dispatches.delete(sessionId);
+    // Suppress the idle signal when a continuation is imminent: the edge-triggered
+    // consumers (waitForActive.onIdle, restart-manager) must not see this idle. A
+    // real idle arrives later — from the continuation's own end(), or from
+    // signalIdle() if the continuation fails to start (spec-idle-suppression-central).
+    if (!this.idleSuppressor?.(sessionId)) this.emit('idle', sessionId);
+  }
+
+  /** Force-emit a real idle for a session (spec-idle-suppression-central): the
+   *  replacement emit when a continuation was expected (end() suppressed) but
+   *  failed to start, so no continuation end() will ever fire. Only the idle
+   *  authority calls this, on the willFire-but-not-started fallthrough. */
+  signalIdle(sessionId: string): void {
     this.emit('idle', sessionId);
   }
 
@@ -81,7 +113,9 @@ export class DispatchState extends EventEmitter {
 
   waitForIdle(sessionId: string, timeoutMs: number): Promise<'idle' | 'timeout'> {
     return new Promise((resolve) => {
-      if (!this.isBusy(sessionId)) { resolve('idle'); return; }
+      // Effectively-idle gate (spec-idle-suppression-central): a reveal-idle
+      // (pending continuation) is not a real idle — keep waiting.
+      if (this.isEffectivelyIdle(sessionId)) { resolve('idle'); return; }
 
       let resolved = false;
       const cleanup = () => {
@@ -94,13 +128,13 @@ export class DispatchState extends EventEmitter {
       const timer = setTimeout(() => { cleanup(); resolve('timeout'); }, timeoutMs);
 
       const onIdle = (id: string) => {
-        if (id !== sessionId) return;
+        if (id !== sessionId || !this.isEffectivelyIdle(sessionId)) return;
         cleanup();
         resolve('idle');
       };
 
       this.on('idle', onIdle);
-      if (!this.isBusy(sessionId)) { cleanup(); resolve('idle'); }
+      if (this.isEffectivelyIdle(sessionId)) { cleanup(); resolve('idle'); }
     });
   }
 
@@ -116,7 +150,9 @@ export class DispatchState extends EventEmitter {
   waitForActive(sessionId: string, opts: WaitForActiveOptions): Promise<'idle' | 'timeout' | 'gone'> {
     return new Promise((resolve) => {
       if (opts.isGone?.()) { resolve('gone'); return; }
-      if (!this.isBusy(sessionId)) { resolve('idle'); return; }
+      // Entry fast-path: resolve only when effectively idle — not busy AND no
+      // pending continuation (spec-idle-suppression-central).
+      if (this.isEffectivelyIdle(sessionId)) { resolve('idle'); return; }
 
       let settled = false;
       const finish = (outcome: 'idle' | 'timeout' | 'gone') => {
@@ -146,11 +182,14 @@ export class DispatchState extends EventEmitter {
       const onActivity = (e: { sessionId: string; eventType: string }) => {
         if (e.sessionId === sessionId) watchdog.notifyEvent(e.eventType);
       };
-      const onIdle = (id: string) => { if (id === sessionId) finish('idle'); };
+      // Listener: an idle for this session resolves only when effectively idle;
+      // a suppressed reveal-idle keeps the wait armed until the real idle.
+      const onIdle = (id: string) => { if (id === sessionId && this.isEffectivelyIdle(sessionId)) finish('idle'); };
 
       this.on('activity', onActivity);
       this.on('idle', onIdle);
-      if (!this.isBusy(sessionId)) finish('idle');
+      // Post-arm re-check: same effectively-idle gate as the entry fast-path.
+      if (this.isEffectivelyIdle(sessionId)) finish('idle');
     });
   }
 }

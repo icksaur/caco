@@ -14,6 +14,7 @@ import { join } from 'path';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { sessionManager } from '../session-manager.js';
+import { setAutoContinuePrefProvider } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { setAppletUserState, setAppletNavigation, type NavigationContext } from '../applet-state.js';
 import { parseImageDataUrl } from '../image-utils.js';
@@ -33,28 +34,31 @@ import { modelCostSummary } from '../model-billing.js';
 import { maybeAutoContinue, AUTOCONTINUE_IDENTIFIER, AUTO_CONTINUE_CAP } from '../auto-continue-runtime.js';
 import { isAutoContinueEnabled } from '../preferences.js';
 import { onSessionIdle } from '../herd-runtime.js';
+import { handleSessionIdle } from '../idle-authority.js';
 
 const router = Router();
 
+// Wire the auto-continue preference into SessionManager's hasPendingAutoContinue
+// predicate (spec-idle-authority) — injection so SessionManager needs no
+// session-state/preferences import. One registration at module load.
+setAutoContinuePrefProvider(() => isAutoContinueEnabled(sessionState.preferences));
+
 /**
- * Fire an auto-continuation for a session that just went idle after revealing
- * tools (spec-enable-tools-autocontinue). Builds the real effect deps around
- * SessionManager + dispatchMessage and delegates the decision/serialization to
- * `maybeAutoContinue`. The continuation is a `[system:autocontinue]` message,
- * dispatched with `needsObservation:false` so it never marks the session
- * unobserved.
+ * Drive the auto-continue runtime for a session (spec-enable-tools-autocontinue):
+ * fires a continuation for revealed tools, or at cap emits the terminal cap
+ * message. Builds the effect deps around SessionManager + dispatchMessage. Called
+ * by the idle authority only when a pending reveal exists. Resolves `true` iff a
+ * continuation dispatch actually started.
  */
-function triggerAutoContinue(sessionId: string): void {
-  // Cheap guard: if nothing was revealed this dispatch there is no continuation to
-  // make — return before building deps. Keeps the idle hook inert (and free) for
-  // the overwhelmingly common no-reveal dispatch.
-  if (sessionManager.getPendingTools(sessionId).length === 0) return;
-  void maybeAutoContinue(sessionId, {
+function runAutoContinue(sessionId: string): Promise<boolean> {
+  return maybeAutoContinue(sessionId, {
     getPendingTools: id => sessionManager.getPendingTools(id),
     getAttempts: id => sessionManager.getAutoContinueAttempts(id),
     isBusy: id => sessionManager.isBusy(id),
     reassert: async (id, tools) => { await sessionManager.enableTools(id, tools); },
     clearPendingTools: id => sessionManager.clearPendingTools(id),
+    markContinuing: id => sessionManager.markContinuationInFlight(id),
+    clearContinuing: id => sessionManager.clearContinuationInFlight(id),
     bumpAttempts: id => sessionManager.bumpAutoContinueAttempts(id),
     dispatch: async (id, text) => {
       const prompt = prefixMessageSource('system', AUTOCONTINUE_IDENTIFIER, text);
@@ -70,6 +74,25 @@ function triggerAutoContinue(sessionId: string): void {
     emitSystem: (id, text) => broadcastEvent(id, { type: 'session.info', data: { message: text } }),
     enabled: () => isAutoContinueEnabled(sessionState.preferences),
     cap: AUTO_CONTINUE_CAP,
+  });
+}
+
+/**
+ * The single idle seam (spec-idle-authority): classify a session.idle and
+ * dispatch its effects. A pending-reveal idle (about to auto-continue) is a FALSE
+ * idle — it fires the continuation and suppresses herd-wake, delegate-completion
+ * (via the shared `hasPendingAutoContinue` predicate, consumed by dispatch-state),
+ * and unobserved-marking. A real idle propagates to all three as before.
+ */
+function handleIdle(sessionId: string, needsObservation: boolean): void {
+  void handleSessionIdle(sessionId, { needsObservation }, {
+    hasPendingAutoContinue: id => sessionManager.hasPendingAutoContinue(id),
+    pendingToolCount: id => sessionManager.getPendingTools(id).length,
+    runAutoContinue,
+    markIdle: id => unobservedTracker.markIdle(id),
+    herdOnSessionIdle: id => { void onSessionIdle(id); },
+    pollQuota: () => { void sessionManager.pollQuota(); },
+    signalDispatchIdle: id => dispatchState.signalIdle(id),
   });
 }
 
@@ -497,22 +520,14 @@ export async function dispatchMessage(
       });
 
       if (event.type === 'session.idle' || event.type === 'session.error') {
-        if (event.type === 'session.idle' && needsObservation) {
-          unobservedTracker.markIdle(sessionId);
-        }
-        if (event.type === 'session.idle') {
-          void sessionManager.pollQuota();
-          // Herd hook: stamp lastIdleAt unconditionally + wake this session's
-          // parent (if a child) and/or its own herd (if a parent). Runs outside
-          // the needsObservation gate so agent/system-sourced child turns count.
-          void onSessionIdle(sessionId);
-        }
         const wasIdle = event.type === 'session.idle';
         void completeDispatch(event.type).then(() => {
-          // After the dispatch is fully torn down (session no longer busy), fire an
-          // auto-continuation if this dispatch revealed tools (spec-enable-tools-
-          // autocontinue). Idle only — an errored dispatch does not auto-continue.
-          if (wasIdle) triggerAutoContinue(sessionId);
+          // After the dispatch is fully torn down (session no longer busy), route
+          // the idle through the single idle authority (spec-idle-authority): it
+          // classifies false idle (reveal → auto-continue, suppress completion
+          // signals) vs real idle (mark unobserved + herd wake + quota). An
+          // errored dispatch is never an idle, so nothing propagates.
+          if (wasIdle) handleIdle(sessionId, needsObservation ?? false);
         });
         unsubscribe();
       }

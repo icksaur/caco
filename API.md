@@ -290,7 +290,9 @@ Returns: `{ ok: true }`
 - `POST /api/preferences` - Update preferences
 - `GET /api/models` - List available models from SDK
 - `GET /api/models/raw` - Raw SDK model objects (unfiltered, session-independent)
-- `GET /api/usage` - Get usage statistics
+- `GET /api/usage` - Get usage statistics (quota)
+- `GET /api/usage/hourly` - Hourly-bucketed token/cost usage over a day window
+- `GET /api/usage/records` - Raw usage records over a time window
 
 **GET /api/preferences**
 
@@ -337,6 +339,22 @@ Returns:
 ```
 
 Returns `null` if no usage data has been received yet.
+
+**GET /api/usage/hourly** - Hourly-bucketed usage
+
+Query params:
+- `days=N` - Window length ending at now. Absent/invalid ⇒ 7; clamped to `[1, 90]`.
+
+Returns `{ from, to, buckets }` where `buckets` is an array of `HourlyBucket` aggregated from the durable usage store over `[from, to]` (both ISO).
+
+**GET /api/usage/records** - Raw usage records
+
+Query params:
+- `from` - ISO timestamp (absent ⇒ 7 days ago). Invalid ⇒ 400.
+- `to` - ISO timestamp (absent ⇒ now). Invalid ⇒ 400. Must be `>= from`.
+- `limit` - Max records (absent/invalid ⇒ 500; clamped to `[1, 5000]`).
+
+The window width is clamped to 90 days (keeping the most-recent end). Returns `{ from, to, records, truncated }` — the most recent `limit` records, newest first; `truncated` is true when more matched than were returned. Returns 400 `{ error }` on a bad window.
 
 **GET /api/themes** - List available themes
 
@@ -414,6 +432,23 @@ Time-bounded lease for fs.watch on a single file or directory (non-recursive). S
 Change notifications arrive on the session's WebSocket as `caco.fs.changed` events with `{ leaseId, path, eventType: "change"|"rename", filename? }`. Multiple events for the same lease within 150ms are coalesced.
 
 Process-wide cap: 16 concurrent leases. Default TTL: 5 minutes. Watchers are refcounted by canonical path so multiple leases on the same file share one underlying fs.watch.
+
+## File Edits
+
+Git-backed edit tracking for the Files applet — surfaces the session cwd's dirty/working-tree changes as reviewable cards. Thin wrapper around the `GitEditPoller` singleton. See `docs/spec-files-applet-edits.md`. All routes 404 when the session is unknown.
+
+- `GET /api/sessions/:id/file-edits/snapshot` - Current dirty set + persisted-clean entries. Returns `{ edits: EditEntry[], isGit }` (`isGit` = whether the cwd resolved to a git repo). Used on applet open to populate the panel without waiting for the next poll.
+- `POST /api/sessions/:id/file-edits/open` - Materialize an `EditEntry` for a repo path the user picks. Body: `{ relativePath, diffMode?: "unstaged"|"staged" }`. Returns `{ edit }`, or 400 on a bad/absolute/escaping/NUL/`..` path or non-file, or 404 when the path is in neither HEAD nor the working tree.
+- `GET /api/sessions/:id/file-edits/cards` - The persisted card list `{ schemaVersion, cards, dismissed }`.
+- `PUT /api/sessions/:id/file-edits/cards` - Persist the card list. Body: `{ schemaVersion: 1|2, cards: Array<{ relativePath, collapsed?, defaultViewerType?, activeViewerType? }>, dismissed: string[] }`. Server sets `updatedAt`. Returns `{ ok: true }` or 400 on a shape/version error.
+- `POST /api/sessions/:id/file-edits/cards` - Identical to the PUT handler; a `navigator.sendBeacon` alias (beacons are POST-only) for the best-effort `beforeunload` flush.
+
+## Memory
+
+The HTTP surface for the Memories applet, over the shared store in `memory-tool.ts` (the tool and these routes are one implementation). See `docs/spec-memory.md`.
+
+- `GET /api/memory` - The full store: `{ entries, count, capacity }`.
+- `DELETE /api/memory/:key` - Delete one entry. `key` must be a slug (lowercase letters, numbers, hyphens) else 400. A missing key is a successful no-op. Returns `{ ok: true, deleted?|notFound?, entries, count, capacity }` so the applet can re-render from the response.
 
 ## Saved Applets
 
@@ -717,6 +752,15 @@ Returns:
   ]
 }
 ```
+
+### MCP OAuth Authentication
+
+OAuth 2.0 (PKCE) flow for MCP servers that require authentication, mounted at `/api/mcp/auth`. The callback hits the same Express server, so the flow works through tunnels. Auto-merges CLI OAuth configs. See `src/routes/mcp-auth.ts`.
+
+- `GET /api/mcp/auth/servers` - List servers with auth status. Returns `{ servers: [{ id, url, needsAuth, needsClientId, expiresAt, error }] }`.
+- `GET /api/mcp/auth/start` - Initiate the OAuth flow. Query: `server` (server id, required), `origin?`. Redirects to the provider's authorization endpoint; renders an error page on a missing/unknown server.
+- `GET /api/mcp/auth/callback` - OAuth redirect target. Query: `code`, `state` (or `error`/`error_description`). Exchanges the code for a token, persists it, and returns an HTML page that signals the popup opener. 400 on a missing/expired/invalid `state`.
+- `POST /api/mcp/auth/config` - Update a server's config. Body: `{ serverId, clientId? }`. Returns `{ ok: true }`, or 400 (missing `serverId`) / 404 (unknown server).
 
 ## Shell Execution
 

@@ -110,4 +110,15 @@ describe('maybeAutoContinue (spec-enable-tools-autocontinue P3/P4/P5)', () => {
   it('builds a continuation prompt that names the tools', () => {
     expect(buildContinuationPrompt(['a', 'b'])).toContain('a, b');
   });
+
+  it('does not reject when the continuation dispatch fails (e.g. 409 SESSION_BUSY race)', async () => {
+    const h = harness();
+    h.setPending(['github-list_issues']);
+    h.dispatch.mockRejectedValueOnce(new Error('Session is busy processing another message'));
+    // Must resolve (swallow), not throw — an unhandled rejection could crash the server.
+    await expect(maybeAutoContinue(SID, h.deps)).resolves.toBeUndefined();
+    // Pending was still consumed and the attempt counted (a concurrent dispatch resets anyway).
+    expect(h.pendingOf()).toEqual([]);
+    expect(h.attemptsOf()).toBe(1);
+  });
 });

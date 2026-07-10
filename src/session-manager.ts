@@ -1354,6 +1354,7 @@ export class SessionManager {
     }
     
     this.sessionCache.delete(sessionId);
+    this.resetAutoContinue(sessionId);
     disposeSessionRuntime(sessionId);
 
     // Remove the whole Caco per-session directory (meta.json, files-cards.json,
@@ -1425,6 +1426,7 @@ export class SessionManager {
       }
 
       this.sessionCache.delete(sessionId);
+      this.resetAutoContinue(sessionId);
       console.log(`✓ Archived session ${sessionId} → ${archivePath}`);
       return { archivePath };
     } finally {

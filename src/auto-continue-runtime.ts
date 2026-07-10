@@ -61,7 +61,10 @@ const chains = new Map<string, Promise<unknown>>();
  *  session. Serialized per session via the trailing-edge chain. */
 export function maybeAutoContinue(sessionId: string, deps: AutoContinueDeps): Promise<void> {
   const prior = chains.get(sessionId) ?? Promise.resolve();
-  const run = prior.catch(() => {}).then(() => evaluate(sessionId, deps));
+  // `evaluate` swallows operational errors internally, but guard the chain too so a
+  // never-expected throw can't surface as an unhandled rejection on either the
+  // stored chain, the cleanup, or the returned promise (the caller `void`s it).
+  const run = prior.catch(() => {}).then(() => evaluate(sessionId, deps)).catch(() => {});
   chains.set(sessionId, run);
   void run.finally(() => { if (chains.get(sessionId) === run) chains.delete(sessionId); });
   return run;
@@ -81,12 +84,22 @@ async function evaluate(sessionId: string, deps: AutoContinueDeps): Promise<void
     return;
   }
   // fire: re-assert the reveal, consume the pending set, count the attempt, then
-  // start a fresh dispatch where the tools are present.
+  // start a fresh dispatch where the tools are present. The re-assert and dispatch
+  // can reject — most notably a 409 SESSION_BUSY if a concurrent human/agent
+  // dispatch lands during the `reassert` await (a benign TOCTOU: that dispatch
+  // already reset our budget), or a send failure if the session was evicted. Such
+  // failures must NEVER escape as an unhandled rejection (there is no global
+  // handler; it could crash the server), so we swallow them here — the operator can
+  // always re-prompt, and a concurrent dispatch supersedes us anyway.
   const tools = deps.getPendingTools(sessionId);
-  await deps.reassert(sessionId, tools);
   deps.clearPendingTools(sessionId);
   deps.bumpAttempts(sessionId);
-  await deps.dispatch(sessionId, buildContinuationPrompt(tools));
+  try {
+    await deps.reassert(sessionId, tools);
+    await deps.dispatch(sessionId, buildContinuationPrompt(tools));
+  } catch (e) {
+    console.warn(`[AUTOCONTINUE] continuation for ${sessionId.slice(0, 8)} did not start: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** Test seam: reset the per-session chains. */

@@ -117,6 +117,7 @@ export const EVENT_TO_OUTER: Record<string, string> = {
   'caco.applet': 'applet-message',
   'caco.scheduler': 'scheduler-message',
   'caco.skill': 'agent-message',
+  'caco.system': 'system-message',
   'caco.agent_selected': 'assistant-activity',
   'caco.info': 'assistant-activity',
   'caco.truncated': 'assistant-activity',
@@ -153,6 +154,7 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
   'caco.applet': 'applet-text',
   'caco.scheduler': 'scheduler-text',
   'caco.skill': 'agent-text',
+  'caco.system': 'system-text',
   'caco.agent_selected': 'compact-text',
   'caco.info': null,  // omit - internal signal
   'caco.truncated': 'truncated-text',
@@ -229,8 +231,16 @@ class ElementInserter {
    * Otherwise uses simple last-child matching.
    */
   getElement(eventType: string, parent: HTMLElement, data?: Record<string, unknown>, agentId?: string): HTMLElement | null {
-    const cssClass = this.map[eventType];
-    if (cssClass === null || cssClass === undefined) return null;
+    const baseClass = this.map[eventType];
+    if (baseClass === null || baseClass === undefined) return null;
+
+    // Scoped modifier: a [system:autocontinue] message renders purple (distinct
+    // from generic gray [system:*]). The modifier is folded into the class so the
+    // reuse check below discriminates it from a plain system box.
+    const modifier = eventType === 'caco.system' && data?.sourceIdentifier === 'autocontinue'
+      ? 'autocontinue'
+      : '';
+    const cssClass = modifier ? `${baseClass} ${modifier}` : baseClass;
 
     // Check if this event type uses keyed lookup
     const keyProp = this.keyProperty[eventType];
@@ -244,9 +254,13 @@ class ElementInserter {
     // Default: reuse last child if it matches class AND originating agent.
     // The agentId guard keeps a sub-agent's events from merging into the
     // preceding primary-session box (and vice versa), so each agent's run
-    // forms its own container that the CSS discriminator can mark.
+    // forms its own container that the CSS discriminator can mark. The modifier
+    // guard keeps a purple [system:autocontinue] box from absorbing a plain
+    // [system:*] message (and vice versa).
     const last = parent.lastElementChild as HTMLElement | null;
-    if (last?.classList.contains(cssClass) && (last.dataset.agentId || '') === (agentId || '')) {
+    if (last?.classList.contains(baseClass)
+        && (last.dataset.agentId || '') === (agentId || '')
+        && (last.dataset.modifier || '') === modifier) {
       this.debug(`[INSERTER] "${this.name}" reuse existing div for type "${eventType}"`);
       return last;
     }
@@ -255,6 +269,7 @@ class ElementInserter {
     const div = document.createElement('div');
     div.className = cssClass;
     if (agentId) div.dataset.agentId = agentId;
+    if (modifier) div.dataset.modifier = modifier;
     parent.appendChild(div);
     this.debug(`[INSERTER] "${this.name}" create new div for type "${eventType}"`);
     return div;
@@ -581,6 +596,7 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'caco.applet': setPath('content'),
   'caco.scheduler': setPath('content'),
   'caco.skill': setPath('content'),
+  'caco.system': setPath('content'),
 
   'caco.agent_selected': (element, data) => {
     const agentId = str(data.agentId, 'agent');
@@ -692,8 +708,9 @@ export class ChatRegion {
       }
     }
 
-    // Get outer div (agentId keeps sub-agent boxes separate + markable)
-    const outer = this.outerInserter.getElement(eventType, this.root.el, undefined, agentId);
+    // Get outer div (agentId keeps sub-agent boxes separate + markable; data
+    // carries sourceIdentifier so [system:autocontinue] gets its purple modifier)
+    const outer = this.outerInserter.getElement(eventType, this.root.el, data, agentId);
     if (!outer) return;
 
     // Get inner div (null = omit this event type)

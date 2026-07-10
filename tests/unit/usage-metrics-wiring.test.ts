@@ -34,6 +34,10 @@ const sm = vi.hoisted(() => ({
   sendStream: vi.fn(async () => {}),
   getCacoToolCatalog: vi.fn(() => [] as { name: string }[]),
   getModels: vi.fn(() => [{ id: 'claude-opus-4.6' }] as unknown[]),
+  // Auto-continuation hook runs on idle; no reveal in these tests ⇒ empty pending
+  // so triggerAutoContinue short-circuits before touching anything else.
+  getPendingTools: vi.fn(() => [] as string[]),
+  resetAutoContinue: vi.fn(),
 }));
 
 vi.mock('../../src/session-manager.js', () => ({ sessionManager: sm }));

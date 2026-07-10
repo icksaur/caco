@@ -218,3 +218,52 @@ describe('SessionManager.enableTools — reveal path (B2)', () => {
     expect(update).not.toHaveBeenCalled();
   });
 });
+
+describe('SessionManager — auto-continuation state (spec-enable-tools-autocontinue P1)', () => {
+  beforeEach(() => { vi.clearAllMocks(); storage.meta.clear(); });
+
+  it('records revealed tools in pendingTools on a successful enable (union)', async () => {
+    const update = vi.fn(async () => ({ success: true }));
+    const { manager } = await makeManager(update, ['github-list_issues', 'github-get_pr']);
+    await manager.enableTools(SID, ['github-list_issues']);
+    expect(manager.getPendingTools(SID)).toEqual(['github-list_issues']);
+    // A second reveal in the same dispatch UNIONS (does not overwrite).
+    await manager.enableTools(SID, ['github-get_pr']);
+    expect(new Set(manager.getPendingTools(SID))).toEqual(new Set(['github-list_issues', 'github-get_pr']));
+  });
+
+  it('records nothing on a no-op (already-enabled) enable', async () => {
+    const update = vi.fn(async () => ({ success: true }));
+    const { manager } = await makeManager(update, ['github-list_issues']);
+    await manager.enableTools(SID, ['view']); // already enabled ⇒ enabled:[]
+    expect(manager.getPendingTools(SID)).toEqual([]);
+  });
+
+  it('records nothing on a failed (rpc false) enable', async () => {
+    const update = vi.fn(async () => ({ success: false }));
+    const { manager } = await makeManager(update, ['github-list_issues']);
+    await manager.enableTools(SID, ['github-list_issues']);
+    expect(manager.getPendingTools(SID)).toEqual([]);
+  });
+
+  it('clearPendingTools leaves the attempt counter intact (independent state)', async () => {
+    const update = vi.fn(async () => ({ success: true }));
+    const { manager } = await makeManager(update, ['github-list_issues']);
+    await manager.enableTools(SID, ['github-list_issues']);
+    manager.bumpAutoContinueAttempts(SID);
+    manager.bumpAutoContinueAttempts(SID);
+    manager.clearPendingTools(SID);
+    expect(manager.getPendingTools(SID)).toEqual([]);
+    expect(manager.getAutoContinueAttempts(SID)).toBe(2); // counter survives the clear
+  });
+
+  it('resetAutoContinue clears BOTH pending tools and the counter', async () => {
+    const update = vi.fn(async () => ({ success: true }));
+    const { manager } = await makeManager(update, ['github-list_issues']);
+    await manager.enableTools(SID, ['github-list_issues']);
+    manager.bumpAutoContinueAttempts(SID);
+    manager.resetAutoContinue(SID);
+    expect(manager.getPendingTools(SID)).toEqual([]);
+    expect(manager.getAutoContinueAttempts(SID)).toBe(0);
+  });
+});

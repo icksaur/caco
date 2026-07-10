@@ -72,6 +72,7 @@
   --color-applet-bg: color-mix(in srgb, var(--orange), var(--base) 60%);
   --color-agent-bg: color-mix(in srgb, var(--purple), var(--base) 70%);
   --color-scheduler-bg: color-mix(in srgb, var(--cyan), var(--base) 85%);
+  --color-system-bg: color-mix(in srgb, var(--text), var(--base) 88%);
   --color-activity-bg: var(--bg-raised);
   --color-selector-bg: color-mix(in srgb, var(--base), white 7%);
   --color-selector-hover: color-mix(in srgb, var(--base), white 14%);
@@ -926,6 +927,32 @@ main {
 .scheduler-message {
   background: var(--color-scheduler-bg);
   padding: var(--space-lg);
+}
+
+/* System messages (spec-enable-tools-autocontinue): server-injected [system:*].
+   Generic system messages are neutral gray; the autocontinue variant renders
+   purple (like an agent message) so an operator sees the machine re-prompt. */
+.system-message {
+  background: var(--color-system-bg, color-mix(in srgb, var(--text), var(--base) 88%));
+  padding: var(--space-lg);
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: var(--text-sm);
+}
+
+.system-message.autocontinue {
+  position: relative;
+  background: var(--color-agent-bg);
+}
+
+.system-message.autocontinue::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--purple);
 }
 
 .assistant-activity {

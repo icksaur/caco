@@ -16,7 +16,7 @@ export function createToolRevealTool(sessionRef: SessionIdRef) {
     description: `Discover and re-enable DEFERRED tools for this session. Deferred tools are excluded from every turn's tool list to save tokens.
 
 - Call with NO arguments (\`{}\`) to list every deferred tool (name + description) you can re-enable — this is how you discover what's available, including \`caco_docs\`.
-- Call with \`names\` to re-enable them; they become callable on your NEXT turn (not this one).
+- Call with \`names\` to re-enable them; Caco automatically continues in a new request where they become available (you cannot call them later in THIS response).
 
 COST: enabling changes the tool block, which busts the prompt cache for ONE turn (a one-time cost, then normal). So batch ALL the tools you expect to need into a SINGLE call. Listing (no args) is free and never mutates.
 
@@ -43,7 +43,7 @@ Names may be the bare display name (e.g. "list_issues") or the full key (e.g. "g
       }
       const parts: string[] = [];
       if (result.enabled.length > 0) {
-        parts.push(`Enabled ${result.enabled.length} tool(s): ${result.enabled.join(', ')}. They are callable on your NEXT turn (not this one). This turn incurs a one-time prompt-cache write; subsequent turns are normal.`);
+        parts.push(`Enabled ${result.enabled.length} tool(s): ${result.enabled.join(', ')}. They are NOT callable later in this response — finish your turn and Caco will automatically continue in a new request where they are available. This incurs a one-time prompt-cache write; subsequent requests are normal.`);
       }
       if (result.alreadyEnabled.length > 0) {
         parts.push(`Already enabled (no change): ${result.alreadyEnabled.join(', ')}.`);

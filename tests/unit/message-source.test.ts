@@ -97,6 +97,30 @@ describe('parseMessageSource', () => {
     });
   });
 
+  describe('system messages', () => {
+    it('parses [system:autocontinue] prefix (identifier drives purple rendering)', () => {
+      const result = parseMessageSource('[system:autocontinue] Continue the task');
+      expect(result.source).toBe('system');
+      expect(result.identifier).toBe('autocontinue');
+      expect(result.cleanContent).toBe('Continue the task');
+    });
+
+    it('parses a generic [system:herd] prefix (stays gray)', () => {
+      const result = parseMessageSource('[system:herd] a wake');
+      expect(result.source).toBe('system');
+      expect(result.identifier).toBe('herd');
+    });
+
+    it('round-trips through prefixMessageSource', () => {
+      const prefixed = prefixMessageSource('system', 'autocontinue', 'go');
+      expect(prefixed).toBe('[system:autocontinue] go');
+      const parsed = parseMessageSource(prefixed);
+      expect(parsed.source).toBe('system');
+      expect(parsed.identifier).toBe('autocontinue');
+      expect(parsed.cleanContent).toBe('go');
+    });
+  });
+
   describe('edge cases', () => {
     it('handles empty content after prefix', () => {
       const result = parseMessageSource('[applet:test] ');

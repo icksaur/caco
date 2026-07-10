@@ -347,6 +347,9 @@ function enrichUserMessageWithSource(event: SessionEvent): SessionEvent {
       ...(parsed.source === 'agent' && { fromSession: parsed.identifier }),
       ...(parsed.source === 'scheduler' && { scheduleSlug: parsed.identifier }),
       ...(parsed.source === 'skill' && { skillName: parsed.identifier }),
+      // System messages carry the raw identifier so the client can scope styling
+      // (e.g. [system:autocontinue] renders purple, [system:herd] stays gray).
+      ...(parsed.source === 'system' && { sourceIdentifier: parsed.identifier }),
     }
   };
 }

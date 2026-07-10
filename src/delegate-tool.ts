@@ -178,10 +178,10 @@ Use to have a reviewer/research session check work or look something up. Don't d
             idleTimeoutMs: DELEGATE_IDLE_TIMEOUT_MS,
             maxTotalMs: DELEGATE_MAX_TOTAL_MS,
             isGone: () => !sessionManager.getSessionCwd(d.sessionId),
-            // A caco_enable_tools reveal-idle is not a real idle (the child is
-            // about to auto-continue) — keep waiting for the real idle so the
-            // delegate doesn't return a premature response (spec-idle-authority).
-            suppressIdle: () => sessionManager.hasPendingAutoContinue(d.sessionId),
+            // A caco_enable_tools reveal-idle is not a real idle — but this is now
+            // handled centrally: dispatchState suppresses the idle emit while a
+            // continuation is pending, so waitForActive stays armed automatically
+            // (spec-idle-suppression-central).
           });
 
           if (result === 'idle') {

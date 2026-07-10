@@ -68,6 +68,20 @@ like `setAutoContinuePrefProvider`:
    `signalIdle` on failed-start), the idle listener re-runs `checkAndRestart` →
    now clear → restart proceeds.
 
+   **Set-up sub-window (continuation-in-flight marker).** `hasAnyPendingAutoContinue()`
+   is driven by the pending-tools set, but the auto-continue runtime clears that set
+   (`clearPendingTools`) BEFORE it `await`s `reassert` and starts the continuation
+   dispatch (`startDispatch` runs synchronously inside `dispatchMessage`, but only
+   after the `reassert` await yields). In that sub-window both `getActiveCount()===0`
+   and the pending set is empty, so an immediate `checkAndRestart()` would still slip
+   through. To close it, `SessionManager` holds a `continuationInFlight` set: the
+   runtime `markContinuing(id)` synchronously BEFORE `clearPendingTools` and
+   `clearContinuing(id)` in a `finally` (after `startDispatch` has registered the
+   dispatch, or the fire failed). `hasAnyPendingAutoContinue()` returns true while any
+   session is in-flight. This marker is fed ONLY into the restart gate — deliberately
+   NOT into `hasPendingAutoContinue` (the `dispatchState` idle suppressor) — so the
+   continuation's own `end()` still emits a real idle.
+
 ### The failed-continuation replacement emit (closes the edge-trigger hole)
 
 Suppressing the `end()` emit assumes a later emit will arrive from the

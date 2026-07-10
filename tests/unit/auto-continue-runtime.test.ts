@@ -18,6 +18,8 @@ function harness(opts?: { enabled?: boolean; cap?: number; busy?: boolean }) {
   const dispatch = vi.fn(async () => {});
   const reassert = vi.fn(async () => {});
   const emitSystem = vi.fn();
+  const markContinuing = vi.fn();
+  const clearContinuing = vi.fn();
 
   const deps: AutoContinueDeps = {
     getPendingTools: sid => [...(pending.get(sid) ?? [])],
@@ -25,6 +27,8 @@ function harness(opts?: { enabled?: boolean; cap?: number; busy?: boolean }) {
     isBusy: () => busy,
     reassert,
     clearPendingTools: sid => { pending.delete(sid); },
+    markContinuing,
+    clearContinuing,
     bumpAttempts: sid => attempts.set(sid, (attempts.get(sid) ?? 0) + 1),
     dispatch,
     emitSystem,
@@ -33,7 +37,7 @@ function harness(opts?: { enabled?: boolean; cap?: number; busy?: boolean }) {
   };
 
   return {
-    deps, dispatch, reassert, emitSystem,
+    deps, dispatch, reassert, emitSystem, markContinuing, clearContinuing,
     setPending: (names: string[]) => pending.set(SID, new Set(names)),
     setAttempts: (n: number) => attempts.set(SID, n),
     setBusy: (b: boolean) => { busy = b; },
@@ -57,6 +61,30 @@ describe('maybeAutoContinue (spec-enable-tools-autocontinue P3/P4/P5)', () => {
     const [, prompt] = h.dispatch.mock.calls[0] as unknown as [string, string];
     expect(prompt).toContain('github-list_issues');
     expect(prompt).toContain('caco_docs');
+  });
+
+  it('brackets the continuation with markContinuing (before clearPendingTools) / clearContinuing (after)', async () => {
+    // Closes the restart sub-window: the in-flight marker must be set BEFORE the
+    // pending set is cleared and released only after the fire path completes.
+    const h = harness();
+    h.setPending(['github-list_issues']);
+    await maybeAutoContinue(SID, h.deps);
+
+    const markOrder = h.markContinuing.mock.invocationCallOrder[0];
+    const dispatchOrder = h.dispatch.mock.invocationCallOrder[0];
+    const clearOrder = h.clearContinuing.mock.invocationCallOrder[0];
+    expect(h.markContinuing).toHaveBeenCalledWith(SID);
+    expect(h.clearContinuing).toHaveBeenCalledWith(SID);
+    expect(markOrder).toBeLessThan(dispatchOrder);   // marked before the dispatch fires
+    expect(clearOrder).toBeGreaterThan(dispatchOrder); // released after
+  });
+
+  it('releases the in-flight marker even when the fire fails', async () => {
+    const h = harness();
+    h.setPending(['github-list_issues']);
+    h.dispatch.mockRejectedValueOnce(new Error('SESSION_BUSY'));
+    await expect(maybeAutoContinue(SID, h.deps)).resolves.toBe(false);
+    expect(h.clearContinuing).toHaveBeenCalledWith(SID);
   });
 
   it('does not fire when nothing is pending', async () => {

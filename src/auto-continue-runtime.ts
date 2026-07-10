@@ -31,6 +31,13 @@ export interface AutoContinueDeps {
   reassert(sessionId: string, tools: string[]): Promise<void>;
   /** Clear the pending-continuation tool set (counter is untouched). */
   clearPendingTools(sessionId: string): void;
+  /** Mark a continuation as being SET UP (spec-idle-suppression-central): held from
+   *  before clearPendingTools until the continuation dispatch has registered (or the
+   *  fire failed), so the restart gate keeps deferring across the sub-window where
+   *  the pending set is already cleared but startDispatch has not yet run. */
+  markContinuing(sessionId: string): void;
+  /** Release the set-up marker (paired with markContinuing, in a finally). */
+  clearContinuing(sessionId: string): void;
   /** Increment the consecutive-continuation counter. */
   bumpAttempts(sessionId: string): void;
   /** Start a fresh continuation dispatch carrying the given (already-prefixed)
@@ -98,6 +105,13 @@ async function evaluate(sessionId: string, deps: AutoContinueDeps): Promise<bool
   // delegate completion / unobserved) that would otherwise never fire, since no
   // continuation dispatch means no further session.idle for this turn.
   const tools = deps.getPendingTools(sessionId);
+  // Mark BEFORE clearing pending (both synchronous, no await between): from here the
+  // restart gate sees an in-flight continuation, closing the window between the
+  // pending set being cleared and startDispatch registering the new dispatch — where
+  // active count is 0 AND nothing is pending, so an immediate checkAndRestart would
+  // otherwise slip through and kill the not-yet-started continuation
+  // (spec-idle-suppression-central).
+  deps.markContinuing(sessionId);
   deps.clearPendingTools(sessionId);
   deps.bumpAttempts(sessionId);
   try {
@@ -107,6 +121,10 @@ async function evaluate(sessionId: string, deps: AutoContinueDeps): Promise<bool
   } catch (e) {
     console.warn(`[AUTOCONTINUE] continuation for ${sessionId.slice(0, 8)} did not start: ${e instanceof Error ? e.message : String(e)}`);
     return false;
+  } finally {
+    // By now startDispatch has run (active>0 covers the running continuation) or the
+    // fire failed — either way the set-up marker is no longer needed.
+    deps.clearContinuing(sessionId);
   }
 }
 

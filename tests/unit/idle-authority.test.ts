@@ -15,6 +15,7 @@ function makeDeps(over: Partial<{
     markIdle: vi.fn(),
     herdOnSessionIdle: vi.fn(),
     pollQuota: vi.fn(),
+    signalDispatchIdle: vi.fn(),
   };
   const deps: IdleAuthorityDeps = {
     hasPendingAutoContinue: spies.hasPendingAutoContinue as unknown as IdleAuthorityDeps['hasPendingAutoContinue'],
@@ -23,6 +24,7 @@ function makeDeps(over: Partial<{
     markIdle: spies.markIdle,
     herdOnSessionIdle: spies.herdOnSessionIdle,
     pollQuota: spies.pollQuota,
+    signalDispatchIdle: spies.signalDispatchIdle,
   };
   return { deps, spies };
 }
@@ -35,6 +37,7 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     await handleSessionIdle(SID, { needsObservation: true }, deps);
     expect(spies.runAutoContinue).toHaveBeenCalledWith(SID);
     // none of the completion consumers fire on a false idle
+    expect(spies.signalDispatchIdle).not.toHaveBeenCalled();
     expect(spies.markIdle).not.toHaveBeenCalled();
     expect(spies.herdOnSessionIdle).not.toHaveBeenCalled();
     expect(spies.pollQuota).not.toHaveBeenCalled();
@@ -42,10 +45,13 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
 
   it('willFire but the continuation FAILED to start: falls through to real-idle effects (no drop)', async () => {
     // A fire that throws (non-409/non-eviction) yields no further idle; the
-    // authority must still wake the herd / complete the delegate / mark unobserved.
+    // authority must still wake the herd / complete the delegate / mark unobserved,
+    // AND force-emit the dispatch idle that end() suppressed (else waitForActive/
+    // waitForIdle/restart are stranded).
     const { deps, spies } = makeDeps({ willFire: true, pending: 1, started: false });
     await handleSessionIdle(SID, { needsObservation: true }, deps);
     expect(spies.runAutoContinue).toHaveBeenCalledWith(SID);
+    expect(spies.signalDispatchIdle).toHaveBeenCalledWith(SID);
     expect(spies.markIdle).toHaveBeenCalledWith(SID);
     expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
     expect(spies.pollQuota).toHaveBeenCalled();
@@ -55,6 +61,8 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     const { deps, spies } = makeDeps({ willFire: false, pending: 0 });
     await handleSessionIdle(SID, { needsObservation: true }, deps);
     expect(spies.runAutoContinue).not.toHaveBeenCalled();
+    // end() already emitted a real idle (not suppressed), so no replacement emit.
+    expect(spies.signalDispatchIdle).not.toHaveBeenCalled();
     expect(spies.markIdle).toHaveBeenCalledWith(SID);
     expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
     expect(spies.pollQuota).toHaveBeenCalled();

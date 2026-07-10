@@ -57,6 +57,8 @@ function runAutoContinue(sessionId: string): Promise<boolean> {
     isBusy: id => sessionManager.isBusy(id),
     reassert: async (id, tools) => { await sessionManager.enableTools(id, tools); },
     clearPendingTools: id => sessionManager.clearPendingTools(id),
+    markContinuing: id => sessionManager.markContinuationInFlight(id),
+    clearContinuing: id => sessionManager.clearContinuationInFlight(id),
     bumpAttempts: id => sessionManager.bumpAutoContinueAttempts(id),
     dispatch: async (id, text) => {
       const prompt = prefixMessageSource('system', AUTOCONTINUE_IDENTIFIER, text);
@@ -90,6 +92,7 @@ function handleIdle(sessionId: string, needsObservation: boolean): void {
     markIdle: id => unobservedTracker.markIdle(id),
     herdOnSessionIdle: id => { void onSessionIdle(id); },
     pollQuota: () => { void sessionManager.pollQuota(); },
+    signalDispatchIdle: id => dispatchState.signalIdle(id),
   });
 }
 

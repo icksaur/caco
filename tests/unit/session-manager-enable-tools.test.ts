@@ -305,4 +305,28 @@ describe('SessionManager.hasPendingAutoContinue (spec-idle-authority)', () => {
     expect(manager.hasPendingAutoContinue(SID)).toBe(false);
     setAutoContinuePrefProvider(() => true); // restore for other tests
   });
+
+  it('hasAnyPendingAutoContinue mirrors the per-session predicate across sessions', async () => {
+    const { setAutoContinuePrefProvider } = await import('../../src/session-manager.js');
+    setAutoContinuePrefProvider(() => true);
+    const { manager } = await makeManager(vi.fn(async () => ({ success: true })), ['github-list_issues']);
+    expect(manager.hasAnyPendingAutoContinue()).toBe(false);
+    await manager.enableTools(SID, ['github-list_issues']);
+    expect(manager.hasAnyPendingAutoContinue()).toBe(true);
+    manager.resetAutoContinue(SID);
+    expect(manager.hasAnyPendingAutoContinue()).toBe(false);
+  });
+
+  it('hasAnyPendingAutoContinue stays true while a continuation is in flight (no pending tools)', async () => {
+    // The set-up sub-window: pending already cleared, startDispatch not yet run.
+    const { manager } = await makeManager(vi.fn(async () => ({ success: true })), ['github-list_issues']);
+    expect(manager.hasAnyPendingAutoContinue()).toBe(false);
+    manager.markContinuationInFlight(SID);
+    expect(manager.hasAnyPendingAutoContinue()).toBe(true);
+    // ...but the per-session suppressor stays pending-driven so the continuation's
+    // own end() still emits a real idle.
+    expect(manager.hasPendingAutoContinue(SID)).toBe(false);
+    manager.clearContinuationInFlight(SID);
+    expect(manager.hasAnyPendingAutoContinue()).toBe(false);
+  });
 });

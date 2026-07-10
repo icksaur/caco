@@ -171,6 +171,29 @@ describe('DispatchState', () => {
       expect(events).toEqual(['session-1']);
       expect(state.isBusy('session-2')).toBe(true);
     });
+
+    // ── central suppression (spec-idle-suppression-central) ──
+
+    it('end() suppresses the idle emit while a continuation is pending', () => {
+      const events: string[] = [];
+      state.on('idle', (id: string) => events.push(id));
+      state.setIdleSuppressor(id => id === 'session-1');
+
+      state.start('session-1', 'corr-1');
+      state.end('session-1');
+
+      expect(events).toEqual([]); // suppressed — no dispatch-emit consumer woken
+    });
+
+    it('signalIdle() force-emits a real idle even while suppressed', () => {
+      const events: string[] = [];
+      state.on('idle', (id: string) => events.push(id));
+      state.setIdleSuppressor(() => true);
+
+      state.signalIdle('session-1');
+
+      expect(events).toEqual(['session-1']); // the replacement emit bypasses suppression
+    });
   });
 
   describe('waitForIdle', () => {
@@ -204,6 +227,19 @@ describe('DispatchState', () => {
       await promise;
 
       expect(state.listenerCount('idle')).toBe(0);
+    });
+
+    it('does not resolve on a suppressed end(); resolves once effectively idle', async () => {
+      state.start('session-1', 'corr-123');
+      let suppressed = true;
+      state.setIdleSuppressor(() => suppressed);
+
+      const promise = state.waitForIdle('session-1', 5000);
+      state.end('session-1');            // suppressed — must not resolve
+      suppressed = false;
+      state.signalIdle('session-1');     // the real idle
+
+      expect(await promise).toBe('idle');
     });
   });
 
@@ -243,24 +279,22 @@ describe('DispatchState', () => {
       await expect(p).resolves.toBe('idle');
     });
 
-    // ── suppressIdle (spec-idle-authority): a pending-continuation idle is not real ──
+    // ── central idle suppressor (spec-idle-suppression-central): a pending-continuation idle is not real ──
 
-    it('suppressIdle gates the entry fast-path (not-busy + suppressed ⇒ waits, not idle)', async () => {
+    it('suppressor gates the entry fast-path (not-busy + suppressed ⇒ waits, not idle)', async () => {
       // Not busy AND suppressed: must NOT resolve idle immediately; times out instead.
-      const p = state.waitForActive('s1', {
-        idleTimeoutMs: IDLE, maxTotalMs: MAX, suppressIdle: () => true,
-      });
+      state.setIdleSuppressor(() => true);
+      const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX });
       await vi.advanceTimersByTimeAsync(MAX);
       await expect(p).resolves.toBe('timeout');
     });
 
-    it('suppressIdle gates the idle listener: a suppressed end() does not resolve, a later real end() does', async () => {
+    it('suppressor gates the idle listener: a suppressed end() does not resolve, a later real end() does', async () => {
       state.start('s1', 'c1');
       let suppressed = true;
-      const p = state.waitForActive('s1', {
-        idleTimeoutMs: IDLE, maxTotalMs: MAX, suppressIdle: () => suppressed,
-      });
-      // Reveal-dispatch ends while suppressed → ignored, keep waiting.
+      state.setIdleSuppressor(() => suppressed);
+      const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX });
+      // Reveal-dispatch ends while suppressed → emit suppressed, keep waiting.
       state.end('s1');
       await vi.advanceTimersByTimeAsync(0);
       // Continuation runs then reaches a real idle (predicate now false).
@@ -270,15 +304,14 @@ describe('DispatchState', () => {
       await expect(p).resolves.toBe('idle');
     });
 
-    it('suppressIdle gates the post-arm re-check (ends in the arm window while suppressed)', async () => {
+    it('suppressor gates the post-arm re-check (ends in the arm window while suppressed)', async () => {
       // Busy at entry (arms listeners), then not-busy but suppressed at the
       // post-arm re-check → must not resolve; a later unsuppressed end() does.
       state.start('s1', 'c1');
       let suppressed = true;
-      const p = state.waitForActive('s1', {
-        idleTimeoutMs: IDLE, maxTotalMs: MAX, suppressIdle: () => suppressed,
-      });
-      state.end('s1');                 // suppressed → ignored by listener
+      state.setIdleSuppressor(() => suppressed);
+      const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX });
+      state.end('s1');                 // suppressed → emit suppressed
       await vi.advanceTimersByTimeAsync(0);
       suppressed = false;
       state.start('s1', 'c2');

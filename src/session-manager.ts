@@ -11,7 +11,7 @@ import { readSessionWorkspace, readSessionEvents, readSessionEventsResult, parse
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
-import { pollQuota } from './quota-poller.js';
+import { setAnyPendingProvider } from './restart-manager.js';import { pollQuota } from './quota-poller.js';
 import type { QuotaSnapshot } from './usage-state.js';
 import { loadMcpServers } from './mcp-config-loader.js';
 import { createObservationHook } from './observe/hook.js';
@@ -409,6 +409,12 @@ export class SessionManager {
   //    non-autocontinue (human/agent/applet/scheduler) dispatch start.
   private pendingTools = new Map<string, Set<string>>();
   private autoContinueAttempts = new Map<string, number>();
+  // Sessions whose continuation is being SET UP (spec-idle-suppression-central):
+  // held by the auto-continue runtime from before the pending set is cleared until
+  // startDispatch registers the continuation, so the restart gate keeps deferring
+  // across that sub-window. Kept OUT of hasPendingAutoContinue (the dispatchState idle
+  // suppressor) so the continuation's own end() still emits a real idle.
+  private continuationInFlight = new Set<string>();
 
   // sessionId → { cwd, summary } (cached from disk)
   private sessionCache = new Map<string, CachedSession>();
@@ -1784,6 +1790,12 @@ export class SessionManager {
 
     if (!session) return { forced: false };
 
+    // Clear-before-abort (spec-idle-suppression-central): a user cancel must not be
+    // held open by a pending reveal-continuation. Reset auto-continue state BEFORE
+    // abort() so the idle suppressor returns false — otherwise the SDK's post-abort
+    // idle would be suppressed and waitForIdle below would hang until force-clear.
+    this.resetAutoContinue(sessionId);
+
     // Call abort with a timeout so we don't hang if the CLI is unresponsive
     try {
       await Promise.race([
@@ -2372,6 +2384,7 @@ export class SessionManager {
   resetAutoContinue(sessionId: string): void {
     this.pendingTools.delete(sessionId);
     this.autoContinueAttempts.delete(sessionId);
+    this.continuationInFlight.delete(sessionId);
   }
 
   /**
@@ -2390,6 +2403,27 @@ export class SessionManager {
     if ((this.pendingTools.get(sessionId)?.size ?? 0) === 0) return false;
     if (autoContinuePrefProvider && !autoContinuePrefProvider()) return false;
     return this.getAutoContinueAttempts(sessionId) < AUTO_CONTINUE_CAP;
+  }
+
+  /** Whether ANY session is about to auto-continue (spec-idle-suppression-central):
+   *  used by restart-manager to defer a graceful restart while a reveal-continuation
+   *  is pending OR being set up, since its immediate check bypasses the idle emit. */
+  hasAnyPendingAutoContinue(): boolean {
+    if (this.continuationInFlight.size > 0) return true;
+    for (const sessionId of this.pendingTools.keys()) {
+      if (this.hasPendingAutoContinue(sessionId)) return true;
+    }
+    return false;
+  }
+
+  /** Mark a continuation as being set up (auto-continue runtime seam). */
+  markContinuationInFlight(sessionId: string): void {
+    this.continuationInFlight.add(sessionId);
+  }
+
+  /** Release the set-up marker (auto-continue runtime seam). */
+  clearContinuationInFlight(sessionId: string): void {
+    this.continuationInFlight.delete(sessionId);
   }
 
   private async enableToolsLocked(sessionId: string, names: string[]): Promise<
@@ -2483,6 +2517,18 @@ export const sessionManager = new SessionManager();
 // the exclusion set + size store (injection, so session-throughput needs no import of
 // session-manager). One registration; every snapshot() thereafter is enriched.
 setDeferredDefsProvider(sessionId => sessionManager.deferredDefsSavings(sessionId));
+
+// Central idle-suppression wiring (spec-idle-suppression-central): dispatchState
+// suppresses its 'idle' emit while a session is about to auto-continue, so EVERY
+// dispatch-emit consumer (waitForActive, waitForIdle, restart-manager) is protected
+// by this single predicate — no per-caller opt-in. Injected — dispatch-state imports
+// no SessionManager.
+dispatchState.setIdleSuppressor(sessionId => sessionManager.hasPendingAutoContinue(sessionId));
+
+// Defer a graceful restart while any reveal-continuation is pending: restart-manager's
+// immediate check bypasses the idle emit, so it needs its own gate on the same
+// predicate (spec-idle-suppression-central).
+setAnyPendingProvider(() => sessionManager.hasAnyPendingAutoContinue());
 
 // The operator's auto-continue preference, injected so SessionManager (which owns
 // the pending/attempt state read by hasPendingAutoContinue) needs no import of the

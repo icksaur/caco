@@ -30,8 +30,16 @@ export function resolveModelAlias(model: string): string {
 const defaultPreferences: UserPreferences = {
   lastCwd: process.cwd(),
   lastModel: DEFAULT_MODEL,
-  lastSessionId: null
+  lastSessionId: null,
+  autoContinueEnabled: true
 };
+
+/** Whether auto-continuation is enabled given a preferences object (default on:
+ *  only an explicit `false` disables it; a missing/undefined prefs object is
+ *  treated as the default-on case). */
+export function isAutoContinueEnabled(prefs: Pick<UserPreferences, 'autoContinueEnabled'> | undefined | null): boolean {
+  return prefs?.autoContinueEnabled !== false;
+}
 
 /**
  * Get default preferences

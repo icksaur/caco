@@ -6,11 +6,12 @@
  * - [agent:sessionId] - from agent-to-agent tools
  * - [scheduler:slug] - from scheduled jobs
  * - [skill:name] - from a skill slash-command invocation (shown purple)
+ * - [system:id] - server-injected (e.g. autocontinue); id drives rendering
  * 
  * Pure functions - no I/O, no side effects.
  */
 
-export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler' | 'skill';
+export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler' | 'skill' | 'system';
 
 export interface ParsedMessage {
   source: MessageSource;
@@ -64,7 +65,17 @@ export function parseMessageSource(content: string): ParsedMessage {
       cleanContent: content.slice(skillMatch[0].length)
     };
   }
-  
+
+  // Parse system marker: [system:identifier] (server-injected, e.g. autocontinue)
+  const systemMatch = content.match(/^\[system:([^\]]+)\]\s*/);
+  if (systemMatch) {
+    return {
+      source: 'system',
+      identifier: systemMatch[1],
+      cleanContent: content.slice(systemMatch[0].length)
+    };
+  }
+
   return { source: 'user', cleanContent: content };
 }
 

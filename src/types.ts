@@ -12,6 +12,10 @@ export interface UserPreferences {
   lastCwd: string;
   lastModel: string;
   lastSessionId: string | null;
+  /** Auto-continuation (spec-enable-tools-autocontinue): when a dispatch reveals
+   *  tools via caco_enable_tools, Caco auto-sends one follow-up so the tools are
+   *  usable. Default on; set false to require a manual message instead. */
+  autoContinueEnabled?: boolean;
 }
 
 export interface SessionCacheEntry {

@@ -189,6 +189,7 @@ describe('ElementInserter (via config tables)', () => {
     expect(EVENT_TO_OUTER['caco.agent']).toBe('agent-message');
     expect(EVENT_TO_OUTER['caco.applet']).toBe('applet-message');
     expect(EVENT_TO_OUTER['caco.scheduler']).toBe('scheduler-message');
+    expect(EVENT_TO_OUTER['caco.system']).toBe('system-message');
   });
 });
 
@@ -200,6 +201,7 @@ describe('EVENT_TO_INNER', () => {
     expect(EVENT_TO_INNER['assistant.turn_start']).toBe('thinking-text');
     expect(EVENT_TO_INNER['session.error']).toBe('error-text');
     expect(EVENT_TO_INNER['caco.info']).toBeNull();
+    expect(EVENT_TO_INNER['caco.system']).toBe('system-text');
   });
 });
 

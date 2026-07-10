@@ -395,6 +395,15 @@ export class SessionManager {
   // read-modify-write of excludedTools is atomic; two enables in one turn compose).
   private revealLocks = new Map<string, Promise<unknown>>();
 
+  // Auto-continuation state (spec-enable-tools-autocontinue). Two SEPARATE maps so
+  // the cap counter is never lost when the pending tool set is cleared on a fire:
+  //  - pendingTools: names revealed this dispatch, to make available in the
+  //    continuation dispatch (unioned across multiple reveals in one dispatch).
+  //  - autoContinueAttempts: consecutive auto-continuations fired, reset only by a
+  //    non-autocontinue (human/agent/applet/scheduler) dispatch start.
+  private pendingTools = new Map<string, Set<string>>();
+  private autoContinueAttempts = new Map<string, number>();
+
   // sessionId → { cwd, summary } (cached from disk)
   private sessionCache = new Map<string, CachedSession>();
   
@@ -2307,10 +2316,54 @@ export class SessionManager {
     const run = prior.catch(() => {}).then(() => this.enableToolsLocked(sessionId, names));
     this.revealLocks.set(sessionId, run);
     try {
-      return await run;
+      const result = await run;
+      // Record a successful reveal so the idle hook can auto-continue this dispatch
+      // in a fresh one where the tools are present (spec-enable-tools-autocontinue).
+      if (result.ok && result.enabled.length > 0) {
+        this.addPendingTools(sessionId, result.enabled.map(k => k as string));
+      }
+      return result;
     } finally {
       if (this.revealLocks.get(sessionId) === run) this.revealLocks.delete(sessionId);
     }
+  }
+
+  /** Union revealed tool names into this session's pending-continuation set. */
+  addPendingTools(sessionId: string, names: string[]): void {
+    if (names.length === 0) return;
+    const set = this.pendingTools.get(sessionId) ?? new Set<string>();
+    for (const n of names) set.add(n);
+    this.pendingTools.set(sessionId, set);
+  }
+
+  /** The tools awaiting an auto-continuation for this session (empty if none). */
+  getPendingTools(sessionId: string): string[] {
+    return [...(this.pendingTools.get(sessionId) ?? [])];
+  }
+
+  /** Clear the pending-continuation tool set (called when a continuation fires).
+   *  Does NOT touch the attempt counter — the two are independent state. */
+  clearPendingTools(sessionId: string): void {
+    this.pendingTools.delete(sessionId);
+  }
+
+  /** Consecutive auto-continuations fired for this session. */
+  getAutoContinueAttempts(sessionId: string): number {
+    return this.autoContinueAttempts.get(sessionId) ?? 0;
+  }
+
+  /** Increment the consecutive-continuation counter (called when a continuation fires). */
+  bumpAutoContinueAttempts(sessionId: string): void {
+    this.autoContinueAttempts.set(sessionId, this.getAutoContinueAttempts(sessionId) + 1);
+  }
+
+  /** Reset auto-continuation state: clear pending tools AND zero the counter.
+   *  Called when a non-autocontinue (human/agent/applet/scheduler) dispatch starts,
+   *  so a topic change never triggers a leftover re-prompt and human activity
+   *  re-arms the budget. */
+  resetAutoContinue(sessionId: string): void {
+    this.pendingTools.delete(sessionId);
+    this.autoContinueAttempts.delete(sessionId);
   }
 
   private async enableToolsLocked(sessionId: string, names: string[]): Promise<

@@ -30,8 +30,40 @@ import { resetRequest, snapshot, markRequestComplete } from '../session-throughp
 import { appendRequestMetrics } from '../request-metrics-log.js';
 import { buildUsageRecord, emitUsageRecord, resolveUsageRates, type UsageRates } from '../usage-metrics.js';
 import { modelCostSummary } from '../model-billing.js';
+import { maybeAutoContinue, AUTOCONTINUE_IDENTIFIER, AUTO_CONTINUE_CAP } from '../auto-continue-runtime.js';
+import { isAutoContinueEnabled } from '../preferences.js';
 
 const router = Router();
+
+/**
+ * Fire an auto-continuation for a session that just went idle after revealing
+ * tools (spec-enable-tools-autocontinue). Builds the real effect deps around
+ * SessionManager + dispatchMessage and delegates the decision/serialization to
+ * `maybeAutoContinue`. The continuation is a `[system:autocontinue]` message,
+ * dispatched with `needsObservation:false` so it never marks the session
+ * unobserved.
+ */
+function triggerAutoContinue(sessionId: string): void {
+  // Cheap guard: if nothing was revealed this dispatch there is no continuation to
+  // make — return before building deps. Keeps the idle hook inert (and free) for
+  // the overwhelmingly common no-reveal dispatch.
+  if (sessionManager.getPendingTools(sessionId).length === 0) return;
+  void maybeAutoContinue(sessionId, {
+    getPendingTools: id => sessionManager.getPendingTools(id),
+    getAttempts: id => sessionManager.getAutoContinueAttempts(id),
+    isBusy: id => sessionManager.isBusy(id),
+    reassert: async (id, tools) => { await sessionManager.enableTools(id, tools); },
+    clearPendingTools: id => sessionManager.clearPendingTools(id),
+    bumpAttempts: id => sessionManager.bumpAutoContinueAttempts(id),
+    dispatch: async (id, text) => {
+      const prompt = prefixMessageSource('system', AUTOCONTINUE_IDENTIFIER, text);
+      await dispatchMessage(id, prompt, { needsObservation: false, requestId: `autocontinue-${Date.now().toString(36)}` });
+    },
+    emitSystem: (id, text) => broadcastEvent(id, { type: 'session.info', data: { message: text } }),
+    enabled: () => isAutoContinueEnabled(sessionState.preferences),
+    cap: AUTO_CONTINUE_CAP,
+  });
+}
 
 /**
  * POST /api/sessions/:sessionId/messages - Send message to specific session
@@ -67,6 +99,12 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     res.status(400).json({ error: 'correlationId required for agent-initiated calls' });
     return;
   }
+
+  // Any human/agent/applet/scheduler message re-arms auto-continuation: clear a
+  // stale pending reveal + reset the consecutive-continuation counter (spec-
+  // enable-tools-autocontinue P5). The continuation dispatch itself calls
+  // dispatchMessage directly (not this route), so it never resets its own budget.
+  sessionManager.resetAutoContinue(sessionId);
   
   // Generate correlationId for non-agent messages (user/applet/scheduler)
   // This allows agent tools to inherit it for agent-to-agent communication
@@ -455,7 +493,13 @@ export async function dispatchMessage(
         if (event.type === 'session.idle') {
           void sessionManager.pollQuota();
         }
-        void completeDispatch(event.type);
+        const wasIdle = event.type === 'session.idle';
+        void completeDispatch(event.type).then(() => {
+          // After the dispatch is fully torn down (session no longer busy), fire an
+          // auto-continuation if this dispatch revealed tools (spec-enable-tools-
+          // autocontinue). Idle only — an errored dispatch does not auto-continue.
+          if (wasIdle) triggerAutoContinue(sessionId);
+        });
         unsubscribe();
       }
     };

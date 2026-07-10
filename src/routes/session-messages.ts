@@ -57,7 +57,14 @@ function triggerAutoContinue(sessionId: string): void {
     bumpAttempts: id => sessionManager.bumpAutoContinueAttempts(id),
     dispatch: async (id, text) => {
       const prompt = prefixMessageSource('system', AUTOCONTINUE_IDENTIFIER, text);
-      await dispatchMessage(id, prompt, { needsObservation: false, requestId: `autocontinue-${Date.now().toString(36)}` });
+      // Broadcast the continuation's events to WS viewers (same as the HTTP route),
+      // otherwise the operator sees nothing live until a page refresh replays history.
+      await dispatchMessage(
+        id,
+        prompt,
+        { needsObservation: false, requestId: `autocontinue-${Date.now().toString(36)}` },
+        { onEvent: (evt) => broadcastEvent(id, evt) }
+      );
     },
     emitSystem: (id, text) => broadcastEvent(id, { type: 'session.info', data: { message: text } }),
     enabled: () => isAutoContinueEnabled(sessionState.preferences),

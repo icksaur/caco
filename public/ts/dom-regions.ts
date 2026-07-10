@@ -596,6 +596,7 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
   'caco.applet': setPath('content'),
   'caco.scheduler': setPath('content'),
   'caco.skill': setPath('content'),
+  'caco.system': setPath('content'),
 
   'caco.agent_selected': (element, data) => {
     const agentId = str(data.agentId, 'agent');
@@ -707,8 +708,9 @@ export class ChatRegion {
       }
     }
 
-    // Get outer div (agentId keeps sub-agent boxes separate + markable)
-    const outer = this.outerInserter.getElement(eventType, this.root.el, undefined, agentId);
+    // Get outer div (agentId keeps sub-agent boxes separate + markable; data
+    // carries sourceIdentifier so [system:autocontinue] gets its purple modifier)
+    const outer = this.outerInserter.getElement(eventType, this.root.el, data, agentId);
     if (!outer) return;
 
     // Get inner div (null = omit this event type)

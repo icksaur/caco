@@ -243,6 +243,13 @@ describe('insertEvent', () => {
       insertEvent({ type: 'user.message', data: {} }, el);
       expect(el.textContent).toBe('');
     });
+
+    it('sets caco.system content (autocontinue message renders its text, not an empty box)', async () => {
+      const { insertEvent } = await import('../../public/ts/dom-regions.js');
+      const el = mockElement();
+      insertEvent({ type: 'caco.system', data: { content: 'Enabled tools are now available' } } as never, el);
+      expect(el.textContent).toBe('Enabled tools are now available');
+    });
   });
 
   describe('delta append mode', () => {
@@ -449,6 +456,53 @@ describe('scopedRoot', () => {
 });
 
 // ── ChatRegion lifecycle tests ──────────────────────────────────
+
+describe('ChatRegion.renderEvent — system message rendering', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal('document', {
+      createElement: (tag: string) => {
+        const el = createMockElement();
+        (el as unknown as { tagName: string }).tagName = tag.toUpperCase();
+        return el;
+      },
+    });
+  });
+
+  it('gives [system:autocontinue] the purple modifier class and renders its text', async () => {
+    const { scopedRoot, ChatRegion } = await import('../../public/ts/dom-regions.js');
+    const root = createMockElement();
+    const region = new ChatRegion(scopedRoot(root));
+
+    region.renderEvent({
+      type: 'user.message',
+      data: { source: 'system', sourceIdentifier: 'autocontinue', content: 'Continue the task' },
+    } as never);
+
+    const outer = root._children[0];
+    expect(outer.className).toContain('system-message');
+    expect(outer.className).toContain('autocontinue'); // purple modifier
+    expect(outer.dataset.modifier).toBe('autocontinue');
+    // inner content is populated (not an empty box)
+    const inner = (outer as unknown as { _children: HTMLElement[] })._children[0];
+    expect(inner.textContent).toBe('Continue the task');
+  });
+
+  it('leaves a generic [system:herd] message gray (no autocontinue modifier)', async () => {
+    const { scopedRoot, ChatRegion } = await import('../../public/ts/dom-regions.js');
+    const root = createMockElement();
+    const region = new ChatRegion(scopedRoot(root));
+
+    region.renderEvent({
+      type: 'user.message',
+      data: { source: 'system', sourceIdentifier: 'herd', content: 'a wake' },
+    } as never);
+
+    const outer = root._children[0];
+    expect(outer.className).toContain('system-message');
+    expect(outer.className).not.toContain('autocontinue');
+  });
+});
 
 describe('ChatRegion.removeThinking', () => {
   beforeEach(() => {

@@ -48,7 +48,9 @@ vi.mock('../../src/routes/websocket.js', () => ({
 }));
 vi.mock('../../src/storage.js', () => ({
   getSessionMeta: vi.fn(() => ({ model: 'claude-opus-4.6' })),
+  readSessionMeta: vi.fn(() => ({ model: 'claude-opus-4.6' })),
   updateSessionMeta: vi.fn(),
+  markSessionIdle: vi.fn(),
 }));
 vi.mock('../../src/model-billing.js', () => ({
   modelCostSummary: vi.fn(() => ({ inputPerMtok: 15, outputPerMtok: 75, cachePerMtok: 1.5, contextWindow: 200_000, multiplier: 1 })),

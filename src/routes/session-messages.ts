@@ -32,6 +32,7 @@ import { buildUsageRecord, emitUsageRecord, resolveUsageRates, type UsageRates }
 import { modelCostSummary } from '../model-billing.js';
 import { maybeAutoContinue, AUTOCONTINUE_IDENTIFIER, AUTO_CONTINUE_CAP } from '../auto-continue-runtime.js';
 import { isAutoContinueEnabled } from '../preferences.js';
+import { onSessionIdle } from '../herd-runtime.js';
 
 const router = Router();
 
@@ -231,6 +232,8 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     promptToSend = prefixMessageSource('agent', fromSession, prompt);
   } else if (source === 'scheduler' && scheduleSlug) {
     promptToSend = prefixMessageSource('scheduler', scheduleSlug, prompt);
+  } else if (source === 'system') {
+    promptToSend = prefixMessageSource('system', 'herd', prompt);
   }
   
   try {
@@ -499,6 +502,10 @@ export async function dispatchMessage(
         }
         if (event.type === 'session.idle') {
           void sessionManager.pollQuota();
+          // Herd hook: stamp lastIdleAt unconditionally + wake this session's
+          // parent (if a child) and/or its own herd (if a parent). Runs outside
+          // the needsObservation gate so agent/system-sourced child turns count.
+          void onSessionIdle(sessionId);
         }
         const wasIdle = event.type === 'session.idle';
         void completeDispatch(event.type).then(() => {

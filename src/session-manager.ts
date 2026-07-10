@@ -35,6 +35,7 @@ import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
 import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-defer-store.js';
 import { getNowActiveSeconds, getLastUsedActiveSeconds, stampToolUsage, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS, COLD_RESUME_STALE_MS } from './tool-usage-store.js';
 import { getToolsUsed, setDeferredDefsProvider } from './session-throughput.js';
+import { isHerdParent } from './herd.js';
 
 
 import { formatMemoryForPrompt } from './memory-tool.js';
@@ -320,6 +321,10 @@ interface SessionListItem {
   scheduleSlug: string | null;
   scheduleNextRun: string | null;
   folder?: string;
+  /** Herd bond: this session's parent id, or null if not a herd child. */
+  orchestratedBy: string | null;
+  /** Whether this session is a herd parent (≥1 child claims it — derived). */
+  isHerdParent: boolean;
 }
 
 /**
@@ -1454,7 +1459,7 @@ export class SessionManager {
       const scheduleSlug = null;
       const scheduleNextRun = null;
       const hasIcon = getSessionIconPath(sessionId) !== null;
-      result.push({ sessionId, cwd, model, name, kind, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, hasIcon, scheduleSlug, scheduleNextRun, folder: meta?.folder });
+      result.push({ sessionId, cwd, model, name, kind, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, hasIcon, scheduleSlug, scheduleNextRun, folder: meta?.folder, orchestratedBy: meta?.orchestratedBy ?? null, isHerdParent: isHerdParent(sessionId) });
     }
     return result;
   }

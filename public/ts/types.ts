@@ -47,6 +47,10 @@ export interface SessionData {
   scheduleSlug?: string;
   scheduleNextRun?: string;
   folder?: string;
+  /** Herd bond: this session's parent id, or absent if not a herd child. */
+  orchestratedBy?: string | null;
+  /** Whether this session is a herd parent (≥1 child claims it). */
+  isHerdParent?: boolean;
 }
 
 export interface SessionsResponse {

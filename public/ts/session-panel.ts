@@ -678,6 +678,18 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     titleSpan.appendChild(intentSpan);
   }
   row1.appendChild(titleSpan);
+
+  // Herd badge: a small marker on herd parents ("herd") and children ("child")
+  // so the supervision relationship is visible while both stay top-level.
+  if (session.isHerdParent || session.orchestratedBy) {
+    const herd = document.createElement('span');
+    herd.className = 'session-herd-badge';
+    herd.textContent = session.isHerdParent ? 'herd' : 'child';
+    herd.title = session.isHerdParent
+      ? 'Orchestrator: supervises herd children'
+      : 'Herd child: supervised by another session';
+    row1.appendChild(herd);
+  }
   
   if (session.updatedAt) {
     const ageSpan = document.createElement('span');

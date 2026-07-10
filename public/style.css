@@ -955,6 +955,20 @@ main {
   background: var(--purple);
 }
 
+/* Herd badge: a small marker on herd parents ("herd") and children ("child")
+   in the session list, so the supervision relationship is visible. */
+.session-herd-badge {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-xs);
+  margin-left: var(--space-xs);
+}
+
 .assistant-activity {
   background: var(--color-activity-bg);
   padding: var(--space-sm);

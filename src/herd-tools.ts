@@ -1,0 +1,180 @@
+/**
+ * Herd orchestration tools (spec-session-orchestration Slice B: B5, B6).
+ *
+ *  - caco_herd_state  — return every child's status + last response (the parent's
+ *    automatic result channel; closes the "no ergonomic result read" gap).
+ *  - caco_herd        — create / acquire / resume / disown children.
+ *
+ * Children are ordinary sessions: they receive normal agent-sourced prompts and
+ * are unaware of the herd. All herd logic lives here + in src/herd.ts + the
+ * server. Dispatches use the agent-message path (source:'agent' + fromSession)
+ * so child prompts render agent-colored.
+ */
+
+import { defineTool } from '@github/copilot-sdk';
+import { z } from 'zod';
+import { randomUUID } from 'crypto';
+import { SERVER_URL } from './config.js';
+import type { SessionIdRef } from './types.js';
+import { sessionManager } from './session-manager.js';
+import { getSessionMeta, updateSessionMeta } from './storage.js';
+import { getLastAssistantMessage } from './session-history.js';
+import { boundDelegateResponse } from './delegate-tool.js';
+import {
+  registerHerdBond,
+  clearHerdBond,
+  getHerdChildren,
+  deriveChildStatus,
+  herdParentActionError,
+  herdAcquireError,
+  herdMemberError,
+  buildHerdStatePayload,
+  type HerdChild,
+  type HerdStateEntry,
+} from './herd.js';
+
+export type GetCorrelationId = (sessionId: string) => string | undefined;
+
+const stripPrefix = (id: string) => id.replace(/^caco-session:/, '');
+
+/** Live snapshot of a parent's children (status derived from the runtime). */
+function gatherHerdChildren(parentId: string): HerdChild[] {
+  return getHerdChildren(parentId).map(id => {
+    const meta = getSessionMeta(id);
+    return {
+      sessionId: id,
+      name: meta?.name ?? null,
+      status: deriveChildStatus(sessionManager.isBusy(id), sessionManager.isActive(id)),
+      lastIdleAt: meta?.lastIdleAt ?? null,
+    };
+  });
+}
+
+/** Fire-and-forget a prompt to a child via the agent-message path (agent color). */
+async function dispatchToChild(childId: string, prompt: string, fromSession: string, correlationId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${SERVER_URL}/api/sessions/${childId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, source: 'agent', fromSession, correlationId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      return { ok: false, error: `HTTP ${res.status} — ${err.error || res.statusText}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export function createHerdTools(sessionRef: SessionIdRef, getCorrelationId: GetCorrelationId) {
+  const selfCorrelation = () => getCorrelationId(sessionRef.id) ?? randomUUID();
+
+  const cacoHerdState = defineTool('caco_herd_state', {
+    description: "Get the current state of ALL your herd children (sessions you started or acquired via caco_herd). Returns each child's status (busy/idle/inactive), last idle time, and its last response — the go-to way to collect results from your herd. You are re-woken with this info whenever a child needs attention; call this for the full detail, then resume or disown each child.",
+
+    parameters: z.object({}),
+
+    handler: async () => {
+      const children = gatherHerdChildren(sessionRef.id);
+      const entries: HerdStateEntry[] = await Promise.all(children.map(async (c) => ({
+        ...c,
+        lastResponse: boundDelegateResponse(await getLastAssistantMessage(c.sessionId), c.sessionId.slice(0, 8)),
+      })));
+      const payload = buildHerdStatePayload(entries);
+      return { textResultForLlm: JSON.stringify(payload, null, 2), resultType: 'text' as const };
+    },
+  });
+
+  const modelIds = sessionManager.getModels().map(m => m.id);
+
+  const cacoHerd = defineTool('caco_herd', {
+    description: `Manage your herd of child sessions (durable, non-blocking supervision). Actions:
+- create: start a NEW session (cwd, model, prompt) as your child.
+- acquire: adopt an EXISTING unowned session (sessionId) into your herd, optionally with a prompt.
+- resume: give an existing child (sessionId) more work (prompt).
+- disown: remove a child (sessionId) from your herd — it becomes an ordinary session again.
+You do NOT wait for children; they run and you are re-woken when one needs attention (use caco_herd_state to collect results). Children are ordinary sessions and are unaware they are in a herd. A child cannot itself create/acquire children (herds are one level deep).${modelIds.length ? `\n\nModel IDs: ${modelIds.join(', ')}.` : ''}`,
+
+    parameters: z.object({
+      action: z.enum(['create', 'acquire', 'resume', 'disown']).describe('Herd action'),
+      sessionId: z.string().optional().describe('Target session (required for acquire/resume/disown)'),
+      cwd: z.string().optional().describe('Working directory (for create)'),
+      model: z.string().optional().describe('Model ID (for create)'),
+      prompt: z.string().optional().describe('Prompt to dispatch (create/resume; optional for acquire)'),
+    }),
+
+    handler: async ({ action, sessionId: rawTarget, cwd, model, prompt }) => {
+      const err = (msg: string) => ({ textResultForLlm: msg, resultType: 'error' as const });
+      const ok = (msg: string) => ({ textResultForLlm: msg, resultType: 'text' as const });
+      const callerId = sessionRef.id;
+      const callerMeta = getSessionMeta(callerId);
+
+      if (action === 'create') {
+        const g1 = herdParentActionError(callerMeta?.orchestratedBy);
+        if (g1) return err(g1);
+        if (!cwd || !model) return err('create requires cwd and model.');
+        if (modelIds.length > 0 && !modelIds.includes(model)) return err(`Unknown model "${model}". Available: ${modelIds.join(', ')}.`);
+        let newId: string;
+        try {
+          const res = await fetch(`${SERVER_URL}/api/sessions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cwd, model, description: `herd child of ${callerId.slice(0, 8)}`, kind: 'agent' }),
+          });
+          if (!res.ok) {
+            const e = await res.json().catch(() => ({ error: res.statusText }));
+            return err(`Failed to create child: ${e.error || res.statusText}`);
+          }
+          ({ sessionId: newId } = await res.json());
+        } catch (e) {
+          return err(`Failed to create child: ${e instanceof Error ? e.message : e}`);
+        }
+        updateSessionMeta(newId, meta => { meta.orchestratedBy = callerId; });
+        registerHerdBond(newId, callerId);
+        if (prompt) {
+          const d = await dispatchToChild(newId, prompt, callerId, selfCorrelation());
+          if (!d.ok) return ok(`Created child ${newId.slice(0, 8)} but its first prompt failed to send: ${d.error}. Use caco_herd resume to retry.`);
+        }
+        return ok(`Created herd child ${newId}. It will work independently; you'll be re-woken when it needs attention (caco_herd_state to collect results).`);
+      }
+
+      const targetId = rawTarget ? stripPrefix(rawTarget) : undefined;
+      if (!targetId) return err(`${action} requires a sessionId.`);
+      const targetMeta = getSessionMeta(targetId);
+
+      if (action === 'acquire') {
+        const g1 = herdParentActionError(callerMeta?.orchestratedBy);
+        if (g1) return err(g1);
+        const ae = herdAcquireError({ callerId, targetId, targetExists: !!targetMeta, targetOrchestratedBy: targetMeta?.orchestratedBy });
+        if (ae) return err(ae);
+        updateSessionMeta(targetId, meta => { meta.orchestratedBy = callerId; });
+        registerHerdBond(targetId, callerId);
+        if (prompt) {
+          const d = await dispatchToChild(targetId, prompt, callerId, selfCorrelation());
+          if (!d.ok) return ok(`Acquired ${targetId.slice(0, 8)} but the prompt failed to send: ${d.error}.`);
+        }
+        return ok(`Acquired ${targetId.slice(0, 8)} into your herd.`);
+      }
+
+      if (action === 'resume') {
+        const me = herdMemberError({ action: 'resume', callerId, targetOrchestratedBy: targetMeta?.orchestratedBy });
+        if (me) return err(me);
+        if (!prompt) return err('resume requires a prompt.');
+        const d = await dispatchToChild(targetId, prompt, callerId, selfCorrelation());
+        if (!d.ok) return err(`Failed to resume ${targetId.slice(0, 8)}: ${d.error}`);
+        return ok(`Resumed child ${targetId.slice(0, 8)}.`);
+      }
+
+      // disown
+      const me = herdMemberError({ action: 'disown', callerId, targetOrchestratedBy: targetMeta?.orchestratedBy });
+      if (me) return err(me);
+      updateSessionMeta(targetId, meta => { meta.orchestratedBy = undefined; });
+      clearHerdBond(targetId);
+      return ok(`Disowned ${targetId.slice(0, 8)} — it is now an ordinary session again.`);
+    },
+  });
+
+  return [cacoHerdState, cacoHerd];
+}

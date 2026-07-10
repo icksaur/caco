@@ -20,6 +20,8 @@ import { createAgentTools } from './src/agent-tools.js';
 import { createMcpAuthTools } from './src/mcp-auth-tools.js';
 import { createDocsTool } from './src/dev-docs-tool.js';
 import { createDelegateTool } from './src/delegate-tool.js';
+import { createHerdTools } from './src/herd-tools.js';
+import { scanHerdsOnBoot, onSessionDeleted } from './src/herd-runtime.js';
 import { createSessionHistoryTool } from './src/session-history-tool.js';
 import { createMemoryTools } from './src/memory-tool.js';
 import { createIndexTool } from './src/index-tool.js';
@@ -246,6 +248,7 @@ async function start(): Promise<void> {
     const mcpAuthTools = createMcpAuthTools();
     const docs = createDocsTool(programCwd);
     const delegateTools = createDelegateTool(sessionRef);
+    const herdTools = createHerdTools(sessionRef, (id) => sessionManager.getDispatchCorrelationId(id));
     const sessionHistoryTools = createSessionHistoryTool();
     const memoryTools = createMemoryTools();
     const indexTools = createIndexTool(sessionCwd);
@@ -255,7 +258,7 @@ async function start(): Promise<void> {
     const browserTools = createBrowserTools(sessionRef);
     const toolRevealTools = createToolRevealTool(sessionRef);
     
-    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...sessionHistoryTools, ...memoryTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools, ...toolRevealTools];
+    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...herdTools, ...sessionHistoryTools, ...memoryTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools, ...toolRevealTools];
     // Capture the full Caco tool catalog (pre-filter, incl. hard-disabled) once, for
     // the mcp-servers applet. See docs/spec-tool-reveal.md Phase A.
     if (sessionManager.getCacoToolCatalog().length === 0) {
@@ -306,6 +309,9 @@ async function start(): Promise<void> {
   sessionState.onSessionEnd((sid) => {
     gitEditPoller.detachFromSession(sid);
     flushFileEditsCardList(sid);
+    // Herd cleanup on delete: disown a deleted parent's children AND clear a
+    // deleted child's own bond (so it can't linger as a ghost in the index).
+    onSessionDeleted(sid);
   });
   
   startScheduleManager();
@@ -346,6 +352,10 @@ async function start(): Promise<void> {
       console.log(`✓ Server running at http://${HOST}:${PORT}`);
       console.log(`  Local: http://localhost:${PORT}`);
       console.log('  Press Ctrl+C to stop');
+      // Post-listen herd boot scan: rebuild the membership index, self-heal
+      // orphaned children, and re-wake any parent with a non-active child. Must
+      // run after listen() because the wake POSTs the message route.
+      void scanHerdsOnBoot();
       return; // Success
     } catch (err: unknown) {
       const error = err as NodeJS.ErrnoException;

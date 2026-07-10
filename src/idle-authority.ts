@@ -20,9 +20,10 @@ export interface IdleAuthorityDeps {
   /** Number of tools pending a continuation (drives the cap-message path even
    *  when hasPendingAutoContinue is false at cap). */
   pendingToolCount(sessionId: string): number;
-  /** Drive the auto-continue runtime: fires a continuation, or (at cap) emits the
-   *  terminal cap message, or no-ops. */
-  runAutoContinue(sessionId: string): Promise<void>;
+  /** Drive the auto-continue runtime: fires a continuation and resolves `true`
+   *  iff a continuation dispatch actually STARTED; `false` at cap / skip / a
+   *  failed fire (so the authority runs real-idle effects instead). */
+  runAutoContinue(sessionId: string): Promise<boolean>;
   /** Real-idle effect: mark the session unobserved (already gated by caller on
    *  needsObservation being honored here). */
   markIdle(sessionId: string): void;
@@ -37,13 +38,16 @@ export interface IdleAuthorityDeps {
  *  1. Capture `willFire` BEFORE driving the continuation (the fire path clears
  *     the pending set).
  *  2. If ANY tools are pending, drive the auto-continue runtime — this fires the
- *     continuation, OR at cap emits the terminal cap message. Driving it whenever
- *     pending>0 is what guarantees the cap message never drops silently.
- *  3. If `willFire` ⇒ FALSE idle: return now. Suppress every real-idle effect;
- *     the session is logically still busy until the continuation reaches a real
- *     idle with nothing pending.
- *  4. Otherwise ⇒ REAL idle (nothing pending, capped, or pref-off): run the
- *     real-idle effects — markIdle (if needsObservation), herd hook, pollQuota.
+ *     continuation, OR at cap emits the terminal cap message. It resolves whether
+ *     a continuation dispatch actually STARTED.
+ *  3. FALSE idle ONLY when a continuation genuinely started (`willFire` AND
+ *     started): return now, suppressing every real-idle effect; the session is
+ *     logically still busy until the continuation's own real idle. If a
+ *     continuation was expected but did NOT start (cap, pref-off, or a failed
+ *     fire that yields no further idle), fall through — otherwise herd-wake /
+ *     delegate-completion / unobserved would be dropped forever for this turn.
+ *  4. REAL idle: run the real-idle effects — markIdle (if needsObservation),
+ *     herd hook, pollQuota.
  */
 export async function handleSessionIdle(
   sessionId: string,
@@ -52,13 +56,15 @@ export async function handleSessionIdle(
 ): Promise<void> {
   const willFire = deps.hasPendingAutoContinue(sessionId);
 
+  let started = false;
   if (deps.pendingToolCount(sessionId) > 0) {
-    await deps.runAutoContinue(sessionId);
+    started = await deps.runAutoContinue(sessionId);
   }
 
-  if (willFire) return; // false idle — inert to completion signals
+  if (willFire && started) return; // false idle — a continuation is genuinely running
 
-  // Real idle: propagate to the completion consumers exactly as before.
+  // Real idle (nothing pending, capped, pref-off, OR a fire that failed to start):
+  // propagate to the completion consumers exactly as before.
   if (ctx.needsObservation) deps.markIdle(sessionId);
   deps.herdOnSessionIdle(sessionId);
   deps.pollQuota();

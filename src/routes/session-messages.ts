@@ -47,9 +47,10 @@ setAutoContinuePrefProvider(() => isAutoContinueEnabled(sessionState.preferences
  * Drive the auto-continue runtime for a session (spec-enable-tools-autocontinue):
  * fires a continuation for revealed tools, or at cap emits the terminal cap
  * message. Builds the effect deps around SessionManager + dispatchMessage. Called
- * by the idle authority only when a pending reveal exists.
+ * by the idle authority only when a pending reveal exists. Resolves `true` iff a
+ * continuation dispatch actually started.
  */
-function runAutoContinue(sessionId: string): Promise<void> {
+function runAutoContinue(sessionId: string): Promise<boolean> {
   return maybeAutoContinue(sessionId, {
     getPendingTools: id => sessionManager.getPendingTools(id),
     getAttempts: id => sessionManager.getAutoContinueAttempts(id),

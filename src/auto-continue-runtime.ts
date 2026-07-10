@@ -58,30 +58,33 @@ const CAP_MESSAGE =
 const chains = new Map<string, Promise<unknown>>();
 
 /** Evaluate and, if warranted, fire exactly one auto-continuation for the
- *  session. Serialized per session via the trailing-edge chain. */
-export function maybeAutoContinue(sessionId: string, deps: AutoContinueDeps): Promise<void> {
+ *  session. Serialized per session via the trailing-edge chain. Resolves `true`
+ *  iff a continuation dispatch actually STARTED (so a caller — the idle authority
+ *  — can fall through to real-idle effects when it did NOT: cap, skip, or a failed
+ *  fire that will produce no further idle). */
+export function maybeAutoContinue(sessionId: string, deps: AutoContinueDeps): Promise<boolean> {
   const prior = chains.get(sessionId) ?? Promise.resolve();
   // `evaluate` swallows operational errors internally, but guard the chain too so a
   // never-expected throw can't surface as an unhandled rejection on either the
-  // stored chain, the cleanup, or the returned promise (the caller `void`s it).
-  const run = prior.catch(() => {}).then(() => evaluate(sessionId, deps)).catch(() => {});
+  // stored chain, the cleanup, or the returned promise.
+  const run = prior.catch(() => {}).then(() => evaluate(sessionId, deps)).catch(() => false);
   chains.set(sessionId, run);
   void run.finally(() => { if (chains.get(sessionId) === run) chains.delete(sessionId); });
   return run;
 }
 
-async function evaluate(sessionId: string, deps: AutoContinueDeps): Promise<void> {
-  if (!deps.enabled()) return;
+async function evaluate(sessionId: string, deps: AutoContinueDeps): Promise<boolean> {
+  if (!deps.enabled()) return false;
   const decision = decideAutoContinue({
     hasPending: deps.getPendingTools(sessionId).length > 0,
     busy: deps.isBusy(sessionId),
     attempts: deps.getAttempts(sessionId),
     cap: deps.cap,
   });
-  if (decision === 'skip') return;
+  if (decision === 'skip') return false;
   if (decision === 'cap-reached') {
     deps.emitSystem(sessionId, CAP_MESSAGE);
-    return;
+    return false;
   }
   // fire: re-assert the reveal, consume the pending set, count the attempt, then
   // start a fresh dispatch where the tools are present. The re-assert and dispatch
@@ -90,15 +93,20 @@ async function evaluate(sessionId: string, deps: AutoContinueDeps): Promise<void
   // already reset our budget), or a send failure if the session was evicted. Such
   // failures must NEVER escape as an unhandled rejection (there is no global
   // handler; it could crash the server), so we swallow them here — the operator can
-  // always re-prompt, and a concurrent dispatch supersedes us anyway.
+  // always re-prompt, and a concurrent dispatch supersedes us anyway. On failure we
+  // return `false` so the idle authority runs the real-idle effects (herd wake /
+  // delegate completion / unobserved) that would otherwise never fire, since no
+  // continuation dispatch means no further session.idle for this turn.
   const tools = deps.getPendingTools(sessionId);
   deps.clearPendingTools(sessionId);
   deps.bumpAttempts(sessionId);
   try {
     await deps.reassert(sessionId, tools);
     await deps.dispatch(sessionId, buildContinuationPrompt(tools));
+    return true;
   } catch (e) {
     console.warn(`[AUTOCONTINUE] continuation for ${sessionId.slice(0, 8)} did not start: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
   }
 }
 

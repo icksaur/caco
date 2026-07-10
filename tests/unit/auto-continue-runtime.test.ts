@@ -48,7 +48,7 @@ describe('maybeAutoContinue (spec-enable-tools-autocontinue P3/P4/P5)', () => {
   it('fires a continuation: re-asserts, clears pending, bumps attempts, dispatches the named tools', async () => {
     const h = harness();
     h.setPending(['github-list_issues', 'caco_docs']);
-    await maybeAutoContinue(SID, h.deps);
+    await expect(maybeAutoContinue(SID, h.deps)).resolves.toBe(true); // continuation started
 
     expect(h.reassert).toHaveBeenCalledWith(SID, ['github-list_issues', 'caco_docs']);
     expect(h.pendingOf()).toEqual([]);          // pending consumed
@@ -115,8 +115,10 @@ describe('maybeAutoContinue (spec-enable-tools-autocontinue P3/P4/P5)', () => {
     const h = harness();
     h.setPending(['github-list_issues']);
     h.dispatch.mockRejectedValueOnce(new Error('Session is busy processing another message'));
-    // Must resolve (swallow), not throw — an unhandled rejection could crash the server.
-    await expect(maybeAutoContinue(SID, h.deps)).resolves.toBeUndefined();
+    // Must resolve false (swallowed, continuation did NOT start), not throw — an
+    // unhandled rejection could crash the server, and false lets the idle authority
+    // run real-idle effects instead of dropping them.
+    await expect(maybeAutoContinue(SID, h.deps)).resolves.toBe(false);
     // Pending was still consumed and the attempt counted (a concurrent dispatch resets anyway).
     expect(h.pendingOf()).toEqual([]);
     expect(h.attemptsOf()).toBe(1);

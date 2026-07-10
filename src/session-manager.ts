@@ -36,6 +36,7 @@ import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-def
 import { getNowActiveSeconds, getLastUsedActiveSeconds, stampToolUsage, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS, COLD_RESUME_STALE_MS } from './tool-usage-store.js';
 import { getToolsUsed, setDeferredDefsProvider } from './session-throughput.js';
 import { isHerdParent } from './herd.js';
+import { AUTO_CONTINUE_CAP } from './auto-continue.js';
 
 
 import { formatMemoryForPrompt } from './memory-tool.js';
@@ -2373,6 +2374,24 @@ export class SessionManager {
     this.autoContinueAttempts.delete(sessionId);
   }
 
+  /**
+   * Whether a continuation WILL fire on this session's next idle (spec-idle-
+   * authority): pending tools exist AND the operator preference is on AND we are
+   * under the consecutive-continuation cap. The single source of truth for
+   * "this idle is not a real idle" — read by the idle authority (to suppress
+   * real-idle effects), the herd hook (to skip the parent wake), and the delegate
+   * wait (to keep waiting). Deliberately NOT gated on isBusy: it answers "is this
+   * session about to auto-continue?" at the idle boundary where the current
+   * dispatch is ending. At/over cap ⇒ false (that idle is real; the cap message
+   * fires separately). Pref read via an injected provider so SessionManager needs
+   * no session-state/preferences import.
+   */
+  hasPendingAutoContinue(sessionId: string): boolean {
+    if ((this.pendingTools.get(sessionId)?.size ?? 0) === 0) return false;
+    if (autoContinuePrefProvider && !autoContinuePrefProvider()) return false;
+    return this.getAutoContinueAttempts(sessionId) < AUTO_CONTINUE_CAP;
+  }
+
   private async enableToolsLocked(sessionId: string, names: string[]): Promise<
     | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[] }
     | { ok: false; error: string }
@@ -2464,3 +2483,11 @@ export const sessionManager = new SessionManager();
 // the exclusion set + size store (injection, so session-throughput needs no import of
 // session-manager). One registration; every snapshot() thereafter is enriched.
 setDeferredDefsProvider(sessionId => sessionManager.deferredDefsSavings(sessionId));
+
+// The operator's auto-continue preference, injected so SessionManager (which owns
+// the pending/attempt state read by hasPendingAutoContinue) needs no import of the
+// preferences/session-state modules (spec-idle-authority). Wired once at startup.
+let autoContinuePrefProvider: (() => boolean) | null = null;
+export function setAutoContinuePrefProvider(fn: () => boolean): void {
+  autoContinuePrefProvider = fn;
+}

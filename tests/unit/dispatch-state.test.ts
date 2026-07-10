@@ -243,6 +243,49 @@ describe('DispatchState', () => {
       await expect(p).resolves.toBe('idle');
     });
 
+    // ── suppressIdle (spec-idle-authority): a pending-continuation idle is not real ──
+
+    it('suppressIdle gates the entry fast-path (not-busy + suppressed ⇒ waits, not idle)', async () => {
+      // Not busy AND suppressed: must NOT resolve idle immediately; times out instead.
+      const p = state.waitForActive('s1', {
+        idleTimeoutMs: IDLE, maxTotalMs: MAX, suppressIdle: () => true,
+      });
+      await vi.advanceTimersByTimeAsync(MAX);
+      await expect(p).resolves.toBe('timeout');
+    });
+
+    it('suppressIdle gates the idle listener: a suppressed end() does not resolve, a later real end() does', async () => {
+      state.start('s1', 'c1');
+      let suppressed = true;
+      const p = state.waitForActive('s1', {
+        idleTimeoutMs: IDLE, maxTotalMs: MAX, suppressIdle: () => suppressed,
+      });
+      // Reveal-dispatch ends while suppressed → ignored, keep waiting.
+      state.end('s1');
+      await vi.advanceTimersByTimeAsync(0);
+      // Continuation runs then reaches a real idle (predicate now false).
+      suppressed = false;
+      state.start('s1', 'c2');
+      state.end('s1');
+      await expect(p).resolves.toBe('idle');
+    });
+
+    it('suppressIdle gates the post-arm re-check (ends in the arm window while suppressed)', async () => {
+      // Busy at entry (arms listeners), then not-busy but suppressed at the
+      // post-arm re-check → must not resolve; a later unsuppressed end() does.
+      state.start('s1', 'c1');
+      let suppressed = true;
+      const p = state.waitForActive('s1', {
+        idleTimeoutMs: IDLE, maxTotalMs: MAX, suppressIdle: () => suppressed,
+      });
+      state.end('s1');                 // suppressed → ignored by listener
+      await vi.advanceTimersByTimeAsync(0);
+      suppressed = false;
+      state.start('s1', 'c2');
+      state.end('s1');
+      await expect(p).resolves.toBe('idle');
+    });
+
     it('times out after the idle gap with no activity', async () => {
       state.start('s1', 'c1');
       const p = state.waitForActive('s1', { idleTimeoutMs: IDLE, maxTotalMs: MAX });

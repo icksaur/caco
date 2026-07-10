@@ -23,12 +23,17 @@ const sm = vi.hoisted(() => ({
   resume: vi.fn(async () => {}),
   pollQuota: vi.fn(async () => {}),
   getModels: vi.fn((): unknown[] => []),
+  // Idle authority (spec-idle-authority): no reveal in these tests ⇒ real idle.
+  getPendingTools: vi.fn(() => [] as string[]),
+  hasPendingAutoContinue: vi.fn(() => false),
+  resetAutoContinue: vi.fn(),
+  getCacoToolCatalog: vi.fn(() => [] as { name: string }[]),
 }));
 
 const broadcastGlobalEvent = vi.hoisted(() => vi.fn());
 const broadcastEvent = vi.hoisted(() => vi.fn());
 
-vi.mock('../../src/session-manager.js', () => ({ sessionManager: sm }));
+vi.mock('../../src/session-manager.js', () => ({ sessionManager: sm, setAutoContinuePrefProvider: vi.fn() }));
 vi.mock('../../src/session-state.js', () => ({
   sessionState: { getSessionConfig: vi.fn(() => ({})) },
 }));

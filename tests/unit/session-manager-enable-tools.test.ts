@@ -267,3 +267,42 @@ describe('SessionManager — auto-continuation state (spec-enable-tools-autocont
     expect(manager.getAutoContinueAttempts(SID)).toBe(0);
   });
 });
+
+describe('SessionManager.hasPendingAutoContinue (spec-idle-authority)', () => {
+  beforeEach(() => { vi.clearAllMocks(); storage.meta.clear(); });
+
+  it('true when pending tools exist, pref on, under cap', async () => {
+    const { setAutoContinuePrefProvider } = await import('../../src/session-manager.js');
+    setAutoContinuePrefProvider(() => true);
+    const { manager } = await makeManager(vi.fn(async () => ({ success: true })), ['github-list_issues']);
+    await manager.enableTools(SID, ['github-list_issues']);
+    expect(manager.hasPendingAutoContinue(SID)).toBe(true);
+  });
+
+  it('false when nothing is pending', async () => {
+    const { setAutoContinuePrefProvider } = await import('../../src/session-manager.js');
+    setAutoContinuePrefProvider(() => true);
+    const { manager } = await makeManager(vi.fn(async () => ({ success: true })), ['github-list_issues']);
+    expect(manager.hasPendingAutoContinue(SID)).toBe(false);
+  });
+
+  it('false at/over the cap (real idle — cap message fires separately)', async () => {
+    const { setAutoContinuePrefProvider } = await import('../../src/session-manager.js');
+    setAutoContinuePrefProvider(() => true);
+    const { manager } = await makeManager(vi.fn(async () => ({ success: true })), ['github-list_issues']);
+    await manager.enableTools(SID, ['github-list_issues']);
+    manager.bumpAutoContinueAttempts(SID);
+    manager.bumpAutoContinueAttempts(SID);
+    manager.bumpAutoContinueAttempts(SID); // attempts = 3 = cap
+    expect(manager.hasPendingAutoContinue(SID)).toBe(false);
+  });
+
+  it('false when the operator preference is off (via injected provider)', async () => {
+    const { setAutoContinuePrefProvider } = await import('../../src/session-manager.js');
+    setAutoContinuePrefProvider(() => false);
+    const { manager } = await makeManager(vi.fn(async () => ({ success: true })), ['github-list_issues']);
+    await manager.enableTools(SID, ['github-list_issues']);
+    expect(manager.hasPendingAutoContinue(SID)).toBe(false);
+    setAutoContinuePrefProvider(() => true); // restore for other tests
+  });
+});

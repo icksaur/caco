@@ -83,6 +83,13 @@ export function wakeParent(parentId: string): Promise<void> {
  * itself a parent, re-evaluate its own herd.
  */
 export async function onSessionIdle(sessionId: string): Promise<void> {
+  // A caco_enable_tools reveal-idle is NOT a real idle: the session is about to
+  // auto-continue in a fresh dispatch (spec-idle-authority). Skip the herd stamp
+  // and parent wake so a herd child that reveals a tool does not wake its parent
+  // mid-work. Belt-and-suspenders: the idle authority already routes false idles
+  // away from this hook; this guard also protects any other future caller.
+  if (sessionManager.hasPendingAutoContinue(sessionId)) return;
+
   markSessionIdle(sessionId);
 
   const meta = getSessionMeta(sessionId);

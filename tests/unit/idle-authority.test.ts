@@ -1,0 +1,79 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { handleSessionIdle, type IdleAuthorityDeps } from '../../src/idle-authority.js';
+
+const SID = 'sess-1';
+
+function makeDeps(over: Partial<{
+  willFire: boolean;
+  pending: number;
+}> = {}): { deps: IdleAuthorityDeps; spies: Record<string, ReturnType<typeof vi.fn>> } {
+  const spies = {
+    hasPendingAutoContinue: vi.fn(() => over.willFire ?? false),
+    pendingToolCount: vi.fn(() => over.pending ?? 0),
+    runAutoContinue: vi.fn(async () => {}),
+    markIdle: vi.fn(),
+    herdOnSessionIdle: vi.fn(),
+    pollQuota: vi.fn(),
+  };
+  const deps: IdleAuthorityDeps = {
+    hasPendingAutoContinue: spies.hasPendingAutoContinue as unknown as IdleAuthorityDeps['hasPendingAutoContinue'],
+    pendingToolCount: spies.pendingToolCount as unknown as IdleAuthorityDeps['pendingToolCount'],
+    runAutoContinue: spies.runAutoContinue as unknown as IdleAuthorityDeps['runAutoContinue'],
+    markIdle: spies.markIdle,
+    herdOnSessionIdle: spies.herdOnSessionIdle,
+    pollQuota: spies.pollQuota,
+  };
+  return { deps, spies };
+}
+
+describe('handleSessionIdle (spec-idle-authority)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('FALSE idle (willFire): fires the continuation and suppresses ALL real-idle effects', async () => {
+    const { deps, spies } = makeDeps({ willFire: true, pending: 1 });
+    await handleSessionIdle(SID, { needsObservation: true }, deps);
+    expect(spies.runAutoContinue).toHaveBeenCalledWith(SID);
+    // none of the completion consumers fire on a false idle
+    expect(spies.markIdle).not.toHaveBeenCalled();
+    expect(spies.herdOnSessionIdle).not.toHaveBeenCalled();
+    expect(spies.pollQuota).not.toHaveBeenCalled();
+  });
+
+  it('REAL idle, nothing pending: runs all real-idle effects, never invokes the continuation', async () => {
+    const { deps, spies } = makeDeps({ willFire: false, pending: 0 });
+    await handleSessionIdle(SID, { needsObservation: true }, deps);
+    expect(spies.runAutoContinue).not.toHaveBeenCalled();
+    expect(spies.markIdle).toHaveBeenCalledWith(SID);
+    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
+    expect(spies.pollQuota).toHaveBeenCalled();
+  });
+
+  it('REAL idle, pending-but-capped: drives runAutoContinue (cap message) AND runs real-idle effects', async () => {
+    // willFire is false (capped) but pending>0, so the continuation runtime must
+    // still be driven (to emit the terminal cap message), then the session is
+    // reported done to herd/delegate/unobserved.
+    const { deps, spies } = makeDeps({ willFire: false, pending: 1 });
+    await handleSessionIdle(SID, { needsObservation: true }, deps);
+    expect(spies.runAutoContinue).toHaveBeenCalledWith(SID);
+    expect(spies.markIdle).toHaveBeenCalledWith(SID);
+    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
+    expect(spies.pollQuota).toHaveBeenCalled();
+  });
+
+  it('honors needsObservation=false: real idle skips markIdle but still runs herd + quota', async () => {
+    const { deps, spies } = makeDeps({ willFire: false, pending: 0 });
+    await handleSessionIdle(SID, { needsObservation: false }, deps);
+    expect(spies.markIdle).not.toHaveBeenCalled();
+    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
+    expect(spies.pollQuota).toHaveBeenCalled();
+  });
+
+  it('captures willFire BEFORE runAutoContinue (fire path clears the pending set)', async () => {
+    const { deps, spies } = makeDeps({ willFire: true, pending: 1 });
+    await handleSessionIdle(SID, { needsObservation: true }, deps);
+    // hasPendingAutoContinue read once, before runAutoContinue
+    const predOrder = spies.hasPendingAutoContinue.mock.invocationCallOrder[0];
+    const runOrder = spies.runAutoContinue.mock.invocationCallOrder[0];
+    expect(predOrder).toBeLessThan(runOrder);
+  });
+});

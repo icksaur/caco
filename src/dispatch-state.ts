@@ -26,6 +26,15 @@ export interface WaitForActiveOptions {
   isGone?: () => boolean;
   /** How often to poll isGone (default 10s). */
   gonePollMs?: number;
+  /**
+   * Optional idle-suppression predicate (spec-idle-authority): while it returns
+   * true, an idle is NOT a real idle (the session is about to auto-continue), so
+   * NONE of the idle-resolution paths resolve. Gates the entry fast-path, the
+   * post-arm re-check, AND the `idle` listener, so a reveal-dispatch that ends
+   * before/after the listener attaches cannot resolve the wait early. Resolves
+   * only once the session reaches a real idle (predicate false).
+   */
+  suppressIdle?: () => boolean;
 }
 
 export class DispatchState extends EventEmitter {
@@ -116,7 +125,9 @@ export class DispatchState extends EventEmitter {
   waitForActive(sessionId: string, opts: WaitForActiveOptions): Promise<'idle' | 'timeout' | 'gone'> {
     return new Promise((resolve) => {
       if (opts.isGone?.()) { resolve('gone'); return; }
-      if (!this.isBusy(sessionId)) { resolve('idle'); return; }
+      // Entry fast-path: only treat a not-busy session as idle if a continuation
+      // is NOT pending (spec-idle-authority — else keep waiting for the real idle).
+      if (!this.isBusy(sessionId) && !opts.suppressIdle?.()) { resolve('idle'); return; }
 
       let settled = false;
       const finish = (outcome: 'idle' | 'timeout' | 'gone') => {
@@ -146,11 +157,14 @@ export class DispatchState extends EventEmitter {
       const onActivity = (e: { sessionId: string; eventType: string }) => {
         if (e.sessionId === sessionId) watchdog.notifyEvent(e.eventType);
       };
-      const onIdle = (id: string) => { if (id === sessionId) finish('idle'); };
+      // Listener: a suppressed idle (pending continuation) is ignored — stay armed
+      // until the continuation reaches a real idle and emits again.
+      const onIdle = (id: string) => { if (id === sessionId && !opts.suppressIdle?.()) finish('idle'); };
 
       this.on('activity', onActivity);
       this.on('idle', onIdle);
-      if (!this.isBusy(sessionId)) finish('idle');
+      // Post-arm re-check: same suppression gate as the entry fast-path.
+      if (!this.isBusy(sessionId) && !opts.suppressIdle?.()) finish('idle');
     });
   }
 }

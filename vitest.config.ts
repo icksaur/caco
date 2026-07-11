@@ -19,7 +19,7 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts', 'public/ts/**/*.ts'],
       exclude: ['**/types.ts', '**/main.ts'],
-      reporter: ['text', 'html'],
+      reporter: ['text', 'html', 'json-summary'],
       // Ratcheting floors. Global floor tracks the current baseline minus a ~1.3pt
       // churn margin (last raised 2026-07-10 when usage-state/quota-poller/preferences
       // pure-logic tests landed: usage-state 9→95%, quota-poller 14→100%). Per-directory

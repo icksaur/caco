@@ -11,9 +11,6 @@ export default defineConfig({
     // Silence informational console.log from production code; warnings + errors still print.
     setupFiles: ['tests/setup.ts'],
 
-    // Exclude tests broken by SDK module resolution issues
-    exclude: ['tests/unit/applet-tools.test.ts'],
-    
     // Coverage configuration
     coverage: {
       provider: 'v8',

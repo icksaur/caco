@@ -8,7 +8,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+import { STORAGE_ROOT } from './storage-paths.js';
 
 export interface QuotaSnapshot {
   isUnlimitedEntitlement: boolean;
@@ -26,7 +26,7 @@ interface UsageInfo {
   fromCache?: boolean;  // True if loaded from disk on startup
 }
 
-const USAGE_FILE = join(homedir(), '.caco', 'usage.json');
+const USAGE_FILE = join(STORAGE_ROOT, 'usage.json');
 
 // Global usage state (most recent from any session)
 let currentUsage: UsageInfo | null = null;
@@ -72,7 +72,7 @@ export function updateUsage(quotaSnapshots: Record<string, QuotaSnapshot> | unde
   currentUsage = next;
 
   try {
-    mkdirSync(join(homedir(), '.caco'), { recursive: true });
+    mkdirSync(STORAGE_ROOT, { recursive: true });
     writeFileSync(USAGE_FILE, JSON.stringify(currentUsage, null, 2));
   } catch (err) {
     console.error('[USAGE] Failed to persist:', err);

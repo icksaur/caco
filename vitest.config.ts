@@ -15,7 +15,10 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts', 'public/ts/**/*.ts'],
-      exclude: ['**/types.ts', '**/main.ts'],
+      // terminal-panel.ts: xterm.js renders to a real canvas jsdom can't implement;
+      // unit-testing it is fake, so it's the one fixed up-front frontend exclusion
+      // (spec-frontend-coverage). The frontend denominator is public/ts minus this file.
+      exclude: ['**/types.ts', '**/main.ts', 'public/ts/terminal-panel.ts'],
       reporter: ['text', 'html', 'json-summary'],
       // Ratcheting floors. Global floor tracks the current baseline minus a ~1.5pt
       // churn margin (last raised 2026-07-10, spec-backend-coverage-80 COMPLETE:

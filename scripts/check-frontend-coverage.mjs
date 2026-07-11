@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const GOAL = 60;
-const FLOOR = Number(process.env.CACO_FE_COV_TARGET ?? '31');
+const FLOOR = Number(process.env.CACO_FE_COV_TARGET ?? '73');
 const SUMMARY = join(process.cwd(), 'coverage', 'coverage-summary.json');
 
 let summary;

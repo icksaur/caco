@@ -2,17 +2,17 @@
 
 ## Goals
 Raise frontend (`public/ts/**`) statement coverage, enforced by a
-`check:frontend-coverage` gate mirroring the backend one. The denominator is fixed
-**up front** by excluding the one genuinely jsdom-impossible file (`terminal-panel.ts`,
-222 stmts, xterm canvas) — see Design; against that fixed denominator the baseline is
-**31.3%** (1537/4906) and the recommended first goal is **60%** (+~1407 statements) —
-the ceiling reachable with *jsdom* (a simulated browser in Node) without a real-browser
-harness. Reaching **80%** additionally requires a browser-based layer (Playwright) with
-instrumented-bundle coverage merge for surfaces jsdom cannot simulate; that is a
-separate, larger investment, called out below as the one open decision. Outcome after
-60%: the pure-logic helpers, the DOM-rendering UI (session panel, footer, model
-selector, popups, markdown render, chat form), and the seam-mocked controllers are all
-guarded by tests, so a careless refactor of the view layer fails CI.
+`check:frontend-coverage` gate mirroring the backend one. **DONE — reached 74.8%**
+(3671/4906), exceeding the 60% goal, via jsdom alone (no Playwright). The denominator
+is fixed by excluding the one genuinely jsdom-impossible file (`terminal-panel.ts`, 222
+stmts, xterm canvas) — see Design; baseline was **31.3%** (1537/4906). Measured perf:
+full `vitest run` stayed at **6.5s** (jsdom's 5s env cost fully hidden by 20-worker
+parallelism), well under the ≤9s budget. Outcome: the pure-logic helpers, the
+DOM-rendering UI (session panel 89%, footer 95%, model selector 85%, popups, markdown
+render 94%, chat form), and the seam-mocked controllers (websocket, view/input/image,
+message-streaming) are all guarded; a careless refactor of the view layer fails CI.
+Reaching **80%** would additionally require a browser-based layer (Playwright) with
+instrumented-bundle coverage merge; deferred as a separate spec (Phase P).
 
 ## Design
 

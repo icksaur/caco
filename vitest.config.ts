@@ -27,15 +27,16 @@ export default defineConfig({
       // these vitest floors are the fine-grained anti-rot net. Raise as coverage
       // improves; do NOT lower without cause.
       thresholds: {
-        statements: 62,
-        branches: 55,
-        functions: 62,
-        lines: 63,
+        statements: 77,
+        branches: 67,
+        functions: 76,
+        lines: 79,
         'src/security/**': { statements: 90, branches: 80, functions: 95, lines: 90 },
         'src/index/**': { statements: 83, branches: 70, functions: 92, lines: 87 },
         'src/observe/**': { statements: 80, branches: 66, functions: 88, lines: 84 },
         'src/workflow/**': { statements: 80, branches: 72, functions: 80, lines: 86 },
         'src/routes/**': { statements: 67, branches: 56, functions: 68, lines: 68 },
+        'public/ts/**': { statements: 73, branches: 62, functions: 68, lines: 76 },
       },
     },
     

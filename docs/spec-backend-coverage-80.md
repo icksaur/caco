@@ -1,11 +1,12 @@
 # spec-backend-coverage-80
 
 ## Goals
-Raise backend (`src/**`) statement coverage from **50.5%** (4763/9438) to **≥80%**
-(≥7551 covered; **+2788 statements**), locked by ratcheting per-directory floors so
-it cannot rot back. Frontend (`public/ts/**`, ~30%) is explicitly out of scope.
-Outcome: a competent agent can safely refactor backend modules with the suite as a
-guard, and the weakest area (`src/routes`, 18.8%) becomes genuinely exercised.
+Raise backend (`src/**`) statement coverage from **50.5%** (4763/9438) to **≥80%**.
+**DONE — reached 81.6%** (7705/9438) with NO file exclusions (Phase 6 unused).
+Locked by the ratcheting `check:coverage` FLOOR (now 80) so it cannot rot back.
+Frontend (`public/ts/**`, ~30%) is explicitly out of scope. Outcome: a competent
+agent can safely refactor backend modules with the suite as a guard, and the
+weakest area (`src/routes`, was 18.8%) is now genuinely exercised (69%).
 
 ## Design
 Four test mechanisms, chosen per module shape. Each phase ratchets the relevant

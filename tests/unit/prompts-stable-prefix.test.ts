@@ -44,3 +44,21 @@ describe('system prompt — stable-prefix ordering (spec-prompt-stable-prefix)',
     expect(prefixA).toBe(prefixB); // the whole shareable prefix is byte-identical
   });
 });
+
+describe('system prompt — Tool Availability (spec-enable-tools-discovery)', () => {
+  it('explains deferral + the caco_enable_tools discover/enable loop, in the stable prefix', async () => {
+    const c = (await buildSystemMessage()).content;
+    expect(c).toContain('## Tool Availability');
+    expect(c).toContain('caco_enable_tools({ names:');
+    expect(c).toContain('caco_enable_tools()'); // the no-args discovery pull
+    expect(c).toContain('<deferred_tools>');    // the change-triggered push
+    // Static — carries no per-session data, so it stays before the cwd token.
+    expect(c.indexOf('## Tool Availability')).toBeLessThan(c.indexOf('## Session Context'));
+  });
+
+  it('drops the dead unconditional first-turn get_applet_state directive', async () => {
+    const c = (await buildSystemMessage()).content;
+    expect(c).not.toContain('on your first turn');
+    expect(c).not.toContain('Call `get_applet_state`');
+  });
+});

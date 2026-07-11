@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildToolCatalog } from '../../src/tool-catalog.js';
-import { formatDeferredTools } from '../../src/session-tool-state.js';
+import { formatDeferredTools, classifyTool, deferredToolKeys, renderDeferredToolsReminder, resolveEnableTargets } from '../../src/session-tool-state.js';
 import { builtinKey, cacoKey, mcpKey } from '../../src/tool-key.js';
 
 describe('buildToolCatalog — the one "what tools exist" view, keyed by ToolKey', () => {
@@ -132,5 +132,43 @@ describe('formatDeferredTools — deferred-only discovery text for caco_enable_t
     const text = formatDeferredTools(clean, new Set([cacoKey('caco_docs')]));
     expect(text).toContain('- `caco_docs` — docs');
     expect(text).not.toContain('disabled by policy');
+  });
+
+  // One source of truth: the reminder's keys must be exactly the tools the no-args
+  // list renders — same selection, catalog-free.
+  it('deferredToolKeys selects exactly the keys formatDeferredTools lists', () => {
+    const expectedKeys = [...cat.values()]
+      .filter(t => classifyTool(t.key, { excluded, hardDisabled: t.hardDisabled, policyDisabled }) === 'deferred')
+      .map(t => t.key);
+    expect(deferredToolKeys(excluded, policyDisabled)).toEqual(expectedKeys);
+  });
+
+  it('deferredToolKeys drops policy exclusions and preserves order', () => {
+    expect(deferredToolKeys(excluded, policyDisabled)).toEqual([
+      cacoKey('caco_docs'), builtinKey('view'), mcpKey('github-list_issues'), mcpKey('github-get_commit'),
+    ]);
+  });
+});
+
+describe('renderDeferredToolsReminder — the change-triggered discovery push', () => {
+  it('lists the identifiers with the enable instruction, names only (no schema/desc)', () => {
+    const out = renderDeferredToolsReminder([cacoKey('caco_docs'), mcpKey('list_issues')]);
+    expect(out).toBe(
+      '<deferred_tools>\n' +
+      'Available but deferred (definitions hidden to save tokens). Enable before use with caco_enable_tools({ names: [...] }); callable next turn.\n' +
+      'caco_docs, list_issues\n' +
+      '</deferred_tools>'
+    );
+  });
+
+  it('emits identifiers that round-trip through resolveEnableTargets (no ambiguity)', () => {
+    const cat = buildToolCatalog({
+      caco: [{ name: 'caco_docs', description: 'd', hardDisabled: false }],
+      builtins: [],
+      mcp: [{ serverName: 'github', tools: [{ key: mcpKey('list_issues'), name: 'list_issues', description: 'i', excludable: true }] }],
+    });
+    const keys = deferredToolKeys(new Set([cacoKey('caco_docs'), mcpKey('list_issues')]), new Set());
+    const resolved = resolveEnableTargets(keys.map(k => k as string), cat);
+    expect(resolved.ok).toBe(true);
   });
 });

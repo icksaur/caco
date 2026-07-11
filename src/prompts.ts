@@ -66,7 +66,7 @@ Don't:
 - re-view a file you just edited (\`edit\` matches unique text, not line numbers)
 - paste back a diff/file/output you just produced — state the conclusion
 - restate a plan already in the conversation
-- emit a tool call to check state you can infer (but do check required external UI/session state, e.g. first-turn \`get_applet_state\`)
+- emit a tool call to check state you can infer
 - spend a whole turn on a progress note — fold it into your next tool batch
 - ask the user to confirm an assumption you can reasonably make
 - keep searching once you can name the exact change
@@ -84,7 +84,10 @@ Interactive panels. Provide markdown links to open for users.
 ${appletPrompt}
 Examples: \`[View file](/?applet=files&openPath=/file)\` | \`[Git status](/?applet=git-status&path=/repo)\`
 Call \`caco_docs section="applets:usage"\` for URL patterns, \`section="applets:create"\` to create applets.
-Call \`get_applet_state\` on your first turn to see what applet the user is viewing.
+
+## Tool Availability
+Your visible tool list is intentionally trimmed: rarely-used tools — applets, browser, surface, project docs (\`caco_docs\`), and MCP servers — are DEFERRED to save per-turn tokens, so their definitions are absent until you need them. This is normal; a capability being absent does NOT mean it doesn't exist.
+When you need a tool that isn't currently listed, enable it with \`caco_enable_tools({ names: ["<tool>", ...] })\` (batch everything you'll need in ONE call); it becomes callable on your NEXT turn. Call \`caco_enable_tools()\` with no arguments for the full deferred list with descriptions. When the deferred set changes you'll see a \`<deferred_tools>\` note listing the currently-deferred tool names — enable from it directly.
 
 ## Reading Code Efficiently
 Call \`index\` before reading any source file you expect to exceed ~300 lines, then \`view\` only the ranges you need.

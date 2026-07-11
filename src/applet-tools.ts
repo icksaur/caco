@@ -358,7 +358,7 @@ export async function buildAppletUsage(slug?: string): Promise<string> {
 export function createAppletTools(_programCwd: string, sessionRef: SessionIdRef | undefined, pushStateToApplet: StatePushHandler) {
 
   const getAppletState = defineTool('get_applet_state', {
-    description: 'Query state pushed by applet JS via setAppletState(). Returns the running applet\'s user input, selections, or computed values.',
+    description: 'Query state pushed by applet JS via setAppletState(). Returns the running applet\'s user input, selections, or computed values. Call this only when a specific interactive task needs the applet the user is currently viewing — not routinely.',
 
     parameters: z.object({
       key: z.string().optional().describe('Optional: Get a specific key from the state object instead of the full state.')

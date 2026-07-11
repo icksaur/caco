@@ -12,6 +12,7 @@
 
 import { clearSession as clearThroughput } from './session-throughput.js';
 import { clearSessionUsage } from './session-usage-cache.js';
+import { clearDeferredReminder } from './deferred-reminder-store.js';
 
 export interface SessionRuntime {
   readonly sessionId: string;
@@ -46,6 +47,11 @@ export function getSessionRuntime(sessionId: string): SessionRuntime {
 
 /** Dispose and forget a session's runtime. No-op if none exists. */
 export function disposeSessionRuntime(sessionId: string): void {
+  // Cleared unconditionally: this is called at every session-end site, but a runtime
+  // object is only present if getSessionRuntime was used, so per-session state that
+  // must be freed on teardown regardless (the deferred-reminder signature) is cleared
+  // here rather than inside runtime.dispose().
+  clearDeferredReminder(sessionId);
   const runtime = runtimes.get(sessionId);
   if (!runtime) return;
   runtimes.delete(sessionId);

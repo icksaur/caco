@@ -29,12 +29,13 @@ import { builtinKey, cacoKey, type ToolKey } from './tool-key.js';
 import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys } from './tool-key-registry.js';
 import { recordObservedSizes, getToolSize } from './tool-size-store.js';
 import { estimateToolTokens } from './tool-size.js';
-import { validateEnable, resolveEnableTargets, computeColdResumeExclusions } from './session-tool-state.js';
+import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys } from './session-tool-state.js';
 import { excludedBuiltinNames, DEFER_ELIGIBLE_CACO_TOOLS } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
 import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-defer-store.js';
 import { getNowActiveSeconds, getLastUsedActiveSeconds, stampToolUsage, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS, COLD_RESUME_STALE_MS } from './tool-usage-store.js';
 import { getToolsUsed, setDeferredDefsProvider, recordCompaction } from './session-throughput.js';
+import { computeDeferredReminder, clearDeferredReminder } from './deferred-reminder-store.js';
 import { isHerdParent } from './herd.js';
 import { AUTO_CONTINUE_CAP } from './auto-continue.js';
 
@@ -1672,6 +1673,7 @@ export class SessionManager {
     // every turn; compaction ends that, so reset the forward base (spec-workflow-savings-model
     // item 4). Manual seam — a standalone RPC outside the dispatch event loop.
     recordCompaction(sessionId);
+    clearDeferredReminder(sessionId);
     return { tokensRemoved: result.tokensRemoved, messagesRemoved: result.messagesRemoved };
   }
 
@@ -2122,6 +2124,20 @@ export class SessionManager {
   getExcludedToolKeys(sessionId: string): ToolKey[] {
     const active = this.activeSessions.get(sessionId);
     return (active?.excludedTools ?? []) as ToolKey[];
+  }
+
+  /** The change-triggered deferred-tools discovery reminder for this dispatch as a
+   *  deferred commit: `{ text, commit }`. `text` is the reminder or null (empty/
+   *  unchanged set); `commit()` advances the emission signature and MUST be called
+   *  only once the send is in flight, so a pre-send failure can't wedge re-emission.
+   *  SYNCHRONOUS and RPC-free: derived from the live in-memory exclusion set minus
+   *  policy builtins (the deferred keys ARE the enable identifiers), never
+   *  `getToolCatalog()` — so it adds no latency or failure mode to prompt send
+   *  (spec-enable-tools-discovery). */
+  nextDeferredToolsReminder(sessionId: string): { text: string | null; commit: () => void } {
+    const policy = new Set<ToolKey>(excludedBuiltinNames() as ToolKey[]);
+    const keys = deferredToolKeys(this.getExcludedToolKeys(sessionId), policy);
+    return computeDeferredReminder(sessionId, keys);
   }
 
   /**

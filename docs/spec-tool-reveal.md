@@ -120,7 +120,10 @@ single-metering-funnel invariant). Concretely:
   description, grouped by Caco/builtin/server) — the discover→enable loop on one
   tool. Heavy schemas stay out of the per-turn payload. (Superseded home: this was
   `caco_docs section="tools"`; see spec-enable-tools-discovery. `caco_docs` is now
-  deferrable and `section="tools"` redirects here.)
+  deferrable and `section="tools"` redirects here.) Discovery also PUSHES: a
+  synchronous per-turn names-only `<deferred_tools>` reminder surfaces the deferred
+  set without a round trip. The no-args pull and the push are two renderings of one
+  deferred-set source of truth (spec-enable-tools-discovery: proactive discovery).
 - **`caco_enable_tools({ names })`.** Removes named tools from the session exclusion set
   and applies it live via the tool-state authority's `enable()` →
   `session.rpc.options.update({ excludedTools, toolFilterPrecedence: "excluded" })`

@@ -32,6 +32,7 @@ const sm = vi.hoisted(() => ({
   resume: vi.fn(async () => {}),
   pollQuota: vi.fn(async () => {}),
   sendStream: vi.fn(async () => {}),
+  nextDeferredToolsReminder: vi.fn((): { text: string | null; commit: () => void } => ({ text: null, commit: () => {} })),
   getCacoToolCatalog: vi.fn(() => [] as { name: string }[]),
   getModels: vi.fn(() => [{ id: 'claude-opus-4.6' }] as unknown[]),
   // Idle authority runs on idle; no reveal in these tests ⇒ empty pending +

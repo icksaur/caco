@@ -434,14 +434,23 @@ export async function dispatchMessage(
       return;
     }
     
+    // Push the change-triggered deferred-tools discovery reminder into the MODEL
+    // prompt only (synchronous, RPC-free). Built once here so the initial send and
+    // any retry (which reuse messageOptions) carry the same augmentation; the user-
+    // visible displayPrompt stays the original text so the internal marker never
+    // surfaces in the UI (spec-enable-tools-discovery).
+    const reminder = sessionManager.nextDeferredToolsReminder(sessionId);
+    const modelPrompt = reminder.text ? `${prompt}\n\n${reminder.text}` : prompt;
+
     const messageOptions: { 
       prompt: string; 
       attachments?: Array<{ type: string; path: string }>;
       displayPrompt?: string;
-    } = { prompt };
+    } = { prompt: modelPrompt };
 
-    if (displayPrompt) {
-      messageOptions.displayPrompt = displayPrompt;
+    const effectiveDisplay = displayPrompt ?? (reminder.text ? prompt : undefined);
+    if (effectiveDisplay) {
+      messageOptions.displayPrompt = effectiveDisplay;
     }
     
     if (tempFilePaths && tempFilePaths.length > 0) {
@@ -558,8 +567,13 @@ export async function dispatchMessage(
     console.log(`[DISPATCH:${rid}] Sending to SDK for session ${sessionId}`);
     try {
       if (beforeSend) await beforeSend();
-      const sendPromise = sessionManager.sendStream(sessionId, prompt, messageOptions);
+      const sendPromise = sessionManager.sendStream(sessionId, modelPrompt, messageOptions);
       sendStarted = true;
+      // The message (with any reminder) is now handed to the SDK, so it is safe to
+      // advance the reminder signature. A send rejection retries with the same
+      // messageOptions (reminder preserved); a pre-send throw skips this, so an
+      // unchanged deferred set re-emits on the next dispatch.
+      reminder.commit();
 
       sendPromise.catch((err: unknown) => {
         if (dispatchCompleted) return;

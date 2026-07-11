@@ -157,3 +157,39 @@ export function formatDeferredTools(catalog: ToolCatalog, excluded: ReadonlySet<
   const body = order.map(g => `## ${g}\n${(groups.get(g) as string[]).join('\n')}`).join('\n\n');
   return `${header}\n\n${body}${footer}`;
 }
+
+/**
+ * The session's dynamically-deferred exclusion keys — the SAME selection
+ * `formatDeferredTools` renders, but as bare keys and WITHOUT a catalog, so the
+ * per-turn discovery reminder needs no SDK/MCP metadata RPC (spec-enable-tools-
+ * discovery: synchronous source, one source of truth).
+ *
+ * A key is deferred iff it is in the live exclusion set and NOT a permanent policy
+ * exclusion (the builtin shell family / platform-absent builtins). Hard-disabled
+ * tools are filtered pre-registration and so are never in the exclusion set — the
+ * exclusion set is by construction a subset of registered, non-hard-disabled tool
+ * keys — which is why filtering `policyDisabled` alone yields exactly the deferred
+ * set. A ToolKey IS the model-facing enable identifier (caco/mcp keys are the bare
+ * name), so every returned key round-trips through `resolveEnableTargets` verbatim
+ * and unambiguously (no display-name collision to resolve). Pure. Preserves the
+ * exclusion set's iteration order.
+ */
+export function deferredToolKeys(excluded: Iterable<ToolKey>, policyDisabled: ReadonlySet<ToolKey>): ToolKey[] {
+  return [...excluded].filter(k => !policyDisabled.has(k));
+}
+
+/**
+ * Render the change-triggered discovery reminder appended to the model prompt: the
+ * deferred tool identifiers plus the one-line enable instruction. Caller guarantees
+ * a non-empty key list (an empty deferred set emits no reminder). Names only — no
+ * schemas — so the per-emission cost is a comma list, not the KBs of definitions
+ * deferral omits. Pure.
+ */
+export function renderDeferredToolsReminder(keys: readonly ToolKey[]): string {
+  return [
+    '<deferred_tools>',
+    'Available but deferred (definitions hidden to save tokens). Enable before use with caco_enable_tools({ names: [...] }); callable next turn.',
+    keys.join(', '),
+    '</deferred_tools>',
+  ].join('\n');
+}

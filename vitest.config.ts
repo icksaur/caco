@@ -20,24 +20,23 @@ export default defineConfig({
       include: ['src/**/*.ts', 'public/ts/**/*.ts'],
       exclude: ['**/types.ts', '**/main.ts'],
       reporter: ['text', 'html', 'json-summary'],
-      // Ratcheting floors. Global floor tracks the current baseline minus a ~1.3pt
-      // churn margin (last raised 2026-07-10 when usage-state/quota-poller/preferences
-      // pure-logic tests landed: usage-state 9→95%, quota-poller 14→100%). Per-directory
-      // locks keep well-tested dirs from rotting down to the global floor. Raise these as
-      // coverage improves; do NOT lower without cause. src/routes is the weakest backend
-      // area (~15%): its lock is a low floor that only protects the route-logic tests added
-      // in the coverage push (spec-routes-coverage-push) — raise it as more handler logic
-      // gets extracted.
+      // Ratcheting floors. Global floor tracks the current baseline minus a ~1.5pt
+      // churn margin (last raised 2026-07-10, Phase 1 of spec-backend-coverage-80:
+      // fs stores + route harnesses lifted backend src/** 50.5→54.7%). Per-directory
+      // locks keep well-tested dirs from rotting down to the global floor. The
+      // authoritative backend-80 gate is `npm run check:coverage` (src/** aggregate);
+      // these vitest floors are the fine-grained anti-rot net. Raise as coverage
+      // improves; do NOT lower without cause.
       thresholds: {
-        statements: 42,
-        branches: 37,
-        functions: 43,
-        lines: 42,
+        statements: 44,
+        branches: 39,
+        functions: 45,
+        lines: 45,
         'src/security/**': { statements: 90, branches: 80, functions: 95, lines: 90 },
         'src/index/**': { statements: 83, branches: 70, functions: 92, lines: 87 },
         'src/observe/**': { statements: 80, branches: 66, functions: 88, lines: 84 },
         'src/workflow/**': { statements: 80, branches: 72, functions: 80, lines: 86 },
-        'src/routes/**': { statements: 18, branches: 14, functions: 18, lines: 18 },
+        'src/routes/**': { statements: 22, branches: 18, functions: 23, lines: 22 },
       },
     },
     

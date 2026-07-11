@@ -35,6 +35,8 @@ import { maybeAutoContinue, AUTOCONTINUE_IDENTIFIER, AUTO_CONTINUE_CAP } from '.
 import { isAutoContinueEnabled } from '../preferences.js';
 import { onSessionIdle } from '../herd-runtime.js';
 import { handleSessionIdle } from '../idle-authority.js';
+import { getLastAssistantMessage } from '../session-history.js';
+import { idleFeed } from '../idle-feed.js';
 
 const router = Router();
 
@@ -84,7 +86,7 @@ function runAutoContinue(sessionId: string): Promise<boolean> {
  * (via the shared `hasPendingAutoContinue` predicate, consumed by dispatch-state),
  * and unobserved-marking. A real idle propagates to all three as before.
  */
-function handleIdle(sessionId: string, needsObservation: boolean): void {
+export function handleIdle(sessionId: string, needsObservation: boolean, correlationId?: string): void {
   void handleSessionIdle(sessionId, { needsObservation }, {
     hasPendingAutoContinue: id => sessionManager.hasPendingAutoContinue(id),
     pendingToolCount: id => sessionManager.getPendingTools(id).length,
@@ -93,6 +95,17 @@ function handleIdle(sessionId: string, needsObservation: boolean): void {
     herdOnSessionIdle: id => { void onSessionIdle(id); },
     pollQuota: () => { void sessionManager.pollQuota(); },
     signalDispatchIdle: id => dispatchState.signalIdle(id),
+    // Publish to the external idle feed (spec-idle-notifications). The idle
+    // authority calls this only inside its needsObservation branch, so herd
+    // children / delegates / auto-continuations never reach the feed. The final
+    // response text is read here (same source as delegate/herd) and size-capped
+    // by the feed.
+    notifyExternalIdle: id => {
+      void getLastAssistantMessage(id).then(response => {
+        const kind = getSessionMeta(id)?.kind ?? 'interactive';
+        idleFeed.append(id, response, kind, correlationId);
+      });
+    },
   });
 }
 
@@ -527,7 +540,7 @@ export async function dispatchMessage(
           // classifies false idle (reveal → auto-continue, suppress completion
           // signals) vs real idle (mark unobserved + herd wake + quota). An
           // errored dispatch is never an idle, so nothing propagates.
-          if (wasIdle) handleIdle(sessionId, needsObservation ?? false);
+          if (wasIdle) handleIdle(sessionId, needsObservation ?? false, effectiveCorrelationId);
         });
         unsubscribe();
       }

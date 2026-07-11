@@ -17,3 +17,4 @@ export { router as fileEditsRoutes } from './file-edits.js';
 export { router as draftRoutes } from './draft.js';
 export { router as memoryRoutes } from './memory.js';
 export { router as usageRoutes } from './usage.js';
+export { router as idleRoutes } from './idle.js';

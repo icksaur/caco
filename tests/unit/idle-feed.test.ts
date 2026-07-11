@@ -145,6 +145,20 @@ describe('IdleFeed', () => {
     });
   });
 
+  describe('remove (session-delete pruning)', () => {
+    it('drops the per-session lastSeq watermark (observable via the filtered reset)', async () => {
+      feed.append('A', 'a1', 'interactive');                          // seq 1, lastSeq[A]=1
+      for (let i = 0; i < IDLE_RING_CAP + 5; i++) feed.append('B', `b${i}`, 'interactive'); // evict seq 1
+      // Before remove: a from-scratch A reader may have missed A@1 (lastSeq[A]=1 > 0
+      // AND the window evicted it) → reset.
+      expect((await feed.read({ after: 0, session: 'A', wait: 0 })).reset).toBe(true);
+      // After remove: A's watermark is gone (→ 0), so there is no unseen A event to
+      // protect and the filtered reset no longer fires for the deleted session.
+      feed.remove('A');
+      expect((await feed.read({ after: 0, session: 'A', wait: 0 })).reset).toBe(false);
+    });
+  });
+
   describe('long-poll', () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());

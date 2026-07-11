@@ -41,6 +41,7 @@ import { legacyAppletRedirectTarget } from './src/legacy-applet-redirects.js';
 import { createGitEditPoller } from './src/git-edit-poller.js';
 import { setGitEditPoller } from './src/dispatch-events.js';
 import { setupWebSocket } from './src/routes/websocket.js';
+import { idleFeed } from './src/idle-feed.js';
 import { initTerminalManager } from './src/terminal-manager.js';
 import { startRotationSweeper } from './src/session-history-rotation.js';
 import { requireSameOrigin } from './src/security/same-origin.js';
@@ -313,6 +314,8 @@ async function start(): Promise<void> {
     // Herd cleanup on delete: disown a deleted parent's children AND clear a
     // deleted child's own bond (so it can't linger as a ghost in the index).
     onSessionDeleted(sid);
+    // Drop the idle feed's per-session bookkeeping for the deleted session.
+    idleFeed.remove(sid);
   });
   
   startScheduleManager();

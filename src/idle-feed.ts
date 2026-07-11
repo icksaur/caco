@@ -22,7 +22,9 @@ export const IDLE_RING_CAP = 1000;
 export const IDLE_WAIT_CAP_MS = 30_000;
 /** Max concurrently parked waiters; over the cap `read` returns immediately. */
 export const IDLE_WAITER_CAP = 256;
-/** Max stored response bytes per event; longer is truncated with `truncated:true`. */
+/** Max stored response length in UTF-16 code units (≈ chars; multibyte chars are
+ *  a few bytes each). Longer is truncated with `truncated:true`. Bounds per-event
+ *  memory; total feed memory is this × IDLE_RING_CAP. */
 export const IDLE_RESPONSE_CAP = 64 * 1024;
 
 export interface IdleEvent {
@@ -142,6 +144,14 @@ export class IdleFeed {
       // Filtered: only a gap the reader could have missed for ITS session counts.
       : stale || (evictedGap && (this.lastSeq.get(session) ?? 0) > after);
     return { cursor: this.head, events, reset };
+  }
+
+  /** Drop a deleted session's `lastSeq` bookkeeping (wired to session delete), so
+   *  the map stays bounded by live sessions rather than lifetime session count —
+   *  which matters on a persistent host churning ephemeral sessions (Ralph loops).
+   *  Retained ring events for the session age out naturally. */
+  remove(sessionId: string): void {
+    this.lastSeq.delete(sessionId);
   }
 
   /** Test seam: clear all state. */

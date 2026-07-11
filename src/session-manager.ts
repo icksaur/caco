@@ -34,7 +34,7 @@ import { excludedBuiltinNames, DEFER_ELIGIBLE_CACO_TOOLS } from './tool-registry
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
 import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-defer-store.js';
 import { getNowActiveSeconds, getLastUsedActiveSeconds, stampToolUsage, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS, COLD_RESUME_STALE_MS } from './tool-usage-store.js';
-import { getToolsUsed, setDeferredDefsProvider } from './session-throughput.js';
+import { getToolsUsed, setDeferredDefsProvider, recordCompaction } from './session-throughput.js';
 import { isHerdParent } from './herd.js';
 import { AUTO_CONTINUE_CAP } from './auto-continue.js';
 
@@ -1668,6 +1668,10 @@ export class SessionManager {
       throw new Error('Compaction failed');
     }
     console.log(`[COMPACT] Session ${sessionId.slice(0, 8)}: removed ${result.tokensRemoved} tokens, ${result.messagesRemoved} messages`);
+    // The workflow "lean" compound base assumes avoided context still inflates the window
+    // every turn; compaction ends that, so reset the forward base (spec-workflow-savings-model
+    // item 4). Manual seam — a standalone RPC outside the dispatch event loop.
+    recordCompaction(sessionId);
     return { tokensRemoved: result.tokensRemoved, messagesRemoved: result.messagesRemoved };
   }
 

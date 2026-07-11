@@ -15,6 +15,7 @@ const recordUsage = vi.fn();
 const recordRateLimit = vi.fn();
 const recordToolCall = vi.fn();
 const recordToolUse = vi.fn();
+const recordCompaction = vi.fn();
 const updateSessionMeta = vi.fn();
 const snapshotMock = vi.fn(() => ({ requestIn: 0, requestCache: 0, requestOut: 0, totalIn: 0, totalCache: 0, totalOut: 0, rateLimitCount: 0, updatedAt: 'now', known: true }));
 
@@ -36,6 +37,7 @@ vi.mock('../../src/session-throughput.js', () => ({
   recordRateLimit: (...args: unknown[]) => recordRateLimit(...(args as [])),
   recordToolCall: (...args: unknown[]) => recordToolCall(...(args as [])),
   recordToolUse: (...args: unknown[]) => recordToolUse(...(args as [])),
+  recordCompaction: (...args: unknown[]) => recordCompaction(...(args as [])),
   snapshot: (...args: unknown[]) => snapshotMock(...(args as [])),
 }));
 vi.mock('../../src/tool-key-registry.js', () => ({
@@ -74,6 +76,7 @@ beforeEach(() => {
   recordRateLimit.mockClear();
   recordToolCall.mockClear();
   recordToolUse.mockClear();
+  recordCompaction.mockClear();
   stampToolUsage.mockClear();
   updateSessionMeta.mockClear();
   snapshotMock.mockClear();
@@ -325,6 +328,26 @@ describe('applyDispatchEventEffects', () => {
         data: {},
       } as never, deps);
       expect(recordRateLimit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('throughput: session.compaction_complete → recordCompaction (automatic seam)', () => {
+    it('resets the workflow compound base and broadcasts a throughput snapshot', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, {
+        type: 'session.compaction_complete',
+        data: { tokensRemoved: 12000 },
+      } as never, deps);
+      expect(recordCompaction).toHaveBeenCalledWith(SID);
+      expect(deps.onEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'caco.throughput' })
+      );
+    });
+
+    it('does NOT reset on compaction_start (only on complete)', () => {
+      const deps = makeDeps();
+      applyDispatchEventEffects(SID, { type: 'session.compaction_start' } as never, deps);
+      expect(recordCompaction).not.toHaveBeenCalled();
     });
   });
 

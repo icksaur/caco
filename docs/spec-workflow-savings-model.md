@@ -81,19 +81,55 @@ Derived (all token quantities are bytes ÷ BYTES_PER_TOKEN where byte-based):
    headline. Equals today's `workflowSavedTokens` (kept, back-compat); billed at the input rate.
 
 4. **Compounding (cache class) — net headline, with a one-turn deferral to avoid
-   double-counting.** Those `freshSaved` tokens are now permanently absent from the window, so
-   **subsequent** round trips re-save them at the cache rate. **Critical:** `freshSaved` (term 3)
-   already prices the *first* time that output would have entered the prompt; if it began
-   compounding on the very next turn we would charge the same tokens twice. So `freshSaved`
-   enters a **pending bucket** on workflow completion and is promoted into the running
-   `avoidedContextTokens` **only after the next `recordUsage`** — compounding therefore starts on
-   the **second** subsequent turn. Per round trip: add the (already-promoted)
-   `avoidedContextTokens` to `cacheCompoundSaved`, then promote any pending. Linear in
-   (later turns × avoided context), matching per-turn cache-read billing.
+   double-counting.** Those `freshSaved` tokens are now absent from the window, so
+   **subsequent** round trips re-save them at the cache rate. **Critical:** `freshSaved`
+   (term 3) already prices the *first* time that output would have entered the prompt; if
+   it began compounding on the very next turn we would charge the same tokens twice. So
+   `freshSaved` enters a **pending bucket** on workflow completion and is promoted into the
+   running `avoidedContextTokens` **only after the next `recordUsage`** — compounding
+   therefore starts on the **second** subsequent turn. Per round trip: add the
+   (already-promoted) `avoidedContextTokens` to `cacheCompoundSaved`, then promote any
+   pending. Linear in (later turns × avoided context), matching per-turn cache-read billing.
    **Deviation from the user's sketch:** the user proposed
    `cachedInputTokensSaved = virtualToolCalls × cumulativeInputTokensSaved` per turn, which
    compounds multiplicatively and explodes super-linearly. The linear, deferred accrual above
    captures the same "savings keep paying off every turn" intuition without indefensible numbers.
+
+   **Compaction reset (INVARIANT — the "absent from the window" premise is not permanent).**
+   The compound term credits per-turn cache savings on the theory that a workflow's avoided
+   context would *otherwise* still be inflating the window on every later turn. **A context
+   compaction destroys that premise:** compaction summarizes/evicts prior context, and it
+   does so in the counterfactual (no-workflow) timeline too — both windows collapse toward the
+   same summary, so the pre-compaction avoided context is no longer *differentially* saving
+   cache tokens. Therefore, **on any compaction of a session's context, reset that session's
+   `avoidedContextTokens` and `pendingAvoidedContext` to 0.** The already-accrued
+   `workflowCacheCompoundSaved` (savings genuinely realized on turns *before* the compaction)
+   is **kept** — only the forward-compounding base is reset; workflows run after the compaction
+   re-accrue from 0. Reset-to-0 (not proportional scaling) is chosen: it is conservative
+   (never overstates), and needs no fragile pre-compaction window measurement. Two seams,
+   both required, because compaction reaches the server two ways — and they are **disjoint by
+   construction** (each real compaction fires exactly ONE of them, so reset never erases
+   legitimately-accrued post-compaction state):
+   - **Manual** (`POST /sessions/:id/compact` → `sessionManager.compactSession` →
+     `rpc.history.compact`): call the reset directly in `compactSession` after a successful
+     compact. This is a standalone RPC **outside** the dispatch event loop, so it never emits a
+     `session.compaction_complete` into `applyDispatchEventEffects`.
+   - **Automatic/background** (SDK threshold, mid-dispatch): the `session.compaction_complete`
+     event flows through `applyDispatchEventEffects`'s **live** `handleEvent` path (the same
+     single-delivery, non-replayed path that feeds `recordUsage`; guarded by `dispatchCompleted`)
+     — handle it there and call the same reset. This path does not run `compactSession`.
+   **Disjointness invariant (honor it or the reset can erase valid state):** a single compaction
+   must trigger `recordCompaction` **at most once**. Because the manual RPC is out-of-band and the
+   automatic event is live-delivered once per compaction, the two seams cannot both fire for one
+   compaction, and no duplicate `compaction_complete` is re-applied for throughput (replay does not
+   drive `applyDispatchEventEffects`). Do NOT add a third seam that could re-observe the same
+   compaction; if a future change makes the manual RPC also stream the event through the dispatch
+   loop, dedupe by compaction identity before this invariant is relied upon. `recordCompaction`
+   itself reads via the plain session lookup (like `resetRequest`'s peers), so an **unknown session
+   is a no-op that creates no phantom throughput entry**.
+   This does NOT apply to the sibling `deferredDefsTokensAccrued` term (spec-deferred-savings):
+   deferred tool-definitions live in the cacheable *prefix* and are genuinely re-sent every warm
+   turn *and survive compaction*, so their per-turn accrual is unaffected by this reset.
 
 5. **Net output cost (output class, signed) — net headline.** The model spent
    `K/BYTES_PER_TOKEN` output tokens writing the script, but avoided emitting
@@ -151,7 +187,11 @@ latency — a long test/build inside a request would otherwise inflate it. Falls
   later turn, never the first). New `recordWorkflowSavingsV2(sessionId, breakdown)` accumulates
   the per-run fields and adds `freshInputTokensSaved` to `pendingAvoidedContext`;
   `workflowSavedTokens` must keep meaning = cumulative `freshInputTokensSaved` (footer
-  back-compat). `markRequestComplete` adds the request's wall to `totalWallMs`. All new fields in
+  back-compat).   New `recordCompaction(sessionId)` (fires at most once per compaction; see item 4
+  disjointness invariant) zeroes `avoidedContextTokens` and `pendingAvoidedContext` but
+  **keeps** `workflowCacheCompoundSaved` and every other accumulator — resetting only the
+  forward-compounding base (item 4). It reads via the plain `sessions.get` lookup (NOT
+  `getOrCreate`), so an unknown session is a no-op that creates no phantom entry. `markRequestComplete` adds the request's wall to `totalWallMs`. All new fields in
   `blank()`, `snapshot()`, and **preserved across `resetRequest`** *except* `lastInputTokens` and
   `pendingAvoidedContext`, which are **reset on a fresh send** (a new request must not price W
   against the prior request's prompt, and a dangling pending bucket must not leak across sends);
@@ -184,8 +224,11 @@ latency — a long test/build inside a request would otherwise inflate it. Falls
   not the exact bytes at workflow time, but within a turn it is the right order of magnitude.
   When unknown (`0`), the replay + compounding terms are simply `0` — we never invent a window.
 - **Compounding could still feel large** over a long session (many turns × avoided context).
-  Mitigation: it is strictly linear and each increment is a real cache-read that *would* have
-  occurred; the tooltip shows it as a separate line so a skeptic sees the assumption.
+  Mitigation: it is strictly linear, each increment is a real cache-read that *would* have
+  occurred, the tooltip shows it as a separate line so a skeptic sees the assumption, **and it
+  is reset at every context compaction** (item 4) so it cannot accrue against context the model
+  no longer carries — the dominant guard against a runaway "lean" figure over a long,
+  repeatedly-compacted session.
 - **Back-compat.** `workflowSavedTokens` keeps its exact current meaning and the `↯` token
   total still includes it + shaping; only the *credit* pricing gets richer and new lines are
   added. No existing field changes meaning.
@@ -195,8 +238,13 @@ latency — a long test/build inside a request would otherwise inflate it. Falls
   all of them as `freshSaved` slightly overlaps with what shaping would have saved. v1
   documents this in the tooltip ("workflow `sh` savings vs a shaped baseline are approximate");
   a future refinement could discount shell-method `freshSaved` by the shaper's expected ratio.
-- **No mid-session / lifecycle concerns.** Pure additions to an in-memory accumulator + a
-  pure math module + a frontend render change. Nothing persisted, nothing registered.
+- **One lifecycle concern: context compaction.** Otherwise pure additions to an in-memory
+  accumulator + a pure math module + a frontend render change (nothing persisted, nothing
+  registered). The single exception is that the compound term's forward base
+  (`avoidedContextTokens` + `pendingAvoidedContext`) must be **reset to 0 on compaction**
+  (item 4), because compaction is the one lifecycle event that invalidates the "avoided context
+  is still in the window" premise. It is observed at two seams: `compactSession` (manual) and
+  the `session.compaction_complete` event in `applyDispatchEventEffects` (automatic).
 - **Estimate, labelled.** Every new figure is shown as `est.`/`~`; the breakdown is the
   honesty mechanism. We are deliberately moving from *undersell* toward *fair*, not toward
   *oversell*.
@@ -212,6 +260,18 @@ latency — a long test/build inside a request would otherwise inflate it. Falls
   later `recordUsage`, `workflowCacheCompoundSaved === 0`; after a **second** later `recordUsage`,
   it equals `freshInputTokensSaved`; after N, `(N−1) × freshInputTokensSaved`. Asserts the
   one-turn deferral and linearity (not multiplicative).
+- **Compaction-reset oracle (BLOCKING guard for the "lean" runaway):** record a workflow, drive
+  ≥2 warm `recordUsage` turns so `workflowCacheCompoundSaved > 0` and `avoidedContextTokens > 0`;
+  call `recordCompaction(sessionId)`; assert `avoidedContextTokens === 0` and
+  `pendingAvoidedContext === 0` while `workflowCacheCompoundSaved` is **unchanged** (pre-compaction
+  accrual kept). Then a further warm `recordUsage` adds **0** more compound (base was reset), and a
+  workflow recorded *after* the compaction re-accrues normally from 0. **Interleaving oracle
+  (disjointness guard):** after a compaction reset, record a NEW workflow + a warm turn so
+  post-compaction `avoidedContextTokens > 0`; assert that value is NOT clobbered (no second reset
+  fires for the same compaction — the two seams are disjoint). `recordCompaction` on an **unknown
+  session is a no-op that creates no throughput entry** (`sessions.has(id)` still false after).
+  Wire-level: assert `sessionManager.compactSession` calls the reset (manual seam) and that
+  `applyDispatchEventEffects` on a `session.compaction_complete` event calls it (automatic seam).
 - **Round-trip honesty oracle (BLOCKING-1 guard):** a workflow with `C` independent calls reports
   `virtualToolCallsAvoided === C−1` but `roundTripsSaved` strictly less (default half), and the
   net headline does **not** include `cacheReplaySaved`.
@@ -246,13 +306,17 @@ latency — a long test/build inside a request would otherwise inflate it. Falls
    fresh, replay, net output); math + round-trip-honesty oracle tests first.
 3. **throughput accumulators** — new fields + `recordUsage` (W capture, compounding accrual,
    pending→avoided promotion) + `pendingAvoidedContext` deferral + `lastInputTokens`/pending
-   reset-on-fresh-send + `markRequestComplete` `totalWallMs` + V2 record path; throughput tests
-   (compounding double-count guard, time, back-compat, reset vs steering).
+   reset-on-fresh-send + `markRequestComplete` `totalWallMs` + V2 record path + `recordCompaction`
+   reset fn; throughput tests (compounding double-count guard, compaction-reset guard, time,
+   back-compat, reset vs steering).
 4. **tool.ts wiring** — emitted-only recording, per-run code bytes, assemble inputs, record V2.
-5. **Surfacing** — `ThroughputData` fields, class-aware pricer, net-credits headline (+ negative
+5. **compaction seams** — `sessionManager.compactSession` calls `recordCompaction` after a
+   successful compact (manual); `applyDispatchEventEffects` handles `session.compaction_complete`
+   → `recordCompaction` (automatic). Wire tests for both.
+6. **Surfacing** — `ThroughputData` fields, class-aware pricer, net-credits headline (+ negative
    net-cost wording), breakdown tooltip with the separate "if sequential" replay line and
    `~time saved`.
-6. **Gates.**
+7. **Gates.**
 
 v1 is the four token classes + net credits + ballpark time; a real tokenizer and durable
 persistence are explicit non-goals.

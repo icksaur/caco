@@ -138,6 +138,7 @@ const toolRegistry = vi.hoisted(() => ({
 const throughput = vi.hoisted(() => ({
   getToolsUsed: vi.fn(() => new Set<string>()),
   setDeferredDefsProvider: vi.fn(),
+  recordCompaction: vi.fn(),
 }));
 const restart = vi.hoisted(() => ({ setAnyPendingProvider: vi.fn() }));
 
@@ -357,6 +358,8 @@ describe('SessionManager coverage seams', () => {
     await expect(manager.send(sessionId, 'hello', { prompt: 'ignored', mode: 'force' })).resolves.toEqual({ text: 'answer' });
     await expect(manager.sendStream(sessionId, 'stream', { mode: 'force' })).resolves.toBe('queued');
     await expect(manager.compactSession(sessionId, ' keep facts ')).resolves.toEqual({ tokensRemoved: 10, messagesRemoved: 2 });
+    // Manual compaction seam: resets the workflow "lean" compound base (spec-workflow-savings-model item 4).
+    expect(throughput.recordCompaction).toHaveBeenCalledWith(sessionId);
     await expect(manager.listMcpServers(sessionId)).resolves.toEqual([{ name: 'github', status: 'connected', source: 'project' }]);
     await expect(manager.listMcpTools('github', sessionId)).resolves.toEqual([{ name: 'list_issues', description: 'List issues.' }]);
     await expect(manager.getCurrentToolMetadata(sessionId)).resolves.toEqual([{ name: 'github-list_issues', mcpServerName: 'github', mcpToolName: 'list_issues' }]);

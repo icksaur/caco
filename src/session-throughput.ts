@@ -416,7 +416,24 @@ export function recordWorkflowSavingsV2(
 }
 
 /**
- * Record context tokens trimmed by the output-shaping hook on one tool result.
+ * Reset the workflow-compounding forward base at a context compaction (spec-workflow-
+ * savings-model item 4). The "lean" compound term credits per-turn cache savings on the
+ * premise that a workflow's avoided context is STILL inflating the window every later turn;
+ * compaction summarizes/evicts that context (in the counterfactual too), ending the premise.
+ * So zero `avoidedContextTokens` + `pendingAvoidedContext` (the forward-compounding base) but
+ * KEEP `workflowCacheCompoundSaved` (savings genuinely realized on pre-compaction turns) and
+ * every other accumulator. Reads via the plain lookup — an unknown session is a no-op that
+ * creates no phantom entry. Fires at most once per compaction (item 4 disjointness invariant).
+ */
+export function recordCompaction(sessionId: string): void {
+  const entry = sessions.get(sessionId);
+  if (!entry) return;
+  entry.avoidedContextTokens = 0;
+  entry.pendingAvoidedContext = 0;
+  entry.updatedAt = now();
+}
+
+/**
  * Unlike the workflow estimate this is an EXACT measurement (raw minus shaped
  * bytes / 4), accumulating on ordinary bash/test/build output. Session-lifetime
  * like total*; NOT cleared by resetRequest.

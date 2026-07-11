@@ -12,7 +12,7 @@ import { broadcastGlobalEvent } from './event-bus.js';
 import type { SessionEvent } from './event-bus.js';
 import type { GitEditPoller } from './git-edit-poller.js';
 import { extractProperty } from './sdk-normalizer.js';
-import { recordUsage, recordRateLimit, recordToolCall, recordToolUse, snapshot } from './session-throughput.js';
+import { recordUsage, recordRateLimit, recordToolCall, recordToolUse, recordCompaction, snapshot } from './session-throughput.js';
 import { toolKeyFromEvent } from './tool-key.js';
 import { learnMcpKey } from './tool-key-registry.js';
 import { stampToolUsage } from './tool-usage-store.js';
@@ -113,6 +113,16 @@ export function applyDispatchEventEffects(
       recordRateLimit(sessionId);
       deps.onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> });
     }
+  }
+
+  // A context compaction ends the "avoided context is still in the window" premise the
+  // workflow "lean" compound term relies on, so reset its forward base (spec-workflow-
+  // savings-model item 4). Automatic seam — this fires on the LIVE, single-delivery
+  // dispatch event stream (background/threshold compaction mid-dispatch); the manual
+  // /compact RPC resets separately in compactSession, disjoint from this path.
+  if (event.type === 'session.compaction_complete') {
+    recordCompaction(sessionId);
+    deps.onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> });
   }
 
   // Count completed tool calls (and failures) for round-trip metrics. Use

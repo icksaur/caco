@@ -2,10 +2,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   recordUsage,
   recordWorkflowSavingsV2,
+  recordCompaction,
   currentWindowTokens,
   markRequestComplete,
   resetRequest,
   snapshot,
+  getThroughput,
   clearSession,
 } from '../../src/session-throughput.js';
 
@@ -67,6 +69,72 @@ describe('workflow compounding — deferred one turn (no double-count)', () => {
     coldUsage();  // deferral turn (cold) — promotes pending→avoided
     usage();      // first warm turn after deferral → 200 compounds
     expect(snapshot(SID).workflowCacheCompoundSaved).toBe(200);
+  });
+});
+
+describe('compaction reset — the compound "lean" base does not survive compaction', () => {
+  it('zeroes the forward base but KEEPS already-accrued compound', () => {
+    run(500);
+    usage(); // promote pending → avoided (compound 0)
+    usage(); // compound += 500
+    const before = snapshot(SID);
+    expect(before.workflowCacheCompoundSaved).toBe(500);
+    expect(before.avoidedContextTokens).toBe(500);
+
+    recordCompaction(SID);
+    const after = snapshot(SID);
+    // Forward base reset...
+    expect(after.avoidedContextTokens).toBe(0);
+    expect(after.pendingAvoidedContext).toBe(0);
+    // ...but the pre-compaction accrual is real history — kept.
+    expect(after.workflowCacheCompoundSaved).toBe(500);
+
+    // A further warm turn adds 0 (base was reset), proving no post-compaction runaway.
+    usage();
+    expect(snapshot(SID).workflowCacheCompoundSaved).toBe(500);
+  });
+
+  it('also clears a pending (un-promoted) bucket at compaction time', () => {
+    run(400); // freshSaved sits in pendingAvoidedContext (not yet promoted)
+    expect(snapshot(SID).pendingAvoidedContext).toBe(400);
+    recordCompaction(SID);
+    expect(snapshot(SID).pendingAvoidedContext).toBe(0);
+    // The dropped pending never compounds afterward.
+    usage();
+    usage();
+    expect(snapshot(SID).workflowCacheCompoundSaved).toBe(0);
+  });
+
+  it('lets a workflow recorded AFTER a compaction re-accrue normally from 0', () => {
+    run(500);
+    usage();
+    usage(); // compound = 500
+    recordCompaction(SID);
+    run(300); // new workflow after compaction
+    usage();  // promote (compound += 0)
+    usage();  // compound += 300
+    expect(snapshot(SID).workflowCacheCompoundSaved).toBe(500 + 300);
+  });
+
+  it('interleaving/disjointness: a second stray reset would NOT clobber legit post-compaction accrual (single-fire contract)', () => {
+    run(500);
+    usage();
+    usage();
+    recordCompaction(SID); // seam A fires once for this compaction
+    run(200);
+    usage();
+    usage(); // legit post-compaction compound = 200
+    expect(snapshot(SID).workflowCacheCompoundSaved).toBe(500 + 200);
+    expect(snapshot(SID).avoidedContextTokens).toBe(200);
+    // The disjointness invariant guarantees no second reset fires for the SAME compaction,
+    // so the 200 base survives. (If a second reset DID fire it would wrongly zero this —
+    // which is exactly why the seams must stay disjoint.)
+  });
+
+  it('is a no-op on an unknown session and creates no phantom entry', () => {
+    clearSession('ghost-compaction');
+    recordCompaction('ghost-compaction');
+    expect(getThroughput('ghost-compaction')).toBeUndefined();
   });
 });
 

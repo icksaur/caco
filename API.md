@@ -822,6 +822,81 @@ Returns:
 }
 ```
 
+## Idle Notifications
+
+A long-poll feed of "a session reached a real idle" events, for out-of-process
+automation (bash/python/powershell) — not a browser. It fires ONLY for
+externally/human-driven idles (dispatches with `needsObservation`, i.e. a normal
+`POST /messages`); it never fires for herd children, delegate targets, or
+tool-enable auto-continuations, which are already observed by an in-process actor.
+
+- `GET /api/idle?after=<seq>&session=<id?>&wait=<ms>` — Return idle events with
+  `seq > after`, optionally filtered to one session, long-polling up to `wait` ms
+  (capped at 30s server-side).
+
+Query params:
+- `after` — the last `cursor` you received. Absent ⇒ start at the current head
+  (future idles only). `0` ⇒ replay all retained events.
+- `session` — filter to one session id (events AND the long-poll wake).
+- `wait` — max ms to hang when caught up (0 = return immediately). Capped at 30s;
+  on timeout you get an empty `events` and an unchanged `cursor` — just re-poll.
+
+Returns:
+```json
+{
+  "cursor": 42,
+  "events": [
+    {
+      "seq": 42,
+      "sessionId": "uuid",
+      "idleAt": "2026-07-10T18:00:00.000Z",
+      "response": "final assistant message text",
+      "truncated": false,
+      "kind": "interactive",
+      "correlationId": "uuid (present when the dispatch had one)"
+    }
+  ],
+  "reset": false
+}
+```
+
+**Cursor discipline.** Always pass back the `cursor` you last received as the next
+`after`. An idle that happened between two reads is returned IMMEDIATELY on the
+next read (no hang) — you never miss one by polling. The feed retains a bounded
+ring; if your cursor has fallen off the retained window (you were away too long,
+or the server restarted) the response has `reset: true` — re-sync current status
+via `GET /api/sessions/:id/state` and resume from `cursor`. Response text of an
+evicted idle is not recoverable from the feed.
+
+**Reachability.** The same-origin guard allows requests with no `Origin` header,
+so `curl`/`requests`/`Invoke-RestMethod` reach this endpoint with no config; do
+not send an `Origin` header from a script.
+
+**Example — Ralph loop** (retry a prompt in fresh sessions until a sentinel):
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+BASE="http://127.0.0.1:53000"; CWD="/path/to/repo"; MODEL="claude-sonnet-4.6"
+PROMPT="Do the task in TASK.md. When fully done, reply with COMPLETE on its own line."
+MAX=10
+for ((i = 1; i <= MAX; i++)); do
+  sid=$(curl -s "$BASE/api/sessions" -H 'Content-Type: application/json' \
+    -d "{\"cwd\":\"$CWD\",\"model\":\"$MODEL\"}" | jq -r .sessionId)
+  cursor=$(curl -s "$BASE/api/idle?session=$sid" | jq .cursor)   # capture BEFORE sending
+  curl -s "$BASE/api/sessions/$sid/messages" -H 'Content-Type: application/json' \
+    -d "{\"prompt\":$(jq -Rn --arg p "$PROMPT" '$p')}" >/dev/null
+  resp=""
+  while [ -z "$resp" ]; do                                       # re-poll across the wait cap
+    r=$(curl -s "$BASE/api/idle?session=$sid&after=$cursor&wait=25000")
+    cursor=$(echo "$r" | jq .cursor)
+    resp=$(echo "$r" | jq -r '.events[-1].response // empty')
+  done
+  printf '=== attempt %s (%s) ===\n%s\n' "$i" "${sid:0:8}" "$resp"
+  printf '%s' "$resp" | grep -q '^COMPLETE$' && { echo "Done in $i."; exit 0; }
+done
+echo "Exhausted $MAX attempts." >&2; exit 1
+```
+
 ## Session Migration
 
 Export and import sessions between Caco instances (e.g., work → home).

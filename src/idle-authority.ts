@@ -31,6 +31,10 @@ export interface IdleAuthorityDeps {
   herdOnSessionIdle(sessionId: string): void;
   /** Real-idle effect: refresh quota. */
   pollQuota(): void;
+  /** Real-idle effect: publish the idle to the external idle feed (spec-idle-
+   *  notifications). Gated on needsObservation exactly like markIdle, so herd
+   *  children / delegates / auto-continuations never reach it. */
+  notifyExternalIdle(sessionId: string): void;
   /** Force-emit the dispatch-level idle (dispatchState.signalIdle) when a
    *  continuation was expected — so end() suppressed its idle emit — but failed to
    *  start. Without this the dispatch-emit consumers (waitForActive, waitForIdle,
@@ -75,7 +79,10 @@ export async function handleSessionIdle(
   // continuation; since it did NOT start, replace that suppressed emit so the
   // dispatch-emit consumers aren't stranded (spec-idle-suppression-central).
   if (willFire && !started) deps.signalDispatchIdle(sessionId);
-  if (ctx.needsObservation) deps.markIdle(sessionId);
+  if (ctx.needsObservation) {
+    deps.markIdle(sessionId);
+    deps.notifyExternalIdle(sessionId);
+  }
   deps.herdOnSessionIdle(sessionId);
   deps.pollQuota();
 }

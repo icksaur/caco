@@ -16,6 +16,7 @@ function makeDeps(over: Partial<{
     herdOnSessionIdle: vi.fn(),
     pollQuota: vi.fn(),
     signalDispatchIdle: vi.fn(),
+    notifyExternalIdle: vi.fn(),
   };
   const deps: IdleAuthorityDeps = {
     hasPendingAutoContinue: spies.hasPendingAutoContinue as unknown as IdleAuthorityDeps['hasPendingAutoContinue'],
@@ -25,6 +26,7 @@ function makeDeps(over: Partial<{
     herdOnSessionIdle: spies.herdOnSessionIdle,
     pollQuota: spies.pollQuota,
     signalDispatchIdle: spies.signalDispatchIdle,
+    notifyExternalIdle: spies.notifyExternalIdle,
   };
   return { deps, spies };
 }
@@ -41,6 +43,7 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     expect(spies.markIdle).not.toHaveBeenCalled();
     expect(spies.herdOnSessionIdle).not.toHaveBeenCalled();
     expect(spies.pollQuota).not.toHaveBeenCalled();
+    expect(spies.notifyExternalIdle).not.toHaveBeenCalled();
   });
 
   it('willFire but the continuation FAILED to start: falls through to real-idle effects (no drop)', async () => {
@@ -80,12 +83,30 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     expect(spies.pollQuota).toHaveBeenCalled();
   });
 
-  it('honors needsObservation=false: real idle skips markIdle but still runs herd + quota', async () => {
+  it('honors needsObservation=false: real idle skips markIdle + external notify but still runs herd + quota', async () => {
     const { deps, spies } = makeDeps({ willFire: false, pending: 0 });
     await handleSessionIdle(SID, { needsObservation: false }, deps);
     expect(spies.markIdle).not.toHaveBeenCalled();
+    expect(spies.notifyExternalIdle).not.toHaveBeenCalled();
     expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
     expect(spies.pollQuota).toHaveBeenCalled();
+  });
+
+  it('notifyExternalIdle fires iff needsObservation on a real idle (the feed gate)', async () => {
+    // needsObservation:true → external feed sees it.
+    const yes = makeDeps({ willFire: false, pending: 0 });
+    await handleSessionIdle(SID, { needsObservation: true }, yes.deps);
+    expect(yes.spies.notifyExternalIdle).toHaveBeenCalledWith(SID);
+
+    // needsObservation:false (herd child / delegate / auto-continue source) → not seen.
+    const no = makeDeps({ willFire: false, pending: 0 });
+    await handleSessionIdle(SID, { needsObservation: false }, no.deps);
+    expect(no.spies.notifyExternalIdle).not.toHaveBeenCalled();
+
+    // false idle (continuation started) → not seen even with needsObservation:true.
+    const falseIdle = makeDeps({ willFire: true, pending: 1, started: true });
+    await handleSessionIdle(SID, { needsObservation: true }, falseIdle.deps);
+    expect(falseIdle.spies.notifyExternalIdle).not.toHaveBeenCalled();
   });
 
   it('captures willFire BEFORE runAutoContinue (fire path clears the pending set)', async () => {

@@ -600,6 +600,37 @@
   cursor: default;
 }
 
+/* spec-files-applet-cards: the unified verb strip (replaces the viewer toggle +
+ * mode toggle). Container is a positioning anchor; each verb button is absolutely
+ * positioned (top set per-button in renderCardVerbs, 40px pitch) at right:16px,
+ * matching the old toggle look. */
+.files-card-verbs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.files-card-verbs.is-switching {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.files-card-verb {
+  position: absolute;
+  right: 16px;
+  pointer-events: auto;
+  background: var(--color-bg, #1e1e1e);
+  border: 1px solid var(--color-border, #3c3c3c);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm, 12px);
+  color: var(--color-text, #ddd);
+  cursor: pointer;
+}
+.files-card-verb:hover {
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.06));
+}
+
 /* V2.a: ImageViewer */
 .files-image-content {
   position: relative;
@@ -751,9 +782,9 @@
   font-size: var(--text-sm, 12px);
   pointer-events: none;
 }
-/* Move the disk-changed indicator to the LEFT of the toggle stack
- * when the toggle is visible — avoid overlap. */
-.files-tab-pane:has(.files-viewer-toggle:not([hidden])) .md-disk-changed {
+/* Move the disk-changed indicator to the LEFT of the verb stack
+ * when any verb button is shown — avoid overlap. */
+.files-tab-pane:has(.files-card-verb) .md-disk-changed {
   right: 100px;
 }
 

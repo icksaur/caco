@@ -398,6 +398,14 @@
     /** V3.x.2: per-viewerType eviction setTimeout ids. */
     this._evictionTimers = new Map();
 
+    // spec-files-applet-cards: the reachable card set for this file is a pure
+    // function of (path, capabilities, read-only). The active card is DERIVED from
+    // the live (activeViewerType, activeMode) via currentCardId(), never stored — so
+    // it can't diverge from the viewer state. isReadOnly mirrors the viewer opts.
+    this.isReadOnly = !!(opts && opts.readOnly) || this.external;
+    var cardReg = (typeof window !== 'undefined' && window.__filesCardRegistry) || null;
+    this.cards = cardReg ? cardReg.cardsForFile(relPath, shellRef.capabilities, this.isReadOnly) : [];
+
     var self = this;
 
     // Tab button (in the strip).
@@ -459,46 +467,19 @@
     pane.style.display = 'none';   // §4.0.H invariant
     this.contentEl = pane;
 
-    // Toggle button (top-right floating). Visibility controlled by
-    // updateToggle().
-    var toggle = document.createElement('button');
-    toggle.className = 'files-viewer-toggle';
-    toggle.type = 'button';
-    toggle.hidden = true;
-    toggle.addEventListener('click', function(e) {
-      e.stopPropagation();
-      var target = toggle.dataset.target;
-      if (target) void self.switchViewer(target);
-    });
-    pane.appendChild(toggle);
-    this.toggleBtn = toggle;
-
-    // V2.d: Mode toggle. Lazy-shown when the active viewer's
-    // getModes() returns ≥2 entries. Stacked below the viewer
-    // toggle. See docs/spec-files-applet.md
-    var modeBtn = document.createElement('button');
-    modeBtn.className = 'files-mode-toggle';
-    modeBtn.type = 'button';
-    modeBtn.hidden = true;
-    modeBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      var targetMode = modeBtn.dataset.target;
-      if (!targetMode) return;
-      var v = self.viewers.get(self.activeViewerType);
-      if (v && typeof v.setMode === 'function') {
-        v.setMode(targetMode);
-        self.updateModeToggle();
-        // C1: persist the mode change so view/edit survives reload.
-        schedulePersist();
-      }
-    });
-    pane.appendChild(modeBtn);
-    this.modeBtn = modeBtn;
+    // spec-files-applet-cards: ONE verb strip replaces the old two-button design
+    // (viewer toggle + mode toggle). renderCardVerbs() fills it with a button per
+    // reachable card except the active one; clicks call switchCard(id). Kept in
+    // `this.verbStripEl`. (Legacy `toggleBtn`/`modeBtn` fields are gone.)
+    var strip = document.createElement('div');
+    strip.className = 'files-card-verbs';
+    pane.appendChild(strip);
+    this.verbStripEl = strip;
 
     // V3.x.1: chrome buttons container. Anchor for per-viewer
     // buttons declared via getChromeButtons(). Position is set
-    // per-button at render time so the count + the mode-toggle
-    // visibility together determine the stack offset. See spec
+    // per-button at render time so the count + the verb-button
+    // count together determine the stack offset. See spec
     // §4.1.A / §4.1.C.
     var chromeEl = document.createElement('div');
     chromeEl.className = 'files-chrome-buttons';
@@ -567,7 +548,7 @@
     this.viewers.clear();
     if (this.tabEl && this.tabEl.parentNode) this.tabEl.parentNode.removeChild(this.tabEl);
     if (this.contentEl && this.contentEl.parentNode) this.contentEl.parentNode.removeChild(this.contentEl);
-    this.toggleBtn = null;
+    this.verbStripEl = null;
     this.tabEl = null;
     this.contentEl = null;
   };
@@ -581,6 +562,7 @@
       activeViewer: this.activeViewerType,
       defaultViewer: this.defaultViewerType,
       activeMode: (v && typeof v.getActiveMode === 'function') ? v.getActiveMode() : null,
+      activeCard: this.currentCardId(),
       isDirty: !!(v && typeof v.isDirty === 'function' && v.isDirty()),
     };
     for (var k in frag) {
@@ -589,60 +571,81 @@
     return out;
   };
 
-  /** Update the floating toggle's visibility and label. Called at
-   *  construction (post-mount) and after every switchViewer. */
-  TabContainer.prototype.updateToggle = function() {
-    if (!this.toggleBtn) return;
-    var available = [];
-    for (var i = 0; i < this.shell.viewers.length; i++) {
-      var d = this.shell.viewers[i];
-      if (d.canHandle(this.absPath, this.relPath)) available.push(d);
-    }
-    if (available.length < 2) { this.toggleBtn.hidden = true; return; }
-    this.toggleBtn.hidden = false;
-    var self = this;
-    var other = null;
-    for (var j = 0; j < available.length; j++) {
-      if (available[j].viewerType !== self.activeViewerType) { other = available[j]; break; }
-    }
-    if (!other) { this.toggleBtn.hidden = true; return; }
-    this.toggleBtn.textContent = '→ ' + other.label;
-    this.toggleBtn.dataset.target = other.viewerType;
+  /** spec-files-applet-cards: the DERIVED active card id. Computed from the real
+   *  (activeViewerType, active viewer mode) — never stored — so it can never diverge
+   *  from the viewer state (cancelled dirty-prompt, failed switch, or a direct
+   *  setMode/switchViewer call all leave it correct). */
+  TabContainer.prototype.currentCardId = function() {
+    var reg = (typeof window !== 'undefined' && window.__filesCardRegistry) || null;
+    if (!reg) return null;
+    var v = this.viewers.get(this.activeViewerType);
+    var mode = (v && typeof v.getActiveMode === 'function') ? v.getActiveMode() : null;
+    return reg.cardIdForViewerState(this.activeViewerType, mode);
   };
 
-  /** V2.d: update the mode toggle button based on the active
-   *  viewer's getModes(). Hides if the viewer has no modes or
-   *  fewer than 2. Adds/removes a `has-modes` class on contentEl
-   *  so CSS can reserve the save-button slot. */
-  TabContainer.prototype.updateModeToggle = function() {
-    if (!this.modeBtn || !this.contentEl) return;
-    var v = this.viewers.get(this.activeViewerType);
-    var modes = (v && typeof v.getModes === 'function') ? v.getModes() : null;
-    if (!modes || modes.length < 2) {
-      this.modeBtn.hidden = true;
-      this.contentEl.classList.remove('has-modes');
-      this.updateChromeButtons();
-      return;
+  /** spec-files-applet-cards: navigate to a card. Looks it up in this file's card
+   *  list (absent → no-op), then delegates to the existing switchViewer + setMode
+   *  machinery (lazy construct / activate / evict / dirty-prompt unchanged). Commits
+   *  NOTHING of its own — the active card is re-derived by renderCardVerbs afterward,
+   *  so a cancelled/failed transition leaves the strip correct. */
+  TabContainer.prototype.switchCard = async function(cardId) {
+    if (this.destroyed) return;
+    var card = null;
+    for (var i = 0; i < this.cards.length; i++) {
+      if (this.cards[i].id === cardId) { card = this.cards[i]; break; }
     }
-    this.contentEl.classList.add('has-modes');
-    this.modeBtn.hidden = false;
-    var active = (typeof v.getActiveMode === 'function') ? v.getActiveMode() : null;
-    var other = null;
-    for (var i = 0; i < modes.length; i++) {
-      if (modes[i].id !== active) { other = modes[i]; break; }
+    if (!card) return; // impossible-state guard
+    if (this.activeViewerType !== card.viewerType) {
+      await this.switchViewer(card.viewerType);
     }
-    if (!other) {
-      this.modeBtn.hidden = true;
-      this.contentEl.classList.remove('has-modes');
-      this.updateChromeButtons();
-      return;
+    // The switch may have been cancelled (dirty prompt) — only touch mode if it landed.
+    if (this.activeViewerType === card.viewerType && card.mode) {
+      var v = this.viewers.get(card.viewerType);
+      if (v && typeof v.setMode === 'function' && typeof v.getActiveMode === 'function'
+          && v.getActiveMode() !== card.mode) {
+        v.setMode(card.mode);
+      }
     }
-    this.modeBtn.textContent = '→ ' + other.label;
-    this.modeBtn.dataset.target = other.id;
-    // Tail-call (spec §4.1.A): chrome buttons read post-update
-    // mode-toggle state when computing their base offset.
+    this.renderCardVerbs();
+    schedulePersist();
+  };
+
+  /** spec-files-applet-cards: render the top-right verb strip — one button per
+   *  reachable card except the active (derived) one. Replaces updateToggle +
+   *  updateModeToggle; every former call site of those now calls this. */
+  TabContainer.prototype.renderCardVerbs = function() {
+    if (!this.verbStripEl) return;
+    var self = this;
+    var active = this.currentCardId();
+    var strip = this.verbStripEl;
+    while (strip.firstChild) strip.removeChild(strip.firstChild);
+    var count = 0;
+    for (var i = 0; i < this.cards.length; i++) {
+      var card = this.cards[i];
+      if (card.id === active) continue;
+      var btn = document.createElement('button');
+      btn.className = 'files-card-verb';
+      btn.type = 'button';
+      btn.textContent = '→ ' + card.verb;
+      btn.dataset.card = card.id;
+      btn.style.top = (8 + count * 40) + 'px';
+      btn.addEventListener('click', (function(id) {
+        return function(e) { e.stopPropagation(); void self.switchCard(id); };
+      })(card.id));
+      strip.appendChild(btn);
+      count += 1;
+    }
+    // has-verbs mirrors the old has-modes hook so CSS can reserve chrome slots.
+    this.contentEl.classList.toggle('has-verbs', count > 0);
+    this._verbCount = count;
     this.updateChromeButtons();
   };
+
+  // Back-compat aliases: every legacy call site (construction, post-switch, replay,
+  // rehydrate, diff bridge) re-renders the verb strip from derived state, so no
+  // navigation path can leave the strip stale (spec: no-bypass).
+  TabContainer.prototype.updateToggle = function() { this.renderCardVerbs(); };
+  TabContainer.prototype.updateModeToggle = function() { this.renderCardVerbs(); };
 
   /** V3.x.1: reconcile chrome buttons against active viewer's
    *  getChromeButtons(). See spec §4.1.B.
@@ -736,10 +739,9 @@
       self._chromeButtonsState.delete(id);
     });
 
-    // Compute base offset from current mode-toggle visibility
-    // (spec §4.1.A trigger ordering: tail-call from updateModeToggle
-    // means modeBtn.hidden reflects the new state).
-    var base = (this.modeBtn && !this.modeBtn.hidden) ? 72 : 40;
+    // Chrome (Save, etc.) stacks below the verb strip: one 40px slot per verb
+    // button, starting at the same 8px top (spec-files-applet-cards §Rendering).
+    var base = 8 + ((this._verbCount || 0) * 40);
     var idx = 0;
     // Layout VISIBLE buttons in desired order.
     desired.forEach(function(desc) {
@@ -832,7 +834,7 @@
     }
 
     this.switching = true;
-    if (this.toggleBtn) this.toggleBtn.disabled = true;
+    if (this.verbStripEl) this.verbStripEl.classList.add('is-switching');
     var priorType = this.activeViewerType;
     var prior = this.viewers.get(priorType);
 
@@ -862,7 +864,6 @@
         this._scheduleEviction(priorType);
       }
       this.updateToggle();
-      this.updateModeToggle();
       this.shell.echoState();
     } catch (err) {
       console.warn('[files-applet] switchViewer failed:', err);
@@ -876,7 +877,7 @@
       }
     } finally {
       this.switching = false;
-      if (this.toggleBtn) this.toggleBtn.disabled = false;
+      if (this.verbStripEl) this.verbStripEl.classList.remove('is-switching');
     }
   };
 
@@ -2099,6 +2100,9 @@
         relativePath: container.relPath,
         defaultViewerType: container.defaultViewerType,
         activeViewerType: container.activeViewerType,
+        // spec-files-applet-cards: the derived active card id is the forward
+        // schema; activeViewerType/mode stay written one release for downgrade.
+        activeCard: (typeof container.currentCardId === 'function') ? container.currentCardId() : undefined,
       };
       if (container.diffMode && container.diffMode !== 'unstaged') {
         card.diffMode = container.diffMode;

@@ -26,22 +26,13 @@ describe('CorrelationMetrics', () => {
       expect(result.allowed).toBe(true);
     });
 
-    it('allows calls within depth limit', () => {
-      metrics.recordCall('session-1');
-      const result = metrics.isAllowed('session-2');
-      expect(result.allowed).toBe(true);
-    });
-
-    it('rejects call exceeding depth limit', () => {
-      // Default maxDepth is 2, so chain of 3 should be rejected
+    it('allows many calls to distinct targets (depth is no longer a chain rule)', () => {
+      // Fan-out that would have tripped the old collapseChain depth rule now stays
+      // allowed here — depth is enforced at the route as a per-dispatch hop-count.
       metrics.recordCall('session-1');
       metrics.recordCall('session-2');
-      
-      const result = metrics.isAllowed('session-3');
-      expect(result.allowed).toBe(false);
-      if (!result.allowed) {
-        expect(result.reason).toContain('depth');
-      }
+      metrics.recordCall('session-3');
+      expect(metrics.isAllowed('session-4').allowed).toBe(true);
     });
 
     it('tracks call count', () => {
@@ -56,7 +47,6 @@ describe('CorrelationMetrics', () => {
   describe('rate limiting', () => {
     it('enforces rate limit', () => {
       const strictRules: CorrelationRules = {
-        maxDepth: 100,
         maxAgeSeconds: 3600,
         rateLimit: { maxCalls: 3, windowSeconds: 60 }
       };
@@ -77,7 +67,6 @@ describe('CorrelationMetrics', () => {
 
     it('slides the window on real recorded timestamps', () => {
       const strictRules: CorrelationRules = {
-        maxDepth: 100,
         maxAgeSeconds: 3600,
         rateLimit: { maxCalls: 2, windowSeconds: 60 }
       };
@@ -101,7 +90,6 @@ describe('CorrelationMetrics', () => {
   describe('expiration', () => {
     it('detects expired correlation', () => {
       const shortRules: CorrelationRules = {
-        maxDepth: 10,
         maxAgeSeconds: 60,
         rateLimit: { maxCalls: 100, windowSeconds: 60 }
       };

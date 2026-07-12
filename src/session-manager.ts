@@ -409,6 +409,11 @@ export class SessionManager {
   //  - autoContinueAttempts: consecutive auto-continuations fired, reset only by a
   //    non-autocontinue (human/agent/applet/scheduler) dispatch start.
   private pendingTools = new Map<string, Set<string>>();
+  // sessionId → the hop-count depth of the dispatch that revealed the pending tools,
+  // captured while that dispatch is live (spec-herd-depth-breadth). The auto-continue
+  // dispatch — a same-session continuation, NOT a root — carries this so nested work
+  // cannot regain delegation budget by revealing a tool.
+  private pendingToolsDepth = new Map<string, number>();
   private autoContinueAttempts = new Map<string, number>();
   // Sessions whose continuation is being SET UP (spec-idle-suppression-central):
   // held by the auto-continue runtime from before the pending set is cleared until
@@ -1763,8 +1768,8 @@ export class SessionManager {
    * Start a dispatch - marks session busy with correlation context
    * Called before dispatching to SDK. Tools can inherit correlationId.
    */
-  startDispatch(sessionId: string, correlationId: string): void {
-    dispatchState.start(sessionId, correlationId);
+  startDispatch(sessionId: string, correlationId: string, depth = 1): void {
+    dispatchState.start(sessionId, correlationId, depth);
   }
 
   /**
@@ -1831,6 +1836,13 @@ export class SessionManager {
    */
   getDispatchCorrelationId(sessionId: string): string | undefined {
     return dispatchState.getCorrelationId(sessionId);
+  }
+
+  /** The hop-count depth of a session's active dispatch, or undefined if idle.
+   *  The route reads the CALLER's depth here to derive an agent call's depth
+   *  (spec-herd-depth-breadth). */
+  getDispatchDepth(sessionId: string): number | undefined {
+    return dispatchState.getDepth(sessionId);
   }
 
   /**
@@ -2368,12 +2380,20 @@ export class SessionManager {
     }
   }
 
-  /** Union revealed tool names into this session's pending-continuation set. */
+  /** Union revealed tool names into this session's pending-continuation set. Captures
+   *  the revealing dispatch's depth (live now) so the continuation preserves it. */
   addPendingTools(sessionId: string, names: string[]): void {
     if (names.length === 0) return;
     const set = this.pendingTools.get(sessionId) ?? new Set<string>();
     for (const n of names) set.add(n);
     this.pendingTools.set(sessionId, set);
+    this.pendingToolsDepth.set(sessionId, dispatchState.getDepth(sessionId) ?? 1);
+  }
+
+  /** The depth the auto-continue dispatch should carry (the revealing dispatch's
+   *  depth), or 1 if none captured. Read by runAutoContinue's direct dispatch. */
+  getRevealDepth(sessionId: string): number {
+    return this.pendingToolsDepth.get(sessionId) ?? 1;
   }
 
   /** The tools awaiting an auto-continuation for this session (empty if none). */
@@ -2403,6 +2423,7 @@ export class SessionManager {
    *  re-arms the budget. */
   resetAutoContinue(sessionId: string): void {
     this.pendingTools.delete(sessionId);
+    this.pendingToolsDepth.delete(sessionId);
     this.autoContinueAttempts.delete(sessionId);
     this.continuationInFlight.delete(sessionId);
   }

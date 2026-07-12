@@ -4,16 +4,15 @@
  * Rules:
  * - Age: Max flow duration
  * - Rate: Max calls per time window
- * - Depth: Max collapsed stack depth
+ *
+ * Depth is NOT handled here: it is a server-derived per-dispatch hop-count enforced
+ * at the message route (spec-herd-depth-breadth), independent of the correlation flow.
  */
-
-import { getEffectiveDepth } from './chain-stack.js';
 
 /**
  * Configuration for runaway limits
  */
 export interface RunawayLimits {
-  maxDepth: number;           // Max collapsed stack depth
   maxDuration: number;        // Max flow age in seconds
   maxCallsPerWindow: number;  // Max calls in time window
   rateWindow: number;         // Time window for rate limiting in seconds
@@ -23,7 +22,6 @@ export interface RunawayLimits {
  * Default limits
  */
 export const DEFAULT_LIMITS: RunawayLimits = {
-  maxDepth: 5,
   maxDuration: 5 * 60,        // 5 minutes
   maxCallsPerWindow: 20,
   rateWindow: 60,             // 1 minute
@@ -33,7 +31,6 @@ export const DEFAULT_LIMITS: RunawayLimits = {
  * Flow metrics for rule evaluation
  */
 export interface FlowMetrics {
-  chain: string[];            // Raw call chain
   startTime: number;          // Unix timestamp (ms) of first call
   callTimestamps: number[];   // Unix timestamps (ms) of all calls
 }
@@ -63,20 +60,9 @@ export class RunawayRulesEngine {
    */
   checkCall(
     metrics: FlowMetrics,
-    newSessionId: string,
     timestamp: number
   ): RuleResult {
-    // Rule 1: Depth check
-    const newChain = [...metrics.chain, newSessionId];
-    const depth = getEffectiveDepth(newChain);
-    if (depth > this.limits.maxDepth) {
-      return {
-        allowed: false,
-        reason: `Effective call depth ${depth} exceeds limit (max ${this.limits.maxDepth})`
-      };
-    }
-
-    // Rule 2: Age check
+    // Rule 1: Age check
     const age = (timestamp - metrics.startTime) / 1000; // Convert to seconds
     if (age > this.limits.maxDuration) {
       return {
@@ -85,7 +71,7 @@ export class RunawayRulesEngine {
       };
     }
 
-    // Rule 3: Rate check
+    // Rule 2: Rate check
     const windowStart = timestamp - (this.limits.rateWindow * 1000);
     const callsInWindow = metrics.callTimestamps.filter(t => t >= windowStart).length + 1; // +1 for new call
     if (callsInWindow > this.limits.maxCallsPerWindow) {

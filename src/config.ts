@@ -29,7 +29,7 @@ export const EXEC_TIMEOUT_MS = 60 * 1000;
 export const EXEC_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 // Agent runaway guard
-export const AGENT_MAX_DEPTH = 2;
+export const AGENT_MAX_DEPTH = 3;
 export const AGENT_MAX_AGE_SECONDS = 60 * 60;
 export const AGENT_RATE_LIMIT_CALLS = 10;
 export const AGENT_RATE_LIMIT_WINDOW_SECONDS = 60;

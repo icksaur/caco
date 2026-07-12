@@ -21,7 +21,7 @@ import { parseImageDataUrl } from '../image-utils.js';
 import { broadcastEvent, broadcastGlobalEvent, type SessionEvent } from './websocket.js';
 import { getSessionMeta, updateSessionMeta } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
-import { DISPATCH_TIMEOUT_MS } from '../config.js';
+import { DISPATCH_TIMEOUT_MS, AGENT_MAX_DEPTH } from '../config.js';
 import { prefixMessageSource, type MessageSource } from '../message-source.js';
 import { createWatchdog } from '../dispatch-watchdog.js';
 import { dispatchState } from '../dispatch-state.js';
@@ -66,10 +66,12 @@ function runAutoContinue(sessionId: string): Promise<boolean> {
       const prompt = prefixMessageSource('system', AUTOCONTINUE_IDENTIFIER, text);
       // Broadcast the continuation's events to WS viewers (same as the HTTP route),
       // otherwise the operator sees nothing live until a page refresh replays history.
+      // A continuation is NOT a root: carry the revealing dispatch's captured depth so
+      // nested work cannot regain delegation budget (spec-herd-depth-breadth).
       await dispatchMessage(
         id,
         prompt,
-        { needsObservation: false, requestId: `autocontinue-${Date.now().toString(36)}` },
+        { needsObservation: false, requestId: `autocontinue-${Date.now().toString(36)}`, depth: sessionManager.getRevealDepth(id) },
         { onEvent: (evt) => broadcastEvent(id, evt) }
       );
     },
@@ -198,7 +200,36 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     return;
   }
   
-  // Runaway guard: check correlation metrics for agent calls
+  // Agent-source ⟺ fromSession (biconditional, spec-herd-depth-breadth): source:'agent'
+  // requires a caller, and a caller may only be presented by an agent call — so the
+  // hop-count depth derivation below cannot be dodged by mismatching the two. Placed
+  // after the steering/self-post gates so it scopes only the agent-dispatch path.
+  if ((source === 'agent') !== Boolean(fromSession)) {
+    res.status(400).json({ error: "source:'agent' requires fromSession, and fromSession requires source:'agent'" });
+    return;
+  }
+
+  // Hop-count depth (spec-herd-depth-breadth): a root entry (user/applet/scheduler/
+  // herd-wake) is depth 1; an agent call is the CALLER's live dispatch depth + 1 (the
+  // push). Server-derived — no body field is trusted. A fire-and-forget agent call
+  // that returns immediately is a push+pop, so siblings share a level (fan-out breadth
+  // is not depth). The child→parent completion wake is source:'system' (a root), which
+  // is the pop. Rejected if the caller has no live dispatch or the push exceeds the max.
+  let dispatchDepth = 1;
+  if (source === 'agent' && fromSession) {
+    const callerDepth = sessionManager.getDispatchDepth(fromSession);
+    if (callerDepth === undefined) {
+      res.status(400).json({ error: 'Agent call rejected: caller has no active dispatch' });
+      return;
+    }
+    dispatchDepth = callerDepth + 1;
+    if (dispatchDepth > AGENT_MAX_DEPTH) {
+      res.status(400).json({ error: `Agent call rejected: Effective call depth ${dispatchDepth} exceeds limit (max ${AGENT_MAX_DEPTH})` });
+      return;
+    }
+  }
+
+  // Runaway guard: rate + age for the correlation flow (depth is handled above).
   if (correlationId) {
     const guardResult = sessionManager.checkAgentCall(correlationId, sessionId);
     if (!guardResult.allowed) {
@@ -280,7 +311,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     await dispatchMessage(
       sessionId, 
       promptToSend, 
-      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId, needsObservation: !source },
+      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId, needsObservation: !source, depth: dispatchDepth },
       {
         onEvent: (evt) => broadcastEvent(sessionId, evt)
       }
@@ -340,11 +371,11 @@ function capturePriceContext(sessionId: string): { model: string | null; rates: 
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; displayPrompt?: string; beforeSend?: () => Promise<void> },
+  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; displayPrompt?: string; beforeSend?: () => Promise<void>; depth?: number },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePaths, correlationId, requestId, needsObservation, displayPrompt, beforeSend } = options || {};
+  const { tempFilePaths, correlationId, requestId, needsObservation, displayPrompt, beforeSend, depth } = options || {};
   const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
 
@@ -357,7 +388,7 @@ export async function dispatchMessage(
   // so a restart requested during session-resume waits for us. The actual
   // send-to-SDK happens later but the busy state is already true here.
   const effectiveCorrelationId = correlationId || randomUUID();
-  sessionManager.startDispatch(sessionId, effectiveCorrelationId);
+  sessionManager.startDispatch(sessionId, effectiveCorrelationId, depth ?? 1);
 
   // Fresh user send → reset request-scoped throughput counters and push
   // the cleared snapshot so the footer zeroes at send. Accumulation then

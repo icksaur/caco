@@ -79,23 +79,28 @@ const sdkStore = vi.hoisted(() => {
 const dispatch = vi.hoisted(() => {
   const busy = new Set<string>();
   const correlations = new Map<string, string>();
+  const depths = new Map<string, number>();
   return {
     busy,
     correlations,
+    depths,
     waitForIdleResult: 'idle',
     dispatchState: {
-      start: vi.fn((sessionId: string, correlationId: string) => {
+      start: vi.fn((sessionId: string, correlationId: string, depth = 1) => {
         busy.add(sessionId);
         correlations.set(sessionId, correlationId);
+        depths.set(sessionId, depth);
       }),
       end: vi.fn((sessionId: string) => {
         busy.delete(sessionId);
         correlations.delete(sessionId);
+        depths.delete(sessionId);
       }),
       isBusy: vi.fn((sessionId: string) => busy.has(sessionId)),
       getAllActive: vi.fn(() => new Set(busy)),
       waitForIdle: vi.fn(async () => dispatch.waitForIdleResult),
       getCorrelationId: vi.fn((sessionId: string) => correlations.get(sessionId)),
+      getDepth: vi.fn((sessionId: string) => depths.get(sessionId)),
       setIdleSuppressor: vi.fn(),
     },
   };
@@ -444,6 +449,27 @@ describe('SessionManager coverage seams', () => {
     await expect(manager.cancelSession(sessionId)).resolves.toEqual({ forced: true });
     expect(dispatch.dispatchState.waitForIdle).toHaveBeenCalledWith(sessionId, 5000);
     expect(manager.getDispatchCorrelationId(sessionId)).toBeUndefined();
+  });
+
+  it('captures the revealing dispatch depth so an auto-continuation is not a root (spec-herd-depth-breadth)', async () => {
+    const manager = await initializedManager();
+
+    // A session dispatching at depth 3 reveals a tool: addPendingTools captures the
+    // live depth so the continuation preserves it (not reset to root 1).
+    manager.startDispatch('deep-session', 'corr-1', 3);
+    expect(manager.getDispatchDepth('deep-session')).toBe(3);
+    manager.addPendingTools('deep-session', ['some_tool']);
+    expect(manager.getRevealDepth('deep-session')).toBe(3);
+
+    // The captured depth survives the dispatch ending (idle) — the continuation
+    // fires after idle and still carries depth 3.
+    manager.endDispatch('deep-session');
+    expect(manager.getDispatchDepth('deep-session')).toBeUndefined();
+    expect(manager.getRevealDepth('deep-session')).toBe(3);
+
+    // A fresh non-autocontinue dispatch re-arms: resetAutoContinue clears the capture.
+    manager.resetAutoContinue('deep-session');
+    expect(manager.getRevealDepth('deep-session')).toBe(1);
   });
 
   it('stops, changes cwd, forks, deletes, and shuts down sessions through public lifecycle APIs', async () => {

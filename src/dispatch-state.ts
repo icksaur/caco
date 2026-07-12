@@ -14,6 +14,10 @@ import { createWatchdog } from './dispatch-watchdog.js';
 export interface ActiveDispatch {
   correlationId: string;
   startedAt: number;
+  /** Server-derived hop-count depth of this dispatch (spec-herd-depth-breadth):
+   *  a root entry (user/applet/scheduler/herd-wake) is 1, an agent call is the
+   *  caller's depth + 1. Read by the route to derive a child dispatch's depth. */
+  depth: number;
 }
 
 /** Options for an activity-aware wait. */
@@ -59,13 +63,14 @@ export class DispatchState extends EventEmitter {
     return !this.isBusy(sessionId) && !this.idleSuppressor?.(sessionId);
   }
 
-  start(sessionId: string, correlationId: string): void {
+  start(sessionId: string, correlationId: string, depth = 1): void {
     if (this.dispatches.has(sessionId)) {
       throw new Error(`Session ${sessionId} is already dispatching`);
     }
     this.dispatches.set(sessionId, {
       correlationId,
-      startedAt: Date.now()
+      startedAt: Date.now(),
+      depth
     });
   }
 
@@ -101,6 +106,13 @@ export class DispatchState extends EventEmitter {
 
   getCorrelationId(sessionId: string): string | undefined {
     return this.dispatches.get(sessionId)?.correlationId;
+  }
+
+  /** The hop-count depth of the session's active dispatch, or undefined if none.
+   *  A caller must be busy (mid-tool-call) for this to be defined — which is what
+   *  the route relies on to derive an agent call's depth (spec-herd-depth-breadth). */
+  getDepth(sessionId: string): number | undefined {
+    return this.dispatches.get(sessionId)?.depth;
   }
 
   getDispatch(sessionId: string): ActiveDispatch | undefined {

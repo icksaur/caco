@@ -138,6 +138,29 @@ describe('DispatchState', () => {
     });
   });
 
+  describe('depth tracking (spec-herd-depth-breadth)', () => {
+    it('defaults to depth 1 when not given (root dispatch)', () => {
+      state.start('session-1', 'corr-1');
+      expect(state.getDepth('session-1')).toBe(1);
+      expect(state.getDispatch('session-1')!.depth).toBe(1);
+    });
+
+    it('stores an explicit depth', () => {
+      state.start('session-1', 'corr-1', 3);
+      expect(state.getDepth('session-1')).toBe(3);
+    });
+
+    it('returns undefined depth when not dispatching', () => {
+      expect(state.getDepth('session-1')).toBeUndefined();
+    });
+
+    it('clears depth after the dispatch ends', () => {
+      state.start('session-1', 'corr-1', 2);
+      state.end('session-1');
+      expect(state.getDepth('session-1')).toBeUndefined();
+    });
+  });
+
   describe('idle event emission', () => {
     it('emits idle event when dispatch ends', () => {
       const events: string[] = [];

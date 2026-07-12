@@ -28,6 +28,8 @@ const routeMocks = vi.hoisted(() => {
     getSession: vi.fn(() => null),
     startDispatch: vi.fn(),
     endDispatch: vi.fn(),
+    getDispatchDepth: vi.fn((_sessionId: string): number | undefined => 1),
+    getRevealDepth: vi.fn((_sessionId: string): number => 1),
   };
   return {
     sessionManager,
@@ -52,7 +54,7 @@ vi.mock('../../src/image-utils.js', () => ({ parseImageDataUrl: vi.fn(() => null
 vi.mock('../../src/routes/websocket.js', () => ({ broadcastEvent: routeMocks.broadcastEvent, broadcastGlobalEvent: routeMocks.broadcastGlobalEvent }));
 vi.mock('../../src/storage.js', () => ({ getSessionMeta: vi.fn(() => null), updateSessionMeta: routeMocks.updateSessionMeta }));
 vi.mock('../../src/unobserved-tracker.js', () => ({ unobservedTracker: { markIdle: vi.fn() } }));
-vi.mock('../../src/config.js', () => ({ DISPATCH_TIMEOUT_MS: 1000 }));
+vi.mock('../../src/config.js', () => ({ DISPATCH_TIMEOUT_MS: 1000, AGENT_MAX_DEPTH: 3 }));
 vi.mock('../../src/message-source.js', () => ({ prefixMessageSource: vi.fn((source: string, id: string, text: string) => `[${source}:${id}] ${text}`) }));
 vi.mock('../../src/dispatch-watchdog.js', () => ({ createWatchdog: vi.fn(() => ({ cancel: vi.fn() })) }));
 vi.mock('../../src/dispatch-state.js', () => ({ dispatchState: { signalIdle: vi.fn(), waitForIdle: vi.fn(async () => 'timeout'), getCorrelationId: vi.fn() } }));
@@ -93,6 +95,7 @@ beforeEach(() => {
   routeMocks.updateSessionMeta.mockImplementation((_sessionId: string, updater: (meta: { responseOptions?: object }) => void) => { updater({ responseOptions: {} }); return true; });
   routeMocks.handleSessionIdle.mockImplementation((_sessionId: string, _options: unknown, _deps: unknown) => undefined);
   routeMocks.maybeAutoContinue.mockResolvedValue(false);
+  routeMocks.sessionManager.getDispatchDepth.mockReturnValue(1);
 });
 
 const postJson = (path: string, body: unknown, headers: Record<string, string> = {}) => fetch(`${base}${path}`, {
@@ -109,10 +112,22 @@ describe('session messages route harness', () => {
   });
 
   it('400s agent-initiated messages that omit correlationId', async () => {
-    const res = await postJson('/sessions/s1/messages', { prompt: 'hi', fromSession: 'agent-source' });
+    const res = await postJson('/sessions/s1/messages', { prompt: 'hi', source: 'agent', fromSession: 'agent-source' });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'correlationId required for agent-initiated calls' });
     expect(routeMocks.sessionManager.resetAutoContinue).not.toHaveBeenCalled();
+  });
+
+  it('400s a fromSession without source:agent (biconditional contract)', async () => {
+    const res = await postJson('/sessions/s1/messages', { prompt: 'hi', fromSession: 'agent-source', correlationId: 'c1' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "source:'agent' requires fromSession, and fromSession requires source:'agent'" });
+  });
+
+  it('400s source:agent without a fromSession (biconditional contract)', async () => {
+    const res = await postJson('/sessions/s1/messages', { prompt: 'hi', source: 'agent', correlationId: 'c1' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "source:'agent' requires fromSession, and fromSession requires source:'agent'" });
   });
 
   it('404s when the session cwd lookup misses', async () => {
@@ -177,12 +192,65 @@ describe('session messages route harness', () => {
     expect(routeMocks.sessionManager.checkAgentCall).toHaveBeenCalledWith('corr-1', 's2');
   });
 
+  describe('hop-count depth (spec-herd-depth-breadth)', () => {
+    it('fan-out: an agent call from a depth-1 caller dispatches the child at depth 2', async () => {
+      routeMocks.sessionManager.getDispatchDepth.mockReturnValue(1);
+      const res = await postJson('/sessions/child-a/messages', { prompt: 'work', source: 'agent', fromSession: 'parent', correlationId: 'corr-1' });
+      expect(res.status).toBe(200);
+      expect(routeMocks.sessionManager.getDispatchDepth).toHaveBeenCalledWith('parent');
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('child-a', expect.any(String), 2);
+    });
+
+    it('fan-out is flat: a second child from the same depth-1 caller is also depth 2', async () => {
+      routeMocks.sessionManager.getDispatchDepth.mockReturnValue(1);
+      await postJson('/sessions/child-a/messages', { prompt: 'work', source: 'agent', fromSession: 'parent', correlationId: 'corr-1' });
+      await postJson('/sessions/child-b/messages', { prompt: 'work', source: 'agent', fromSession: 'parent', correlationId: 'corr-1' });
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('child-b', expect.any(String), 2);
+    });
+
+    it('nesting: a depth-2 caller pushes its child to depth 3 (allowed at max 3)', async () => {
+      routeMocks.sessionManager.getDispatchDepth.mockReturnValue(2);
+      const res = await postJson('/sessions/grandchild/messages', { prompt: 'work', source: 'agent', fromSession: 'child', correlationId: 'corr-1' });
+      expect(res.status).toBe(200);
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('grandchild', expect.any(String), 3);
+    });
+
+    it('nesting: a depth-3 caller pushes past the limit and is rejected', async () => {
+      routeMocks.sessionManager.getDispatchDepth.mockReturnValue(3);
+      const res = await postJson('/sessions/too-deep/messages', { prompt: 'work', source: 'agent', fromSession: 'deep-caller', correlationId: 'corr-1' });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'Agent call rejected: Effective call depth 4 exceeds limit (max 3)' });
+      expect(routeMocks.sessionManager.startDispatch).not.toHaveBeenCalled();
+    });
+
+    it('absent/idle caller: an agent call whose caller has no live dispatch is rejected', async () => {
+      routeMocks.sessionManager.getDispatchDepth.mockReturnValue(undefined);
+      const res = await postJson('/sessions/s2/messages', { prompt: 'work', source: 'agent', fromSession: 'idle-parent', correlationId: 'corr-1' });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'Agent call rejected: caller has no active dispatch' });
+      expect(routeMocks.sessionManager.startDispatch).not.toHaveBeenCalled();
+    });
+
+    it('wake-pop: a source:system wake is a root at depth 1 regardless of any child depth', async () => {
+      const res = await postJson('/sessions/parent/messages', { prompt: 'your herd needs attention', source: 'system' });
+      expect(res.status).toBe(200);
+      expect(routeMocks.sessionManager.getDispatchDepth).not.toHaveBeenCalled();
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('parent', expect.any(String), 1);
+    });
+
+    it('root: a plain user message dispatches at depth 1', async () => {
+      const res = await postJson('/sessions/s1/messages', { prompt: 'hello' });
+      expect(res.status).toBe(200);
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('s1', expect.any(String), 1);
+    });
+  });
+
   it('reaches only the no-session dispatch teardown path for a normal message', async () => {
     routeMocks.sessionManager.getSession.mockReturnValueOnce(null);
     const res = await postJson('/sessions/s1/messages', { prompt: 'dispatch then stop' }, { 'x-request-id': 'req-1' });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, sessionId: 's1' });
-    expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('s1', expect.any(String));
+    expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('s1', expect.any(String), 1);
     expect(routeMocks.sessionManager.endDispatch).toHaveBeenCalledWith('s1');
     expect(routeMocks.broadcastEvent).toHaveBeenCalledWith('s1', { type: 'session.error', data: { message: 'No active session' } });
     expect(routeMocks.broadcastGlobalEvent).toHaveBeenCalledWith({ type: 'session.busy', data: { sessionId: 's1', isBusy: false } });

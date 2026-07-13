@@ -22,6 +22,7 @@ import { createDocsTool } from './src/dev-docs-tool.js';
 import { createDelegateTool } from './src/delegate-tool.js';
 import { createHerdTools } from './src/herd-tools.js';
 import { scanHerdsOnBoot, onSessionDeleted } from './src/herd-runtime.js';
+import { startAutoArchiveReaper } from './src/session-archive-reaper.js';
 import { createSessionHistoryTool } from './src/session-history-tool.js';
 import { createMemoryTools } from './src/memory-tool.js';
 import { createIndexTool } from './src/index-tool.js';
@@ -360,6 +361,9 @@ async function start(): Promise<void> {
       // orphaned children, and re-wake any parent with a non-active child. Must
       // run after listen() because the wake POSTs the message route.
       void scanHerdsOnBoot();
+      // Start the soft-archive reaper: periodically archive sessions parked in the
+      // auto-archive folder that have been idle past the threshold (spec-soft-archive-folder).
+      startAutoArchiveReaper();
       return; // Success
     } catch (err: unknown) {
       const error = err as NodeJS.ErrnoException;

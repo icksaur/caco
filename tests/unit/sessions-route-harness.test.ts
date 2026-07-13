@@ -131,6 +131,7 @@ const sessionManager = {
   getModels: vi.fn(() => [{ id: 'model-a', name: 'Model A', capabilities: { supports: { reasoningEffort: true } }, supportedReasoningEfforts: ['low'], defaultReasoningEffort: 'low' }]),
   isActive: vi.fn((id: string) => state.activeIds.has(id)),
   isBusy: vi.fn((id: string) => state.busyIds.has(id)),
+  isUnderMaintenance: vi.fn((_id: string) => false),
   hasMessages: vi.fn((id: string) => id === knownId),
   getSessionCwd: vi.fn((id: string) => state.cwdById.get(id) ?? null),
   getSessionModel: vi.fn((id: string) => state.metaById.get(id)?.model ?? null),

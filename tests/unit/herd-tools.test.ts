@@ -4,11 +4,12 @@ const sessionManagerFake = vi.hoisted(() => ({
   getModels: vi.fn<() => Array<{ id: string }>>(),
   isBusy: vi.fn<(sessionId: string) => boolean>(),
   isActive: vi.fn<(sessionId: string) => boolean>(),
+  isUnderMaintenance: vi.fn<(sessionId: string) => boolean>(),
 }));
 
 const storageFake = vi.hoisted(() => ({
-  getSessionMeta: vi.fn<(sessionId: string) => { name?: string; lastIdleAt?: string; orchestratedBy?: string } | undefined>(),
-  updateSessionMeta: vi.fn<(sessionId: string, updater: (meta: { orchestratedBy?: string }) => void) => void>(),
+  getSessionMeta: vi.fn<(sessionId: string) => { name?: string; lastIdleAt?: string; orchestratedBy?: string; folder?: string; autoArchiveTaggedAt?: number } | undefined>(),
+  updateSessionMeta: vi.fn<(sessionId: string, updater: (meta: { orchestratedBy?: string; folder?: string; autoArchiveTaggedAt?: number }) => void) => void>(),
 }));
 
 const historyFake = vi.hoisted(() => ({
@@ -84,6 +85,7 @@ beforeEach(() => {
   sessionManagerFake.getModels.mockReturnValue([{ id: 'auto' }, { id: 'sonnet' }]);
   sessionManagerFake.isBusy.mockReturnValue(false);
   sessionManagerFake.isActive.mockReturnValue(true);
+  sessionManagerFake.isUnderMaintenance.mockReturnValue(false);
   storageFake.getSessionMeta.mockImplementation(() => undefined);
   storageFake.updateSessionMeta.mockImplementation((_sessionId, updater) => {
     updater({});
@@ -286,15 +288,51 @@ describe('caco_herd acquire, resume, and disown', () => {
     expect(notMine.textResultForLlm).toContain('not a child of your herd');
   });
 
-  it('disowns an owned child and clears the bond', async () => {
+  it('disowns an owned child, parks it in auto-archive with a fresh tag, and clears the bond', async () => {
     storageFake.getSessionMeta.mockImplementation(sessionId => (
       sessionId === 'target-child-0004' ? { orchestratedBy: 'parent-session-0001' } : undefined
     ));
 
     const out = await tools().herdTool.handler({ action: 'disown', sessionId: 'target-child-0004' });
 
-    expect(out).toMatchObject({ resultType: 'text', textResultForLlm: 'Disowned target-c — it is now an ordinary session again.' });
+    expect(out).toMatchObject({ resultType: 'text' });
+    expect((out as { textResultForLlm: string }).textResultForLlm).toContain('auto-archive');
     expect(storageFake.updateSessionMeta).toHaveBeenCalledWith('target-child-0004', expect.any(Function));
+    // Apply the updater to a blank meta and assert the parking mutation.
+    const updater = storageFake.updateSessionMeta.mock.calls.at(-1)![1];
+    const m: { orchestratedBy?: string; folder?: string; autoArchiveTaggedAt?: number } = { orchestratedBy: 'parent-session-0001' };
+    updater(m);
+    expect(m.orchestratedBy).toBeUndefined();
+    expect(m.folder).toBe('auto-archive');
+    expect(typeof m.autoArchiveTaggedAt).toBe('number');
     expect(herdFake.clearHerdBond).toHaveBeenCalledWith('target-child-0004');
+  });
+
+  it('refuses disown while the child is under an archive maintenance claim', async () => {
+    storageFake.getSessionMeta.mockImplementation(sessionId => (
+      sessionId === 'target-child-0004' ? { orchestratedBy: 'parent-session-0001' } : undefined
+    ));
+    sessionManagerFake.isUnderMaintenance.mockReturnValue(true);
+
+    const out = await tools().herdTool.handler({ action: 'disown', sessionId: 'target-child-0004' });
+
+    expect(out).toMatchObject({ resultType: 'error' });
+    expect((out as { textResultForLlm: string }).textResultForLlm).toContain('being archived');
+    expect(herdFake.clearHerdBond).not.toHaveBeenCalled();
+  });
+
+  it('acquire un-tags a parked session (clears auto-archive folder + tag)', async () => {
+    storageFake.getSessionMeta.mockImplementation(sessionId => (
+      sessionId === 'target-child-0004' ? { folder: 'auto-archive', autoArchiveTaggedAt: 123 } : undefined
+    ));
+
+    await tools().herdTool.handler({ action: 'acquire', sessionId: 'target-child-0004' });
+
+    const updater = storageFake.updateSessionMeta.mock.calls.at(-1)![1];
+    const m: { orchestratedBy?: string; folder?: string; autoArchiveTaggedAt?: number } = { folder: 'auto-archive', autoArchiveTaggedAt: 123 };
+    updater(m);
+    expect(m.orchestratedBy).toBe('parent-session-0001');
+    expect(m.folder).toBeUndefined();
+    expect(m.autoArchiveTaggedAt).toBeUndefined();
   });
 });

@@ -35,6 +35,12 @@ export interface SessionMeta {
   context?: Record<string, string[]>;
   model?: string;
   folder?: string;
+  /** Epoch ms when this session was parked into the `auto-archive` folder
+   *  (spec-soft-archive-folder). The schedule anchor: the reaper's idle clock is
+   *  max(autoArchiveTaggedAt, lastUsedAt, lastIdleAt, creation), so a session already
+   *  idle before parking still gets the full grace window from the moment it was
+   *  tagged. Set on entry to the folder (disown / folder PATCH), cleared on exit. */
+  autoArchiveTaggedAt?: number;
   /** Per-session context-window budget (absolute tokens). When set, the SDK's
    *  infiniteSessions.backgroundCompactionThreshold is derived as T/W so the
    *  session compacts earlier, cutting per-call cache cost. Absent = SDK default. */

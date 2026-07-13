@@ -34,6 +34,14 @@ export const AGENT_MAX_AGE_SECONDS = 60 * 60;
 export const AGENT_RATE_LIMIT_CALLS = 10;
 export const AGENT_RATE_LIMIT_WINDOW_SECONDS = 60;
 
+// Soft-archive folder reaper (spec-soft-archive-folder). Sessions parked in the
+// AUTO_ARCHIVE_FOLDER and quiescent past AUTO_ARCHIVE_IDLE_MS are auto-archived
+// (the reversible export+remove). caco_herd disown parks children here.
+export const AUTO_ARCHIVE_FOLDER = 'auto-archive';
+export const AUTO_ARCHIVE_IDLE_MS = Number(process.env.CACO_AUTO_ARCHIVE_IDLE_MS) || 24 * 60 * 60 * 1000;
+export const AUTO_ARCHIVE_SWEEP_INTERVAL_MS = Number(process.env.CACO_AUTO_ARCHIVE_SWEEP_INTERVAL_MS) || 60 * 60 * 1000;
+export const AUTO_ARCHIVE_ENABLED = process.env.CACO_AUTO_ARCHIVE !== '0';
+
 // caco_run_workflow (code-execution orchestration). On by default: it runs
 // arbitrary code auto-approved, but only ever the read-oriented `caco` facade
 // inside a bounded child process. Opt out with CACO_WORKFLOW=0.

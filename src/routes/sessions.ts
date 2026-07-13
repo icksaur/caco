@@ -21,6 +21,7 @@ import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, 
 import { readSessionWorkspace, searchSessionEvents, getEventVersion } from '../sdk-session-store.js';
 import { rotateSessionHistory } from '../session-history-rotation.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
+import { AUTO_ARCHIVE_FOLDER } from '../config.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
@@ -668,6 +669,13 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Invalid folder name: only letters, numbers, space, dash, underscore. Nested paths not supported.' });
       return;
     }
+    // A folder change alters auto-archive eligibility; refuse it while the reaper
+    // holds this session's maintenance claim so the mid-archive snapshot can't be
+    // invalidated (spec-soft-archive-folder). A rescue move-out is retried, not lost.
+    if (sessionManager.isUnderMaintenance(sessionId)) {
+      res.status(409).json({ error: 'Session is being archived; try again shortly.' });
+      return;
+    }
   }
 
   // Handle model change via SDK
@@ -743,7 +751,14 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
   const persisted = updateSessionMeta(sessionId, meta => {
     if (name !== undefined) meta.name = name;
     if (envHint !== undefined) meta.envHint = envHint;
-    if (folder !== undefined) meta.folder = normalizeFolder(folder) || undefined;
+    if (folder !== undefined) {
+      const next = normalizeFolder(folder) || undefined;
+      meta.folder = next;
+      // Keep the auto-archive schedule anchor in sync with folder membership: stamp
+      // on entry (fresh grace window), clear on exit (spec-soft-archive-folder).
+      if (next === AUTO_ARCHIVE_FOLDER) { if (meta.autoArchiveTaggedAt === undefined) meta.autoArchiveTaggedAt = Date.now(); }
+      else meta.autoArchiveTaggedAt = undefined;
+    }
 
     if (setContext) {
       const { setName, items, mode = 'replace' } = setContext;

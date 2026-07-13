@@ -885,27 +885,47 @@ export class SessionManager {
   }
 
   /**
-   * Run an exclusive history-rotation operation for a session. Refuses if the
-   * session is active, busy, or already rotating. While it runs, resume() waits
-   * on it so a rotation and a resume never race on the same events.jsonl.
+   * Run an exclusive MAINTENANCE operation for a session under the shared claim
+   * (spec-soft-archive-folder). The claim's ONLY job is mutual exclusion: it rejects
+   * a session already under another maintenance op (rotation OR archive), a future
+   * `resume()` waits on it (it awaits `rotatingSessions`), and eligibility-changing
+   * meta mutations refuse while it is held. It does NOT itself refuse active/busy —
+   * that liveness policy belongs to each caller. Uses the same `rotatingSessions`
+   * registry so resume's existing wait covers archive too.
    */
-  async runExclusiveRotation<T>(sessionId: string, op: () => Promise<T>): Promise<T> {
-    if (this.activeSessions.has(sessionId)) throw new Error(`Cannot rotate active session ${sessionId}`);
-    if (this.isBusy(sessionId)) throw new Error(`Cannot rotate busy session ${sessionId}`);
-    if (this.rotatingSessions.has(sessionId)) throw new Error(`Rotation already in progress for ${sessionId}`);
-    // A resume in flight is invisible to activeSessions until AFTER the multi-second
-    // SDK read of events.jsonl (_doResume sets activeSessions only at the end), but it
-    // is reading the very file we would swap. resumeInProgress is set synchronously at
-    // resume() entry, before any await, so checking it closes that window.
-    if (this.resumeInProgress.has(sessionId)) throw new Error(`Cannot rotate session ${sessionId} while a resume is in flight`);
-
+  async runExclusiveMaintenance<T>(sessionId: string, op: () => Promise<T>): Promise<T> {
+    if (this.rotatingSessions.has(sessionId)) throw new Error(`Session ${sessionId} is under maintenance`);
     const promise = op();
-    this.rotatingSessions.set(sessionId, promise.catch(() => {}));
+    this.rotatingSessions.set(sessionId, promise.then(() => {}, () => {}));
     try {
       return await promise;
     } finally {
       this.rotatingSessions.delete(sessionId);
     }
+  }
+
+  /** Whether a maintenance op (rotation/archive) currently holds this session's
+   *  claim. Eligibility-changing meta mutations (disown/acquire/folder PATCH) refuse
+   *  while held so the reaper's under-claim eligibility snapshot cannot be
+   *  invalidated mid-archive (spec-soft-archive-folder). */
+  isUnderMaintenance(sessionId: string): boolean {
+    return this.rotatingSessions.has(sessionId);
+  }
+
+  /**
+   * Run an exclusive history-rotation operation for a session. Rotation's liveness
+   * policy (refuse active/busy/resume) runs before acquiring the shared maintenance
+   * claim so a rotation and a resume never race on the same events.jsonl.
+   */
+  async runExclusiveRotation<T>(sessionId: string, op: () => Promise<T>): Promise<T> {
+    if (this.activeSessions.has(sessionId)) throw new Error(`Cannot rotate active session ${sessionId}`);
+    if (this.isBusy(sessionId)) throw new Error(`Cannot rotate busy session ${sessionId}`);
+    // A resume in flight is invisible to activeSessions until AFTER the multi-second
+    // SDK read of events.jsonl (_doResume sets activeSessions only at the end), but it
+    // is reading the very file we would swap. resumeInProgress is set synchronously at
+    // resume() entry, before any await, so checking it closes that window.
+    if (this.resumeInProgress.has(sessionId)) throw new Error(`Cannot rotate session ${sessionId} while a resume is in flight`);
+    return this.runExclusiveMaintenance(sessionId, op);
   }
 
   isRotating(sessionId: string): boolean {
@@ -1422,11 +1442,39 @@ export class SessionManager {
     if (!existsSync(sdkPath)) {
       throw new Error('SDK session data not found — cannot archive without full data');
     }
+    // Serialize under the shared maintenance claim so the export+delete core never
+    // runs twice on one session (manual-vs-reaper) and a resume can't race the delete.
+    // Manual liveness policy: stop an active/busy session, then run the core.
+    return this.runExclusiveMaintenance(sessionId, async () => {
+      if (this.activeSessions.has(sessionId)) {
+        await this.stop(sessionId);
+      }
+      return this.archiveCore(sessionId);
+    });
+  }
 
-    if (this.activeSessions.has(sessionId)) {
-      await this.stop(sessionId);
-    }
+  /**
+   * Reaper-safe archive (spec-soft-archive-folder): the AUTOMATIC path. Acquires the
+   * shared maintenance claim, then — under the claim, so eligibility-changing
+   * mutations are frozen out — re-checks `isStillEligible()` and REFUSES (skips)
+   * rather than stopping a session that went live/parented/rescued after the scan.
+   * Returns 'archived' or 'skipped'. Never throws for a refusal; a genuine archive
+   * failure propagates to the sweep's per-id catch.
+   */
+  async reapArchive(sessionId: string, isStillEligible: () => boolean): Promise<'archived' | 'skipped'> {
+    const sdkPath = join(homedir(), '.copilot', 'session-state', sessionId);
+    if (!existsSync(sdkPath)) return 'skipped';
+    if (this.rotatingSessions.has(sessionId)) return 'skipped';
+    return this.runExclusiveMaintenance(sessionId, async () => {
+      if (!isStillEligible()) return 'skipped';
+      await this.archiveCore(sessionId);
+      return 'archived';
+    });
+  }
 
+  /** The export+delete core shared by manual `archive()` and the reaper. Callers own
+   *  the maintenance claim and their own liveness policy; this just does the work. */
+  private async archiveCore(sessionId: string): Promise<{ archivePath: string }> {
     dispatchState.start(sessionId, 'archive');
     try {
       const archiveDir = join(homedir(), '.caco', 'sessions', 'archive');

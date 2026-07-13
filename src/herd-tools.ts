@@ -14,7 +14,7 @@
 import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
-import { SERVER_URL } from './config.js';
+import { SERVER_URL, AUTO_ARCHIVE_FOLDER } from './config.js';
 import type { SessionIdRef } from './types.js';
 import { sessionManager } from './session-manager.js';
 import { getSessionMeta, updateSessionMeta } from './storage.js';
@@ -94,7 +94,7 @@ export function createHerdTools(sessionRef: SessionIdRef, getCorrelationId: GetC
 - create: start a NEW session (cwd, model, prompt) as your child.
 - acquire: adopt an EXISTING unowned session (sessionId) into your herd, optionally with a prompt.
 - resume: give an existing child (sessionId) more work (prompt).
-- disown: remove a child (sessionId) from your herd — it becomes an ordinary session again.
+- disown: remove a child (sessionId) from your herd — moves it to the "auto-archive" folder, where it is auto-archived after ~24h idle unless you move it out or re-acquire it.
 You do NOT wait for children; they run and you are re-woken when one needs attention (use caco_herd_state to collect results). Children are ordinary sessions and are unaware they are in a herd. A child cannot itself create/acquire children (herds are one level deep).${modelIds.length ? `\n\nModel IDs: ${modelIds.join(', ')}.` : ''}`,
 
     parameters: z.object({
@@ -149,7 +149,13 @@ You do NOT wait for children; they run and you are re-woken when one needs atten
         if (g1) return err(g1);
         const ae = herdAcquireError({ callerId, targetId, targetExists: !!targetMeta, targetOrchestratedBy: targetMeta?.orchestratedBy });
         if (ae) return err(ae);
-        updateSessionMeta(targetId, meta => { meta.orchestratedBy = callerId; });
+        if (sessionManager.isUnderMaintenance(targetId)) return err(`${targetId.slice(0, 8)} is being archived; try again shortly.`);
+        // Re-parenting un-parks a session: clear the auto-archive tag so a reacquired
+        // child is never left scheduled for archival (spec-soft-archive-folder).
+        updateSessionMeta(targetId, meta => {
+          meta.orchestratedBy = callerId;
+          if (meta.folder === AUTO_ARCHIVE_FOLDER) { meta.folder = undefined; meta.autoArchiveTaggedAt = undefined; }
+        });
         registerHerdBond(targetId, callerId);
         if (prompt) {
           const d = await dispatchToChild(targetId, prompt, callerId, selfCorrelation());
@@ -170,9 +176,18 @@ You do NOT wait for children; they run and you are re-woken when one needs atten
       // disown
       const me = herdMemberError({ action: 'disown', callerId, targetOrchestratedBy: targetMeta?.orchestratedBy });
       if (me) return err(me);
-      updateSessionMeta(targetId, meta => { meta.orchestratedBy = undefined; });
+      if (sessionManager.isUnderMaintenance(targetId)) return err(`${targetId.slice(0, 8)} is being archived; try again shortly.`);
+      // Park the disowned child in the auto-archive folder with a fresh schedule
+      // anchor, so a large herd's leftovers drain themselves after the grace window
+      // (spec-soft-archive-folder). The child stays a normal, fully-usable session —
+      // move it out or re-acquire it to cancel; nothing is deleted for ≥24h.
+      updateSessionMeta(targetId, meta => {
+        meta.orchestratedBy = undefined;
+        meta.folder = AUTO_ARCHIVE_FOLDER;
+        meta.autoArchiveTaggedAt = Date.now();
+      });
       clearHerdBond(targetId);
-      return ok(`Disowned ${targetId.slice(0, 8)} — it is now an ordinary session again.`);
+      return ok(`Disowned ${targetId.slice(0, 8)} — moved to the "${AUTO_ARCHIVE_FOLDER}" folder; it will be auto-archived after ~24h idle unless you move it out or re-acquire it.`);
     },
   });
 

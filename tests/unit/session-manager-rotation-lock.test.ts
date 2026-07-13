@@ -104,7 +104,7 @@ describe('runExclusiveRotation guards', () => {
     let release!: () => void;
     const first = sessionManager.runExclusiveRotation(SID, () => new Promise<void>(r => { release = r; }));
     expect(sessionManager.isRotating(SID)).toBe(true);
-    await expect(sessionManager.runExclusiveRotation(SID, vi.fn())).rejects.toThrow(/already in progress/);
+    await expect(sessionManager.runExclusiveRotation(SID, vi.fn())).rejects.toThrow(/under maintenance/);
     release();
     await first;
   });
@@ -116,5 +116,49 @@ describe('runExclusiveRotation guards', () => {
     release();
     await running;
     expect(sessionManager.isRotating(SID)).toBe(false);
+  });
+});
+
+describe('shared maintenance claim (spec-soft-archive-folder)', () => {
+  const SID = 'sess-maint';
+
+  beforeEach(() => {
+    internals.activeSessions.clear();
+    internals.resumeInProgress.clear();
+    internals.rotatingSessions.clear();
+  });
+
+  it('exposes isUnderMaintenance while a claim is held (mutations gate on this)', async () => {
+    let release!: () => void;
+    expect(sessionManager.isUnderMaintenance(SID)).toBe(false);
+    const held = sessionManager.runExclusiveMaintenance(SID, () => new Promise<void>(r => { release = r; }));
+    expect(sessionManager.isUnderMaintenance(SID)).toBe(true);
+    release();
+    await held;
+    expect(sessionManager.isUnderMaintenance(SID)).toBe(false);
+  });
+
+  it('serializes: a second claim on a held session is refused (no double core)', async () => {
+    let release!: () => void;
+    const first = sessionManager.runExclusiveMaintenance(SID, () => new Promise<void>(r => { release = r; }));
+    await expect(sessionManager.runExclusiveMaintenance(SID, vi.fn())).rejects.toThrow(/under maintenance/);
+    release();
+    await first;
+  });
+
+  it('does NOT set dispatch-busy — the claim is orthogonal to isBusy', async () => {
+    let release!: () => void;
+    const held = sessionManager.runExclusiveMaintenance(SID, () => new Promise<void>(r => { release = r; }));
+    expect(sessionManager.isUnderMaintenance(SID)).toBe(true);
+    expect(sessionManager.isBusy(SID)).toBe(false); // so a reaper recheck's isBusy stays true-valued
+    release();
+    await held;
+  });
+
+  it('reapArchive skips a session with no SDK data (never reaches the core)', async () => {
+    // A random id has no ~/.copilot/session-state/<id> dir → early skip, no claim held.
+    const recheck = vi.fn(() => true);
+    await expect(sessionManager.reapArchive('no-such-session-data-xyz', recheck)).resolves.toBe('skipped');
+    expect(sessionManager.isUnderMaintenance('no-such-session-data-xyz')).toBe(false);
   });
 });

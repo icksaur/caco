@@ -18,6 +18,7 @@ import { SERVER_URL, AUTO_ARCHIVE_FOLDER } from './config.js';
 import type { SessionIdRef } from './types.js';
 import { sessionManager } from './session-manager.js';
 import { getSessionMeta, updateSessionMeta } from './storage.js';
+import { unobservedTracker } from './unobserved-tracker.js';
 import { getLastAssistantMessage } from './session-history.js';
 import { boundDelegateResponse } from './delegate-tool.js';
 import {
@@ -168,6 +169,10 @@ You do NOT wait for children; they run and you are re-woken when one needs atten
         const me = herdMemberError({ action: 'resume', callerId, targetOrchestratedBy: targetMeta?.orchestratedBy });
         if (me) return err(me);
         if (!prompt) return err('resume requires a prompt.');
+        // Resuming a child IS an observation by the supervising parent: clear its
+        // unobserved badge (durable lastObservedAt + broadcast), independent of
+        // whether the dispatch below succeeds (spec-herd-observe-clear).
+        unobservedTracker.markObserved(targetId);
         const d = await dispatchToChild(targetId, prompt, callerId, selfCorrelation());
         if (!d.ok) return err(`Failed to resume ${targetId.slice(0, 8)}: ${d.error}`);
         return ok(`Resumed child ${targetId.slice(0, 8)}.`);
@@ -187,6 +192,10 @@ You do NOT wait for children; they run and you are re-woken when one needs atten
         meta.autoArchiveTaggedAt = Date.now();
       });
       clearHerdBond(targetId);
+      // Retiring a child IS an observation by the parent: clear its unobserved badge
+      // (durable lastObservedAt + broadcast) so a disowned child doesn't linger
+      // badged in the list (spec-herd-observe-clear).
+      unobservedTracker.markObserved(targetId);
       return ok(`Disowned ${targetId.slice(0, 8)} — moved to the "${AUTO_ARCHIVE_FOLDER}" folder; it will be auto-archived after ~24h idle unless you move it out or re-acquire it.`);
     },
   });

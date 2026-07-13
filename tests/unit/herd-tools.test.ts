@@ -31,11 +31,16 @@ const herdFake = vi.hoisted(() => ({
   buildHerdStatePayload: vi.fn<(entries: HerdStateEntry[]) => { count: number; children: HerdStateEntry[] }>(),
 }));
 
+const trackerFake = vi.hoisted(() => ({
+  markObserved: vi.fn<(sessionId: string) => boolean>(),
+}));
+
 vi.mock('../../src/session-manager.js', () => ({ sessionManager: sessionManagerFake }));
 vi.mock('../../src/storage.js', () => storageFake);
 vi.mock('../../src/session-history.js', () => historyFake);
 vi.mock('../../src/delegate-tool.js', () => delegateFake);
 vi.mock('../../src/herd.js', () => herdFake);
+vi.mock('../../src/unobserved-tracker.js', () => ({ unobservedTracker: trackerFake }));
 
 import { createHerdTools } from '../../src/herd-tools.js';
 import type { SessionIdRef } from '../../src/types.js';
@@ -273,6 +278,10 @@ describe('caco_herd acquire, resume, and disown', () => {
     expect(ok).toMatchObject({ resultType: 'text', textResultForLlm: 'Resumed child target-c.' });
     expect(failed.resultType).toBe('error');
     expect(failed.textResultForLlm).toContain('Failed to resume target-c: network down');
+    // Resume clears the child's unobserved badge (spec-herd-observe-clear) — even the
+    // dispatch-failed second resume observed the child (marked before the send).
+    expect(trackerFake.markObserved).toHaveBeenCalledWith('target-child-0004');
+    expect(trackerFake.markObserved).toHaveBeenCalledTimes(2);
   });
 
   it('validates resume prompt and herd membership', async () => {
@@ -286,6 +295,8 @@ describe('caco_herd acquire, resume, and disown', () => {
     expect(missingPrompt).toMatchObject({ resultType: 'error', textResultForLlm: 'resume requires a prompt.' });
     expect(notMine.resultType).toBe('error');
     expect(notMine.textResultForLlm).toContain('not a child of your herd');
+    // Neither a missing-prompt resume nor a non-member resume observes the child.
+    expect(trackerFake.markObserved).not.toHaveBeenCalled();
   });
 
   it('disowns an owned child, parks it in auto-archive with a fresh tag, and clears the bond', async () => {
@@ -306,6 +317,8 @@ describe('caco_herd acquire, resume, and disown', () => {
     expect(m.folder).toBe('auto-archive');
     expect(typeof m.autoArchiveTaggedAt).toBe('number');
     expect(herdFake.clearHerdBond).toHaveBeenCalledWith('target-child-0004');
+    // Disown observes the child, clearing its unobserved badge (spec-herd-observe-clear).
+    expect(trackerFake.markObserved).toHaveBeenCalledWith('target-child-0004');
   });
 
   it('refuses disown while the child is under an archive maintenance claim', async () => {
@@ -319,6 +332,8 @@ describe('caco_herd acquire, resume, and disown', () => {
     expect(out).toMatchObject({ resultType: 'error' });
     expect((out as { textResultForLlm: string }).textResultForLlm).toContain('being archived');
     expect(herdFake.clearHerdBond).not.toHaveBeenCalled();
+    // A refused disown does not observe the child.
+    expect(trackerFake.markObserved).not.toHaveBeenCalled();
   });
 
   it('acquire un-tags a parked session (clears auto-archive folder + tag)', async () => {

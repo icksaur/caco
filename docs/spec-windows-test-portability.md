@@ -83,7 +83,7 @@ run — teardown should be resilient and the pattern gitignored.)
 - The B1 fs-mock keys (`/virtual-caco-home/...`) match `path.join` output on
   Linux exactly.
 
-## Design: the single principle
+## Design
 
 **Normalize to POSIX at every emit boundary; keep native separators only for
 real filesystem calls that stay on the host.** This is already Caco's stated
@@ -112,7 +112,47 @@ Linux never crashed: `fs.watch` there doesn't emit EPERM on watched-dir
 deletion and `rm -rf` of a watched dir is benign. Fixing either half stops the
 crash; we fix both — B3 removes the trigger, A9 removes the latent crash vector.
 
-## Implementation Plan
+## Risks and Mitigations
+
+- **R1: `toPosix` on a path still used for fs I/O could double-normalize or
+  break UNC paths.** Mitigation: apply only to returned/model-facing values;
+  never mutate the variable used for the subsequent `fs` call. UNC (`\\server`)
+  is out of scope (Caco operates under homedir/cwd).
+- **R2: A7 widening `ALLOWED_BASES` to the whole OS temp dir enlarges the
+  writable surface of the MCP file routes.** Mitigation: `os.tmpdir()` is
+  already an intended allowed area (the `/tmp` entry proves intent); we are
+  making the existing intent correct on Windows, not adding a new class of
+  path. Still gated by `validatePath` traversal checks.
+- **R3: B2 retry masks a real leak.** Mitigation: retries are bounded; a
+  persistent failure still surfaces. The leaked-dir gitignore is cosmetic.
+- **R4: A1 changes gitignore behavior on Windows (from broken to working),
+  which could change which files a Windows user sees in the file browser.**
+  This is the intended fix; call it out in the commit so it's not a surprise.
+
+## Acceptance
+
+- Re-run the full suite on Windows via `vitest run` to a durable logfile
+  (detached; the build/`--coverage` path can destabilize the host — tests only,
+  no `npm run build`).
+- Confirm the 10 previously-failing files pass and the pass count is unchanged
+  otherwise (Linux parity preserved).
+- Spot-check A1 by confirming a gitignored file is now excluded from
+  `walkProjectFiles` output on Windows (behavioral, not just separator).
+
+## Open Questions for Review
+
+1. For A3/A4/A5, should paths be emitted **relative** (POSIX) rather than
+   absolute-with-forward-slashes? Current tests only assert `/`-separators and a
+   suffix match, so `toPosix` on the existing (absolute) path satisfies them.
+   Absolute-vs-relative is a separate design choice; this spec keeps the current
+   shape and only fixes separators. Confirm that's acceptable.
+2. B1: prefer fixing the **test** (build keys with `join`) vs. making the fs
+   mock separator-insensitive? Spec proposes the former (smaller, explicit).
+3. Should we add a lint/CI guard to prevent future `\`-leak regressions
+   (e.g. forbid returning `path.relative`/`path.join` results from model-facing
+   functions without `toPosix`)? Proposed as out-of-scope follow-up.
+
+## Plan
 
 ### Reviewer resolutions (gpt-5.3-codex)
 
@@ -143,43 +183,3 @@ before commit (per the workflow request). Order:
     watched repo — the direct cause of the server crash during test runs).
 13. **Verify**: full `vitest run` to a durable log; expect 0 platform failures AND
     no server crash (tests no longer churn the watched repo; watch errors are caught).
-
-## Risks & Mitigations
-
-- **R1: `toPosix` on a path still used for fs I/O could double-normalize or
-  break UNC paths.** Mitigation: apply only to returned/model-facing values;
-  never mutate the variable used for the subsequent `fs` call. UNC (`\\server`)
-  is out of scope (Caco operates under homedir/cwd).
-- **R2: A7 widening `ALLOWED_BASES` to the whole OS temp dir enlarges the
-  writable surface of the MCP file routes.** Mitigation: `os.tmpdir()` is
-  already an intended allowed area (the `/tmp` entry proves intent); we are
-  making the existing intent correct on Windows, not adding a new class of
-  path. Still gated by `validatePath` traversal checks.
-- **R3: B2 retry masks a real leak.** Mitigation: retries are bounded; a
-  persistent failure still surfaces. The leaked-dir gitignore is cosmetic.
-- **R4: A1 changes gitignore behavior on Windows (from broken to working),
-  which could change which files a Windows user sees in the file browser.**
-  This is the intended fix; call it out in the commit so it's not a surprise.
-
-## Test / Verification Strategy
-
-- Re-run the full suite on Windows via `vitest run` to a durable logfile
-  (detached; the build/`--coverage` path can destabilize the host — tests only,
-  no `npm run build`).
-- Confirm the 10 previously-failing files pass and the pass count is unchanged
-  otherwise (Linux parity preserved).
-- Spot-check A1 by confirming a gitignored file is now excluded from
-  `walkProjectFiles` output on Windows (behavioral, not just separator).
-
-## Open Questions for Review
-
-1. For A3/A4/A5, should paths be emitted **relative** (POSIX) rather than
-   absolute-with-forward-slashes? Current tests only assert `/`-separators and a
-   suffix match, so `toPosix` on the existing (absolute) path satisfies them.
-   Absolute-vs-relative is a separate design choice; this spec keeps the current
-   shape and only fixes separators. Confirm that's acceptable.
-2. B1: prefer fixing the **test** (build keys with `join`) vs. making the fs
-   mock separator-insensitive? Spec proposes the former (smaller, explicit).
-3. Should we add a lint/CI guard to prevent future `\`-leak regressions
-   (e.g. forbid returning `path.relative`/`path.join` results from model-facing
-   functions without `toPosix`)? Proposed as out-of-scope follow-up.

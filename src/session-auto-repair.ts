@@ -122,7 +122,7 @@ export function repairSessionEvents(sessionId: string, errorMessage?: string): s
           let lineFixed = 0;
           for (const att of atts) {
             if (!att.displayName) {
-              att.displayName = att.path ? att.path.split('/').pop() : 'attachment';
+              att.displayName = att.path ? att.path.split(/[\\/]/).pop() : 'attachment';
               lineFixed++;
             }
           }

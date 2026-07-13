@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const testState = vi.hoisted(() => ({
-  homeDir: `${process.cwd()}/.caco-test/mcp-config-loader-${process.pid}`,
+  homeDir: `${process.env.TEMP || process.env.TMPDIR || '/tmp'}/caco-mcp-config-loader-${process.pid}`,
   cacoAuth: { servers: {} as Record<string, { token?: string; refreshToken?: string; expiresAt?: number }> },
   cliTokens: new Map<string, { accessToken: string; expiresAt?: number }>(),
   refreshResult: false,

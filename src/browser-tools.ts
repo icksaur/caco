@@ -9,6 +9,7 @@ import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { toPosix } from './path-utils.js';
 import {
   getConnection,
   invalidateConnection,
@@ -196,7 +197,7 @@ export function createBrowserTools(sessionRef: SessionIdRef | undefined) {
         }
         writeFileSync(path, buffer);
         const viewport = conn.page.viewport();
-        return { path, width: viewport?.width ?? 0, height: viewport?.height ?? 0 };
+        return { path: toPosix(path), width: viewport?.width ?? 0, height: viewport?.height ?? 0 };
       }, config.defaultTimeoutMs));
       if (!result.ok) return fail(result.reason, result.message);
       return ok(result.data);

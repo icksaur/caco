@@ -1,5 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createFileWatcher, type FileWatcher } from '../../src/file-watcher.js';
@@ -8,7 +9,7 @@ const scratchRoots: string[] = [];
 const watchers: FileWatcher[] = [];
 
 function scratchDir(name: string): string {
-  const dir = join(process.cwd(), '.caco', 'test-work', `${name}-${randomUUID()}`);
+  const dir = join(tmpdir(), 'caco-file-watcher-test', `${name}-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
   scratchRoots.push(dir);
   return dir;

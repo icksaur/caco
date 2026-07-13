@@ -3,7 +3,10 @@ import { existsSync, rmSync } from 'fs';
 import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 
-const testState = vi.hoisted(() => ({ homeDir: `${process.cwd()}/.caco-applet-store-more-${process.pid}` }));
+const testState = vi.hoisted(() => {
+  const tmp = process.env.TEMP || process.env.TMPDIR || '/tmp';
+  return { homeDir: `${tmp}/caco-applet-store-more-${process.pid}` };
+});
 
 vi.mock('os', async (importOriginal) => {
   const original = await importOriginal<typeof import('os')>();
@@ -206,7 +209,7 @@ describe('applet-store existence, deletion, and assets', () => {
     const missingAsset = await resolveAppletAsset('asset-user', 'missing.txt');
 
     expect(userAsset).toBe(join(appletDir('asset-user'), 'asset.txt'));
-    expect(bundledAsset).toMatch(/applets\/files\/content\.html$/);
+    expect(bundledAsset).toMatch(/applets[\\/]files[\\/]content\.html$/);
     expect(missingAsset).toBeNull();
   });
 

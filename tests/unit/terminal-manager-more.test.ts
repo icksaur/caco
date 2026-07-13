@@ -1,5 +1,6 @@
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -62,7 +63,7 @@ vi.mock('../../src/event-bus.js', () => terminalMocks.eventBus);
 const scratchRoots: string[] = [];
 
 function scratchDir(name: string): string {
-  const dir = join(process.cwd(), '.caco', 'test-work', `${name}-${randomUUID()}`);
+  const dir = join(tmpdir(), 'caco-terminal-mgr-test', `${name}-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
   scratchRoots.push(dir);
   return dir;

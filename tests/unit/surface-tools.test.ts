@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 
 const eventBus = vi.hoisted(() => ({ broadcastEvent: vi.fn() }));
 
@@ -31,7 +32,7 @@ beforeEach(async () => {
   vi.resetModules();
   eventBus.broadcastEvent.mockReset();
   previousCacoHome = process.env.CACO_HOME;
-  home = mkdtempSync(join(process.cwd(), '.test-caco-surface-'));
+  home = mkdtempSync(join(tmpdir(), 'test-caco-surface-'));
   process.env.CACO_HOME = home;
   store = await import('../../src/surface-store.js');
   tools = await createTools();

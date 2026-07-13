@@ -4,10 +4,13 @@ import { join } from 'node:path';
 
 type WatchCallback = (event: string, filename: string | Buffer | null) => void;
 
-const testState = vi.hoisted(() => ({
-  homeDir: `${process.cwd()}/.caco-test/extension-store-more-home-${process.pid}`,
-  projectDir: `${process.cwd()}/.caco-test/extension-store-more-project-${process.pid}`,
-}));
+const testState = vi.hoisted(() => {
+  const tmp = process.env.TEMP || process.env.TMPDIR || '/tmp';
+  return {
+    homeDir: `${tmp}/caco-extension-store-more-home-${process.pid}`,
+    projectDir: `${tmp}/caco-extension-store-more-project-${process.pid}`,
+  };
+});
 
 const watchState = vi.hoisted(() => ({
   calls: [] as Array<{ dir: string; options: { recursive?: boolean }; callback: WatchCallback }>,
@@ -29,7 +32,7 @@ vi.mock('fs', async (importOriginal) => {
       const close = vi.fn();
       watchState.calls.push({ dir, options, callback });
       watchState.closeFns.push(close);
-      return { close };
+      return { close, on: vi.fn() };
     }),
   };
 });

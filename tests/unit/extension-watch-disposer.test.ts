@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const watchMock = vi.hoisted(() => {
   const watchers: Array<{ close: ReturnType<typeof vi.fn> }> = [];
   const watch = vi.fn(() => {
-    const w = { close: vi.fn() };
+    const w = { close: vi.fn(), on: vi.fn() };
     watchers.push(w);
     return w;
   });

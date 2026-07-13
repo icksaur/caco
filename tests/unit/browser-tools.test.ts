@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 
 class BrowserBusyError extends Error {}
 class NotConnectedError extends Error {}
@@ -96,7 +97,7 @@ async function callTool(name: string, args: Record<string, unknown> = {}): Promi
 beforeEach(async () => {
   vi.resetModules();
   vi.useRealTimers();
-  screenshotDir = join(process.cwd(), '.test-browser-screenshots');
+  screenshotDir = join(tmpdir(), '.test-browser-screenshots');
   rmSync(screenshotDir, { recursive: true, force: true });
   browser.getConnection.mockReset().mockResolvedValue(browser.connection);
   browser.invalidateConnection.mockReset();
@@ -295,7 +296,7 @@ describe('browser tool handlers', () => {
   });
 
   it('action uploads an existing file through the element handle', async () => {
-    const uploadPath = join(process.cwd(), '.test-browser-upload.txt');
+    const uploadPath = join(tmpdir(), '.test-browser-upload.txt');
     writeFileSync(uploadPath, 'upload');
     try {
       const payload = await callTool('caco_browser_action', { action: 'upload', target: { selector: 'input' }, value: uploadPath });
@@ -312,7 +313,7 @@ describe('browser tool handlers', () => {
   it('action rejects id-only targets and missing upload files as invalid_args', async () => {
     const idOnly = await callTool('caco_browser_action', { action: 'click', target: { id: 7 } });
     expect(idOnly).toEqual({ ok: false, reason: 'invalid_args', message: 'invalid_args: v1 requires {selector}; {id} alone is not yet supported. Use snapshot to find a usable CSS selector.' });
-    const missingUpload = await callTool('caco_browser_action', { action: 'upload', target: { selector: 'input' }, value: join(process.cwd(), '.missing-upload') });
+    const missingUpload = await callTool('caco_browser_action', { action: 'upload', target: { selector: 'input' }, value: join(tmpdir(), '.missing-upload') });
     expect(missingUpload.ok).toBe(false);
     if (missingUpload.ok) throw new Error('upload unexpectedly succeeded');
     expect(missingUpload.reason).toBe('invalid_args');

@@ -39,11 +39,11 @@ beforeAll(async () => {
 
 afterAll(() => {
   server?.close();
-  rmSync(join(testState.homeDir, '.caco'), { recursive: true, force: true });
+  rmSync(join(testState.homeDir, '.caco'), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 beforeEach(() => {
-  rmSync(join(testState.homeDir, '.caco'), { recursive: true, force: true });
+  rmSync(join(testState.homeDir, '.caco'), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   mkdirSync(join(testState.homeDir, '.caco', 'schedule'), { recursive: true });
   triggerSchedule.mockClear();
 });

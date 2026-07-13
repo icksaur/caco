@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 
 let cacoHome: string;
 let originalCacoHome: string | undefined;
@@ -11,7 +12,7 @@ async function importStore() {
 
 beforeEach(() => {
   originalCacoHome = process.env.CACO_HOME;
-  cacoHome = mkdtempSync(join(process.cwd(), '.caco-output-store-test-'));
+  cacoHome = mkdtempSync(join(tmpdir(), 'caco-output-store-test-'));
   process.env.CACO_HOME = cacoHome;
   vi.resetModules();
 });

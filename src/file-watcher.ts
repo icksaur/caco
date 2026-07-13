@@ -18,6 +18,7 @@ import { readFile } from 'fs/promises';
 import { join } from 'path';
 import chokidar, { type FSWatcher } from 'chokidar';
 import ignore, { type Ignore } from 'ignore';
+import { toPosix } from './path-utils.js';
 
 /** Directories that are NEVER worth watching for diffs, even if they
  *  aren't in .gitignore. Same list the file-picker uses for parity. */
@@ -52,16 +53,22 @@ async function buildIgnoredPredicate(repoRoot: string): Promise<(p: string) => b
   } catch { /* no .gitignore */ }
 
   return (absPath: string): boolean => {
-    // Compute path relative to repoRoot.
-    if (!absPath.startsWith(repoRoot)) return false;
-    let rel = absPath.slice(repoRoot.length);
-    if (rel.startsWith('/') || rel.startsWith('\\')) rel = rel.slice(1);
+    // Normalize both sides to POSIX before comparing: chokidar can report
+    // '/'-separated paths on Windows while repoRoot (from process.cwd()/join)
+    // is '\'-separated, so a raw startsWith would never match and NOTHING would
+    // be ignored. Comparing/deriving `rel` in one separator form fixes both the
+    // EXCLUDED_DIRS split and the `ignore` lib (which requires POSIX) at once.
+    const nAbs = toPosix(absPath);
+    const nRoot = toPosix(repoRoot);
+    if (!nAbs.startsWith(nRoot)) return false;
+    let rel = nAbs.slice(nRoot.length);
+    if (rel.startsWith('/')) rel = rel.slice(1);
     if (rel === '') return false;
 
     // ANY segment in EXCLUDED_DIRS → ignore. The first-segment-only
     // check would miss nested cases like 'packages/foo/node_modules'
     // common in monorepos.
-    const segs = rel.split(/[/\\]/);
+    const segs = rel.split('/');
     for (let i = 0; i < segs.length; i++) {
       if (EXCLUDED_DIRS.has(segs[i])) return true;
     }

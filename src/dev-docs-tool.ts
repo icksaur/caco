@@ -9,6 +9,7 @@ import { defineTool } from '@github/copilot-sdk';
 import { z } from 'zod';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { toPosix } from './path-utils.js';
 import { APPLET_HOWTO, buildAppletUsage } from './applet-tools.js';
 import { buildExtensionsGuide } from './extensions-tool.js';
 
@@ -189,7 +190,7 @@ A named file section's response begins with a heading TOC (H2/H3 with line numbe
           for (const entry of readdirSync(dir, { withFileTypes: true })) {
             const full = join(dir, entry.name);
             if (entry.isDirectory()) walk(full);
-            else if (entry.name.endsWith('.md')) results.push(full);
+            else if (entry.name.endsWith('.md')) results.push(toPosix(full));
           }
         };
         walk(docsDir);
@@ -211,7 +212,7 @@ A named file section's response begins with a heading TOC (H2/H3 with line numbe
         const cleaned = section.endsWith('.md') ? section : section + '.md';
         const candidates = [
           join(projectRoot, cleaned),
-          join(docsDir, cleaned),
+          toPosix(join(docsDir, cleaned)),
         ];
         // Fall back to a recursive basename match so docs in docs/ subdirs
         // (guides/, research/, archive/) are still fetchable by short name.

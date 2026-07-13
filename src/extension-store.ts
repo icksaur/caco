@@ -113,6 +113,15 @@ export function watchExtensions(onChange: ChangeHandler): ExtensionWatch {
         else if (file === 'server.ts') type = 'server';
         if (type) onChange(slug, type);
       });
+      // A raw fs.watch 'error' (Windows EPERM when the watched dir is
+      // deleted/renamed, ENOSPC, etc.) is fatal if unhandled — it surfaces as an
+      // uncaughtException and crashes the whole server. Degrade to no live-reload
+      // for this dir instead: log the error TYPE only (never the message — it may
+      // carry a path/PII), then close. Extensions still load on the next scan.
+      watcher.on('error', (err: unknown) => {
+        console.warn(`[EXT] extension watcher error (${err instanceof Error ? err.name : typeof err}); disabling live-reload for one directory`);
+        try { watcher.close(); } catch { /* already closed */ }
+      });
       watchers.push(watcher);
     } catch {
       // dir doesn't exist, skip

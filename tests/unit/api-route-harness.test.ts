@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import express from 'express';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
 
@@ -153,7 +154,7 @@ let extensionDir: string;
 const originalCwd = process.cwd();
 
 beforeAll(async () => {
-  root = mkdtempSync(join(originalCwd, '.api-route-harness-'));
+  root = mkdtempSync(join(tmpdir(), 'caco-api-harness-'));
   workspace = join(root, 'workspace');
   home = join(root, 'home');
   extensionDir = join(root, 'extension-one');
@@ -195,7 +196,11 @@ afterAll(async () => {
   if (server) {
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
-  rmSync(root, { recursive: true, force: true });
+  // Best-effort: the temp tree lives under the OS temp dir, so a Windows
+  // file-lock EPERM on teardown leaks a harmless dir the OS reclaims later.
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch { /* leaked temp dir under os.tmpdir() — harmless */ }
 });
 
 beforeEach(() => {

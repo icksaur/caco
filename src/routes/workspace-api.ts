@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import { readFile, writeFile, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
 import { sessionManager } from '../session-manager.js';
 import { excludedBuiltinNames, isDeferEligibleCacoTool } from '../tool-registry.js';
@@ -31,7 +31,8 @@ const router = Router();
 const ALLOWED_BASES = [
   process.cwd(),           // Current workspace
   join(homedir(), '.caco'), // Caco directory
-  '/tmp'                    // Temp directory
+  '/tmp',                   // Temp directory (Linux)
+  tmpdir()                  // OS temp directory (cross-platform)
 ];
 
 /**

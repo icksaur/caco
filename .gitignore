@@ -46,5 +46,8 @@ issues.md
 code-review.md
 github-copilot-sdk-*.tgz
 
+# Test harness temp dirs (Windows teardown can leak these)
+.api-route-harness-*/
+
 # Local Caco runtime state (schedules, drafts) — never commit
 .caco/

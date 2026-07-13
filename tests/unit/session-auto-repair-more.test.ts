@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { join } from 'path';
 
 const files = vi.hoisted(() => new Map<string, string>());
 const fsMock = vi.hoisted(() => ({
@@ -21,7 +22,7 @@ vi.mock('crypto', () => ({ randomUUID: uuidMock }));
 import { repairSessionEvents, shouldAutoRepairSessionError } from '../../src/session-auto-repair.js';
 
 function eventPath(sessionId: string): string {
-  return `/virtual-caco-home/.copilot/session-state/${sessionId}/events.jsonl`;
+  return join('/virtual-caco-home', '.copilot', 'session-state', sessionId, 'events.jsonl');
 }
 
 function writeEvents(sessionId: string, lines: unknown[]): void {

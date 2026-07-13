@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -62,7 +63,7 @@ function restoreGitIsolationEnv(): void {
 }
 
 function scratchDir(name: string): string {
-  const dir = join(process.cwd(), '.caco', 'test-work', `${name}-${randomUUID()}`);
+  const dir = join(tmpdir(), 'caco-git-poller-test', `${name}-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
   scratchRoots.push(dir);
   return dir;

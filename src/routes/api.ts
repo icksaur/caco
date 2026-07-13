@@ -18,6 +18,7 @@ import { join, dirname, resolve, extname, relative, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import ignore from 'ignore';
+import { toPosix } from '../path-utils.js';
 import { sessionManager } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getOutput, updateSessionMeta } from '../storage.js';
@@ -530,7 +531,7 @@ export async function walkProjectFiles(rootDir: string, showDotfiles = false, re
       if (!showDotfiles && entry.name.startsWith('.')) continue;
 
       const fullPath = join(dir, entry.name);
-      const relPath = relative(rootDir, fullPath);
+      const relPath = toPosix(relative(rootDir, fullPath));
 
       if (entry.isDirectory()) {
         if (EXCLUDED_DIRS.has(entry.name)) continue;

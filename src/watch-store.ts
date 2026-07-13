@@ -145,7 +145,7 @@ export function createWatchStore(deps: {
 
   function attachWatcher(realPath: string, _scope: WatchScope): FSWatcher {
     // Recursive is deliberately false; spec is non-recursive only.
-    return watch(realPath, { persistent: false, recursive: false }, (eventType, filename) => {
+    const watcher = watch(realPath, { persistent: false, recursive: false }, (eventType, filename) => {
       const entry = paths.get(realPath);
       if (!entry) return;
 
@@ -190,6 +190,24 @@ export function createWatchStore(deps: {
 
       scheduleEmit(entry, ev, name);
     });
+    // A raw fs.watch 'error' (Windows EPERM when the watched path is
+    // deleted/renamed, ENOSPC, etc.) is fatal if unhandled — it surfaces as an
+    // uncaughtException and crashes the whole server. Degrade to no-watch for
+    // this path instead: log the error TYPE only (never the message — it may
+    // carry a path/PII), close, and drop the entry so its leases expire.
+    watcher.on('error', (err: unknown) => {
+      console.warn(`[WATCH] fs.watch error (${err instanceof Error ? err.name : typeof err}); detaching path watcher`);
+      try { watcher.close(); } catch { /* already closed */ }
+      // Mirror releaseLease's cleanup so a dead path leaves no dangling leases
+      // (which would count toward the lease cap and could be renewed forever).
+      const entry = paths.get(realPath);
+      if (entry) {
+        for (const leaseId of entry.leases) leases.delete(leaseId);
+        if (entry.coalesceTimer) { clearTimeout(entry.coalesceTimer); entry.coalesceTimer = null; }
+      }
+      paths.delete(realPath);
+    });
+    return watcher;
   }
 
   /** Acquire a new lease. Returns AcquireResult; never throws on protocol-level failures. */

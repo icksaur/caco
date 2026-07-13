@@ -9,6 +9,7 @@ import { type Express, Router } from 'express';
 import { createJiti } from 'jiti';
 import { join } from 'path';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { toPosix } from './path-utils.js';
 import { listExtensions, type ExtensionInfo } from './extension-store.js';
 import { broadcastGlobalEvent, broadcastEvent } from './event-bus.js';
 import type { SessionEvent } from './event-bus.js';
@@ -133,7 +134,7 @@ export class ExtensionRuntime {
     meta: ExtensionMetadata,
   ): Promise<ToolDefinition[]> {
     const jiti = createJiti(import.meta.url);
-    const mod = await jiti.import(join(ext.dir, 'server.ts')) as { default?: (api: ServerExtensionAPI) => void };
+    const mod = await jiti.import(toPosix(join(ext.dir, 'server.ts'))) as { default?: (api: ServerExtensionAPI) => void };
     if (typeof mod.default !== 'function') {
       console.warn(`[EXT:${ext.slug}] server.ts has no default export`);
       return [];
@@ -141,6 +142,11 @@ export class ExtensionRuntime {
 
     const extRouter = Router();
     const tools: ToolDefinition[] = [];
+    // All ext.dir-derived paths are POSIX-normalized: jiti/ESM resolution and the
+    // real fs both accept '/'-separated paths on Windows, and keeping one form
+    // avoids '\'-vs-'/' drift between the import specifier and the state file.
+    const stateDir = toPosix(ext.dir);
+    const statePath = toPosix(join(ext.dir, 'state.json'));
 
     const api: ServerExtensionAPI = {
       router: extRouter,
@@ -168,7 +174,7 @@ export class ExtensionRuntime {
 
       getState: <T>(key: string): T | undefined => {
         try {
-          const raw = readFileSync(join(ext.dir, 'state.json'), 'utf-8');
+          const raw = readFileSync(statePath, 'utf-8');
           return JSON.parse(raw)[key] as T;
         } catch {
           return undefined;
@@ -176,13 +182,12 @@ export class ExtensionRuntime {
       },
 
       setState: <T>(key: string, value: T): void => {
-        const statePath = join(ext.dir, 'state.json');
         let state: Record<string, unknown> = {};
         try {
           state = JSON.parse(readFileSync(statePath, 'utf-8'));
         } catch { /* fresh state */ }
         state[key] = value;
-        mkdirSync(ext.dir, { recursive: true });
+        mkdirSync(stateDir, { recursive: true });
         writeFileSync(statePath, JSON.stringify(state, null, 2));
       },
     };

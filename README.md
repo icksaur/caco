@@ -96,7 +96,7 @@ Open `/portal.html` to aggregate multiple Caco instances in a single view. Each 
 - **Drag-and-drop sessions** between instances to transfer them. Drag a session from one instance's session list and drop it on another instance's sidebar icon. The session archive is exported from the source and imported at the destination.
 - Instances are saved in `localStorage` and reconnect on reload.
 
-### Scheduled Sessions
+### Terminal Emulator
 
   panel opens below the footer; opening it is what starts the shell.
 - **Long-press the glyph to restart** the shell (kill + respawn) — an escape hatch for a
@@ -164,6 +164,10 @@ Caco wraps the Copilot SDK which wraps Copilot-CLI. You can configure Copilot-CL
 - Ask your agent to help create hooks for your project
 
 ### Model Providers (BYOK)
+
+Alternative model providers are a Copilot SDK feature.  Please see the official documentation for full configuration information.
+
+```
     "ollama": {
       "type": "openai",
       "baseUrl": "http://localhost:11434/v1",      // no key needed for local

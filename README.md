@@ -1,6 +1,6 @@
 # Caco
 
-[Caco](caco.png)
+![Caco](caco.png)
 
 ## What is this?
 

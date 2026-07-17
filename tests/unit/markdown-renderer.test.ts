@@ -138,6 +138,23 @@ describe('renderMarkdownElement', () => {
     expect(code.innerHTML).toContain('&lt;tag&gt;');
   });
 
+  it('renders an indented code block (undefined language) without throwing', () => {
+    // marked passes `language` as undefined for indented (4-space) code blocks;
+    // the real renderer must treat it as no-language, not crash on .startsWith
+    // (regression: a README with an indented example crashed the whole render).
+    const { markedFake } = setupRenderer();
+    const code = markedFake.renderer?.code as (c: string, l: string | undefined) => string;
+    expect(typeof code).toBe('function');
+
+    const out = code('const x = 1;', undefined);
+
+    expect(() => code('const x = 1;', undefined)).not.toThrow();
+    expect(out).toContain('<pre><code');
+    expect(out).toContain('const x = 1;');
+    // No language → no language-* class.
+    expect(out).not.toContain('language-');
+  });
+
   it('sanitizes raw HTML by removing forbidden tags, ids, and event attributes', () => {
     setupRenderer();
     const el = document.createElement('div');

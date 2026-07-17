@@ -96,23 +96,28 @@ function configureMarked(): void {
     renderer: {
       code(code: string, language: string): string {
         const safe = escapeHtml(code);
+        // marked passes `language` as undefined for INDENTED (4-space) code blocks
+        // (only fenced blocks carry an info-string), so normalize before any string
+        // op — otherwise `language.startsWith` throws on an indented block, crashing
+        // the whole render (e.g. a README with an indented example).
+        const lang = language || '';
         // Inline offer-action blocks are parsed server-side into pinned buttons;
         // never render them in the transcript. Match info-strings starting with
         // `caco-actions` so an OPEN/partial fence is also hidden during streaming.
-        if (language === 'caco-actions' || language.startsWith('caco-actions')) {
+        if (lang.startsWith('caco-actions')) {
           return '';
         }
         // caco-embed: emit a placeholder div carrying the (escaped) URL list.
         // Iframes are built post-sanitize by renderMediaEmbedsIn (DOMPurify
         // forbids <iframe>, mirroring the mermaid placeholder pattern).
-        if (language === 'caco-embed' || language.startsWith('caco-embed')) {
+        if (lang.startsWith('caco-embed')) {
           return `<div class="media-embed">${safe}</div>`;
         }
-        if (language === 'mermaid') {
+        if (lang === 'mermaid') {
           const id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
           return `<div class="mermaid-diagram" data-mermaid-id="${id}">${safe}</div>`;
         }
-        const langClass = language ? `language-${language}` : '';
+        const langClass = lang ? `language-${lang}` : '';
         return `<pre><code class="hljs ${langClass}">${safe}</code></pre>`;
       }
     }

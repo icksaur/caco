@@ -1,28 +1,27 @@
 # Caco
 
-![Caco](caco.png)
-
-A dangerous solution to any problem.
+[Caco](caco.png)
 
 ## What is this?
 
 A self-extensible web-based wrapper for the [GitHub Copilot SDK](https://github.com/github/copilot-sdk).
 
 **Key capabilities:**
-- self modification and self introspection
-- session-to-session orchestration, delegation, and scatter-gather
+- agent-to-agent orchestration, delegation, and scatter-gather
 - custom UI elements called "applets" for when chat interface doesn't make sense
 - ad-hoc per-session surface for UI-to-agent collaboration
 - extensibile slash commands, pound-completion, tools, and applets
 - scheduled tasks
 - BYOK provider support
+- HTTP client/server architecture
+- self modification and self introspection
 - almost everything else Copilot-CLI can do
 
 ## Requirements
 
 - Node.js 18+
-- GitHub Copilot CLI installed and authenticated
 - GitHub Copilot subscription
+- GitHub Copilot CLI installed and authenticated
 
 ```bash
 copilot --version  # Verify CLI works
@@ -74,31 +73,31 @@ To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Star
 
 | Command | Description |
 |---------|-------------|
-| `/caco.session-new` | New chat |
-| `/caco.agent <name>` | Select an SDK custom agent for your next message (no prompt; mirrors the Copilot CLI) |
-| `/caco.session-rename <name>` | Rename current session |
-| `/caco.session-cwd <path>` | Change session working directory |
-| `/caco.session-folder <name>` | Move session to a folder (or "/" for root) |
-| `/caco.session-archive` | Archive current session |
-| `/caco.session-model` | Change session model |
-| `/caco.session-export` | Export current session as .tar.gz |
-| `/caco.session-fork [message]` | Fork session into a new side conversation (inherits history) |
-| `/caco.session-compact` | Force context compaction |
-| `/caco.session-context-window [tokens]` | Cap session context window so it compacts earlier (cuts per-call cost); no arg opens a picker |
-| `/caco.session-effort` | Set reasoning effort level for models that support it (picker) |
-| `/caco.restart` | Restart the Caco server |
+| `/session-new` | New chat |
+| `/agent <name> <prompt>` | Dispatch prompt with an SDK custom agent |
+| `/session-rename <name>` | Rename current session |
+| `/session-cwd <path>` | Change session working directory |
+| `/session-folder <name>` | Move session to a folder (or "/" for root) |
+| `/session-archive` | Archive current session |
+| `/session-model` | Change session model |
+| `/session-export` | Export current session as .tar.gz |
+| `/session-fork [message]` | Fork session into a new side conversation (inherits history) |
+| `/session-compact` | Force context compaction |
+| `/session-context-window [tokens]` | Cap session context window so it compacts earlier (cuts per-call cost); no arg opens a picker |
+| `/session-effort` | Set reasoning effort level for models that support it (picker) |
+| `/restart` | Restart the Caco server |
 
-Caco's built-ins live in the reserved `caco.` namespace so they never collide with SDK
-skills (`/skill-name`) or agents. The legacy bare names (`/restart`, `/agent`, …) still
-work as aliases, but yield to a skill of the same name when one exists.
+### Portal
 
-### Terminal
+Open `/portal.html` to aggregate multiple Caco instances in a single view. Each instance runs on a different machine or directory and is accessed by its URL.
 
-Each session has an integrated terminal — a real, user-identity shell (PowerShell on
-Windows; your login `$SHELL`, e.g. bash/fish/zsh, on macOS/Linux) running in the session's
-working directory.
+- **Sidebar** shows connected instances as icons. Click to switch between them.
+- **Add instances** by clicking the `+` button and entering the Caco URL (e.g., `http://work-machine:53000`).
+- **Drag-and-drop sessions** between instances to transfer them. Drag a session from one instance's session list and drop it on another instance's sidebar icon. The session archive is exported from the source and imported at the destination.
+- Instances are saved in `localStorage` and reconnect on reload.
 
-- **Toggle** with the `>` glyph mid-right in the context footer, or press `` Ctrl+` ``. The
+### Scheduled Sessions
+
   panel opens below the footer; opening it is what starts the shell.
 - **Long-press the glyph to restart** the shell (kill + respawn) — an escape hatch for a
   wedged terminal.
@@ -165,27 +164,6 @@ Caco wraps the Copilot SDK which wraps Copilot-CLI. You can configure Copilot-CL
 - Ask your agent to help create hooks for your project
 
 ### Model Providers (BYOK)
-
-By default Caco lists the GitHub Copilot models available to your account. You can additionally bring your own models from any OpenAI-compatible, Anthropic, Azure, or local (Ollama) provider — including gateways like [OpenRouter](https://openrouter.ai) — by creating `~/.caco/providers.json`. BYOK models appear in the new-chat picker and `/session-model` grouped under their provider, alongside GitHub models.
-
-This is a **Caco-owned** file; the Copilot CLI never reads it. With no file present, Caco behaves exactly as before (GitHub-only).
-
-```jsonc
-{
-  "providers": {
-    "openrouter": {
-      "type": "openai",                          // "openai" | "azure" | "anthropic"
-      "baseUrl": "https://openrouter.ai/api/v1",
-      "apiKeyEnv": "OPENROUTER_API_KEY",          // NAME of an env var, never the key itself
-      "models": [
-        {
-          "id": "anthropic/claude-opus-4",         // wire model sent to the provider
-          "name": "Claude Opus 4",                 // display name
-          "contextWindow": 200000,
-          "inputPerMtok": 5, "outputPerMtok": 25, "cachePerMtok": 0.5
-        }
-      ]
-    },
     "ollama": {
       "type": "openai",
       "baseUrl": "http://localhost:11434/v1",      // no key needed for local
@@ -205,13 +183,12 @@ This is a **Caco-owned** file; the Copilot CLI never reads it. With no file pres
 - A missing or malformed file, or a model with an unset key, never breaks GitHub models — listing continues and only the affected BYOK model fails (at session start, with a clear message).
 - Editing the file takes effect on the next server restart.
 
-See [docs/spec-byok.md](docs/spec-byok.md) for the design.
+See [docs/multi-provider.md](docs/multi-provider.md) for background and [docs/byok-spec.md](docs/byok-spec.md) for the design.
 
 ## Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| `` Ctrl+` `` | Toggle the session terminal |
 | `Escape` | start leader timer |
 | `Escape` `l` | Toggle session panel |
 | `Escape` `.` | Toggle applet panel |

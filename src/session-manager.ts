@@ -42,6 +42,7 @@ import { AUTO_CONTINUE_CAP } from './auto-continue.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 import { buildSystemMessage, resolveSystemMessage } from './prompts.js';
+import { DEFAULT_MODEL } from './preferences.js';
 
 
 interface McpServerInfo {
@@ -763,8 +764,12 @@ export class SessionManager {
   /**
    * Create a new session for the given cwd
    * @param config - Required config with toolFactory (prevents sessions without tools)
+   * @param sessionId - Optional explicit SDK session id. Omitted = the SDK generates
+   *   one (the normal path). Provided = bind a fresh empty session to an existing
+   *   identity — used to reopen a never-messaged session whose events.jsonl was never
+   *   written (a cold `resumeSession` of it throws "Session not found"). See _doResume.
    */
-  async create(cwd: string, config: CreateConfig): Promise<string> {
+  async create(cwd: string, config: CreateConfig, sessionId?: string): Promise<string> {
     // Model is REQUIRED - fail loudly if not provided
     if (!config.model) {
       throw new Error('Model is required when creating a session');
@@ -797,6 +802,9 @@ export class SessionManager {
         tools,
         excludedTools: seededExclusions,
         onPermissionRequest: approveAll,
+        // A caller-supplied id binds this fresh session to an existing identity
+        // (never-messaged reopen). Omitted → the SDK generates a new id.
+        ...(sessionId && { sessionId }),
         // configDirectory is the SDK's public option name (it maps internally to
         // the wire field configDir). Passing `configDir` here was silently dropped,
         // so the SDK fell back to its ~/.copilot default; name it correctly so the
@@ -973,7 +981,38 @@ export class SessionManager {
       console.log(`Session ${sessionId} already active`);
       return { sessionId, usedFallbackCwd };
     }
-    
+
+    // Never-messaged session: created but never given a first turn, so the SDK
+    // wrote workspace.yaml + Caco meta but NO events.jsonl (events are written
+    // only on the first turn). A cold resumeSession of it throws "Session not
+    // found" (measured against the CLI). Reify "resume a never-messaged session"
+    // as "create under its own id": createSession accepts an explicit sessionId,
+    // opening an empty chat whose first message writes events.jsonl (then it is
+    // normally durable). Runs BEFORE the resume-path tool/client setup so that
+    // work is not wasted on the recreate. reconcileRotation + re-read FIRST so a
+    // session mid history-rotation (events transiently renamed aside) is never
+    // misread as never-messaged and recreated over; only a clean file-absent
+    // `missing` triggers this — `corrupt` and present-but-empty (`ok`) keep the
+    // resume path. Model falls back meta (readModelFromEvents) → DEFAULT_MODEL so
+    // a session with unreadable model meta still opens rather than throwing.
+    // evictInactiveSessions() after create() preserves the MAX_ACTIVE_SESSIONS
+    // bound the normal resume tail enforces. (A pre-set reasoningEffort/context
+    // budget is not applied to the still-empty session, but self-heals on the
+    // first real resume once it has history — see spec-session-orchestration M4.)
+    reconcileRotation(sessionId);
+    const eventsProbe = readSessionEventsResult(sessionId);
+    if (!eventsProbe.ok && eventsProbe.kind === 'missing') {
+      console.log(`[RESUME] ${sessionId} has no events.jsonl (never messaged) — recreating under id as an empty session`);
+      await this.create(cwd, {
+        model: (config.modelOverride ?? readModelFromEvents(sessionId)) ?? DEFAULT_MODEL,
+        systemMessage: resolveSystemMessage(await buildSystemMessage(), cwd),
+        toolFactory: config.toolFactory,
+        excludedTools: config.excludedTools,
+      }, sessionId);
+      await this.evictInactiveSessions();
+      return { sessionId, usedFallbackCwd };
+    }
+
     const tDoStart = performance.now();
     const tEnsure0 = performance.now();
     const client = await this.ensureClient();

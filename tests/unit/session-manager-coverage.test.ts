@@ -407,6 +407,132 @@ describe('SessionManager coverage seams', () => {
     expect(storage.meta.get('resume-session')?.model).toBe('byok:wire');
   });
 
+  // ── M4: never-messaged session resume (docs/spec-session-orchestration.md, Slice D) ──
+  // A session created but never given a first turn has no events.jsonl (the SDK writes
+  // events only on the first turn), so a cold resumeSession throws "Session not found".
+  // _doResume detects the clean file-absent `missing` read and recreates the session
+  // under its own id (createSession accepts an explicit sessionId) → opens as an empty chat.
+
+  async function createThenEvict(manager: Awaited<ReturnType<typeof initializedManager>>, model = 'github-model') {
+    sdk.fakeClient.createSession.mockImplementation(async (cfg: { sessionId?: string }) => makeSession(cfg.sessionId ?? 'created-session'));
+    const sessionId = await manager.create(process.cwd(), { model, toolFactory: () => ['tool'] });
+    await manager.stop(sessionId); // removes from activeSessions, keeps sessionCache (simulates LRU eviction)
+    expect(manager.isActive(sessionId)).toBe(false);
+    sdk.fakeClient.resumeSession.mockClear();
+    sdk.fakeClient.createSession.mockClear();
+    return sessionId;
+  }
+
+  it('recreates a never-messaged (missing events.jsonl) evicted session under its id instead of failing resume (M4)', async () => {
+    const manager = await initializedManager();
+    const sessionId = await createThenEvict(manager);
+    sdkStore.eventsResult.set(sessionId, { ok: false, kind: 'missing', error: new Error('gone') });
+
+    const result = await manager.resume(sessionId, { toolFactory: () => ['tool'] });
+
+    expect(result).toEqual({ sessionId, usedFallbackCwd: undefined });
+    expect(sdk.fakeClient.resumeSession).not.toHaveBeenCalled();
+    expect(sdk.fakeClient.createSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId, model: 'github-model' }));
+    expect(manager.isActive(sessionId)).toBe(true);
+  });
+
+  it('recreate is idempotent — re-evicting a still-never-messaged session recreates it again (M4)', async () => {
+    const manager = await initializedManager();
+    const sessionId = await createThenEvict(manager);
+    sdkStore.eventsResult.set(sessionId, { ok: false, kind: 'missing', error: new Error('gone') });
+
+    await manager.resume(sessionId, { toolFactory: () => ['tool'] });
+    await manager.stop(sessionId);
+    sdk.fakeClient.createSession.mockClear();
+    // Still never messaged (no events written)
+    await manager.resume(sessionId, { toolFactory: () => ['tool'] });
+
+    expect(sdk.fakeClient.createSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));
+    expect(manager.isActive(sessionId)).toBe(true);
+  });
+
+  it('recreating a never-messaged session over the active cap evicts to preserve MAX_ACTIVE_SESSIONS (M4 bound)', async () => {
+    const manager = await initializedManager();
+    let n = 0;
+    sdk.fakeClient.createSession.mockImplementation(async (cfg: { sessionId?: string }) => makeSession(cfg.sessionId ?? `gen-${++n}`));
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) ids.push(await manager.create(process.cwd(), { model: 'github-model', toolFactory: () => ['tool'] }));
+    const target = await manager.create(process.cwd(), { model: 'github-model', toolFactory: () => ['tool'] });
+    await manager.stop(target);
+    sdkStore.eventsResult.set(target, { ok: false, kind: 'missing', error: new Error('gone') });
+
+    await manager.resume(target, { toolFactory: () => ['tool'] });
+
+    expect(manager.isActive(target)).toBe(true);
+    const activeCount = ids.filter(id => manager.isActive(id)).length + 1; // + target
+    expect(activeCount).toBeLessThanOrEqual(5);
+  });
+
+  it('falls back to DEFAULT_MODEL when a never-messaged session has no model meta (M4)', async () => {
+    const manager = await initializedManager();
+    const sessionId = await createThenEvict(manager);
+    storage.meta.set(sessionId, { name: '' }); // wipe model meta
+    sdkStore.parsedModels.delete(sessionId);
+    sdkStore.eventsResult.set(sessionId, { ok: false, kind: 'missing', error: new Error('gone') });
+
+    await expect(manager.resume(sessionId, { toolFactory: () => ['tool'] })).resolves.toEqual({ sessionId, usedFallbackCwd: undefined });
+    expect(sdk.fakeClient.createSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));
+    expect(manager.isActive(sessionId)).toBe(true);
+  });
+
+  it('does NOT recreate a corrupt-events session — it stays on the resume/auto-repair path (M4)', async () => {
+    const manager = await initializedManager();
+    const sessionId = await createThenEvict(manager);
+    sdkStore.eventsResult.set(sessionId, { ok: false, kind: 'corrupt', error: new Error('bad json') });
+
+    await manager.resume(sessionId, { toolFactory: () => ['tool'] });
+
+    expect(sdk.fakeClient.resumeSession).toHaveBeenCalledWith(sessionId, expect.anything());
+    expect(sdk.fakeClient.createSession).not.toHaveBeenCalled();
+  });
+
+  it('does NOT recreate a present-but-empty (ok) events session — file-absent vs empty boundary (M4)', async () => {
+    const manager = await initializedManager();
+    const sessionId = await createThenEvict(manager);
+    sdkStore.eventsResult.set(sessionId, { ok: true, value: [] });
+
+    await manager.resume(sessionId, { toolFactory: () => ['tool'] });
+
+    expect(sdk.fakeClient.resumeSession).toHaveBeenCalledWith(sessionId, expect.anything());
+    expect(sdk.fakeClient.createSession).not.toHaveBeenCalled();
+  });
+
+  it('reconciles rotation and re-reads before deciding: a rotation-transient missing that reconciles to ok takes the resume path (M4)', async () => {
+    const manager = await initializedManager();
+    const sessionId = await createThenEvict(manager);
+    // Events look missing, but reconcileRotation restores them (rotation mid-swap) — must NOT recreate.
+    sdkStore.eventsResult.set(sessionId, { ok: false, kind: 'missing', error: new Error('mid-rotation') });
+    rotation.reconcileRotation.mockImplementationOnce(() => {
+      sdkStore.eventsResult.set(sessionId, { ok: true, value: [{ type: 'session.start' }] });
+      return 'recovered';
+    });
+
+    await manager.resume(sessionId, { toolFactory: () => ['tool'] });
+
+    expect(sdk.fakeClient.resumeSession).toHaveBeenCalledWith(sessionId, expect.anything());
+    expect(sdk.fakeClient.createSession).not.toHaveBeenCalled();
+  });
+
+  it('an already-active never-messaged session short-circuits at the early return (no recreate) (M4)', async () => {
+    const manager = await initializedManager();
+    sdk.fakeClient.createSession.mockImplementation(async (cfg: { sessionId?: string }) => makeSession(cfg.sessionId ?? 'created-session'));
+    const sessionId = await manager.create(process.cwd(), { model: 'github-model', toolFactory: () => ['tool'] });
+    sdkStore.eventsResult.set(sessionId, { ok: false, kind: 'missing', error: new Error('gone') });
+    sdk.fakeClient.createSession.mockClear();
+    sdk.fakeClient.resumeSession.mockClear();
+
+    const result = await manager.resume(sessionId, { toolFactory: () => ['tool'] });
+
+    expect(result).toEqual({ sessionId, usedFallbackCwd: undefined });
+    expect(sdk.fakeClient.createSession).not.toHaveBeenCalled();
+    expect(sdk.fakeClient.resumeSession).not.toHaveBeenCalled();
+  });
+
   it('changes model, reasoning effort, and context budget through live SDK mutations or warm recreate', async () => {
     const manager = await initializedManager();
     const sessionId = await manager.create(process.cwd(), { model: 'effort-model', toolFactory: () => [] });

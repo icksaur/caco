@@ -274,7 +274,7 @@ describe('session-panel rendering', () => {
     expect(rootNew?.querySelector('.session-title')?.getAttribute('title')).toBe('Root session');
     expect(rootNew?.querySelector('.session-intent')?.textContent).toBe('editing tests');
     expect(rootNew?.querySelector('.session-herd-badge')?.textContent).toBe('herd');
-    expect(rootNew?.querySelector('.session-age')?.textContent).toMatch(/ago|now|m|h|d|mo|y/);
+    expect(rootNew?.querySelector('.session-age')?.textContent).toMatch(/ago|now|m|h|d|w|mo|y/);
 
     const child = document.querySelector<HTMLElement>('.session-item[data-session-id="alpha-child"]');
     expect(child?.querySelector('.session-intent')?.textContent).toBe('tracked child intent');

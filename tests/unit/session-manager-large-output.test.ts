@@ -53,6 +53,7 @@ vi.mock('../../src/storage.js', () => storage);
 vi.mock('../../src/sdk-session-store.js', () => ({
   readSessionWorkspace: vi.fn(() => null),
   readSessionEvents: vi.fn(() => []),
+  readSessionEventsResult: vi.fn(() => ({ ok: true, value: [] })),
   parseSessionModel: vi.fn(() => null),
   listSessionIds: vi.fn(() => []),
   STATE_DIR: '/tmp/nonexistent-state',

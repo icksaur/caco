@@ -15,6 +15,7 @@ import { readFileSync, appendFileSync, mkdirSync, statSync, renameSync } from 'f
 import { homedir } from 'os';
 import { sessionState, createSessionState } from './src/session-state.js';
 import { sessionManager } from './src/session-manager.js';
+import { isBenignWatcherFault } from './src/watch-fault-classifier.js';
 import { createAppletTools } from './src/applet-tools.js';
 import { createAgentTools } from './src/agent-tools.js';
 import { createMcpAuthTools } from './src/mcp-auth-tools.js';
@@ -387,6 +388,15 @@ async function start(): Promise<void> {
 const CRASH_LOG_DIR = join(process.env.CACO_HOME || join(homedir(), '.caco'), 'logs');
 const CRASH_LOG_MAX_BYTES = 2 * 1024 * 1024;  // rotate at 2 MB
 
+// Rate-limit BOTH the console line and the crash-log persist for survived watch
+// faults, so a thrashing watcher can't spam stderr or churn crash.log (which
+// keeps only one rotated generation — a storm could evict real fatal history).
+// Every fault still increments a suppressed count that is surfaced on the next
+// emitted record, so nothing is silently lost.
+const WATCH_FAULT_LOG_INTERVAL_MS = 60_000;
+let lastWatchFaultLogMs = 0;
+let suppressedWatchFaults = 0;
+
 function recordCrash(kind: string, err: unknown): void {
   try {
     mkdirSync(CRASH_LOG_DIR, { recursive: true });
@@ -433,6 +443,26 @@ process.on('SIGINT', () => {
 // server.log) and exits — but the next startup overwrites server.log,
 // losing the stack. Persisting to ~/.caco/logs/crash.log preserves it.
 process.on('uncaughtException', (err) => {
+  // A benign filesystem-watch fault (e.g. Windows EPERM from OneDrive sync churn,
+  // or ENOSPC) can come from a watcher we don't own (chokidar/SDK internals) and
+  // otherwise kills every session in this process. It is self-contained and
+  // survivable: record it (rate-limited log) and keep running, mirroring the
+  // unhandledRejection policy below. See spec-server-resilience.
+  if (isBenignWatcherFault(err)) {
+    const e = err as NodeJS.ErrnoException;
+    const now = Date.now();
+    suppressedWatchFaults++;
+    if (now - lastWatchFaultLogMs > WATCH_FAULT_LOG_INTERVAL_MS) {
+      const n = suppressedWatchFaults;
+      suppressedWatchFaults = 0;
+      lastWatchFaultLogMs = now;
+      // Log/persist code + syscall ONLY (never err.message/stack — it may carry a
+      // path/PII), with the count of faults since the last emitted record.
+      console.warn(`[WATCH-FAULT survived] ${e.code} ${e.syscall} x${n} (server continues)`);
+      recordCrash('uncaughtException:watch-survived', `${e.code} ${e.syscall} (x${n} since last record)`);
+    }
+    return;
+  }
   console.error('[UNCAUGHT EXCEPTION]', err);
   recordCrash('uncaughtException', err);
   // Best-effort flush of in-memory state before dying.

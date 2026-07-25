@@ -154,17 +154,7 @@ catch-all backstop for everything else.
   we could log-spam. Accepted for now (each is recorded; volume is itself a
   signal). A future dedupe/backoff is out of scope.
 
-## Implementation plan
-
-1. Add `isBenignWatcherFault(err)` helper in `server.ts` near `recordCrash`.
-2. Branch the `uncaughtException` handler: survive benign watcher faults
-   (log type/code + `recordCrash('uncaughtException:watch-survived', err)` +
-   `return`); otherwise unchanged (`process.exit(1)`).
-3. Keep A9 per-watcher handlers as-is.
-4. Test (see below).
-5. Manual verification on this Windows box before commit.
-
-## Test / verification strategy
+## Acceptance
 
 - **Unit:** extract the classifier (`isBenignWatcherFault`) so it is testable
   without the process handler, and assert:
@@ -181,6 +171,16 @@ catch-all backstop for everything else.
   simulated benign error is logged as `watch-survived` and the process keeps
   serving). Confirm a normal fatal error still exits.
 - Full unit suite stays green (`vitest run`), no Linux regression.
+
+## Plan
+
+1. Add `isBenignWatcherFault(err)` helper in `server.ts` near `recordCrash`.
+2. Branch the `uncaughtException` handler: survive benign watcher faults
+   (log type/code + `recordCrash('uncaughtException:watch-survived', err)` +
+   `return`); otherwise unchanged (`process.exit(1)`).
+3. Keep A9 per-watcher handlers as-is.
+4. Test (see Acceptance).
+5. Manual verification on this Windows box before commit.
 
 ## Open questions for review — RESOLVED (gpt-5.3-codex)
 

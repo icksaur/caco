@@ -130,9 +130,12 @@ pool bounds simultaneous `tsx` processes. No shared result path, so no cross-run
 ### Part 2: the read-oriented facade
 
 A typed module the harness imports (physical: `src/workflow/facade.ts`), built on the
-Slice-A cores, **all path-scoped to `sessionCwd` via the existing `validatePath`**.
-Each returns plain JS data (objects/arrays), NOT formatted-for-LLM strings, so the
-script composes them freely:
+Slice-A cores. The **path-addressed** reads (`read`/`reads`/`peek`/`list`/`index`) resolve
+relative to `sessionCwd` but reach any path the OS user can (Part 2b — parity with
+`sh`/`rg`, via the workflow-local `resolveReadPath`, distinct from the route-boundary
+`validatePath`); the **tree-searches** (`grep`/`glob`) stay rooted at `sessionCwd`. Each
+returns plain JS data (objects/arrays), NOT formatted-for-LLM strings, so the script
+composes them freely:
 
 | Fn | Returns | Core (shared with tool) |
 |---|---|---|
@@ -157,6 +160,82 @@ the facade cannot silently diverge from what `view`/`grep`/`index` return.
 
 The facade ships a `.d.ts`; an API summary string is embedded in the tool description
 and prompt so the model knows the surface without loading full defs.
+
+### Part 2b: read reach — any path the OS user can access (V2)
+
+**Problem.** The path-addressed read ops (`read`/`reads`/`peek`/`list`/`index`) resolve
+through `validatePath(sessionCwd, …)`, which **rejects** any absolute path or `..` escape
+(`Path escapes allowed directory`). But `sh()` and `rg()` are unrestricted host tooling in
+the *same* workflow — `caco.sh('cat /etc/hostname')` succeeds while `caco.read('/etc/hostname')`
+throws. Under the spec's own threat model (**privilege parity with `bash`** — the agent
+can already read any path via `sh`) that rejection is **not a security boundary**; it is
+pure friction that makes the ergonomic read ops strictly weaker than the escape hatch they
+exist to replace, pushing the model back to `sh('cat …')` for any out-of-tree read.
+
+**Change (path-addressed reads only).** The **path-addressed** read ops — `read`, `reads`,
+`peek`, `list`, and `index` (via `caco.index`) — resolve like `sh`/`rg`: **relative paths
+resolve against `sessionCwd`; absolute paths and `..` escapes are allowed** — reaching any
+path the OS user can. Each reads a single named path, so the cost is bounded (one `stat` +
+one file/dir), matching the `sh('cat <path>')` it replaces.
+
+**Tree-search ops stay cwd-rooted (deliberate, not an oversight).** `grep`, `glob`, and
+`frames` remain rooted at `sessionCwd` and unchanged. Three reasons: (1) the request is the
+"view"/read case, not search; (2) an in-process unbounded walk (`glob('/**')`, a JS-fallback
+grep over `/`) has **different, worse** failure characteristics than `sh`/`rg` — the latter
+are separate processes bounded by the workflow's streamed byte-ceiling, an in-process walk
+is not — so bash-parity does *not* hold for them; (3) `grepCore` is shared with `frames`
+and the main tool via the core-equality oracle (B3) and returns **base-relative** paths
+(`cores.ts:163` asserts grep with an absolute `opts.path` still yields base-relative
+results); making its output absolute would break that contract. **External-tree search is
+already available** without loosening these: `caco.rg(['pattern', '/abs/path'])` and
+`caco.sh('rg … /abs')` run unrestricted. So `grepCore`/`globCore` keep `validatePath` on
+their `opts.path`/pattern; only the addressed reads change.
+
+**The boundary that stays.** `validatePath`/`validatePathMultiple` remains the **real**
+allowlist boundary for **remote/untrusted input** — the browser-facing file endpoints in
+`routes/workspace-api.ts` (locked to `ALLOWED_BASES`) are **unchanged**. The two are now
+correctly separated: a **workflow-local resolver** (`resolveReadPath(base, requested)` in
+`path-utils.ts`) for the trusted, bash-parity addressed reads; `validatePath` for
+route/remote callers **and** for the still-scoped workflow tree-searches. `resolveReadPath`
+never rejects on reach — it resolves (`resolve(base, requested)`, **lexical**, matching
+`validatePath`'s existing non-realpath behavior; no read path relied on realpath
+canonicalization) and returns a `display` path. **Inside/outside predicate (Windows-safe):**
+reuse `validatePath`'s exact normalized-prefix test — `display` is the base-relative POSIX
+path iff `normalized === resolvedBase || normalized.startsWith(resolvedBase + sep)`,
+otherwise the absolute POSIX path (so a cross-drive `D:\…` on Windows is correctly classified
+"outside" → shown absolute, never a bogus `..\..\` relative). This keeps `read().path`
+unambiguous and re-readable.
+
+**Reach is opt-in per core (default-scoped shared cores).** The reach is **not** applied
+by loosening the cores unconditionally — that would silently loosen any *other* caller of a
+shared core. Instead each addressed-read core (`readFileRangeCore`, `peekAnchorsCore`,
+`readSpecsCore`, and `indexCore`) takes an `external` flag (**default `false` → hard-scoped
+via `validatePath`**); **only the facade** (`createFacade`) passes `external: true`. So a
+shared-core caller that is not the facade stays scoped by construction — notably `frames`
+(`src/index/frames.ts`), which calls `readFileRangeCore`/`indexCore` **without** the flag
+and therefore keeps `sessionCwd` scope and base-relative result paths. Empty path is a
+caller error in both modes (`path is required`), preserving the prior explicit diagnostic.
+
+**Scope (deliberate).** The standalone top-level `index` tool (`createIndexTool`, the
+main-session Caco tool, not the workflow facade) keeps its `sessionCwd` scope: it calls
+`indexCore` without `external`, so its not-found/not-file error text and returned path
+field stay base-relative. The top-level `index` tool being cwd-scoped while the SDK-builtin
+`view` already reads any path is a pre-existing inconsistency this change does **not**
+address (out of the workflow-facade scope of this request). `frames` is unchanged; it is a
+`sessionCwd`-rooted symbol search whose inputs are in-tree.
+
+**Required test flips (implementation intent).** These existing negative oracles assert the
+*old* rejection and MUST be updated to the new reach (their reach is now allowed; assert the
+resolved `display` instead):
+- `workflow-cores.test.ts`: `readFileRangeCore` / `readSpecsCore` / `peekAnchorsCore`
+  "rejects a path that escapes the base" (~:57, :100, :125) → now **succeed** on an escaping
+  path (point at a real fixture outside base), returning an absolute `display`.
+- `workflow-facade.test.ts`: "rejects path escapes" (`caco.read('../../etc/passwd')`,
+  `caco.list('..')`, ~:109-112) → `read` of an absolute/existing outside path **succeeds**;
+  `list('..')` **succeeds** (lists the parent).
+- **Unchanged (must stay green):** `grepCore` absolute-`opts.path` → base-relative
+  (`cores.ts:163`); any `grep`/`glob` escape scoping; all `routes/workspace-api.ts` /
+  `path-utils.test.ts` `validatePath` rejection tests.
 
 ## Considerations
 
@@ -192,7 +271,7 @@ and prompt so the model knows the surface without loading full defs.
 | Concurrent-run collision | Per-run random scratch dir + unique result path; pool bound |
 | Facade drifts from tools | Both call Slice-A cores; oracle asserts core equality and shared formatter |
 | Token win unproven | Opt-in flag; default-on only past a measured reduction threshold |
-| Path escape via facade | All facade reads go through `validatePath(sessionCwd, …)`; tested with `../../etc/passwd` |
+| Facade read reach abused | Not a new capability — **addressed** reads reach exactly what `sh`/`rg` already do (privilege parity, bounded single-path cost); tree-searches (`grep`/`glob`) stay cwd-rooted to avoid unbounded in-process walks; the **remote** boundary (`routes/workspace-api.ts` → `validatePath`/`ALLOWED_BASES`) is untouched and separately tested |
 
 ## Acceptance
 
@@ -205,7 +284,9 @@ and prompt so the model knows the surface without loading full defs.
 | Result envelope | one `emit` → JSON-identical value in result; second `emit` throws; non-JSON value → clear error; no emit → "completed without emit" error | round-trip + property |
 | Model-facing payload ≤ cap; overflow recoverable | size assertion + `retrieve_output` round-trip returns full raw | invariant + round-trip |
 | Log bound | workflow prints > ceiling; Caco memory stays bounded, capture stops, raw still retrievable | property |
-| Path scope | `facade.read('../../etc/passwd')` rejected, same as tools | invariant |
+| Read reach | `facade.read('/etc/hostname')` and `caco.read('../<outside>')` **succeed** (relative resolves against cwd; absolute/escape allowed), returning an absolute `display` path when outside base; parity with `caco.sh('cat …')` | invariant |
+| Tree-search stays scoped | `grep`/`glob` keep `sessionCwd` root; `grepCore` absolute `opts.path` still yields base-relative paths (`cores.ts:163` unchanged); external-tree search goes through `caco.rg(['pat','/abs'])`/`caco.sh` | invariant |
+| Remote boundary intact | `routes/workspace-api.ts` still rejects `../../etc/passwd` via `validatePath`/`ALLOWED_BASES` (workflow loosening does not touch the route path) | invariant |
 | Timeout + child reap | infinite-loop and `sh('sleep 999')` workflows killed within `timeoutMs`; no surviving child | property |
 | **Token delta** | dogfood a real fan-out vs the equivalent single-tool sequence; record tokens in/out | measured |
 

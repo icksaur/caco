@@ -8,7 +8,7 @@ import { getOutput } from '../output-store.js';
 import { readFileRangeCore, readSpecsCore, peekAnchorsCore, grepCore, globCore, sliceLinesByRange, resolveRg } from './cores.js';
 import { type ReadResult, type GrepMatch, type GrepOptions, type ReadSpec, type PeekResult, WorkflowInputError } from './types.js';
 import { getHostShell } from './shell.js';
-import { validatePath } from '../path-utils.js';
+import { resolveReadPath } from '../path-utils.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -56,11 +56,11 @@ function sliceLines(text: string, range?: [number, number]): string {
 
 export function createFacade(sessionCwd: string): Facade {
   return {
-    index: (path, options) => indexCore(sessionCwd, path, options),
+    index: (path, options) => indexCore(sessionCwd, path, { ...options, external: true }),
     frames: (symbol, options) => buildFrames(sessionCwd, symbol, options),
-    read: (path, range) => readFileRangeCore(sessionCwd, path, range),
-    reads: (specs) => readSpecsCore(sessionCwd, specs),
-    peek: (path, anchors, context) => peekAnchorsCore(sessionCwd, path, anchors, context),
+    read: (path, range) => readFileRangeCore(sessionCwd, path, range, true),
+    reads: (specs) => readSpecsCore(sessionCwd, specs, true),
+    peek: (path, anchors, context) => peekAnchorsCore(sessionCwd, path, anchors, context, true),
     grep: (pattern, options) => grepCore(sessionCwd, pattern, options),
     glob: (pattern) => globCore(sessionCwd, pattern),
     async rg(args) {
@@ -74,9 +74,8 @@ export function createFacade(sessionCwd: string): Facade {
       return stdout;
     },
     async list(path = '.') {
-      const v = validatePath(sessionCwd, path);
-      if (!v.valid) throw new WorkflowInputError(v.error);
-      const entries = await readdir(v.resolved, { withFileTypes: true });
+      const { resolved } = resolveReadPath(sessionCwd, path);
+      const entries = await readdir(resolved, { withFileTypes: true });
       return entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
     },
     async retrieve(id, range) {
@@ -134,7 +133,7 @@ export const FACADE_API_SUMMARY = `\`caco\` facade (all async):
 - caco.list(path?) -> dir entries (dirs suffixed /).
 - caco.retrieve(id, [start, end]?) -> stored large output by id.
 - caco.sh(command) -> { stdout, stderr, code }. Runs in ${getHostShell().label} on this host (write ${getHostShell().label} syntax); never throws on non-zero exit.
-Paths are scoped to the session dir (escaping throws), except \`rg\`/\`sh\` (unrestricted host tooling).`;
+Addressed reads (read/reads/peek/list/index) resolve relative paths against the session dir and reach ANY path you can access (absolute or ../ escapes OK — like sh/rg). Tree searches (grep/glob) stay rooted at the session dir; search an external tree with caco.rg(['pat','/abs']) or caco.sh.`;
 
 /** Hand-authored .d.ts injected so workflow scripts get types for \`caco\`. */
 export const FACADE_DTS = `interface ReadResult { path: string; totalLines: number; range: [number, number]; text: string; }

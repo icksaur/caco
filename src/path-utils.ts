@@ -80,6 +80,39 @@ export function validatePath(base: string, requested: string): PathValidationRes
   };
 }
 
+/** Resolved workflow-facade read path: absolute `resolved` + a re-readable `display`. */
+export interface ResolvedReadPath {
+  /** Absolute, normalized target path. */
+  resolved: string;
+  /** Base-relative POSIX path when inside `base`, else the absolute POSIX path. */
+  display: string;
+  /** Whether the target is within `base`. */
+  inside: boolean;
+}
+
+/**
+ * Resolve a workflow-facade READ path with bash-parity reach. A relative path
+ * resolves against `base` (the session cwd); an absolute path or `..` escape is
+ * ALLOWED — never rejected. The workflow facade shares sh/rg's trust model
+ * (docs/spec-caco-run-workflow "privilege parity with bash"): an addressed read
+ * (read/reads/peek/list/index) reaches any path the OS user can, so a hard scope
+ * here would only be friction, not security (the agent can `sh('cat <path>')`).
+ *
+ * This is NOT for remote/route input — those keep `validatePath`'s allowlist
+ * rejection (see routes/workspace-api.ts). Resolution is lexical (no realpath),
+ * matching validatePath. `display` is base-relative when inside `base`, else the
+ * absolute path, using the SAME normalized-prefix test as validatePath so a
+ * cross-drive Windows path is classified "outside" (shown absolute) rather than a
+ * bogus `..\..\` relative.
+ */
+export function resolveReadPath(base: string, requested: string): ResolvedReadPath {
+  const resolvedBase = resolve(base);
+  const resolved = normalize(resolve(base, requested));
+  const inside = resolved === resolvedBase || resolved.startsWith(resolvedBase + sep);
+  const display = inside ? (toPosix(relative(resolvedBase, resolved)) || '.') : toPosix(resolved);
+  return { resolved, display, inside };
+}
+
 /**
  * Check if a path is within any of the allowed base directories.
  * 

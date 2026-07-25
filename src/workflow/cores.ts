@@ -4,7 +4,7 @@ import { execFile } from 'child_process';
 import { createRequire } from 'module';
 import { join, relative, resolve, sep } from 'path';
 import { promisify } from 'util';
-import { validatePath, toPosix } from '../path-utils.js';
+import { validatePath, resolveReadPath, toPosix } from '../path-utils.js';
 import { MAX_FILE_SIZE_BYTES } from '../config.js';
 import { type ReadResult, type GrepMatch, type GrepOptions, type ReadSpec, type PeekResult, WorkflowInputError } from './types.js';
 
@@ -59,6 +59,26 @@ function scope(base: string, requested: string): string {
 }
 
 /**
+ * Resolve a facade read input to an absolute target + a display path. `external`
+ * (the workflow addressed reads: read/reads/peek/list/index) allows ANY path via
+ * resolveReadPath — bash parity with sh/rg (see docs/spec-caco-run-workflow Part
+ * 2b). Otherwise the path is hard-scoped to `base` via validatePath (the default,
+ * so a shared-core caller like frames stays scoped and its result paths stay
+ * base-relative unless it explicitly opts in). Empty path is a caller error in
+ * both modes.
+ */
+function resolveInput(base: string, requested: string, external: boolean): { resolved: string; display: string } {
+  if (!requested) throw new WorkflowInputError('path is required');
+  if (external) {
+    const { resolved, display } = resolveReadPath(base, requested);
+    return { resolved, display };
+  }
+  const v = validatePath(base, requested);
+  if (!v.valid) throw new WorkflowInputError(v.error);
+  return { resolved: v.resolved, display: toPosix(v.relative) };
+}
+
+/**
  * Slice a 1-based inclusive line range out of text. The single clamp used by
  * both file reads and stored-output retrieval. `totalLines` is the number of
  * '\n'-split segments (a newline-terminated file reports N+1; see ReadResult).
@@ -85,8 +105,9 @@ export async function readFileRangeCore(
   base: string,
   path: string,
   range?: [start: number, end: number],
+  external = false,
 ): Promise<ReadResult> {
-  const resolved = scope(base, path);
+  const { resolved, display } = resolveInput(base, path, external);
   let info;
   try {
     info = await stat(resolved);
@@ -99,7 +120,7 @@ export async function readFileRangeCore(
   const content = await readFile(resolved, 'utf8');
   const sliced = sliceLinesByRange(content, range);
   return {
-    path: toPosix(relative(base, resolved)) || '.',
+    path: display,
     totalLines: sliced.totalLines,
     range: sliced.range,
     text: sliced.text,
@@ -118,8 +139,9 @@ export async function peekAnchorsCore(
   path: string,
   anchors: string[],
   context = 3,
+  external = false,
 ): Promise<PeekResult[]> {
-  const resolved = scope(base, path);
+  const resolved = resolveInput(base, path, external).resolved;
   let info;
   try {
     info = await stat(resolved);
@@ -148,11 +170,11 @@ export async function peekAnchorsCore(
  * model the caller should fix and re-run (contrast peekAnchorsCore, which tolerates
  * misses). Out-of-bounds ranges are clamped, not errors (see sliceLinesByRange).
  */
-export async function readSpecsCore(base: string, specs: ReadSpec[]): Promise<ReadResult[]> {
+export async function readSpecsCore(base: string, specs: ReadSpec[], external = false): Promise<ReadResult[]> {
   const cache = new Map<string, { rel: string; content: string }>();
   const results: ReadResult[] = [];
   for (const spec of specs) {
-    const resolved = scope(base, spec.path);
+    const { resolved, display } = resolveInput(base, spec.path, external);
     let entry = cache.get(resolved);
     if (!entry) {
       let info;
@@ -163,7 +185,7 @@ export async function readSpecsCore(base: string, specs: ReadSpec[]): Promise<Re
       }
       if (!info.isFile()) throw new WorkflowInputError(`not a file: ${spec.path}`);
       if (info.size > MAX_FILE_SIZE_BYTES) throw new WorkflowInputError(`file too large (${info.size} bytes): ${spec.path}`);
-      entry = { rel: toPosix(relative(base, resolved)) || '.', content: await readFile(resolved, 'utf8') };
+      entry = { rel: display, content: await readFile(resolved, 'utf8') };
       cache.set(resolved, entry);
     }
     const sliced = sliceLinesByRange(entry.content, spec.range);

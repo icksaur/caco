@@ -1,6 +1,6 @@
 import { stat, readFile } from 'fs/promises';
 import { extname } from 'path';
-import { validatePath, toPosix } from '../path-utils.js';
+import { validatePath, resolveReadPath, toPosix } from '../path-utils.js';
 import { MAX_FILE_SIZE_BYTES } from '../config.js';
 import { treeSitterAdapter } from './tree-sitter-adapter.js';
 import { languageForExtension, LANG_CONFIGS } from './extractors.js';
@@ -27,6 +27,13 @@ function clampEntries(value: number | undefined): number {
 export interface IndexCoreOptions {
   language?: string;
   maxEntries?: number;
+  /**
+   * Bash-parity reach for the workflow facade's `caco.index`: resolve relative
+   * paths against `sessionCwd` but allow absolute/`..` paths (see
+   * docs/spec-caco-run-workflow Part 2b). The standalone top-level `index` tool
+   * leaves this false, keeping its `sessionCwd` scope.
+   */
+  external?: boolean;
 }
 
 /**
@@ -40,9 +47,16 @@ export async function indexCore(
   path: string,
   options: IndexCoreOptions = {},
 ): Promise<IndexResult> {
-  const validation = validatePath(sessionCwd, path);
-  if (!validation.valid) throw new IndexInputError(`Error: ${validation.error}`);
-  const resolved = validation.resolved;
+  let resolved: string;
+  let display: string;
+  if (options.external) {
+    ({ resolved, display } = resolveReadPath(sessionCwd, path));
+  } else {
+    const validation = validatePath(sessionCwd, path);
+    if (!validation.valid) throw new IndexInputError(`Error: ${validation.error}`);
+    resolved = validation.resolved;
+    display = toPosix(validation.relative);
+  }
 
   let lang: string | null;
   if (options.language) {
@@ -57,9 +71,9 @@ export async function indexCore(
   try {
     info = await stat(resolved);
   } catch {
-    throw new IndexInputError(`Error: file not found: ${validation.relative}`);
+    throw new IndexInputError(`Error: file not found: ${display}`);
   }
-  if (!info.isFile()) throw new IndexInputError(`Error: not a file: ${validation.relative}`);
+  if (!info.isFile()) throw new IndexInputError(`Error: not a file: ${display}`);
   if (info.size > MAX_FILE_SIZE_BYTES) throw new IndexInputError(`Error: file too large (${info.size} bytes).`);
   if (info.size > PARSE_INPUT_CAP_BYTES) {
     throw new IndexInputError(`File is ${Math.round(info.size / 1024)} KiB, above the ${PARSE_INPUT_CAP_BYTES / 1024} KiB parse cap. Read it in ranges with \`view\` (view_range) instead of indexing.`);
@@ -67,7 +81,7 @@ export async function indexCore(
 
   const source = await readFile(resolved, 'utf8');
   return treeSitterAdapter.index({
-    path: toPosix(validation.relative),
+    path: display,
     language: lang,
     source,
     options: { maxEntries: clampEntries(options.maxEntries) },

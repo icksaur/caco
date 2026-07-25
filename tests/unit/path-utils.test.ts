@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { join, sep } from 'path';
-import { validatePath, validatePathMultiple } from '../../src/path-utils.js';
+import { validatePath, validatePathMultiple, resolveReadPath } from '../../src/path-utils.js';
 
 // Use OS-appropriate test paths
 const isWindows = process.platform === 'win32';
@@ -152,5 +152,38 @@ describe('validatePathMultiple', () => {
     if (!result.valid) {
       expect(result.error).toContain('not in allowed directories');
     }
+  });
+});
+
+describe('resolveReadPath (workflow bash-parity reach)', () => {
+  it('resolves a relative path against base and reports it inside with a relative display', () => {
+    const r = resolveReadPath(base, 'src/app.ts');
+    expect(r.inside).toBe(true);
+    expect(r.resolved).toBe(join(base, 'src', 'app.ts'));
+    expect(r.display).toBe('src/app.ts');
+  });
+
+  it('allows an absolute path outside base (no rejection) with an absolute display', () => {
+    const outside = isWindows ? 'C:\\etc\\hosts' : '/etc/hosts';
+    const r = resolveReadPath(base, outside);
+    expect(r.inside).toBe(false);
+    expect(r.display).toBe(isWindows ? 'C:/etc/hosts' : '/etc/hosts');
+  });
+
+  it('allows a ../ escape (resolves, marks outside)', () => {
+    const r = resolveReadPath(base, '../secrets.txt');
+    expect(r.inside).toBe(false);
+    expect(r.resolved).toBe(join(testRoot, 'secrets.txt'));
+  });
+
+  it('reports the base itself as inside with a "." display', () => {
+    const r = resolveReadPath(base, '.');
+    expect(r.inside).toBe(true);
+    expect(r.display).toBe('.');
+  });
+
+  it('does not treat a sibling with a shared prefix as inside (base=/x/project vs /x/project-other)', () => {
+    const r = resolveReadPath(base, '../project-other/file.txt');
+    expect(r.inside).toBe(false);
   });
 });

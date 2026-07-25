@@ -1,16 +1,22 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { createFacade, wrapFacadeForAccounting, type Facade } from '../../src/workflow/facade.js';
 import { WorkflowInputError } from '../../src/workflow/types.js';
 import { getHostShell } from '../../src/workflow/shell.js';
 import { resolveRg } from '../../src/workflow/cores.js';
+import { toPosix } from '../../src/path-utils.js';
 
 let base: string;
+let outsideDir: string;
+let outsideFile: string;
 
 beforeAll(async () => {
   base = await mkdtemp(join(tmpdir(), 'wf-facade-'));
+  outsideDir = await mkdtemp(join(tmpdir(), 'wf-facade-out-'));
+  outsideFile = join(outsideDir, 'outside.txt');
+  await writeFile(outsideFile, 'OUTSIDE payload\n');
   await writeFile(join(base, 'one.ts'), 'export const x = 1;\nexport function f() { return x; }\n');
   await mkdir(join(base, 'sub'), { recursive: true });
   await writeFile(join(base, 'sub', 'two.txt'), 'hello NEEDLE world\n');
@@ -18,6 +24,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(base, { recursive: true, force: true });
+  await rm(outsideDir, { recursive: true, force: true });
 });
 
 describe('createFacade', () => {
@@ -55,6 +62,16 @@ describe('createFacade', () => {
     const caco = createFacade(base);
     const res = await caco.index('one.ts');
     expect(res.language).toBe('typescript');
+    expect(res.sections.length).toBeGreaterThan(0);
+  });
+
+  it('indexes a source file outside the base (caco.index bash-parity reach, spec Part 2b)', async () => {
+    const outsideTs = join(outsideDir, 'ext.ts');
+    await writeFile(outsideTs, 'export const y = 2;\nexport function g() { return y; }\n');
+    const caco = createFacade(base);
+    const res = await caco.index(outsideTs);
+    expect(res.language).toBe('typescript');
+    expect(res.path).toBe(toPosix(outsideTs));
     expect(res.sections.length).toBeGreaterThan(0);
   });
 
@@ -106,10 +123,14 @@ describe('createFacade', () => {
     expect(bad.code).toBe(3);
   });
 
-  it('rejects path escapes', async () => {
+  it('reads and lists any path the OS user can access (bash-parity reach, spec Part 2b)', async () => {
     const caco = createFacade(base);
-    await expect(caco.read('../../etc/passwd')).rejects.toBeInstanceOf(WorkflowInputError);
-    await expect(caco.list('..')).rejects.toBeInstanceOf(WorkflowInputError);
+    const read = await caco.read(outsideFile);
+    expect(read.text).toBe('OUTSIDE payload\n');
+    expect(read.path).toBe(toPosix(outsideFile));
+    // list('..') resolves to the parent and succeeds (no escape rejection)
+    const parent = await caco.list('..');
+    expect(parent).toContain(`${basename(base)}/`);
   });
 
   it('retrieve throws for an unknown id', async () => {

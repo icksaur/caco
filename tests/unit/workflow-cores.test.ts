@@ -14,11 +14,17 @@ const execFileAsync = promisify(execFile);
 const RG = resolveRg();
 
 let base: string;
+let outsideDir: string;
+let outsideFile: string;
 
 const FILE_BODY = 'alpha\nbeta TARGET\ngamma\ndelta TARGET\nepsilon\n';
+const OUTSIDE_BODY = 'outside-one\noutside-two ANCHOR\noutside-three\n';
 
 beforeAll(async () => {
   base = await mkdtemp(join(tmpdir(), 'wf-cores-'));
+  outsideDir = await mkdtemp(join(tmpdir(), 'wf-outside-'));
+  outsideFile = join(outsideDir, 'outside.txt');
+  await writeFile(outsideFile, OUTSIDE_BODY);
   await writeFile(join(base, 'a.txt'), FILE_BODY);
   await mkdir(join(base, 'sub'), { recursive: true });
   await writeFile(join(base, 'sub', 'b.txt'), 'no match here\nTARGET deep\n');
@@ -31,6 +37,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(base, { recursive: true, force: true });
+  await rm(outsideDir, { recursive: true, force: true });
 });
 
 describe('readFileRangeCore', () => {
@@ -54,8 +61,25 @@ describe('readFileRangeCore', () => {
     expect(res.range).toEqual([3, res.totalLines]);
   });
 
-  it('rejects a path that escapes the base', async () => {
+  it('reads an absolute path outside the base with an absolute display when external (bash-parity reach, spec Part 2b)', async () => {
+    const res = await readFileRangeCore(base, outsideFile, undefined, true);
+    expect(res.text).toBe(OUTSIDE_BODY);
+    expect(res.path).toBe(toPosix(outsideFile));
+  });
+
+  it('reads a ../-escaping path when external (resolves against base, no rejection)', async () => {
+    const rel = relative(base, outsideFile);
+    const res = await readFileRangeCore(base, rel, [1, 1], true);
+    expect(res.text).toBe('outside-one');
+    expect(res.path).toBe(toPosix(outsideFile));
+  });
+
+  it('rejects an escaping path by default (external not set — shared cores stay scoped)', async () => {
     await expect(readFileRangeCore(base, '../../etc/passwd')).rejects.toBeInstanceOf(WorkflowInputError);
+  });
+
+  it('rejects an empty path with a clear error', async () => {
+    await expect(readFileRangeCore(base, '', undefined, true)).rejects.toThrow(/path is required/i);
   });
 
   it('rejects a missing file', async () => {
@@ -97,7 +121,13 @@ describe('readSpecsCore', () => {
     await expect(readSpecsCore(base, [{ path: 'a.txt' }, { path: 'nope.txt' }])).rejects.toBeInstanceOf(WorkflowInputError);
   });
 
-  it('rejects a path that escapes the base', async () => {
+  it('reads absolute paths outside the base with absolute display when external (bash-parity reach)', async () => {
+    const [res] = await readSpecsCore(base, [{ path: outsideFile, range: [2, 2] }], true);
+    expect(res.text).toBe('outside-two ANCHOR');
+    expect(res.path).toBe(toPosix(outsideFile));
+  });
+
+  it('rejects an escaping spec path by default (external not set)', async () => {
     await expect(readSpecsCore(base, [{ path: '../../etc/passwd' }])).rejects.toBeInstanceOf(WorkflowInputError);
   });
 });
@@ -122,7 +152,14 @@ describe('peekAnchorsCore', () => {
     expect(res[0].range![0]).toBe(1);
   });
 
-  it('rejects a path that escapes the base', async () => {
+  it('peeks an anchor in an absolute path outside the base when external (bash-parity reach)', async () => {
+    const res = await peekAnchorsCore(base, outsideFile, ['ANCHOR'], 1, true);
+    expect(res[0].found).toBe(true);
+    expect(res[0].line).toBe(2);
+    expect(res[0].text).toBe(OUTSIDE_BODY.split('\n').slice(0, 3).join('\n'));
+  });
+
+  it('rejects an escaping peek path by default (external not set)', async () => {
     await expect(peekAnchorsCore(base, '../../etc/passwd', ['x'])).rejects.toBeInstanceOf(WorkflowInputError);
   });
 

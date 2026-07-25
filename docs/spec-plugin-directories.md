@@ -1,0 +1,396 @@
+# spec-plugin-directories
+
+Document of record for **per-session plugin directories**: loading third-party
+extensibility (Open Plugins) into *specific* Caco sessions via the SDK's
+`pluginDirectories`, without ever writing to the shared `~/.copilot` system config.
+
+## Goals
+
+**Primary use case — third-party extensibility without polluting system config.** Some
+development environments require third-party plugins (custom agents, MCP servers, skills,
+hooks, rules) to do their work. Today the only way to supply these to a Copilot session is
+to install them into the shared personal/system config (`~/.copilot`), which makes them
+**global**: every session in every project pays their context cost and inherits their
+behavior forever. That is the pollution this spec eliminates.
+
+The goal is to make plugin loading **per-session and opt-in**, so a small number of
+deliberately "dirty" (bloated) sessions carry the plugins a task requires while the rest of
+Caco — including the orchestrating session the user talks to — stays clean and unbloated.
+A normal Caco session must be able to **set up other sessions** with plugin directories
+through orchestration, without loading those plugins itself.
+
+Concretely, plugin directories must be settable at these entry points:
+- a **slash command** (`/caco.plugin-directory`) for the session the user is in;
+- **`create_caco_session`** — a persistent child born with plugins;
+- **`caco_herd`** (`create`/`acquire`) — herd children born/adopted with plugins;
+- **`caco_session_delegate`** — apply to an existing target before dispatching;
+- the **`task` tool** — see "task-tool coverage" below (inherited, not parameterized).
+
+Non-goal: **no new UI**. The feature is entirely slash-command + tool parameters + durable
+per-session metadata. No panel, no picker, no settings screen.
+
+## Design
+
+### The SDK primitive (verified)
+
+All SDK/runtime line numbers below are **approximate (circa the current build)** — they
+will drift with SDK upgrades; the symbol names are the durable anchors.
+
+`pluginDirectories?: string[]` is a first-class field on **`SessionConfigBase`**
+(`node_modules/@github/copilot-sdk/dist/types.d.ts:~1657`, interface spans ~1321–1760).
+Its documented contract:
+
+> Local filesystem paths to Open Plugins-format directories (https://open-plugins.com/) to
+> load for this session. Relative paths resolve against `workingDirectory` (or the runtime
+> cwd if unset); absolute paths are recommended. Invalid entries are logged and skipped.
+> Treated as an **explicit opt-in**: plugin agents and rules load **even when
+> `enableConfigDiscovery` is false**. Loaded assets slot between project (cwd) sources and
+> personal/home sources in the session-wide precedence order.
+
+Two facts make this feature viable and are load-bearing for the whole design:
+
+1. **Available on BOTH create and resume.** `SessionConfig` (`:1760`) and
+   `ResumeSessionConfig` (`:1775`) both `extends SessionConfigBase`, and the SDK client
+   sends the field on **both** wire calls — `session.create`
+   (`copilot-sdk/dist/client.js:1020`) and `session.resume` (`client.js:1197`). So a
+   session's plugin set can be established at birth *and* faithfully re-established every
+   time Caco resumes it.
+2. **There is NO live-mutation RPC for it.** `pluginDirectories` does not appear in the
+   `options.update` surface (only `skillDirectories`-style fields recur elsewhere; the
+   runtime `OptionsUpdate` has no plugin field). Therefore **changing the plugin set of a
+   running session requires a session recreate**, exactly like Caco's existing
+   context-budget change.
+
+What plugins contribute (why this is "extensibility", not just prompts): the runtime
+models a `"plugin"` source for **agents** (`AgentInfoSource`, `copilot-linux-x64/sdk/index.d.ts:332`),
+**MCP servers** (`sourcePlugin`/`sourcePluginVersion`, `:6851-6854`), **extensions**
+(`ExtensionSource`, `:7644`), and **hooks** (`addHooksFromInstalledPlugins`, `:9543`), plus
+skills and instruction/rules files.
+
+### Durable per-session state is the source of truth
+
+Because the dirs must be re-supplied on **every** resume (cold open, LRU-evicted reopen,
+server restart, model switch, warm recreate), a transient parameter is not enough. The
+session's own metadata is the source of truth:
+
+`SessionMeta.pluginDirectories?: string[]` (`src/session-meta-store.ts`), stored as
+**absolute, normalized** paths. This mirrors the two existing per-session SDK-config fields
+that already work this way — `contextBudgetTokens` and `reasoningEffort` — which are
+persisted to meta and re-applied in `_doResume` (`src/session-manager.ts:994-1003`). Plugin
+dirs follow that identical, proven path. Absent field = no plugins = today's behavior.
+
+Absolute-and-normalized at write time (resolved against the session cwd when the caller
+gives a relative path) is deliberate: the SDK resolves relative paths against
+`workingDirectory`, so storing relative would silently re-target if the session's cwd later
+changes via `/caco.session-cwd`. Storing absolute makes the binding stable.
+
+### Applying to a session
+
+- **At create** — the **`POST /api/sessions` route is the single owner of create-time
+  persistence** (it already stamps `kind`/`name`/`parentSessionId`,
+  `src/routes/sessions.ts:210-235`). It validates+normalizes the incoming list, passes it
+  through `sessionState.ensureSession` → `CreateConfig.pluginDirectories` (`src/types.ts:57`)
+  → `client.createSession({ …, pluginDirectories })` (`src/session-manager.ts:793`), **and**
+  writes the same normalized list to the new session's meta in its existing
+  `updateSessionMeta` block. One owner, one normalized value, no layer-race: `create()` never
+  writes `pluginDirectories` to meta itself, it only forwards the config to the SDK.
+  (`ensureSession`/`ensureSessionLocked` gain a pass-through parameter — `src/session-state.ts:102,158`.)
+- **At resume** — `_doResume` reads `getSessionMeta(sessionId)?.pluginDirectories` and adds
+  it to `resumeArgs` (`src/session-manager.ts:1034`), alongside the existing
+  `reasoningEffort`/`infiniteSessions` conditionals. This is the step that makes the
+  feature *reliable* rather than best-effort.
+- **On change to an existing session** — `setSessionPluginDirectories(sessionId, dirs)` on
+  `SessionManager`. Its contract is **active-vs-inactive aware**, which is where it differs
+  from its sibling `setSessionContextBudget` (`src/session-manager.ts:1697`, which *throws*
+  when the session is not active):
+  - **Inactive** (not in `activeSessions` — evicted, or never opened, the common case for a
+    freshly `acquire`d herd member): **persist to meta and return.** No recreate is needed
+    or possible; the next resume reads meta and applies the dirs — which is exactly when the
+    session next runs. This is the cheap, always-available path.
+  - **Active**: persist to meta **first**, `disconnect()`, drop from `activeSessions`, then
+    `resume(…, { warmRecreate: true })` so the recreate reads the new meta; **on failure
+    restore the previous meta value and re-resume**, surfacing a "reverted" error — the
+    exact persist-then-recreate-with-rollback shape of `setSessionContextBudget`, so no new
+    lifecycle semantics are introduced. `warmRecreate: true` correctly suppresses
+    cold-resume auto-defer.
+  - **Busy**: refuse (existing busy guards), never yank a running session.
+  - Unchanged input is a **no-op** in both modes (no meta write, no recreate).
+
+**A plugin change on an *active* session costs a session recreate. This is inherent** (no
+live RPC) and must be stated in the command's user-facing text, exactly as the
+context-window command already warns "reconnecting…". On an inactive session it is free.
+
+### Entry points
+
+**1. Slash command `/caco.plugin-directory <path…|clear>`** (`public/ts/command-registry.ts`,
+added to `BUILTIN_COMMANDS` at `:18`). Sets the **full list** for the current session
+(replace semantics; space-separated paths, or `clear`/`none`/`reset` to remove all). It
+PATCHes `/api/sessions/:id { pluginDirectories }` — the same route that already handles
+`contextBudgetTokens`/`reasoningEffort` (`src/routes/sessions.ts:635-700`) — which validates
+and calls `setSessionPluginDirectories`. Replace-not-append is chosen because it is the
+only semantics with a single obvious inverse (`clear`) and no hidden accumulated state;
+the current list is visible via the existing session-state read.
+
+**2. `create_caco_session`** (`src/agent-tools.ts:65`) gains an optional
+`pluginDirectories: string[]`, forwarded in its `POST /api/sessions` body. This is the
+main "clean orchestrator sets up a dirty worker" path.
+
+**3. `caco_herd`** (`src/herd-tools.ts:101`) gains an optional `pluginDirectories: string[]`:
+- `create` — included in the child's `POST /api/sessions` body (`herd-tools.ts:125`), so the
+  child is born with plugins;
+- `acquire` — applied to the adopted session via the same PATCH/recreate path **before** any
+  prompt is dispatched, so the child's first turn already has its plugins.
+- `resume`/`disown` — **reject** the parameter with a clear error ("plugin directories are
+  set via `create`/`acquire` or `/caco.plugin-directory`; `resume` only dispatches work").
+  Silently ignoring a passed parameter is a footgun; an explicit error keeps `resume` a
+  single-purpose verb (preserving the stall-guard's progress semantics) without pretending
+  the input was honored.
+
+**4. `caco_session_delegate`** (`src/delegate-tool.ts:107`) gains an optional
+`pluginDirectories: string[]` per prompt entry. When present, the plugin set is applied to
+that target (recreate) **before** the message is dispatched and before the blocking wait
+begins, so the delegate answers with its plugins loaded. Because delegate blocks, applying
+mid-flight is forbidden: if the target is busy the call fails fast with the existing
+busy-target error rather than yanking a running session.
+
+**5. The `task` tool — partial inheritance; the exact surface MUST be measured, not
+assumed.** `task` is an **SDK built-in agent**
+(`copilot-linux-x64/definitions/task.agent.yaml`), not a Caco tool, so Caco cannot add
+parameters to it. Coverage therefore depends on what a sub-agent inherits from its parent
+session. What the runtime types actually state (all citations circa the current SDK build —
+treat line numbers as approximate):
+
+- **Inherited:** `createSubagentSession(agentId, options)` — *"Creates an ephemeral
+  LocalSession configured as a subagent of this session. The child session **inherits auth,
+  working directory, feature flags, provider config, custom instructions state, and other
+  parent context**. The caller specifies only what differs for the subagent (capabilities,
+  tool restrictions, MCP servers, etc.)"* (`copilot-linux-x64/sdk/index.d.ts:~24349`).
+- **NOT simply inherited — specified per agent:** `SubagentSessionOptions.mcpServers` is
+  *"MCP servers the subagent needs (**from the agent definition**)"* (`~:28914`), and
+  `availableTools` is a per-agent tool allowlist. So a sub-agent's MCP/tool surface is
+  governed by its **agent definition**, not automatically by the session's plugin set.
+- **Explicitly disabled for `task`:** `task.agent.yaml` sets
+  `promptParts.includeCustomAgentInstructions: false`, so plugin-contributed
+  **instructions/rules** are **not** injected into the `task` sub-agent's prompt.
+
+**Therefore this spec does NOT claim "plugins are fully available inside `task`."** What is
+defensible today: plugin-contributed **agents** register in the configured session with
+`AgentInfoSource: "plugin"` (`~:332`), i.e. a plugin can *supply an agent* that the session
+can select and that `task`-style delegation can target; and the sub-agent inherits broad
+parent context per the quote above.
+
+Because the user's requirement explicitly names the `task` tool, the *exact* inherited
+surface (plugin MCP servers? plugin skills? plugin agents selectable as a `task`
+`agent_type`?) is settled by an **empirical probe (Plan D1) before any claim ships in tool
+text or docs**. This mirrors how the never-messaged-session fix measured SDK behavior
+rather than guessing. If the probe shows a gap, the fallback is already available and needs
+no new SDK capability: **use a full Caco child session** (`create_caco_session` /
+`caco_herd create`, which *do* take `pluginDirectories`) instead of a `task` sub-agent for
+plugin-dependent work — and the spec/tool text says so plainly.
+
+### Isolation from system config (the anti-pollution property)
+
+Nothing in this feature writes to `~/.copilot`, installs a plugin, or mutates any shared
+config. `pluginDirectories` is a **per-session runtime parameter** pointing at directories
+the user already controls; the only persisted state is a list of paths in that one session's
+`meta.json`. A session without the field behaves exactly as today. This is the whole point:
+the plugin's blast radius is one session, and deleting/archiving that session removes it.
+
+## Invariants
+
+- **Per-session, never global** (invariant): configuring plugin directories never writes to
+  `~/.copilot` or any shared config, and never affects another session. A session with no
+  `pluginDirectories` in meta is byte-identical in behavior to today.
+- **Durable across every resume** (invariant): a session's plugin set is stored in its own
+  `meta.json` and re-supplied on every `session.resume` (cold open, evicted reopen, restart,
+  warm recreate, model switch). "Set once, stays set" — never best-effort.
+- **Absolute and normalized** (invariant): stored paths are absolute (relative input is
+  resolved against the session cwd at write time), so a later `/caco.session-cwd` change
+  cannot silently re-target which plugins load.
+- **Change ⇒ recreate, atomically or not at all** (invariant): applying a new plugin set to
+  a live session persists meta then recreates; on failure the previous meta value is
+  restored and the session is brought back, so a failed apply never leaves the session's
+  metadata and its live runtime disagreeing.
+- **Orchestrator stays clean** (invariant): setting plugin directories on another session
+  never loads those plugins into the caller. The configuring session's own context is
+  unchanged.
+- **No new UI** (invariant): the surface is one slash command plus tool parameters; no
+  panel, picker, or settings screen is added.
+- **Validated at the boundary** (invariant): a path that does not exist (or is not a
+  directory) is rejected at set time with a clear error, rather than being silently skipped
+  by the runtime. A directory lacking `plugin.json` is accepted with a warning, never a
+  hard block.
+- **Capability claims are measured, not assumed** (invariant): no documentation or tool
+  text asserts what plugins are available inside a `task`/`explore` sub-agent until the
+  D1 probe has measured it; where the surface is unproven the spec states the uncertainty
+  and points at the full-child-session fallback.
+
+## Considerations
+
+- **Silent-skip is the trap this must avoid — partially.** The SDK "logs and skips" invalid
+  entries; inside Caco that log is invisible, producing "why isn't my plugin loading?".
+  Boundary validation (exists + isDirectory + a **shallow `plugin.json` presence check**,
+  the Open-Plugins manifest the runtime looks for) catches the common mistakes: a typo'd
+  path, a file, and a directory that is not a plugin root. It is **not** a format validator
+  — a directory with a `plugin.json` that the runtime later rejects as malformed still
+  skips silently at load time. The `plugin.json` check is therefore a **warning, not a hard
+  reject** (a future/looser layout must not be blocked by Caco), while non-existent and
+  not-a-directory **are** hard rejects. Residual risk is surfaced by echoing the accepted
+  list back to the caller/toast. The honest claim: Caco catches path mistakes, not content
+  mistakes.
+- **List bound.** The stored list is capped at **16** entries; a longer list is rejected
+  with a clear error, so a pathological config cannot produce an unbounded load on every
+  resume.
+- **Recreate cost is real.** Every plugin-set change drops and re-resumes the SDK session
+  (history is preserved — this is the same mechanism as a context-budget change), which
+  costs a cold-ish resume. Acceptable because plugin sets are configured rarely, and the
+  alternative (live mutation) does not exist in the SDK.
+- **Plugins are third-party code with real capability.** Plugin directories can contribute
+  **hooks** (which run commands) and **MCP servers** (which run processes). This is a
+  genuine trust decision by the user pointing at a directory, and it is consistent with
+  Caco's existing posture (`approveAll`, `enableConfigDiscovery: true` already auto-loads a
+  project's `.mcp.json`, and `caco_run_workflow` runs arbitrary TS at bash parity). The
+  spec does **not** claim plugin loading is sandboxed; it claims plugins are *scoped to one
+  session* instead of global. Document this in the command help text.
+- **Bloat is the intent, contained.** Plugin agents/skills/MCP add context cost — that is
+  why the user wants them confined. The feature composes with Caco's existing frugality
+  levers (`caco_enable_tools` deferral, auto-defer, context budget), which continue to
+  operate on the dirty session normally.
+- **Precedence is the runtime's, not Caco's.** Plugin assets slot between project (cwd) and
+  personal/home sources; Caco does not attempt to re-order or merge. On name collision the
+  runtime's documented precedence wins, and Caco surfaces no custom merge semantics.
+- **`enableConfigDiscovery` interaction.** Caco already passes `enableConfigDiscovery: true`
+  (`session-manager.ts:813`). `pluginDirectories` is an *independent* explicit opt-in, so the
+  two compose without change; no discovery toggling is needed for plugins to load.
+- **List bound.** See the cap above (16); rejected beyond the cap with a clear error.
+- **Multi-target delegate is non-atomic.** `caco_session_delegate` accepts 1–2 targets;
+  applying plugin dirs is **per-target and may partially succeed** (target A configured,
+  target B rejected). There is no cross-target rollback: each target's own meta write is
+  atomic, failures are reported per-target in the delegate result, and the caller decides.
+  Documented rather than engineered around, because the two targets are independent
+  sessions with no shared invariant.
+- **Herd `resume`/`disown` reject the parameter** (explicit error) so "resume = dispatch
+  work" stays a single-purpose verb and no caller is misled into thinking a plugin change
+  was applied.
+
+## Risks and Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Plugin set silently lost on resume (feature looks flaky) | Meta is the source of truth and is read in `_doResume`; oracle asserts `pluginDirectories` present in `resumeArgs` after evict→reopen and after restart |
+| Invalid path silently skipped by the runtime | Validate exists + isDirectory at the set boundary; reject with a clear error; report the accepted list back |
+| Failed recreate leaves meta and runtime disagreeing | Persist-then-recreate with meta rollback + re-resume on failure (identical to `setSessionContextBudget`), surfaced as a "reverted" error |
+| Relative path re-targets after a cwd change | Resolve to absolute at write time; store absolute only |
+| Third-party plugin code (hooks/MCP) runs with session privilege | Explicit user action naming a directory; scoped to one session (not global); consistent with existing `approveAll`/project-`.mcp.json` posture; stated plainly in command help — no sandbox claim |
+| Plugin bloat leaks into the clean orchestrator | Configuration is applied to the *target* session only; the caller never loads the dirs; invariant + oracle |
+| Recreate on a busy session interrupts work | Route/tool refuse when the target is busy (existing busy guards), same as other recreate paths |
+| Unbounded list degrades every resume | Cap list length; reject over-cap with a clear error |
+
+## Acceptance
+
+- Observable: from a clean orchestrating session, `create_caco_session` /
+  `caco_herd create` produce a child whose SDK session was created **with**
+  `pluginDirectories`; the child's plugin-provided agents/skills/MCP are available to it
+  (including from its `task` sub-agents) while the orchestrator's own session is unchanged.
+  `/caco.plugin-directory <path>` on the current session applies (with a
+  "reconnecting…" toast) and survives eviction, restart, and a model switch.
+  `/caco.plugin-directory clear` removes it. `~/.copilot` is never modified.
+- Gates: typecheck ×2, lint:strict, knip, full tests (`npm test`, coverage thresholds),
+  build:client, check:specs.
+- Oracles:
+  - **create** — `sessionManager.create` with `pluginDirectories` passes them to
+    `client.createSession`; the created session's meta stores the **absolute** list.
+  - **resume durability** — a session with `meta.pluginDirectories` passes them in
+    `client.resumeSession` args on cold resume, on evicted-reopen, on warm recreate, and
+    **after a server restart** (meta is re-read from disk; restart is asserted explicitly,
+    not assumed equal to cold); a session without the field passes **no**
+    `pluginDirectories` key (today's behavior).
+  - **live change (active)** — `setSessionPluginDirectories` on an **active** session
+    persists meta, disconnects, and re-resumes with the new list; a failing resume
+    **restores the previous meta value**, re-resumes, and throws a "reverted" error;
+    unchanged input is a no-op (no recreate).
+  - **inactive change** — on a session **not** in `activeSessions`, the same call
+    **persists meta and performs NO recreate** (and does not throw); the next resume then
+    supplies the dirs. A **busy** session is refused.
+  - **validation** — non-existent path, a file (not a directory), and an over-cap list
+    (>16) are each **rejected** with a clear error and **no** meta write and **no**
+    recreate; a directory **without `plugin.json`** is **accepted with a warning** (not
+    rejected) and appears in the echoed accepted list.
+  - **normalization** — a relative path is stored resolved against the session cwd;
+    a subsequent `/caco.session-cwd` change does not alter the stored dirs.
+  - **route** — `PATCH /api/sessions/:id { pluginDirectories }` applies/clears; refuses a
+    busy session; `null`/`[]` clears the field.
+  - **orchestration** — `create_caco_session` and `caco_herd create` forward the parameter
+    into the child's create body; `caco_herd acquire` applies it before dispatch (via the
+    inactive persist-only path when the target is not loaded);
+    `caco_session_delegate` applies it before the blocking wait, fails fast on a busy
+    target, and reports **per-target** success/failure (non-atomic across targets);
+    **the caller's own meta is never modified** in every case.
+  - **herd resume/disown reject it** — passing `pluginDirectories` to `caco_herd resume` or
+    `disown` returns a clear error and performs **no** recreate and **no** meta write
+    (explicitly not a silent ignore).
+  - **task-tool surface (D1 probe, measured not asserted)** — a recorded probe determines
+    what a `task` sub-agent of a plugin-configured session actually sees (plugin agents
+    selectable? plugin MCP servers present? plugin skills loaded? plugin rules in prompt —
+    expected NO, given `includeCustomAgentInstructions: false`). The measured result is
+    written into this spec and the tool text **before** any capability claim ships; if the
+    surface is insufficient, the documented guidance is to use a full Caco child session
+    (`create_caco_session`/`caco_herd create`) for plugin-dependent work.
+  - **isolation** — configuring a target never writes `~/.copilot` and never touches any
+    other session's meta.
+
+## Plan
+
+Delivered in four slices: **D** = an empirical probe that settles the `task`-tool surface
+before anything claims it; **A** = the durable core (persist + create + resume), which is
+what makes everything else reliable; **B** = the user-facing command; **C** = orchestration
+parameters. D can run in parallel with A but MUST land before any capability claim in tool
+text/docs.
+
+**Slice D — measure the sub-agent surface (de-risk; no product code)**
+
+| # | Step | Files | Oracle | Invariants |
+|---|------|-------|--------|------------|
+| D1 | Probe (throwaway script against the real SDK/CLI): create a session with `pluginDirectories` pointing at a minimal Open-Plugins fixture (an agent + a skill + an MCP server + a rule); record what a `task` sub-agent of that session actually sees — agent selectable, MCP present, skill loaded, rule in prompt. Write the measured result into this spec's "task tool" subsection and drop/keep the capability claim accordingly | (measurement only) + `docs/spec-plugin-directories.md` | task-tool-surface oracle: recorded, reproducible result; no claim ships unmeasured | task-claim-is-measured |
+
+**Slice A — durable core**
+
+| # | Step | Files | Oracle | Invariants |
+|---|------|-------|--------|------------|
+| A1 | Add `pluginDirectories?: string[]` to `SessionMeta`; add a pure `normalizePluginDirectories(cwd, input)` (resolve→absolute, dedupe, cap 16, hard-reject missing/not-a-directory, warn on missing `plugin.json`) returning typed errors + warnings | `src/session-meta-store.ts`, `src/plugin-directories.ts` (new) | normalization + validation oracles | absolute-and-normalized, validated-at-boundary |
+| A2 | Thread `CreateConfig.pluginDirectories` → `client.createSession`; **`POST /api/sessions` owns** validation + create-time meta persistence, passing through `ensureSession`/`ensureSessionLocked` | `src/types.ts`, `src/session-manager.ts`, `src/session-state.ts`, `src/routes/sessions.ts` | create oracle (SDK arg + meta both carry the normalized list; `create()` itself writes no meta) | per-session, single-owner |
+| A3 | Read `meta.pluginDirectories` in `_doResume` → `resumeArgs` (absent ⇒ key omitted) | `src/session-manager.ts` | resume-durability oracle (cold/evicted/warm/**restart**) | durable-across-resume |
+| A4 | `setSessionPluginDirectories`: **inactive ⇒ persist-only**; **active ⇒** persist → disconnect → warm recreate → rollback+re-resume on failure; busy ⇒ refuse; unchanged ⇒ no-op | `src/session-manager.ts` | live-change (active) + inactive-change + busy-refuse oracles incl. revert | change⇒recreate-atomically |
+
+**Slice B — user-facing command**
+
+| # | Step | Files | Oracle | Invariants |
+|---|------|-------|--------|------------|
+| B1 | `PATCH /api/sessions/:id { pluginDirectories }` (validate, busy-refuse, `null`/`[]` clears); include current list in the session-state read | `src/routes/sessions.ts` | route oracle | validated-at-boundary |
+| B2 | `/caco.plugin-directory` built-in: register in `BUILTIN_COMMANDS` + handler (replace semantics, `clear`/`none`/`reset`, "reconnecting…" toast, trust note in the description); add the canonical name to README's command table (the `command-registry` test asserts it) | `public/ts/command-registry.ts`, `README.md` | command unit test; command-registry doc test stays green | no-new-UI |
+
+**Slice C — orchestration parameters**
+
+| # | Step | Files | Oracle | Invariants |
+|---|------|-------|--------|------------|
+| C1 | `create_caco_session` optional `pluginDirectories`, forwarded in the create body | `src/agent-tools.ts` | orchestration oracle | orchestrator-stays-clean |
+| C2 | `caco_herd` optional `pluginDirectories`: `create` → child create body; `acquire` → apply before dispatch (persist-only when the target is inactive); `resume`/`disown` → **explicit error** | `src/herd-tools.ts` | orchestration + herd-resume-rejects oracles | orchestrator-stays-clean |
+| C3 | `caco_session_delegate` per-prompt optional `pluginDirectories`: apply before dispatch, fail fast on a busy target, report per-target (non-atomic) | `src/delegate-tool.ts` | delegate oracle incl. partial-success reporting | orchestrator-stays-clean |
+
+## Rationale
+
+The SDK already provides the exact primitive and — critically — provides it on **both**
+`session.create` and `session.resume`, so the only thing Caco must add is **durability plus
+reach**: remember the choice per session, re-apply it on every resume, and let the three
+orchestration tools set it on *other* sessions. Storing the list in the session's own
+`meta.json` and re-reading it in `_doResume` is the same mechanism that already makes
+`contextBudgetTokens` and `reasoningEffort` reliable, so this introduces no new lifecycle
+concept; likewise `setSessionPluginDirectories` is a direct sibling of
+`setSessionContextBudget`, inheriting its persist-then-recreate-with-rollback correctness.
+
+The design deliberately refuses a UI. Plugin configuration is a rare, deliberate act that a
+clean orchestrating session performs on the sessions that need it — which is exactly the
+shape of Caco's existing herd/delegate/agent tooling. The result is the property the user
+asked for: third-party extensibility is available where it is needed and **absent
+everywhere else**, with the shared `~/.copilot` config never touched, so a plugin's cost and
+blast radius end at the session that opted in.

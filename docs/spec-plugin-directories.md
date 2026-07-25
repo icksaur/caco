@@ -153,40 +153,43 @@ begins, so the delegate answers with its plugins loaded. Because delegate blocks
 mid-flight is forbidden: if the target is busy the call fails fast with the existing
 busy-target error rather than yanking a running session.
 
-**5. The `task` tool — partial inheritance; the exact surface MUST be measured, not
-assumed.** `task` is an **SDK built-in agent**
-(`copilot-linux-x64/definitions/task.agent.yaml`), not a Caco tool, so Caco cannot add
-parameters to it. Coverage therefore depends on what a sub-agent inherits from its parent
-session. What the runtime types actually state (all citations circa the current SDK build —
-treat line numbers as approximate):
+**5. The `task` tool — MEASURED (Slice D1 probe, real SDK/CLI).** `task` is an **SDK
+built-in agent** (`copilot-linux-x64/definitions/task.agent.yaml`), not a Caco tool, so Caco
+cannot add parameters to it. Coverage therefore depends on what a sub-agent inherits. This
+was **measured empirically** against the real runtime with a minimal Open-Plugins fixture
+(plugin agent + real stdio MCP server + skill + command), comparing a session created with
+`pluginDirectories` against a control session without. Results:
 
-- **Inherited:** `createSubagentSession(agentId, options)` — *"Creates an ephemeral
-  LocalSession configured as a subagent of this session. The child session **inherits auth,
-  working directory, feature flags, provider config, custom instructions state, and other
-  parent context**. The caller specifies only what differs for the subagent (capabilities,
-  tool restrictions, MCP servers, etc.)"* (`copilot-linux-x64/sdk/index.d.ts:~24349`).
-- **NOT simply inherited — specified per agent:** `SubagentSessionOptions.mcpServers` is
-  *"MCP servers the subagent needs (**from the agent definition**)"* (`~:28914`), and
-  `availableTools` is a per-agent tool allowlist. So a sub-agent's MCP/tool surface is
-  governed by its **agent definition**, not automatically by the session's plugin set.
-- **Explicitly disabled for `task`:** `task.agent.yaml` sets
-  `promptParts.includeCustomAgentInstructions: false`, so plugin-contributed
-  **instructions/rules** are **not** injected into the `task` sub-agent's prompt.
+| Question | Measured result |
+|---|---|
+| Plugin **agents** load into the session? | **Yes** — as `probeplugin:probe-agent`, `source: "plugin"` (control session: none) |
+| `task` can **delegate to a plugin agent**? | **Yes** — `agent_type: "probeplugin:probe-agent"` dispatches; `subagent.started` reports that agent, and the **plugin's own prompt is honored** (its marker token came back) |
+| Plugin agents advertised to the model? | **Yes** — a sub-agent independently observed the plugin agent listed in the `task` tool's agent types |
+| Plugin **MCP server** connects? | **Yes** — `status: "connected"`, `source: "plugin"`, `sourcePlugin: "probeplugin"` |
+| Parent session sees plugin **MCP tools**? | **Yes** — exposed as `<server>-<tool>` (`probemcp-probe_ping`) |
+| **`task` sub-agent** sees plugin MCP tools? | **Yes** — the wildcard (`tools: ["*"]`) sub-agent listed `probemcp-probe_ping` |
+| Plugin-agent sub-agent sees plugin MCP tools? | **Yes** — same tool visible |
+| Plugin **skills/commands** load? | **Yes** — as `probeplugin:probe-skill`, `probeplugin:probe-cmd` |
+| Control session (no `pluginDirectories`) | **Zero** plugin agents/MCP — isolation confirmed |
 
-**Therefore this spec does NOT claim "plugins are fully available inside `task`."** What is
-defensible today: plugin-contributed **agents** register in the configured session with
-`AgentInfoSource: "plugin"` (`~:332`), i.e. a plugin can *supply an agent* that the session
-can select and that `task`-style delegation can target; and the sub-agent inherits broad
-parent context per the quote above.
+**So the requirement "plugins usable from the `task` tool" is satisfied by configuring the
+session that invokes `task`** — which is exactly the "dirty session" the orchestrator sets
+up. Two measured caveats that MUST be documented in the command/tool text:
 
-Because the user's requirement explicitly names the `task` tool, the *exact* inherited
-surface (plugin MCP servers? plugin skills? plugin agents selectable as a `task`
-`agent_type`?) is settled by an **empirical probe (Plan D1) before any claim ships in tool
-text or docs**. This mirrors how the never-messaged-session fix measured SDK behavior
-rather than guessing. If the probe shows a gap, the fallback is already available and needs
-no new SDK capability: **use a full Caco child session** (`create_caco_session` /
-`caco_herd create`, which *do* take `pluginDirectories`) instead of a `task` sub-agent for
-plugin-dependent work — and the spec/tool text says so plainly.
+- **Agents with an explicit `tools:` allowlist do not gain plugin MCP tools.** `explore`
+  declares an explicit tool list, so it only ever receives allowlisted tools; only
+  wildcard-tool agents (`task`, `tools: ["*"]`, and plugin agents that declare `["*"]`) see
+  plugin MCP tools. Choose the sub-agent accordingly.
+- **Plugin rules/instructions do NOT reach the `task` sub-agent's prompt**, because
+  `task.agent.yaml` sets `promptParts.includeCustomAgentInstructions: false`. Plugin
+  *agents*, *MCP tools*, and *skills* work; plugin *instruction/rule files* apply to the
+  session's own turns, not to a `task` sub-agent's prompt. Work that depends on plugin
+  **rules** must run either in the session itself or in a plugin-provided **agent** (whose
+  own prompt is honored, as measured).
+
+An earlier draft asserted blanket inheritance without evidence; that claim was rejected in
+review and replaced by this measured table. Probe scripts are throwaway (not committed);
+re-running them is described in the D1 plan row.
 
 ### Isolation from system config (the anti-pollution property)
 
@@ -221,9 +224,10 @@ the plugin's blast radius is one session, and deleting/archiving that session re
   by the runtime. A directory lacking `plugin.json` is accepted with a warning, never a
   hard block.
 - **Capability claims are measured, not assumed** (invariant): no documentation or tool
-  text asserts what plugins are available inside a `task`/`explore` sub-agent until the
-  D1 probe has measured it; where the surface is unproven the spec states the uncertainty
-  and points at the full-child-session fallback.
+  text asserts what plugins are available inside a `task`/`explore` sub-agent except what
+  the D1 probe measured (§Entry points 5), including its two negative caveats
+  (explicit-allowlist agents get no plugin MCP tools; plugin rules do not reach the `task`
+  sub-agent prompt).
 
 ## Considerations
 
@@ -329,29 +333,29 @@ the plugin's blast radius is one session, and deleting/archiving that session re
   - **herd resume/disown reject it** — passing `pluginDirectories` to `caco_herd resume` or
     `disown` returns a clear error and performs **no** recreate and **no** meta write
     (explicitly not a silent ignore).
-  - **task-tool surface (D1 probe, measured not asserted)** — a recorded probe determines
-    what a `task` sub-agent of a plugin-configured session actually sees (plugin agents
-    selectable? plugin MCP servers present? plugin skills loaded? plugin rules in prompt —
-    expected NO, given `includeCustomAgentInstructions: false`). The measured result is
-    written into this spec and the tool text **before** any capability claim ships; if the
-    surface is insufficient, the documented guidance is to use a full Caco child session
-    (`create_caco_session`/`caco_herd create`) for plugin-dependent work.
+  - **task-tool surface (D1 probe — MEASURED, see §Entry points 5)** — with a plugin
+    configured: `task` delegates to `<plugin>:<agent>` and the plugin agent's prompt is
+    honored; plugin MCP tools (`<server>-<tool>`) are visible to the parent, to the wildcard
+    `task` sub-agent, and to plugin-agent sub-agents; plugin skills/commands load namespaced;
+    a control session without `pluginDirectories` sees none of it. Documented caveats:
+    explicit-allowlist agents (e.g. `explore`) do **not** receive plugin MCP tools, and
+    plugin **rules** do not enter the `task` sub-agent prompt
+    (`includeCustomAgentInstructions: false`). Re-runnable via the D1 fixture recipe.
   - **isolation** — configuring a target never writes `~/.copilot` and never touches any
     other session's meta.
 
 ## Plan
 
 Delivered in four slices: **D** = an empirical probe that settles the `task`-tool surface
-before anything claims it; **A** = the durable core (persist + create + resume), which is
-what makes everything else reliable; **B** = the user-facing command; **C** = orchestration
-parameters. D can run in parallel with A but MUST land before any capability claim in tool
-text/docs.
+(**DONE — results recorded in "Entry points" §5**); **A** = the durable core (persist +
+create + resume), which is what makes everything else reliable; **B** = the user-facing
+command; **C** = orchestration parameters.
 
-**Slice D — measure the sub-agent surface (de-risk; no product code)**
+**Slice D — measure the sub-agent surface (DONE; de-risk, no product code)**
 
 | # | Step | Files | Oracle | Invariants |
 |---|------|-------|--------|------------|
-| D1 | Probe (throwaway script against the real SDK/CLI): create a session with `pluginDirectories` pointing at a minimal Open-Plugins fixture (an agent + a skill + an MCP server + a rule); record what a `task` sub-agent of that session actually sees — agent selectable, MCP present, skill loaded, rule in prompt. Write the measured result into this spec's "task tool" subsection and drop/keep the capability claim accordingly | (measurement only) + `docs/spec-plugin-directories.md` | task-tool-surface oracle: recorded, reproducible result; no claim ships unmeasured | task-claim-is-measured |
+| D1 | **DONE.** Probe (throwaway scripts against the real SDK/CLI): built a minimal Open-Plugins fixture (`plugin.json` + `agents/*.agent.md` + real stdio MCP server + `skills/<n>/SKILL.md` + `commands/*.md`), created a session with `pluginDirectories` vs a control without, then introspected (`rpc.agent.list`, `rpc.mcp.list`, `rpc.commands.list`) and ran live `task` delegations forcing `agent_type` to both the plugin agent and the wildcard `task` agent. Measured table recorded in §Entry points 5, including the two caveats (explicit-allowlist agents get no plugin MCP tools; plugin *rules* do not reach the `task` sub-agent prompt) | (measurement only) → `docs/spec-plugin-directories.md` | task-tool-surface oracle: **satisfied** — plugin agents delegatable via `task`, plugin MCP tools visible to parent and wildcard sub-agents, control session clean | task-claim-is-measured |
 
 **Slice A — durable core**
 

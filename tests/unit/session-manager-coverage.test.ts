@@ -533,8 +533,96 @@ describe('SessionManager coverage seams', () => {
     expect(sdk.fakeClient.resumeSession).not.toHaveBeenCalled();
   });
 
-  it('changes model, reasoning effort, and context budget through live SDK mutations or warm recreate', async () => {
+  // ── Per-session plugin directories (docs/spec-plugin-directories.md) ──
+
+  it('passes create-time plugin directories to the SDK and omits the key when absent (M-plugins)', async () => {
     const manager = await initializedManager();
+
+    await manager.create(process.cwd(), { model: 'github-model', toolFactory: () => [], pluginDirectories: ['/abs/p1', '/abs/p2'] });
+    expect(sdk.fakeClient.createSession).toHaveBeenCalledWith(expect.objectContaining({ pluginDirectories: ['/abs/p1', '/abs/p2'] }));
+
+    sdk.fakeClient.createSession.mockClear();
+    await manager.create(process.cwd(), { model: 'github-model', toolFactory: () => [] });
+    expect(sdk.fakeClient.createSession.mock.calls[0][0]).not.toHaveProperty('pluginDirectories');
+  });
+
+  it('re-supplies stored plugin directories on every resume, and omits them when unset (M-plugins)', async () => {
+    const manager = await initializedManager();
+    sdkStore.listedSessionIds.push('pd-session', 'plain-session');
+    for (const id of ['pd-session', 'plain-session']) {
+      sdkStore.events.set(id, [{ type: 'session.start', data: { context: { cwd: process.cwd() } } }, { type: 'message' }]);
+    }
+    storage.meta.set('pd-session', { name: '', model: 'github-model', pluginDirectories: ['/abs/p1'] });
+    storage.meta.set('plain-session', { name: '', model: 'github-model' });
+    manager.refreshCache();
+
+    await manager.resume('pd-session', { toolFactory: () => [] });
+    expect(sdk.fakeClient.resumeSession).toHaveBeenCalledWith('pd-session', expect.objectContaining({ pluginDirectories: ['/abs/p1'] }));
+
+    await manager.resume('plain-session', { toolFactory: () => [] });
+    const plainArgs = sdk.fakeClient.resumeSession.mock.calls.find(c => c[0] === 'plain-session')![1];
+    expect(plainArgs).not.toHaveProperty('pluginDirectories');
+  });
+
+  it('setSessionPluginDirectories persists without a recreate when the session is inactive (M-plugins)', async () => {
+    const manager = await initializedManager();
+    storage.meta.set('cold-session', { name: '' });
+
+    const r = await manager.setSessionPluginDirectories('cold-session', ['/abs/p1']);
+
+    expect(r).toEqual({ changed: true, recreated: false });
+    expect(storage.meta.get('cold-session')?.pluginDirectories).toEqual(['/abs/p1']);
+    expect(sdk.fakeClient.resumeSession).not.toHaveBeenCalled();
+  });
+
+  it('setSessionPluginDirectories recreates an ACTIVE session with the new dirs (M-plugins)', async () => {
+    const manager = await initializedManager();
+    sdk.fakeClient.createSession.mockImplementation(async () => makeSession('live-session'));
+    const sessionId = await manager.create(process.cwd(), { model: 'github-model', toolFactory: () => [] });
+    sdkStore.events.set(sessionId, [{ type: 'session.start', data: { context: { cwd: process.cwd() } } }, { type: 'message' }]);
+    sdk.fakeClient.resumeSession.mockClear();
+
+    const r = await manager.setSessionPluginDirectories(sessionId, ['/abs/p1']);
+
+    expect(r).toEqual({ changed: true, recreated: true });
+    expect(storage.meta.get(sessionId)?.pluginDirectories).toEqual(['/abs/p1']);
+    expect(sdk.fakeClient.resumeSession).toHaveBeenCalledWith(sessionId, expect.objectContaining({ pluginDirectories: ['/abs/p1'] }));
+  });
+
+  it('setSessionPluginDirectories is a no-op for unchanged input (M-plugins)', async () => {
+    const manager = await initializedManager();
+    storage.meta.set('same-session', { name: '', pluginDirectories: ['/abs/p1'] });
+
+    const r = await manager.setSessionPluginDirectories('same-session', ['/abs/p1']);
+
+    expect(r).toEqual({ changed: false, recreated: false });
+    expect(sdk.fakeClient.resumeSession).not.toHaveBeenCalled();
+  });
+
+  it('setSessionPluginDirectories clears with an empty list (M-plugins)', async () => {
+    const manager = await initializedManager();
+    storage.meta.set('clear-session', { name: '', pluginDirectories: ['/abs/p1'] });
+
+    const r = await manager.setSessionPluginDirectories('clear-session', []);
+
+    expect(r).toEqual({ changed: true, recreated: false });
+    expect(storage.meta.get('clear-session')?.pluginDirectories).toBeUndefined();
+  });
+
+  it('setSessionPluginDirectories restores the previous dirs when the recreate fails (M-plugins)', async () => {
+    const manager = await initializedManager();
+    sdk.fakeClient.createSession.mockImplementation(async () => makeSession('revert-session'));
+    const sessionId = await manager.create(process.cwd(), { model: 'github-model', toolFactory: () => [] });
+    sdkStore.events.set(sessionId, [{ type: 'session.start', data: { context: { cwd: process.cwd() } } }, { type: 'message' }]);
+    storage.meta.set(sessionId, { name: '', model: 'github-model', pluginDirectories: ['/abs/old'] });
+    // First resume (the apply) fails; the rollback resume succeeds.
+    sdk.fakeClient.resumeSession.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(manager.setSessionPluginDirectories(sessionId, ['/abs/new'])).rejects.toThrow(/reverted/i);
+    expect(storage.meta.get(sessionId)?.pluginDirectories).toEqual(['/abs/old']);
+  });
+
+  it('changes model, reasoning effort, and context budget through live SDK mutations or warm recreate', async () => {    const manager = await initializedManager();
     const sessionId = await manager.create(process.cwd(), { model: 'effort-model', toolFactory: () => [] });
     const session = fakeSessions.get(sessionId)!;
 

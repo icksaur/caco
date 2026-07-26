@@ -29,6 +29,7 @@ export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string
   { name: 'caco.session-compact', description: 'Force context compaction (optionally add text to focus the summary)' },
   { name: 'caco.session-context-window', description: 'Cap session context window (compact earlier to cut cost)' },
   { name: 'caco.session-effort', description: 'Set reasoning effort for models that support it' },
+  { name: 'caco.plugin-directory', description: 'Load Open Plugins directories into this session only (no argument shows current)' },
 ];
 
 const commands = new Map<string, Command>();
@@ -348,8 +349,62 @@ registerBuiltin('caco.session-context-window', async (arg) => {
   return items;
 });
 
-const EFFORT_LABELS: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'xHigh' };
+/** Words that clear the list. A slash command cannot pass `[]`, so these are its idiom
+ *  for the same operation (spec-plugin-directories "clearing contract"). */
+const PLUGIN_CLEAR_WORDS = new Set(['clear', 'none', 'reset']);
 
+registerBuiltin('caco.plugin-directory', async (arg) => {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) { showToast('No active session'); return; }
+  const trimmed = arg.trim();
+
+  // Bare invocation SHOWS, it does not clear: this value is otherwise invisible, and a
+  // stray Enter must not destroy a working plugin config. Clearing is always explicit.
+  if (!trimmed) {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/state`);
+      const dirs: string[] = res.ok ? ((await res.json()).pluginDirectories ?? []) : [];
+      showToast(dirs.length ? `Plugin directories: ${dirs.join('  ')}` : 'Plugin directories: none',
+        { type: 'info', autoHideMs: 8000 });
+    } catch (e) {
+      showToast(`Could not read plugin directories: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
+
+  const clearing = PLUGIN_CLEAR_WORDS.has(trimmed.toLowerCase());
+  const dirs = clearing ? [] : trimmed.split(/\s+/).filter(Boolean);
+
+  // The pending toast is only honest when a reconnect will actually happen; an inactive
+  // session is persist-only. We don't know liveness here, so say "applying" neutrally and
+  // let the response report whether a reconnect occurred.
+  if (!clearing) showToast('Loading plugins — reconnecting if this session is open…', { type: 'info', autoHideMs: 4000 });
+
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pluginDirectories: dirs }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to set plugin directories'); return; }
+
+    const warn = Array.isArray(data.pluginWarnings) && data.pluginWarnings.length
+      ? ` — ${data.pluginWarnings.join('; ')}` : '';
+    if (!data.pluginDirectoriesChanged) {
+      showToast(`Plugin directories unchanged${warn}`, { type: 'info', autoHideMs: 3000 });
+    } else if (clearing) {
+      showToast(`Plugin directories cleared${warn}`, { type: 'success', autoHideMs: 4000 });
+    } else {
+      const tail = data.pluginDirectoriesRecreated ? 'session reconnected' : 'applies on next open';
+      showToast(`Plugin directories set (${dirs.length}) — ${tail}${warn}`, { type: 'success', autoHideMs: 6000 });
+    }
+  } catch (e) {
+    showToast(`Failed to set plugin directories: ${e instanceof Error ? e.message : String(e)}`);
+  }
+});
+
+const EFFORT_LABELS: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'xHigh' };
 registerBuiltin('caco.session-effort', async (arg) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }

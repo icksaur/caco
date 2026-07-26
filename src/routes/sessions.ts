@@ -23,6 +23,7 @@ import { rotateSessionHistory } from '../session-history-rotation.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
 import { AUTO_ARCHIVE_FOLDER } from '../config.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
+import { normalizePluginDirectories } from '../plugin-directories.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
 import { mergeContextSet, KNOWN_SET_NAMES } from '../context-tools.js';
 import { DispatchHttpError, dispatchMessage } from './session-messages.js';
@@ -208,7 +209,7 @@ router.get('/sessions/search', (req: Request, res: Response) => {
 });
 
 router.post('/sessions', async (req: Request, res: Response) => {
-  const { cwd, model, description, parentSessionId, isSwarmSession, kind } = req.body as { cwd?: string; model?: string; description?: string; parentSessionId?: string; isSwarmSession?: boolean; kind?: SessionKind };
+  const { cwd, model, description, parentSessionId, isSwarmSession, kind, pluginDirectories } = req.body as { cwd?: string; model?: string; description?: string; parentSessionId?: string; isSwarmSession?: boolean; kind?: SessionKind; pluginDirectories?: string[] };
   const clientId = req.headers['x-client-id'] as string | undefined;
   
   const sessionCwd = cwd || process.cwd();
@@ -220,10 +221,29 @@ router.post('/sessions', async (req: Request, res: Response) => {
   if (!statSync(sessionCwd).isDirectory()) {
     return res.status(400).json({ error: `Path is not a directory: ${sessionCwd}` });
   }
+
+  // The create route is the SINGLE owner of create-time plugin-directory validation and
+  // persistence (spec-plugin-directories): it normalizes once, passes the result to the SDK
+  // create AND stamps the same list into the new session's meta below, so the very first
+  // resume re-applies it. `create()` itself never writes this field.
+  let normalizedPluginDirs: string[] | undefined;
+  let pluginWarnings: string[] = [];
+  if (pluginDirectories !== undefined) {
+    if (!Array.isArray(pluginDirectories) || pluginDirectories.some(d => typeof d !== 'string')) {
+      return res.status(400).json({ error: 'pluginDirectories must be an array of strings' });
+    }
+    try {
+      const result = normalizePluginDirectories(sessionCwd, pluginDirectories);
+      normalizedPluginDirs = result.directories;
+      pluginWarnings = result.warnings;
+    } catch (e) {
+      return res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  }
   
   try {
     // Create new session (forces new, ignoring any existing active session)
-    const sessionId = await sessionState.ensureSession(model, true, sessionCwd, clientId);
+    const sessionId = await sessionState.ensureSession(model, true, sessionCwd, clientId, normalizedPluginDirs);
     const actualCwd = sessionManager.getSessionCwd(sessionId);
     
     // Set metadata
@@ -233,6 +253,7 @@ router.post('/sessions', async (req: Request, res: Response) => {
       if (description) meta.name = description;
       if (parentSessionId) meta.parentSessionId = parentSessionId;
       if (isSwarmSession) meta.isSwarmSession = true;
+      if (normalizedPluginDirs?.length) meta.pluginDirectories = normalizedPluginDirs;
     });
     
     // Broadcast session list change for all clients to refresh
@@ -244,7 +265,9 @@ router.post('/sessions', async (req: Request, res: Response) => {
     res.json({ 
       sessionId, 
       cwd: actualCwd || sessionCwd,
-      model: model || 'default'
+      model: model || 'default',
+      ...(normalizedPluginDirs?.length && { pluginDirectories: normalizedPluginDirs }),
+      ...(pluginWarnings.length && { pluginWarnings })
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -285,6 +308,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       repairMessage: result.repairMessage || null,
       responseOptions: meta?.responseOptions || null,
       contextBudgetTokens: meta?.contextBudgetTokens ?? null,
+      pluginDirectories: meta?.pluginDirectories ?? [],
       reasoningEffort: meta?.reasoningEffort ?? null,
       activeApplet: meta?.activeApplet || null,
       appletParams: meta?.appletParams || null,
@@ -632,7 +656,7 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
  */
 router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
-  const { name, envHint, model, cwd: newCwd, setContext, folder, contextBudgetTokens, reasoningEffort } = req.body as { 
+  const { name, envHint, model, cwd: newCwd, setContext, folder, contextBudgetTokens, reasoningEffort, pluginDirectories } = req.body as { 
     name?: string; 
     envHint?: string;
     model?: string;
@@ -641,6 +665,7 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
     setContext?: { setName: string; items: string[]; mode?: 'replace' | 'merge' };
     contextBudgetTokens?: number | null;
     reasoningEffort?: string | null;
+    pluginDirectories?: string[] | null;
   };
   
   const currentCwd = sessionManager.getSessionCwd(sessionId);
@@ -743,6 +768,41 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
     }
   }
   
+  // Per-session Open-Plugins directories (spec-plugin-directories). Unlike the budget/effort
+  // branches this does NOT require an active session: an inactive target is persist-only and
+  // applies on its next open. `null`/`[]` clears; an omitted field leaves the value untouched.
+  // NOTE: like the model/cwd/budget branches above, a failure here returns early, so a PATCH
+  // that ALSO carried name/folder/context leaves those unapplied. Callers send plugin changes
+  // on their own PATCH (the slash command does), so this is not exercised in practice.
+  let pluginResult: { changed: boolean; recreated: boolean } | undefined;
+  let pluginWarnings: string[] = [];
+  if (pluginDirectories !== undefined) {
+    if (pluginDirectories !== null && (!Array.isArray(pluginDirectories) || pluginDirectories.some(d => typeof d !== 'string'))) {
+      res.status(400).json({ error: 'pluginDirectories must be an array of strings, or null to clear' });
+      return;
+    }
+    if (sessionManager.isBusy(sessionId)) {
+      res.status(409).json({ error: 'Cannot change plugin directories while the session is working', code: 'SESSION_BUSY' });
+      return;
+    }
+    let normalized: string[] = [];
+    try {
+      const result = normalizePluginDirectories(currentCwd, pluginDirectories ?? []);
+      normalized = result.directories;
+      pluginWarnings = result.warnings;
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    try {
+      pluginResult = await sessionManager.setSessionPluginDirectories(sessionId, normalized);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(400).json({ error: msg });
+      return;
+    }
+  }
+
   // updateSessionMeta re-reads meta from disk AFTER the model/budget mutations
   // above (each may have written to meta — model via syncModelCache,
   // contextBudgetTokens via the recreate), so those writes are preserved.
@@ -802,7 +862,7 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
     return;
   }
   
-  res.json({ success: true });
+  res.json({ success: true, ...(pluginResult && { pluginDirectoriesChanged: pluginResult.changed, pluginDirectoriesRecreated: pluginResult.recreated, ...(pluginWarnings.length && { pluginWarnings }) }) });
 });
 
 /**
@@ -856,6 +916,7 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
     currentIntent: meta?.currentIntent || null,
     responseOptions: meta?.responseOptions || null,
     contextBudgetTokens: meta?.contextBudgetTokens ?? null,
+    pluginDirectories: meta?.pluginDirectories ?? [],
     reasoningEffort: meta?.reasoningEffort ?? null,
     isActive,
     isBusy

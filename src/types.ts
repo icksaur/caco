@@ -59,6 +59,9 @@ export interface CreateConfig {
   systemMessage?: SystemMessage;
   toolFactory: ToolFactory;
   excludedTools?: string[];
+  /** Open-Plugins directories for the new session (spec-plugin-directories). Absolute +
+   *  already normalized by the caller (the create route owns validation + meta persistence). */
+  pluginDirectories?: string[];
 }
 
 export interface ResumeConfig {

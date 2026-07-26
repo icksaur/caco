@@ -99,11 +99,11 @@ export class SessionState {
    * @param cwd - Working directory for the session
    * @param clientId - Client identifier for multi-client support
    */
-  async ensureSession(model?: string, newChat?: boolean, cwd?: string, clientId?: string): Promise<string> {
-    return this.runTransition(clientId, () => this.ensureSessionLocked(model, newChat, cwd, clientId));
+  async ensureSession(model?: string, newChat?: boolean, cwd?: string, clientId?: string, pluginDirectories?: string[]): Promise<string> {
+    return this.runTransition(clientId, () => this.ensureSessionLocked(model, newChat, cwd, clientId, pluginDirectories));
   }
 
-  private async ensureSessionLocked(model?: string, newChat?: boolean, cwd?: string, clientId?: string): Promise<string> {
+  private async ensureSessionLocked(model?: string, newChat?: boolean, cwd?: string, clientId?: string, pluginDirectories?: string[]): Promise<string> {
     const activeId = this.getActiveSessionId(clientId);
     
     // Explicit new chat request - just clear the active session reference
@@ -159,7 +159,8 @@ export class SessionState {
       model: finalModel,
       systemMessage: resolveSystemMessage(this._config.systemMessage, sessionCwd),
       toolFactory: this._config.toolFactory,
-      excludedTools: this._config.excludedTools
+      excludedTools: this._config.excludedTools,
+      ...(pluginDirectories?.length && { pluginDirectories })
     });
     
     this.setActiveSessionId(newSessionId, clientId);

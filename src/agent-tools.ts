@@ -66,10 +66,11 @@ export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: Get
       cwd: z.string().describe('Working directory for the new session'),
       model: z.string().describe('Model ID (e.g. claude-sonnet-4.6). See this tool\'s description for the available IDs.'),
       initialMessage: z.string().optional().describe('Optional first message'),
-      description: z.string().optional().describe('Short label for the session list')
+      description: z.string().optional().describe('Short label for the session list'),
+      pluginDirectories: z.array(z.string()).optional().describe('Absolute paths to Open Plugins directories to load into the NEW session only (never installed into ~/.copilot). Plugin agents/MCP tools/skills become available to that session and its task sub-agents. Sticky: stays set for the session\'s lifetime.')
     }),
 
-    handler: async ({ cwd, model, initialMessage, description }) => {
+    handler: async ({ cwd, model, initialMessage, description, pluginDirectories }) => {
       if (modelIds.length > 0 && !modelIds.includes(model)) {
         return {
           textResultForLlm: `Unknown model "${model}". Available: ${modelIds.join(', ')}.`,
@@ -80,7 +81,7 @@ export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: Get
         const createResponse = await fetch(`${SERVER_URL}/api/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cwd, model, parentSessionId: sessionRef.id, description, kind: 'agent' })
+          body: JSON.stringify({ cwd, model, parentSessionId: sessionRef.id, description, kind: 'agent', ...(pluginDirectories?.length && { pluginDirectories }) })
         });
         
         if (!createResponse.ok) {

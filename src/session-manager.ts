@@ -42,6 +42,7 @@ import { AUTO_CONTINUE_CAP } from './auto-continue.js';
 
 import { formatMemoryForPrompt } from './memory-tool.js';
 import { buildSystemMessage, resolveSystemMessage } from './prompts.js';
+import { samePluginDirectories } from './plugin-directories.js';
 import { DEFAULT_MODEL } from './preferences.js';
 
 
@@ -802,6 +803,9 @@ export class SessionManager {
         tools,
         excludedTools: seededExclusions,
         onPermissionRequest: approveAll,
+        // Per-session Open-Plugins directories (spec-plugin-directories). Scoped to this
+        // session only — never installed into the shared ~/.copilot config.
+        ...(config.pluginDirectories?.length && { pluginDirectories: config.pluginDirectories }),
         // A caller-supplied id binds this fresh session to an existing identity
         // (never-messaged reopen). Omitted → the SDK generates a new id.
         ...(sessionId && { sessionId }),
@@ -1031,6 +1035,7 @@ export class SessionManager {
     const applyModel = !!resolved && (!!resolved.provider || isOverride);
     const infinite = this.infiniteSessionsFor(sessionId, cacoModel ?? undefined);
     const storedEffort = getSessionMeta(sessionId)?.reasoningEffort;
+    const storedPluginDirectories = getSessionMeta(sessionId)?.pluginDirectories;
     const defaultEffort = cacoModel ? this.cachedModels.find(m => m.id === cacoModel)?.defaultReasoningEffort : undefined;
     const applyEffort = storedEffort && storedEffort !== defaultEffort;
     
@@ -1088,6 +1093,10 @@ export class SessionManager {
       ...(resolved?.provider && { provider: resolved.provider }),
       ...(infinite && { infiniteSessions: infinite }),
       ...(applyEffort && { reasoningEffort: storedEffort }),
+      // Per-session Open-Plugins directories (spec-plugin-directories). The SDK has no
+      // live-mutation RPC for these, so re-supplying them from meta on EVERY resume is
+      // what makes "set once, stays set" true across eviction, restart, and recreate.
+      ...(storedPluginDirectories?.length && { pluginDirectories: storedPluginDirectories }),
       ...(this.contextTierFor(cacoModel ?? undefined) && { contextTier: this.contextTierFor(cacoModel ?? undefined) }),
     } as ResumeSessionConfig;
 
@@ -1769,10 +1778,73 @@ export class SessionManager {
     return { tokensRemoved: result.tokensRemoved, messagesRemoved: result.messagesRemoved };
   }
 
+  /**
+   * Set (or clear) the session's Open-Plugins directories (spec-plugin-directories).
+   *
+   * `dirs` must already be normalized (absolute) by the caller; an empty array clears.
+   * Active-vs-inactive aware, which is where this differs from setSessionContextBudget:
+   *  - inactive => persist to meta and return. No recreate is needed or possible; the next
+   *    resume reads meta and supplies the dirs, which is exactly when the session next runs.
+   *  - active   => persist first, then disconnect + warm-recreate so the new SDK session is
+   *    built with the dirs (the SDK has no live-mutation RPC). On failure the previous meta
+   *    value is restored and the session is brought back, so meta and runtime never disagree.
+   * Unchanged input is a no-op in both modes. Callers (route/tools) reject busy sessions.
+   *
+   * @returns whether a recreate was performed (callers surface "reconnected" vs
+   *          "applies on next open").
+   */
+  async setSessionPluginDirectories(sessionId: string, dirs: string[]): Promise<{ changed: boolean; recreated: boolean }> {
+    const next = dirs.length > 0 ? dirs : undefined;
+    let previous: string[] | undefined;
+    let changed = false;
+    const persisted = updateSessionMeta(sessionId, meta => {
+      previous = meta.pluginDirectories;
+      if (samePluginDirectories(previous, next)) return;
+      changed = true;
+      meta.pluginDirectories = next;
+    });
+    if (!persisted) {
+      throw new Error(`Cannot change plugin directories: session metadata for ${sessionId} is unreadable`);
+    }
+    if (!changed) return { changed: false, recreated: false };
+
+    const active = this.activeSessions.get(sessionId);
+    if (!active) {
+      console.log(`[PLUGINS] Stored ${next?.length ?? 0} plugin dir(s) for inactive ${sessionId.slice(0, 8)}; applies on next open`);
+      return { changed: true, recreated: false };
+    }
+
+    const { toolFactory, excludedTools } = active;
+    try {
+      await active.session.disconnect();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`[PLUGINS] disconnect during plugin-directory change failed: ${msg}`);
+    }
+    dispatchState.end(sessionId);
+    this.activeSessions.delete(sessionId);
+
+    try {
+      await this.resume(sessionId, { toolFactory, excludedTools, warmRecreate: true });
+      console.log(`[PLUGINS] Recreated session ${sessionId.slice(0, 8)} with ${next?.length ?? 0} plugin dir(s)`);
+      return { changed: true, recreated: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      updateSessionMeta(sessionId, meta => { meta.pluginDirectories = previous; });
+      try {
+        await this.resume(sessionId, { toolFactory, excludedTools, warmRecreate: true });
+        console.warn(`[PLUGINS] Plugin-directory change failed; reverted ${sessionId.slice(0, 8)}`);
+        throw new Error(`Plugin directory change failed (${msg}); reverted`);
+      } catch (rollbackErr) {
+        const rmsg = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+        throw new Error(`Plugin directory change failed (${msg}) and rollback failed (${rmsg}); session ended`);
+      }
+    }
+  }
+
   /** Clear stored reasoning effort when switching to a model that doesn't
    *  support it or doesn't include the stored value in supportedReasoningEfforts. */
-  private clearStaleReasoningEffort(sessionId: string, newModelId: string): void {
-    updateSessionMeta(sessionId, meta => {
+  private clearStaleReasoningEffort(sessionId: string, newModelId: string): void {    updateSessionMeta(sessionId, meta => {
       if (!meta.reasoningEffort) return;
       const newModel = this.cachedModels.find(m => m.id === newModelId);
       const supported = newModel?.supportedReasoningEfforts;

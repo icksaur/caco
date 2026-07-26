@@ -18,6 +18,7 @@ type SessionMeta = {
   responseOptions?: unknown;
   contextBudgetTokens?: number | null;
   reasoningEffort?: string | null;
+  pluginDirectories?: string[];
   folder?: string;
   envHint?: string;
   context?: Record<string, string[]>;
@@ -156,6 +157,13 @@ const sessionManager = {
     const meta = state.metaById.get(id) ?? {};
     meta.reasoningEffort = effort;
     state.metaById.set(id, meta);
+  }),
+  setSessionPluginDirectories: vi.fn(async (id: string, dirs: string[]) => {
+    const meta = state.metaById.get(id) ?? {};
+    const changed = JSON.stringify(meta.pluginDirectories ?? []) !== JSON.stringify(dirs);
+    meta.pluginDirectories = dirs.length ? dirs : undefined;
+    state.metaById.set(id, meta);
+    return { changed, recreated: changed && state.activeIds.has(id) };
   }),
   compactSession: vi.fn(async (id: string, customInstructions?: string) => ({ ok: true, sessionId: id, customInstructions: customInstructions ?? null })),
   resume: vi.fn(async (id: string) => { state.activeIds.add(id); return { sessionId: id }; }),
@@ -334,9 +342,31 @@ describe('sessions route harness', () => {
     const res = await postJson('/sessions', { cwd: process.cwd(), model: 'model-a', description: 'New name', parentSessionId: knownId });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ sessionId: 'created-id', cwd: process.cwd(), model: 'model-a' });
-    expect(sessionState.ensureSession).toHaveBeenCalledWith('model-a', true, process.cwd(), undefined);
+    expect(sessionState.ensureSession).toHaveBeenCalledWith('model-a', true, process.cwd(), undefined, undefined);
     expect(state.metaById.get('created-id')).toMatchObject({ kind: 'agent', name: 'New name', parentSessionId: knownId });
     expect(broadcastGlobalEvent).toHaveBeenCalledWith({ type: 'session.listChanged', data: { reason: 'created', sessionId: 'created-id' } });
+  });
+
+  it('creates a session with plugin directories, persisting them to meta and passing them to the SDK create', async () => {
+    const { mkdtempSync, writeFileSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const dir = mkdtempSync(join(tmpdir(), 'create-pd-'));
+    writeFileSync(join(dir, 'plugin.json'), '{"name":"p"}');
+
+    const res = await postJson('/sessions', { cwd: process.cwd(), model: 'model-a', pluginDirectories: [dir] });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ sessionId: 'created-id', pluginDirectories: [dir] });
+    // the route is the single owner of create-time persistence
+    expect(state.metaById.get('created-id')?.pluginDirectories).toEqual([dir]);
+    expect(sessionState.ensureSession).toHaveBeenCalledWith('model-a', true, process.cwd(), undefined, [dir]);
+  });
+
+  it('rejects an invalid plugin directory at create time', async () => {
+    const res = await postJson('/sessions', { cwd: process.cwd(), model: 'model-a', pluginDirectories: ['/definitely/not/here'] });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/does not exist/i);
   });
 
   it('returns state for existing sessions and 404s missing sessions', async () => {
@@ -397,6 +427,42 @@ describe('sessions route harness', () => {
     expect(state.metaById.get(knownId)).toMatchObject({ name: 'Renamed', envHint: 'linux', folder: 'Work', contextBudgetTokens: 50, context: { files: ['a.ts'] } });
     expect(broadcastEvent).toHaveBeenCalledWith(knownId, { type: 'caco.context', data: { reason: 'changed', context: { files: ['a.ts'] }, setName: 'files' } });
     expect(broadcastGlobalEvent).toHaveBeenCalledWith({ type: 'session.listChanged', data: { reason: 'updated', sessionId: knownId } });
+  });
+
+  it('patches plugin directories: sets, clears, validates, and refuses a busy session', async () => {
+    const { mkdtempSync, writeFileSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const dir = mkdtempSync(join(tmpdir(), 'route-pd-'));
+    writeFileSync(join(dir, 'plugin.json'), '{"name":"p"}');
+    const aFile = join(dir, 'plugin.json');
+
+    // set
+    const set = await patchJson('/sessions/known', { pluginDirectories: [dir] });
+    expect(set.status).toBe(200);
+    expect(await set.json()).toMatchObject({ success: true, pluginDirectoriesChanged: true });
+    expect(state.metaById.get(knownId)?.pluginDirectories).toEqual([dir]);
+
+    // clear with an empty array
+    const cleared = await patchJson('/sessions/known', { pluginDirectories: [] });
+    expect(cleared.status).toBe(200);
+    expect(state.metaById.get(knownId)?.pluginDirectories).toBeUndefined();
+
+    // null also clears
+    expect((await patchJson('/sessions/known', { pluginDirectories: null })).status).toBe(200);
+
+    // validation: missing dir, a file, and a non-array
+    expect((await patchJson('/sessions/known', { pluginDirectories: [join(dir, 'nope')] })).status).toBe(400);
+    expect((await patchJson('/sessions/known', { pluginDirectories: [aFile] })).status).toBe(400);
+    expect((await patchJson('/sessions/known', { pluginDirectories: 'not-an-array' })).status).toBe(400);
+
+    // busy target is refused
+    expect((await patchJson('/sessions/busy', { pluginDirectories: [dir] })).status).toBe(409);
+
+    // an omitted field leaves the value untouched
+    state.metaById.set(knownId, { ...(state.metaById.get(knownId) ?? {}), pluginDirectories: [dir] });
+    expect((await patchJson('/sessions/known', { name: 'Untouched' })).status).toBe(200);
+    expect(state.metaById.get(knownId)?.pluginDirectories).toEqual([dir]);
   });
 
   it('patches cwd and reasoning effort with validation', async () => {

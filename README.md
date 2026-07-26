@@ -85,6 +85,7 @@ To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Star
 | `/caco.session-compact` | Force context compaction |
 | `/caco.session-context-window [tokens]` | Cap session context window so it compacts earlier (cuts per-call cost); no arg opens a picker |
 | `/caco.session-effort` | Set reasoning effort level for models that support it (picker) |
+| `/caco.plugin-directory [paths\|clear]` | Load Open Plugins directories into this session only (never into `~/.copilot`); no arg shows the current list |
 | `/caco.restart` | Restart the Caco server |
 
 ### Portal

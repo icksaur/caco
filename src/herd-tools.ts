@@ -21,6 +21,7 @@ import { getSessionMeta, updateSessionMeta } from './storage.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { getLastAssistantMessage } from './session-history.js';
 import { boundDelegateResponse } from './delegate-tool.js';
+import { applyPluginDirectories } from './plugin-directories-apply.js';
 import {
   registerHerdBond,
   clearHerdBond,
@@ -104,13 +105,20 @@ You do NOT wait for children; they run and you are re-woken when one needs atten
       cwd: z.string().optional().describe('Working directory (for create)'),
       model: z.string().optional().describe('Model ID (for create)'),
       prompt: z.string().optional().describe('Prompt to dispatch (create/resume; optional for acquire)'),
+      pluginDirectories: z.array(z.string()).optional().describe('Absolute paths to Open Plugins directories for the CHILD session (create/acquire only; rejected on resume/disown). Never installed into ~/.copilot. Sticky: stays set for the child\'s lifetime. Omit to leave an acquired session\'s existing dirs untouched; pass [] to clear them.'),
     }),
 
-    handler: async ({ action, sessionId: rawTarget, cwd, model, prompt }) => {
+    handler: async ({ action, sessionId: rawTarget, cwd, model, prompt, pluginDirectories }) => {
       const err = (msg: string) => ({ textResultForLlm: msg, resultType: 'error' as const });
       const ok = (msg: string) => ({ textResultForLlm: msg, resultType: 'text' as const });
       const callerId = sessionRef.id;
       const callerMeta = getSessionMeta(callerId);
+
+      // Silently ignoring a passed parameter is a footgun; resume/disown are pure
+      // dispatch/bond verbs, so reject rather than pretend (spec-plugin-directories).
+      if (pluginDirectories !== undefined && (action === 'resume' || action === 'disown')) {
+        return err(`pluginDirectories is not supported on ${action}; set it via create/acquire or the /caco.plugin-directory command.`);
+      }
 
       if (action === 'create') {
         const g1 = herdParentActionError(callerMeta?.orchestratedBy);
@@ -122,7 +130,7 @@ You do NOT wait for children; they run and you are re-woken when one needs atten
           const res = await fetch(`${SERVER_URL}/api/sessions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cwd, model, description: `herd child of ${callerId.slice(0, 8)}`, kind: 'agent' }),
+            body: JSON.stringify({ cwd, model, description: `herd child of ${callerId.slice(0, 8)}`, kind: 'agent', ...(pluginDirectories?.length && { pluginDirectories }) }),
           });
           if (!res.ok) {
             const e = await res.json().catch(() => ({ error: res.statusText }));
@@ -158,6 +166,12 @@ You do NOT wait for children; they run and you are re-woken when one needs atten
           if (meta.folder === AUTO_ARCHIVE_FOLDER) { meta.folder = undefined; meta.autoArchiveTaggedAt = undefined; }
         });
         registerHerdBond(targetId, callerId);
+        // Apply plugin dirs BEFORE any prompt so the child's first turn already has them.
+        // Omitted => leave an already-configured session untouched; [] => explicit clear.
+        if (pluginDirectories !== undefined) {
+          const p = await applyPluginDirectories(SERVER_URL, targetId, pluginDirectories);
+          if (!p.ok) return ok(`Acquired ${targetId.slice(0, 8)}, but setting plugin directories failed: ${p.error}. The session keeps its previous plugin configuration.`);
+        }
         if (prompt) {
           const d = await dispatchToChild(targetId, prompt, callerId, selfCorrelation());
           if (!d.ok) return ok(`Acquired ${targetId.slice(0, 8)} but the prompt failed to send: ${d.error}.`);

@@ -48,6 +48,12 @@ export interface SessionMeta {
   /** Reasoning effort level for models that support it. Injected into resumeArgs
    *  on session resume. Absent = SDK default effort for the model. */
   reasoningEffort?: string;
+  /** Open-Plugins directories loaded into this session's SDK runtime
+   *  (spec-plugin-directories). Absolute + normalized. Supplied on BOTH createSession and
+   *  resumeSession, so this field is what makes the choice survive eviction/restart —
+   *  the SDK has no live-mutation RPC for it. Absent = no plugins (today's behavior);
+   *  scoped to this session only, so ~/.copilot is never polluted. */
+  pluginDirectories?: string[];
   /** Caco-side cwd override. When set, wins over the SDK session.start
    *  cwd on cache rebuild (restart) so /session-cwd changes persist. */
   cwd?: string;

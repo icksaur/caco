@@ -7,6 +7,7 @@ import { sessionManager } from './session-manager.js';
 import { dispatchState } from './dispatch-state.js';
 import { getSessionMeta } from './storage.js';
 import { getLastAssistantMessage } from './session-history.js';
+import { applyPluginDirectories } from './plugin-directories-apply.js';
 
 const DELEGATE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const DELEGATE_MAX_TOTAL_MS = 60 * 60 * 1000;
@@ -107,6 +108,7 @@ Use to have a reviewer/research session check work or look something up. Don't d
       prompts: z.array(z.object({
         sessionId: z.string().describe('Target session ID (UUID, with or without the caco-session: prefix)'),
         message: z.string().describe('Message to send to the delegate'),
+        pluginDirectories: z.array(z.string()).optional().describe('Absolute paths to Open Plugins directories to configure on THIS target before sending (never installed into ~/.copilot). STICKY: this permanently changes the target\'s configuration, not just this request, and costs a reconnect if it is loaded. Omit to leave its existing dirs untouched; pass [] to clear them.'),
       })).min(1).max(2).describe('Sessions to delegate to (1-2)'),
     }),
 
@@ -139,6 +141,28 @@ Use to have a reviewer/research session check work or look something up. Don't d
         }
 
         delegates.push({ sessionId: p.sessionId, startedAt: Date.now(), done: false, result: null });
+      }
+
+      // Configure plugin directories BEFORE any dispatch (and before the blocking wait), so
+      // each target answers with its plugins loaded. Per-target and NON-ATOMIC across
+      // targets by design (they are independent sessions): a failure is reported and that
+      // target is dropped from the batch rather than silently answering unconfigured.
+      const pluginNotes: string[] = [];
+      for (let i = delegates.length - 1; i >= 0; i--) {
+        const dirs = prompts[i].pluginDirectories;
+        if (dirs === undefined) continue;
+        const applied = await applyPluginDirectories(SERVER_URL, delegates[i].sessionId, dirs);
+        const id8 = delegates[i].sessionId.slice(0, 8);
+        if (!applied.ok) {
+          pluginNotes.push(`${id8}: plugin directories NOT set (${applied.error}) — no message sent to this target.`);
+          delegates.splice(i, 1);
+          prompts.splice(i, 1);
+          continue;
+        }
+        if (applied.warnings?.length) pluginNotes.push(`${id8}: ${applied.warnings.join('; ')}`);
+      }
+      if (delegates.length === 0) {
+        return { textResultForLlm: `No delegates were messaged.\n${pluginNotes.join('\n')}`, resultType: 'error' as const };
       }
 
       for (let i = 0; i < delegates.length; i++) {
@@ -209,7 +233,9 @@ Use to have a reviewer/research session check work or look something up. Don't d
       }));
 
       return {
-        textResultForLlm: JSON.stringify(results, null, 2),
+        textResultForLlm: pluginNotes.length
+          ? `${JSON.stringify(results, null, 2)}\n\nPlugin directory notes:\n${pluginNotes.join('\n')}`
+          : JSON.stringify(results, null, 2),
         resultType: 'text' as const,
       };
     }

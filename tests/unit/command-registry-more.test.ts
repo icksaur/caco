@@ -595,3 +595,97 @@ describe('skill command loading and invocation failures', () => {
     expect(mockState.showToast).toHaveBeenCalledWith('No active session');
   });
 });
+
+describe('caco.plugin-directory', () => {
+  const run = async (arg: string) => { await findCommand('caco.plugin-directory')!.handler(arg); };
+
+  it('bare invocation SHOWS the current list and performs no write', async () => {
+    setActiveSession('s1');
+    const fetchMock = vi.fn(async () => response(true, { pluginDirectories: ['/abs/p1', '/abs/p2'] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await run('   ');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/state');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockState.showToast).toHaveBeenCalledWith(expect.stringContaining('/abs/p1'), expect.objectContaining({ type: 'info' }));
+  });
+
+  it('bare invocation reports "none" when unset', async () => {
+    setActiveSession('s1');
+    vi.stubGlobal('fetch', vi.fn(async () => response(true, { pluginDirectories: [] })));
+    await run('');
+    expect(mockState.showToast).toHaveBeenCalledWith('Plugin directories: none', expect.objectContaining({ type: 'info' }));
+  });
+
+  it('sets space-separated paths and reports a reconnect', async () => {
+    setActiveSession('s1');
+    const fetchMock = vi.fn(async () => response(true, { pluginDirectoriesChanged: true, pluginDirectoriesRecreated: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await run('/abs/p1 /abs/p2');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ pluginDirectories: ['/abs/p1', '/abs/p2'] }),
+    }));
+    expect(mockState.showToast).toHaveBeenCalledWith(expect.stringContaining('session reconnected'), expect.objectContaining({ type: 'success' }));
+  });
+
+  it('reports "applies on next open" when no recreate happened', async () => {
+    setActiveSession('s1');
+    vi.stubGlobal('fetch', vi.fn(async () => response(true, { pluginDirectoriesChanged: true, pluginDirectoriesRecreated: false })));
+    await run('/abs/p1');
+    expect(mockState.showToast).toHaveBeenCalledWith(expect.stringContaining('applies on next open'), expect.objectContaining({ type: 'success' }));
+  });
+
+  it.each(['clear', 'none', 'reset', 'CLEAR'])('clears with the word %s (sending [])', async (word) => {
+    setActiveSession('s1');
+    const fetchMock = vi.fn(async () => response(true, { pluginDirectoriesChanged: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await run(word);
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1', expect.objectContaining({
+      body: JSON.stringify({ pluginDirectories: [] }),
+    }));
+    expect(mockState.showToast).toHaveBeenCalledWith(expect.stringContaining('Plugin directories cleared'), expect.objectContaining({ type: 'success' }));
+  });
+
+  it('reports a no-op rather than staying silent', async () => {
+    setActiveSession('s1');
+    vi.stubGlobal('fetch', vi.fn(async () => response(true, { pluginDirectoriesChanged: false })));
+    await run('/abs/p1');
+    expect(mockState.showToast).toHaveBeenCalledWith(expect.stringContaining('Plugin directories unchanged'), expect.objectContaining({ type: 'info' }));
+  });
+
+  it('surfaces route warnings alongside success', async () => {
+    setActiveSession('s1');
+    vi.stubGlobal('fetch', vi.fn(async () => response(true, { pluginDirectoriesChanged: true, pluginWarnings: ['No plugin.json found in /abs/p1'] })));
+    await run('/abs/p1');
+    expect(mockState.showToast).toHaveBeenCalledWith(expect.stringContaining('No plugin.json'), expect.objectContaining({ type: 'success' }));
+  });
+
+  it('surfaces warnings on the clear path too', async () => {
+    setActiveSession('s1');
+    vi.stubGlobal('fetch', vi.fn(async () => response(true, { pluginDirectoriesChanged: true, pluginWarnings: ['stale note'] })));
+    await run('clear');
+    expect(mockState.showToast).toHaveBeenCalledWith(expect.stringContaining('stale note'), expect.objectContaining({ type: 'success' }));
+  });
+
+  it('reports the route error verbatim', async () => {
+    setActiveSession('s1');
+    vi.stubGlobal('fetch', vi.fn(async () => response(false, { error: 'Not a directory: /abs/p1' })));
+    await run('/abs/p1');
+    expect(mockState.showToast).toHaveBeenCalledWith('Not a directory: /abs/p1');
+  });
+
+  it('requires an active session', async () => {
+    setActiveSession(null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await run('/abs/p1');
+    expect(mockState.showToast).toHaveBeenCalledWith('No active session');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

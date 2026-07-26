@@ -122,14 +122,63 @@ context-window command already warns "reconnecting…". On an inactive session i
 
 ### Entry points
 
-**1. Slash command `/caco.plugin-directory <path…|clear>`** (`public/ts/command-registry.ts`,
+**1. Slash command `/caco.plugin-directory [<path…>|clear]`** (`public/ts/command-registry.ts`,
 added to `BUILTIN_COMMANDS` at `:18`). Sets the **full list** for the current session
-(replace semantics; space-separated paths, or `clear`/`none`/`reset` to remove all). It
-PATCHes `/api/sessions/:id { pluginDirectories }` — the same route that already handles
+(replace semantics; space-separated paths). It PATCHes
+`/api/sessions/:id { pluginDirectories }` — the same route that already handles
 `contextBudgetTokens`/`reasoningEffort` (`src/routes/sessions.ts:635-700`) — which validates
-and calls `setSessionPluginDirectories`. Replace-not-append is chosen because it is the
-only semantics with a single obvious inverse (`clear`) and no hidden accumulated state;
-the current list is visible via the existing session-state read.
+and calls `setSessionPluginDirectories`. Replace-not-append is chosen because it is the only
+semantics with a single obvious inverse and no hidden accumulated state.
+
+**Bare invocation shows, it does not clear.** `/caco.plugin-directory` with **no argument**
+reports the session's current list (or "none") and changes nothing. This deliberately
+differs from `/caco.session-context-window`, where an empty argument means "reset to
+default": that setting is a scalar with an obvious default, whereas this one is a list whose
+current value is otherwise invisible, and a bare-Enter typo must not silently destroy a
+working plugin configuration. Clearing is always **explicit** (`clear`/`none`/`reset`).
+
+### Clearing contract (every setter, one table)
+
+`[]` and the `clear` word are the same operation expressed in the two available idioms —
+tools take an array, a slash command takes text. Where there is nothing yet to clear (create
+time), an empty list is simply "no plugins", never an error.
+
+| Setter | Value that clears | Bare/omitted | Notes |
+|---|---|---|---|
+| `/caco.plugin-directory` | `clear` \| `none` \| `reset` | **shows current list**, no change | a slash command cannot pass `[]`; the words are its idiom |
+| `PATCH /api/sessions/:id` | `[]` **or** `null` | field omitted ⇒ untouched | both idioms accepted so a client may send either |
+| `create_caco_session` | `[]` ≡ absent (no-op) | absent ⇒ no plugins | nothing exists yet to clear; **not** an error |
+| `caco_herd create` | `[]` ≡ absent (no-op) | absent ⇒ no plugins | same as above |
+| `caco_herd acquire` | `[]` **clears** the adopted session's dirs | absent ⇒ **leave the target's existing dirs untouched** | adoption must not silently wipe a session that was already configured |
+| `caco_session_delegate` | `[]` **clears** the target's dirs | absent ⇒ target's existing dirs untouched | per-prompt entry |
+| `caco_herd resume` / `disown` | — | — | parameter **rejected** with an error (any value, including `[]`) |
+
+The two rules that make this memorable: **omitted always means "don't touch"**, and
+**empty always means "make it empty"** — except at create time, where those coincide.
+
+### Slash-command feedback (toasts)
+
+The command is the only *human*-facing entry point, and its outcomes are not uniform — the
+active path costs a reconnect, the inactive path is instant, and validation can partially
+accept. So feedback is specified explicitly rather than left to one generic "done":
+
+| Outcome | Toast |
+|---|---|
+| Bare invocation (show) | info — `Plugin directories: <abs paths>` or `Plugin directories: none` |
+| Applying to an **active** session | info, before the request — `Loading plugins — reconnecting…` (mirrors the context-window command's existing warning, because this path recreates the SDK session) |
+| Applying to an **inactive** session | *no* pending toast (nothing to wait for) |
+| Success, recreate happened | success — `Plugin directories set (N) — session reconnected` |
+| Success, no recreate | success — `Plugin directories set (N) — applies on next open` |
+| Success, cleared | success — `Plugin directories cleared` |
+| Unchanged input (no-op) | info — `Plugin directories unchanged` (explicitly not silent, so a repeat isn't mistaken for a failure) |
+| Validation rejected | error — the specific reason and the offending path (`Not a directory: /x/y`, `Path does not exist: …`, `Too many plugin directories (max 16)`) |
+| Accepted with a warning | success + warning — `Set (N); no plugin.json in: <path>` (the shallow-manifest warning is surfaced, never swallowed) |
+| Busy session | error — `Cannot change plugin directories while the session is working` |
+| Failed apply, reverted | error — `Plugin directory change failed; reverted to previous` |
+
+Two properties this pins down: the user is always told **whether a reconnect occurred**
+(because that is the cost), and **warnings are shown, not swallowed** — the whole point of
+boundary validation is that the SDK's own "logged and skipped" is invisible here.
 
 **2. `create_caco_session`** (`src/agent-tools.ts:65`) gains an optional
 `pluginDirectories: string[]`, forwarded in its `POST /api/sessions` body. This is the
@@ -139,7 +188,9 @@ main "clean orchestrator sets up a dirty worker" path.
 - `create` — included in the child's `POST /api/sessions` body (`herd-tools.ts:125`), so the
   child is born with plugins;
 - `acquire` — applied to the adopted session via the same PATCH/recreate path **before** any
-  prompt is dispatched, so the child's first turn already has its plugins.
+  prompt is dispatched, so the child's first turn already has its plugins. **Omitted leaves
+  the target's existing dirs untouched** (adoption never silently wipes a session that was
+  already configured); `[]` explicitly clears them.
 - `resume`/`disown` — **reject** the parameter with a clear error ("plugin directories are
   set via `create`/`acquire` or `/caco.plugin-directory`; `resume` only dispatches work").
   Silently ignoring a passed parameter is a footgun; an explicit error keeps `resume` a
@@ -217,8 +268,10 @@ is deliberate and worth stating plainly because a delegate call *looks* transien
   one: it permanently changes the target's configuration (and, on a loaded target, costs a
   recreate). Delegating once with plugins **bloats that session for good**.
 - The inverse is explicit and available everywhere: passing an **empty array `[]` clears**
-  the target's plugin directories (same as `/caco.plugin-directory clear`). "Set" and
-  "unset" are the same verb with different arguments — the only two states.
+  the target's plugin directories (and the slash command's word idiom, `clear`, does the
+  same — see the clearing-contract table). "Set" and "unset" are the same verb with
+  different arguments — the only two states. **Omitting** the parameter never changes
+  anything.
 - Because it is sticky, the natural pattern is **configure once, delegate many**: set the
   plugin dirs at `create_caco_session` / `caco_herd create` time (free — no recreate, the
   session is born with them) and let subsequent delegates simply send work. Passing the
@@ -362,7 +415,16 @@ the plugin's blast radius is one session, and deleting/archiving that session re
   - **normalization** — a relative path is stored resolved against the session cwd;
     a subsequent `/caco.session-cwd` change does not alter the stored dirs.
   - **route** — `PATCH /api/sessions/:id { pluginDirectories }` applies/clears; refuses a
-    busy session; `null`/`[]` clears the field.
+    busy session; `null`/`[]` clears the field; an **omitted** field leaves it untouched.
+  - **clearing contract** — for each setter: `[]` clears on `acquire`/`delegate`/PATCH;
+    `[]` at **create** time is a no-op (no plugins, **not** an error); omitted never
+    changes an existing value; `clear`/`none`/`reset` on the slash command clears; a
+    **bare** `/caco.plugin-directory` **shows** the current list and performs no write.
+  - **command feedback** — each outcome emits its specified toast: show, pending
+    (**only** when the session is active), success-with-reconnect vs
+    success-applies-on-next-open, cleared, unchanged/no-op, validation error naming the
+    offending path, `plugin.json` warning surfaced alongside success, busy, and
+    reverted-failure.
   - **orchestration** — `create_caco_session` and `caco_herd create` forward the parameter
     into the child's create body; `caco_herd acquire` applies it before dispatch (via the
     inactive persist-only path when the target is not loaded);
@@ -415,7 +477,7 @@ command; **C** = orchestration parameters.
 | # | Step | Files | Oracle | Invariants |
 |---|------|-------|--------|------------|
 | B1 | `PATCH /api/sessions/:id { pluginDirectories }` (validate, busy-refuse, `null`/`[]` clears); include current list in the session-state read | `src/routes/sessions.ts` | route oracle | validated-at-boundary |
-| B2 | `/caco.plugin-directory` built-in: register in `BUILTIN_COMMANDS` + handler (replace semantics, `clear`/`none`/`reset`, "reconnecting…" toast, trust note in the description); add the canonical name to README's command table (the `command-registry` test asserts it) | `public/ts/command-registry.ts`, `README.md` | command unit test; command-registry doc test stays green | no-new-UI |
+| B2 | `/caco.plugin-directory` built-in: register in `BUILTIN_COMMANDS` + handler — replace semantics, **bare = show current**, `clear`/`none`/`reset` = clear, the full toast matrix (pending only when active; reconnect vs next-open; no-op; per-path validation errors; `plugin.json` warning; busy; reverted), trust note in the description; add the canonical name to README's command table (the `command-registry` test asserts it) | `public/ts/command-registry.ts`, `README.md` | command unit test incl. bare-show + toast matrix; command-registry doc test stays green | no-new-UI |
 
 **Slice C — orchestration parameters**
 

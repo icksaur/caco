@@ -191,6 +191,40 @@ An earlier draft asserted blanket inheritance without evidence; that claim was r
 review and replaced by this measured table. Probe scripts are throwaway (not committed);
 re-running them is described in the D1 plan row.
 
+### Stickiness: configuration is persistent, never per-request
+
+**A plugin directory set through *any* entry point — including `caco_session_delegate` —
+sticks to the target session for all of its future turns, until explicitly cleared.** This
+is deliberate and worth stating plainly because a delegate call *looks* transient:
+
+- **Sticky by mechanism.** Every entry point routes through the same durable write
+  (`SessionMeta.pluginDirectories`), and `_doResume` re-supplies it on every subsequent
+  resume. So the dirs outlive the delegate reply, the session's eviction, and a server
+  restart.
+- **Sticky by necessity.** The SDK offers **no per-turn plugin option**: `pluginDirectories`
+  exists only on `SessionConfigBase` and is sent only on `session.create` and
+  `session.resume`. There is no per-message parameter. Scoping a plugin set to exactly one
+  request would therefore require a recreate *before* the request **and another recreate
+  after** — two full session rebuilds per delegate, racing any concurrent activity on that
+  session, with no atomicity if the caller dies in between. That is strictly worse than
+  persistent configuration, so this spec does not offer per-request scoping.
+- **Sticky by intent.** The goal is *"usable localized to a few dirty/bloated sessions"* —
+  a worker session that needs a plugin generally needs it for the whole job, not for one
+  message. Persistent configuration is the desired behavior, not a workaround.
+
+**Consequences that MUST be in the tool text** so no caller is surprised:
+- `caco_session_delegate`'s `pluginDirectories` is a **configure** action, not a scoped
+  one: it permanently changes the target's configuration (and, on a loaded target, costs a
+  recreate). Delegating once with plugins **bloats that session for good**.
+- The inverse is explicit and available everywhere: passing an **empty array `[]` clears**
+  the target's plugin directories (same as `/caco.plugin-directory clear`). "Set" and
+  "unset" are the same verb with different arguments — the only two states.
+- Because it is sticky, the natural pattern is **configure once, delegate many**: set the
+  plugin dirs at `create_caco_session` / `caco_herd create` time (free — no recreate, the
+  session is born with them) and let subsequent delegates simply send work. Passing the
+  same dirs on every delegate is a **no-op** (unchanged input short-circuits before any
+  meta write or recreate), so repeating them is harmless but pointless.
+
 ### Isolation from system config (the anti-pollution property)
 
 Nothing in this feature writes to `~/.copilot`, installs a plugin, or mutates any shared
@@ -207,6 +241,11 @@ the plugin's blast radius is one session, and deleting/archiving that session re
 - **Durable across every resume** (invariant): a session's plugin set is stored in its own
   `meta.json` and re-supplied on every `session.resume` (cold open, evicted reopen, restart,
   warm recreate, model switch). "Set once, stays set" — never best-effort.
+- **Sticky, with exactly two states** (invariant): configuration applied through **any**
+  entry point (including `caco_session_delegate`) persists for all of the target's future
+  turns until explicitly cleared; there is no per-request or auto-expiring scope. A session
+  is either configured with a non-empty list or has no plugin directories at all, and an
+  empty array is the explicit clear.
 - **Absolute and normalized** (invariant): stored paths are absolute (relative input is
   resolved against the session cwd at write time), so a later `/caco.session-cwd` change
   cannot silently re-target which plugins load.
@@ -341,6 +380,11 @@ the plugin's blast radius is one session, and deleting/archiving that session re
     explicit-allowlist agents (e.g. `explore`) do **not** receive plugin MCP tools, and
     plugin **rules** do not enter the `task` sub-agent prompt
     (`includeCustomAgentInstructions: false`). Re-runnable via the D1 fixture recipe.
+  - **stickiness** — after a `caco_session_delegate` call carrying `pluginDirectories`, the
+    target's **subsequent, unrelated** turns still receive those dirs (assert they appear in
+    the next `resumeSession` args and in meta after the delegate reply); passing the **same**
+    dirs again is a no-op (no meta write, no recreate); passing **`[]` clears** them and the
+    next resume supplies **no** `pluginDirectories` key.
   - **isolation** — configuring a target never writes `~/.copilot` and never touches any
     other session's meta.
 

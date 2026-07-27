@@ -35,6 +35,10 @@ export interface RotationConfig {
   thresholdBytes: number;
   minTailEvents: number;
   minSavingBytes: number;
+  /** At or above this size the COURTESY gates (unobserved/viewed) stop blocking, so a
+   *  large session that is permanently open can still be rotated. Correctness gates
+   *  (busy/rotating/resuming) are never overridden. See docs/spec-rotation-pressure.md. */
+  pressureBytes: number;
 }
 
 export function rotationConfigFromEnv(): RotationConfig {
@@ -46,6 +50,7 @@ export function rotationConfigFromEnv(): RotationConfig {
     thresholdBytes: num(process.env.CACO_ROTATE_THRESHOLD_BYTES, 64 * 1024 * 1024),
     minTailEvents: num(process.env.CACO_ROTATE_MIN_TAIL_EVENTS, 4000),
     minSavingBytes: num(process.env.CACO_ROTATE_MIN_SAVING_BYTES, 32 * 1024 * 1024),
+    pressureBytes: num(process.env.CACO_ROTATE_PRESSURE_BYTES, 256 * 1024 * 1024),
   };
 }
 
@@ -382,53 +387,95 @@ export interface AutoRotateOverrides extends Partial<RotationDeps> {
  * and per-session by the idle sweep. Cheap gates run BEFORE the isolated verify
  * client, so ineligible sessions cost ~nothing. Never throws.
  *
- * Gate order (cheapest-first): env → observed → not-viewed → idle-age (sweep) →
- * size → not-blocked → cooldown → stamp → rotate. The size check precedes the
- * (SessionManager-importing) not-blocked check so small/missing sessions never
- * pull in the manager. The not-blocked check precedes the cooldown stamp so a
+ * Gate order (cheapest-first): env → size (also decides pressure) → observed →
+ * not-viewed → idle-age (sweep) → not-blocked → cooldown → stamp → rotate.
+ * Size is measured FIRST because it decides whether the session is under pressure,
+ * which decides whether the courtesy gates (observed/viewed) apply at all
+ * (docs/spec-rotation-pressure.md). It is a single statSync, and it still precedes
+ * the (SessionManager-importing) not-blocked check, so small/missing sessions never
+ * pull in the manager. The not-blocked check still precedes the cooldown stamp so a
  * temporarily active/busy session is not spuriously cooled down for an hour.
+ *
+ * Always returns a RotationResult carrying a `reason` — never a bare null — so a
+ * caller (notably the sweep) can report WHY nothing happened. Swap-time aborts are
+ * namespaced `failed:<reason>` to stay distinguishable from eligibility skips.
  */
 export async function autoRotateIfEligible(
   sessionId: string,
   overrides: AutoRotateOverrides = {},
-): Promise<RotationResult | null> {
-  if (!isAutoRotateEnabled()) return null;
+): Promise<RotationResult> {
+  const skip = (reason: string): RotationResult => ({ ok: false, reason });
+
+  if (!isAutoRotateEnabled()) return skip('disabled');
+
+  // Size FIRST (one statSync): it is the cheapest gate and it decides whether the
+  // session is under pressure, which in turn decides whether the courtesy gates below
+  // still apply. A missing file is not an error — nothing to rotate.
+  const stateDir = overrides.stateDir ?? STATE_DIR;
+  let size = 0;
+  try { size = statSync(join(stateDir, sessionId, 'events.jsonl')).size; } catch { return skip('no-events'); }
+  const cfg = overrides.config ?? rotationConfigFromEnv();
+  if (size < cfg.thresholdBytes) return { ok: false, reason: 'under-threshold', beforeBytes: size };
+
+  // Every skip past this point reports the measured size, so the sweep can decide
+  // whether to warn without re-stat'ing (and without measurement drift).
+  const skipSized = (reason: string): RotationResult => ({ ok: false, reason, beforeBytes: size });
+
+  // Pressure: past this size the COURTESY gates (unobserved/viewed) stop applying,
+  // because the cost of not rotating (slow boots, GBs of RSS, slow cold resume) now
+  // exceeds the cost of truncating scrollback the user is unlikely to revisit. The
+  // CORRECTNESS gates (busy/rotating/resuming, via isBlocked) are never overridden.
+  // See docs/spec-rotation-pressure.md.
+  const underPressure = size >= cfg.pressureBytes;
 
   const isUnobserved = overrides.isUnobserved ?? defaultIsUnobserved;
-  if (isUnobserved(sessionId)) return null;
+  if (!underPressure && isUnobserved(sessionId)) return skipSized('unobserved');
 
   const isViewed = overrides.isViewed ?? isSessionViewed;
-  if (isViewed(sessionId)) return null;
+  if (!underPressure && isViewed(sessionId)) return skipSized('viewed');
 
   const meta = getSessionMeta(sessionId);
 
   const minIdleAgeMs = overrides.minIdleAgeMs ?? 0;
   if (minIdleAgeMs > 0) {
     const lastIdleAt = meta?.lastIdleAt ? Date.parse(meta.lastIdleAt) : NaN;
-    if (!Number.isFinite(lastIdleAt)) return null; // never idle / no metadata ⇒ not provably cold
-    if (Date.now() - lastIdleAt < minIdleAgeMs) return null;
+    if (!Number.isFinite(lastIdleAt)) return skipSized('never-idle'); // no metadata ⇒ not provably cold
+    if (Date.now() - lastIdleAt < minIdleAgeMs) return skipSized('not-idle');
   }
 
-  const stateDir = overrides.stateDir ?? STATE_DIR;
-  let size = 0;
-  try { size = statSync(join(stateDir, sessionId, 'events.jsonl')).size; } catch { return null; }
-  const cfg = overrides.config ?? rotationConfigFromEnv();
-  if (size < cfg.thresholdBytes) return null;
-
   const isBlocked = overrides.isBlocked ?? defaultIsRotationBlocked;
-  if (await isBlocked(sessionId)) return null;
+  if (await isBlocked(sessionId)) return skipSized('blocked');
 
   // Back off on the most recent attempt OR success — a session that keeps
   // failing verify must not re-spin the isolated client on every deactivation.
   const lastTouch = Math.max(meta?.lastRotatedAt ?? 0, meta?.lastRotateAttemptAt ?? 0);
-  if (lastTouch && Date.now() - lastTouch < AUTO_ROTATE_COOLDOWN_MS) return null;
+  if (lastTouch && Date.now() - lastTouch < AUTO_ROTATE_COOLDOWN_MS) return skipSized('cooldown');
+
+  // Under pressure, substitute the isViewed DEP itself rather than only skipping the
+  // eligibility check. performRotation re-checks isViewed immediately before the swap
+  // (a client can subscribe during the multi-second verify); overriding only the
+  // eligibility gate would burn a full verify and then abort with 'became-viewed',
+  // so an always-viewed session would still never rotate. One decision, both checks.
+  const rotateOverrides: AutoRotateOverrides = underPressure
+    ? { ...overrides, isViewed: () => false }
+    : overrides;
+  if (underPressure) {
+    (overrides.log ?? console.log)(
+      `[ROTATE] ${sessionId.slice(0, 8)} is ${(size / 1048576).toFixed(0)} MiB (>= pressure ${(cfg.pressureBytes / 1048576).toFixed(0)} MiB) — overriding viewed/unobserved gates`,
+    );
+  }
 
   // Record the attempt BEFORE the expensive work so a failure still cools down.
   updateSessionMeta(sessionId, m => { m.lastRotateAttemptAt = Date.now(); });
   try {
-    return await rotateSessionHistory(sessionId, overrides);
-  } catch {
-    return null;
+    const result = await rotateSessionHistory(sessionId, rotateOverrides);
+    // Namespace a swap-time abort ('became-viewed', 'concurrent-write', 'archive-failed',
+    // verify failure) so the sweep breakdown never conflates "never attempted" with
+    // "attempted and aborted late" — they have very different remedies.
+    if (!result.ok) return { ...result, reason: `failed:${result.reason ?? 'unknown'}`, beforeBytes: result.beforeBytes ?? size };
+    return result;
+  } catch (e) {
+    return { ok: false, reason: 'failed:threw', beforeBytes: size, error: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -451,11 +498,15 @@ async function defaultIsRotationBlocked(sessionId: string): Promise<boolean> {
 export interface SweepSummary { scanned: number; rotated: number; savedBytes: number; }
 
 export interface SweepDeps {
-  rotate?: (sessionId: string, overrides: AutoRotateOverrides) => Promise<RotationResult | null>;
+  rotate?: (sessionId: string, overrides: AutoRotateOverrides) => Promise<RotationResult>;
   knownSessionIds?: () => string[] | Promise<string[]>;
   minIdleAgeMs?: number;
   bootExcludeId?: string | null;
   log?: (msg: string) => void;
+  /** Loud channel for an over-pressure session that still did not rotate. */
+  warn?: (msg: string) => void;
+  /** Injected for tests; where events.jsonl lives when sizing a non-rotated session. */
+  stateDir?: string;
 }
 
 let sweeping = false;
@@ -476,16 +527,33 @@ export async function sweepRotateEligible(deps: SweepDeps = {}): Promise<SweepSu
       : (await import('./session-manager.js')).sessionManager.knownSessionIds();
     const rotate = deps.rotate ?? autoRotateIfEligible;
     const minIdleAgeMs = deps.minIdleAgeMs ?? envMs('CACO_ROTATE_MIN_IDLE_AGE_MS', 4 * 60 * 60 * 1000);
+    const cfg = rotationConfigFromEnv();
+    const log = deps.log ?? ((m: string) => console.log(m));
+    const warn = deps.warn ?? ((m: string) => console.warn(m));
+    // Why each session was skipped. A maintenance task that can legitimately no-op
+    // forever MUST say why: "rotated=0" alone is indistinguishable from "nothing needed
+    // rotating", which is how a 438 MiB session stayed unrotated for months unnoticed.
+    const reasons = new Map<string, number>();
     for (const id of ids) {
       if (deps.bootExcludeId && id === deps.bootExcludeId) continue;
       summary.scanned++;
       try {
-        const r = await rotate(id, { minIdleAgeMs });
-        if (r?.ok) { summary.rotated++; summary.savedBytes += r.savedBytes ?? 0; }
+        const r = await rotate(id, { minIdleAgeMs, ...(deps.stateDir && { stateDir: deps.stateDir }) });
+        if (r?.ok) { summary.rotated++; summary.savedBytes += r.savedBytes ?? 0; continue; }
+        const reason = r?.reason ?? 'unknown';
+        reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
+        // A session past the pressure ceiling that STILL did not rotate is the exact
+        // failure this subsystem was blind to. Never let it pass silently. The size
+        // comes from the skip result (measured during eligibility) — no extra syscall.
+        const size = r?.beforeBytes ?? 0;
+        if (size >= cfg.pressureBytes) {
+          warn(`[ROTATE-SWEEP] ${id.slice(0, 8)} is ${(size / 1048576).toFixed(0)} MiB (over pressure) but did NOT rotate: ${reason}`);
+        }
       } catch { /* one session must never break the sweep */ }
     }
-    (deps.log ?? ((m: string) => console.log(m)))(
-      `[ROTATE-SWEEP] scanned=${summary.scanned} rotated=${summary.rotated} freed=${(summary.savedBytes / 1048576).toFixed(1)} MB`,
+    const skipped = [...reasons.entries()].sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r}:${n}`).join(', ');
+    log(
+      `[ROTATE-SWEEP] scanned=${summary.scanned} rotated=${summary.rotated} freed=${(summary.savedBytes / 1048576).toFixed(1)} MB skipped={${skipped}}`,
     );
     return summary;
   } finally {

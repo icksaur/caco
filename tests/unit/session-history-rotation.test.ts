@@ -28,7 +28,7 @@ import {
   type RotationConfig, type RotationDeps,
 } from '../../src/session-history-rotation.js';
 
-const LOOSE: RotationConfig = { thresholdBytes: 0, minTailEvents: 2, minSavingBytes: 0 };
+const LOOSE: RotationConfig = { thresholdBytes: 0, minTailEvents: 2, minSavingBytes: 0, pressureBytes: Number.MAX_SAFE_INTEGER };
 
 function line(type: string, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({ type, data: extra });
@@ -301,25 +301,25 @@ describe('reconcileRotation — crash recovery by file presence', () => {
 });
 
 describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
-  const cfg: RotationConfig = { thresholdBytes: 1000, minTailEvents: 2, minSavingBytes: 0 };
+  const cfg: RotationConfig = { thresholdBytes: 1000, minTailEvents: 2, minSavingBytes: 0, pressureBytes: Number.MAX_SAFE_INTEGER };
 
   afterEach(() => { delete process.env.CACO_ROTATE_AUTO; });
 
   it('returns null when auto-rotate is disabled (CACO_ROTATE_AUTO=0)', async () => {
     process.env.CACO_ROTATE_AUTO = '0';
     writeSession('ar1', [START, line('a'), COMPACT, line('c')]);
-    expect(await autoRotateIfEligible('ar1', { stateDir, config: cfg })).toBeNull();
+    expect(await autoRotateIfEligible('ar1', { stateDir, config: cfg })).toMatchObject({ ok: false, reason: 'disabled' });
   });
 
   it('returns null when the events file is missing', async () => {
     process.env.CACO_ROTATE_AUTO = '1';
-    expect(await autoRotateIfEligible('nope', { stateDir, config: cfg })).toBeNull();
+    expect(await autoRotateIfEligible('nope', { stateDir, config: cfg })).toMatchObject({ ok: false, reason: 'no-events' });
   });
 
   it('returns null when the file is below the size threshold', async () => {
     process.env.CACO_ROTATE_AUTO = '1';
     writeSession('ar2', [START, line('a'), COMPACT, line('c')]);
-    expect(await autoRotateIfEligible('ar2', { stateDir, config: { ...cfg, thresholdBytes: 10_000_000 } })).toBeNull();
+    expect(await autoRotateIfEligible('ar2', { stateDir, config: { ...cfg, thresholdBytes: 10_000_000 } })).toMatchObject({ ok: false, reason: 'under-threshold' });
   });
 
   it('skips an unobserved session (user likely about to open it)', async () => {
@@ -332,7 +332,7 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
       stateDir, config: { ...cfg, thresholdBytes: 0 },
       isUnobserved: () => true,
     });
-    expect(result).toBeNull();
+    expect(result).toMatchObject({ ok: false, reason: 'unobserved' });
   });
 
   it('backs off within the cooldown after a recent attempt (even a failed one)', async () => {
@@ -349,7 +349,7 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
     // cooldown gate, which must short-circuit WITHOUT calling rotateSessionHistory.
     expect(await autoRotateIfEligible(sid, {
       stateDir, config: { ...cfg, thresholdBytes: 0 }, isBlocked: () => false,
-    })).toBeNull();
+    })).toMatchObject({ ok: false, reason: 'cooldown' });
   });
 
   it('skips a viewed session before stat/rotation', async () => {
@@ -360,7 +360,7 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
       stateDir, config: { ...cfg, thresholdBytes: 0 },
       isViewed: () => true,
     });
-    expect(result).toBeNull();
+    expect(result).toMatchObject({ ok: false, reason: 'viewed' });
   });
 
   it('skips when idle age is below minIdleAgeMs (sweep gate)', async () => {
@@ -374,7 +374,7 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
       stateDir, config: { ...cfg, thresholdBytes: 0 },
       isBlocked: () => false, minIdleAgeMs: 60_000,
     });
-    expect(result).toBeNull();
+    expect(result).toMatchObject({ ok: false, reason: 'not-idle' });
   });
 
   it('skips when there is no idle metadata under a sweep age gate', async () => {
@@ -385,7 +385,129 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
       stateDir, config: { ...cfg, thresholdBytes: 0 },
       isBlocked: () => false, minIdleAgeMs: 60_000,
     });
-    expect(result).toBeNull();
+    expect(result).toMatchObject({ ok: false, reason: 'never-idle' });
+  });
+
+  // ── Pressure escalation (docs/spec-rotation-pressure.md) ──
+
+  it('at/above the pressure ceiling, a VIEWED session still rotates (courtesy gate overridden)', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-pressure-viewed';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    const seen: string[] = [];
+    const result = await autoRotateIfEligible(sid, {
+      stateDir,
+      // pressureBytes 0 => every size is "under pressure"
+      config: { ...cfg, thresholdBytes: 0, pressureBytes: 0 },
+      isViewed: () => true,
+      isUnobserved: () => true,
+      isBlocked: () => false,
+      verify: async () => {},
+      log: (m: string) => seen.push(m),
+    });
+    expect(result.ok).toBe(true);
+    expect(seen.some(m => /overriding viewed\/unobserved/.test(m))).toBe(true);
+  });
+
+  it('the pressure override reaches the SWAP-TIME isViewed re-check, not just eligibility', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-pressure-swap';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    // performRotation re-checks isViewed immediately before the swap. If the override
+    // stopped at the eligibility gate this would abort with 'became-viewed' after a
+    // full verify — the exact bug that made an always-viewed session unrotatable.
+    const result = await autoRotateIfEligible(sid, {
+      stateDir,
+      config: { ...cfg, thresholdBytes: 0, pressureBytes: 0 },
+      isViewed: () => true,
+      isBlocked: () => false,
+      verify: async () => {},
+    });
+    expect(result.reason).not.toBe('became-viewed');
+    expect(result.ok).toBe(true);
+  });
+
+  it('correctness gates stay absolute even far above the pressure ceiling', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-pressure-busy';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    const result = await autoRotateIfEligible(sid, {
+      stateDir,
+      config: { ...cfg, thresholdBytes: 0, pressureBytes: 0 },
+      isViewed: () => true,
+      isBlocked: () => true, // busy/rotating/resuming
+      verify: async () => { throw new Error('must not verify a blocked session'); },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'blocked' });
+  });
+
+  it('below the ceiling a viewed session is skipped WITHOUT running the verify (no wasted work)', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-subceiling';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    const result = await autoRotateIfEligible(sid, {
+      stateDir,
+      config: { ...cfg, thresholdBytes: 0, pressureBytes: Number.MAX_SAFE_INTEGER },
+      isViewed: () => true,
+      isBlocked: () => false,
+      verify: async () => { throw new Error('verify must not run for a sub-ceiling viewed session'); },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'viewed' });
+  });
+
+  it('swap safety holds on the pressure path: a concurrent write still aborts the swap', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-pressure-concurrent';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    const eventsPath = join(stateDir, sid, 'events.jsonl');
+    const result = await autoRotateIfEligible(sid, {
+      stateDir,
+      config: { ...cfg, thresholdBytes: 0, pressureBytes: 0 },
+      isViewed: () => true,
+      isBlocked: () => false,
+      // Mutate the live file DURING verify: the pre-swap stat re-check must abort.
+      verify: async () => { writeFileSync(eventsPath, read(eventsPath) + '\n' + line('late')); },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('failed:concurrent-write');
+  });
+
+  it('swap safety holds on the pressure path: an archive failure aborts before any rename', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-pressure-archivefail';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    const eventsPath = join(stateDir, sid, 'events.jsonl');
+    const before = read(eventsPath);
+    // Make the archive path unwritable by planting a DIRECTORY where the archive file goes.
+    mkdirSync(join(stateDir, sid, 'events-archive.jsonl'), { recursive: true });
+    const result = await autoRotateIfEligible(sid, {
+      stateDir,
+      config: { ...cfg, thresholdBytes: 0, pressureBytes: 0 },
+      isViewed: () => true,
+      isBlocked: () => false,
+      verify: async () => {},
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('failed:archive-failed');
+    // Live file untouched — archive-append precedes the swap.
+    expect(read(eventsPath)).toBe(before);
+  });
+
+  it('swap safety holds on the pressure path: a verify failure leaves the file byte-identical', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    const sid = 'ar-pressure-verifyfail';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    const eventsPath = join(stateDir, sid, 'events.jsonl');
+    const before = read(eventsPath);
+    const result = await autoRotateIfEligible(sid, {
+      stateDir,
+      config: { ...cfg, thresholdBytes: 0, pressureBytes: 0 },
+      isViewed: () => true,
+      isBlocked: () => false,
+      verify: async () => { throw new Error('staged load failed'); },
+    });
+    expect(result.ok).toBe(false);
+    expect(read(eventsPath)).toBe(before);
   });
 
   it('does NOT stamp cooldown when the session is blocked (active/busy/etc.)', async () => {
@@ -397,7 +519,7 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
       stateDir, config: { ...cfg, thresholdBytes: 0 },
       isBlocked: () => true,
     });
-    expect(result).toBeNull();
+    expect(result).toMatchObject({ ok: false, reason: 'blocked' });
     // No attempt timestamp written → eligible again the moment it unblocks.
     const meta = existsSync(metaP) ? JSON.parse(read(metaP)) : {};
     expect(meta.lastRotateAttemptAt).toBeUndefined();
@@ -405,6 +527,40 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
 });
 
 describe('sweepRotateEligible', () => {
+  it('logs a skip-reason breakdown so "rotated=0" is never silent', async () => {
+    const rotate = async (id: string) => (
+      id === 'big' ? { ok: true, savedBytes: 1048576 }
+      : id === 'open' ? { ok: false, reason: 'viewed' }
+      : { ok: false, reason: 'under-threshold' }
+    );
+    const lines: string[] = [];
+    const summary = await sweepRotateEligible({
+      knownSessionIds: () => ['big', 'open', 's1', 's2'],
+      rotate, log: (m: string) => lines.push(m), stateDir,
+    });
+    expect(summary).toMatchObject({ scanned: 4, rotated: 1 });
+    const line = lines.join('\n');
+    expect(line).toContain('under-threshold:2');
+    expect(line).toContain('viewed:1');
+  });
+
+  it('warns loudly when an over-pressure session still did not rotate', async () => {
+    const sid = 'sweep-overpressure';
+    writeSession(sid, [START, line('a'), COMPACT, line('c')]);
+    const warns: string[] = [];
+    // The skip result carries the measured size (no re-stat in the sweep), so a
+    // contract-faithful stub must report it just as autoRotateIfEligible does.
+    process.env.CACO_ROTATE_PRESSURE_BYTES = '1';
+    try {
+      await sweepRotateEligible({
+        knownSessionIds: () => [sid],
+        rotate: async () => ({ ok: false, reason: 'blocked', beforeBytes: 5_000_000 }),
+        log: () => {}, warn: (m: string) => warns.push(m), stateDir,
+      });
+    } finally { delete process.env.CACO_ROTATE_PRESSURE_BYTES; }
+    expect(warns.some(w => /did NOT rotate: blocked/.test(w))).toBe(true);
+  });
+
   afterEach(() => { delete process.env.CACO_ROTATE_AUTO; });
 
   it('returns an empty summary when auto-rotate is disabled', async () => {

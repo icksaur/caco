@@ -25,7 +25,8 @@ vi.mock('os', async (importOriginal) => {
 import {
   planRotation, performRotation, reconcileRotation, defaultPreserveModel, autoRotateIfEligible,
   sweepRotateEligible,
-  type RotationConfig, type RotationDeps,
+  sweepPressureOnly,
+  type RotationConfig, type RotationDeps, type AutoRotateOverrides,
 } from '../../src/session-history-rotation.js';
 
 const LOOSE: RotationConfig = { thresholdBytes: 0, minTailEvents: 2, minSavingBytes: 0, pressureBytes: Number.MAX_SAFE_INTEGER };
@@ -523,6 +524,79 @@ describe('autoRotateIfEligible — pre-gates (no SDK)', () => {
     // No attempt timestamp written → eligible again the moment it unblocks.
     const meta = existsSync(metaP) ? JSON.parse(read(metaP)) : {};
     expect(meta.lastRotateAttemptAt).toBeUndefined();
+  });
+});
+
+describe('sweepPressureOnly (boot pressure pass)', () => {
+  const PRESSURE = 256 * 1024 * 1024;
+  afterEach(() => { delete process.env.CACO_ROTATE_PRESSURE_BYTES; delete process.env.CACO_ROTATE_AUTO; });
+
+  it('passes ONLY over-pressure sessions to autoRotateIfEligible (sub-pressure never called)', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    process.env.CACO_ROTATE_PRESSURE_BYTES = '400'; // bytes — 'big' clears it, 'small' does not
+    writeSession('pp-small', [START]);
+    writeSession('pp-big', [START, line('x'.repeat(500)), COMPACT, line('c')]);
+    const seen: string[] = [];
+    const summary = await sweepPressureOnly({
+      knownSessionIds: () => ['pp-small', 'pp-big'],
+      rotate: async (id: string) => { seen.push(id); return { ok: true, savedBytes: 1024 }; },
+      log: () => {}, warn: () => {}, stateDir,
+    });
+    expect(seen).toEqual(['pp-big']);          // sub-pressure provably not passed
+    expect(summary).toMatchObject({ scanned: 1, rotated: 1 });
+  });
+
+  it('drops the coldness proxies: no bootExcludeId honored and minIdleAgeMs forced to 0', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    process.env.CACO_ROTATE_PRESSURE_BYTES = '1';
+    writeSession('pp-excluded', [START, line('a'), COMPACT, line('c')]);
+    let sawOverrides: AutoRotateOverrides | null = null;
+    await sweepPressureOnly({
+      knownSessionIds: () => ['pp-excluded'],
+      // The general sweep would skip this id; the pressure pass must not.
+      bootExcludeId: 'pp-excluded',
+      rotate: async (_id, o) => { sawOverrides = o; return { ok: true, savedBytes: 1 }; },
+      log: () => {}, warn: () => {}, stateDir,
+    });
+    expect(sawOverrides).not.toBeNull();
+    expect((sawOverrides as unknown as AutoRotateOverrides).minIdleAgeMs).toBe(0);
+  });
+
+  it('warns when an over-pressure candidate still did not rotate (never silent)', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    process.env.CACO_ROTATE_PRESSURE_BYTES = '1';
+    writeSession('pp-blocked', [START, line('a'), COMPACT, line('c')]);
+    const warns: string[] = [];
+    await sweepPressureOnly({
+      knownSessionIds: () => ['pp-blocked'],
+      rotate: async () => ({ ok: false, reason: 'blocked', beforeBytes: 999_999_999 }),
+      log: () => {}, warn: (m: string) => warns.push(m), stateDir,
+    });
+    expect(warns.some(w => /did NOT rotate: blocked/.test(w))).toBe(true);
+  });
+
+  it('is a no-op when nothing is over pressure (no rotate calls at all)', async () => {
+    process.env.CACO_ROTATE_AUTO = '1';
+    // default ceiling (256 MiB) — the tiny fixtures are far below it
+    writeSession('pp-tiny', [START, line('a'), COMPACT, line('c')]);
+    let called = 0;
+    const summary = await sweepPressureOnly({
+      knownSessionIds: () => ['pp-tiny'],
+      rotate: async () => { called++; return { ok: true }; },
+      log: () => {}, warn: () => {}, stateDir,
+    });
+    expect(called).toBe(0);
+    expect(summary).toMatchObject({ scanned: 0, rotated: 0 });
+    void PRESSURE;
+  });
+
+  it('respects CACO_ROTATE_AUTO=0', async () => {
+    process.env.CACO_ROTATE_AUTO = '0';
+    process.env.CACO_ROTATE_PRESSURE_BYTES = '1';
+    writeSession('pp-off', [START, line('a'), COMPACT, line('c')]);
+    let called = 0;
+    await sweepPressureOnly({ knownSessionIds: () => ['pp-off'], rotate: async () => { called++; return { ok: true }; }, log: () => {}, warn: () => {}, stateDir });
+    expect(called).toBe(0);
   });
 });
 

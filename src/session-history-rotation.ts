@@ -564,17 +564,93 @@ export async function sweepRotateEligible(deps: SweepDeps = {}): Promise<SweepSu
 export interface SweeperHandle { stop(): void; }
 
 /**
- * Start the background sweeper: one boot sweep (delayed so reconnecting clients
- * register as viewers first) + a periodic sweep. Timers are unref'd so they
- * never keep the process alive. Behind CACO_ROTATE_AUTO=1 via sweepRotateEligible.
+ * Pressure-only sweep: consider ONLY sessions at/above the pressure ceiling
+ * (docs/spec-rotation-windows.md). Two things distinguish it from the general sweep:
+ * candidates are prefiltered by size BEFORE autoRotateIfEligible is called (so a
+ * sub-pressure session is provably never passed, and the general sweep's policy is
+ * untouched), and the coldness proxies that the general sweep needs — bootExcludeId
+ * and minIdleAgeMs — are dropped, because callers only invoke this when coldness is
+ * established by a stronger signal (an empty activeSessions at boot, or a measured
+ * quiet period).
+ *
+ * Every correctness gate still applies: this routes through autoRotateIfEligible →
+ * rotateSessionHistory → runExclusiveRotation, whose synchronous
+ * activeSessions/isBusy/resumeInProgress triple-check is what actually prevents
+ * rewriting a live or loading session. It shares the `sweeping` overlap guard with
+ * the general sweep, so the two can never run concurrently.
+ */
+export async function sweepPressureOnly(deps: SweepDeps & { label?: string } = {}): Promise<SweepSummary> {
+  const summary: SweepSummary = { scanned: 0, rotated: 0, savedBytes: 0 };
+  if (!isAutoRotateEnabled()) return summary;
+  if (sweeping) return summary;
+  sweeping = true;
+  try {
+    const ids = deps.knownSessionIds
+      ? await deps.knownSessionIds()
+      : (await import('./session-manager.js')).sessionManager.knownSessionIds();
+    const rotate = deps.rotate ?? autoRotateIfEligible;
+    const stateDir = deps.stateDir ?? STATE_DIR;
+    const cfg = rotationConfigFromEnv();
+    const log = deps.log ?? ((m: string) => console.log(m));
+    const warn = deps.warn ?? ((m: string) => console.warn(m));
+    const label = deps.label ?? 'ROTATE-PRESSURE';
+
+    // Prefilter by size so a sub-pressure session is never handed to autoRotateIfEligible.
+    const candidates: string[] = [];
+    for (const id of ids) {
+      let size = 0;
+      try { size = statSync(join(stateDir, id, 'events.jsonl')).size; } catch { continue; }
+      if (size >= cfg.pressureBytes) candidates.push(id);
+    }
+    if (candidates.length === 0) return summary;
+
+    for (const id of candidates) {
+      summary.scanned++;
+      try {
+        // minIdleAgeMs: 0 and no bootExcludeId — see the doc comment above.
+        const r = await rotate(id, { minIdleAgeMs: 0, ...(deps.stateDir && { stateDir: deps.stateDir }) });
+        if (r?.ok) {
+          summary.rotated++;
+          summary.savedBytes += r.savedBytes ?? 0;
+          log(`[${label}] rotated ${id.slice(0, 8)} freed=${((r.savedBytes ?? 0) / 1048576).toFixed(1)} MB`);
+          continue;
+        }
+        warn(`[${label}] ${id.slice(0, 8)} is ${((r?.beforeBytes ?? 0) / 1048576).toFixed(0)} MiB (over pressure) but did NOT rotate: ${r?.reason ?? 'unknown'}`);
+      } catch { /* one session must never break the pass */ }
+    }
+    return summary;
+  } finally {
+    sweeping = false;
+  }
+}
+
+/**
+ * Start the background sweeper: an early pressure-only pass, one delayed boot sweep
+ * (delayed so reconnecting clients register as viewers first) + a periodic sweep.
+ * Timers are unref'd so they never keep the process alive. Behind CACO_ROTATE_AUTO=1.
  */
 export function startRotationSweeper(opts: {
   bootDelayMs?: number;
+  bootPressureMs?: number;
   intervalMs?: number;
   getBootExcludeId?: () => string | null;
 } = {}): SweeperHandle {
   const bootDelay = opts.bootDelayMs ?? envMs('CACO_ROTATE_BOOT_DELAY_MS', 60 * 1000);
+  const bootPressure = opts.bootPressureMs ?? envMs('CACO_ROTATE_BOOT_PRESSURE_MS', 3 * 1000);
   const intervalMs = opts.intervalMs ?? envMs('CACO_ROTATE_SWEEP_INTERVAL_MS', 4 * 60 * 60 * 1000);
+
+  // Boot pressure pass (spec-rotation-windows). Runs EARLY and deliberately does NOT
+  // honor bootExcludeId: that exclusion protects the session the UI auto-opens, which
+  // is precisely the session that grows largest and therefore most needs rotating. It
+  // is safe here because boot is the one moment when an over-pressure session is
+  // provably cold — resume is lazy, so activeSessions is empty, nothing is busy, and
+  // no WS client has subscribed yet. If the user does send a message inside this
+  // window, resumeInProgress is set and runExclusiveRotation declines; the pass is
+  // best-effort-but-frequent, not guaranteed on every boot.
+  const pressureTimer = setTimeout(() => {
+    void sweepPressureOnly({ label: 'ROTATE-BOOT' }).catch(() => {});
+  }, bootPressure);
+  pressureTimer.unref?.();
 
   const bootTimer = setTimeout(() => {
     void sweepRotateEligible({ bootExcludeId: opts.getBootExcludeId?.() ?? null }).catch(() => {});
@@ -586,6 +662,7 @@ export function startRotationSweeper(opts: {
 
   return {
     stop() {
+      clearTimeout(pressureTimer);
       clearTimeout(bootTimer);
       clearInterval(intervalTimer);
     },

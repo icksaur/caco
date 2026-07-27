@@ -622,6 +622,49 @@ describe('SessionManager coverage seams', () => {
     expect(storage.meta.get(sessionId)?.pluginDirectories).toEqual(['/abs/old']);
   });
 
+  // ── stopIfIdle atomicity (docs/spec-rotation-windows.md) ──
+
+  it('stopIfIdle refuses a BUSY session without touching it', async () => {
+    const manager = await initializedManager();
+    sdk.fakeClient.createSession.mockImplementation(async () => makeSession('busy-stop'));
+    const sessionId = await manager.create(process.cwd(), { model: 'github-model', toolFactory: () => [] });
+    const session = fakeSessions.get(sessionId)!;
+    manager.startDispatch(sessionId, 'corr-busy');
+
+    await expect(manager.stopIfIdle(sessionId)).resolves.toBe(false);
+
+    expect(manager.isActive(sessionId)).toBe(true);      // untouched
+    expect(session.disconnect).not.toHaveBeenCalled();   // never torn down mid-turn
+  });
+
+  it('stopIfIdle removes the session from activeSessions BEFORE awaiting disconnect (atomicity)', async () => {
+    const manager = await initializedManager();
+    sdk.fakeClient.createSession.mockImplementation(async () => makeSession('atomic-stop'));
+    const sessionId = await manager.create(process.cwd(), { model: 'github-model', toolFactory: () => [] });
+    const session = fakeSessions.get(sessionId)!;
+
+    // Observe liveness from INSIDE a disconnect that has not yet resolved: if the delete
+    // happened after the await, the session would still read as active here — which is the
+    // window in which stop() can tear down a newly-started dispatch.
+    let activeDuringDisconnect: boolean | null = null;
+    session.disconnect.mockImplementation(() => {
+      // Runs at the moment disconnect is invoked — i.e. after stopIfIdle's synchronous
+      // prefix. If the delete had been deferred until after the await (as stop() does),
+      // this would still observe the session as active.
+      activeDuringDisconnect = manager.isActive(sessionId);
+    });
+
+    await expect(manager.stopIfIdle(sessionId)).resolves.toBe(true);
+
+    expect(activeDuringDisconnect).toBe(false);
+    expect(manager.isActive(sessionId)).toBe(false);
+  });
+
+  it('stopIfIdle is a no-op for a session that is not loaded', async () => {
+    const manager = await initializedManager();
+    await expect(manager.stopIfIdle('never-loaded')).resolves.toBe(true);
+  });
+
   it('changes model, reasoning effort, and context budget through live SDK mutations or warm recreate', async () => {    const manager = await initializedManager();
     const sessionId = await manager.create(process.cwd(), { model: 'effort-model', toolFactory: () => [] });
     const session = fakeSessions.get(sessionId)!;

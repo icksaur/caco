@@ -1287,6 +1287,44 @@ export class SessionManager {
     void autoRotateIfEligible(sessionId).catch(() => {});
   }
 
+  /**
+   * Stop a session ONLY if it is idle, atomically (spec-rotation-windows).
+   *
+   * `stop()` is unsuitable for maintenance because it deletes from `activeSessions`
+   * AFTER `await session.disconnect()` — a dispatch beginning during that await would
+   * be torn down mid-turn. Here the busy check and the `activeSessions.delete` are in
+   * the SAME synchronous block, so under Node's single-threaded model no other JS
+   * (including `dispatchState.start()`) can interleave between them. Awaits only
+   * follow the delete, by which point any incoming dispatch must go through
+   * `resume()`, which waits on the rotation claim and sets `resumeInProgress`
+   * synchronously — so `runExclusiveRotation` refuses rather than rewriting under it.
+   *
+   * Deliberately does NOT fire auto-rotation itself: the caller (the pressure pass)
+   * owns that, so this stays a pure, predictable teardown.
+   *
+   * @returns false if the session was busy (nothing was touched); true otherwise.
+   */
+  async stopIfIdle(sessionId: string): Promise<boolean> {
+    // ---- synchronous prefix: no await may be introduced inside this block ----
+    if (this.isBusy(sessionId)) return false;
+    const active = this.activeSessions.get(sessionId);
+    if (!active) return true; // already not loaded — nothing to do
+    this.activeSessions.delete(sessionId);
+    // ---- end synchronous prefix ----
+
+    const { session } = active;
+    try {
+      await session.disconnect();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn(`Warning: session.disconnect() during maintenance failed: ${message}`);
+    }
+    dispatchState.end(sessionId);
+    disposeSessionRuntime(sessionId);
+    console.log(`✓ Stopped idle session ${sessionId.slice(0, 8)} for maintenance`);
+    return true;
+  }
+
   async changeCwd(sessionId: string, newCwd: string): Promise<void> {
     if (this.isBusy(sessionId)) {
       throw new Error('Cannot change CWD while session is processing');

@@ -564,6 +564,86 @@ export async function sweepRotateEligible(deps: SweepDeps = {}): Promise<SweepSu
 export interface SweeperHandle { stop(): void; }
 
 /**
+ * Quiet-period maintenance window (docs/spec-rotation-windows.md): for servers that run
+ * for weeks and may never see a boot. Arms on dispatchState's suppression-aware 'idle'
+ * event and, after the server has stayed quiet for `quietMs`, runs the pressure-only pass.
+ *
+ * Trigger shape is dictated by what is observable: `DispatchState.start()` emits NOTHING,
+ * so "cancel the timer when a dispatch starts" is not implementable. Instead the timer is
+ * idle-ARMED and gated at FIRE time on `getActiveCount() === 0` — work that began mid-window
+ * produced no cancellable event but is caught by that re-check.
+ *
+ * Unlike the boot pass this window may find a candidate loaded-but-idle, so it stops such a
+ * session first via `stopIfIdle` (atomic; a busy session is skipped, never torn down).
+ */
+export function startQuietMaintenance(opts: {
+  quietMs?: number;
+  stopIfIdle?: (sessionId: string) => Promise<boolean>;
+  getActiveCount?: () => number;
+  onIdle?: (listener: () => void) => () => void;
+  /** Injected for tests so the pass itself is observable (the module's usual dep-injection
+   *  style: rotate/knownSessionIds/log/warn/stateDir are all injectable too). */
+  sweep?: (deps: SweepDeps & { label?: string }) => Promise<SweepSummary>;
+} = {}): SweeperHandle {
+  const quietMs = opts.quietMs ?? envMs('CACO_ROTATE_QUIET_MS', 15 * 60 * 1000);
+  let timer: NodeJS.Timeout | null = null;
+  let disposed = false;
+
+  const runPass = async () => {
+    const activeCount = opts.getActiveCount
+      ? opts.getActiveCount()
+      : (await import('./dispatch-state.js')).dispatchState.getActiveCount();
+    // Fire-time gate: a dispatch that started mid-window emitted no cancellable event.
+    if (activeCount > 0) return;
+
+    const stopIfIdle = opts.stopIfIdle
+      ?? (async (id: string) => (await import('./session-manager.js')).sessionManager.stopIfIdle(id));
+    const sweep = opts.sweep ?? sweepPressureOnly;
+
+    await sweep({
+      label: 'ROTATE-QUIET',
+      // A loaded-but-idle candidate must be stopped before rotation can pass
+      // runExclusiveRotation's activeSessions check. A busy session returns false here and
+      // is then declined by autoRotateIfEligible's own correctness gates, so ignoring the
+      // boolean cannot rotate anything that was not safely stopped.
+      rotate: async (id, overrides) => {
+        await stopIfIdle(id);
+        return autoRotateIfEligible(id, overrides);
+      },
+    });
+  };
+
+  const arm = () => {
+    if (disposed) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => { void runPass().catch(() => {}); }, quietMs);
+    timer.unref?.();
+  };
+
+  let unsubscribe: (() => void) | null = null;
+  if (opts.onIdle) {
+    unsubscribe = opts.onIdle(arm);
+  } else {
+    void (async () => {
+      const { dispatchState } = await import('./dispatch-state.js');
+      if (disposed) return;
+      dispatchState.on('idle', arm);
+      unsubscribe = () => dispatchState.removeListener('idle', arm);
+    })();
+  }
+  arm(); // a server that is quiet from the start still gets a window
+
+  return {
+    stop() {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      unsubscribe?.();
+    },
+  };
+}
+
+/**
  * Pressure-only sweep: consider ONLY sessions at/above the pressure ceiling
  * (docs/spec-rotation-windows.md). Two things distinguish it from the general sweep:
  * candidates are prefiltered by size BEFORE autoRotateIfEligible is called (so a

@@ -45,7 +45,7 @@ import { setGitEditPoller } from './src/dispatch-events.js';
 import { setupWebSocket } from './src/routes/websocket.js';
 import { idleFeed } from './src/idle-feed.js';
 import { initTerminalManager } from './src/terminal-manager.js';
-import { startRotationSweeper } from './src/session-history-rotation.js';
+import { startRotationSweeper, startQuietMaintenance } from './src/session-history-rotation.js';
 import { requireSameOrigin } from './src/security/same-origin.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
@@ -333,6 +333,12 @@ async function start(): Promise<void> {
   startRotationSweeper({
     getBootExcludeId: () => sessionState.preferences.lastSessionId ?? null,
   });
+
+  // Quiet-period maintenance (spec-rotation-windows): for servers that run for weeks
+  // and never see a boot, rotate an over-pressure session once the whole server has
+  // been idle long enough. Uses dispatchState's 'idle' event — NOT onAllIdle, which is
+  // restart-only and a single-slot callback already owned by the restart cleanup above.
+  startQuietMaintenance();
   
   sessionManager.snapshotSessionOrder();
   const msToMidnight = new Date().setHours(24, 0, 0, 0) - Date.now();

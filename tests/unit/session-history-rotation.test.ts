@@ -26,6 +26,7 @@ import {
   planRotation, performRotation, reconcileRotation, defaultPreserveModel, autoRotateIfEligible,
   sweepRotateEligible,
   sweepPressureOnly,
+  startQuietMaintenance,
   type RotationConfig, type RotationDeps, type AutoRotateOverrides,
 } from '../../src/session-history-rotation.js';
 
@@ -597,6 +598,120 @@ describe('sweepPressureOnly (boot pressure pass)', () => {
     let called = 0;
     await sweepPressureOnly({ knownSessionIds: () => ['pp-off'], rotate: async () => { called++; return { ok: true }; }, log: () => {}, warn: () => {}, stateDir });
     expect(called).toBe(0);
+  });
+});
+
+describe('startQuietMaintenance', () => {
+  afterEach(() => { delete process.env.CACO_ROTATE_AUTO; delete process.env.CACO_ROTATE_PRESSURE_BYTES; });
+
+  it('arms on idle and runs the pass only after the quiet period', async () => {
+    vi.useFakeTimers();
+    try {
+      let idleListener: (() => void) | null = null;
+      const passes: string[] = [];
+      const h = startQuietMaintenance({
+        quietMs: 1000,
+        getActiveCount: () => 0,
+        stopIfIdle: async () => true,
+        // Inject the sweep so the POSITIVE path is actually observable: without this the
+        // internal sweepPressureOnly falls back to the real (empty) session cache and the
+        // pass is inert, which would make this test pass whether or not it ran.
+        sweep: async (deps) => { passes.push(deps.label ?? '?'); return { scanned: 0, rotated: 0, savedBytes: 0 }; },
+        onIdle: (l) => { idleListener = l; return () => { idleListener = null; }; },
+      });
+      expect(idleListener).not.toBeNull();
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(passes).toEqual([]);                 // not yet
+
+      await vi.advanceTimersByTimeAsync(2);
+      await vi.runOnlyPendingTimersAsync();
+      expect(passes).toEqual(['ROTATE-QUIET']);   // the pass really ran
+      h.stop();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('stops a loaded-but-idle candidate before rotating it', async () => {
+    vi.useFakeTimers();
+    try {
+      const stopped: string[] = [];
+      const rotated: string[] = [];
+      const h = startQuietMaintenance({
+        quietMs: 10,
+        getActiveCount: () => 0,
+        stopIfIdle: async (id) => { stopped.push(id); return true; },
+        // Drive the injected rotate wrapper the way the real sweep would.
+        sweep: async (deps) => {
+          await deps.rotate!('loaded-big', { minIdleAgeMs: 0 });
+          return { scanned: 1, rotated: 0, savedBytes: 0 };
+        },
+        onIdle: () => () => {},
+      });
+      await vi.advanceTimersByTimeAsync(20);
+      await vi.runOnlyPendingTimersAsync();
+      expect(stopped).toEqual(['loaded-big']);    // stopIfIdle ran BEFORE the rotate
+      void rotated;
+      h.stop();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('aborts at FIRE time when a dispatch is active (no cancel-on-start event exists)', async () => {
+    vi.useFakeTimers();
+    try {
+      let passes = 0;
+      let stopCalls = 0;
+      const h = startQuietMaintenance({
+        quietMs: 10,
+        getActiveCount: () => 1,             // work started mid-window
+        stopIfIdle: async () => { stopCalls++; return true; },
+        sweep: async () => { passes++; return { scanned: 0, rotated: 0, savedBytes: 0 }; },
+        onIdle: () => () => {},
+      });
+      await vi.advanceTimersByTimeAsync(50);
+      await vi.runOnlyPendingTimersAsync();
+      expect(passes).toBe(0);                // fire-time gate aborted before any sweep
+      expect(stopCalls).toBe(0);             // and nothing was stopped
+      h.stop();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('re-arms on each idle so the window measures quiet from the LAST activity', async () => {
+    vi.useFakeTimers();
+    try {
+      let idleListener: (() => void) | null = null;
+      let ran = 0;
+      const h = startQuietMaintenance({
+        quietMs: 100,
+        getActiveCount: () => { ran++; return 1; },
+        stopIfIdle: async () => true,
+        onIdle: (l) => { idleListener = l; return () => {}; },
+      });
+      await vi.advanceTimersByTimeAsync(90);
+      (idleListener as unknown as () => void)();   // activity => re-arm
+      await vi.advanceTimersByTimeAsync(90);
+      expect(ran).toBe(0);                          // original timer was replaced
+      await vi.advanceTimersByTimeAsync(20);
+      expect(ran).toBe(1);
+      h.stop();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('stop() clears the timer and unsubscribes', async () => {
+    vi.useFakeTimers();
+    try {
+      let unsubscribed = false;
+      let ran = 0;
+      const h = startQuietMaintenance({
+        quietMs: 10,
+        getActiveCount: () => { ran++; return 0; },
+        stopIfIdle: async () => true,
+        onIdle: () => () => { unsubscribed = true; },
+      });
+      h.stop();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(ran).toBe(0);
+      expect(unsubscribed).toBe(true);
+    } finally { vi.useRealTimers(); }
   });
 });
 

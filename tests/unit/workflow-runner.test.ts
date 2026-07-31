@@ -12,12 +12,62 @@ import { promisify } from 'util';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { runWorkflow, isWorkflowRunnerAvailable, sweepWorkflowScratch } from '../../src/workflow/runner.js';
-import { WORKFLOW_LOG_CAP_BYTES } from '../../src/config.js';
+import { WORKFLOW_KILL_GRACE_MS, WORKFLOW_LOG_CAP_BYTES, WORKFLOW_TIMEOUT_MIN_MS } from '../../src/config.js';
 import { STORAGE_ROOT } from '../../src/storage-paths.js';
 import { mkdir, utimes } from 'fs/promises';
 import { existsSync } from 'fs';
 
 const execFileAsync = promisify(execFile);
+
+// The reap test must let the child boot, spawn its shell and reach `touch`
+// BEFORE the deadline fires, or its start-witness fails: child startup measures
+// ~190ms alone and ~390ms under full-suite contention, so this keeps a ~4x
+// margin. The infinite-loop test needs no such slack and runs at the floor.
+const REAP_TEST_TIMEOUT_MS = WORKFLOW_TIMEOUT_MIN_MS + 500;
+
+/** A `ps` snapshot, or undefined if `ps` could not be run. */
+async function psSnapshot(): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync('ps', ['-eo', 'args'], { windowsHide: true });
+    return stdout;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether `ps` can enumerate processes here. Probed once up front so a
+ * transient failure mid-poll is retried rather than mistaken for "this platform
+ * has no ps" — which would silently void the test instead of failing it.
+ */
+async function canInspectProcesses(): Promise<boolean> {
+  return (await psSnapshot()) !== undefined;
+}
+
+/**
+ * The `ps` snapshot taken once `marker` is gone, or the last successful one if
+ * `timeoutMs` elapses first — so a failing assertion names the survivor. Polls
+ * rather than sleeping a fixed grace: reaping is near-instant, so a constant
+ * wait both pads the suite and flakes the day a reap runs long.
+ */
+async function waitForReap(marker: string, timeoutMs: number): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let last: string | undefined;
+  for (;;) {
+    const snapshot = await psSnapshot();
+    if (snapshot !== undefined) {
+      last = snapshot;
+      if (!snapshot.includes(marker)) return snapshot;
+    }
+    if (Date.now() >= deadline) {
+      // Never assert against an absent snapshot: "" contains no marker and
+      // would pass vacuously.
+      if (last === undefined) throw new Error('ps returned no snapshot before the deadline');
+      return last;
+    }
+    await new Promise((res) => setTimeout(res, 25));
+  }
+}
 
 let base: string;
 
@@ -65,23 +115,32 @@ describe('runWorkflow (integration smokes)', () => {
 
   it('times out an infinite loop within the deadline', async () => {
     const start = Date.now();
-    const r = await runWorkflow(base, { code: 'while (true) {}', timeoutMs: 1500 });
+    // A busy loop never yields, so no in-child timer can fire: only a
+    // parent-side signal ends this run.
+    const r = await runWorkflow(base, { code: 'while (true) {}', timeoutMs: WORKFLOW_TIMEOUT_MIN_MS });
     expect(r.timedOut).toBe(true);
     expect(r.outcome).toBe('error');
     expect(Date.now() - start).toBeLessThan(10000);
   }, 15000);
 
   it('reaps child processes spawned via sh() on timeout', async () => {
-    const marker = `sleep 9.${Date.now() % 100000}`;
-    const r = await runWorkflow(base, { code: `await caco.sh(${JSON.stringify(marker)});`, timeoutMs: 1500 });
+    if (!(await canInspectProcesses())) return; // no `ps`; reaping is unverifiable here
+
+    const nonce = `${process.pid}${Date.now() % 1000}`;
+    const marker = `sleep 9.${nonce}`;
+    const started = join(base, `sh-started-${nonce}`);
+    const r = await runWorkflow(base, {
+      code: `await caco.sh(${JSON.stringify(`touch '${started}'; ${marker}`)});`,
+      timeoutMs: REAP_TEST_TIMEOUT_MS,
+    });
     expect(r.timedOut).toBe(true);
-    await new Promise((res) => setTimeout(res, 1500));
-    let survivors = '';
-    try {
-      const { stdout } = await execFileAsync('ps', ['-eo', 'args'], { windowsHide: true });
-      survivors = stdout;
-    } catch { /* ps unavailable (e.g. Windows); skip */ }
-    if (survivors) expect(survivors).not.toContain(marker);
+
+    const survivors = await waitForReap(marker, WORKFLOW_KILL_GRACE_MS + 3000);
+    // Proves the grandchild existed before asserting it is gone: one that never
+    // spawned is equally absent from `ps`, so without this the test would pass
+    // vacuously whenever the deadline beat child startup.
+    expect(existsSync(started)).toBe(true);
+    expect(survivors).not.toContain(marker);
   }, 15000);
 });
 

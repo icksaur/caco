@@ -9,6 +9,7 @@ import { STORAGE_ROOT, ensureDir } from '../storage-paths.js';
 import {
   WORKFLOW_TIMEOUT_DEFAULT_MS,
   WORKFLOW_TIMEOUT_CAP_MS,
+  WORKFLOW_TIMEOUT_MIN_MS,
   WORKFLOW_KILL_GRACE_MS,
   WORKFLOW_LOG_CAP_BYTES,
   WORKFLOW_RESULT_MAX_BYTES,
@@ -179,7 +180,7 @@ ${userCode}
 
 function clampTimeout(requested: number | undefined): number {
   if (requested === undefined || !Number.isFinite(requested)) return WORKFLOW_TIMEOUT_DEFAULT_MS;
-  return Math.max(1000, Math.min(WORKFLOW_TIMEOUT_CAP_MS, Math.floor(requested)));
+  return Math.max(WORKFLOW_TIMEOUT_MIN_MS, Math.min(WORKFLOW_TIMEOUT_CAP_MS, Math.floor(requested)));
 }
 
 /** Shape of the JSON envelope the child harness writes to result.json. */

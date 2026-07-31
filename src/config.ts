@@ -47,6 +47,11 @@ export const AUTO_ARCHIVE_ENABLED = process.env.CACO_AUTO_ARCHIVE !== '0';
 // inside a bounded child process. Opt out with CACO_WORKFLOW=0.
 export const WORKFLOW_ENABLED = process.env.CACO_WORKFLOW !== '0';
 export const WORKFLOW_TIMEOUT_DEFAULT_MS = 30 * 1000;
+// Floor for a caller-requested timeout: a run must outlive tsx child startup
+// (node boot + esbuild transform, ~400ms) or it would time out before its code
+// began. Tests that assert timeout behaviour use this to stay as short as the
+// runner permits without becoming vacuous.
+export const WORKFLOW_TIMEOUT_MIN_MS = 1000;
 // Real hard cap. Advertised as 120s in the tool description (WORKFLOW_TIMEOUT_ADVERTISED_MS)
 // with ~10s wiggle room so commands near the advertised limit still complete.
 export const WORKFLOW_TIMEOUT_CAP_MS = 130 * 1000;

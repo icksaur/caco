@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   boundDelegateResponse,
   delegateTargetError,
+  delegateArgError,
+  normalizeDelegateTargetId,
   buildDelegateSendBody,
   DELEGATE_TOTAL_BYTE_BUDGET,
 } from '../../src/delegate-tool.js';
@@ -109,5 +111,51 @@ describe('boundDelegateResponse (byte-aware)', () => {
     const payload = JSON.stringify(results, null, 2);
     expect(Buffer.byteLength(payload, 'utf8')).toBeLessThan(8 * 1024);
     expect(() => JSON.parse(payload)).not.toThrow();
+  });
+});
+
+describe('delegateArgError', () => {
+  it('returns null when every entry is addressable', () => {
+    expect(delegateArgError([{ sessionId: 'abc' }, { sessionId: 'def' }])).toBeNull();
+  });
+
+  it('names the offending index and tells the caller how to retry', () => {
+    const err = delegateArgError([{ sessionId: 'abc' }, {}]);
+    expect(err).toContain('prompts[1]');
+    expect(err).toMatch(/re-send/i);
+    expect(err).toMatch(/shorten/i);
+    // Must not blame the target: the delivered arguments were incomplete, and
+    // misattributing this is what cost three retries in the original incident.
+    expect(err).not.toMatch(/does not exist|not loaded/i);
+  });
+
+  it('treats blank and whitespace-only ids as missing, not as a target lookup', () => {
+    expect(delegateArgError([{ sessionId: '' }])).toContain('prompts[0]');
+    expect(delegateArgError([{ sessionId: '   ' }])).toContain('prompts[0]');
+  });
+
+  it('reports the FIRST unusable entry', () => {
+    expect(delegateArgError([{}, {}])).toContain('prompts[0]');
+  });
+});
+
+describe('normalizeDelegateTargetId', () => {
+  it('strips the prefix and surrounding whitespace', () => {
+    expect(normalizeDelegateTargetId('  caco-session:abc-123  ')).toBe('abc-123');
+    expect(normalizeDelegateTargetId('abc-123')).toBe('abc-123');
+  });
+
+  it('collapses a prefix-only id to empty so validation can reject it', () => {
+    // A truncated call can leave the prefix without its UUID. Normalizing first is
+    // what stops that reaching the target guard as a lookup for the empty id.
+    expect(normalizeDelegateTargetId('caco-session:')).toBe('');
+    expect(normalizeDelegateTargetId(undefined)).toBe('');
+  });
+});
+
+describe('delegateArgError with normalized ids', () => {
+  it('rejects a prefix-only id as missing', () => {
+    const err = delegateArgError([{ sessionId: normalizeDelegateTargetId('caco-session:') }]);
+    expect(err).toContain('prompts[0]');
   });
 });

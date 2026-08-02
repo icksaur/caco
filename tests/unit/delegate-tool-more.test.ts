@@ -33,7 +33,10 @@ interface WaitOptions {
 }
 
 interface DelegatePrompt {
-  sessionId: string;
+  // Optional so a dropped-key call is expressible here — the whole point of the
+  // fix is that the SCHEMA no longer rejects it before the handler can report it
+  // (spec-delegate-arg-integrity). Re-tightening the schema breaks these tests.
+  sessionId?: string;
   message: string;
 }
 
@@ -180,5 +183,64 @@ describe('caco_session_delegate handler orchestration', () => {
 
     sessionManagerFake.getSessionCwd.mockReturnValue(undefined);
     expect(waitOptions.isGone()).toBe(true);
+  });
+});
+
+describe('caco_session_delegate incomplete arguments', () => {
+  it('reports a dropped sessionId actionably instead of failing opaquely', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Exactly the shape observed in the incident: message present, sessionId gone.
+    const out = await tool().handler({ prompts: [{ message: 'review this' }] });
+
+    expect(out.resultType).toBe('error');
+    expect(out.textResultForLlm).toContain('prompts[0]');
+    expect(out.textResultForLlm).toMatch(/re-send/i);
+    expect(out.textResultForLlm).not.toMatch(/does not exist|not loaded/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses the WHOLE batch when any entry is unaddressable', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await tool().handler({ prompts: [
+      { sessionId: 'good-session-0002', message: 'valid' },
+      { message: 'no target' },
+    ] });
+
+    expect(out.resultType).toBe('error');
+    expect(out.textResultForLlm).toContain('prompts[1]');
+    // Partial delivery would leave the caller blocking on a reply it never asked
+    // for, so the valid entry must NOT be sent either.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('treats a blank sessionId as missing rather than looking it up', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    storageFake.getSessionMeta.mockReturnValue(undefined);
+
+    const out = await tool().handler({ prompts: [{ sessionId: '   ', message: 'hi' }] });
+
+    expect(out.textResultForLlm).toContain('prompts[0]');
+    expect(out.textResultForLlm).not.toMatch(/does not exist/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('caco_session_delegate prefix-only target', () => {
+  it('treats a prefix-only sessionId as missing, not as a lookup for the empty id', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    storageFake.getSessionMeta.mockReturnValue(undefined);
+
+    const out = await tool().handler({ prompts: [{ sessionId: 'caco-session:', message: 'hi' }] });
+
+    expect(out.resultType).toBe('error');
+    expect(out.textResultForLlm).toContain('prompts[0]');
+    expect(out.textResultForLlm).not.toMatch(/does not exist/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

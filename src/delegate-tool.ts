@@ -45,6 +45,34 @@ export function boundDelegateResponse(text: string, sessionId8: string, byteBudg
   return text.slice(0, lo) + marker;
 }
 
+/** Canonical target id: `caco-session:` prefix stripped and surrounding whitespace
+ *  removed. Normalizing BEFORE validation is what makes the emptiness check see the
+ *  same value the target guards will — otherwise a prefix-only id (`caco-session:`,
+ *  a plausible truncation artifact) is non-blank here, strips to `''` later, and
+ *  degrades into a confusing "does not exist" for the empty id. */
+export function normalizeDelegateTargetId(raw: string | undefined): string {
+  return (raw ?? '').trim().replace(/^caco-session:/, '').trim();
+}
+
+/** The first `prompts` entry with an unusable `sessionId`, as an actionable message,
+ *  or null when every entry is addressable. Expects ALREADY-NORMALIZED ids
+ *  (see `normalizeDelegateTargetId`).
+ *
+ *  This check lives here rather than in the zod schema on purpose. A required
+ *  `z.string()` is enforced by the SDK *before* the handler runs, and that rejection
+ *  is reported to the caller as an opaque "Tool execution failed" with the reason
+ *  discarded — which is exactly what happened when argument generation dropped the
+ *  trailing `sessionId` key three times in a row: the recorded tool-call arguments
+ *  held only `message`, while all 33 successful calls carried both keys
+ *  (spec-delegate-arg-integrity). Owning the check here is what makes the failure
+ *  legible and retryable. `caco_herd` already validates its `sessionId` this way. */
+export function delegateArgError(entries: Array<{ sessionId?: string }>): string | null {
+  const i = entries.findIndex(e => !e.sessionId || e.sessionId.trim() === '');
+  if (i < 0) return null;
+  return `prompts[${i}] has no usable sessionId, so there is nothing to delegate to. The tool call arguments arrived incomplete — this is not a problem with the target session. ` +
+    'Re-send the call with an explicit sessionId for every entry; if it happens again, shorten the message (long messages are likelier to be truncated).';
+}
+
 /** Classify a delegate target into an actionable error message, or null when it is OK
  *  to send. `loaded` MUST mirror the messages endpoint's own gate (getSessionCwd — the
  *  session is in the runtime cache); that is exactly the condition under which a POST
@@ -106,14 +134,21 @@ Use to have a reviewer/research session check work or look something up. Don't d
 
     parameters: z.object({
       prompts: z.array(z.object({
-        sessionId: z.string().describe('Target session ID (UUID, with or without the caco-session: prefix)'),
+        sessionId: z.string().optional().describe('Target session ID (UUID, with or without the caco-session: prefix). REQUIRED — optional in the schema only so a dropped key is reported as an actionable error instead of an opaque tool failure.'),
         message: z.string().describe('Message to send to the delegate'),
         pluginDirectories: z.array(z.string()).optional().describe('Absolute paths to Open Plugins directories to configure on THIS target before sending (never installed into ~/.copilot). STICKY: this permanently changes the target\'s configuration, not just this request, and costs a reconnect if it is loaded. Omit to leave its existing dirs untouched; pass [] to clear them.'),
       })).min(1).max(2).describe('Sessions to delegate to (1-2)'),
     }),
 
     handler: async ({ prompts: rawPrompts }) => {
-      const prompts = rawPrompts.map(p => ({ ...p, sessionId: p.sessionId.replace(/^caco-session:/, '') }));
+      // Normalize FIRST so validation sees exactly the id the target guards will,
+      // then refuse before anything with a side effect. An unaddressable entry
+      // fails the whole batch rather than being dropped, because the caller blocks
+      // awaiting one reply per prompt it believes it sent (spec-delegate-arg-integrity).
+      const prompts = rawPrompts.map(p => ({ ...p, sessionId: normalizeDelegateTargetId(p.sessionId) }));
+      const argError = delegateArgError(prompts);
+      if (argError) return { textResultForLlm: argError, resultType: 'error' as const };
+
       if (prompts.some(p => p.sessionId === sessionRef.id)) {
         return { textResultForLlm: 'Cannot delegate to yourself.', resultType: 'error' as const };
       }

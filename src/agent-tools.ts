@@ -63,14 +63,29 @@ export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: Get
     description: `Create a new persistent Caco session (appears in the session list, watchable/resumable). Use for work in a separate project/directory the user reviews separately, long-running watched sessions, or triaging into independent sessions. For quick sub-tasks that report back inline, use the built-in \`task\` tool. Provide \`initialMessage\` to create and prompt in one step. Runs autonomously — do not poll or wait.\n\nModel IDs: ${modelIds.join(', ') || '(none loaded)'}.`,
 
     parameters: z.object({
-      cwd: z.string().describe('Working directory for the new session'),
-      model: z.string().describe('Model ID (e.g. claude-sonnet-4.6). See this tool\'s description for the available IDs.'),
+      cwd: z.string().optional().describe('Working directory for the new session. REQUIRED — optional in the schema only so a dropped key is reported as an actionable error instead of an opaque tool failure.'),
+      model: z.string().optional().describe('Model ID (e.g. claude-sonnet-4.6). REQUIRED — see this tool\'s description for the available IDs.'),
       initialMessage: z.string().optional().describe('Optional first message'),
       description: z.string().optional().describe('Short label for the session list'),
       pluginDirectories: z.array(z.string()).optional().describe('Absolute paths to Open Plugins directories to load into the NEW session only (never installed into ~/.copilot). Plugin agents/MCP tools/skills become available to that session and its task sub-agents. Sticky: stays set for the session\'s lifetime.')
     }),
 
-    handler: async ({ cwd, model, initialMessage, description, pluginDirectories }) => {
+    handler: async ({ cwd: rawCwd, model: rawModel, initialMessage, description, pluginDirectories }) => {
+      // Same exposure as caco_session_delegate: a long free-text field
+      // (initialMessage) sits beside short required identifiers, and tool-call
+      // arguments are emitted in generation order, so a truncated call can arrive
+      // with cwd/model dropped. Enforcing them here rather than in the schema keeps
+      // the reason reportable (spec-delegate-arg-integrity). Narrowing through
+      // locals carries the proof forward, so nothing downstream needs a cast.
+      const cwd = rawCwd?.trim() ?? '';
+      const model = rawModel?.trim() ?? '';
+      const missing = [!cwd && 'cwd', !model && 'model'].filter(Boolean);
+      if (missing.length > 0) {
+        return {
+          textResultForLlm: `create_caco_session is missing required argument(s): ${missing.join(', ')}. The tool call arguments arrived incomplete — re-send with all of them; if it happens again, shorten initialMessage and send it as a follow-up.`,
+          resultType: 'error' as const
+        };
+      }
       if (modelIds.length > 0 && !modelIds.includes(model)) {
         return {
           textResultForLlm: `Unknown model "${model}". Available: ${modelIds.join(', ')}.`,

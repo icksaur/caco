@@ -209,3 +209,38 @@ describe('agent tool handlers', () => {
     expect(nonError).toEqual({ textResultForLlm: 'Error creating session: offline', resultType: 'error' });
   });
 });
+
+describe('create_caco_session incomplete arguments', () => {
+  it('names a dropped required argument instead of failing opaquely', async () => {
+    // Same exposure as the delegate incident: initialMessage is long free text and
+    // the required identifiers can be lost when the argument stream is truncated.
+    const out = await getTool(createTools(), 'create_caco_session').handler({
+      model: 'auto',
+      initialMessage: 'a very long instruction',
+    });
+
+    expect(out.resultType).toBe('error');
+    expect(out.textResultForLlm).toContain('cwd');
+    expect(out.textResultForLlm).toMatch(/re-send/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('names every missing argument at once', async () => {
+    const out = await getTool(createTools(), 'create_caco_session').handler({});
+
+    expect(out.textResultForLlm).toContain('cwd');
+    expect(out.textResultForLlm).toContain('model');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('treats a blank argument as missing, before the unknown-model check', async () => {
+    const out = await getTool(createTools(), 'create_caco_session').handler({
+      cwd: '   ',
+      model: 'auto',
+    });
+
+    expect(out.textResultForLlm).toContain('cwd');
+    expect(out.textResultForLlm).not.toMatch(/unknown model/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

@@ -26,6 +26,14 @@ export interface SessionMeta {
    *  session claims it here (role is derived, never stored on the parent).
    *  Distinct from parentSessionId, which tracks fork/agent lineage. */
   orchestratedBy?: string;
+  /** Herd PROVENANCE (spec-soft-archive-folder): the parent whose `caco_herd create`
+   *  brought this session into existence. WRITE-ONCE — stamped in the same meta write
+   *  as the initial bond and never written or cleared again, so it cannot desync from
+   *  `orchestratedBy` and survives disown, re-acquire, and restart. Presence is what
+   *  matters: `disown` parks a child for auto-archival only if this is set, so a
+   *  session the herd merely ACQUIRED is handed back untouched. Absent on every
+   *  session the herd did not create (including legacy bonds) — the fail-safe. */
+  herdOriginParent?: string;
   lastObservedAt?: string;
   lastIdleAt?: string;
   lastUsedAt?: string;

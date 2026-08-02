@@ -123,7 +123,7 @@ additional meta write on the same child applied after the parking write.
 | # | Step | Files | Oracle | Invariants |
 |---|------|-------|--------|------------|
 | 1 | Import `unobservedTracker`; in the `caco_herd` resume branch, after BOTH the member guard AND the `prompt`-required check, call `unobservedTracker.markObserved(targetId)` | `src/herd-tools.ts`, `tests/unit/herd-tools.test.ts` | resume-clears handler unit (incl. no-prompt ⇒ no call) | markObserved-sole-clear |
-| 2 | In the `caco_herd` disown branch, call `unobservedTracker.markObserved(targetId)` alongside the existing park + bond-clear | `src/herd-tools.ts`, `tests/unit/herd-tools.test.ts` | disown-clears handler unit; idempotent/no-member-leak | markObserved-sole-clear |
+| 2 | In the `caco_herd` disown branch, call `unobservedTracker.markObserved(targetId)` alongside the existing park (for a herd-created child) + bond-clear | `src/herd-tools.ts`, `tests/unit/herd-tools.test.ts` | disown-clears handler unit; idempotent/no-member-leak | markObserved-sole-clear |
 | 3 | Extend the herd-tools test's `sessionManager`/tracker mocks with `markObserved`; assert call + no-call-for-non-member | `tests/unit/herd-tools.test.ts` | the two handler oracles green | - |
 
 ## Rationale (optional)

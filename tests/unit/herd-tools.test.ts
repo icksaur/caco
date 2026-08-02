@@ -8,8 +8,8 @@ const sessionManagerFake = vi.hoisted(() => ({
 }));
 
 const storageFake = vi.hoisted(() => ({
-  getSessionMeta: vi.fn<(sessionId: string) => { name?: string; lastIdleAt?: string; orchestratedBy?: string; folder?: string; autoArchiveTaggedAt?: number } | undefined>(),
-  updateSessionMeta: vi.fn<(sessionId: string, updater: (meta: { orchestratedBy?: string; folder?: string; autoArchiveTaggedAt?: number }) => void) => void>(),
+  getSessionMeta: vi.fn<(sessionId: string) => { name?: string; lastIdleAt?: string; orchestratedBy?: string; herdOriginParent?: string; folder?: string; autoArchiveTaggedAt?: number } | undefined>(),
+  updateSessionMeta: vi.fn<(sessionId: string, updater: (meta: { orchestratedBy?: string; herdOriginParent?: string; folder?: string; autoArchiveTaggedAt?: number }) => void) => void>(),
 }));
 
 const historyFake = vi.hoisted(() => ({
@@ -39,7 +39,13 @@ vi.mock('../../src/session-manager.js', () => ({ sessionManager: sessionManagerF
 vi.mock('../../src/storage.js', () => storageFake);
 vi.mock('../../src/session-history.js', () => historyFake);
 vi.mock('../../src/delegate-tool.js', () => delegateFake);
-vi.mock('../../src/herd.js', () => herdFake);
+// `shouldParkOnDisown` is deliberately NOT faked: the parking branch must be driven
+// by the fixture's real provenance stamp, so a hand-written double that drifted from
+// the real predicate could not hide a regression.
+vi.mock('../../src/herd.js', async () => ({
+  ...herdFake,
+  shouldParkOnDisown: (await vi.importActual<typeof import('../../src/herd.js')>('../../src/herd.js')).shouldParkOnDisown,
+}));
 vi.mock('../../src/unobserved-tracker.js', () => ({ unobservedTracker: trackerFake }));
 
 import { createHerdTools } from '../../src/herd-tools.js';
@@ -181,6 +187,14 @@ describe('caco_herd create', () => {
     }));
     expect(storageFake.updateSessionMeta).toHaveBeenCalledWith('new-child-0003', expect.any(Function));
     expect(herdFake.registerHerdBond).toHaveBeenCalledWith('new-child-0003', 'parent-session-0001');
+    // Provenance is stamped in the SAME write as the bond (spec-soft-archive-folder):
+    // this is the only path that creates a herd child, so it is the only place the
+    // write-once origin can be recorded.
+    const updater = storageFake.updateSessionMeta.mock.calls.at(-1)![1];
+    const m: { orchestratedBy?: string; herdOriginParent?: string } = {};
+    updater(m);
+    expect(m.orchestratedBy).toBe('parent-session-0001');
+    expect(m.herdOriginParent).toBe('parent-session-0001');
   });
 
   it('rejects create from a herd child before touching fetch', async () => {
@@ -299,9 +313,11 @@ describe('caco_herd acquire, resume, and disown', () => {
     expect(trackerFake.markObserved).not.toHaveBeenCalled();
   });
 
-  it('disowns an owned child, parks it in auto-archive with a fresh tag, and clears the bond', async () => {
+  it('disowns a child it CREATED, parks it in auto-archive with a fresh tag, and clears the bond', async () => {
     storageFake.getSessionMeta.mockImplementation(sessionId => (
-      sessionId === 'target-child-0004' ? { orchestratedBy: 'parent-session-0001' } : undefined
+      sessionId === 'target-child-0004'
+        ? { orchestratedBy: 'parent-session-0001', herdOriginParent: 'parent-session-0001' }
+        : undefined
     ));
 
     const out = await tools().herdTool.handler({ action: 'disown', sessionId: 'target-child-0004' });
@@ -319,6 +335,102 @@ describe('caco_herd acquire, resume, and disown', () => {
     expect(herdFake.clearHerdBond).toHaveBeenCalledWith('target-child-0004');
     // Disown observes the child, clearing its unobserved badge (spec-herd-observe-clear).
     expect(trackerFake.markObserved).toHaveBeenCalledWith('target-child-0004');
+  });
+
+  it('disowns an ACQUIRED child without parking it, leaving its folder untouched', async () => {
+    // No herdOriginParent stamp => the herd did not create this session.
+    storageFake.getSessionMeta.mockImplementation(sessionId => (
+      sessionId === 'target-child-0004' ? { orchestratedBy: 'parent-session-0001' } : undefined
+    ));
+
+    const out = await tools().herdTool.handler({ action: 'disown', sessionId: 'target-child-0004' });
+
+    expect(out).toMatchObject({ resultType: 'text' });
+    expect((out as { textResultForLlm: string }).textResultForLlm).not.toContain('auto-archive');
+    expect((out as { textResultForLlm: string }).textResultForLlm).toContain('not scheduled for archival');
+    // Asserted against a meta that ALREADY carries a user folder: disown must neither
+    // set the auto-archive folder nor clear the folder the session already had.
+    const updater = storageFake.updateSessionMeta.mock.calls.at(-1)![1];
+    const m: { orchestratedBy?: string; folder?: string; autoArchiveTaggedAt?: number } =
+      { orchestratedBy: 'parent-session-0001', folder: 'my-work' };
+    updater(m);
+    expect(m.orchestratedBy).toBeUndefined();
+    expect(m.folder).toBe('my-work');
+    expect(m.autoArchiveTaggedAt).toBeUndefined();
+    expect(herdFake.clearHerdBond).toHaveBeenCalledWith('target-child-0004');
+    // Releasing an acquired child is still an observation (spec-herd-observe-clear).
+    expect(trackerFake.markObserved).toHaveBeenCalledWith('target-child-0004');
+  });
+
+  it('does not park a child whose meta predates provenance (unknown => fail safe)', async () => {
+    storageFake.getSessionMeta.mockImplementation(sessionId => (
+      sessionId === 'target-child-0004' ? { orchestratedBy: 'parent-session-0001' } : undefined
+    ));
+
+    await tools().herdTool.handler({ action: 'disown', sessionId: 'target-child-0004' });
+
+    const updater = storageFake.updateSessionMeta.mock.calls.at(-1)![1];
+    const m: { orchestratedBy?: string; folder?: string; autoArchiveTaggedAt?: number } = { orchestratedBy: 'parent-session-0001' };
+    updater(m);
+    expect(m.folder).toBeUndefined();
+    expect(m.autoArchiveTaggedAt).toBeUndefined();
+  });
+
+  it('acquire does not stamp provenance, so a later disown does not park', async () => {
+    storageFake.getSessionMeta.mockImplementation(sessionId => (
+      sessionId === 'target-child-0004' ? { name: 'pre-existing' } : undefined
+    ));
+
+    await tools().herdTool.handler({ action: 'acquire', sessionId: 'target-child-0004' });
+
+    const updater = storageFake.updateSessionMeta.mock.calls.at(-1)![1];
+    const m: { orchestratedBy?: string; herdOriginParent?: string } = {};
+    updater(m);
+    expect(m.orchestratedBy).toBe('parent-session-0001');
+    expect(m.herdOriginParent).toBeUndefined();
+  });
+
+  it('acquire leaves an existing provenance stamp intact (write-once survives re-acquire)', async () => {
+    storageFake.getSessionMeta.mockImplementation(sessionId => (
+      sessionId === 'target-child-0004' ? { herdOriginParent: 'original-creator-0009' } : undefined
+    ));
+
+    await tools().herdTool.handler({ action: 'acquire', sessionId: 'target-child-0004' });
+
+    const updater = storageFake.updateSessionMeta.mock.calls.at(-1)![1];
+    const m: { orchestratedBy?: string; herdOriginParent?: string } = { herdOriginParent: 'original-creator-0009' };
+    updater(m);
+    expect(m.herdOriginParent).toBe('original-creator-0009');
+  });
+
+  it('keeps provenance across a create -> disown -> acquire -> disown round trip', async () => {
+    // A PERSISTING store: the default harness discards mutations (it only captures the
+    // updater), so a round trip run against it would pass without proving anything.
+    const store = new Map<string, Record<string, unknown>>();
+    storageFake.getSessionMeta.mockImplementation(id => store.get(id) as never);
+    storageFake.updateSessionMeta.mockImplementation((id, updater) => {
+      const meta = store.get(id) ?? {};
+      updater(meta as never);
+      store.set(id, meta);
+    });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ sessionId: 'new-child-0003' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await tools().herdTool.handler({ action: 'create', cwd: '/workspace/project', model: 'auto' });
+    expect(store.get('new-child-0003')?.herdOriginParent).toBe('parent-session-0001');
+
+    await tools().herdTool.handler({ action: 'disown', sessionId: 'new-child-0003' });
+    expect(store.get('new-child-0003')?.folder).toBe('auto-archive');
+
+    await tools().herdTool.handler({ action: 'acquire', sessionId: 'new-child-0003' });
+    expect(store.get('new-child-0003')?.folder).toBeUndefined();
+    expect(store.get('new-child-0003')?.autoArchiveTaggedAt).toBeUndefined();
+
+    const second = await tools().herdTool.handler({ action: 'disown', sessionId: 'new-child-0003' });
+    // The stamp was never cleared, so the child is still herd-created and parks again.
+    expect(store.get('new-child-0003')?.herdOriginParent).toBe('parent-session-0001');
+    expect(store.get('new-child-0003')?.folder).toBe('auto-archive');
+    expect((second as { textResultForLlm: string }).textResultForLlm).toContain('auto-archive');
   });
 
   it('refuses disown while the child is under an archive maintenance claim', async () => {

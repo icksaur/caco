@@ -308,9 +308,11 @@ hits a gone session — no window overlaps the async delete.
     fixture's stamp, not a hand-passed flag): the bond is cleared, and `folder` /
     `autoArchiveTaggedAt` are left byte-identical to their prior values (asserted
     against a meta that already carries a user folder, proving disown neither sets nor
-    clears it). The result message does NOT mention `auto-archive`, and the park-path
-    test asserts the converse message in the same shape — exercising the "one
-    predicate, two messages" coupling end to end.
+    clears it). The result message does NOT mention `auto-archive`, and states only the
+    observable outcome — it must not assert *why* (this branch also serves an unknown
+    -provenance bond, where "it was acquired" would be a guess stated as fact). The
+    park-path test asserts the converse message in the same shape — exercising the
+    "one predicate, two messages" coupling end to end.
   - **unknown provenance fails safe** — a legacy child whose meta predates the field
     (no `herdOriginParent`) is not parked by disown.
   - **create stamps provenance, acquire does not** — `caco_herd create` writes

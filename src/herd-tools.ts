@@ -30,6 +30,7 @@ import {
   herdParentActionError,
   herdAcquireError,
   herdMemberError,
+  shouldParkOnDisown,
   buildHerdStatePayload,
   type HerdChild,
   type HerdStateEntry,
@@ -96,7 +97,7 @@ export function createHerdTools(sessionRef: SessionIdRef, getCorrelationId: GetC
 - create: start a NEW session (cwd, model, prompt) as your child.
 - acquire: adopt an EXISTING unowned session (sessionId) into your herd, optionally with a prompt.
 - resume: give an existing child (sessionId) more work (prompt).
-- disown: remove a child (sessionId) from your herd — moves it to the "auto-archive" folder, where it is auto-archived after ~24h idle unless you move it out or re-acquire it.
+- disown: remove a child (sessionId) from your herd. A child you CREATED is moved to the "auto-archive" folder, where it is auto-archived after ~24h idle unless you move it out or re-acquire it. A session you ACQUIRED is simply released — it keeps its folder and is never scheduled for archival.
 You do NOT wait for children; they run and you are re-woken when one needs attention (use caco_herd_state to collect results). Children are ordinary sessions and are unaware they are in a herd. A child cannot itself create/acquire children (herds are one level deep).${modelIds.length ? `\n\nModel IDs: ${modelIds.join(', ')}.` : ''}`,
 
     parameters: z.object({
@@ -140,7 +141,10 @@ You do NOT wait for children; they run and you are re-woken when one needs atten
         } catch (e) {
           return err(`Failed to create child: ${e instanceof Error ? e.message : e}`);
         }
-        updateSessionMeta(newId, meta => { meta.orchestratedBy = callerId; });
+        // Stamp provenance in the SAME write as the bond: this is the one and only
+        // path that creates a herd child, so it is the one and only place the
+        // write-once origin can be recorded (spec-soft-archive-folder).
+        updateSessionMeta(newId, meta => { meta.orchestratedBy = callerId; meta.herdOriginParent = callerId; });
         registerHerdBond(newId, callerId);
         if (prompt) {
           const d = await dispatchToChild(newId, prompt, callerId, selfCorrelation());
@@ -196,21 +200,33 @@ You do NOT wait for children; they run and you are re-woken when one needs atten
       const me = herdMemberError({ action: 'disown', callerId, targetOrchestratedBy: targetMeta?.orchestratedBy });
       if (me) return err(me);
       if (sessionManager.isUnderMaintenance(targetId)) return err(`${targetId.slice(0, 8)} is being archived; try again shortly.`);
-      // Park the disowned child in the auto-archive folder with a fresh schedule
-      // anchor, so a large herd's leftovers drain themselves after the grace window
-      // (spec-soft-archive-folder). The child stays a normal, fully-usable session —
-      // move it out or re-acquire it to cancel; nothing is deleted for ≥24h.
+      // Park ONLY a child this herd created, in the auto-archive folder with a fresh
+      // schedule anchor, so a large herd's leftovers drain themselves after the grace
+      // window (spec-soft-archive-folder). The child stays a normal, fully-usable
+      // session — move it out or re-acquire it to cancel; nothing is deleted for ≥24h.
+      // An ACQUIRED session pre-existed the herd, so releasing it clears the bond and
+      // nothing else: scheduling someone else's session for removal is not ours to do.
+      // One predicate drives both the mutation and the message, so the reported
+      // outcome can never disagree with what happened.
+      const park = shouldParkOnDisown(targetMeta?.herdOriginParent);
       updateSessionMeta(targetId, meta => {
         meta.orchestratedBy = undefined;
-        meta.folder = AUTO_ARCHIVE_FOLDER;
-        meta.autoArchiveTaggedAt = Date.now();
+        if (park) {
+          meta.folder = AUTO_ARCHIVE_FOLDER;
+          meta.autoArchiveTaggedAt = Date.now();
+        }
       });
       clearHerdBond(targetId);
       // Retiring a child IS an observation by the parent: clear its unobserved badge
       // (durable lastObservedAt + broadcast) so a disowned child doesn't linger
       // badged in the list (spec-herd-observe-clear).
       unobservedTracker.markObserved(targetId);
-      return ok(`Disowned ${targetId.slice(0, 8)} — moved to the "${AUTO_ARCHIVE_FOLDER}" folder; it will be auto-archived after ~24h idle unless you move it out or re-acquire it.`);
+      return ok(park
+        ? `Disowned ${targetId.slice(0, 8)} — moved to the "${AUTO_ARCHIVE_FOLDER}" folder; it will be auto-archived after ~24h idle unless you move it out or re-acquire it.`
+        // Phrased as the observable outcome, not as a claim about origin: this branch
+        // is also reached for a bond with no recorded provenance, where asserting
+        // "it was acquired" would be a guess stated as fact.
+        : `Disowned ${targetId.slice(0, 8)} — released as-is: it keeps its folder and is not scheduled for archival.`);
     },
   });
 

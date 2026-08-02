@@ -207,6 +207,23 @@ export function herdMemberError(opts: {
   return null;
 }
 
+/**
+ * Whether disowning a child also parks it for auto-archival (spec-soft-archive-folder).
+ *
+ * True only for a child the herd itself CREATED, identified by the write-once
+ * `meta.herdOriginParent` stamp. A session the herd merely acquired pre-existed the
+ * herd and is handed back untouched — releasing a borrowed session must not schedule
+ * it for removal. Absent provenance (a legacy bond, or any session created outside
+ * `caco_herd create`) fails safe to NOT parking, mirroring the reaper's
+ * "unknown age ⇒ not eligible".
+ *
+ * Takes the stamp rather than a `SessionMeta` so the herd core stays free of the meta
+ * schema, like `childIdleDecision`.
+ */
+export function shouldParkOnDisown(herdOriginParent: string | undefined): boolean {
+  return herdOriginParent !== undefined;
+}
+
 export interface HerdStateEntry extends HerdChild {
   lastResponse: string;
 }

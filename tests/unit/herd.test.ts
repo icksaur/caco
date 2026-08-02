@@ -10,6 +10,7 @@ import {
   decideHerdWake,
   wakeParentIfNeeded,
   deriveChildStatus,
+  shouldParkOnDisown,
   herdParentActionError,
   herdAcquireError,
   herdMemberError,
@@ -224,5 +225,21 @@ describe('wakeParentIfNeeded (trailing-edge serialization)', () => {
       wakeParentIfNeeded('p3', deps),
     ]);
     expect(maxActive).toBe(1);
+  });
+});
+
+describe('shouldParkOnDisown', () => {
+  it('parks a child the herd created (provenance stamp present)', () => {
+    expect(shouldParkOnDisown('parent-abc')).toBe(true);
+  });
+
+  it('does not park a child the herd merely acquired (no stamp)', () => {
+    expect(shouldParkOnDisown(undefined)).toBe(false);
+  });
+
+  it('treats an empty stamp as present, not as absent', () => {
+    // Presence, not truthiness: '' is a (degenerate) recorded origin, and using a
+    // truthiness test here would silently reclassify it as "acquired".
+    expect(shouldParkOnDisown('')).toBe(true);
   });
 });

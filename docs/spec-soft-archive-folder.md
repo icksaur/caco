@@ -6,9 +6,16 @@ Stop disowned herd children (and any session the user parks) from polluting the
 root session list forever. A session tagged into a reserved **`auto-archive`**
 folder that then sits idle past a threshold (default **24h**) is automatically
 archived (the existing reversible export-and-remove), clearing it from the active
-list. `caco_herd` **disown** auto-tags the child into `auto-archive`, so a large
-herd's leftovers drain themselves after a day-long observation window — with the
-user free to rescue any of them (move out of the folder) or clean up early.
+list. `caco_herd` **disown** auto-tags the child into `auto-archive` **when the
+herd created that child**, so a large herd's leftovers drain themselves after a
+day-long observation window — with the user free to rescue any of them (move out
+of the folder) or clean up early.
+
+A child the herd merely **acquired** pre-existed the herd and belongs to the user,
+not to the run: disowning it must leave it exactly as the herd found it. Scheduling
+someone else's session for archival is a side effect the parent never asked for and
+the user cannot anticipate, so **release-what-you-acquired is a no-op** beyond
+dropping the bond.
 
 ## Design
 
@@ -17,9 +24,10 @@ user free to rescue any of them (move out of the folder) or clean up early.
 **Stage 1 — soft tag (instant, reversible by moving out).** `auto-archive` is an
 ordinary single-level session folder (`SessionMeta.folder`, `folder.ts` validation
 — `auto-archive` is valid: letters + dash). Nothing special about the folder except
-that the reaper watches it. `caco_herd disown` now sets the child's
+that the reaper watches it. `caco_herd disown` sets the child's
 `folder = 'auto-archive'` in the same `updateSessionMeta` that clears
-`orchestratedBy` — **a deliberate contract change** (see Invariants). Entering the
+`orchestratedBy` — **but only for a child the herd itself created** (see
+*Provenance* below) — **a deliberate contract change** (see Invariants). Entering the
 folder (via disown OR a manual move-in through the PATCH route) also stamps
 `SessionMeta.autoArchiveTaggedAt = Date.now()` — the **schedule anchor** that starts
 the grace window fresh, independent of any stale pre-existing `lastIdleAt` (a child
@@ -29,6 +37,24 @@ it out before the reaper fires cancels archival. **`caco_herd acquire` clears th
 tag**: re-parenting a parked session sets `orchestratedBy` AND, if it was in
 `auto-archive`, moves it out (clears `folder` + `autoArchiveTaggedAt`) so a
 reacquired child is never left scheduled for archival.
+
+**Provenance — `herdOriginParent`, a write-once creation stamp.** Deciding whether
+disown may park a child requires knowing whether the herd created it. That fact is
+recorded as `SessionMeta.herdOriginParent?: string` — the id of the parent whose
+`caco_herd create` brought the session into existence — stamped in the **same**
+`updateSessionMeta` that sets the initial bond, and **never written again and never
+cleared**. `caco_herd acquire` does not stamp it; a session that pre-existed the herd
+therefore has no stamp, and disown parks a child **iff the stamp is present**.
+
+Provenance is deliberately a property of the **session** (who created it), not of the
+**bond** (how this parent got it). A bond-scoped origin field would have to be written
+and cleared in lockstep with `orchestratedBy` at all six bond-lifecycle sites (create,
+acquire, disown, idle self-heal, boot self-heal, parent-deleted disown-all) — two
+fields that must be kept in sync, where any missed site leaves a stale origin that
+silently mis-routes a later disown. A write-once creation fact has no lifecycle, so it
+cannot desync with anything: the four bond-clearing sites need no change at all. It is
+also the more faithful reading of the rule — "the herd did not create it" is a
+statement about the session's origin, which re-parenting does not alter.
 
 **Stage 2 — hard reap (periodic, reversible via import).** A low-frequency sweep
 (`SessionManager`, a dedicated timer alongside the existing health-check lifecycle)
@@ -116,13 +142,24 @@ hits a gone session — no window overlaps the async delete.
 
 ## Invariants
 
-- **disown parks the child in `auto-archive`** (contract change, replaces "becomes
-  an ordinary session again"): disown clears the herd bond, sets
-  `folder = 'auto-archive'`, AND stamps `autoArchiveTaggedAt`. The child is still a
-  normal, fully-usable session (can be re-parented, resumed, or moved out); the
-  folder is only a soft archival schedule with a ≥24h grace window, so an accidental
-  disown is always recoverable. The `caco_herd` disown tool description is updated to
-  say so.
+- **disown parks only what the herd created** (contract change, replaces "becomes
+  an ordinary session again"): disown always clears the herd bond, and **iff
+  `meta.herdOriginParent` is set** it also sets `folder = 'auto-archive'` AND stamps
+  `autoArchiveTaggedAt`. The child is still a normal, fully-usable session (can be
+  re-parented, resumed, or moved out); the folder is only a soft archival schedule
+  with a ≥24h grace window, so an accidental disown is always recoverable. The
+  `caco_herd` disown tool description states both outcomes, and the disown result
+  message reports the one that actually happened.
+- **Disowning an acquired session mutates nothing but the bond.** For a child with
+  no `herdOriginParent` stamp, disown leaves `folder` and `autoArchiveTaggedAt`
+  exactly as they were — it never moves the session into a folder, never moves it
+  out of one, and never schedules it for archival. Acquiring and releasing a
+  session the herd did not create is observably folder-neutral.
+- **`herdOriginParent` is write-once and never cleared.** It is stamped only by
+  `caco_herd create`, in the same meta write as the initial bond. No other code path
+  writes it, and no bond-clearing path (disown, idle self-heal, boot self-heal,
+  parent-deleted) touches it — so it can never desync from the bond, and provenance
+  survives disown, re-acquire, and restart.
 - **The grace window is anchored on tag time, not stale idle.** Eligibility uses
   `max(autoArchiveTaggedAt, lastUsedAt, lastIdleAt, creation)`, so a session already
   idle >24h before it enters `auto-archive` still gets a full window from the moment
@@ -152,6 +189,31 @@ hits a gone session — no window overlaps the async delete.
 
 ## Considerations
 
+- **Unknown provenance fails safe (never park).** A bond written before
+  `herdOriginParent` existed has no stamp, so disown will not park it. This is the same
+  fail-safe direction the reaper already takes for an unresolvable age ("unknown ⇒ not
+  eligible"): on missing information, never schedule an archival. The cost of the
+  wrong guess in this direction is one manual archive; in the other it is a user's
+  session queued for removal. The live population is empty (no session currently
+  carries `orchestratedBy`), so no migration or backfill is required.
+- **A re-acquired herd-created child parks again on the next disown.** Provenance is
+  the session's origin, so a child created by a herd stays parkable for life, even
+  after the user rescues it from `auto-archive` and the parent re-acquires it. This is
+  a deliberate trade: bond-scoped provenance would spare that user a second rescue, at
+  the cost of a mutable field that must track the bond across six sites. The rescue
+  path stays cheap (move out of the folder) and the 24h window means nothing is lost
+  meanwhile, so the simpler immutable fact wins.
+- **Acquired sessions never self-drain.** Root-list tidiness now applies only to
+  herd-created children. That is the intent: a session the user already had was never
+  the herd's to clean up, and the user retains the manual archive and the folder PATCH
+  to park it deliberately.
+- **Only an explicit `disown` ever parks.** The other three bond-clearing paths — idle
+  self-heal, boot self-heal, and `disownChildrenOf` when a parent is deleted — clear the
+  bond WITHOUT parking, so a herd-created child whose parent crashed or was deleted stays
+  in the root list rather than draining. That is pre-existing behaviour, unchanged here,
+  and it is the fail-safe direction (an automatic cleanup triggered by a *failure* should
+  not also schedule archival). Documented so "why didn't my crashed herd's children
+  drain?" has an answer; extending parking to those paths is deliberately out of scope.
 - **Foreground / liveness detection.** "In use" excludes the loaded set
   (`activeSessions.has`), a resume in flight (`resumeInProgress`, set synchronously
   before the SDK load so the window is closed), and both herd roles. An idle-but-
@@ -175,8 +237,19 @@ hits a gone session — no window overlaps the async delete.
 - **Archives a session the user was about to return to.** Mitigation: 24h grace +
   visible folder + foreground/active exclusion; and it is import-reversible.
 - **disown auto-tag surprises a user who disowned to re-parent.** Mitigation:
-  documented in the tool description; the session is unchanged and re-parenting or
-  moving it out is immediate; the 24h window means no data is touched meanwhile.
+  parking is now limited to herd-created children, so a user's own acquired session
+  is never affected; documented in the tool description; the session is unchanged and
+  re-parenting or moving it out is immediate; the 24h window means no data is touched
+  meanwhile.
+- **A stale or wrong disown message misleads the parent.** The result string and the
+  tool description previously promised parking unconditionally. Mitigation: the
+  message is derived from the same decision that performed the mutation (one
+  predicate, two messages), so it cannot claim a parking that did not happen; both
+  outcomes are covered by oracles.
+- **Provenance is forged or absent, so a herd-created child never drains.** Mitigation:
+  the stamp is written by `caco_herd create` itself in the same write as the bond — no
+  caller supplies it — and the failure mode is the safe one (an un-parked session in
+  the root list, which the user can archive manually).
 - **Reaper runs without an SDK client (archive would fail).** Mitigation: the sweep
   runs only while the client is up; per-id failures are caught and skipped.
 - **A long-idle child archives immediately on disown (no grace).** Mitigation:
@@ -202,11 +275,13 @@ hits a gone session — no window overlaps the async delete.
 
 ## Acceptance
 
-- Observable: after disowning a child it appears in the `auto-archive` folder in the
-  session list; ≥24h later (or with a lowered threshold for the demo) the reaper
-  removes it from the active list and a `.tar.gz` exists in
+- Observable: after disowning a child **the herd created**, it appears in the
+  `auto-archive` folder in the session list; ≥24h later (or with a lowered threshold
+  for the demo) the reaper removes it from the active list and a `.tar.gz` exists in
   `~/.caco/sessions/archive/`; importing that file restores it. Moving a session out
-  of `auto-archive` before the threshold prevents archival.
+  of `auto-archive` before the threshold prevents archival. After disowning a child
+  the herd merely **acquired**, the session stays exactly where it was — same folder
+  (or none), no archival schedule — and only the bond is gone.
 - Budgets: n/a (one O(sessions) scan per ~1h tick).
 - Gates: `tsc` ×2, `lint:strict`, `knip`, `npm test` (coverage thresholds),
   `build:client`, `check:specs` — all green.
@@ -223,10 +298,35 @@ hits a gone session — no window overlaps the async delete.
   - **Herd-member exclusion** — a session with `orchestratedBy` set (a child) is NOT
     eligible even if folder==`auto-archive` and aged; a parent (someone's
     `orchestratedBy`) is NOT eligible.
-  - **disown auto-tag / acquire un-tag** — `caco_herd disown` sets
-    `folder='auto-archive'`, stamps `autoArchiveTaggedAt`, clears `orchestratedBy`;
-    `caco_herd acquire` of a parked session sets `orchestratedBy` and clears
-    `folder`+`autoArchiveTaggedAt` (herd-tools handler tests).
+  - **disown auto-tag / acquire un-tag** — `caco_herd disown` of a child with
+    `herdOriginParent` set sets `folder='auto-archive'`, stamps `autoArchiveTaggedAt`,
+    clears `orchestratedBy`; `caco_herd acquire` of a parked session sets
+    `orchestratedBy` and clears `folder`+`autoArchiveTaggedAt` (herd-tools handler
+    tests).
+  - **disown of an acquired child does not park** — a child with NO `herdOriginParent`
+    stamp is disowned through the **real handler** (so the branch is driven by the
+    fixture's stamp, not a hand-passed flag): the bond is cleared, and `folder` /
+    `autoArchiveTaggedAt` are left byte-identical to their prior values (asserted
+    against a meta that already carries a user folder, proving disown neither sets nor
+    clears it). The result message does NOT mention `auto-archive`, and the park-path
+    test asserts the converse message in the same shape — exercising the "one
+    predicate, two messages" coupling end to end.
+  - **unknown provenance fails safe** — a legacy child whose meta predates the field
+    (no `herdOriginParent`) is not parked by disown.
+  - **create stamps provenance, acquire does not** — `caco_herd create` writes
+    `herdOriginParent = <parent id>` in the same meta update as the bond;
+    `caco_herd acquire` leaves `herdOriginParent` untouched (absent stays absent, and an
+    existing stamp from an earlier creator is not overwritten).
+  - **provenance survives a disown/re-acquire round trip** — create → disown (parks)
+    → acquire (un-parks) → disown parks again, proving the stamp is never cleared.
+    The existing herd-tools harness mocks `updateSessionMeta` and asserts by applying
+    the captured updater to a hand-built meta, so mutations do **not** persist between
+    steps: this oracle must either thread `herdOriginParent` through the fixture
+    explicitly at each step, or drive the sequence through a small persisting in-memory
+    meta store. Stating the mechanism is part of the oracle — a round trip run against
+    the non-persisting harness would pass vacuously.
+  - **both disown paths observe the child** — `markObserved` is called for a parked
+    and an unparked disown alike (spec-herd-observe-clear is orthogonal to parking).
   - **sweep wiring** — given a stubbed session set, the sweep archives exactly the
     eligible ids, skips the rest, and continues past a thrown archive (best-effort).
   - **reaper-safe race + resume-in-flight** — a session that becomes busy/active, OR
@@ -255,11 +355,14 @@ hits a gone session — no window overlaps the async delete.
 | 1 | Add `AUTO_ARCHIVE_FOLDER='auto-archive'`, `AUTO_ARCHIVE_IDLE_MS` (24h), sweep interval + on/off flag to config | `src/config.ts` | constant present; `isValidFolder('auto-archive')===true` | auto-archive-normal-folder |
 | 2 | Add `SessionMeta.autoArchiveTaggedAt?: number`; stamp it whenever `folder` is set to `auto-archive` (disown branch + PATCH `/sessions` route folder update) | `src/session-meta-store.ts`, `src/routes/sessions.ts`, `src/herd-tools.ts` | tag-stamp unit (folder→auto-archive sets the timestamp; other folders don't) | grace-anchored-on-tag-time |
 | 3 | Pure `isAutoArchiveEligible(meta, { isBusy, isActive, isResuming, isParent, isChild }, now)` with the `max(tagged, used, idle, creation)` anchor | `src/session-archive-reaper.ts` (new pure module), `tests/unit/session-archive-reaper.test.ts` | eligibility hand cases + reference table + old-child-grace + herd-member exclusion | reaper-never-touches-live; grace-anchored-on-tag-time |
-| 4 | disown sets `folder='auto-archive'` + stamps tag + clears bond; acquire of a parked session clears `folder`+`autoArchiveTaggedAt`; disown/acquire AND the folder PATCH route refuse while the target is under the reaper's maintenance claim; update disown/acquire tool descriptions | `src/herd-tools.ts`, `src/routes/sessions.ts`, `tests/unit/herd-tools*.test.ts` | disown auto-tag + acquire un-tag + mutation-under-claim units | disown-parks-child; eligibility-frozen-under-claim |
+| 4 | **(amended by row 10 — the unconditional parking below was later narrowed to herd-created children)** disown sets `folder='auto-archive'` + stamps tag + clears bond; acquire of a parked session clears `folder`+`autoArchiveTaggedAt`; disown/acquire AND the folder PATCH route refuse while the target is under the reaper's maintenance claim; update disown/acquire tool descriptions | `src/herd-tools.ts`, `src/routes/sessions.ts`, `tests/unit/herd-tools*.test.ts` | disown auto-tag + acquire un-tag + mutation-under-claim units | eligibility-frozen-under-claim |
 | 5 | Generalize `runExclusiveRotation`'s claim into a shared maintenance registry whose ONLY job is mutual exclusion (reject a session already under maintenance; resume waits; eligibility-mutations refuse) and does NOT refuse active/busy; extract `archive()`'s core; both paths acquire the claim then apply their own entry policy: manual stops-active-then-core, reaper refuses live/busy/resuming/herd + rechecks folder/age; claim held across the whole core | `src/session-manager.ts`, `src/routes/sessions.ts`, `tests/unit/session-manager-*.test.ts` | reaper-safe race + resume-in-flight + proceeding-eligible + manual-vs-reaper serialization + active-manual-archive oracles | reversible; reaper-never-touches-live; eligibility-frozen-under-claim; core-runs-once |
 | 6 | Sweep method: iterate `listSessionIds()`, read meta, apply the pure predicate with injected runtime facts (incl. `isResuming`, `isChild`), call the reaper-safe archive per eligible id (sequential, per-id try/catch, optional cap) | `src/session-manager.ts`, `tests/unit/session-manager-*.test.ts` | sweep wiring oracle (archives eligible, skips rest, survives a throw) | reversible; reaper-never-touches-live |
 | 7 | Dedicated reaper timer in the health-check lifecycle (start/stop, client-gated, configurable interval) | `src/session-manager.ts` | timer starts/stops with lifecycle (unit) | - |
 | 8 | Verify import round-trip restores a reaped session | `tests/unit/*import*.test.ts` (extend) | reversibility oracle | reversible |
+| 9 | Add `SessionMeta.herdOriginParent?: string` (write-once, never cleared); stamp it in the `caco_herd create` branch in the same `updateSessionMeta` as the initial bond | `src/session-meta-store.ts`, `src/herd-tools.ts` | create-stamps / acquire-does-not oracle | herd-created-by-write-once |
+| 10 | Pure `shouldParkOnDisown(herdOriginParent: string \| undefined): boolean` in `src/herd.ts` (takes the primitive, not `SessionMeta`, so the herd core stays meta-free like `childIdleDecision`); the disown branch parks (folder + tag) only when it returns true, and returns the matching message; update the `caco_herd` tool description so `disown` states both outcomes | `src/herd.ts`, `src/herd-tools.ts`, `tests/unit/herd*.test.ts` | disown-acquired-does-not-park + unknown-provenance-fails-safe + round-trip + both-paths-observe oracles | disown-parks-only-created; acquired-disown-is-bond-only |
+| 11 | **Amend the existing parking test**: `tests/unit/herd-tools.test.ts:302` ("disowns an owned child, parks it in auto-archive") uses a fixture with `orchestratedBy` but no origin stamp — under the new contract that is exactly the *acquired* case, so the test flips and MUST be updated to stamp `herdOriginParent` on the fixture. It is the park-path oracle; the unstamped fixture becomes the no-park oracle | `tests/unit/herd-tools.test.ts` | park path (stamped fixture) + no-park path (unstamped fixture) | disown-parks-only-created |
 
 ## Rationale (optional)
 
@@ -272,3 +375,9 @@ after a herd" from N manual archives into a no-op with a 24h observation window;
 keeping the folder a normal, visible, movable tag preserves full user control and
 reversibility at every stage. Speed is deliberately not a goal (24h, hourly sweep):
 the value is eventual tidiness, not prompt deletion.
+
+That rationale is about the herd's *own* leftovers, and the first implementation
+over-applied it: `disown` parked every child, including sessions the herd had merely
+borrowed. Restricting parking to herd-created children keeps the whole benefit — the
+leftovers of a big run still drain themselves — while restoring the property that
+`acquire` is a borrow: whatever the herd did not create, it hands back untouched.

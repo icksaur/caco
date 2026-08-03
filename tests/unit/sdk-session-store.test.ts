@@ -1,5 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, openSync, closeSync, ftruncateSync, statSync, existsSync, readFileSync, appendFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, openSync, closeSync, ftruncateSync, statSync, existsSync, readFileSync, appendFileSync, writeSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -264,6 +264,69 @@ describe('sdk-session-store', () => {
       expect(parseSessionModel('sess-23')).toBeNull();
     });
   });
+  describe('parseSessionModel streaming', () => {
+    const CHUNK = 1 << 20; // must match forEachFileLine's read buffer
+
+    it('reads a model event whose line spans a chunk boundary, multi-byte char included', () => {
+      // Place a multi-byte character so its two bytes straddle the chunk
+      // boundary exactly: decoding each chunk independently would split it and
+      // corrupt the model name, so this pins that the decoder carries the
+      // partial character into the next chunk.
+      const modelName = 'claude-caf\u00e9-5';
+      const line = JSON.stringify({ type: 'session.model_change', data: { newModel: modelName } });
+      const charOffsetInLine = Buffer.byteLength(line.slice(0, line.indexOf('\u00e9')), 'utf8');
+      const prefix = JSON.stringify({ type: 'session.start', data: { selectedModel: 'gpt-4' } }) + '\n';
+      // prefix + pad + charOffsetInLine must land the character at CHUNK - 1.
+      const padBytes = CHUNK - 1 - charOffsetInLine - Buffer.byteLength(prefix);
+      const pad = 'x'.repeat(padBytes - 1) + '\n';
+
+      const dir = sessDir('model-chunked');
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, 'events.jsonl');
+      writeFileSync(path, prefix + pad + line + '\n');
+
+      // The fixture is only meaningful if the character really straddles.
+      // (Assumes the first read fills the buffer; a short read would still let
+      // correct code pass, but would move the boundary off the character.)
+      const buf = readFileSync(path);
+      const at = Buffer.byteLength(prefix) + padBytes + charOffsetInLine;
+      expect(at).toBe(CHUNK - 1);
+      expect(buf[at]).toBe(0xc3);       // first byte of e-acute, last byte of chunk 1
+      expect(buf[at + 1]).toBe(0xa9);   // second byte, first byte of chunk 2
+
+      expect(parseSessionModel('model-chunked')).toBe(modelName);
+    });
+
+    // The file is 600 MiB logical but a few KiB on disk (sparse), past Node's
+    // ~512 MiB string cap. Any implementation that materializes the file throws
+    // and reports no model — which for defaultPreserveModel means rotation
+    // proceeds and the model is lost permanently. The NUL region also has no
+    // newlines, so this doubles as the over-long-line case: it must be discarded
+    // rather than accumulated, and scanning must RESUME after it, or the trailing
+    // model_change would be missed.
+    it.skipIf(process.platform === 'win32')('finds the last model event in a file too large to hold in memory', () => {
+      const dir = sessDir('model-huge');
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, 'events.jsonl');
+      writeFileSync(path, JSON.stringify({ type: 'session.start', data: { selectedModel: 'gpt-4' } }) + '\n');
+
+      const size = 600 * 1024 * 1024;
+      const tail = '\n' + JSON.stringify({ type: 'session.model_change', data: { newModel: 'claude-opus-5' } }) + '\n';
+      const fd = openSync(path, 'r+');
+      try {
+        ftruncateSync(fd, size);
+        writeSync(fd, Buffer.from(tail, 'utf8'), 0, Buffer.byteLength(tail), size);
+      } finally {
+        closeSync(fd);
+      }
+
+      expect(statSync(path).size).toBeGreaterThan(0x1fffffe8);
+      expect(() => readFileSync(path, 'utf-8')).toThrow(); // holding it whole is impossible
+
+      expect(parseSessionModel('model-huge')).toBe('claude-opus-5');
+    });
+  });
+
 
   describe('listSessionIds', () => {
     it('lists subdirectories', () => {

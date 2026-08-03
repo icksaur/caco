@@ -1,4 +1,5 @@
 import { readFileSync, readdirSync, existsSync, statSync, openSync, readSync, closeSync } from 'fs';
+import { StringDecoder } from 'string_decoder';
 import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
@@ -339,34 +340,101 @@ export function readLastTurns(sessionId: string, maxTurns: number, maxEvents: nu
   return result.ok ? result.value : { events: [], totalLines: 0, skipped: 0 };
 }
 
+/**
+ * Threshold past which `forEachFileLine` stops accumulating a line and discards
+ * it. This is what makes memory bounded for ANY file shape — without it, a file
+ * containing no newlines would grow the carry buffer until it hit the very
+ * string cap this streaming is meant to avoid. It bounds the RETAINED carry, so
+ * a line emitted just as the threshold is crossed can be up to one chunk longer;
+ * peak memory is constant either way. Three orders of magnitude above any real
+ * event line.
+ */
+const MAX_LINE_CHARS = 8 * 1024 * 1024;
+
+/**
+ * Feed every line of a file to `onLine` without ever holding the file in memory:
+ * a fixed-size read buffer plus a capped carry, so peak memory is constant at
+ * any file size — including past Node's ~512 MiB string cap. Return `false` from
+ * `onLine` to stop early.
+ *
+ * `StringDecoder` carries a multi-byte character split across a chunk boundary
+ * into the next chunk, so decoding chunk-by-chunk is exact rather than
+ * approximately right.
+ */
+function forEachFileLine(path: string, onLine: (line: string) => boolean | void): void {
+  const fd = openSync(path, 'r');
+  try {
+    const buf = Buffer.allocUnsafe(1 << 20);
+    const decoder = new StringDecoder('utf8');
+    let carry = '';
+    let discardingOverlongLine = false;
+    let bytesRead: number;
+    while ((bytesRead = readSync(fd, buf, 0, buf.length, null)) > 0) {
+      let text = decoder.write(buf.subarray(0, bytesRead));
+      if (discardingOverlongLine) {
+        const nl = text.indexOf('\n');
+        if (nl < 0) continue; // still inside the over-long line
+        discardingOverlongLine = false;
+        text = text.slice(nl + 1);
+      }
+      const lines = (carry + text).split('\n');
+      // The last element is either a partial line or '' — hold it for the next
+      // chunk rather than emitting a line the file does not contain.
+      carry = lines.pop() ?? '';
+      for (const line of lines) {
+        if (onLine(line) === false) return;
+      }
+      if (carry.length > MAX_LINE_CHARS) {
+        carry = '';
+        discardingOverlongLine = true;
+      }
+    }
+    if (!discardingOverlongLine) {
+      carry += decoder.end();
+      if (carry) onLine(carry);
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * The session's current model, or null when the events log records none.
+ *
+ * The model is only ever set by a `session.start` (selectedModel) or a
+ * `session.model_change` (newModel); last write wins. A cheap substring guard
+ * skips `JSON.parse` on the (potentially hundreds of thousands of) other event
+ * lines. Every line is still visited, because the last model_change can be
+ * anywhere in the file — but the file is streamed rather than materialized, so
+ * memory is constant and the ~512 MiB string cap is never hit.
+ *
+ * That cap was not a theoretical limit here: `defaultPreserveModel` calls this
+ * to persist the model to meta BEFORE rotation front-truncates the events that
+ * record it, and rotation is what happens to exactly the sessions large enough
+ * to trip the cap. A read failure there returns null and rotation proceeds, so
+ * the model would be lost permanently.
+ */
 export function parseSessionModel(sessionId: string): string | null {
   const eventsPath = sessionPath(sessionId, 'events.jsonl');
   if (!existsSync(eventsPath)) return null;
-  let content: string;
+  let model: string | null = null;
   try {
-    content = readFileSync(eventsPath, 'utf-8');
+    forEachFileLine(eventsPath, line => {
+      const isStart = line.includes('"session.start"');
+      const isChange = !isStart && line.includes('"session.model_change"');
+      if (!isStart && !isChange) return;
+      let event: SessionEvent;
+      try { event = JSON.parse(line); } catch { return; }
+      if (event.type === 'session.start' && event.data?.selectedModel) {
+        model = String(event.data.selectedModel);
+      } else if (event.type === 'session.model_change') {
+        // SDK emits { previousModel, newModel }
+        const newModel = (event.data as { newModel?: unknown })?.newModel ?? (event.data as { model?: unknown })?.model;
+        if (newModel) model = String(newModel);
+      }
+    });
   } catch {
     return null;
-  }
-  // The model is only ever set by a session.start (selectedModel) or a
-  // session.model_change (newModel); last write wins. A cheap substring guard
-  // lets us skip JSON.parse on the (potentially hundreds of thousands of) other
-  // event lines — the bulk of cold-open prework cost on large sessions. The
-  // full file is still scanned because the last model_change can be anywhere.
-  let model: string | null = null;
-  for (const line of content.split('\n')) {
-    const isStart = line.includes('"session.start"');
-    const isChange = !isStart && line.includes('"session.model_change"');
-    if (!isStart && !isChange) continue;
-    let event: SessionEvent;
-    try { event = JSON.parse(line); } catch { continue; }
-    if (event.type === 'session.start' && event.data?.selectedModel) {
-      model = String(event.data.selectedModel);
-    } else if (event.type === 'session.model_change') {
-      // SDK emits { previousModel, newModel }
-      const newModel = (event.data as { newModel?: unknown })?.newModel ?? (event.data as { model?: unknown })?.model;
-      if (newModel) model = String(newModel);
-    }
   }
   return model;
 }

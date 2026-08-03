@@ -30,6 +30,7 @@ import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys } from '
 import { recordObservedSizes, getToolSize } from './tool-size-store.js';
 import { estimateToolTokens } from './tool-size.js';
 import { buildPagerView, type PagerSessionInput } from './pager-view.js';
+import { planSessionRemoval, type RemovalPlan } from './session-removal.js';
 import { activityVersion } from './activity-version.js';
 import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys } from './session-tool-state.js';
 import { excludedBuiltinNames, DEFER_ELIGIBLE_CACO_TOOLS } from './tool-registry.js';
@@ -1507,7 +1508,12 @@ export class SessionManager {
 
     const staging = mkdtempSync(join(tmpdir(), 'caco-export-'));
     try {
-      cpSync(join(sdkBase, sessionId), join(staging, 'sdk', sessionId), { recursive: true });
+      // Each half is copied only if it exists. A caller that requires BOTH (a
+      // transfer to another machine) checks that itself; removal deliberately
+      // accepts a partial export rather than destroying the surviving half.
+      if (existsSync(join(sdkBase, sessionId))) {
+        cpSync(join(sdkBase, sessionId), join(staging, 'sdk', sessionId), { recursive: true });
+      }
       if (existsSync(join(cacoBase, sessionId))) {
         cpSync(join(cacoBase, sessionId), join(staging, 'caco', sessionId), { recursive: true });
       }
@@ -1526,19 +1532,19 @@ export class SessionManager {
     }
   }
 
-  async archive(sessionId: string): Promise<{ archivePath: string }> {
-    const sdkPath = join(homedir(), '.copilot', 'session-state', sessionId);
-    if (!existsSync(sdkPath)) {
-      throw new Error('SDK session data not found — cannot archive without full data');
-    }
+  async archive(sessionId: string): Promise<{ archivePath: string | null }> {
     // Serialize under the shared maintenance claim so the export+delete core never
     // runs twice on one session (manual-vs-reaper) and a resume can't race the delete.
     // Manual liveness policy: stop an active/busy session, then run the core.
     return this.runExclusiveMaintenance(sessionId, async () => {
+      const plan = planSessionRemoval({
+        hasSdkData: existsSync(join(homedir(), '.copilot', 'session-state', sessionId)),
+        hasCacoData: existsSync(getSessionDir(sessionId)),
+      });
       if (this.activeSessions.has(sessionId)) {
         await this.stop(sessionId);
       }
-      return this.archiveCore(sessionId);
+      return this.archiveCore(sessionId, plan);
     });
   }
 
@@ -1562,17 +1568,23 @@ export class SessionManager {
   }
 
   /** The export+delete core shared by manual `archive()` and the reaper. Callers own
-   *  the maintenance claim and their own liveness policy; this just does the work. */
-  private async archiveCore(sessionId: string): Promise<{ archivePath: string }> {
+   *  the maintenance claim and their own liveness policy; this just does the work.
+   *  `plan` decides how much of it applies — see src/session-removal.ts. */
+  private async archiveCore(sessionId: string, plan: RemovalPlan = { kind: 'full' }): Promise<{ archivePath: string | null }> {
     dispatchState.start(sessionId, 'archive');
     try {
-      const archiveDir = join(homedir(), '.caco', 'sessions', 'archive');
-      mkdirSync(archiveDir, { recursive: true });
-      const archivePath = join(archiveDir, `${sessionId}.caco-session.tar.gz`);
-      await this.exportToFile(sessionId, archivePath);
+      let archivePath: string | null = null;
+      if (plan.kind !== 'cache-only') {
+        const archiveDir = join(homedir(), '.caco', 'sessions', 'archive');
+        mkdirSync(archiveDir, { recursive: true });
+        archivePath = join(archiveDir, `${sessionId}.caco-session.tar.gz`);
+        await this.exportToFile(sessionId, archivePath);
+      }
 
-      const client = await this.ensureClient();
-      await client.deleteSession(sessionId);
+      if (plan.kind === 'full') {
+        const client = await this.ensureClient();
+        await client.deleteSession(sessionId);
+      }
 
       const cacoPath = getSessionDir(sessionId);
       if (existsSync(cacoPath)) {
@@ -1583,7 +1595,9 @@ export class SessionManager {
       this.sessionCache.delete(sessionId);
       activityVersion.bump();
       this.resetAutoContinue(sessionId);
-      console.log(`✓ Archived session ${sessionId} → ${archivePath}`);
+      console.log(plan.kind === 'full'
+        ? `✓ Archived session ${sessionId} → ${archivePath}`
+        : `✓ Removed ${plan.kind} session ${sessionId}${archivePath ? ` → ${archivePath}` : ' (nothing on disk to archive)'}`);
       return { archivePath };
     } finally {
       dispatchState.end(sessionId);

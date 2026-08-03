@@ -753,7 +753,10 @@ export async function archiveSession(sessionId: string, displayName?: string): P
     const response = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
     if (response.ok) {
       const data = await response.json();
-      showToast(`Archived "${name}" → ${data.archivePath}`, { type: 'success', autoHideMs: 5000 });
+      showToast(data.archivePath
+        ? `Archived "${name}" → ${data.archivePath}`
+        : `Removed "${name}" (no data left to archive)`,
+        { type: 'success', autoHideMs: 5000 });
       notifySessionArchived(sessionId);
       void loadSessions();
       if (data.wasActive) {

@@ -55,6 +55,7 @@ vi.mock('../../src/event-bus.js', () => eventBus);
 vi.mock('../../src/sdk-session-store.js', () => ({
   readSessionWorkspace: vi.fn(() => null),
   readSessionEvents: vi.fn(() => []),
+  readSessionHeadResult: vi.fn(() => ({ ok: true, value: { start: null, hasMore: false } })),
   parseSessionModel: vi.fn(() => null),
   listSessionIds: vi.fn(() => []),
   STATE_DIR: '/tmp/nonexistent-state',

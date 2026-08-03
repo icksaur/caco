@@ -19,7 +19,8 @@ vi.mock('../../src/storage.js', () => ({
 }));
 vi.mock('../../src/session-runtime.js', () => ({ disposeSessionRuntime: vi.fn() }));
 vi.mock('../../src/event-bus.js', () => ({ broadcastEvent: vi.fn(), broadcastGlobalEvent: vi.fn() }));
-vi.mock('../../src/sdk-session-store.js', () => ({ readSessionWorkspace: vi.fn(() => null), readSessionEvents: vi.fn(() => []), parseSessionModel: vi.fn(() => null), listSessionIds: vi.fn(() => []), STATE_DIR: '/tmp/none' }));
+vi.mock('../../src/sdk-session-store.js', () => ({ readSessionWorkspace: vi.fn(() => null), readSessionEvents: vi.fn(() => []), parseSessionModel: vi.fn(() => null), listSessionIds: vi.fn(() => []),
+ readSessionHeadResult: vi.fn(() => ({ ok: true, value: { start: null, hasMore: false } })), STATE_DIR: '/tmp/none' }));
 vi.mock('../../src/mcp-config-loader.js', () => ({ loadMcpServers: vi.fn(async () => ({})) }));
 vi.mock('../../src/provider-registry.js', () => ({ hasProviders: vi.fn(() => false), listByokModels: vi.fn(() => []), resolveModel: vi.fn((m: string) => ({ sdkModel: m, cacoId: m })) }));
 vi.mock('../../src/quota-poller.js', () => ({ pollQuota: vi.fn() }));

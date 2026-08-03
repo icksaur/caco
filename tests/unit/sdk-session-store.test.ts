@@ -1,5 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, openSync, closeSync, ftruncateSync, statSync, existsSync, readFileSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -13,7 +13,7 @@ vi.mock('os', async (importOriginal) => {
 import {
   readSessionWorkspace,
   readSessionEvents,
-  readSessionEventsResult,
+  readSessionHeadResult,
   readLastTurns,
   readLastTurnsResult,
   parseSessionModel,
@@ -126,40 +126,6 @@ describe('sdk-session-store', () => {
     });
   });
 
-  describe('readSessionEventsResult', () => {
-    it('classifies an absent file as missing', () => {
-      const r = readSessionEventsResult('nonexistent');
-      expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.kind).toBe('missing');
-    });
-
-    it('classifies an empty file as ok with no events', () => {
-      const dir = sessDir('res-empty');
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'events.jsonl'), '\n  \n');
-      const r = readSessionEventsResult('res-empty');
-      expect(r.ok).toBe(true);
-      if (r.ok) expect(r.value).toEqual([]);
-    });
-
-    it('classifies an all-malformed non-empty file as corrupt (not empty)', () => {
-      const dir = sessDir('res-garbage');
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'events.jsonl'), 'not json\nalso not json\n');
-      const r = readSessionEventsResult('res-garbage');
-      expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.kind).toBe('corrupt');
-    });
-
-    it('classifies a partial parse as ok', () => {
-      const dir = sessDir('res-partial');
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'events.jsonl'), '{"type":"ok"}\nbroken\n');
-      const r = readSessionEventsResult('res-partial');
-      expect(r.ok).toBe(true);
-      if (r.ok) expect(r.value).toHaveLength(1);
-    });
-  });
 
   describe('readLastTurnsResult', () => {
     it('classifies an absent file as missing', () => {
@@ -361,5 +327,128 @@ describe('sdk-session-store', () => {
       expect(totalLines).toBe(0);
       expect(skipped).toBe(0);
     });
+  });
+});
+
+describe('readSessionHeadResult', () => {
+  function writeRaw(sessionId: string, content: string): void {
+    const dir = sessDir(sessionId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'events.jsonl'), content);
+  }
+
+  /**
+   * The reference answer, computed independently of production code: read the
+   * whole file and apply the classification rules by hand. A reference derived
+   * from the module under test would only prove it agrees with itself.
+   */
+  function fromFullRead(sessionId: string): unknown {
+    const p = join(sessDir(sessionId), 'events.jsonl');
+    if (!existsSync(p)) return { ok: false, kind: 'missing' };
+    const parsed: unknown[] = [];
+    let nonEmpty = 0;
+    for (const line of readFileSync(p, 'utf-8').split('\n')) {
+      if (!line.trim()) continue;
+      nonEmpty++;
+      try { parsed.push(JSON.parse(line)); } catch { /* malformed */ }
+    }
+    if (nonEmpty > 0 && parsed.length === 0) return { ok: false, kind: 'corrupt' };
+    return { ok: true, value: { start: parsed[0] ?? null, hasMore: parsed.length > 1 } };
+  }
+
+  function normalize(r: ReturnType<typeof readSessionHeadResult>): unknown {
+    return r.ok ? { ok: true, value: r.value } : { ok: false, kind: r.kind };
+  }
+
+  const start = JSON.stringify({ type: 'session.start', data: { context: { cwd: '/w' } } });
+  const msg = JSON.stringify({ type: 'user.message', data: { content: 'hi' } });
+
+  const shapes: Array<[string, string]> = [
+    ['empty', ''],
+    ['blank lines only', '\n\n\n'],
+    ['start only', start],
+    ['start + one', `${start}\n${msg}`],
+    ['start + many', [start, msg, msg, msg, msg].join('\n')],
+    ['trailing newline', `${start}\n${msg}\n`],
+    ['blank lines between', `${start}\n\n\n${msg}`],
+    ['garbage first line', `{not json\n${start}\n${msg}`],
+    ['all garbage', '{not json\nalso not json'],
+    // Window=64 cuts inside line 2. Its 39-byte prefix is a valid JSON number
+    // while the whole line is not, so keeping the partial line would report a
+    // second event that does not exist. This is the case lines.pop() guards.
+    ['partial line parses but whole line does not', `{"type":"session.start"}\n${'1'.repeat(60)}abc`],
+    ['long first line', `${JSON.stringify({ type: 'session.start', data: { context: { cwd: '/w', pad: 'x'.repeat(5000) } } })}\n${msg}`],
+  ];
+
+  // The property that makes the bounded read safe: it must answer exactly what
+  // reading the whole file would answer, for every shape AND every window size —
+  // including windows far too small to hold a line, which force the fallback.
+  for (const windowBytes of ['64', '512', '']) {
+    for (const [label, content] of shapes) {
+      it(`matches the full read for "${label}" (window=${windowBytes || 'default'})`, () => {
+        const id = `head-${label.replace(/\W+/g, '-')}-${windowBytes || 'def'}`;
+        writeRaw(id, content);
+        if (windowBytes) process.env.CACO_HEAD_READ_BYTES = windowBytes;
+        else delete process.env.CACO_HEAD_READ_BYTES;
+        try {
+          expect(normalize(readSessionHeadResult(id))).toEqual(fromFullRead(id));
+        } finally {
+          delete process.env.CACO_HEAD_READ_BYTES;
+        }
+      });
+    }
+  }
+
+  it('reports a missing events file as missing, not empty', () => {
+    const r = readSessionHeadResult('head-absent');
+    expect(r).toEqual({ ok: false, kind: 'missing' });
+  });
+
+  it('exposes the session.start event so discovery can read cwd', () => {
+    writeRaw('head-cwd', `${start}\n${msg}`);
+    const r = readSessionHeadResult('head-cwd');
+    expect(r.ok && r.value.start?.type).toBe('session.start');
+    expect(r.ok && r.value.hasMore).toBe(true);
+  });
+
+  it('reports hasMore false for a session that only ever started', () => {
+    writeRaw('head-lonely', start);
+    const r = readSessionHeadResult('head-lonely');
+    expect(r.ok && r.value.hasMore).toBe(false);
+  });
+
+  // A session being appended to is the normal case at discovery time. The race
+  // itself (a write landing between a stat and the read) is closed by
+  // construction — there is no stat — rather than by this test, which can only
+  // check the weaker property that the answer reflects the file as it is now.
+  it('sees events appended after the size was last observed', () => {
+    const id = 'head-appended';
+    writeRaw(id, `${start}\n`);
+    const path = join(sessDir(id), 'events.jsonl');
+    statSync(path); // observe the one-event size, as a stat-first implementation would
+    appendFileSync(path, `${msg}\n`);
+
+    const r = readSessionHeadResult(id);
+    expect(r.ok && r.value.hasMore).toBe(true);
+    expect(normalize(r)).toEqual(fromFullRead(id));
+  });
+
+  // Boundedness, proven without timing: the file is 600 MiB logical (a few KiB on
+  // disk, sparse) which is past Node's ~512 MiB string cap, so ANY implementation
+  // that reads the whole file throws and reports corrupt. Passing means the tail
+  // was never touched.
+  it.skipIf(process.platform === 'win32')('answers from the head without reading a file too large to read whole', () => {
+    const id = 'head-huge';
+    writeRaw(id, `${start}\n${msg}\n`);
+    const path = join(sessDir(id), 'events.jsonl');
+    const fd = openSync(path, 'r+');
+    try { ftruncateSync(fd, 600 * 1024 * 1024); } finally { closeSync(fd); }
+
+    expect(statSync(path).size).toBeGreaterThan(0x1fffffe8);
+    expect(() => readFileSync(path, 'utf-8')).toThrow(); // reading it whole is impossible
+
+    const r = readSessionHeadResult(id);
+    expect(r.ok && r.value.start?.type).toBe('session.start');
+    expect(r.ok && r.value.hasMore).toBe(true);
   });
 });

@@ -7,7 +7,7 @@ import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage, SessionEv
 import { ensureSessionMeta, getSessionMeta, updateSessionMeta, readSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
 import { getSessionDir } from './storage-paths.js';
 import { cancelCardPersist } from './file-edits-store.js';
-import { readSessionWorkspace, readSessionEvents, readSessionEventsResult, parseSessionModel, listSessionIds } from './sdk-session-store.js';
+import { readSessionWorkspace, readSessionEvents, readSessionHeadResult, parseSessionModel, listSessionIds } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
@@ -723,14 +723,13 @@ export class SessionManager {
 
       const record: CachedSession = { cwd: null, summary: null };
 
-      const eventsResult = readSessionEventsResult(sessionId);
-      if (!eventsResult.ok && eventsResult.kind === 'missing') continue;
+      const headResult = readSessionHeadResult(sessionId);
+      if (!headResult.ok && headResult.kind === 'missing') continue;
 
-      if (eventsResult.ok) {
-        const events = eventsResult.value;
-        if (events.length === 0) continue;
+      if (headResult.ok) {
+        const startEvent = headResult.value.start;
+        if (startEvent === null) continue;
 
-        const startEvent = events[0];
         if (startEvent.type === 'session.start') {
           const ctx = startEvent.data?.context as Record<string, unknown> | undefined;
           record.cwd = typeof ctx?.cwd === 'string' ? ctx.cwd : null;
@@ -739,7 +738,7 @@ export class SessionManager {
         // Corrupt events file: a transient read failure or all-malformed JSONL
         // must not erase a real session from the UI. Register it anyway, deriving
         // cwd from the meta override or workspace, and log loudly.
-        console.error(`[DISCOVER] Corrupt events for ${sessionId}; registering with fallback cwd (${eventsResult.error.message})`);
+        console.error(`[DISCOVER] Corrupt events for ${sessionId}; registering with fallback cwd (${headResult.error.message})`);
         record.cwd = readSessionWorkspace(sessionId)?.cwd ?? null;
       }
 
@@ -1004,7 +1003,7 @@ export class SessionManager {
     // budget is not applied to the still-empty session, but self-heals on the
     // first real resume once it has history — see spec-session-orchestration M4.)
     reconcileRotation(sessionId);
-    const eventsProbe = readSessionEventsResult(sessionId);
+    const eventsProbe = readSessionHeadResult(sessionId);
     if (!eventsProbe.ok && eventsProbe.kind === 'missing') {
       console.log(`[RESUME] ${sessionId} has no events.jsonl (never messaged) — recreating under id as an empty session`);
       await this.create(cwd, {
@@ -2046,11 +2045,11 @@ export class SessionManager {
    * Check if a session has messages (i.e., can be resumed)
    */
   hasMessages(sessionId: string): boolean {
-    const result = readSessionEventsResult(sessionId);
+    const result = readSessionHeadResult(sessionId);
     // Corrupt (unreadable but present) → treat as having messages so auto-resume
     // does not skip a session whose history merely failed to read.
     if (!result.ok) return result.kind === 'corrupt';
-    return result.value.length > 1;
+    return result.value.hasMore;
   }
 
   /**

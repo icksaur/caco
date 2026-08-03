@@ -62,9 +62,13 @@ export function readSessionWorkspace(sessionId: string): SessionWorkspace | null
  * classifies as `corrupt`, NOT as an empty session — otherwise an all-garbage
  * events file would make a real session look empty and vanish from discovery.
  * A partial parse (some lines recovered) is still `ok`.
+ *
+ * NOT exported: this loads the whole history, so it must not be reachable as a
+ * casual default. Callers that need the front of a session use
+ * `readSessionHeadResult` (bounded); the one caller that genuinely needs every
+ * event is `readSessionEvents`, which renders history.
  */
-export function readSessionEventsResult(sessionId: string): DiskRead<SessionEvent[]> {
-  const eventsPath = sessionPath(sessionId, 'events.jsonl');
+function readSessionEventsResult(sessionId: string): DiskRead<SessionEvent[]> {  const eventsPath = sessionPath(sessionId, 'events.jsonl');
   if (!existsSync(eventsPath)) return { ok: false, kind: 'missing' };
   let content: string;
   try {
@@ -88,6 +92,110 @@ export function readSessionEventsResult(sessionId: string): DiskRead<SessionEven
 export function readSessionEvents(sessionId: string): SessionEvent[] {
   const result = readSessionEventsResult(sessionId);
   return result.ok ? result.value : [];
+}
+
+/**
+ * What callers who only care about the FRONT of a session's history can learn
+ * without reading the history.
+ *
+ * Discovery needs the `session.start` line (for cwd) and auto-resume needs to
+ * know whether anything follows it — between them that is two lines, but both
+ * used to load the whole file to get them. `start` is the first parseable event
+ * (exactly the old `events[0]`); `hasMore` is `events.length > 1`.
+ */
+export interface SessionHead {
+  start: SessionEvent | null;
+  hasMore: boolean;
+}
+
+/**
+ * Bytes read from the front of events.jsonl to answer head questions. Measured
+ * across every session on disk, the `session.start` line is 220-670 bytes, so
+ * this window is ~100x the largest real first line and always spans the first
+ * two events. It is a PERFORMANCE bound, never a correctness one: a window that
+ * cannot answer conclusively falls back to the full read.
+ */
+function headReadBytes(): number {
+  const v = Number(process.env.CACO_HEAD_READ_BYTES);
+  return Number.isFinite(v) && v > 0 ? v : 64 * 1024;
+}
+
+/** Read up to `maxBytes` from the front of a file. `reachedEof` is decided by
+ *  the read itself rather than by a prior `stat`: discovery runs while other
+ *  sessions may be appending, and a stale size would let appended bytes go
+ *  unread while still claiming the whole file was seen. */
+function readHeadString(path: string, maxBytes: number): { text: string; reachedEof: boolean } {
+  const fd = openSync(path, 'r');
+  try {
+    const buf = Buffer.allocUnsafe(maxBytes);
+    let off = 0;
+    while (off < maxBytes) {
+      const n = readSync(fd, buf, off, maxBytes - off, off);
+      if (n <= 0) break;
+      off += n;
+    }
+    return { text: buf.toString('utf-8', 0, off), reachedEof: off < maxBytes };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Read a session's first events from a bounded window at the front of the file,
+ * with the same `missing` / `corrupt` / `ok` classification as
+ * `readSessionEventsResult` — a real session must never be dropped from
+ * discovery because its history failed to read.
+ *
+ * Every real session is answered from the window, so startup cost is bounded by
+ * the session COUNT rather than by total history size. The equivalence is by
+ * construction rather than by assumption: whenever the window cannot decide
+ * (no parseable line yet, or only one, and the file continues past the window)
+ * this defers to the full read, so the result is always what reading the whole
+ * file would have produced.
+ */
+export function readSessionHeadResult(sessionId: string): DiskRead<SessionHead> {
+  const eventsPath = sessionPath(sessionId, 'events.jsonl');
+  if (!existsSync(eventsPath)) return { ok: false, kind: 'missing' };
+
+  const window = headReadBytes();
+  let text: string;
+  let reachedEof: boolean;
+  try {
+    ({ text, reachedEof } = readHeadString(eventsPath, window));
+  } catch (error) {
+    return { ok: false, kind: 'corrupt', error: error instanceof Error ? error : new Error(String(error)) };
+  }
+
+  const lines = text.split('\n');
+  // Mid-file the window almost certainly cuts a line in half; a truncated line
+  // must not be judged malformed, so drop it and let the fallback decide.
+  if (!reachedEof) lines.pop();
+
+  let start: SessionEvent | null = null;
+  let hasMore = false;
+  let nonEmptyLines = 0;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    nonEmptyLines++;
+    let event: SessionEvent;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (start === null) start = event;
+    else { hasMore = true; break; }
+  }
+
+  // Conclusive: a second event settles hasMore, and EOF settles its absence.
+  if (start !== null && (hasMore || reachedEof)) return { ok: true, value: { start, hasMore } };
+  if (start === null && reachedEof) {
+    return nonEmptyLines > 0
+      ? { ok: false, kind: 'corrupt', error: new Error('events.jsonl has no parseable lines') }
+      : { ok: true, value: { start: null, hasMore: false } };
+  }
+
+  // Inconclusive (only reachable when the front of a file is unparseable or a
+  // single line exceeds the window): answer exactly as the full read would.
+  const full = readSessionEventsResult(sessionId);
+  if (!full.ok) return full;
+  return { ok: true, value: { start: full.value[0] ?? null, hasMore: full.value.length > 1 } };
 }
 
 interface LastTurnsCacheEntry {

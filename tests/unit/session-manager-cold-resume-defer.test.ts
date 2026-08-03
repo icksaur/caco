@@ -50,6 +50,7 @@ vi.mock('../../src/event-bus.js', () => ({ broadcastEvent: vi.fn(), broadcastGlo
 vi.mock('../../src/sdk-session-store.js', () => ({
   readSessionWorkspace: vi.fn(() => null), readSessionEvents: vi.fn(() => []),
   readSessionEventsResult: vi.fn(() => ({ events: [] })), parseSessionModel: vi.fn(() => null),
+  readSessionHeadResult: vi.fn(() => ({ ok: true, value: { start: null, hasMore: false } })),
   listSessionIds: vi.fn(() => []), STATE_DIR: '/tmp/nonexistent-state',
 }));
 vi.mock('../../src/mcp-config-loader.js', () => ({ loadMcpServers: vi.fn(async () => ({})) }));

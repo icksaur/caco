@@ -70,6 +70,10 @@ const sdkStore = vi.hoisted(() => {
     readSessionWorkspace: vi.fn((sessionId: string) => workspace.get(sessionId) ?? null),
     readSessionEvents: vi.fn((sessionId: string) => events.get(sessionId) ?? []),
     readSessionEventsResult: vi.fn((sessionId: string) => eventsResult.get(sessionId) ?? { ok: true, value: events.get(sessionId) ?? [] }),
+    readSessionHeadResult: vi.fn((sessionId: string) => {
+      const r = (eventsResult.get(sessionId) ?? { ok: true, value: events.get(sessionId) ?? [] }) as { ok: boolean; value?: unknown[] };
+      return r.ok ? { ok: true, value: { start: r.value?.[0] ?? null, hasMore: (r.value?.length ?? 0) > 1 } } : r;
+    }),
     parseSessionModel: vi.fn((sessionId: string) => parsedModels.get(sessionId) ?? null),
     listSessionIds: vi.fn(() => [...listedSessionIds]),
     STATE_DIR: 'tests/unit/nonexistent-state',

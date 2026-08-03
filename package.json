@@ -6,7 +6,8 @@
   "scripts": {
     "start": "tsx server.ts",
     "dev": "tsx watch server.ts",
-    "build": "npm run build:client && npm run typecheck && npm run lint:strict && npm run knip && npm run test && npm run check:coverage && npm run check:frontend-coverage && npm run scan:pii && npm run check:vendor && npm run check:specs",
+    "build": "node scripts/gate.mjs",
+    "build:serial": "node scripts/gate.mjs --serial",
     "check:vendor": "node scripts/check-vendor-versions.js",
     "check:coverage": "node scripts/check-backend-coverage.mjs",
     "check:frontend-coverage": "node scripts/check-frontend-coverage.mjs",

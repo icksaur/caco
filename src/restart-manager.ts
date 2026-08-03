@@ -69,6 +69,31 @@ export function _setTestHandlers(handlers: { onExit?: () => void; onSpawn?: () =
   spawnHandler = handlers.onSpawn ?? null;
 }
 
+/**
+ * Whether this process should spawn its own replacement on restart.
+ *
+ * Standalone: yes — nothing else will bring the server back.
+ *
+ * Under systemd: NO. The replacement would land in the same cgroup, and when
+ * this process then exits, a Type=forking unit treats that as the service
+ * stopping: it runs ExecStop and, with the default KillMode=control-group,
+ * kills whatever is left in the cgroup — including the replacement, which needs
+ * 7-11s to boot and has not yet bound the port. Observed three times on
+ * 2026-08-03; each left the machine with NO server, and because ExecStop
+ * succeeded the unit reported success, so Restart=on-failure never fired.
+ *
+ * So under a service manager we exit and let it start a fresh unit. This
+ * REQUIRES `Restart=always` in the unit — `on-failure` will not act on our
+ * clean exit.
+ *
+ * `INVOCATION_ID` is systemd's per-unit marker on every process it manages.
+ * `JOURNAL_STREAM` is deliberately not used: it only means output is captured
+ * by journald, which an unsupervised process can inherit too.
+ */
+export function shouldSpawnReplacement(env: NodeJS.ProcessEnv): boolean {
+  return !env.INVOCATION_ID;
+}
+
 function ensureIdleListener(): void {
   if (idleListenerInstalled) return;
   dispatchState.on('idle', () => {
@@ -129,16 +154,20 @@ function checkAndRestart(): void {
 
   if (spawnHandler) {
     spawnHandler();
-  } else {
+  } else if (shouldSpawnReplacement(process.env)) {
     spawnServer();
+  } else {
+    log('Managed by systemd — exiting so the service manager starts the replacement (needs Restart=always)');
   }
 
-  // Defer exit to let event loop flush WebSocket buffers AND to keep the
-  // process alive long enough that spawnServer's early-exit diagnostic
-  // listener can log a silent child crash to restart.log. 1s is a tradeoff:
-  // most loader/import crashes fire within ~100ms; longer waits delay the
-  // user's UI reconnect. If a child takes >1s to die we miss the trace —
-  // accept that until we wire a proper child→parent "ready" signal.
+  // Defer exit to let the event loop flush WebSocket buffers AND, on the
+  // self-spawn path, to keep this process alive long enough for spawnServer's
+  // early-exit listener to log a silent child crash to restart.log. 1s is a
+  // tradeoff: most loader/import crashes fire within ~100ms; longer waits delay
+  // the user's UI reconnect. If a child takes >1s to die we miss the trace —
+  // accept that until we wire a proper child→parent "ready" signal. Under a
+  // service manager there is no child to watch, so the delay only covers the
+  // buffer flush.
   const doExit = () => {
     log('Exiting for restart...');
     if (exitHandler) {

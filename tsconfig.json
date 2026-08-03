@@ -14,7 +14,15 @@
     "sourceMap": true,
     "resolveJsonModule": true,
     "noEmit": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    // Warm typechecks reuse the dependency graph (4.1s -> 1.5s). Safe where an
+    // eslint --cache is not: buildinfo records the referenced-by graph and each
+    // input's signature (including node_modules .d.ts), so editing one file still
+    // re-checks its dependents, and a tsconfig option change forces a full
+    // re-check. eslint's cache keys on the file alone and was measured silently
+    // missing a real violation introduced through a dependency.
+    "incremental": true,
+    "tsBuildInfoFile": "node_modules/.cache/tsc/backend.tsbuildinfo"
   },
   "include": [
     "src/**/*.ts",

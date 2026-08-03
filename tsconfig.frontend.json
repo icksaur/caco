@@ -9,7 +9,11 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    // See tsconfig.json for why incremental is sound here. Separate buildinfo:
+    // the two programs have different roots and options.
+    "incremental": true,
+    "tsBuildInfoFile": "node_modules/.cache/tsc/frontend.tsbuildinfo"
   },
   "include": [
     "public/ts/**/*.ts"

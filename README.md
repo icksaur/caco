@@ -122,19 +122,25 @@ Open `/portal.html` to aggregate multiple Caco instances in a single view. Each 
 
 Open `/pager.html` to triage finished work in one place, away from the main UI.
 
-- **Busy indicator** shows how many sessions are working right now.
-- **A card appears** for every session that has stopped, that you have not looked at
-  yet, and that ended its last message with a `caco-actions` block — showing the
-  session name and the full text of every action it offered.
+- **Busy indicator** shows how many sessions are working right now, and names them.
+- **A card appears** for every session that has stopped and is holding an unhandled
+  offer — its last message ended with a `caco-actions` block — showing the session
+  name and the full text of every action it offered.
 - **Click an action** to send that exact text back to that session and let it
-  continue; the card leaves the board. **Dismiss** clears the card without sending
-  anything (it marks the session observed, the same as opening it would).
+  continue; the card leaves the board. **Dismiss** takes the card off the board
+  without sending anything.
+- **The pager is independent of the unobserved dot.** It does not care whether you
+  or another machine has viewed the session, and dismissing here does not clear the
+  dot anywhere. Its unit of work is the *offer*, not the session: dismiss hides the
+  current offer, and a card returns only when a session makes a **new** one.
+- **Offers expire after 7 days.** An old offer refers to a state of the world that
+  has moved on, so the board decays on its own rather than needing to be tended.
 - The board updates on its own — no reload — via `GET /api/pager?since=<version>&wait=<ms>`,
   which holds for up to 10s and returns the whole board whenever it changes. Because
   every response is a complete snapshot, a missed update costs at most 10s of
   staleness and never leaves the board wrong.
-- Delegates, herd children and scheduled runs never raise a card: only a session you
-  yourself last prompted becomes "unobserved". They still count toward the busy total.
+- Delegates, herd children and scheduled runs raise cards like anything else if they
+  end a turn with a `caco-actions` block; they also count toward the busy total.
 
 ### Scheduled Sessions
 

@@ -19,7 +19,10 @@ describe('public/pager.html', () => {
   it('polls the pager endpoint and acts through the documented routes', () => {
     expect(page).toContain('/api/pager?wait=');
     expect(page).toContain('/messages');
-    expect(page).toContain('/observe');
+    // Dismiss goes to the pager's own endpoint, never /observe: clearing the
+    // shared unobserved flag from here would blank the dot on every other client.
+    expect(page).toContain('/pager-dismiss');
+    expect(page).not.toContain('/observe');
   });
 
   it('encodes the session id into every action URL', () => {

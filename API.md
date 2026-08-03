@@ -910,15 +910,19 @@ Returns:
 staleness and can never leave a client's board wrong. `waiting` is capped at 50
 entries with `waitingTruncated` set rather than silently cut.
 
-A session appears in `waiting` only when all three hold: not busy, unobserved, and
-holding non-empty `responseOptions`. Since only a source-less user turn marks a
-session unobserved, delegates, herd children and scheduled runs never appear —
-though they do count toward `busyCount`.
+A session appears in `waiting` only when all of these hold: not busy, holding
+non-empty `responseOptions`, that offer not already dismissed, and the offer made
+within the last 7 days. It is deliberately INDEPENDENT of unobserved state — the
+pager's unit of work is the offer, not the session, so another client viewing the
+session never removes a card.
+
+- `POST /api/sessions/:id/pager-dismiss` — take the current offer off the board.
+  Writes only `pagerDismissedAt`; it does NOT mark the session observed. The
+  watermark is monotonic, so a strictly newer offer brings the card back.
 
 Act on an entry by POSTing its option text verbatim to
 `POST /api/sessions/:id/messages` with `{ "prompt": "<option text>" }` and no
-`source`; dismiss it with `POST /api/sessions/:id/observe`. Either way it leaves the
-board on the next poll.
+`source`. Either way it leaves the board on the next poll.
 
 **Example — Ralph loop** (retry a prompt in fresh sessions until a sentinel):
 ```bash

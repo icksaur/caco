@@ -1647,8 +1647,10 @@ export class SessionManager {
         cwd,
         kind: meta?.kind ?? 'interactive',
         isBusy: this.isBusy(sessionId),
-        isUnobserved: unobservedTracker.isUnobserved(sessionId),
+        orchestratedBy: meta?.orchestratedBy,
         responseOptions: meta?.responseOptions,
+        responseOptionsAt: meta?.responseOptionsAt,
+        pagerDismissedAt: meta?.pagerDismissedAt,
         lastIdleAt: meta?.lastIdleAt,
       });
     }
@@ -1657,7 +1659,7 @@ export class SessionManager {
 
   /** The current pager board, at the given version. */
   pagerView(version: number): ReturnType<typeof buildPagerView> {
-    return buildPagerView(this.listForPager(), dispatchState.getActiveCount(), version);
+    return buildPagerView(this.listForPager(), dispatchState.getActiveCount(), version, Date.now());
   }
 
   snapshotSessionOrder(): void {

@@ -3,14 +3,24 @@
 ## Goals
 
 A standalone page at `/pager.html` where the user triages finished work. It shows
-how many sessions are working right now, and a card per session that has stopped,
-has not been looked at, and offered next-step actions. Each card shows the session
+how many sessions are working right now, and a card per session that has stopped
+and is holding an unhandled offer of next-step actions. Each card shows the session
 name and the full text of every offered action; clicking one sends that text to
 that session so the work continues. The board updates on its own — no reload —
 and a session leaves it as soon as it is acted on or dismissed.
 
 The point is triage away from the main UI: a small surface that answers "who is
-waiting on me?" and lets the user unblock them one click at a time.
+waiting on me?" and lets the user unblock them one click at a time. Mobile is the
+primary consumer, so type and tap targets are sized for a phone first.
+
+**The pager's unit of work is the OFFER, not the session**, and it is deliberately
+INDEPENDENT of unobserved state. "Unobserved" answers *"has a human looked at this
+session?"*; the pager asks *"has this offer been dealt with?"* Those are different
+questions, and the first version wrongly coupled them by gating on `isUnobserved`.
+That broke in both directions: another client viewing the session on a second
+machine consumed the flag and the card silently vanished from the phone, while
+dismissing on the phone cleared the unobserved dot on every desktop. Measured on
+the live machine: 8 sessions held offers and **0** appeared on the board.
 
 ## Design
 
@@ -34,15 +44,22 @@ populated array or missing. Every read must null-guard
 (`(meta.responseOptions?.length ?? 0) > 0`); treating it as always-an-array throws on
 the common case of a turn that offered nothing.
 
-**Only a source-less user turn can make a session unobserved.**
-`session-messages.ts:314` passes `needsObservation: !source`, and
-`idle-authority.ts:82` calls `markIdle` only under that flag (`markIdle` also skips
-`kind === 'swarm'`, `unobserved-tracker.ts:59`). Delegates, herd children, scheduled
-runs and auto-continuations therefore never become unobserved and never produce a
-card — they are already excluded upstream, so the pager needs no kind-filtering of
-its own. They still count toward `busyCount`, which comes from `dispatchState` and
-sees every dispatch. This is why `isUnobserved` is the load-bearing term in the
-predicate, and it is exactly the "waiting on *me*" semantic the board wants.
+**Agent-driven sessions are excluded by kind and bond, not by accident.** In the
+first version this fell out of gating on `isUnobserved`: `session-messages.ts:314`
+passes `needsObservation: !source` and `idle-authority.ts:82` marks idle only under
+that flag, so nothing agent-driven ever became unobserved. Dropping that gate would
+have silently admitted every herd child and delegate reply to the board, so the
+exclusion is now stated outright: `kind` of `agent` or `swarm`, or an
+`orchestratedBy` bond, is never triaged — such a session is drained by whoever
+drives it and is not the user's to action. `scheduled` is deliberately NOT excluded:
+a run that finished overnight with nobody watching is precisely what a pager is for,
+and the old coupling hid those too. All of them still count toward `busyCount`,
+which comes from `dispatchState` and sees every dispatch.
+
+A delegate TARGET is an ordinary interactive session, so its offers do appear. That
+is intended — the offer is a real next step someone may want to take — and it is
+observable in practice: of the 9 sessions holding offers on the live machine, one is
+a standing reviewer session that was delegated to.
 
 **One endpoint, not two.** The request describes a GET and a hanging GET returning
 the same payload. Two endpoints returning an identical shape is code that must be
@@ -94,29 +111,63 @@ over the cap the read answers immediately rather than accumulating waiters.
 - `src/routes/pager.ts` — the route; a thin adapter, with query parsing exported pure
   so the clamp contract is testable without Express (as `parseIdleQuery` is).
 
-**Input type — do not use `SessionListItem`.** `sessionManager.list()`
-(`session-manager.ts:1591`, type at `:312`) returns **neither** `responseOptions` nor
-`lastIdleAt`, which are the predicate's third term, the card text, and the ordering
-key. Widening `SessionListItem` would grow the list payload for every client that
-does not need it; reading meta twice (once via `list()`, once for the missing
-fields) would be wasteful. So the route gathers a purpose-built input directly:
+**Input type — do not use `SessionListItem`.** `sessionManager.list()` returns
+none of `responseOptions`, `responseOptionsAt`, `pagerDismissedAt` or `lastIdleAt`
+— the predicate's terms, the card text, and the ordering key. Widening
+`SessionListItem` would grow the list payload for every client that does not need
+it; reading meta twice (once via `list()`, once for the missing fields) would be
+wasteful. So the route gathers a purpose-built input directly:
 
 ```ts
 interface PagerSessionInput {
   sessionId: string; name: string; cwd: string | null; kind: SessionKind;
-  isBusy: boolean; isUnobserved: boolean;
-  responseOptions?: string[];   // absent when the turn offered nothing
+  isBusy: boolean;
+  responseOptions?: string[];    // absent when the turn offered nothing
+  responseOptionsAt?: string;    // absent for offers predating the field
+  pagerDismissedAt?: string;
   lastIdleAt?: string;
 }
 ```
+
+`isUnobserved` is deliberately absent: the pager does not consult it, and carrying
+it would invite a future change to gate on it again.
 
 A new `SessionManager.listForPager(): PagerSessionInput[]` builds these from the same
 `sessionCache` iteration as `list()`, reading `getSessionMeta` once per session and
 skipping the two `existsSync` icon probes `list()` performs — so it is strictly
 cheaper than `list()` and does not touch `events.jsonl`.
 
-**Triage predicate** (the single definition of "needs me"), all three required:
-not busy, unobserved, and `(responseOptions?.length ?? 0) > 0`.
+**Triage predicate** (the single definition of "needs me"). A session appears iff
+ALL hold — note that unobserved state is not among them:
+
+- not busy;
+- not agent-driven: `kind` is neither `agent` nor `swarm`, and no `orchestratedBy`
+  bond (a herd child is drained by its parent, not by the user);
+- `(responseOptions?.length ?? 0) > 0`;
+- the offer is UNHANDLED: `offerAt > pagerDismissedAt` (or never dismissed);
+- the offer is FRESH: `now - offerAt <= PAGER_MAX_OFFER_AGE_MS` (7 days).
+
+`offerAt` is `responseOptionsAt ?? lastIdleAt`. `responseOptionsAt` is stamped in
+the same meta write that persists the options. The fallback exists for offers
+written before that field. It is a close approximation, not an identity: options
+are only ever written during a turn and `lastIdleAt` is stamped when that same turn
+ends, so the two normally describe the same moment — but any later idle that does
+not clear the options would advance `lastIdleAt` and make a legacy offer read
+fresher than it is. Self-limiting: it applies only to offers predating the field,
+and the 7-day window caps how far it can mislead. Without the fallback every pre-existing offer would be
+invisible forever; with it, the two genuinely recent ones show immediately.
+
+**Freshness is semantic, not just a cold-start guard.** An offer references a
+state of the world; three weeks on, that world has moved and the actions are
+probably wrong. Decay keeps the board honest with no gardening. It is also what
+makes adoption safe: of the 8 sessions holding offers on the live machine, 6 are
+10–76 days old and only 2 fall inside the window.
+
+**Dismissal is a watermark, not a flag.** Dismiss writes `pagerDismissedAt = now`
+and touches nothing else — in particular it does NOT mark the session observed.
+A later offer beats the watermark by timestamp, so a card returns exactly when
+there is genuinely new work and never merely because time passed. Nothing has to
+clear the watermark, so there is no second piece of state to keep in sync.
 
 **Snapshot shape:**
 
@@ -127,8 +178,12 @@ not busy, unobserved, and `(responseOptions?.length ?? 0) > 0`.
 - `waitingTruncated: boolean` — `waiting` is capped at `PAGER_MAX_WAITING = 50`
 
 **Bump sites call `activityVersion.bump()` directly** at each transition:
-`dispatchState.start()` and `end()`, `unobservedTracker.markIdle`/`markObserved`,
-the `responseOptions` write in `dispatch-events.ts`, and session create/delete. A
+`dispatchState.start()` and `end()`, the `responseOptions` write in
+`dispatch-events.ts`, the pager dismiss, and session create/delete. The unobserved
+mark/observe bump is REMOVED: the board no longer depends on that state, so waking
+every poller for it is pure churn. Aging out at the 7-day boundary raises no bump
+and needs none — the route rebuilds the snapshot on every response, including a
+timed-out park, so a card disappears within one poll cycle. A
 `'change'` event plus a subscriber would be an extra layer that does nothing a
 direct call does not, and would be inert until someone remembered to wire the
 listener. Missing a site degrades latency to ≤10s, never correctness.
@@ -157,28 +212,33 @@ option text> }` and no `source` — the plain user-message path
 `responseOptions` are cleared, so it leaves the board on the next poll without any
 client-side removal.
 
-**Dismiss** is `POST /api/sessions/:id/observe`, which already exists
-(`src/routes/sessions.ts:603`). It clears unobserved, so the card leaves the board.
-Included because without it a card the user does not want to act on would sit on
-the board permanently.
+**Dismiss** is `POST /api/sessions/:id/pager-dismiss`, which writes only
+`pagerDismissedAt`. It does NOT mark the session observed — that would clear the
+dot on every other client from a phone tap. Included because without it a card the
+user does not want to act on would sit on the board until it aged out.
 
 ## Invariants
 
 - **The triage rule has one definition.** `needsTriage` in `src/pager-view.ts` is the
   only place that decides what appears; the page never re-derives it. The snapshot
   and any future consumer therefore cannot disagree.
-- **Viewing the pager is not observing.** Rendering a card must never call
-  `markObserved` or otherwise clear unobserved state; only an explicit click does.
-  Otherwise opening the pager would silently clear every unobserved dot in the app.
+- **The pager never reads or writes unobserved state.** It does not gate on
+  `isUnobserved`, and dismiss does NOT call `markObserved`. That state answers a
+  different question and is shared with every other client; coupling them is what
+  made cards vanish when a second machine viewed the session, and made a phone
+  dismissal clear a desktop dot.
 - **A click is bound to session id and option text, never to list position.** The
   card element carries the session id and the button carries its own option text, so
   a re-render between paint and click cannot retarget the action. **No automated
   oracle** — see Acceptance.
 - **Model-derived strings are inserted as text, never as HTML.** Session names and
   option text are untrusted model output.
-- **Ordering is deterministic**: `lastIdleAt` descending, tie-broken by `sessionId`.
+- **Ordering is deterministic**: `offerAt` descending, tie-broken by `sessionId`.
   Two renders of the same state produce the same order, so cards do not jump under
   the user's cursor.
+- **Dismissal is monotonic.** `pagerDismissedAt` only ever moves forward and is
+  never cleared; a card returns only because a NEWER offer outranks it, never
+  because state was reset.
 - **The response is always a full snapshot.** No delta, no cursor, no client-side
   merge — this is what makes a missed bump self-correcting.
 - **`since` is read and the waiter registered in one synchronous block**, so no
@@ -209,6 +269,12 @@ the board permanently.
   never touches `events.jsonl`. It deliberately does not reuse `list()`, which
   additionally stats for an icon per session — work the pager has no use for and
   would pay on every wake.
+- **Freshness needs a clock, so `now` is a parameter.** `buildPagerView` takes the
+  current time rather than calling `Date.now()`, keeping the module pure and the
+  age boundary exactly testable.
+- **A malformed timestamp must not admit a card.** An unparseable `offerAt` is
+  treated as unknown age and therefore NOT fresh, matching the reaper's existing
+  "unknown ⇒ not eligible" stance: on missing information, never surface.
 - **Empty board.** With nothing waiting, the page shows an explicit resting state
   ("nothing waiting") rather than a blank panel, alongside a busy indicator reading
   zero. This is the state the board is in most of the time and must not look broken
@@ -255,15 +321,30 @@ the board permanently.
 - Gates: `npm run build` (the full parallel gate: typecheck ×2, lint:strict, knip,
   2600+ tests with coverage floors, scan:pii, check:specs) green.
 - Oracles:
-  - **needsTriage hand table** — every combination of {busy, unobserved, options
-    absent / empty-array / non-empty} mapped to a hand-computed expected boolean,
-    written before the implementation. Pins that all three conditions are required
-    and that an absent `responseOptions` is handled without throwing.
+  - **needsTriage hand table** — every combination of {busy, options absent /
+    empty / non-empty, offer newer vs older than dismissal, offer inside vs outside
+    the freshness window} mapped to a hand-computed expected boolean, written
+    before the implementation. Pins that unobserved state is NOT consulted: a row
+    with `isUnobserved` absent from the input type cannot compile if it creeps back.
+  - **agent-driven exclusion** — `kind: agent`, `kind: swarm`, and an
+    `orchestratedBy` bond each keep a session off the board even when it holds a
+    fresh undismissed offer; `kind: scheduled` does NOT.
+  - **offer age boundary** — an offer exactly at `PAGER_MAX_OFFER_AGE_MS` is fresh
+    and one millisecond older is not, with `now` injected.
+  - **offerAt fallback** — a session with `responseOptions` but no
+    `responseOptionsAt` uses `lastIdleAt`; one with neither is not fresh and does
+    not appear.
+  - **dismissal watermark** — an offer at or before `pagerDismissedAt` is hidden; a
+    strictly newer offer for the same session reappears. Proves a card returns for
+    new work and not for the passage of time.
+  - **dismiss does not observe** — the pager dismiss endpoint writes
+    `pagerDismissedAt` and leaves `lastObservedAt` and the unobserved set untouched
+    (asserted against the tracker, not just the meta write).
   - **buildPagerView reference** — a fixed input list compared against an
     independently constructed expected snapshot (hand-written, not derived from the
     production function), covering ordering, the `MAX_WAITING` cap with
     `waitingTruncated`, and exact option-text passthrough.
-  - **deterministic ordering** — a list with equal `lastIdleAt` values produces a
+  - **deterministic ordering** — a list with equal `offerAt` values produces a
     stable `sessionId` tie-break; shuffling the input does not change the output.
   - **immediate vs parked** — `since < version` answers without waiting;
     `since === version` parks and resolves on `bump()`; `since > version` (restart)
@@ -297,11 +378,14 @@ the board permanently.
 |---|------|-------|--------|------------|
 | 1 | Pure `needsTriage` + `buildPagerView` + `PagerSessionInput` + constants (`PAGER_MAX_WAITING`) | `src/pager-view.ts`, `tests/unit/pager-view.test.ts` | needsTriage hand table (incl. absent options); buildPagerView reference; deterministic ordering | one-definition; deterministic-order |
 | 2 | `ActivityVersion`: counter, `bump()` with `PAGER_COALESCE_MS` settle window, `read({since,wait,signal})`, waiter park/settle | `src/activity-version.ts`, `tests/unit/activity-version.test.ts` | immediate vs parked; restart-stale; wait clamp; coalescing; abort; waiter cap | full-snapshot; sync-register |
-| 3 | Call `activityVersion.bump()` at each transition: dispatch start/end, unobserved mark/observe, responseOptions write, session create/delete | `src/dispatch-state.ts`, `src/unobserved-tracker.ts`, `src/dispatch-events.ts`, `src/session-manager.ts`, `tests/unit/activity-version-wiring.test.ts` | bump coverage | idle-feed-unchanged |
-| 4 | `SessionManager.listForPager(): PagerSessionInput[]` — same cache iteration as `list()`, one meta read, no icon stat | `src/session-manager.ts`, `tests/unit/session-manager-pager-inputs.test.ts` | returns options + lastIdleAt; performs no events.jsonl read | snapshot-cost |
+| 3 | Call `activityVersion.bump()` at each transition: dispatch start/end, responseOptions write, session create/delete (**row 9 removes the unobserved bump added here**) | `src/dispatch-state.ts`, `src/unobserved-tracker.ts`, `src/dispatch-events.ts`, `src/session-manager.ts`, `tests/unit/activity-version-wiring.test.ts` | bump coverage | idle-feed-unchanged |
+| 4 | `SessionManager.listForPager(): PagerSessionInput[]` — same cache iteration as `list()`, one meta read, no icon stat | `src/session-manager.ts`, `tests/unit/session-manager-pager-inputs.test.ts` | returns options, responseOptionsAt, pagerDismissedAt, orchestratedBy and lastIdleAt; performs no events.jsonl read | snapshot-cost |
 | 5 | `GET /api/pager` route with exported pure query parser; abort on client close; mount in the router index | `src/routes/pager.ts`, `src/routes/index.ts`, `tests/unit/pager-route.test.ts` | wait clamp (pure); snapshot shape | full-snapshot |
 | 6 | `public/pager.html` — self-contained page: busy indicator + count, cards, click-to-send, dismiss, explicit empty state, poll loop with backoff on error | `public/pager.html`, `tests/unit/pager-page-static.test.ts` | no-raw-HTML-sink static assertion; **manual visual signoff** for rendering, click payload, and re-render targeting | not-observing; click-bound-to-id; text-not-html |
-| 7 | Document the endpoint and the page | `README.md` | - | - |
+| 7 | Document the endpoint and the page | `README.md`, `API.md` | - | - |
+| 8 | Re-gate on the offer: add `SessionMeta.responseOptionsAt` (stamped with the options) and `pagerDismissedAt`; `needsTriage` drops `isUnobserved` and gains the dismissal watermark + 7-day freshness with injected `now` | `src/session-meta-store.ts`, `src/dispatch-events.ts`, `src/pager-view.ts`, `src/session-manager.ts` (thread the new fields through `listForPager`, drop `isUnobserved`), `tests/unit/pager-view.test.ts` | needsTriage hand table; offer age boundary; offerAt fallback; dismissal watermark | pager-ignores-unobserved; dismissal-monotonic |
+| 9 | `POST /api/sessions/:id/pager-dismiss` writing only `pagerDismissedAt`; drop the unobserved bump; point the page's Dismiss at it | `src/routes/pager.ts`, `src/unobserved-tracker.ts`, `public/pager.html`, `tests/unit/pager-route.test.ts` | dismiss-does-not-observe | pager-ignores-unobserved |
+| 10 | Size type and tap targets for a phone (mobile is the primary consumer) | `public/pager.html` | manual visual signoff | - |
 
 ## Rationale (optional, skippable)
 

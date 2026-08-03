@@ -145,7 +145,12 @@ export function applyDispatchEventEffects(
     if (typeof content === 'string') {
       const options = extractActionOptions(content);
       if (options.length > 0) {
-        updateSessionMeta(sessionId, meta => { meta.responseOptions = options; });
+        // Stamp the offer's age in the SAME write, so the two can never disagree.
+        const at = new Date().toISOString();
+        updateSessionMeta(sessionId, meta => {
+          meta.responseOptions = options;
+          meta.responseOptionsAt = at;
+        });
         // New options are exactly what puts a session on the pager board.
         activityVersion.bump();
       }

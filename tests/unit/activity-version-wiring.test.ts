@@ -36,15 +36,17 @@ describe('activity version wiring', () => {
     expect(delta(() => dispatchState.end(id))).toBeGreaterThan(0);
   });
 
-  it('bumps when a session becomes unobserved', () => {
+  // The board no longer depends on unobserved state, so waking every parked
+  // poller for it would be pure churn (spec-pager).
+  it('does NOT bump when a session becomes unobserved', () => {
     const tracker = new UnobservedTracker(bus.broadcastGlobalEvent);
-    expect(delta(() => { tracker.markIdle('wire-b'); })).toBeGreaterThan(0);
+    expect(delta(() => { tracker.markIdle('wire-b'); })).toBe(0);
   });
 
-  it('bumps when a session is observed', () => {
+  it('does NOT bump when a session is observed', () => {
     const tracker = new UnobservedTracker(bus.broadcastGlobalEvent);
     tracker.markIdle('wire-c');
-    expect(delta(() => { tracker.markObserved('wire-c'); })).toBeGreaterThan(0);
+    expect(delta(() => { tracker.markObserved('wire-c'); })).toBe(0);
   });
 
   it('does not bump when marking an already-observed session (no state change)', () => {

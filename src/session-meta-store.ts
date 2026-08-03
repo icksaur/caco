@@ -66,6 +66,19 @@ export interface SessionMeta {
    *  cwd on cache rebuild (restart) so /session-cwd changes persist. */
   cwd?: string;
   responseOptions?: string[];
+  /** ISO time the current `responseOptions` were written — the age of the OFFER,
+   *  which the pager uses to decide freshness and to compare against
+   *  `pagerDismissedAt`. Written in the same update as the options
+   *  (spec-pager). Absent on offers that predate this field; the pager falls
+   *  back to `lastIdleAt`, which for a session still holding options describes
+   *  the same moment (the turn that wrote them is the turn that then idled). */
+  responseOptionsAt?: string;
+  /** ISO time the user dismissed this session's offer from the pager. A
+   *  monotonic watermark, never cleared: an offer at or before it is hidden, and
+   *  a strictly newer offer brings the card back. Deliberately SEPARATE from
+   *  `lastObservedAt` — dismissing an offer on one device must not tell every
+   *  other client the session has been read (spec-pager). */
+  pagerDismissedAt?: string;
   activeApplet?: string;
   appletParams?: Record<string, string>;
   appletPanelVisible?: boolean;

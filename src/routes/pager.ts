@@ -17,6 +17,7 @@
 import { Router, Request, Response } from 'express';
 import { activityVersion } from '../activity-version.js';
 import { sessionManager } from '../session-manager.js';
+import { updateSessionMeta } from '../storage.js';
 
 const router = Router();
 
@@ -49,6 +50,34 @@ router.get('/pager', async (req: Request, res: Response) => {
   // woke the waiter: a bump landing in between would otherwise be reported as
   // already-seen, and the client would not re-poll for it.
   res.json(sessionManager.pagerView(activityVersion.version));
+});
+
+/**
+ * POST /api/sessions/:sessionId/pager-dismiss
+ *
+ * Take one offer off the pager board. Writes ONLY `pagerDismissedAt` — it does
+ * NOT mark the session observed, because dismissing an offer on a phone must not
+ * tell every other client the session has been read. The watermark is monotonic:
+ * a strictly newer offer outranks it and the card returns.
+ */
+router.post('/sessions/:sessionId/pager-dismiss', (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  if (!sessionManager.getSessionCwd(sessionId)) {
+    res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+
+  const dismissedAt = new Date().toISOString();
+  const written = updateSessionMeta(sessionId, meta => { meta.pagerDismissedAt = dismissedAt; }, { createIfMissing: false });
+  if (!written) {
+    // Corrupt or absent meta: refuse rather than report a dismissal that was
+    // never persisted, which would reappear on the next poll and look like a bug.
+    res.status(409).json({ error: 'Could not persist the dismissal (session metadata unreadable)' });
+    return;
+  }
+
+  activityVersion.bump();
+  res.json({ success: true, dismissedAt });
 });
 
 export { router };

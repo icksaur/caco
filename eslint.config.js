@@ -129,10 +129,8 @@ export default [
         'varsIgnorePattern': '^_',
         'caughtErrorsIgnorePattern': '^_'
       }],
-      // Frontend has many fire-and-forget patterns (event handlers, etc.)
-      // Keep these as warnings to track, but don't block commits
-      '@typescript-eslint/no-floating-promises': 'warn',
-      '@typescript-eslint/no-misused-promises': 'warn',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
       '@typescript-eslint/await-thenable': 'error',
       '@typescript-eslint/no-explicit-any': 'warn',
       

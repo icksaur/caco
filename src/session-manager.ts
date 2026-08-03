@@ -29,6 +29,8 @@ import { builtinKey, cacoKey, type ToolKey } from './tool-key.js';
 import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys } from './tool-key-registry.js';
 import { recordObservedSizes, getToolSize } from './tool-size-store.js';
 import { estimateToolTokens } from './tool-size.js';
+import { buildPagerView, type PagerSessionInput } from './pager-view.js';
+import { activityVersion } from './activity-version.js';
 import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys } from './session-tool-state.js';
 import { excludedBuiltinNames, DEFER_ELIGIBLE_CACO_TOOLS } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
@@ -848,6 +850,7 @@ export class SessionManager {
       lastUsedAt: Date.now(),
     });
     this.sessionCache.set(session.sessionId, { cwd, summary: null });
+    activityVersion.bump();
     
     ensureSessionMeta(session.sessionId);
     
@@ -1477,6 +1480,7 @@ export class SessionManager {
     }
     
     this.sessionCache.delete(sessionId);
+    activityVersion.bump();
     this.resetAutoContinue(sessionId);
     disposeSessionRuntime(sessionId);
 
@@ -1577,6 +1581,7 @@ export class SessionManager {
       }
 
       this.sessionCache.delete(sessionId);
+      activityVersion.bump();
       this.resetAutoContinue(sessionId);
       console.log(`✓ Archived session ${sessionId} → ${archivePath}`);
       return { archivePath };
@@ -1608,6 +1613,37 @@ export class SessionManager {
       result.push({ sessionId, cwd, model, name, kind, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, hasIcon, scheduleSlug, scheduleNextRun, folder: meta?.folder, orchestratedBy: meta?.orchestratedBy ?? null, isHerdParent: isHerdParent(sessionId) });
     }
     return result;
+  }
+
+  /**
+   * The pager's per-session inputs (spec-pager).
+   *
+   * Deliberately not `list()`: that returns neither `responseOptions` (the third
+   * triage term and the card text) nor `lastIdleAt` (the ordering key), and it
+   * additionally stats for an icon per session — work the pager has no use for
+   * and would pay on every wake. One meta read per session, no events.jsonl.
+   */
+  listForPager(): PagerSessionInput[] {
+    const result: PagerSessionInput[] = [];
+    for (const [sessionId, { cwd }] of this.sessionCache) {
+      const meta = getSessionMeta(sessionId);
+      result.push({
+        sessionId,
+        name: meta?.name || '',
+        cwd,
+        kind: meta?.kind ?? 'interactive',
+        isBusy: this.isBusy(sessionId),
+        isUnobserved: unobservedTracker.isUnobserved(sessionId),
+        responseOptions: meta?.responseOptions,
+        lastIdleAt: meta?.lastIdleAt,
+      });
+    }
+    return result;
+  }
+
+  /** The current pager board, at the given version. */
+  pagerView(version: number): ReturnType<typeof buildPagerView> {
+    return buildPagerView(this.listForPager(), dispatchState.getActiveCount(), version);
   }
 
   snapshotSessionOrder(): void {
@@ -2725,6 +2761,7 @@ export class SessionManager {
 
     // Mirror what create() does for cache registration
     this.sessionCache.set(newId, { cwd: parentCwd, summary: null });
+    activityVersion.bump();
     ensureSessionMeta(newId);
 
     return { sessionId: newId, cwd: parentCwd };

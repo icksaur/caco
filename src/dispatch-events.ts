@@ -19,6 +19,7 @@ import { learnMcpKey } from './tool-key-registry.js';
 import { stampToolUsage } from './tool-usage-store.js';
 import { extractActionOptions } from './offer-action-parse.js';
 import { updateSessionMeta } from './storage.js';
+import { activityVersion } from './activity-version.js';
 
 // Set by server.ts after the poller is constructed. Optional — if absent
 // (e.g. unit tests), the file-edits triggers become no-ops.
@@ -145,6 +146,8 @@ export function applyDispatchEventEffects(
       const options = extractActionOptions(content);
       if (options.length > 0) {
         updateSessionMeta(sessionId, meta => { meta.responseOptions = options; });
+        // New options are exactly what puts a session on the pager board.
+        activityVersion.bump();
       }
     }
   }

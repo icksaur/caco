@@ -1,5 +1,6 @@
 import { getSessionMeta, updateSessionMeta } from './storage.js';
 import { broadcastGlobalEvent } from './event-bus.js';
+import { activityVersion } from './activity-version.js';
 import type { SessionKind } from './session-meta-store.js';
 
 type BroadcastCallback = (event: {
@@ -141,6 +142,10 @@ export class UnobservedTracker {
   }
 
   private broadcast(type: string, sessionId: string): void {
+    // The single chokepoint for both mark paths, so the pager board cannot go
+    // stale on an observed/unobserved change without also failing to broadcast
+    // (spec-pager).
+    activityVersion.bump();
     this.broadcastFn({
       type: 'session.listChanged',
       data: {

@@ -118,6 +118,24 @@ Open `/portal.html` to aggregate multiple Caco instances in a single view. Each 
 - **Drag-and-drop sessions** between instances to transfer them. Drag a session from one instance's session list and drop it on another instance's sidebar icon. The session archive is exported from the source and imported at the destination.
 - Instances are saved in `localStorage` and reconnect on reload.
 
+### Pager
+
+Open `/pager.html` to triage finished work in one place, away from the main UI.
+
+- **Busy indicator** shows how many sessions are working right now.
+- **A card appears** for every session that has stopped, that you have not looked at
+  yet, and that ended its last message with a `caco-actions` block — showing the
+  session name and the full text of every action it offered.
+- **Click an action** to send that exact text back to that session and let it
+  continue; the card leaves the board. **Dismiss** clears the card without sending
+  anything (it marks the session observed, the same as opening it would).
+- The board updates on its own — no reload — via `GET /api/pager?since=<version>&wait=<ms>`,
+  which holds for up to 10s and returns the whole board whenever it changes. Because
+  every response is a complete snapshot, a missed update costs at most 10s of
+  staleness and never leaves the board wrong.
+- Delegates, herd children and scheduled runs never raise a card: only a session you
+  yourself last prompted becomes "unobserved". They still count toward the busy total.
+
 ### Scheduled Sessions
 
 Caco runs agentic sessions on a cron schedule — unattended, recurring automation. Scheduled sessions appear in the session panel with a clock icon. Create them via the REST API (see `API.md`) or ask your agent to set one up.

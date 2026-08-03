@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caco Pager</title>
+<link rel="icon" href="/caco.png">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { min-height: 100%; background: #1a1a1a; color: #d4d4d4; font-family: -apple-system, sans-serif; }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 20px 16px 48px; }
+
+header { display: flex; align-items: center; gap: 12px; padding: 8px 0 18px; border-bottom: 1px solid #333; margin-bottom: 18px; }
+h1 { font-size: 16px; font-weight: 600; color: #eee; flex: 1; }
+
+.busy { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #999; }
+.spinner { width: 12px; height: 12px; border: 2px solid #444; border-top-color: #007acc; border-radius: 50%; }
+.spinner.spinning { animation: spin 0.9s linear infinite; }
+.spinner.resting { border-top-color: #444; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.conn { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: #2a2a2a; color: #777; }
+.conn.error { background: #4a2020; color: #e88; }
+
+.card { background: #222; border: 1px solid #333; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
+.card-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.name { font-size: 14px; font-weight: 600; color: #eee; }
+.when { font-size: 11px; color: #777; margin-left: auto; white-space: nowrap; }
+.cwd { font-size: 11px; color: #777; margin-bottom: 10px; word-break: break-all; }
+
+.options { display: flex; flex-direction: column; gap: 6px; }
+.option {
+  text-align: left; width: 100%; cursor: pointer;
+  background: #2b2b2b; color: #d4d4d4; border: 1px solid #3a3a3a; border-radius: 6px;
+  padding: 9px 11px; font-size: 13px; font-family: inherit; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word; transition: background 0.12s, border-color 0.12s;
+}
+.option:hover:not(:disabled) { background: #333; border-color: #007acc; }
+.option:disabled { opacity: 0.5; cursor: default; }
+
+.card-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.dismiss { background: none; border: none; color: #777; font-size: 12px; cursor: pointer; font-family: inherit; padding: 2px 0; }
+.dismiss:hover:not(:disabled) { color: #bbb; text-decoration: underline; }
+.dismiss:disabled { opacity: 0.5; cursor: default; }
+.card-msg { font-size: 12px; color: #d89; }
+
+.empty { text-align: center; color: #666; font-size: 13px; padding: 56px 0; }
+.truncated { text-align: center; color: #777; font-size: 12px; padding: 8px 0; }
+.working { font-size: 12px; color: #777; margin: -6px 0 16px; word-break: break-word; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Pager</h1>
+    <div class="busy">
+      <span class="spinner resting" id="spinner"></span>
+      <span id="busyText">0 working</span>
+    </div>
+    <span class="conn" id="conn">connecting</span>
+  </header>
+  <div class="working" id="working"></div>
+  <div id="board"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var WAIT_MS = 10000;
+  var boardEl = document.getElementById('board');
+  var workingEl = document.getElementById('working');
+  var spinnerEl = document.getElementById('spinner');
+  var busyTextEl = document.getElementById('busyText');
+  var connEl = document.getElementById('conn');
+
+  var lastVersion = null;
+  var backoffMs = 1000;
+  // Session ids the user just acted on. The board is a moment-old view, so a card
+  // is hidden locally until the server's snapshot catches up; otherwise it would
+  // linger and invite a double-send.
+  var acted = Object.create(null);
+
+  function setConn(text, isError) {
+    connEl.textContent = text;
+    connEl.className = isError ? 'conn error' : 'conn';
+  }
+
+  function relTime(iso) {
+    if (!iso) return '';
+    var secs = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+    if (!isFinite(secs)) return '';
+    if (secs < 60) return 'just now';
+    if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+    if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
+    return Math.floor(secs / 86400) + 'd ago';
+  }
+
+  // Every insertion below is textContent or createTextNode. Model-authored text
+  // (session names, option text) must never reach an HTML sink.
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function post(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    }).then(function (res) {
+      if (res.ok) return null;
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        var err = new Error(data.error || ('HTTP ' + res.status));
+        err.status = res.status;
+        throw err;
+      });
+    });
+  }
+
+  function renderCard(entry) {
+    var card = el('div', 'card');
+
+    var head = el('div', 'card-head');
+    head.appendChild(el('span', 'name', entry.name || entry.sessionId.slice(0, 8)));
+    head.appendChild(el('span', 'when', relTime(entry.idleAt)));
+    card.appendChild(head);
+
+    if (entry.cwd) card.appendChild(el('div', 'cwd', entry.cwd));
+
+    var msg = el('span', 'card-msg', '');
+    var buttons = [];
+
+    function lock(disabled) {
+      buttons.forEach(function (b) { b.disabled = disabled; });
+    }
+
+    var options = el('div', 'options');
+    (entry.options || []).forEach(function (optionText) {
+      var btn = el('button', 'option', optionText);
+      btn.type = 'button';
+      buttons.push(btn);
+      btn.addEventListener('click', function () {
+        // Bound to this card's own session id and to this option's own string,
+        // captured in the closure — never re-read from the DOM or from a list
+        // index, so a re-render between paint and click cannot retarget it.
+        msg.textContent = '';
+        lock(true);
+        post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/messages', { prompt: optionText })
+          .then(function () {
+            // The send makes the session busy, which bumps the version and wakes
+            // the parked poll on its own; hide the card now so it cannot be
+            // clicked twice in the gap.
+            acted[entry.sessionId] = true;
+            card.remove();
+          })
+          .catch(function (err) {
+            if (err.status === 409 || err.status === 404) {
+              // Already busy, or gone: either way it does not belong on the
+              // board. Remove it rather than promising a refresh — 409 raises no
+              // bump of its own, so nothing would arrive to clear it.
+              acted[entry.sessionId] = true;
+              card.remove();
+              return;
+            }
+            lock(false);
+            msg.textContent = 'Send failed: ' + err.message;
+          });
+      });
+      options.appendChild(btn);
+    });
+    card.appendChild(options);
+
+    var foot = el('div', 'card-foot');
+    var dismiss = el('button', 'dismiss', 'Dismiss');
+    dismiss.type = 'button';
+    buttons.push(dismiss);
+    dismiss.addEventListener('click', function () {
+      msg.textContent = '';
+      lock(true);
+      post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/observe')
+        .then(function () {
+          // markObserved bumps the version, so the parked poll refreshes itself.
+          acted[entry.sessionId] = true;
+          card.remove();
+        })
+        .catch(function (err) {
+          lock(false);
+          msg.textContent = 'Dismiss failed: ' + err.message;
+        });
+    });
+    foot.appendChild(dismiss);
+    foot.appendChild(msg);
+    card.appendChild(foot);
+
+    return card;
+  }
+
+  function render(view) {
+    var count = view.busyCount || 0;
+    busyTextEl.textContent = count === 1 ? '1 session working' : count + ' sessions working';
+    spinnerEl.className = 'spinner ' + (count > 0 ? 'spinning' : 'resting');
+
+    // Naming who is working answers the other half of "what is happening" — the
+    // count alone cannot tell you whether the thing you care about is moving.
+    var names = (view.busy || []).map(function (b) { return b.name || b.sessionId.slice(0, 8); });
+    workingEl.textContent = names.length ? names.join(' · ') : '';
+
+    var waiting = (view.waiting || []).filter(function (w) { return !acted[w.sessionId]; });
+
+    // Drop stale local suppressions once the server agrees the session is gone
+    // from the board, so acting on it again later still works.
+    var present = Object.create(null);
+    (view.waiting || []).forEach(function (w) { present[w.sessionId] = true; });
+    Object.keys(acted).forEach(function (id) { if (!present[id]) delete acted[id]; });
+
+    boardEl.textContent = '';
+    if (waiting.length === 0) {
+      boardEl.appendChild(el('div', 'empty', count > 0
+        ? 'Nothing waiting on you — work in progress.'
+        : 'Nothing waiting on you.'));
+      return;
+    }
+    waiting.forEach(function (entry) { boardEl.appendChild(renderCard(entry)); });
+    if (view.waitingTruncated) {
+      boardEl.appendChild(el('div', 'truncated', 'More sessions are waiting than shown.'));
+    }
+  }
+
+  var polling = false;
+  function poll(immediate) {
+    if (polling) return;
+    polling = true;
+
+    var url = '/api/pager?wait=' + (immediate ? 0 : WAIT_MS);
+    if (!immediate && lastVersion !== null) url += '&since=' + lastVersion;
+
+    fetch(url)
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (view) {
+        // A version we have already seen means the server answered without
+        // parking — it sheds load past its waiter cap. Re-polling instantly then
+        // would spin hardest exactly when the server is most loaded, so back off.
+        var madeProgress = view.version !== lastVersion;
+        lastVersion = view.version;
+        backoffMs = 1000;
+        setConn('live', false);
+        render(view);
+        polling = false;
+        if (madeProgress || immediate) poll(false);
+        else setTimeout(function () { poll(false); }, 1000);
+      })
+      .catch(function () {
+        // The server may be restarting; back off rather than hammering it, and
+        // say so instead of silently showing a frozen board.
+        setConn('reconnecting', true);
+        polling = false;
+        setTimeout(function () { poll(true); }, backoffMs);
+        backoffMs = Math.min(backoffMs * 2, 15000);
+      });
+  }
+
+  poll(true);
+})();
+</script>
+</body>
+</html>

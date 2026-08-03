@@ -10,6 +10,7 @@
 
 import { EventEmitter } from 'events';
 import { createWatchdog } from './dispatch-watchdog.js';
+import { activityVersion } from './activity-version.js';
 
 export interface ActiveDispatch {
   correlationId: string;
@@ -72,10 +73,16 @@ export class DispatchState extends EventEmitter {
       startedAt: Date.now(),
       depth
     });
+    // Busy/idle transitions change the pager board. Bumped directly rather than
+    // via a new event, which would be inert until someone wired a listener
+    // (spec-pager). Unconditional: unlike the 'idle' emit below this is a level
+    // signal, so suppressing it would hide a real busy change.
+    activityVersion.bump();
   }
 
   end(sessionId: string): void {
-    this.dispatches.delete(sessionId);
+    const wasDispatching = this.dispatches.delete(sessionId);
+    if (wasDispatching) activityVersion.bump();
     // Suppress the idle signal when a continuation is imminent: the edge-triggered
     // consumers (waitForActive.onIdle, restart-manager) must not see this idle. A
     // real idle arrives later — from the continuation's own end(), or from

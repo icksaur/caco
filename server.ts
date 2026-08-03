@@ -35,7 +35,7 @@ import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
 import { createToolRevealTool } from './src/tool-reveal-tool.js';
 import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
-import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes, draftRoutes, memoryRoutes, usageRoutes, idleRoutes } from './src/routes/index.js';
+import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes, draftRoutes, memoryRoutes, usageRoutes, idleRoutes, pagerRoutes } from './src/routes/index.js';
 import { initWatchRoutes } from './src/routes/watch.js';
 import { flushAll as flushAllFileEditsCardLists } from './src/file-edits-store.js';
 import { initFileEditsRoutes, flushFileEditsCardList } from './src/routes/file-edits.js';
@@ -200,6 +200,7 @@ app.use('/api', draftRoutes);
 app.use('/api', memoryRoutes);
 app.use('/api', usageRoutes);
 app.use('/api', idleRoutes);
+app.use('/api', pagerRoutes);
 
 // Server Lifecycle
 

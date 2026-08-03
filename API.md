@@ -872,6 +872,54 @@ evicted idle is not recoverable from the feed.
 so `curl`/`requests`/`Invoke-RestMethod` reach this endpoint with no config; do
 not send an `Origin` header from a script.
 
+## Pager
+
+The board behind `/pager.html`: which sessions are working, and which have
+finished, are still unobserved, and offered `caco-actions` next steps.
+
+- `GET /api/pager?since=<version>&wait=<ms>` — Return the current board, optionally
+  long-polling until it changes (capped at 10s server-side).
+
+Query params:
+- `since` — the `version` you last received. Absent ⇒ return immediately. When it
+  equals the server's version the request parks until something changes; when it is
+  behind (or ahead, after a restart reset the counter) it returns immediately.
+- `wait` — max ms to hang when caught up (0 = return immediately). Capped at 10s.
+
+Returns:
+```json
+{
+  "version": 128,
+  "busyCount": 2,
+  "busy": [{ "sessionId": "uuid", "name": "worker" }],
+  "waiting": [
+    {
+      "sessionId": "uuid",
+      "name": "SSG",
+      "cwd": "/home/you/repo",
+      "kind": "interactive",
+      "idleAt": "2026-08-03T10:00:00.000Z",
+      "options": ["Fix the failing test", "Add a regression test"]
+    }
+  ],
+  "waitingTruncated": false
+}
+```
+
+**Always a full snapshot**, never a delta — so a missed update costs at most 10s of
+staleness and can never leave a client's board wrong. `waiting` is capped at 50
+entries with `waitingTruncated` set rather than silently cut.
+
+A session appears in `waiting` only when all three hold: not busy, unobserved, and
+holding non-empty `responseOptions`. Since only a source-less user turn marks a
+session unobserved, delegates, herd children and scheduled runs never appear —
+though they do count toward `busyCount`.
+
+Act on an entry by POSTing its option text verbatim to
+`POST /api/sessions/:id/messages` with `{ "prompt": "<option text>" }` and no
+`source`; dismiss it with `POST /api/sessions/:id/observe`. Either way it leaves the
+board on the next poll.
+
 **Example — Ralph loop** (retry a prompt in fresh sessions until a sentinel):
 ```bash
 #!/usr/bin/env bash

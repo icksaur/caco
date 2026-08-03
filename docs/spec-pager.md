@@ -206,6 +206,35 @@ no build step and no new esbuild entry point. This is deliberate, not lazy: a ne
 accompanied by DOM tests. All logic worth testing is on the server in
 `pager-view.ts`, where it is cheap to test properly; the page stays a renderer.
 
+**Page layout — three zones, no chrome.** The page is glanced at on a phone, so
+everything that is not information is removed:
+
+1. **A small "live" badge, top centre.** The only persistent chrome. It reports the
+   poll's health (`live` / `reconnecting`), which is the one thing the board itself
+   cannot convey: a frozen board and an up-to-date empty board look identical, so
+   without it the user cannot trust what they are seeing.
+2. **One row per running session**, each with its own throbber and the session's
+   name. Replaces the aggregate count and the single joined line — names run
+   together on one row were unreadable, which was the actual complaint, and a count
+   answers "how many" when the useful question is "which one".
+3. **The action cards**, unchanged.
+
+Removed: the "Pager" heading (the page has one purpose and its title bar already
+says so) and the running count (`busyCount`), which is now unused by the page.
+
+**`busyCount` stays in the snapshot** even though the page stops rendering it. It
+is not merely `busy.length`: `busyCount` is `dispatchState.getActiveCount()` and
+counts every active dispatch, while `busy` is built by filtering the session cache,
+so a dispatch for a session not in the cache appears in one and not the other. The
+API documents both; dropping the count would remove the only signal that such a
+dispatch exists.
+
+**Running rows are ordered in `buildPagerView`, not the page** — by name then
+`sessionId`, for the same reason cards are: the underlying `busy` array follows
+session-cache insertion order, which changes across a restart, and rows that
+reshuffle under a glance are worse than useless. Ordering is a rule, so it lives in
+the pure module with the other rules.
+
 **Acting on an option** is `POST /api/sessions/:id/messages` with `{ prompt: <exact
 option text> }` and no `source` — the plain user-message path
 (`src/routes/session-messages.ts:120`). The session then becomes busy and its
@@ -233,9 +262,10 @@ user does not want to act on would sit on the board until it aged out.
   oracle** — see Acceptance.
 - **Model-derived strings are inserted as text, never as HTML.** Session names and
   option text are untrusted model output.
-- **Ordering is deterministic**: `offerAt` descending, tie-broken by `sessionId`.
-  Two renders of the same state produce the same order, so cards do not jump under
-  the user's cursor.
+- **Ordering is deterministic**, and owned by `buildPagerView`: cards by `offerAt`
+  descending then `sessionId`; running rows by name then `sessionId`. Two renders of
+  the same state produce the same order, so nothing jumps under the user's cursor or
+  reshuffles across a restart.
 - **Dismissal is monotonic.** `pagerDismissedAt` only ever moves forward and is
   never cleared; a card returns only because a NEWER offer outranks it, never
   because state was reset.
@@ -344,8 +374,9 @@ user does not want to act on would sit on the board until it aged out.
     independently constructed expected snapshot (hand-written, not derived from the
     production function), covering ordering, the `MAX_WAITING` cap with
     `waitingTruncated`, and exact option-text passthrough.
-  - **deterministic ordering** — a list with equal `offerAt` values produces a
-    stable `sessionId` tie-break; shuffling the input does not change the output.
+  - **deterministic ordering** — cards with equal `offerAt` fall back to a stable
+    `sessionId` tie-break, and running rows with equal names likewise; shuffling
+    either input does not change the output order.
   - **immediate vs parked** — `since < version` answers without waiting;
     `since === version` parks and resolves on `bump()`; `since > version` (restart)
     answers immediately rather than hanging.
@@ -386,6 +417,8 @@ user does not want to act on would sit on the board until it aged out.
 | 8 | Re-gate on the offer: add `SessionMeta.responseOptionsAt` (stamped with the options) and `pagerDismissedAt`; `needsTriage` drops `isUnobserved` and gains the dismissal watermark + 7-day freshness with injected `now` | `src/session-meta-store.ts`, `src/dispatch-events.ts`, `src/pager-view.ts`, `src/session-manager.ts` (thread the new fields through `listForPager`, drop `isUnobserved`), `tests/unit/pager-view.test.ts` | needsTriage hand table; offer age boundary; offerAt fallback; dismissal watermark | pager-ignores-unobserved; dismissal-monotonic |
 | 9 | `POST /api/sessions/:id/pager-dismiss` writing only `pagerDismissedAt`; drop the unobserved bump; point the page's Dismiss at it | `src/routes/pager.ts`, `src/unobserved-tracker.ts`, `public/pager.html`, `tests/unit/pager-route.test.ts` | dismiss-does-not-observe | pager-ignores-unobserved |
 | 10 | Size type and tap targets for a phone (mobile is the primary consumer) | `public/pager.html` | manual visual signoff | - |
+| 11 | Order the `busy` array by name then `sessionId` in `buildPagerView` | `src/pager-view.ts`, `tests/unit/pager-view.test.ts` | running-row ordering oracle | deterministic-order |
+| 12 | Strip the header to a small centred "live" badge; drop the title and the running count; render one throbber row per running session | `public/pager.html`, `tests/unit/pager-page-static.test.ts` | static assertion that the page no longer reads `busyCount`; **manual visual signoff** | - |
 
 ## Rationale (optional, skippable)
 

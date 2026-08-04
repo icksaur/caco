@@ -1,5 +1,10 @@
 # spec-pager
 
+**Status:** done — all 12 plan rows shipped. As-built in `src/pager-view.ts`
+(read model), `src/activity-version.ts` (long-poll parking), `src/routes/pager.ts`
+(`GET /api/pager`, `POST /api/sessions/:id/pager-dismiss`) and `public/pager.html`.
+Archived; `README.md` and `API.md` are the living documentation.
+
 ## Goals
 
 A standalone page at `/pager.html` where the user triages finished work. It shows
@@ -419,8 +424,7 @@ user does not want to act on would sit on the board until it aged out.
 
 ## Plan
 
-Rows 1-10 are SHIPPED. Rows 11-12 amend that shipped page; read them together
-with row 6 rather than building the count only to strip it.
+All 12 rows are SHIPPED; this table is the as-built record, not remaining work.
 
 | # | Step | Files | Oracle | Invariants |
 |---|------|-------|--------|------------|

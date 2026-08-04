@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readdirSync } from 'fs';
 import { join } from 'path';
 
 const appletToolsFake = vi.hoisted(() => ({
@@ -101,10 +102,31 @@ describe('caco_docs filesystem-backed sections', () => {
   });
 
   it('finds docs by recursive basename fallback', async () => {
-    const out = await tool().handler({ section: 'spec-backend-coverage-80' });
+    // Must use a doc in a SUBDIRECTORY: a doc sitting directly in docs/ resolves
+    // via the docs/<name> candidate and never reaches the fallback, so it cannot
+    // witness this behaviour. Discovered from disk so archiving a doc keeps the
+    // test honest instead of pinning a filename that may itself move.
+    const subdirDoc = readdirSync(join(process.cwd(), 'docs'), { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .flatMap(dir => readdirSync(join(process.cwd(), 'docs', dir.name))
+        .filter(f => f.endsWith('.md'))
+        .map(f => ({ dir: dir.name, file: f })))
+      .find(Boolean);
+    expect(subdirDoc, 'no doc in a docs/ subdirectory to exercise the fallback').toBeDefined();
 
-    expect(out.textResultForLlm).toContain('docs/spec-backend-coverage-80.md');
-    expect(out.textResultForLlm).toContain('# spec-backend-coverage-80');
+    const out = await tool().handler({ section: subdirDoc!.file.replace(/\.md$/, '') });
+
+    expect(out.textResultForLlm).toContain(`docs/${subdirDoc!.dir}/${subdirDoc!.file}`);
+  });
+
+  it('keeps an archived spec reachable by its short name', async () => {
+    // spec-hygiene-process states this as an invariant: relocating a doc into
+    // guides/, research/ or archive/ must never break a by-name read. Code
+    // comments still cite (spec-pager) after it was archived.
+    const out = await tool().handler({ section: 'spec-pager' });
+
+    expect(out.textResultForLlm).toContain('docs/archive/spec-pager.md');
+    expect(out.textResultForLlm).toContain('# spec-pager');
   });
 
   it('reports tried paths and available docs for a missing section', async () => {

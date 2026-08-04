@@ -124,6 +124,16 @@ export function needsTriage(input: PagerSessionInput, now: number): boolean {
   return dismissedAt === null || offerAt > dismissedAt;
 }
 
+/** Running rows: by the same string the page displays, then by session id.
+ *  The `busy` array follows session-cache insertion order, which changes across a
+ *  restart, and rows that reshuffle under a glance are worse than useless. */
+function compareBusy(a: PagerSessionInput, b: PagerSessionInput): number {
+  const an = a.name || a.sessionId;
+  const bn = b.name || b.sessionId;
+  if (an !== bn) return an < bn ? -1 : 1;
+  return a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0;
+}
+
 /** Newest offer first, tie-broken by session id so two renders of one state agree
  *  and cards never reorder under the user's cursor. */
 function compareWaiting(a: PagerSessionInput, b: PagerSessionInput): number {
@@ -143,6 +153,7 @@ export function buildPagerView(
 ): PagerView {
   const busy = inputs
     .filter(i => i.isBusy)
+    .sort(compareBusy)
     .map(i => ({ sessionId: i.sessionId, name: i.name }));
 
   const triaged = inputs.filter(i => needsTriage(i, now)).sort(compareWaiting);

@@ -176,6 +176,24 @@ describe('buildPagerView ordering', () => {
     expect(reversed.waiting.map(w => w.sessionId)).toEqual(forward.waiting.map(w => w.sessionId));
   });
 
+  it('orders running rows deterministically by displayed name then id', () => {
+    // The busy array follows session-cache insertion order, so without a sort the
+    // rows reshuffle across a restart. Sorting on `name || sessionId` matches what
+    // the page actually shows, so a nameless session does not sort under ''.
+    const mk = (sessionId: string, name: string) => input({ sessionId, name, isBusy: true, responseOptions: undefined });
+    const forward = buildPagerView([mk('s-3', 'zeta'), mk('s-1', 'alpha'), mk('s-2', '')], 3, 1, NOW);
+    const reversed = buildPagerView([mk('s-2', ''), mk('s-1', 'alpha'), mk('s-3', 'zeta')], 3, 1, NOW);
+
+    expect(forward.busy.map(b => b.sessionId)).toEqual(['s-1', 's-2', 's-3']);
+    expect(reversed.busy.map(b => b.sessionId)).toEqual(forward.busy.map(b => b.sessionId));
+  });
+
+  it('tie-breaks running rows with identical names on session id', () => {
+    const mk = (sessionId: string) => input({ sessionId, name: 'same', isBusy: true, responseOptions: undefined });
+    const view = buildPagerView([mk('s-c'), mk('s-a'), mk('s-b')], 3, 1, NOW);
+    expect(view.busy.map(b => b.sessionId)).toEqual(['s-a', 's-b', 's-c']);
+  });
+
   it('orders newest offer first', () => {
     const view = buildPagerView([
       input({ sessionId: 'mid', responseOptionsAt: ago(2 * DAY) }),

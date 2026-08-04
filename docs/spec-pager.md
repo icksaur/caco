@@ -222,18 +222,23 @@ everything that is not information is removed:
 Removed: the "Pager" heading (the page has one purpose and its title bar already
 says so) and the running count (`busyCount`), which is now unused by the page.
 
-**`busyCount` stays in the snapshot** even though the page stops rendering it. It
-is not merely `busy.length`: `busyCount` is `dispatchState.getActiveCount()` and
-counts every active dispatch, while `busy` is built by filtering the session cache,
-so a dispatch for a session not in the cache appears in one and not the other. The
-API documents both; dropping the count would remove the only signal that such a
-dispatch exists.
+**`busyCount` stays in the snapshot** even though the page stops rendering it —
+but not because it carries information `busy` lacks. It does not: the only two
+`dispatchState.start()` callers (the message path and `archiveCore`) both operate
+on a session already in `sessionCache`, and the one window where the two diverge
+(inside `archiveCore`, between the cache delete and the dispatch end) contains no
+`await`, so no route handler can build a snapshot inside it. In every observable
+snapshot `busyCount === busy.length`. It stays because it is a shipped, documented
+API field that out-of-process readers may consume, and removing it would be a
+gratuitous breaking change for no gain. Nothing observable is lost by dropping it
+from the page.
 
-**Running rows are ordered in `buildPagerView`, not the page** — by name then
-`sessionId`, for the same reason cards are: the underlying `busy` array follows
-session-cache insertion order, which changes across a restart, and rows that
-reshuffle under a glance are worse than useless. Ordering is a rule, so it lives in
-the pure module with the other rules.
+**Running rows are ordered in `buildPagerView`, not the page** — by
+`name || sessionId` then `sessionId`, for the same reason cards are: the underlying
+`busy` array follows session-cache insertion order, which changes across a restart,
+and rows that reshuffle under a glance are worse than useless. Sorting on the same
+string the page displays keeps a nameless session from sorting under `''` while
+showing an id. Ordering is a rule, so it lives in the pure module with the others.
 
 **Acting on an option** is `POST /api/sessions/:id/messages` with `{ prompt: <exact
 option text> }` and no `source` — the plain user-message path
@@ -305,6 +310,12 @@ user does not want to act on would sit on the board until it aged out.
 - **A malformed timestamp must not admit a card.** An unparseable `offerAt` is
   treated as unknown age and therefore NOT fresh, matching the reaper's existing
   "unknown ⇒ not eligible" stance: on missing information, never surface.
+- **An archive shows as a running row.** `archiveCore` holds a dispatch, so a
+  session being archived is `isBusy` until its cache entry is dropped. It used to
+  be an anonymous +1 in the count; per-session rows promote it to a named,
+  throbbing row — a maintenance op that reads as work. Pre-existing and rare
+  (seconds), accepted rather than special-cased, since suppressing it would mean
+  the page knowing about dispatch reasons.
 - **Empty board.** With nothing waiting, the page shows an explicit resting state
   ("nothing waiting") rather than a blank panel, alongside a busy indicator reading
   zero. This is the state the board is in most of the time and must not look broken
@@ -341,7 +352,8 @@ user does not want to act on would sit on the board until it aged out.
 ## Acceptance
 
 - Observable: with the server running, open `http://localhost:53000/pager.html`.
-  While a session is working the busy count and indicator are live. When a session
+  While a session is working, one throbber row per running session names it, and
+  the "live" badge sits small and centred above them. When a session
   finishes a turn ending in a `caco-actions` block, a card appears within ~1s with
   no reload, showing the session name and every option in full. Clicking an option
   sends it and the card disappears; the target session starts working. Dismiss
@@ -401,9 +413,14 @@ user does not want to act on would sit on the board until it aged out.
     script; the deliberate trade is to keep the page trivial enough to eyeball and to
     hold every decidable rule server-side. Signoff must exercise: an option
     containing `<script>` and backticks, an option with non-ASCII punctuation, and a
-    click made immediately after a board re-render.
+    click made immediately after a board re-render. Also, since three of the four
+    layout changes have no automated oracle: the badge is small and top-centre, no
+    title is present, and each running session gets its own readable throbber row.
 
 ## Plan
+
+Rows 1-10 are SHIPPED. Rows 11-12 amend that shipped page; read them together
+with row 6 rather than building the count only to strip it.
 
 | # | Step | Files | Oracle | Invariants |
 |---|------|-------|--------|------------|
@@ -418,7 +435,7 @@ user does not want to act on would sit on the board until it aged out.
 | 9 | `POST /api/sessions/:id/pager-dismiss` writing only `pagerDismissedAt`; drop the unobserved bump; point the page's Dismiss at it | `src/routes/pager.ts`, `src/unobserved-tracker.ts`, `public/pager.html`, `tests/unit/pager-route.test.ts` | dismiss-does-not-observe | pager-ignores-unobserved |
 | 10 | Size type and tap targets for a phone (mobile is the primary consumer) | `public/pager.html` | manual visual signoff | - |
 | 11 | Order the `busy` array by name then `sessionId` in `buildPagerView` | `src/pager-view.ts`, `tests/unit/pager-view.test.ts` | running-row ordering oracle | deterministic-order |
-| 12 | Strip the header to a small centred "live" badge; drop the title and the running count; render one throbber row per running session | `public/pager.html`, `tests/unit/pager-page-static.test.ts` | static assertion that the page no longer reads `busyCount`; **manual visual signoff** | - |
+| 12 | Strip the header to a small centred "live" badge; drop the title and the running count; render one throbber row per running session. The page reads `busyCount` in THREE places — the count text, the spinner state, and the two-state empty message — so all three must move to `(view.busy \|\| []).length` or be removed, or the static oracle passes while the empty-state distinction silently regresses | `public/pager.html`, `README.md` (the Pager section still promises "how many sessions are working"), `tests/unit/pager-page-static.test.ts` | static assertion that the page no longer reads `busyCount`; **manual visual signoff** (badge small + top-centre, no title, one readable throbber row per running session) | - |
 
 ## Rationale (optional, skippable)
 

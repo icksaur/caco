@@ -36,4 +36,19 @@ describe('public/pager.html', () => {
   it('sends no source field, so actions post as plain user messages', () => {
     expect(page).not.toContain('source:');
   });
+
+  it('renders running sessions as rows, not as a count', () => {
+    // "How many are working" is the question the page used to answer; the useful
+    // one is "which". Reading busyCount again would regress that, and it would
+    // also silently take the two-state empty message with it, since that branch
+    // used to read the same field.
+    expect(page).not.toContain('busyCount');
+    expect(page).toContain('run-row');
+    expect(page).toContain('work in progress');
+  });
+
+  it('carries no title and centres the status badge', () => {
+    expect(page).not.toContain('<h1>');
+    expect(page).toContain('justify-content: center');
+  });
 });

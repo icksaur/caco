@@ -122,7 +122,8 @@ Open `/portal.html` to aggregate multiple Caco instances in a single view. Each 
 
 Open `/pager.html` to triage finished work in one place, away from the main UI.
 
-- **Busy indicator** shows how many sessions are working right now, and names them.
+- **One row per running session**, each with its own indicator, so you can read which
+  session is working rather than just how many are.
 - **A card appears** for every session that has stopped and is holding an unhandled
   offer — its last message ended with a `caco-actions` block — showing the session
   name and the full text of every action it offered.
@@ -139,8 +140,10 @@ Open `/pager.html` to triage finished work in one place, away from the main UI.
   which holds for up to 10s and returns the whole board whenever it changes. Because
   every response is a complete snapshot, a missed update costs at most 10s of
   staleness and never leaves the board wrong.
-- Delegates, herd children and scheduled runs raise cards like anything else if they
-  end a turn with a `caco-actions` block; they also count toward the busy total.
+- **Herd children and swarm sessions raise no cards.** Each is driven and drained by
+  the agent that spawned it, so it is never waiting on a human. Scheduled runs *do*
+  raise cards — a job that finished overnight with nobody watching is the case the
+  pager exists for. Every running session shows a row regardless.
 
 ### Scheduled Sessions
 

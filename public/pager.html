@@ -35,11 +35,28 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 .option:hover:not(:disabled) { background: #333; border-color: #007acc; }
 .option:disabled { opacity: 0.5; cursor: default; }
 
+/* The well borrows .option's metrics so it reads as one more item in the stack. */
+.well-wrap { margin-top: 10px; }
+.well {
+  display: block; width: 100%; box-sizing: border-box;
+  background: #262626; color: #d4d4d4; border: 1px solid #3a3a3a; border-radius: 6px;
+  padding: 14px 14px; font-size: 16px; font-family: inherit; line-height: 1.5;
+  resize: none; overflow: hidden;
+}
+.well::placeholder { color: #6e6e6e; }
+.well:focus { outline: none; border-color: #007acc; }
+.well:disabled { opacity: 0.5; }
+
 .card-foot { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
-.dismiss { background: none; border: 1px solid #3a3a3a; color: #999; font-size: 14px; cursor: pointer; font-family: inherit; padding: 9px 16px; border-radius: 6px; }
+.dismiss, .send { background: none; border: 1px solid #3a3a3a; color: #999; font-size: 14px; cursor: pointer; font-family: inherit; padding: 9px 16px; border-radius: 6px; }
 .dismiss:hover:not(:disabled) { color: #bbb; text-decoration: underline; }
-.dismiss:disabled { opacity: 0.5; cursor: default; }
-.card-msg { font-size: 14px; color: #d89; }
+.dismiss:disabled, .send:disabled { opacity: 0.5; cursor: default; }
+/* Right-aligned opposite Dismiss, and accented as the affirmative action. */
+.send { margin-left: auto; color: #cfe6f5; border-color: #007acc; }
+.send:hover:not(:disabled) { background: #123; }
+.send[hidden] { display: none; }
+/* Its own line: a long error between two buttons overflows a narrow screen. */
+.card-msg { font-size: 14px; color: #d89; margin-top: 10px; }
 
 .empty { text-align: center; color: #666; font-size: 15px; padding: 56px 0; }
 .truncated { text-align: center; color: #777; font-size: 13px; padding: 8px 0; }
@@ -73,6 +90,26 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
   // is hidden locally until the server's snapshot catches up; otherwise it would
   // linger and invite a double-send.
   var acted = Object.create(null);
+  // In-progress text per session, so a board rebuild — which happens whenever ANY
+  // session changes state — cannot destroy what the user is writing. Deliberately
+  // NOT pruned like `acted`: that map is a suppression and must expire, whereas a
+  // session briefly going busy from another client would otherwise delete text
+  // this user is still typing. Cleared only when the user resolves the card.
+  var drafts = Object.create(null);
+  // A long-lived tab must not accumulate forever; key order tracks edit recency.
+  var DRAFT_CAP = 20;
+
+  function setDraft(sessionId, text) {
+    delete drafts[sessionId];
+    if (!text) return;
+    drafts[sessionId] = text;
+    var keys = Object.keys(drafts);
+    if (keys.length > DRAFT_CAP) delete drafts[keys[0]];
+  }
+
+  function clearDraft(sessionId) {
+    delete drafts[sessionId];
+  }
 
   function setConn(text, isError) {
     connEl.textContent = text;
@@ -130,52 +167,106 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       buttons.forEach(function (b) { b.disabled = disabled; });
     }
 
+    // One path for every way of sending, because an option click and a Send are
+    // the same act with a different string. Bound to this card's own session id
+    // and to its own text, captured in the closure — never re-read from the DOM
+    // or from a list index, so a re-render between paint and click cannot
+    // retarget it.
+    function submit(text) {
+      msg.textContent = '';
+      lock(true);
+      post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/messages', { prompt: text })
+        .then(function () {
+          // The send makes the session busy, which bumps the version and wakes
+          // the parked poll on its own; hide the card now so it cannot be
+          // clicked twice in the gap.
+          clearDraft(entry.sessionId);
+          acted[entry.sessionId] = true;
+          card.remove();
+        })
+        .catch(function (err) {
+          if (err.status === 409 || err.status === 404) {
+            // Already busy, or gone: either way it does not belong on the
+            // board. Remove it rather than promising a refresh — 409 raises no
+            // bump of its own, so nothing would arrive to clear it. The draft
+            // stays: the message was NOT delivered, so discarding the text here
+            // would destroy typing over something the user did not do.
+            acted[entry.sessionId] = true;
+            card.remove();
+            return;
+          }
+          lock(false);
+          msg.textContent = 'Send failed: ' + err.message;
+        });
+    }
+
     var options = el('div', 'options');
     (entry.options || []).forEach(function (optionText) {
       var btn = el('button', 'option', optionText);
       btn.type = 'button';
       buttons.push(btn);
-      btn.addEventListener('click', function () {
-        // Bound to this card's own session id and to this option's own string,
-        // captured in the closure — never re-read from the DOM or from a list
-        // index, so a re-render between paint and click cannot retarget it.
-        msg.textContent = '';
-        lock(true);
-        post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/messages', { prompt: optionText })
-          .then(function () {
-            // The send makes the session busy, which bumps the version and wakes
-            // the parked poll on its own; hide the card now so it cannot be
-            // clicked twice in the gap.
-            acted[entry.sessionId] = true;
-            card.remove();
-          })
-          .catch(function (err) {
-            if (err.status === 409 || err.status === 404) {
-              // Already busy, or gone: either way it does not belong on the
-              // board. Remove it rather than promising a refresh — 409 raises no
-              // bump of its own, so nothing would arrive to clear it.
-              acted[entry.sessionId] = true;
-              card.remove();
-              return;
-            }
-            lock(false);
-            msg.textContent = 'Send failed: ' + err.message;
-          });
-      });
+      btn.addEventListener('click', function () { submit(optionText); });
       options.appendChild(btn);
     });
     card.appendChild(options);
 
     var foot = el('div', 'card-foot');
+    var send = el('button', 'send', 'Send');
+    send.type = 'button';
+
+    // The well is defensive about entry.options: the server only ever lists a
+    // session holding an offer, so a card without options cannot reach the board.
+    if ((entry.options || []).length > 0) {
+      var wrap = el('div', 'well-wrap');
+      var well = el('textarea', 'well');
+      well.rows = 1;
+      well.placeholder = 'something else \u2026';
+      well.setAttribute('aria-label', 'Send something else to this session');
+      buttons.push(well);
+
+      function grow() {
+        // jsdom and any pre-layout paint report 0 here; leave the height alone
+        // rather than collapsing the control to nothing.
+        well.style.height = 'auto';
+        if (well.scrollHeight > 0) well.style.height = well.scrollHeight + 'px';
+      }
+
+      function syncSend() {
+        send.hidden = well.value.trim().length === 0;
+      }
+
+      well.value = drafts[entry.sessionId] || '';
+      syncSend();
+
+      well.addEventListener('input', function () {
+        setDraft(entry.sessionId, well.value);
+        syncSend();
+        grow();
+      });
+
+      send.addEventListener('click', function () {
+        var text = well.value.trim();
+        if (!text) return;
+        submit(text);
+      });
+
+      wrap.appendChild(well);
+      card.appendChild(wrap);
+    } else {
+      send.hidden = true;
+    }
+
     var dismiss = el('button', 'dismiss', 'Dismiss');
     dismiss.type = 'button';
     buttons.push(dismiss);
+    buttons.push(send);
     dismiss.addEventListener('click', function () {
       msg.textContent = '';
       lock(true);
       post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/pager-dismiss')
         .then(function () {
           // The dismissal bumps the version, so the parked poll refreshes itself.
+          clearDraft(entry.sessionId);
           acted[entry.sessionId] = true;
           card.remove();
         })
@@ -185,8 +276,9 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
         });
     });
     foot.appendChild(dismiss);
-    foot.appendChild(msg);
+    foot.appendChild(send);
     card.appendChild(foot);
+    card.appendChild(msg);
 
     return card;
   }

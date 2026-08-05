@@ -37,8 +37,7 @@ describe('public/pager.html', () => {
     expect(page).not.toContain('source:');
   });
 
-  it('renders running sessions as rows, not as a count', () => {
-    // "How many are working" is the question the page used to answer; the useful
+  it('renders running sessions as rows, not as a count', () => {    // "How many are working" is the question the page used to answer; the useful
     // one is "which". Reading busyCount again would regress that, and it would
     // also silently take the two-state empty message with it, since that branch
     // used to read the same field.
@@ -50,5 +49,14 @@ describe('public/pager.html', () => {
   it('carries no title and centres the status badge', () => {
     expect(page).not.toContain('<h1>');
     expect(page).toContain('justify-content: center');
+  });
+
+  it('keeps the free-text well featureless', () => {
+    // The well must not grow into a chat client: reaching for the chat form
+    // would drag the popup/router stack into a page that is build-free on
+    // purpose. Pin the absence of the machinery, not just the intent.
+    for (const feature of ['chat-form', 'slashCommand', 'mention', 'autocomplete', 'bundle.js']) {
+      expect(page).not.toContain(feature);
+    }
   });
 });

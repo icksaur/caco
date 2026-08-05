@@ -130,6 +130,10 @@ Open `/pager.html` to triage finished work in one place, away from the main UI.
 - **Click an action** to send that exact text back to that session and let it
   continue; the card leaves the board. **Dismiss** takes the card off the board
   without sending anything.
+- **Or write your own.** Each card has a *something else …* well below its options;
+  typing in it reveals **Send**, which delivers your text just like an option. Your
+  typing survives the board's background refreshes and is only discarded when you
+  send or dismiss.
 - **The pager is independent of the unobserved dot.** It does not care whether you
   or another machine has viewed the session, and dismissing here does not clear the
   dot anywhere. Its unit of work is the *offer*, not the session: dismiss hides the

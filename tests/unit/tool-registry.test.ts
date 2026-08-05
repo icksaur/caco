@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { filterDisabledTools, parseDisabledToolNames, parseExcludedBuiltins, DEFAULT_EXCLUDED_BUILTINS, isDeferEligibleCacoTool, NEVER_DEFER_CACO_TOOLS, isPseudoServer } from '../../src/tool-registry.js';
+import { filterDisabledTools, parseDisabledToolNames, parseExcludedBuiltins, DEFAULT_EXCLUDED_BUILTINS, isDeferEligibleCacoTool, isDeferEligibleCacoEntry, NEVER_DEFER_CACO_TOOLS, isPseudoServer } from '../../src/tool-registry.js';
 
 interface FakeTool { name: string; }
 const t = (name: string): FakeTool => ({ name });
@@ -81,6 +81,24 @@ describe('isDeferEligibleCacoTool', () => {
   it('a hard-disabled tool is never eligible — it already costs zero', () => {
     expect(isDeferEligibleCacoTool('register_mcp_server', { hardDisabled: true })).toBe(false);
     expect(isDeferEligibleCacoTool('register_mcp_server', { hardDisabled: false })).toBe(true);
+  });
+});
+
+describe('isDeferEligibleCacoEntry', () => {
+  const entry = (over: Partial<{ name: string; hardDisabled: boolean; origin: 'builtin' | 'extension' }> = {}) =>
+    ({ name: 'caco_herd', hardDisabled: false, origin: 'builtin' as const, ...over });
+
+  it('never defers an extension tool, whatever its name', () => {
+    // The name-only predicate cannot see this, which is exactly why the applet
+    // badge and the enumeration must both route through the entry form.
+    expect(isDeferEligibleCacoEntry(entry({ name: 'my_plugin_tool', origin: 'extension' }))).toBe(false);
+    expect(isDeferEligibleCacoTool('my_plugin_tool')).toBe(true);
+  });
+
+  it('agrees with the name predicate for built-ins', () => {
+    expect(isDeferEligibleCacoEntry(entry())).toBe(true);
+    expect(isDeferEligibleCacoEntry(entry({ name: 'caco_enable_tools' }))).toBe(false);
+    expect(isDeferEligibleCacoEntry(entry({ hardDisabled: true }))).toBe(false);
   });
 });
 

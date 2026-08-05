@@ -155,6 +155,23 @@ export function isDeferEligibleCacoTool(name: string, opts?: { hardDisabled?: bo
 }
 
 /**
+ * THE defer-eligibility verdict for a Caco catalog entry — the only form callers
+ * should use, because it folds in the `origin` filter that a name-plus-flag check
+ * cannot see. Extension tools are never eligible: a fixed name blocklist cannot
+ * express a protection for a dynamic third-party tool set.
+ *
+ * Both the enumeration (`computeStaleDeferCandidates`) and the applet's
+ * `wouldDefer` badge route through this, so the view cannot disagree with
+ * behaviour. Reaching for `isDeferEligibleCacoTool` directly on a catalog entry
+ * is how they drifted apart before.
+ */
+export function isDeferEligibleCacoEntry(
+  entry: { name: string; hardDisabled: boolean; origin: 'builtin' | 'extension' },
+): boolean {
+  return entry.origin === 'builtin' && isDeferEligibleCacoTool(entry.name, { hardDisabled: entry.hardDisabled });
+}
+
+/**
  * Synthetic servers in the mcp-servers applet ("Caco", "Built-in") — not real MCP
  * servers. They have no learned keys, so manual defer against them is inert; the
  * name would still enter persisted state and render a misleading deferred badge.

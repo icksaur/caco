@@ -12,7 +12,7 @@ import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
 import { sessionManager } from '../session-manager.js';
-import { excludedBuiltinNames, isDeferEligibleCacoTool, isPseudoServer } from '../tool-registry.js';
+import { excludedBuiltinNames, isPseudoServer } from '../tool-registry.js';
 import { builtinKey, type ToolKey } from '../tool-key.js';
 import { lookupMcpKey, learnFromMetadata } from '../tool-key-registry.js';
 import { buildToolCatalog } from '../tool-catalog.js';
@@ -367,7 +367,7 @@ export function buildMcpServerPayload(
         tokenCost: cacoCost,
         knownTokenCost: cacoCost,
         state,
-        ...usageFields(t.key, isDeferEligibleCacoTool(t.name, { hardDisabled: t.hardDisabled })),
+        ...usageFields(t.key, t.deferEligible === true),
       };
     }),
   };

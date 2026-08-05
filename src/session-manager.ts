@@ -33,7 +33,7 @@ import { buildPagerView, type PagerSessionInput } from './pager-view.js';
 import { planSessionRemoval, type RemovalPlan } from './session-removal.js';
 import { activityVersion } from './activity-version.js';
 import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys } from './session-tool-state.js';
-import { excludedBuiltinNames, isDeferEligibleCacoTool } from './tool-registry.js';
+import { excludedBuiltinNames, isDeferEligibleCacoEntry } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
 import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-defer-store.js';
 import { getNowActiveSeconds, getLastUsedActiveSeconds, stampToolUsage, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS, COLD_RESUME_STALE_MS } from './tool-usage-store.js';
@@ -2371,6 +2371,9 @@ export class SessionManager {
     const catalog = buildToolCatalog({
       caco: this.getCacoToolCatalog().map(c => ({
         name: c.name, description: c.description, hardDisabled: c.hardDisabled, parameters: c.parameters,
+        // Decided here, where the full entry (incl. builtin-vs-extension) is in hand;
+        // the payload only reads it. See isDeferEligibleCacoEntry.
+        deferEligible: isDeferEligibleCacoEntry(c),
       })),
       builtins: [...listedBuiltins, ...bareExcluded],
       mcp,
@@ -2519,7 +2522,7 @@ export class SessionManager {
     // CacoToolCatalogEntry.origin); an empty/unregistered catalog yields no Caco
     // candidates, which over-sends rather than over-hides.
     const cacoCandidates = this.getCacoToolCatalog()
-      .filter(c => c.origin === 'builtin' && isDeferEligibleCacoTool(c.name, { hardDisabled: c.hardDisabled }))
+      .filter(c => isDeferEligibleCacoEntry(c))
       .map(c => cacoKey(c.name));
     const nowActiveSeconds = getNowActiveSeconds();
     const lastUsed = getLastUsedActiveSeconds();

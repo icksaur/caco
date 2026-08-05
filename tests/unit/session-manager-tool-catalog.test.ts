@@ -62,4 +62,30 @@ describe('getToolCatalog — learns keys from the TARGET session, not the most-r
     expect(mcpTools[0].key).toBe('github-list_issues');
     expect(mcpTools[0].server).toBe('github');
   });
+
+  it('decides Caco defer-eligibility during projection, where builtin-vs-extension is still known', async () => {
+    // CatalogTool cannot recover the builtin/extension distinction — it collapses
+    // every Caco source to origin:'caco' — so the verdict has to be computed here.
+    // Re-deriving it downstream from name+hardDisabled marked extension tools
+    // "would defer" when enumeration would never defer them.
+    const { SessionManager } = await import('../../src/session-manager.js');
+    const manager = new SessionManager();
+    (manager as unknown as { listBuiltinTools: () => Promise<unknown[]> }).listBuiltinTools = async () => [];
+    (manager as unknown as { getCacoToolCatalog: () => unknown[] }).getCacoToolCatalog = () => [
+      { name: 'caco_herd', description: 'h', hardDisabled: false, origin: 'builtin' },
+      { name: 'caco_enable_tools', description: 'e', hardDisabled: false, origin: 'builtin' },
+      { name: 'register_mcp_server', description: 'r', hardDisabled: true, origin: 'builtin' },
+      { name: 'my_plugin_tool', description: 'p', hardDisabled: false, origin: 'extension' },
+    ];
+    const active = (manager as unknown as { activeSessions: Map<string, unknown> }).activeSessions;
+    active.set('A', { cwd: '/x', session: fakeSession([]), toolFactory: () => [], excludedTools: [], lastUsedAt: 1000 });
+
+    const { catalog } = await manager.getToolCatalog('A');
+    const verdict = (name: string) => [...catalog.values()].find(t => t.name === name)?.deferEligible;
+
+    expect(verdict('caco_herd')).toBe(true);
+    expect(verdict('caco_enable_tools')).toBe(false);
+    expect(verdict('register_mcp_server')).toBe(false);
+    expect(verdict('my_plugin_tool')).toBe(false);
+  });
 });

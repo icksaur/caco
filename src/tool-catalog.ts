@@ -30,6 +30,11 @@ export interface CatalogTool {
   excludable: boolean;
   /** DEFAULT_DISABLED_TOOLS (filtered pre-registration) → not live-revealable. */
   hardDisabled: boolean;
+  /** Caco tools only: the defer-eligibility verdict, decided by the projector that
+   *  holds the full catalog entry (`isDeferEligibleCacoEntry`) rather than re-derived
+   *  from name + hardDisabled here, which cannot see builtin-vs-extension. Absent for
+   *  builtin/MCP tools, which have their own eligibility rules. */
+  deferEligible?: boolean;
   parameters?: Record<string, unknown>;
   /** Builtin tools may carry per-tool instructions (part of their wire definition,
    *  so they count toward the token estimate). */
@@ -39,7 +44,7 @@ export interface CatalogTool {
 export type ToolCatalog = ReadonlyMap<ToolKey, CatalogTool>;
 
 export interface CatalogSources {
-  caco: Array<{ name: string; description: string; hardDisabled: boolean; parameters?: Record<string, unknown> }>;
+  caco: Array<{ name: string; description: string; hardDisabled: boolean; parameters?: Record<string, unknown>; deferEligible?: boolean }>;
   builtins: Array<{ name: string; description: string; parameters?: Record<string, unknown>; instructions?: string }>;
   /** MCP tools carry a `key` and `excludable`. When the model-facing key has been learned
    *  (from the tool-key-registry) `key` is that real exclusion string and `excludable` is
@@ -55,7 +60,7 @@ export function buildToolCatalog(sources: CatalogSources): ToolCatalog {
     if (!map.has(t.key)) map.set(t.key, t);
   };
   for (const c of sources.caco) {
-    add({ key: cacoKey(c.name), name: c.name, description: c.description, origin: 'caco', excludable: true, hardDisabled: c.hardDisabled, parameters: c.parameters });
+    add({ key: cacoKey(c.name), name: c.name, description: c.description, origin: 'caco', excludable: true, hardDisabled: c.hardDisabled, parameters: c.parameters, deferEligible: c.deferEligible });
   }
   for (const b of sources.builtins) {
     const name = b.name.startsWith('builtin:') ? b.name.slice('builtin:'.length) : b.name;

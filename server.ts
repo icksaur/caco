@@ -267,6 +267,9 @@ async function start(): Promise<void> {
     // Capture the full Caco tool catalog (pre-filter, incl. hard-disabled) once, for
     // the mcp-servers applet. See docs/spec-tool-reveal.md Phase A.
     if (sessionManager.getCacoToolCatalog().length === 0) {
+      // Extension tools are catalogued but never auto-deferred: a fixed name
+      // blocklist cannot protect a dynamic, third-party tool set.
+      const extensionNames = new Set((extensionTools as Array<{ name: string }>).map(t => t.name));
       sessionManager.setCacoToolCatalog(
         (allTools as Array<{ name: string; description?: string; parameters?: unknown }>).map(t => {
           let parameters: Record<string, unknown> | undefined;
@@ -279,6 +282,7 @@ async function start(): Promise<void> {
             name: t.name,
             description: t.description ?? '',
             hardDisabled: disabledTools.has(t.name.toLowerCase()),
+            origin: extensionNames.has(t.name) ? 'extension' as const : 'builtin' as const,
             parameters,
           };
         }),

@@ -113,29 +113,56 @@ export function excludedBuiltinNames(): string[] {
 }
 
 /**
- * Caco `defineTool` tools that cold-resume auto-defer (Phase C) MAY hide. A fixed
- * allowlist keyed by tool name — everything NOT listed is always kept, so the
- * escape-hatch (`caco_docs`/`caco_enable_tools`) and the session/agent/memory/
- * workflow/index/retrieve tools can never auto-defer themselves out of reach.
+ * Built-in Caco tools that may NEVER be auto-deferred. Everything else is
+ * deferrable BY DEFAULT — the inversion of the former `DEFER_ELIGIBLE_CACO_TOOLS`
+ * allowlist (see docs/spec-defer-default-inversion.md).
  *
- * Contents = the browser tools (`src/browser-tools.ts`), the applet-state tools
- * (`src/applet-tools.ts`), and the surface tools (`src/surface-tools.ts`). Kept in
- * sync with those three modules by hand (spec-tool-reveal C1). `restart_server`
- * lives in applet-tools.ts but is deliberately EXCLUDED: it's a privileged
- * control-plane action used mid-workflow, and keeping it always-on avoids an
- * enable round-trip before a restart at the cost of a single always-sent tool.
+ * The default is the whole point. An allowlist of what MAY defer means forgetting
+ * to list a new tool costs permanent, silent, per-turn rent in every session; a
+ * blocklist of what may NOT means forgetting costs one recoverable enable
+ * round-trip. Eight tools became permanently always-sent under the old default,
+ * by omission rather than decision.
+ *
+ * Each entry needs a reason that outlives a usage argument:
+ *  - `caco_enable_tools` — the only path back; deferring it is unrecoverable.
+ *  - `caco_run_workflow` — the shell; used continuously.
+ *  - `retrieve_output`   — shaped output leaves an `out_…` handle in the
+ *    transcript that only this tool redeems, so deferring it strands a promise
+ *    already made to the model.
+ *  - `caco_docs` — a DISCOVERY tool. Usage-driven deferral is self-reinforcing
+ *    for these (deferred ⇒ invisible ⇒ unused ⇒ stale forever), so its idle age
+ *    measures the deferral, not disuse. A judgment call, not a proof: the
+ *    `caco_enable_tools` listing does keep deferred tools nominally discoverable.
  */
-export const DEFER_ELIGIBLE_CACO_TOOLS: string[] = [
+export const NEVER_DEFER_CACO_TOOLS: string[] = [
+  'caco_enable_tools',
+  'caco_run_workflow',
+  'retrieve_output',
   'caco_docs',
-  'caco_browser_ensure_running', 'caco_browser_navigate', 'caco_browser_snapshot',
-  'caco_browser_screenshot', 'caco_browser_action', 'caco_browser_eval',
-  'get_applet_state', 'set_applet_state',
-  'caco_get_surface', 'caco_get_surface_changes', 'caco_mutate_surface', 'caco_set_surface_style',
 ];
 
-/** Whether a Caco tool (by name) is eligible for cold-resume auto-defer. */
-export function isDeferEligibleCacoTool(name: string): boolean {
-  return DEFER_ELIGIBLE_CACO_TOOLS.includes(name);
+/**
+ * Whether a Caco tool is eligible for auto-defer. THE single eligibility
+ * predicate — the applet's `wouldDefer` badge and the resume-time decision both
+ * call this with the same arguments, so the view cannot disagree with behaviour.
+ *
+ * Hard-disabled tools are never eligible: they already cost zero, so deferring
+ * one would grow every session's exclusion set for no saving.
+ */
+export function isDeferEligibleCacoTool(name: string, opts?: { hardDisabled?: boolean }): boolean {
+  if (opts?.hardDisabled) return false;
+  return !NEVER_DEFER_CACO_TOOLS.includes(name);
+}
+
+/**
+ * Synthetic servers in the mcp-servers applet ("Caco", "Built-in") — not real MCP
+ * servers. They have no learned keys, so manual defer against them is inert; the
+ * name would still enter persisted state and render a misleading deferred badge.
+ */
+const PSEUDO_SERVER_NAMES: string[] = ['Caco', 'Built-in'];
+
+export function isPseudoServer(name: string): boolean {
+  return PSEUDO_SERVER_NAMES.includes(name);
 }
 
 /** Whether the SDK `skill` built-in tool is available to sessions. Skills run by asking

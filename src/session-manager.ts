@@ -33,7 +33,7 @@ import { buildPagerView, type PagerSessionInput } from './pager-view.js';
 import { planSessionRemoval, type RemovalPlan } from './session-removal.js';
 import { activityVersion } from './activity-version.js';
 import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys } from './session-tool-state.js';
-import { excludedBuiltinNames, DEFER_ELIGIBLE_CACO_TOOLS } from './tool-registry.js';
+import { excludedBuiltinNames, isDeferEligibleCacoTool } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
 import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-defer-store.js';
 import { getNowActiveSeconds, getLastUsedActiveSeconds, stampToolUsage, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS, COLD_RESUME_STALE_MS } from './tool-usage-store.js';
@@ -302,6 +302,11 @@ export interface CacoToolCatalogEntry {
   name: string;
   description: string;
   hardDisabled: boolean;
+  /** Built-in Caco tool vs a third-party extension tool. Auto-defer considers
+   *  ONLY builtins: a fixed name blocklist cannot express a protection for
+   *  extension tools, which are dynamic and unknown at author time
+   *  (spec-defer-default-inversion). */
+  origin: 'builtin' | 'extension';
   /** JSON-schema form of the tool's parameters (converted from zod at capture),
    *  so the applet can estimate the tool's real per-turn token cost. */
   parameters?: Record<string, unknown>;
@@ -2509,17 +2514,25 @@ export class SessionManager {
    */
   private computeStaleDeferCandidates(usedHere: ReadonlySet<ToolKey>, logLabel: string): ToolKey[] {
     const mcpCandidates = [...new Set(allLearnedKeys())];
-    const cacoCandidates = DEFER_ELIGIBLE_CACO_TOOLS.map(n => cacoKey(n));
+    // Enumerated from the registered catalog, not a hand-maintained constant, so a
+    // new built-in is deferrable the day it ships. Extensions are excluded (see
+    // CacoToolCatalogEntry.origin); an empty/unregistered catalog yields no Caco
+    // candidates, which over-sends rather than over-hides.
+    const cacoCandidates = this.getCacoToolCatalog()
+      .filter(c => c.origin === 'builtin' && isDeferEligibleCacoTool(c.name, { hardDisabled: c.hardDisabled }))
+      .map(c => cacoKey(c.name));
     const nowActiveSeconds = getNowActiveSeconds();
     const lastUsed = getLastUsedActiveSeconds();
     const staleOf = (tools: ToolKey[]) => computeColdResumeExclusions({
       isCold: true, tools, lastUsed, nowActiveSeconds, threshold: DEFER_STALE_THRESHOLD_ACTIVE_SECONDS,
     });
     // SET: only MCP keys enter the persisted latch. The latch's ONLY CLEAR path is the
-    // operator's per-MCP-server un-defer (setServerDeferred), so latching a Caco-allowlist
-    // tool — which has no per-server operator control — would strand it deferred forever.
+    // operator's per-MCP-server un-defer (setServerDeferred), so latching a Caco tool —
+    // which has no per-server operator control — would strand it deferred forever.
     // Caco tools therefore stay on the LIVE staleness recompute (their pre-latch behaviour):
     // recomputed each seam, never persisted, so cross-session freshness still governs them.
+    // This is what keeps deferral reversible now that the Caco candidate set is the whole
+    // built-in catalog rather than a fixed allowlist.
     const staleMcp = staleOf(mcpCandidates);
     addAutoDeferred(staleMcp);
     const staleCacoLive = staleOf(cacoCandidates);

@@ -89,7 +89,13 @@ const MCP_B = 'github-mcp-server-get_pr' as ToolKey;
 
 async function makeManager() {
   const { SessionManager } = await import('../../src/session-manager.js');
-  return new SessionManager() as unknown as {
+  const mgr = new SessionManager();
+  // Caco defer candidates now come from the registered catalog rather than a
+  // constant, so a manager with no catalog has none (spec-defer-default-inversion).
+  (mgr as unknown as { getCacoToolCatalog: () => unknown[] }).getCacoToolCatalog = () => [
+    { name: 'caco_browser_navigate', description: 'nav', hardDisabled: false, origin: 'builtin' },
+  ];
+  return mgr as unknown as {
     computeColdResumeAutoDefer: (sessionId: string, config: { modelOverride?: string; warmRecreate?: boolean }) => ToolKey[];
     computeNewSessionAutoDefer: () => ToolKey[];
     setServerDeferred: (server: string, deferred: boolean) => Promise<{ affectedSessions: number; failedSessions: string[]; keys: ToolKey[] }>;
@@ -244,11 +250,11 @@ describe('SessionManager auto-defer LATCH (spec-auto-defer-latch)', () => {
     expect(second).toContain(MCP_A); // STILL returned — freshness does not un-latch
   });
 
-  it('Caco-allowlist tools are NOT latched (no operator clear path) — they stay LIVE', async () => {
+  it('Caco tools are NOT latched (no operator clear path) — they stay LIVE', async () => {
     registry.learned = [];
     const cacoKeyOf = (await import('../../src/tool-key.js')).cacoKey;
-    const { DEFER_ELIGIBLE_CACO_TOOLS } = await import('../../src/tool-registry.js');
-    const cacoName = DEFER_ELIGIBLE_CACO_TOOLS[0];
+    // Any deferrable built-in will do; the catalog fixture below supplies it.
+    const cacoName = 'caco_browser_navigate';
     const cacoK = cacoKeyOf(cacoName) as unknown as ToolKey;
     const mgr = await makeManager();
     const first = mgr.computeNewSessionAutoDefer();

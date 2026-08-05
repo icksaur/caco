@@ -28,7 +28,7 @@ const sessionManager = {
 };
 
 vi.mock('../../src/session-manager.js', () => ({ sessionManager }));
-vi.mock('../../src/tool-registry.js', () => ({ excludedBuiltinNames: () => [], isDeferEligibleCacoTool: () => false }));
+vi.mock('../../src/tool-registry.js', () => ({ excludedBuiltinNames: () => [], isDeferEligibleCacoTool: () => false, isPseudoServer: (n: string) => n === 'Caco' || n === 'Built-in' }));
 vi.mock('../../src/tool-key-registry.js', () => ({ lookupMcpKey: () => null, learnFromMetadata: vi.fn() }));
 vi.mock('../../src/tool-catalog.js', () => ({ buildToolCatalog: () => [] }));
 vi.mock('../../src/session-tool-state.js', () => ({ classifyTool: () => 'enabled' }));

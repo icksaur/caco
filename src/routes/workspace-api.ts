@@ -12,7 +12,7 @@ import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
 import { sessionManager } from '../session-manager.js';
-import { excludedBuiltinNames, isDeferEligibleCacoTool } from '../tool-registry.js';
+import { excludedBuiltinNames, isDeferEligibleCacoTool, isPseudoServer } from '../tool-registry.js';
 import { builtinKey, type ToolKey } from '../tool-key.js';
 import { lookupMcpKey, learnFromMetadata } from '../tool-key-registry.js';
 import { buildToolCatalog } from '../tool-catalog.js';
@@ -367,7 +367,7 @@ export function buildMcpServerPayload(
         tokenCost: cacoCost,
         knownTokenCost: cacoCost,
         state,
-        ...usageFields(t.key, isDeferEligibleCacoTool(t.name)),
+        ...usageFields(t.key, isDeferEligibleCacoTool(t.name, { hardDisabled: t.hardDisabled })),
       };
     }),
   };
@@ -533,6 +533,13 @@ router.post('/servers/:server/defer', async (req: Request, res: Response) => {
   const { deferred } = req.body as { deferred?: boolean };
   if (typeof deferred !== 'boolean') {
     res.status(400).json({ ok: false, error: 'deferred (boolean) required' });
+    return;
+  }
+  // "Caco"/"Built-in" are synthetic groupings, not MCP servers: they own no learned
+  // keys, so this is inert today — but only incidentally. Refuse it rather than let a
+  // meaningless name into persisted defer state and a misleading applet badge.
+  if (isPseudoServer(server)) {
+    res.status(400).json({ ok: false, error: `${server} is not an MCP server; its tools defer by usage, not by operator toggle` });
     return;
   }
   try {

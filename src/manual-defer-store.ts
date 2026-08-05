@@ -15,6 +15,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { isPseudoServer } from './tool-registry.js';
 
 const STORE_FILE = join(homedir(), '.caco', 'manual-defer.json');
 
@@ -26,7 +27,10 @@ function ensureLoaded(): void {
   loaded = true;
   try {
     const arr = JSON.parse(readFileSync(STORE_FILE, 'utf-8')) as string[];
-    if (Array.isArray(arr)) for (const s of arr) deferred.add(s);
+    // Drop pseudo-server names on the way in: the write path now refuses them, but
+    // that cannot clean entries an earlier build already persisted, and a stale one
+    // renders a deferred badge for a group that defers by usage instead.
+    if (Array.isArray(arr)) for (const s of arr) if (!isPseudoServer(s)) deferred.add(s);
   } catch {
     // No file yet — start empty.
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { filterDisabledTools, parseDisabledToolNames, parseExcludedBuiltins, DEFAULT_EXCLUDED_BUILTINS, isDeferEligibleCacoTool } from '../../src/tool-registry.js';
+import { filterDisabledTools, parseDisabledToolNames, parseExcludedBuiltins, DEFAULT_EXCLUDED_BUILTINS, isDeferEligibleCacoTool, NEVER_DEFER_CACO_TOOLS, isPseudoServer } from '../../src/tool-registry.js';
 
 interface FakeTool { name: string; }
 const t = (name: string): FakeTool => ({ name });
@@ -53,12 +53,42 @@ describe('filterDisabledTools', () => {
 });
 
 describe('isDeferEligibleCacoTool', () => {
-  it('caco_docs is defer-eligible (discovery moved to caco_enable_tools)', () => {
-    expect(isDeferEligibleCacoTool('caco_docs')).toBe(true);
+  // The inversion (spec-defer-default-inversion): deferrable is the DEFAULT, and
+  // only these four are protected. An allowlist made forgetting cost permanent
+  // per-turn rent; a blocklist makes it cost a recoverable enable round-trip.
+  it('protects exactly the four named tools', () => {
+    expect([...NEVER_DEFER_CACO_TOOLS].sort()).toEqual(
+      ['caco_docs', 'caco_enable_tools', 'caco_run_workflow', 'retrieve_output'],
+    );
+    for (const name of NEVER_DEFER_CACO_TOOLS) {
+      expect(isDeferEligibleCacoTool(name)).toBe(false);
+    }
   });
 
-  it('the escape hatch caco_enable_tools is NOT defer-eligible', () => {
-    expect(isDeferEligibleCacoTool('caco_enable_tools')).toBe(false);
+  it('caco_docs is protected as a discovery tool, reversing the old allowlist', () => {
+    // Deferred ⇒ invisible ⇒ unused ⇒ stale forever: a usage signal cannot govern
+    // a tool whose job is to reveal something.
+    expect(isDeferEligibleCacoTool('caco_docs')).toBe(false);
+  });
+
+  it('every other Caco tool is eligible by default, including ones never listed anywhere', () => {
+    for (const name of ['caco_herd', 'caco_herd_state', 'create_caco_session', 'restart_server',
+      'get_session_state', 'caco_memory', 'index', 'caco_session_delegate', 'a_tool_shipped_tomorrow']) {
+      expect(isDeferEligibleCacoTool(name)).toBe(true);
+    }
+  });
+
+  it('a hard-disabled tool is never eligible — it already costs zero', () => {
+    expect(isDeferEligibleCacoTool('register_mcp_server', { hardDisabled: true })).toBe(false);
+    expect(isDeferEligibleCacoTool('register_mcp_server', { hardDisabled: false })).toBe(true);
+  });
+});
+
+describe('isPseudoServer', () => {
+  it('names the synthetic applet groupings, not real MCP servers', () => {
+    expect(isPseudoServer('Caco')).toBe(true);
+    expect(isPseudoServer('Built-in')).toBe(true);
+    expect(isPseudoServer('github-mcp-server')).toBe(false);
   });
 });
 

@@ -52,7 +52,9 @@ vi.mock('../../src/tool-size-store.js', () => ({
 // Only the shell family is policy-excluded here.
 vi.mock('../../src/tool-registry.js', () => ({
   excludedBuiltinNames: () => ['builtin:bash', 'builtin:powershell'],
-  DEFER_ELIGIBLE_CACO_TOOLS: ['caco_browser_navigate'],
+  isDeferEligibleCacoTool: (name: string, o?: { hardDisabled?: boolean }) =>
+    !o?.hardDisabled && name !== 'caco_enable_tools',
+  isPseudoServer: (n: string) => n === 'Caco' || n === 'Built-in',
 }));
 
 interface FakeActive {
@@ -67,7 +69,7 @@ async function makeManager(excluded: string[]) {
   const { SessionManager } = await import('../../src/session-manager.js');
   const manager = new SessionManager();
   (manager as { getCacoToolCatalog: () => unknown[] }).getCacoToolCatalog = () => [
-    { name: 'caco_browser_navigate', description: 'nav', hardDisabled: false, parameters: { properties: { url: { type: 'string' } } } },
+    { name: 'caco_browser_navigate', description: 'nav', hardDisabled: false, origin: 'builtin', parameters: { properties: { url: { type: 'string' } } } },
   ];
   const active = (manager as unknown as { activeSessions: Map<string, FakeActive> }).activeSessions;
   active.set(SID, { cwd: '/x', session: {}, toolFactory: () => [], excludedTools: [...excluded], lastUsedAt: Date.now() });

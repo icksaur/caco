@@ -1650,6 +1650,21 @@ body:has(#sessionView.hidden) #usageInfo {
   padding: var(--space-sm) 0;
 }
 
+/* Standalone page links at the foot of the session panel. Quiet by default —
+   navigating away from the app shell should never compete with the session list. */
+.panel-link {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  padding: var(--space-sm) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.panel-link:hover {
+  color: var(--color-text);
+}
+
 .schedule-item {
   display: flex;
   align-items: center;

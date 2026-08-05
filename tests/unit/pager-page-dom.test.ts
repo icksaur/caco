@@ -232,6 +232,166 @@ describe('drafts survive anything the user did not do', () => {
   });
 });
 
+describe('the board holds still while the user is typing', () => {
+  const other = { sessionId: 's-9', name: 'other' };
+
+  async function focusWell(): Promise<HTMLTextAreaElement> {
+    const w = well()!;
+    w.focus();
+    await flush();
+    expect(document.activeElement).toBe(w);
+    return w;
+  }
+
+  it('keeps running rows live while the board is held', async () => {
+    // The page must not look frozen: only the board is deferred.
+    await deliver(view([entry()]));
+    await focusWell();
+
+    await deliver(view([entry({ name: 'renamed' })], [other]));
+
+    expect([...document.querySelectorAll('.run-name')].map(n => n.textContent)).toEqual(['other']);
+    expect(cards()[0].querySelector('.name')!.textContent).toBe('alpha');
+  });
+
+  it('does not rebuild the board or move focus while a well is focused', async () => {
+    await deliver(view([entry()]));
+    const w = await focusWell();
+    await type('mid sentence');
+
+    await deliver(view([entry()], [other]));
+
+    expect(well()).toBe(w);
+    expect(document.activeElement).toBe(w);
+    expect(w.value).toBe('mid sentence');
+  });
+
+  it('applies the stashed view once focus leaves', async () => {
+    await deliver(view([entry()]));
+    const w = await focusWell();
+    await deliver(view([entry({ name: 'renamed' })]));
+    expect(cards()[0].querySelector('.name')!.textContent).toBe('alpha');
+
+    w.blur();
+    await flush();
+
+    expect(cards()[0].querySelector('.name')!.textContent).toBe('renamed');
+  });
+
+  it('keeps only the newest stashed view, not a queue', async () => {
+    await deliver(view([entry()]));
+    const w = await focusWell();
+
+    await deliver(view([entry({ name: 'first' })]));
+    await deliver(view([entry({ name: 'second' })]));
+    await deliver(view([entry({ name: 'third' })]));
+    w.blur();
+    await flush();
+
+    expect(cards()[0].querySelector('.name')!.textContent).toBe('third');
+  });
+
+  it('stays held when focus moves between two wells', async () => {
+    await deliver(view([entry({ sessionId: 's-1' }), entry({ sessionId: 's-2', name: 'beta' })]));
+    well(0)!.focus();
+    await flush();
+    // Stash something first: without a pending view, releasing the hold is a
+    // no-op and a missing re-check would go unnoticed.
+    await deliver(view([entry({ sessionId: 's-1', name: 'renamed' }), entry({ sessionId: 's-2', name: 'beta' })]));
+    expect(cards()[0].querySelector('.name')!.textContent).toBe('alpha');
+
+    const second = well(1)!;
+    second.focus();
+    await flush();
+
+    // focusout fires before the next element takes focus, so releasing without
+    // re-checking would rebuild the board out from under the user mid-move.
+    expect(cards()[0].querySelector('.name')!.textContent).toBe('alpha');
+    expect(document.activeElement).toBe(second);
+  });
+
+  it('only a well on the board holds the board', async () => {
+    // Scoping the predicate to the board keeps an unrelated textarea elsewhere on
+    // the page from freezing triage if one is ever added.
+    await deliver(view([entry()]));
+    const stray = document.createElement('textarea');
+    stray.className = 'well';
+    document.body.appendChild(stray);
+    stray.focus();
+    await flush();
+
+    await deliver(view([entry({ name: 'renamed' })]));
+
+    expect(cards()[0].querySelector('.name')!.textContent).toBe('renamed');
+    stray.remove();
+  });
+
+  it('does not prune the acted suppression from a board render it skipped', async () => {
+    // The prune belongs with the draw, not with every response. If it ran on a
+    // view whose cards were never rendered, a card the user just dismissed would
+    // lose its suppression and reappear.
+    await deliver(view([entry({ sessionId: 's-1' }), entry({ sessionId: 's-2', name: 'beta' })]));
+    dismissBtn(0)!.click();
+    await flush();
+    expect(cards()).toHaveLength(1);
+
+    well(0)!.focus();
+    await flush();
+    // Skipped while held — this is the view that would prune s-1's suppression.
+    await deliver(view([entry({ sessionId: 's-2', name: 'beta' })]));
+    // s-1 is back in the newest view, which is the one that will actually apply.
+    await deliver(view([entry({ sessionId: 's-1' }), entry({ sessionId: 's-2', name: 'beta' })]));
+    well(0)!.blur();
+    await flush();
+
+    expect(cards()).toHaveLength(1);
+    expect(cards()[0].querySelector('.name')!.textContent).toBe('beta');
+  });
+
+  it('cannot wedge when the focused well is removed by something else', async () => {
+    // The hold is a predicate over live DOM, not a flag, so a focused node that
+    // disappears must not strand the board.
+    await deliver(view([entry()]));
+    const w = await focusWell();
+    w.remove();
+
+    await deliver(view([entry({ name: 'renamed' })]));
+
+    expect(cards()[0].querySelector('.name')!.textContent).toBe('renamed');
+  });
+
+  it('releases the hold when the page is hidden', async () => {
+    await deliver(view([entry()]));
+    await focusWell();
+    await deliver(view([entry({ name: 'renamed' })]));
+
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await flush();
+
+    expect(cards()[0].querySelector('.name')!.textContent).toBe('renamed');
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+  });
+
+  it('releases the hold after the maximum duration with no event at all', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      boot();
+      await deliver(view([entry()]));
+      await focusWell();
+      await deliver(view([entry({ name: 'renamed' })]));
+      expect(cards()[0].querySelector('.name')!.textContent).toBe('alpha');
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await flush();
+
+      expect(cards()[0].querySelector('.name')!.textContent).toBe('renamed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('a failed send does not cost the user their typing', () => {
   it('keeps the draft and re-enables the controls on an unexpected failure', async () => {
     await deliver(view([entry()]));

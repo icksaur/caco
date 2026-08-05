@@ -98,6 +98,12 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
   var drafts = Object.create(null);
   // A long-lived tab must not accumulate forever; key order tracks edit recency.
   var DRAFT_CAP = 20;
+  // The board is not rebuilt while a well has focus, so a background refresh
+  // cannot take the caret or the mobile keyboard away mid-sentence. The newest
+  // pending view waits here; the timer is the backstop that needs no event.
+  var heldView = null;
+  var holdTimer = null;
+  var MAX_HOLD_MS = 60000;
 
   function setDraft(sessionId, text) {
     delete drafts[sessionId];
@@ -287,11 +293,12 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     return card;
   }
 
-  function render(view) {
+  function renderRunning(view) {
     // One row per running session, each with its own throbber. A count answers
     // "how many" when the useful question is "which one", and names joined onto a
     // single line were unreadable on a phone. Server-ordered, so rows do not
-    // reshuffle between polls.
+    // reshuffle between polls. Always runs, even while the board is held, so the
+    // page never looks frozen.
     var running = view.busy || [];
     runningEl.textContent = '';
     running.forEach(function (b) {
@@ -300,18 +307,23 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       row.appendChild(el('span', 'run-name', b.name || b.sessionId.slice(0, 8)));
       runningEl.appendChild(row);
     });
+  }
 
+  function renderBoard(view) {
     var waiting = (view.waiting || []).filter(function (w) { return !acted[w.sessionId]; });
 
     // Drop stale local suppressions once the server agrees the session is gone
-    // from the board, so acting on it again later still works.
+    // from the board, so acting on it again later still works. Lives here rather
+    // than beside the running rows so it stays in lockstep with what is actually
+    // drawn: pruning against a view whose cards were never rendered would
+    // un-suppress a card that then reappears on the next rebuild.
     var present = Object.create(null);
     (view.waiting || []).forEach(function (w) { present[w.sessionId] = true; });
     Object.keys(acted).forEach(function (id) { if (!present[id]) delete acted[id]; });
 
     boardEl.textContent = '';
     if (waiting.length === 0) {
-      boardEl.appendChild(el('div', 'empty', running.length > 0
+      boardEl.appendChild(el('div', 'empty', (view.busy || []).length > 0
         ? 'Nothing waiting on you — work in progress.'
         : 'Nothing waiting on you.'));
       return;
@@ -321,6 +333,56 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       boardEl.appendChild(el('div', 'truncated', 'More sessions are waiting than shown.'));
     }
   }
+
+  /**
+   * Is the user typing into a card right now? A predicate over live DOM rather
+   * than a flag set on focus and cleared on blur: a flag strands the board if the
+   * focused node is removed, or if a mobile keyboard closes without firing blur.
+   * Here a vanished node simply makes this false and the board rebuilds.
+   */
+  function boardIsHeld() {
+    var a = document.activeElement;
+    return !!a && a.classList && a.classList.contains('well') && boardEl.contains(a);
+  }
+
+  function applyHeld() {
+    if (holdTimer !== null) { clearTimeout(holdTimer); holdTimer = null; }
+    if (!heldView) return;
+    var view = heldView;
+    heldView = null;
+    renderBoard(view);
+  }
+
+  function render(view) {
+    renderRunning(view);
+    if (boardIsHeld()) {
+      // Latest wins, not a queue: every response is a complete snapshot, so an
+      // older one is never worth applying.
+      heldView = view;
+      if (holdTimer === null) {
+        holdTimer = setTimeout(function () {
+          // Backstop for the case where no event ever arrives. Past a minute,
+          // staleness is the worse failure — and the draft map means only the
+          // caret and keyboard are lost here, never the text.
+          holdTimer = null;
+          applyHeld();
+        }, MAX_HOLD_MS);
+      }
+      return;
+    }
+    heldView = null;
+    if (holdTimer !== null) { clearTimeout(holdTimer); holdTimer = null; }
+    renderBoard(view);
+  }
+
+  // Focus moving between two wells must not release the hold, and focusout fires
+  // before the next element takes focus, so re-check once the move has settled.
+  boardEl.addEventListener('focusout', function () {
+    setTimeout(function () { if (!boardIsHeld()) applyHeld(); }, 0);
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) applyHeld();
+  });
 
   var polling = false;
   function poll(immediate) {

@@ -176,6 +176,21 @@ describe('drafts survive anything the user did not do', () => {
     expect(sendBtn()!.hidden).toBe(false);
   });
 
+  it('re-grows a restored draft so a multi-line message is not clipped', async () => {
+    // jsdom has no layout, so this pins that the auto-grow ran on restore (it
+    // sets height to 'auto' before measuring) rather than the resulting pixels.
+    // The visual result is covered by manual signoff, but the regression this
+    // catches — a restored draft left in a one-row, overflow:hidden box — is the
+    // one that makes surviving text look lost.
+    await deliver(view([entry()]));
+    await type('line one\nline two\nline three');
+
+    await deliver(view([entry()], [{ sessionId: 's-9', name: 'other' }]));
+
+    expect(well()!.value).toBe('line one\nline two\nline three');
+    expect(well()!.style.height).toBe('auto');
+  });
+
   it('keeps the text when the session briefly leaves the board and returns', async () => {
     // The busy blip is why drafts are not pruned like `acted`: another client
     // sending would otherwise delete text this user is still writing.

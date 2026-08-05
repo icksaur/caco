@@ -237,6 +237,10 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 
       well.value = drafts[entry.sessionId] || '';
       syncSend();
+      // A restored draft must be grown too: rebuilds are frequent and unattended,
+      // so without this a multi-line message reappears clipped to one row and
+      // reads as lost even though the text is intact.
+      grow();
 
       well.addEventListener('input', function () {
         setDraft(entry.sessionId, well.value);

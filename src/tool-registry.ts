@@ -115,7 +115,7 @@ export function excludedBuiltinNames(): string[] {
 /**
  * Built-in Caco tools that may NEVER be auto-deferred. Everything else is
  * deferrable BY DEFAULT — the inversion of the former `DEFER_ELIGIBLE_CACO_TOOLS`
- * allowlist (see docs/spec-defer-default-inversion.md).
+ * allowlist (see docs/archive/spec-defer-default-inversion.md).
  *
  * The default is the whole point. An allowlist of what MAY defer means forgetting
  * to list a new tool costs permanent, silent, per-turn rent in every session; a

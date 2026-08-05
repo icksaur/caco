@@ -1,7 +1,19 @@
 # spec-defer-default-inversion
 
-**Status:** draft, reviewed once (findings folded). Amends `spec-tool-reveal`
-phase C1, which introduced `DEFER_ELIGIBLE_CACO_TOOLS`. Supersedes that constant.
+**Status:** done — all six plan rows shipped. As-built in `src/tool-registry.ts`
+(`NEVER_DEFER_CACO_TOOLS`, `isDeferEligibleCacoEntry`, `isPseudoServer`),
+`src/session-manager.ts` (catalog-driven candidate enumeration, `origin` on
+`CacoToolCatalogEntry`), `src/tool-catalog.ts`, `src/routes/workspace-api.ts` and
+`src/manual-defer-store.ts`. Amends `spec-tool-reveal` phase C1 and supersedes its
+`DEFER_ELIGIBLE_CACO_TOOLS` constant. Archived; the code comments on
+`NEVER_DEFER_CACO_TOOLS` are the living documentation.
+
+A review after implementation caught one regression, fixed in `ae6bc04`: the
+applet's eligibility badge re-derived its verdict from name + `hardDisabled`,
+which cannot see builtin-vs-extension because `CatalogTool` collapses every Caco
+source to `origin: 'caco'`. The verdict is now computed once during projection
+(`isDeferEligibleCacoEntry`) and carried, so the view cannot disagree with
+behaviour.
 
 ## Goals
 
@@ -155,6 +167,8 @@ round-trip before a restart. Only one session ever needs it, and it is 12h idle.
   below. Each must fail before its change exists.
 
 ## Plan
+
+All six rows are SHIPPED; this table is the as-built record, not remaining work.
 
 | # | Step | Files | Oracle | Invariants |
 |---|------|-------|--------|------------|

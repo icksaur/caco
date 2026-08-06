@@ -146,9 +146,9 @@ export class ChatFormController {
       // resizes, persists the draft, enables Send, and mutes these buttons.
       //
       // The options are deliberately NOT cleared: nothing has been sent, so
-      // clearing the offer would strand someone who clicked the wrong one.
-      // A muted button stays clickable for the same reason (muting is CSS
-      // pointer-events, which a re-click through the container bypasses).
+      // clearing the offer would strand someone who clicked the wrong one. The
+      // muted class must therefore stay click-through — see the CSS note on
+      // `.response-option-btn.muted`, which no longer sets `pointer-events`.
       this.textarea.value = prompt;
       this.textarea.dispatchEvent(new Event('input', { bubbles: true }));
       this.textarea.focus();

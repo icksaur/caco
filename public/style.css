@@ -249,7 +249,13 @@ input[type="text"]:focus {
   text-align: left;
 }
 .response-option-btn:hover { background: var(--color-bg-hover); }
-.response-option-btn.muted { opacity: 0.3; cursor: default; pointer-events: none; }
+/* Dimmed once text is staged — deprioritized, NOT inert. `pointer-events: none`
+   would make the click land on the container, where the delegated handler's
+   `closest('.response-option-btn')` returns null, so a user who staged the wrong
+   option could never click another (verified in a real browser). Staging is only
+   reversible if a muted button still accepts a click. */
+.response-option-btn.muted { opacity: 0.3; }
+.response-option-btn.muted:hover { opacity: 0.6; }
 
 /* Input bar - horizontal flex container */
 .chat-form .input-bar {

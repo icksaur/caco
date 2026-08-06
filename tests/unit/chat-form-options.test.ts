@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 /**
  * The offered-action click path (spec-offer-action-stage).
@@ -145,8 +147,6 @@ describe('clicking an offered action stages it', () => {
   });
 
   it('restages when a different option is clicked', () => {
-    // Muting is CSS-only (pointer-events), so the handler must still accept a
-    // second click; the user changing their mind is the expected path.
     const { textarea, optionsEl } = mount();
 
     buttons(optionsEl)[0].click();
@@ -154,5 +154,19 @@ describe('clicking an offered action stages it', () => {
 
     expect(textarea.value).toBe(OPTIONS[1]);
     expect(seams.dispatchPrompt).not.toHaveBeenCalled();
+  });
+
+  it('does not let CSS make a muted option unclickable', async () => {
+    // The behavioural test above CANNOT catch this: jsdom does no hit-testing,
+    // so dispatching on the button works regardless of `pointer-events`. In a
+    // real browser a `pointer-events: none` button makes the CONTAINER the event
+    // target, `closest('.response-option-btn')` returns null, and the user who
+    // staged the wrong option can never click another. Verified in Edge; pinned
+    // here statically because that is the only place it is checkable.
+    const css = readFileSync(join(process.cwd(), 'public', 'style.css'), 'utf8');
+    const mutedRule = /\.response-option-btn\.muted\s*\{([^}]*)\}/.exec(css);
+
+    expect(mutedRule, '.response-option-btn.muted rule').not.toBeNull();
+    expect(mutedRule![1]).not.toContain('pointer-events');
   });
 });

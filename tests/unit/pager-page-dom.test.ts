@@ -25,6 +25,8 @@ interface PostCall { url: string; body: Record<string, unknown> }
 let parked: ParkedPoll[] = [];
 let posts: PostCall[] = [];
 let postReply: { status: number; error?: string } = { status: 200 };
+let parkPosts = false;
+let parkedPosts: Array<(r: unknown) => void> = [];
 
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
@@ -36,15 +38,19 @@ function boot(): void {
   parked = [];
   posts = [];
   postReply = { status: 200 };
+  parkPosts = false;
+  parkedPosts = [];
 
   globalThis.fetch = ((url: string, opts?: { method?: string; body?: string }) => {
     if (opts?.method === 'POST') {
       posts.push({ url, body: JSON.parse(opts.body || '{}') as Record<string, unknown> });
       const ok = postReply.status >= 200 && postReply.status < 300;
-      return Promise.resolve({
+      const reply = {
         ok, status: postReply.status,
         json: () => Promise.resolve(ok ? {} : { error: postReply.error || 'boom' }),
-      });
+      };
+      if (parkPosts) return new Promise(resolve => { parkedPosts.push(resolve); });
+      return Promise.resolve(reply);
     }
     return new Promise(resolve => { parked.push({ resolve }); });
   }) as unknown as typeof fetch;
@@ -411,6 +417,34 @@ describe('a failed send does not cost the user their typing', () => {
     // only a rebuild proves the text would actually survive.
     await deliver(view([entry()]));
     expect(well()!.value).toBe('precious text');
+  });
+
+  it('cannot be sent twice when a background view rebuilds the board mid-flight', async () => {
+    // Tapping Send blurs the well, which releases the hold and rebuilds the
+    // board — while the POST is still in flight. A rebuilt card is a fresh node
+    // that never saw lock(true), so without suppressing the card at the moment
+    // the action starts, the second tap delivers a duplicate message.
+    await deliver(view([entry()]));
+    well()!.focus();
+    await flush();
+    await type('once only');
+    await deliver(view([entry()], [{ sessionId: 's-9', name: 'other' }]));
+
+    parkPosts = true;
+    well()!.blur();
+    sendBtn()!.click();
+    await flush();
+
+    expect(posts).toHaveLength(1);
+    const stillThere = sendBtn();
+    if (stillThere && !stillThere.hidden) {
+      stillThere.click();
+      await flush();
+    }
+    expect(posts).toHaveLength(1);
+
+    parkedPosts.forEach(r => r({ ok: true, status: 200, json: () => Promise.resolve({}) }));
+    await flush();
   });
 
   it('takes the card away when the session is already busy or gone', async () => {

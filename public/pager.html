@@ -86,9 +86,10 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 
   var lastVersion = null;
   var backoffMs = 1000;
-  // Session ids the user just acted on. The board is a moment-old view, so a card
-  // is hidden locally until the server's snapshot catches up; otherwise it would
-  // linger and invite a double-send.
+  // Session ids with an action in flight or just completed. The board is a
+  // moment-old view, so a card is hidden locally from the instant the user acts
+  // until the server's snapshot catches up; otherwise it would linger — or be
+  // rebuilt unlocked — and invite a double-send.
   var acted = Object.create(null);
   // In-progress text per session, so a board rebuild — which happens whenever ANY
   // session changes state — cannot destroy what the user is writing. Deliberately
@@ -181,13 +182,18 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     function submit(text) {
       msg.textContent = '';
       lock(true);
+      // Suppress at initiation, not on resolution. A rebuild during the in-flight
+      // window would otherwise hand back a fresh card that never saw lock(true) —
+      // unlocked, draft intact — and a second tap would deliver the message twice.
+      // Releasing the board hold on blur makes that rebuild the common case
+      // rather than a race.
+      acted[entry.sessionId] = true;
       post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/messages', { prompt: text })
         .then(function () {
           // The send makes the session busy, which bumps the version and wakes
           // the parked poll on its own; hide the card now so it cannot be
           // clicked twice in the gap.
           clearDraft(entry.sessionId);
-          acted[entry.sessionId] = true;
           card.remove();
         })
         .catch(function (err) {
@@ -197,10 +203,12 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
             // bump of its own, so nothing would arrive to clear it. The draft
             // stays: the message was NOT delivered, so discarding the text here
             // would destroy typing over something the user did not do.
-            acted[entry.sessionId] = true;
             card.remove();
             return;
           }
+          // Nothing was sent, so the card belongs back on the board with its
+          // text; lift the suppression or the next render would drop it.
+          delete acted[entry.sessionId];
           lock(false);
           msg.textContent = 'Send failed: ' + err.message;
         });
@@ -273,14 +281,15 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     dismiss.addEventListener('click', function () {
       msg.textContent = '';
       lock(true);
+      acted[entry.sessionId] = true;
       post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/pager-dismiss')
         .then(function () {
           // The dismissal bumps the version, so the parked poll refreshes itself.
           clearDraft(entry.sessionId);
-          acted[entry.sessionId] = true;
           card.remove();
         })
         .catch(function (err) {
+          delete acted[entry.sessionId];
           lock(false);
           msg.textContent = 'Dismiss failed: ' + err.message;
         });

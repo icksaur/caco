@@ -2532,13 +2532,16 @@ export class SessionManager {
    * per-MCP-server un-defer, and a Caco pseudo-server has no such operator control, so
    * latching them would strand them deferred forever (invariant: latched ⇒ operator-
    * clearable). They stay on the LIVE staleness recompute — their pre-latch behaviour —
-   * so cross-session freshness still governs the small fixed Caco set.
+   * so cross-session freshness still governs them. BUILTINS ride that same live path,
+   * for the same reason: `Built-in` is equally a pseudo-server with no un-defer control.
    *
    * Staleness is the pure `computeColdResumeExclusions` fed the shared threshold — the
-   * SAME math the applet's per-tool `wouldDefer` badge shows. Builtins are omitted
-   * (already excluded via the base seed). Calling `getNowActiveSeconds()` advances the
-   * shared active clock — an intentional, cap-bounded tick (tool-usage-store
-   * MAX_ACTIVE_GAP_SECONDS): rapid repeat calls cannot over-age tools.
+   * SAME math the applet's per-tool `wouldDefer` badge shows. Builtins are a first-class
+   * input here (spec-builtin-defer); only POLICY-excluded ones are omitted, since those
+   * are already gone via the base seed and must classify `disabled`, never `deferred`.
+   * Calling `getNowActiveSeconds()` advances the shared active clock — an intentional,
+   * cap-bounded tick (tool-usage-store MAX_ACTIVE_GAP_SECONDS): rapid repeat calls
+   * cannot over-age tools.
    */
   private computeStaleDeferCandidates(usedHere: ReadonlySet<ToolKey>, logLabel: string): ToolKey[] {
     const mcpCandidates = [...new Set(allLearnedKeys())];

@@ -280,10 +280,11 @@ export function buildMcpServerPayload(
   // actually-deferred tool would mis-render as enabled/unobserved. classifyTool over the
   // real live set is what lets the applet show a true "deferred" state, not a prediction.
   const excluded = new Set<ToolKey>([...deferredBuiltins.map(n => builtinKey(n)), ...sessionExcludedKeys]);
-  // Policy-disabled = the builtin exclusions (shell family + platform-absent builtins):
-  // permanent app-layer policy, shown 'disabled' (not 'deferred') and not re-enableable.
-  // MCP tools are never policy-disabled (C2 never defers builtins), so an excluded MCP/
-  // Caco-allowlist tool classifies 'deferred' while an excluded builtin classifies 'disabled'.
+  // Policy-disabled = the builtin exclusions (shell family, search family, and
+  // platform-absent builtins): permanent app-layer policy, shown 'disabled' (not
+  // 'deferred') and not re-enableable. An excluded MCP/Caco tool — or a
+  // usage-deferred builtin — classifies 'deferred'; only a POLICY-excluded builtin
+  // classifies 'disabled'. Policy is checked first, which is what keeps that true.
   const policyDisabled = new Set<ToolKey>(deferredBuiltins.map(n => builtinKey(n)));
 
   // Per-tool usage/age + defer verdict, from the shared threshold so the applet view

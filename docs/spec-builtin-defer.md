@@ -17,7 +17,8 @@ more than all 6 enabled Caco tools (2,948). Every one reports
 `read_agent` 395 · `list_agents` 329 · `glob` 277 · `web_fetch` 176
 
 `grep`/`glob` (860 combined) duplicate `caco.grep`/`caco.glob`, already reachable
-inside `caco_run_workflow`. `task` is the single most expensive definition in the
+inside `caco_run_workflow`, and are handled by exclusion rather than deferral (see
+Design). `task` is the single most expensive definition in the
 session — and it is *inflated by the operator's own custom agents*: a bare session
 measures 793 tokens, this one 1,723, because `.github/agents` entries are appended
 to the same description.
@@ -61,8 +62,6 @@ Deliberately **not** protected, with reasons:
   completes. Same trade already accepted for `caco_herd_state`: autocontinue
   usually makes the enable round-trip automatic, and 724 tokens every turn for a
   rare event is the worse deal.
-- `grep` / `glob` — redundant with the workflow facade. They will defer on
-  staleness and stay deferred for an operator who greps through workflows.
 - `skill` — a discovery-adjacent tool, but unlike `caco_docs` its *availability*
   is announced by the `<available_skills>` block in context, not by the tool
   definition. Deferring it does not hide the skills; it only defers the invoker.
@@ -73,6 +72,39 @@ Deliberately **not** protected, with reasons:
   invoker turns into enable-then-invoke. **Row 1 must verify the `<available_skills>`
   block is present independently of the tool definition before deferring `skill`;
   if it is not, `skill` joins the protected set.**
+
+**`grep` and `glob` are hard-excluded, not deferred** — the one place this spec
+uses the older mechanism, and deliberately. Deferral is *passive*: it fires only
+when a tool goes stale, so a `grep` reached for even occasionally never ages out
+and its 583 tokens are paid forever. Exclusion is the only option that changes
+behaviour, which is exactly why the shell family was excluded rather than left to
+usage — `tool-registry.ts` states the rule as "route all shell through `caco.sh`
+inside `caco_run_workflow`". Search is the same shape: `caco.grep`/`caco.glob`
+already exist in the facade, and one workflow call can run five searches where five
+`grep` calls each cost a round trip. Turns dominate tokens, so forcing the batched
+path is worth more than the 860 tokens it also saves.
+
+**The stated blocker is discharged.** That same comment parks search/read tools
+behind "a separate future effort (`index_multiread`)". `spec-caco-frames` describes
+itself as "the pragmatic unification of B2 (graph) and `index_multiread`", and
+`caco.frames` has shipped — so the general read-reducer that grep/glob were waiting
+on now exists. Nothing is being pre-empted.
+
+**Reversibility differs from deferral, and that is the trade.** A deferred tool is
+one `caco_enable_tools` call away; an excluded builtin needs a config edit or
+`CACO_EXCLUDED_BUILTINS` plus a restart, and classifies `disabled` (not
+re-enableable) in the applet. The agent cannot undo it mid-task. That is acceptable
+for search precisely because the capability is not lost — only the route changes —
+whereas the same move on `str_replace_editor` would remove an ability outright.
+
+**Parity is via three facade calls, not one.** `caco.grep` is a strict subset of
+builtin `grep`: no `-A/-B/-C` context, no `count` mode, no multiline, no type
+filter. The gaps are covered by `caco.rg(args[])` (raw ripgrep — full parity by
+construction) and `caco.peek(path, anchors, context)` (±context around literal
+anchors, which is the actual use case `-C` serves when editing). One real
+behavioural difference must be documented rather than papered over: facade tree
+searches are **rooted at the session directory**, so an external tree needs
+`caco.rg(['pat','/abs'])` or `caco.sh`.
 
 **Policy-excluded builtins are untouched.** `classifyTool` checks
 `policyDisabled` before the dynamic set, so a hard-excluded builtin classifies
@@ -137,6 +169,14 @@ than computed from a heuristic.
   policy-excluded builtin still classifies `disabled`, not `deferred`.
 - **Saving less than measured** because a tool is used often enough to stay fresh
   → that is the mechanism working; the floor is "no worse than today".
+- **Search reach silently narrows** once `grep` is gone, because facade tree searches
+  are rooted at the session directory → the exclusion rationale names
+  `caco.rg(['pat','/abs'])` as the external-tree route, and the workflow tool
+  description already documents it; row 6 updates the prompt so the agent is not
+  directed at a tool it no longer has.
+- **Sub-agents lose search** if their toolsets do inherit `excludedTools` → row 5
+  verifies this BEFORE the exclusion lands, because the failure is silent: an
+  `explore` dispatch would simply return worse answers.
 
 ## Acceptance
 
@@ -156,8 +196,10 @@ than computed from a heuristic.
 | 2 | Add `setBuiltinToolNames`/`getBuiltinToolNames` (sync cache, populated from the first `listBuiltinTools()`); add builtin keys to the candidate universe in `computeStaleDeferCandidates` via `builtinKey(name)`; extend the existing Caco-key latch purge to builtin keys | `src/session-manager.ts`, `src/routes/workspace-api.ts` (populate the cache), `tests/unit/caco-defer-candidates.test.ts` | ref-impl: fixture builtin list ⇒ expected candidate keys, **every one `builtin:`-prefixed**; a policy-excluded builtin is never emitted as a candidate **even when maximally stale**; empty cache ⇒ no builtin candidates; a latched builtin key is purged | one-predicate, warm-never-mutated, builtins-never-latched |
 | 3 | Thread the verdict into the `/servers` payload's builtin branch through the SAME predicate; update the load-bearing comments in `workspace-api.ts` and `session-manager.ts` that currently assert builtins are never dynamically deferred | `src/routes/workspace-api.ts`, `src/session-manager.ts`, `tests/unit/mcp-server-payload.test.ts` | payload test: `deferEligible` matches enumeration for edit / policy-excluded / ordinary builtins | one-predicate |
 | 4 | Verify a policy-excluded builtin still fails `validateEnable`, so widening the candidate set cannot make one re-enableable | `tests/unit/session-tool-state.test.ts` | `validateEnable('builtin:bash')` ⇒ not ok, with the disabled reason | policy-beats-deferral |
-| 5 | Record the refuted SDK settings so they are not retried | this file, `src/tool-registry.ts` comment | - | - |
-| 6 | Measure before/after on a fresh session; confirm the deferred-tools reminder names the deferred builtins on a background-agent wake | - | operator-visible token drop; reminder present in the wake flow | - |
+| 5 | **Verify sub-agents keep their own search tools** before excluding anything: the `explore` agent advertises `grep/glob/view/bash/powershell` while Caco already excludes the shell family from sessions, which suggests sub-agent toolsets are SDK-side and independent of `excludedTools` — confirm, since a wrong answer here silently degrades every `explore` dispatch | - | dispatch an `explore` sub-agent after the exclusion and confirm it can still search | - |
+| 6 | Add `builtin:grep` + `builtin:glob` to `DEFAULT_EXCLUDED_BUILTINS` with the routing rationale; update the batching line in `src/prompts.ts` that still names `grep`/`glob` as things to fire in parallel, and the `## Reading Code Efficiently` guidance if it points at them | `src/tool-registry.ts`, `src/prompts.ts`, `tests/unit/tool-registry.test.ts`, `tests/unit/prompts*.test.ts` | exclusion list contains both keys, `builtin:`-prefixed; a prompt assertion that the batching guidance no longer directs the agent at an excluded tool | policy-beats-deferral |
+| 7 | Record the refuted SDK settings so they are not retried | this file, `src/tool-registry.ts` comment | - | - |
+| 8 | Measure before/after on a fresh session; confirm the deferred-tools reminder names the deferred builtins on a background-agent wake | - | operator-visible token drop; reminder present in the wake flow | - |
 
 ## Rationale
 

@@ -136,13 +136,23 @@ export class ChatFormController {
     const optionsEl = this.form.querySelector('#responseOptions') as HTMLElement | null;
     optionsEl?.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('.response-option-btn') as HTMLElement | null;
-      if (!btn || btn.classList.contains('muted')) return;
+      if (!btn) return;
       const prompt = btn.dataset.prompt;
       if (!prompt) return;
-      formStateStore.set({ options: [] });
+      // Stage, don't send (spec-offer-action-stage). An offered action is a
+      // suggestion, and the text was written by the model — often nearly right
+      // rather than exactly right — so the user gets to amend it before
+      // committing, and a mis-tap costs nothing. The `input` event is what
+      // resizes, persists the draft, enables Send, and mutes these buttons.
+      //
+      // The options are deliberately NOT cleared: nothing has been sent, so
+      // clearing the offer would strand someone who clicked the wrong one.
+      // A muted button stays clickable for the same reason (muting is CSS
+      // pointer-events, which a re-click through the container bypasses).
       this.textarea.value = prompt;
       this.textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      this.form.requestSubmit();
+      this.textarea.focus();
+      this.textarea.setSelectionRange(prompt.length, prompt.length);
     });
 
     this.form.addEventListener('submit', (e) => this.handleSubmit(e));

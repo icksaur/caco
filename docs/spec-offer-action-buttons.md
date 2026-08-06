@@ -21,7 +21,7 @@ fragment — not the full action. The cap is also too short.
   grid — purely cosmetic; the element's value/tooltip/sent text remain the full 200-char
   string.
 - **Tooltip** (`title`) = the full 200-char text.
-- **Click** sends the full 200-char text (already via `data-prompt`).
+- **Click** stages the full 200-char text into the message well (already via `data-prompt`); sending is a second, deliberate act. See `spec-offer-action-stage`.
 
 ## Changes
 
@@ -36,7 +36,7 @@ fragment — not the full action. The cap is also too short.
 - `min-width: 0` is required — without it a grid/flex item won't shrink below its content
   width, so `text-overflow: ellipsis` never triggers.
 - 1–3 options: a 2-col grid still reads naturally (1 → one cell; 2 → one row; 3 → 2 + 1).
-- The existing `muted` state, click-to-send, and `formStateStore` flow are unchanged.
+- The existing `muted` state and `formStateStore` flow are unchanged. (Click-to-send became click-to-STAGE in `spec-offer-action-stage`; the text carried is the same.)
 - HTML-escaping: `data-prompt` and `title` are escaped with the **same** shared
   `escapeHtml` (escapes `&` before `"`), so the two are byte-identical and decode back to
   the canonical text — guaranteeing tooltip === sent.

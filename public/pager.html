@@ -215,11 +215,18 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     }
 
     var options = el('div', 'options');
+    // Assigned below, once the well exists. An option click STAGES its text into
+    // this card's own well rather than sending (spec-offer-action-stage): the
+    // offer is a suggestion, so the user gets a second, deliberate act — and on a
+    // phone a mis-tap no longer dispatches a turn.
+    var stage = null;
     (entry.options || []).forEach(function (optionText) {
       var btn = el('button', 'option', optionText);
       btn.type = 'button';
       buttons.push(btn);
-      btn.addEventListener('click', function () { submit(optionText); });
+      btn.addEventListener('click', function () {
+        if (stage) stage(optionText);
+      });
       options.appendChild(btn);
     });
     card.appendChild(options);
@@ -261,6 +268,21 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
         syncSend();
         grow();
       });
+
+      // Staging goes through the SAME path as typing — draft map, Send
+      // visibility, auto-grow — so a staged option is indistinguishable from
+      // typed text downstream and survives the frequent board rebuilds.
+      // Focus is load-bearing, not a nicety: the board hold is a predicate over
+      // document.activeElement, and a click on a button focuses nothing, so
+      // without this the board could rebuild while the user is deciding.
+      stage = function (optionText) {
+        well.value = optionText;
+        setDraft(entry.sessionId, optionText);
+        syncSend();
+        grow();
+        well.focus();
+        if (well.setSelectionRange) well.setSelectionRange(optionText.length, optionText.length);
+      };
 
       send.addEventListener('click', function () {
         var text = well.value.trim();

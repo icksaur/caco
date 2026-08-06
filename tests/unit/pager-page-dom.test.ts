@@ -238,6 +238,77 @@ describe('drafts survive anything the user did not do', () => {
   });
 });
 
+describe('clicking an option stages it into the card', () => {
+  const optionButtons = (i = 0): HTMLButtonElement[] =>
+    [...cards()[i].querySelectorAll('.option')] as HTMLButtonElement[];
+
+  it('fills that card own well and sends nothing', async () => {
+    await deliver(view([entry()]));
+
+    optionButtons()[0].click();
+    await flush();
+
+    expect(posts).toHaveLength(0);
+    expect(well()!.value).toBe('Do the first thing');
+    expect(sendBtn()!.hidden).toBe(false);
+    expect(cards()).toHaveLength(1);
+  });
+
+  it('focuses the well, which is what engages the board hold', async () => {
+    // The hold is a predicate over document.activeElement. A click on a BUTTON
+    // does not focus a textarea, so without an explicit focus the board could
+    // rebuild under the user mid-decision — the interruption the hold exists to
+    // prevent.
+    await deliver(view([entry()]));
+
+    optionButtons()[0].click();
+    await flush();
+
+    expect(document.activeElement).toBe(well());
+  });
+
+  it('keeps the staged text through a board rebuild', async () => {
+    await deliver(view([entry()]));
+    optionButtons()[0].click();
+    await flush();
+    well()!.blur();
+    await flush();
+
+    await deliver(view([entry()], [{ sessionId: 's-9', name: 'other' }]));
+
+    expect(well()!.value).toBe('Do the first thing');
+  });
+
+  it('leaves every option live so the user can change their mind', async () => {
+    // No muting here, unlike the main UI: a pager card has no shared well, so
+    // switching between offered options is the normal act.
+    await deliver(view([entry()]));
+
+    optionButtons()[0].click();
+    await flush();
+    for (const b of optionButtons()) expect(b.disabled).toBe(false);
+
+    optionButtons()[1].click();
+    await flush();
+
+    expect(well()!.value).toBe('Do the second thing');
+    expect(posts).toHaveLength(0);
+  });
+
+  it('still sends when Send is pressed after staging', async () => {
+    await deliver(view([entry({ sessionId: 'sess-abc' })]));
+    optionButtons()[0].click();
+    await flush();
+
+    sendBtn()!.click();
+    await flush();
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toEqual({ prompt: 'Do the first thing' });
+    expect(cards()).toHaveLength(0);
+  });
+});
+
 describe('the board holds still while the user is typing', () => {
   const other = { sessionId: 's-9', name: 'other' };
 

@@ -127,9 +127,10 @@ Open `/pager.html` to triage finished work in one place, away from the main UI.
 - **A card appears** for every session that has stopped and is holding an unhandled
   offer — its last message ended with a `caco-actions` block — showing the session
   name and the full text of every action it offered.
-- **Click an action** to send that exact text back to that session and let it
-  continue; the card leaves the board. **Dismiss** takes the card off the board
-  without sending anything.
+- **Click an action** to put that exact text in the card's well; press **Send** to
+  deliver it and the card leaves the board. The click stages rather than sends, so
+  a mis-tap costs nothing and you can amend the wording first. **Dismiss** takes
+  the card off the board without sending anything.
 - **Or write your own.** Each card has a *something else …* well below its options;
   typing in it reveals **Send**, which delivers your text just like an option. Your
   typing survives the board's background refreshes and is only discarded when you

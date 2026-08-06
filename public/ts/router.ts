@@ -70,12 +70,16 @@ export function initRouter(): void {
     // Skip downloads, hash-only changes, reloads
     if (event.downloadRequest !== null || event.hashChange) return;
     if (event.navigationType === 'reload') return;
-    
+
+    // A link out of the SPA (e.g. /pager.html) must reach the browser: this
+    // handler can only swap content within the current document.
+    if (!shouldInterceptNavigation(event.destination.url, new URL(window.location.href))) {
+      debug('ROUTER', 'Different document, leaving to the browser:', event.destination.url);
+      return;
+    }
+
     const url = new URL(event.destination.url);
-    
-    // Only intercept same-origin
-    if (url.origin !== window.location.origin) return;
-    
+
     debug('ROUTER', 'Intercepting navigation to:', url.toString());
     
     event.intercept({
@@ -101,6 +105,26 @@ export function initRouter(): void {
   
   // Set up expand button click handler
   onButton('expandBtn', { onPress: toggleAppletExpanded });
+}
+
+/**
+ * Whether the SPA router should take over a navigation.
+ *
+ * Only a change WITHIN this document belongs to the router: `handleNavigation`
+ * reads `?session`/`?applet` and swaps content in place, so it cannot service a
+ * different document. Intercepting one — a link to `/pager.html`, say — commits
+ * the URL and then renders nothing, so the address bar changes while the page
+ * stays put. Pathname is therefore the discriminator, not origin alone.
+ */
+export function shouldInterceptNavigation(destination: string, current: URL): boolean {
+  let url: URL;
+  try {
+    url = new URL(destination);
+  } catch {
+    return false;
+  }
+  if (url.origin !== current.origin) return false;
+  return url.pathname === current.pathname;
 }
 
 /**

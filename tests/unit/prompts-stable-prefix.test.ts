@@ -45,15 +45,22 @@ describe('system prompt — stable-prefix ordering (spec-prompt-stable-prefix)',
   });
 });
 
-describe('system prompt — Tool Availability (spec-enable-tools-discovery)', () => {
-  it('explains deferral + the caco_enable_tools discover/enable loop, in the stable prefix', async () => {
+describe('system prompt — tool deferral (spec-enable-tools-discovery)', () => {
+  it('explains deferral and points at the runtime note, in the stable prefix', async () => {
     const c = (await buildSystemMessage()).content;
-    expect(c).toContain('## Tool Availability');
-    expect(c).toContain('caco_enable_tools({ names:');
-    expect(c).toContain('caco_enable_tools()'); // the no-args discovery pull
+    expect(c).toContain('## Tools');
+    expect(c).toContain('DEFERRED');
+    expect(c).toContain('caco_enable_tools');
     expect(c).toContain('<deferred_tools>');    // the change-triggered push
+    // The exact call syntax (`{ names: [...] }`, the no-args discovery pull) is
+    // deliberately NOT asserted any more: it lives in caco_enable_tools' own
+    // description, which the model receives in the same request, so restating it
+    // here was paying twice for one fact (spec-prompt-trim). What the prompt must
+    // still carry is the framing no schema can give — that absence is deliberate
+    // and reversible, and that the runtime note is the thing to enable from.
+    expect(c).toContain('does NOT mean it doesn');
     // Static — carries no per-session data, so it stays before the cwd token.
-    expect(c.indexOf('## Tool Availability')).toBeLessThan(c.indexOf('## Session Context'));
+    expect(c.indexOf('## Tools')).toBeLessThan(c.indexOf('## Session Context'));
   });
 
   it('drops the dead unconditional first-turn get_applet_state directive', async () => {

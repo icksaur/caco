@@ -30,6 +30,24 @@ joins the candidate universe in `computeStaleDeferCandidates`, keyed by
 `builtinKey(name)`. The staleness rule, the cold-seam gating, the live recompute,
 and the `caco_enable_tools` recovery path are all reused unchanged.
 
+**The candidate source must be synchronous.** `computeStaleDeferCandidates` is sync
+and runs inside create/resume; `listBuiltinTools()` is an async client RPC, so it
+cannot be called there. Mirror the Caco solution exactly: a
+`setBuiltinToolNames(names)` / `getBuiltinToolNames()` pair on `SessionManager`,
+populated once from the first successful `listBuiltinTools()` (the `/servers`
+payload already performs that call). An empty cache yields no builtin candidates,
+which over-sends rather than over-hides — the same safe direction as an
+unregistered Caco catalog, and the reason this needs no await.
+
+**Builtins ride the live recompute, never the latch.** The persisted auto-defer
+latch takes MCP keys only, because its sole clear path is a per-MCP-server operator
+un-defer. `Built-in` is a pseudo-server with no such control, so a latched builtin
+would strand deferred forever — the identical stranding the Caco rule avoids, and
+the one `isPseudoServer` now refuses to create. Builtin keys therefore go into
+`staleCacoLive`-style live staleness only, and the existing Caco-key purge extends
+to builtin keys so any already-latched entry heals itself. (Verified 2026-08-05:
+`~/.caco/auto-defer.json` is currently `[]`, so no migration debt exists today.)
+
 **Protect only `str_replace_editor`.** It is the SDK's sole view/edit/create tool
 and Caco ships no replacement — `DEFAULT_EXCLUDED_BUILTINS` already documents this
 as the reason it is not excluded. Deferring it would leave the agent unable to
@@ -48,6 +66,13 @@ Deliberately **not** protected, with reasons:
 - `skill` — a discovery-adjacent tool, but unlike `caco_docs` its *availability*
   is announced by the `<available_skills>` block in context, not by the tool
   definition. Deferring it does not hide the skills; it only defers the invoker.
+  The asymmetry with `caco_docs` is deliberate and worth stating: `caco_docs` is
+  protected because deferral makes it INVISIBLE (nothing else announces it), whereas
+  a deferred `skill` still has its skills advertised every turn. The cost is that
+  the skill contract says "invoke IMMEDIATELY as your first action", which a deferred
+  invoker turns into enable-then-invoke. **Row 1 must verify the `<available_skills>`
+  block is present independently of the tool definition before deferring `skill`;
+  if it is not, `skill` joins the protected set.**
 
 **Policy-excluded builtins are untouched.** `classifyTool` checks
 `policyDisabled` before the dynamic set, so a hard-excluded builtin classifies
@@ -55,14 +80,21 @@ Deliberately **not** protected, with reasons:
 keeps the shell family and `ask_user` permanently gone rather than one enable call
 away, and this spec must not weaken it.
 
-**Two SDK settings that look relevant are not.** `SubagentSettings.disabledSubagents`
-and `SessionOpenOptions.disabledSkills` both exist and Caco wires neither, but
-**neither reduces schema cost** — measured directly against the SDK
-(`rpc.tools.list` on three fresh sessions): `task` stayed 793 tokens and `skill`
-640 in every case, with an identical persona list. `disabledSubagents` blocks
-*dispatch*, exactly as its doc says; it does not shorten the description the model
-is billed for. This is recorded so nobody re-derives it: the only lever that
-reduces builtin tokens is not sending the definition.
+**Two SDK settings that look relevant did not help, with a caveat.**
+`SubagentSettings.disabledSubagents` and `SessionOpenOptions.disabledSkills` both
+exist and Caco wires neither. Measured directly against the SDK (`rpc.tools.list`,
+three fresh sessions): `task` stayed 793 tokens and `skill` 640 in every case, with
+an identical persona list — consistent with the doc wording, which says disabled
+subagents "cannot be dispatched" and says nothing about the description.
+
+**The scope of that result is narrower than it looks.** Those sessions were bare,
+so `task` was at its 793-token floor; the probe therefore shows the settings do not
+remove BUILT-IN personas, and does NOT establish anything about the ~930 tokens
+that operator-defined `.github/agents` entries append. If a future attempt wants to
+shrink `task` in place, the open question is whether `disabledSubagents` suppresses
+a CUSTOM agent's block — untested here, and worth one probe before assuming either
+way. What is settled: these settings are not a substitute for not sending the
+definition.
 
 **Cost is measured, not estimated.** The `/servers` payload already carries a live
 `tokenCost` per tool, so the before/after is read from the running instance rather
@@ -119,11 +151,13 @@ than computed from a heuristic.
 
 | # | Step | Files | Oracle | Invariants |
 |---|------|-------|--------|------------|
-| 1 | Add `NEVER_DEFER_BUILTINS` (`str_replace_editor`) + `isDeferEligibleBuiltin(name, {policyDisabled})`, mirroring the Caco predicate | `src/tool-registry.ts`, `tests/unit/tool-registry.test.ts` | hand table: `str_replace_editor` ⇒ false; a policy-excluded builtin ⇒ false; `task`/`grep`/`glob`/`skill` ⇒ true | edit-always-available, policy-beats-deferral |
-| 2 | Add builtin keys to the candidate universe in `computeStaleDeferCandidates`, using `builtinKey(name)`; source the name list from the same catalog the payload uses | `src/session-manager.ts`, `tests/unit/caco-defer-candidates.test.ts` | ref-impl: fixture builtin list ⇒ expected candidate keys, all `builtin:`-prefixed; policy-excluded never a candidate | one-predicate, warm-never-mutated |
-| 3 | Thread the verdict into the `/servers` payload's builtin branch through the SAME predicate | `src/routes/workspace-api.ts`, `tests/unit/mcp-server-payload.test.ts` | payload test: `deferEligible` matches enumeration for edit/policy/ordinary builtins | one-predicate |
-| 4 | Record the refuted SDK settings so they are not retried | `docs/spec-builtin-defer.md` (this file), `src/tool-registry.ts` comment | - | - |
-| 5 | Measure before/after on a fresh session and report | - | operator-visible token drop | - |
+| 0 | Confirm the `<available_skills>` block is emitted independently of the `skill` tool definition; if it is not, add `skill` to the protected set before proceeding | - | live inspection of a session's context | - |
+| 1 | Add `NEVER_DEFER_BUILTINS` (`str_replace_editor`) + `isDeferEligibleBuiltin(name, {policyDisabled})`, mirroring the Caco predicate | `src/tool-registry.ts`, `tests/unit/tool-registry.test.ts` | hand table: `str_replace_editor` ⇒ false; a policy-excluded builtin ⇒ false; `task`/`grep`/`glob` ⇒ true; **exact `NEVER_DEFER_BUILTINS` membership pinned** so a later edit cannot silently drop a protection | edit-always-available, policy-beats-deferral |
+| 2 | Add `setBuiltinToolNames`/`getBuiltinToolNames` (sync cache, populated from the first `listBuiltinTools()`); add builtin keys to the candidate universe in `computeStaleDeferCandidates` via `builtinKey(name)`; extend the existing Caco-key latch purge to builtin keys | `src/session-manager.ts`, `src/routes/workspace-api.ts` (populate the cache), `tests/unit/caco-defer-candidates.test.ts` | ref-impl: fixture builtin list ⇒ expected candidate keys, **every one `builtin:`-prefixed**; a policy-excluded builtin is never emitted as a candidate **even when maximally stale**; empty cache ⇒ no builtin candidates; a latched builtin key is purged | one-predicate, warm-never-mutated, builtins-never-latched |
+| 3 | Thread the verdict into the `/servers` payload's builtin branch through the SAME predicate; update the load-bearing comments in `workspace-api.ts` and `session-manager.ts` that currently assert builtins are never dynamically deferred | `src/routes/workspace-api.ts`, `src/session-manager.ts`, `tests/unit/mcp-server-payload.test.ts` | payload test: `deferEligible` matches enumeration for edit / policy-excluded / ordinary builtins | one-predicate |
+| 4 | Verify a policy-excluded builtin still fails `validateEnable`, so widening the candidate set cannot make one re-enableable | `tests/unit/session-tool-state.test.ts` | `validateEnable('builtin:bash')` ⇒ not ok, with the disabled reason | policy-beats-deferral |
+| 5 | Record the refuted SDK settings so they are not retried | this file, `src/tool-registry.ts` comment | - | - |
+| 6 | Measure before/after on a fresh session; confirm the deferred-tools reminder names the deferred builtins on a background-agent wake | - | operator-visible token drop; reminder present in the wake flow | - |
 
 ## Rationale
 

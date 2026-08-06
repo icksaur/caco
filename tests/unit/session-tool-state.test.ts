@@ -36,6 +36,20 @@ describe('classifyTool — the one presentation-axis definition', () => {
   });
 });
 
+describe('validateEnable — policy survives a wider defer candidate set', () => {
+  it('refuses to enable a policy-excluded builtin', async () => {
+    // Widening the candidate universe to builtins must not make a hard-excluded
+    // one look re-enableable: classifyTool checks policy BEFORE the dynamic set.
+    const { validateEnable, classifyTool } = await import('../../src/session-tool-state.js');
+    const key = 'builtin:bash' as never;
+    const catalog = new Map([[key, { key, name: 'bash', description: 'b', origin: 'builtin', excludable: true, hardDisabled: false }]]) as never;
+    const policy = new Set([key]) as never;
+
+    expect(classifyTool(key, { excluded: new Set(), hardDisabled: false, policyDisabled: policy })).toBe('disabled');
+    expect(validateEnable([key], catalog, new Set([key]), policy).ok).toBe(false);
+  });
+});
+
 describe('validateEnable — atomic, reveal-only', () => {
   const catalog = cat([
     { key: k.bash, origin: 'builtin' },

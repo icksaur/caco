@@ -86,6 +86,24 @@ export function disabledToolNames(): Set<string> {
  * per-turn schema tax. NOTE: `str_replace_editor` is deliberately NOT excluded — it is
  * the SDK's actual view/edit/create tool (Caco has no replacement), so excluding it
  * would remove the agent's ability to edit files.
+ *
+ * `grep`/`glob` are excluded for the same reason as the shell family: `caco.grep`,
+ * `caco.glob`, `caco.rg` (raw ripgrep) and `caco.peek` already cover search inside
+ * `caco_run_workflow`, where one call runs many searches instead of one round trip
+ * each. Exclusion rather than auto-defer is deliberate: deferral is passive, so a
+ * tool reached for even occasionally never goes stale and is paid for forever —
+ * only exclusion changes the route. The capability is not lost, only relocated;
+ * note facade tree searches are rooted at the session dir, so an external tree
+ * needs `caco.rg(['pat','/abs'])`. This supersedes the older "separate future
+ * effort (index_multiread)" note: that effort landed as `caco.frames`
+ * (spec-caco-frames), which calls itself the unification of index_multiread and
+ * the graph work.
+ *
+ * NOT a lever, recorded so it is not retried: the SDK's
+ * `SubagentSettings.disabledSubagents` and `SessionOpenOptions.disabledSkills`
+ * change *dispatch/availability*, not the definitions the model is billed for.
+ * Measured on three fresh sessions via `rpc.tools.list` — `task` stayed 793 tokens
+ * and `skill` 640 with an identical persona list in every case.
  */
 export const DEFAULT_EXCLUDED_BUILTINS: string[] = [
   'builtin:bash', 'builtin:read_bash', 'builtin:stop_bash', 'builtin:list_bash',
@@ -93,6 +111,7 @@ export const DEFAULT_EXCLUDED_BUILTINS: string[] = [
   'builtin:local_shell',
   'builtin:ask_user',
   'builtin:fetch_copilot_cli_documentation',
+  'builtin:grep', 'builtin:glob',
 ];
 
 /** Parse CACO_EXCLUDED_BUILTINS (comma-separated) and union with the defaults. */
@@ -169,6 +188,36 @@ export function isDeferEligibleCacoEntry(
   entry: { name: string; hardDisabled: boolean; origin: 'builtin' | 'extension' },
 ): boolean {
   return entry.origin === 'builtin' && isDeferEligibleCacoTool(entry.name, { hardDisabled: entry.hardDisabled });
+}
+
+/**
+ * Built-in tools that may NEVER be auto-deferred. Everything else is deferrable
+ * once stale (docs/spec-builtin-defer.md), the same inversion applied to Caco
+ * tools — builtins were previously all-or-nothing: hard-excluded and
+ * unrecoverable, or sent every turn forever.
+ *
+ *  - `str_replace_editor` — the SDK's only view/edit/create tool, and Caco ships
+ *    no replacement. Every other builtin's enable round-trip lands at a natural
+ *    pause; this one would land mid-edit.
+ *  - `skill` — its description EMBEDS the `<available_skills>` block listing every
+ *    skill. Deferring it hides not just the invoker but the existence of skills,
+ *    so the model could never know to re-enable it: the same self-reinforcing
+ *    discovery hazard that protects `caco_docs`. Verified 2026-08-05 by reading
+ *    the live tool definition, which names all five local skills inline.
+ */
+export const NEVER_DEFER_BUILTINS: string[] = [
+  'str_replace_editor',
+  'skill',
+];
+
+/**
+ * Whether a built-in tool is eligible for auto-defer. Mirrors
+ * `isDeferEligibleCacoTool`; policy-excluded builtins are never eligible because
+ * they are already gone and classify `disabled`, never `deferred`.
+ */
+export function isDeferEligibleBuiltin(name: string, opts?: { policyDisabled?: boolean }): boolean {
+  if (opts?.policyDisabled) return false;
+  return !NEVER_DEFER_BUILTINS.includes(name);
 }
 
 /**

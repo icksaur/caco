@@ -144,6 +144,23 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
     expect(caco.find(t => t.name === 'register_mcp_server')).toMatchObject({ state: 'disabled', observed: false });
   });
 
+  it('Built-in: the eligibility badge matches what enumeration would defer', () => {
+    // The badge used to report "eligible" only for tools ALREADY excluded, so the
+    // applet claimed nothing would ever defer.
+    const out = buildMcpServerPayload([], {}, {}, [
+      { name: 'task', description: 't' },
+      { name: 'str_replace_editor', description: 'e' },
+      { name: 'skill', description: 's' },
+      { name: 'bash', description: 'b' },
+    ], ['bash'], []);
+    const verdict = (n: string) => out[0].tools.find(t => t.name === n)!.deferEligible;
+
+    expect(verdict('task')).toBe(true);
+    expect(verdict('str_replace_editor')).toBe(false);
+    expect(verdict('skill')).toBe(false);
+    expect(verdict('bash')).toBe(false);
+  });
+
   it('Caco: the eligibility badge matches what enumeration would actually defer', () => {
     // The badge is the operator's only view of the rule, so re-deriving it from
     // name + hardDisabled here — which cannot see builtin-vs-extension — made it

@@ -12,7 +12,7 @@ import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
 import { sessionManager } from '../session-manager.js';
-import { excludedBuiltinNames, isDeferEligibleCacoEntry, isPseudoServer } from '../tool-registry.js';
+import { excludedBuiltinNames, isDeferEligibleCacoEntry, isDeferEligibleBuiltin, isPseudoServer } from '../tool-registry.js';
 import { builtinKey, type ToolKey } from '../tool-key.js';
 import { lookupMcpKey, learnFromMetadata } from '../tool-key-registry.js';
 import { buildToolCatalog } from '../tool-catalog.js';
@@ -326,6 +326,7 @@ export function buildMcpServerPayload(
     tools: entries.filter(t => t.origin === 'builtin').map((t): PayloadTool => {
       const state = classifyTool(t.key, { excluded, hardDisabled: false, policyDisabled });
       const listed = listedBuiltinKeys.has(t.key);
+      const eligible = isDeferEligibleBuiltin(t.name, { policyDisabled: policyDisabled.has(t.key) });
       return {
         name: t.name,
         description: t.description,
@@ -342,12 +343,12 @@ export function buildMcpServerPayload(
         tokenCost: listed
           ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters ?? null, instructions: t.instructions ?? null })
           : null,
-        // Builtins are never dynamically deferred (policy only), so known == live cost.
+        // Known == live cost: a deferred builtin's schema is still known locally.
         knownTokenCost: listed
           ? estimateToolTokens({ name: t.name, description: t.description, parameters: t.parameters ?? null, instructions: t.instructions ?? null })
           : null,
         state,
-        ...usageFields(t.key, excluded.has(t.key)),
+        ...usageFields(t.key, eligible),
       };
     }),
   };
@@ -488,6 +489,9 @@ router.get('/servers', async (req: Request, res: Response) => {
       observedByKey[m.name] = meta; // model-facing name == the MCP ToolKey
       if (m.namespacedName) observedByKey[m.namespacedName] = meta;
     }
+    // Feed the sync cache auto-defer enumeration reads (spec-builtin-defer): this is
+    // the one place builtin names are already fetched.
+    sessionManager.setBuiltinToolNames(builtinTools.map(b => b.name));
     const servers = buildMcpServerPayload(
       mcpServers, availableByServer, observedByKey, builtinTools,
       // Deferred SDK builtins carry a `builtin:` prefix in the exclusion list; strip

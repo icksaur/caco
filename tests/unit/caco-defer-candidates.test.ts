@@ -131,3 +131,48 @@ describe('Caco auto-defer candidate enumeration', () => {
     expect(got).toEqual(['a_tool_shipped_tomorrow']);
   });
 });
+
+describe('builtin auto-defer candidate enumeration', () => {
+  async function builtinCandidatesFor(names: string[]): Promise<string[]> {
+    const { SessionManager } = await import('../../src/session-manager.js');
+    const mgr = new SessionManager();
+    (mgr as unknown as { getCacoToolCatalog: () => CatalogEntry[] }).getCacoToolCatalog = () => [];
+    mgr.setBuiltinToolNames(names);
+    return (mgr as unknown as { computeNewSessionAutoDefer: () => string[] }).computeNewSessionAutoDefer();
+  }
+
+  it('emits builtin-prefixed keys, or the exclusion silently does nothing', async () => {
+    const got = await builtinCandidatesFor(['task', 'web_fetch']);
+
+    expect(got.sort()).toEqual(['builtin:task', 'builtin:web_fetch']);
+  });
+
+  it('never emits a protected builtin', async () => {
+    const got = await builtinCandidatesFor(['str_replace_editor', 'skill', 'task']);
+
+    expect(got).toEqual(['builtin:task']);
+  });
+
+  it('never emits a policy-excluded builtin, even when maximally stale', async () => {
+    // These are already gone via the base seed and must classify 'disabled', never
+    // 'deferred'; emitting them would make them look re-enableable.
+    const got = await builtinCandidatesFor(['bash', 'ask_user', 'grep', 'glob', 'task']);
+
+    expect(got).toEqual(['builtin:task']);
+  });
+
+  it('yields nothing when the name cache was never populated', async () => {
+    // computeStaleDeferCandidates is sync and cannot await listBuiltinTools, so an
+    // unpopulated cache must over-send rather than over-hide.
+    expect(await builtinCandidatesFor([])).toEqual([]);
+  });
+
+  it('purges a builtin key an older build latched', async () => {
+    latch.keys = new Set(['builtin:str_replace_editor']);
+
+    const got = await builtinCandidatesFor(['str_replace_editor', 'task']);
+
+    expect(got).toEqual(['builtin:task']);
+    expect([...latch.keys]).toEqual([]);
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { filterDisabledTools, parseDisabledToolNames, parseExcludedBuiltins, DEFAULT_EXCLUDED_BUILTINS, isDeferEligibleCacoTool, isDeferEligibleCacoEntry, NEVER_DEFER_CACO_TOOLS, isPseudoServer } from '../../src/tool-registry.js';
+import { filterDisabledTools, parseDisabledToolNames, parseExcludedBuiltins, DEFAULT_EXCLUDED_BUILTINS, isDeferEligibleCacoTool, isDeferEligibleCacoEntry, NEVER_DEFER_CACO_TOOLS, isDeferEligibleBuiltin, NEVER_DEFER_BUILTINS, isPseudoServer } from '../../src/tool-registry.js';
 
 interface FakeTool { name: string; }
 const t = (name: string): FakeTool => ({ name });
@@ -102,6 +102,49 @@ describe('isDeferEligibleCacoEntry', () => {
   });
 });
 
+describe('isDeferEligibleBuiltin', () => {
+  it('protects exactly the two named builtins', () => {
+    expect([...NEVER_DEFER_BUILTINS].sort()).toEqual(['skill', 'str_replace_editor']);
+  });
+
+  it('never defers the only file-edit tool', () => {
+    // Every other builtin's enable round-trip lands at a pause point; this one
+    // would land mid-edit, and Caco ships no replacement.
+    expect(isDeferEligibleBuiltin('str_replace_editor')).toBe(false);
+  });
+
+  it('never defers skill, whose description embeds the skill list', () => {
+    // Deferring it hides the existence of skills, so the model could not know to
+    // re-enable it — the discovery hazard that also protects caco_docs.
+    expect(isDeferEligibleBuiltin('skill')).toBe(false);
+  });
+
+  it('defers ordinary builtins, including ones never listed anywhere', () => {
+    for (const n of ['task', 'read_agent', 'list_agents', 'web_fetch', 'a_builtin_shipped_tomorrow']) {
+      expect(isDeferEligibleBuiltin(n)).toBe(true);
+    }
+  });
+
+  it('never defers a policy-excluded builtin, which is already gone', () => {
+    expect(isDeferEligibleBuiltin('bash', { policyDisabled: true })).toBe(false);
+    expect(isDeferEligibleBuiltin('bash', { policyDisabled: false })).toBe(true);
+  });
+});
+
+describe('DEFAULT_EXCLUDED_BUILTINS', () => {
+  it('routes search through the workflow facade, as it does the shell', () => {
+    // caco.grep/glob/rg/peek cover search inside caco_run_workflow, where one call
+    // runs many searches. Exclusion not deferral: a tool used occasionally never
+    // goes stale, so only exclusion changes the route.
+    expect(DEFAULT_EXCLUDED_BUILTINS).toContain('builtin:grep');
+    expect(DEFAULT_EXCLUDED_BUILTINS).toContain('builtin:glob');
+  });
+
+  it('keeps the keys builtin-prefixed, or the exclusion silently does nothing', () => {
+    for (const k of DEFAULT_EXCLUDED_BUILTINS) expect(k.startsWith('builtin:')).toBe(true);
+  });
+});
+
 describe('isPseudoServer', () => {
   it('names the synthetic applet groupings, not real MCP servers', () => {
     expect(isPseudoServer('Caco')).toBe(true);
@@ -114,9 +157,11 @@ describe('parseExcludedBuiltins', () => {
   it('defaults exclude the shell built-ins (bash + powershell families)', () => {
     expect(DEFAULT_EXCLUDED_BUILTINS).toContain('builtin:bash');
     expect(DEFAULT_EXCLUDED_BUILTINS).toContain('builtin:powershell');
-    // search/read tools are NOT excluded (separate future effort)
-    expect(DEFAULT_EXCLUDED_BUILTINS).not.toContain('builtin:grep');
-    expect(DEFAULT_EXCLUDED_BUILTINS).not.toContain('builtin:glob');
+    // str_replace_editor stays: it is the only view/edit/create tool and Caco
+    // ships no replacement. (grep/glob DID move to the facade — see the
+    // DEFAULT_EXCLUDED_BUILTINS suite above; the older "search tools are not
+    // excluded, separate future effort" contract is superseded, that effort
+    // having landed as caco.frames.)
     expect(DEFAULT_EXCLUDED_BUILTINS).not.toContain('builtin:str_replace_editor');
   });
 

@@ -95,7 +95,7 @@ Large shell/test/build output may be shaped to a failure-focused summary ending 
 
 ## Batch Tool Calls
 Every turn replays the whole context window, so fewer turns = less latency and cost. Emit multiple independent tool calls in one response — the runtime runs them together in a single round trip:
-- **Reads/searches**: fire all your \`view\`/\`grep\`/\`glob\`/\`index\` calls at once, not one-per-turn.
+- **Reads/searches**: fire all your \`view\`/\`index\`/\`caco_run_workflow\` calls at once, not one-per-turn. Search lives in the workflow facade (\`caco.grep\`/\`caco.glob\`/\`caco.rg\`), where one call can run many searches.
 - **Edits**: make all \`edit\`/\`create\` calls for a change in one response — they apply in order, across the same or different files, not one edit per turn.
 - Pair \`report_intent\` with that batch, not as its own turn.
 Don't narrate between mechanical tool calls in the same phase — a standalone progress note costs a full context replay. Fold any status update into the message that carries your next tool batch; emit a bare update only at a true phase boundary (research → implement → test), one line. Split a batch only when a later call needs an earlier call's result, or when side-effect ordering matters and can't be expressed in one response.

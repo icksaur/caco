@@ -33,7 +33,7 @@ import { buildPagerView, type PagerSessionInput } from './pager-view.js';
 import { planSessionRemoval, type RemovalPlan } from './session-removal.js';
 import { activityVersion } from './activity-version.js';
 import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys } from './session-tool-state.js';
-import { excludedBuiltinNames, isDeferEligibleCacoEntry } from './tool-registry.js';
+import { excludedBuiltinNames, isDeferEligibleCacoEntry, isDeferEligibleBuiltin } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
 import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-defer-store.js';
 import { getNowActiveSeconds, getLastUsedActiveSeconds, stampToolUsage, DEFER_STALE_THRESHOLD_ACTIVE_SECONDS, COLD_RESUME_STALE_MS } from './tool-usage-store.js';
@@ -407,6 +407,7 @@ export class SessionManager {
   // startup by server.ts BEFORE filterDisabledTools, so hard-disabled tools are
   // still enumerable for the mcp-servers applet. See docs/spec-tool-reveal.md.
   private cacoToolCatalog: CacoToolCatalogEntry[] = [];
+  private builtinToolNames: string[] = [];
   
   // sessionId → Promise (serializes concurrent caco_enable_tools reveals so the
   // read-modify-write of excludedTools is atomic; two enables in one turn compose).
@@ -2213,6 +2214,22 @@ export class SessionManager {
   }
 
   /**
+   * Cache the SDK's built-in tool NAMES for auto-defer candidate enumeration.
+   * `computeStaleDeferCandidates` is synchronous and runs inside create/resume,
+   * but `listBuiltinTools()` is an async client RPC, so the names have to be
+   * captured out-of-band. Populated from the `/servers` payload's existing call;
+   * an empty cache simply yields no builtin candidates, which over-sends rather
+   * than over-hides (spec-builtin-defer).
+   */
+  setBuiltinToolNames(names: string[]): void {
+    if (names.length) this.builtinToolNames = [...new Set(names)];
+  }
+
+  getBuiltinToolNames(): string[] {
+    return this.builtinToolNames;
+  }
+
+  /**
    * List Caco's built-in (model) tools via client RPC, with full metadata
    * (parameters + instructions) so their per-turn token cost is accurate. These
    * are surfaced as the synthetic "Built-in" pseudo-server. ONLY sanctioned use of
@@ -2525,16 +2542,29 @@ export class SessionManager {
       .filter(c => isDeferEligibleCacoEntry(c))
       .map(c => cacoKey(c.name));
 
+    // Built-ins join the same live staleness rule (spec-builtin-defer). Keys MUST be
+    // `builtin:`-prefixed — the bare model-facing name would silently exclude nothing.
+    // Policy-excluded builtins are omitted: they are already gone via the base seed and
+    // must classify `disabled`, never `deferred`.
+    const policyExcluded = new Set(excludedBuiltinNames());
+    const builtinCandidates = this.getBuiltinToolNames()
+      .filter(n => isDeferEligibleBuiltin(n, { policyDisabled: policyExcluded.has(builtinKey(n)) }))
+      .map(n => builtinKey(n));
+
     // Only MCP keys belong in the persisted latch, but an older build put Caco
     // tools there. The latch is unioned into the seed below WITHOUT re-checking
     // eligibility, so a stale entry defers a tool that may now be protected — and
     // the latch's only clear path is a per-MCP-server un-defer that a pseudo-server
     // cannot offer, so it would never come back. Purge them here, where the
-    // catalog is in hand, so the state heals itself once.
-    const cacoKeys = new Set<string>(this.getCacoToolCatalog().map(c => String(cacoKey(c.name))));
-    const strandedCaco = [...getAutoDeferred()].filter(k => cacoKeys.has(String(k)));
+    // catalog is in hand, so the state heals itself once. Builtins are covered too:
+    // `Built-in` is a pseudo-server for the same reason.
+    const pseudoKeys = new Set<string>([
+      ...this.getCacoToolCatalog().map(c => String(cacoKey(c.name))),
+      ...this.getBuiltinToolNames().map(n => String(builtinKey(n))),
+    ]);
+    const strandedCaco = [...getAutoDeferred()].filter(k => pseudoKeys.has(String(k)));
     if (strandedCaco.length) {
-      console.log(`[DEFER] purging ${strandedCaco.length} stale Caco key(s) from the MCP latch: ${strandedCaco.join(', ')}`);
+      console.log(`[DEFER] purging ${strandedCaco.length} stale pseudo-server key(s) from the MCP latch: ${strandedCaco.join(', ')}`);
       removeAutoDeferred(strandedCaco);
     }
     const nowActiveSeconds = getNowActiveSeconds();
@@ -2551,14 +2581,16 @@ export class SessionManager {
     // built-in catalog rather than a fixed allowlist.
     const staleMcp = staleOf(mcpCandidates);
     addAutoDeferred(staleMcp);
-    const staleCacoLive = staleOf(cacoCandidates);
-    // Seed = the WHOLE MCP latch (sticky across later freshness) ∪ live-stale Caco tools,
-    // minus per-session used-here protection.
-    const deferred = [...new Set<ToolKey>([...getAutoDeferred(), ...staleCacoLive])].filter(k => !usedHere.has(k));
+    // Caco AND builtin tools ride the live recompute together: both live under
+    // pseudo-servers with no operator un-defer, so latching either would strand it.
+    const staleLive = staleOf([...cacoCandidates, ...builtinCandidates]);
+    // Seed = the WHOLE MCP latch (sticky across later freshness) ∪ live-stale
+    // pseudo-server tools, minus per-session used-here protection.
+    const deferred = [...new Set<ToolKey>([...getAutoDeferred(), ...staleLive])].filter(k => !usedHere.has(k));
     if (deferred.length) {
       console.log(
         `[DEFER] ${logLabel}: deferred=${deferred.length} ` +
-        `newlyStaleMcp=${staleMcp.length} mcpLatch=${getAutoDeferred().size} staleCaco=${staleCacoLive.length} ` +
+        `newlyStaleMcp=${staleMcp.length} mcpLatch=${getAutoDeferred().size} staleLive=${staleLive.length} ` +
         `keptUsedHere=${usedHere.size} thresholdSec=${DEFER_STALE_THRESHOLD_ACTIVE_SECONDS} clockSec=${Math.round(nowActiveSeconds)}`,
       );
     }

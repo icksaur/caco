@@ -50,6 +50,15 @@ no muting — because a pager card is a triage surface where switching between
 offered options is the common act, and there is no ambiguity about which well the
 text landed in.
 
+**Staging on the pager MUST focus the well.** The board hold (spec-pager-freeform
+phase 2) is a predicate over `document.activeElement`, so it engages only while a
+well is focused. A click on a *button* does not focus the textarea, which would
+leave a user who has just staged an option reading a board that can rebuild under
+them mid-decision — the exact interruption the hold exists to prevent. The staging
+path therefore calls `well.focus()` explicitly, and this is a behavioural
+requirement, not an incidental nicety: without it the hold silently does not apply.
+Focusing also raises the mobile keyboard, which is what an editable stage wants.
+
 **One rule, two mechanisms.** The shared invariant is "a click stages, a second act
 sends". How staging is displayed differs because the surfaces differ, and that
 difference is intentional rather than an inconsistency to be reconciled later.
@@ -69,16 +78,23 @@ difference is intentional rather than an inconsistency to be reconciled later.
 
 ## Considerations
 
-- **The main UI stages into a shared well.** If a draft is already there, the click
-  replaces it. Replacing is right — the user just expressed a specific intent — but
-  it is a destructive act on text they typed, so it is worth being deliberate: this
-  spec keeps replace (matching today) rather than appending, and notes it here so
-  the next reader knows it was a choice.
+- **The main UI stages into a shared well, and replace is now riskier than it was.**
+  Today a click sends immediately, so overwriting a draft is invisible collateral of
+  an act the user clearly intended. Once options become an *editing affordance*, a
+  mis-tap can silently clobber typed text that is also persisted to disk. The spec
+  keeps replace anyway — a confirm on every click would defeat the one-tap ergonomics
+  the buttons exist for, and an append produces a nonsense concatenation — but this is
+  an accepted tradeoff, not an oversight. If it bites in practice, the fix is an undo
+  affordance, not a prompt.
 - **Mobile keyboards.** Focusing the textarea on the main UI raises the keyboard,
   which is what an editable stage wants. On the pager, focusing a card's well also
   raises it — and that now interacts with the board hold from
   `spec-pager-freeform`, which is correct: a staged option should hold the board
   exactly like typing does.
+- **Staging overwrites the pager well too**, including text the user typed there.
+  Same reasoning as the main UI — the click is a specific expressed intent — and
+  symmetric across both surfaces so there is one rule to remember. Repeated option
+  clicks therefore restage, which is the intended way to change your mind.
 - **Empty/whitespace options cannot occur** — the server only emits non-empty
   option text — but the pager's Send already gates on `value.trim()`, so a staged
   option behaves the same as typed text with no extra guard.
@@ -110,11 +126,12 @@ difference is intentional rather than an inconsistency to be reconciled later.
 
 | # | Step | Files | Oracle | Invariants |
 |---|------|-------|--------|------------|
-| 1 | Main UI: drop `requestSubmit()` and the `options: []` clear from the option-click handler; focus the textarea with the caret at the end | `public/ts/chat-form-controller.ts` | jsdom: clicking an option sets `textarea.value` and dispatches NO submit; `formStateStore` options are unchanged | no-single-click-send, offer-survives-staging |
-| 2 | Confirm the staged state leaves options visible-and-muted rather than hidden, adjusting `refreshButton` only if it hides them | `public/ts/chat-form-controller.ts`, `public/ts/form-state.ts` | `computeFormState(false, true, true)` ⇒ muted; after a staged click the container is displayed and its buttons carry `.muted` | offer-survives-staging |
-| 3 | Pager: option click stages into that card's well via the draft map, reveals Send, and posts nothing | `public/pager.html` | jsdom (`pager-page-dom.test.ts`): clicking an option makes zero POSTs, sets the well's value, un-hides Send; a rebuild preserves it | no-single-click-send, pager-draft-owns-text |
+| 0 | Build the missing main-UI harness: no existing test exercises the `#responseOptions` click wiring at all, so rows 1-2 are not checkable without it. A jsdom fixture that mounts the form, renders options, and can observe `dispatchPrompt` | `tests/unit/chat-form-options.test.ts` | the harness renders option buttons and a click reaches the handler | - |
+| 1 | Main UI: drop `requestSubmit()` and the `options: []` clear from the option-click handler; focus the textarea with the caret at the end | `public/ts/chat-form-controller.ts` | jsdom: clicking an option sets `textarea.value`, **`dispatchPrompt` is NOT called** (asserted directly, not via the absence of `requestSubmit` — the dispatch path could change), and `formStateStore` options are unchanged | no-single-click-send, offer-survives-staging |
+| 2 | Confirm the staged state leaves options visible-and-muted rather than hidden. **Verified from code**: `refreshButton` renders when `optionsVisible \|\| optionsMuted`, so muted ⇒ shown-and-dimmed and no change is needed — the row exists to pin it | `public/ts/chat-form-controller.ts`, `public/ts/form-state.ts` | after a staged click the container is displayed and its buttons carry `.muted` | offer-survives-staging |
+| 3 | Pager: option click stages into that card's well (`setDraft` + `syncSend` + `grow`), **focuses the well**, reveals Send, and posts nothing | `public/pager.html` | jsdom (`pager-page-dom.test.ts`): clicking an option makes zero POSTs, sets the well's value, un-hides Send, and leaves `document.activeElement` as that well (which is what engages the board hold); a rebuild preserves the staged text | no-single-click-send, pager-draft-owns-text |
 | 4 | Pager: options stay live after staging (no muting) | `public/pager.html` | jsdom: after staging, option buttons are enabled and a second click restages | - |
-| 5 | Update both specs and the README pager section to describe staging | `docs/spec-offer-action-buttons.md`, `docs/archive/spec-pager.md`, `README.md` | `npm run check:specs` | - |
+| 5 | Update the live specs and the README pager section to describe staging. **`docs/archive/spec-pager.md` is deliberately NOT edited** — archived specs are frozen as-built records; this spec supersedes it, and `spec-pager-freeform` (still draft, and the accurate description of the shipped page) carries the pager's current contract | `docs/spec-offer-action-buttons.md`, `docs/spec-pager-freeform.md`, `README.md` | `npm run check:specs` | - |
 
 ## Rationale
 

@@ -107,6 +107,19 @@ describe('Caco auto-defer candidate enumeration', () => {
     expect(got).toEqual(['caco_herd']);
   });
 
+  it('purges a Caco tool an older build latched, instead of deferring it forever', async () => {
+    // The latch is unioned into the seed WITHOUT re-checking eligibility, and its
+    // only clear path is a per-MCP-server un-defer that a pseudo-server cannot
+    // offer. A stale entry for a now-protected tool would therefore defer it with
+    // no way back — the exact stranding the "MCP keys only" rule exists to prevent.
+    latch.keys = new Set(['caco_docs']);
+
+    const got = await candidatesFor([entry('caco_docs'), entry('caco_herd')]);
+
+    expect(got).toEqual(['caco_herd']);
+    expect([...latch.keys]).toEqual([]);
+  });
+
   it('yields nothing when the catalog is unregistered, over-sending rather than over-hiding', async () => {
     expect(await candidatesFor([])).toEqual([]);
   });

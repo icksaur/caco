@@ -2524,6 +2524,19 @@ export class SessionManager {
     const cacoCandidates = this.getCacoToolCatalog()
       .filter(c => isDeferEligibleCacoEntry(c))
       .map(c => cacoKey(c.name));
+
+    // Only MCP keys belong in the persisted latch, but an older build put Caco
+    // tools there. The latch is unioned into the seed below WITHOUT re-checking
+    // eligibility, so a stale entry defers a tool that may now be protected — and
+    // the latch's only clear path is a per-MCP-server un-defer that a pseudo-server
+    // cannot offer, so it would never come back. Purge them here, where the
+    // catalog is in hand, so the state heals itself once.
+    const cacoKeys = new Set<string>(this.getCacoToolCatalog().map(c => String(cacoKey(c.name))));
+    const strandedCaco = [...getAutoDeferred()].filter(k => cacoKeys.has(String(k)));
+    if (strandedCaco.length) {
+      console.log(`[DEFER] purging ${strandedCaco.length} stale Caco key(s) from the MCP latch: ${strandedCaco.join(', ')}`);
+      removeAutoDeferred(strandedCaco);
+    }
     const nowActiveSeconds = getNowActiveSeconds();
     const lastUsed = getLastUsedActiveSeconds();
     const staleOf = (tools: ToolKey[]) => computeColdResumeExclusions({

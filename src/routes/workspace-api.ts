@@ -12,7 +12,7 @@ import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { validatePathMultiple } from '../path-utils.js';
 import { sessionManager } from '../session-manager.js';
-import { excludedBuiltinNames, isPseudoServer } from '../tool-registry.js';
+import { excludedBuiltinNames, isDeferEligibleCacoEntry, isPseudoServer } from '../tool-registry.js';
 import { builtinKey, type ToolKey } from '../tool-key.js';
 import { lookupMcpKey, learnFromMetadata } from '../tool-key-registry.js';
 import { buildToolCatalog } from '../tool-catalog.js';
@@ -226,6 +226,10 @@ export interface CacoCatalogTool {
   name: string;
   description: string;
   hardDisabled: boolean;
+  /** Built-in vs extension. Carried so the eligibility verdict below is computed
+   *  from the same predicate enumeration uses; `CatalogTool` collapses every Caco
+   *  source to origin 'caco', so it cannot be recovered downstream. */
+  origin: 'builtin' | 'extension';
   parameters?: Record<string, unknown>;
 }
 
@@ -305,7 +309,10 @@ export function buildMcpServerPayload(
     .map(n => ({ name: n, description: '' }));
 
   const catalog = buildToolCatalog({
-    caco: cacoCatalog.map(c => ({ name: c.name, description: c.description, hardDisabled: c.hardDisabled, parameters: c.parameters })),
+    caco: cacoCatalog.map(c => ({
+      name: c.name, description: c.description, hardDisabled: c.hardDisabled, parameters: c.parameters,
+      deferEligible: isDeferEligibleCacoEntry(c),
+    })),
     builtins: [...builtinTools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters, instructions: t.instructions })), ...bareDeferred],
     mcp: servers.map(s => ({ serverName: s.name, tools: availableByServer[s.name] ?? [] })),
   });

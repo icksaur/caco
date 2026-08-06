@@ -55,7 +55,7 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
       {},
       [{ name: 'view', description: 'Read a file' }],
       ['bash'],
-      [{ name: 'caco_run_workflow', description: 'run', hardDisabled: false }],
+      [{ name: 'caco_run_workflow', description: 'run', hardDisabled: false, origin: 'builtin' }],
     );
     expect(out.map(s => s.name)).toEqual(['Built-in', 'Caco', 'github']);
   });
@@ -134,14 +134,32 @@ describe('buildMcpServerPayload — groups, states, merge', () => {
 
   it('Caco: hardDisabled → disabled, else enabled; token cost from parameters', () => {
     const out = buildMcpServerPayload([], {}, {}, [], [], [
-      { name: 'caco_docs', description: 'docs', hardDisabled: false, parameters: { properties: { section: { type: 'string' } } } },
-      { name: 'register_mcp_server', description: 'oauth', hardDisabled: true },
+      { name: 'caco_docs', description: 'docs', hardDisabled: false, origin: 'builtin', parameters: { properties: { section: { type: 'string' } } } },
+      { name: 'register_mcp_server', description: 'oauth', hardDisabled: true, origin: 'builtin' },
     ]);
     const caco = out[1].tools;
     const docs = caco.find(t => t.name === 'caco_docs')!;
     expect(docs).toMatchObject({ state: 'enabled' });
     expect(docs.tokenCost!).toBeGreaterThan(0);
     expect(caco.find(t => t.name === 'register_mcp_server')).toMatchObject({ state: 'disabled', observed: false });
+  });
+
+  it('Caco: the eligibility badge matches what enumeration would actually defer', () => {
+    // The badge is the operator's only view of the rule, so re-deriving it from
+    // name + hardDisabled here — which cannot see builtin-vs-extension — made it
+    // disagree with behaviour for every tool.
+    const out = buildMcpServerPayload([], {}, {}, [], [], [
+      { name: 'caco_herd', description: 'h', hardDisabled: false, origin: 'builtin' },
+      { name: 'caco_enable_tools', description: 'e', hardDisabled: false, origin: 'builtin' },
+      { name: 'register_mcp_server', description: 'r', hardDisabled: true, origin: 'builtin' },
+      { name: 'my_plugin_tool', description: 'p', hardDisabled: false, origin: 'extension' },
+    ]);
+    const verdict = (name: string) => out[1].tools.find(t => t.name === name)!.deferEligible;
+
+    expect(verdict('caco_herd')).toBe(true);
+    expect(verdict('caco_enable_tools')).toBe(false);
+    expect(verdict('register_mcp_server')).toBe(false);
+    expect(verdict('my_plugin_tool')).toBe(false);
   });
 
   it('enriches an available MCP tool with observed schema when loaded (state enabled)', () => {

@@ -477,6 +477,14 @@ export class SessionManager {
       this.startHealthCheck();
       console.log('[SDK] Shared client started');
       void pollQuota(client);
+      // Fill the builtin-name cache that auto-defer enumeration reads. Startup, not
+      // the /servers route: that route only runs when the mcp-servers applet is
+      // opened, so relying on it would leave builtin deferral dead for anyone who
+      // never opens the panel. Fire-and-forget — the cache is read synchronously and
+      // an empty one simply yields no builtin candidates (over-send, never over-hide).
+      void this.listBuiltinTools()
+        .then(tools => this.setBuiltinToolNames(tools.map(t => t.name)))
+        .catch(() => { /* best-effort: absent names just mean nothing defers */ });
       return client;
     })();
     

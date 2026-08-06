@@ -175,4 +175,15 @@ describe('builtin auto-defer candidate enumeration', () => {
     expect(got).toEqual(['builtin:task']);
     expect([...latch.keys]).toEqual([]);
   });
+
+  it('keeps a populated cache when a later refresh comes back empty', async () => {
+    // A failed RPC returns [] (listBuiltinTools swallows errors). Overwriting with
+    // that would silently kill deferral until the next successful call.
+    const { SessionManager } = await import('../../src/session-manager.js');
+    const mgr = new SessionManager();
+    mgr.setBuiltinToolNames(['task', 'web_fetch']);
+    mgr.setBuiltinToolNames([]);
+
+    expect(mgr.getBuiltinToolNames()).toEqual(['task', 'web_fetch']);
+  });
 });

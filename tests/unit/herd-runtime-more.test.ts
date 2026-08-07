@@ -66,7 +66,7 @@ describe('onSessionIdle more lifecycle branches', () => {
 
     await onSessionIdle('child1');
 
-    expect(storage.markSessionIdle).toHaveBeenCalledWith('child1', false);
+    expect(storage.markSessionIdle).toHaveBeenCalledWith('child1');
     expect(storage.updateSessionMeta).toHaveBeenCalledWith('child1', expect.any(Function));
     expect(herd.getHerdParent('child1')).toBeUndefined();
     expect(globalThis.fetch).not.toHaveBeenCalled();

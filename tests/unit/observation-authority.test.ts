@@ -44,6 +44,7 @@ vi.mock('../../src/event-bus.js', () => ({ broadcastGlobalEvent: vi.fn(), broadc
 import { handleSessionIdle } from '../../src/idle-authority.js';
 import { UnobservedTracker } from '../../src/unobserved-tracker.js';
 import { markSessionIdle, markSessionObserved, setSessionMeta } from '../../src/session-meta-store.js';
+import { afterAll } from 'vitest';
 
 /** A tracker standing in for the live one, wired to the same metadata. */
 function liveTracker(): UnobservedTracker {
@@ -60,12 +61,10 @@ async function idle(tracker: UnobservedTracker, sessionId: string, attended: boo
     pendingToolCount: () => 0,
     runAutoContinue: () => Promise.resolve(false),
     markIdle: id => { tracker.markIdle(id); },
-    // The unconditional effect. In production this is herd-runtime's
-    // onSessionIdle, which calls markSessionIdle for EVERY idle — attended or
-    // not — and that is the write that arms the badge. The stub takes the
-    // authority's OWN `attended` argument rather than the test's local, so it
-    // cannot implement the fix on the test side and pass before the code does.
-    herdOnSessionIdle: (id, attendedByAuthority) => { markSessionIdle(id, attendedByAuthority); },
+    // The unconditional effect, wired EXACTLY as production does
+    // (session-messages.ts). It no longer carries the verdict — that is persisted
+    // by markIdle — so this stub cannot accidentally implement the fix.
+    herdOnSessionIdle: id => { markSessionIdle(id); },
     pollQuota: () => {},
     signalDispatchIdle: () => {},
     notifyExternalIdle: () => {},
@@ -80,13 +79,14 @@ function rehydrated(ids: string[]): UnobservedTracker {
 }
 
 beforeEach(() => { rmSync(TEST_ROOT, { recursive: true, force: true }); });
+afterAll(() => { rmSync(TEST_ROOT, { recursive: true, force: true }); });
 
 describe('an attended idle does not arm the badge for a restart', () => {
   it('leaves a delegate target observed after re-hydrating', async () => {
     // The reported symptom: reviewer sessions that were delegated to show the
     // badge in a batch once the set is rebuilt from timestamps.
     const live = liveTracker();
-    setSessionMeta('reviewer', { name: 'reviewer', kind: 'interactive' } as never);
+    setSessionMeta('reviewer', { name: 'reviewer', kind: 'interactive', unobserved: false } as never);
     markSessionObserved('reviewer');
 
     await idle(live, 'reviewer', true);   // a delegate reply
@@ -97,7 +97,7 @@ describe('an attended idle does not arm the badge for a restart', () => {
 
   it('still arms for an idle the user is owed', async () => {
     const live = liveTracker();
-    setSessionMeta('chat', { name: 'chat', kind: 'interactive' } as never);
+    setSessionMeta('chat', { name: 'chat', kind: 'interactive', unobserved: false } as never);
     markSessionObserved('chat');
 
     await idle(live, 'chat', false);      // the user's own turn
@@ -111,7 +111,7 @@ describe('an attended idle does not arm the badge for a restart', () => {
     // COLDNESS signal, so skipping it would make an active delegate look idle
     // for hours and expose it to auto-archive.
     const live = liveTracker();
-    setSessionMeta('reviewer', { name: 'reviewer', kind: 'interactive' } as never);
+    setSessionMeta('reviewer', { name: 'reviewer', kind: 'interactive', unobserved: false } as never);
 
     await idle(live, 'reviewer', true);
 
@@ -125,7 +125,7 @@ describe('the live set and a re-hydrated set agree', () => {
     // defensible, and they diverge only in combination.
     const live = liveTracker();
     for (const id of ['user-chat', 'reviewer', 'herd-child', 'swarm-child']) {
-      setSessionMeta(id, { name: id, kind: id === 'swarm-child' ? 'swarm' : 'interactive' } as never);
+      setSessionMeta(id, { name: id, kind: id === 'swarm-child' ? 'swarm' : 'interactive', unobserved: false } as never);
     }
 
     await idle(live, 'user-chat', false);
@@ -146,7 +146,7 @@ describe('the live set and a re-hydrated set agree', () => {
     // attendance follows the request source, an unattended swarm idle SHOULD arm
     // — proving no kind test survives on either path.
     const live = liveTracker();
-    setSessionMeta('swarm-child', { name: 'swarm', kind: 'swarm' } as never);
+    setSessionMeta('swarm-child', { name: 'swarm', kind: 'swarm', unobserved: false } as never);
 
     await idle(live, 'swarm-child', false);
 
@@ -156,8 +156,7 @@ describe('the live set and a re-hydrated set agree', () => {
 });
 
 describe('metadata written before this change still behaves as it did', () => {
-  it('treats a missing lastAttendedAt as no attendance', () => {
-    setSessionMeta('old', { name: 'old', lastIdleAt: '2026-01-02T00:00:00.000Z', lastObservedAt: '2026-01-01T00:00:00.000Z' } as never);
+  it('falls back to the timestamp comparison when the verdict is absent', () => {    setSessionMeta('old', { name: 'old', lastIdleAt: '2026-01-02T00:00:00.000Z', lastObservedAt: '2026-01-01T00:00:00.000Z' } as never);
     setSessionMeta('old-seen', { name: 'old', lastIdleAt: '2026-01-01T00:00:00.000Z', lastObservedAt: '2026-01-02T00:00:00.000Z' } as never);
 
     const t = rehydrated(['old', 'old-seen']);

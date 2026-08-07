@@ -36,9 +36,12 @@ export interface SessionMeta {
   herdOriginParent?: string;
   lastObservedAt?: string;
   lastIdleAt?: string;
-  /** Set when an idle was requested by an agent (delegate, herd parent, scheduler)
-   *  and is therefore already accounted for. Never cleared, only advanced. */
-  lastAttendedAt?: string;
+  /** The observation VERDICT, written when the idle authority classifies an idle:
+   *  true when a human is owed attention, false once observed. Persisted so a
+   *  restart reads back the decision instead of re-deriving it from timestamps,
+   *  which cannot express that an agent requested the work
+   *  (spec-observation-authority). Absent on metadata predating the field. */
+  unobserved?: boolean;
   lastUsedAt?: string;
   currentIntent?: string;
   intentHistory?: Array<{ text: string; ts: number }>;
@@ -118,7 +121,13 @@ export function ensureSessionMeta(sessionId: string): void {
   ensureDir(sessionDir);
   const metaPath = join(sessionDir, 'meta.json');
   if (!existsSync(metaPath)) {
-    writeFileSync(metaPath, JSON.stringify({ name: '' }, null, 2));
+    // `unobserved: false` from birth: it makes the field's ABSENCE mean "written
+    // before this field existed", which is the only case the legacy timestamp
+    // fallback should serve. Without it a fresh session that has only ever had
+    // agent-requested idles carries no verdict, and the fallback's "never
+    // observed ⇒ unobserved" rule arms it — the very divergence this replaces
+    // (spec-observation-authority).
+    writeFileSync(metaPath, JSON.stringify({ name: '', unobserved: false }, null, 2));
   }
 }
 
@@ -221,7 +230,7 @@ function backupCorruptMeta(sessionId: string, error: Error): void {
 /** Mark session as observed (user viewed the chat panel for it). */
 export function markSessionObserved(sessionId: string): void {
   const ts = new Date().toISOString();
-  updateSessionMeta(sessionId, meta => { meta.lastObservedAt = ts; });
+  updateSessionMeta(sessionId, meta => { meta.lastObservedAt = ts; meta.unobserved = false; });
   console.log(`[STORAGE] markSessionObserved: ${sessionId.slice(0, 8)} lastObservedAt=${ts}`);
 }
 
@@ -230,41 +239,34 @@ export function markSessionObserved(sessionId: string): void {
  *
  * `lastIdleAt` is stamped for EVERY idle, attended or not: the archive reaper and
  * history rotation read it as a coldness signal, so skipping it would make an
- * actively-delegated session look untouched for hours.
- *
- * `attended` records that an agent — a delegating session, a herd parent, a
- * scheduler — requested this work and is therefore the one who observes it. That
- * verdict is only known at the idle authority, so it is threaded here rather than
- * re-derived; re-deriving it from timestamps is what made the badge disagree with
- * itself across a restart (spec-observation-authority).
+ * actively-delegated session look untouched for hours. It deliberately does NOT
+ * decide observation — see `meta.unobserved` (spec-observation-authority).
  */
-export function markSessionIdle(sessionId: string, attended = false): void {
+export function markSessionIdle(sessionId: string): void {
   const ts = new Date().toISOString();
-  updateSessionMeta(sessionId, meta => {
-    meta.lastIdleAt = ts;
-    if (attended) meta.lastAttendedAt = ts;
-  });
-  console.log(`[STORAGE] markSessionIdle: ${sessionId.slice(0, 8)} lastIdleAt=${ts}${attended ? ' (attended)' : ''}`);
+  updateSessionMeta(sessionId, meta => { meta.lastIdleAt = ts; });
+  console.log(`[STORAGE] markSessionIdle: ${sessionId.slice(0, 8)} lastIdleAt=${ts}`);
 }
 
 /**
- * The single rule for "a human owes this session attention": it went idle after
- * the last time anyone — the user, or the agent that requested the work —
- * accounted for it. Both the live tracker's hydrate and any direct caller must use
- * this, or the two derivations drift (spec-observation-authority).
+ * The single rule for "a human owes this session attention".
+ *
+ * `meta.unobserved` is the VERDICT, written by the tracker at the moment the idle
+ * authority classifies an idle — so hydrate reads back exactly what the live set
+ * held, instead of re-deriving it from timestamps that cannot express who asked
+ * for the work. Deriving it was the bug: an agent-requested idle advanced
+ * `lastIdleAt` while `lastObservedAt` stood still, arming every delegate target
+ * until the next restart flipped them together.
+ *
+ * The timestamp comparison survives only as the migration path for metadata
+ * written before the flag existed, where it reproduces the old behaviour exactly.
  */
-export function isUnobservedFromMeta(meta: Pick<SessionMeta, 'lastIdleAt' | 'lastObservedAt' | 'lastAttendedAt'> | undefined): boolean {
-  if (!meta?.lastIdleAt) return false; // never went idle
-  const idle = new Date(meta.lastIdleAt).getTime();
-  const observed = meta.lastObservedAt ? new Date(meta.lastObservedAt).getTime() : 0;
-  // Attendance is stamped in the SAME write as lastIdleAt, so an attended idle
-  // ties rather than exceeding — hence `>=` here against `>` for observation,
-  // which happens on a separate, earlier action. A tie against observation must
-  // still arm: an ISO millisecond is coarse enough for a user's read and the
-  // session's next idle to collide, and dropping the badge in that case loses
-  // work silently, whereas showing it costs one glance.
-  if (meta.lastAttendedAt && new Date(meta.lastAttendedAt).getTime() >= idle) return false;
-  return idle > observed;
+export function isUnobservedFromMeta(meta: Pick<SessionMeta, 'lastIdleAt' | 'lastObservedAt' | 'unobserved'> | undefined): boolean {
+  if (!meta) return false;
+  if (typeof meta.unobserved === 'boolean') return meta.unobserved;
+  if (!meta.lastIdleAt) return false; // never went idle
+  if (!meta.lastObservedAt) return true; // never observed
+  return new Date(meta.lastIdleAt) > new Date(meta.lastObservedAt);
 }
 
 /** True if the session went idle after it was last observed or attended. */

@@ -14,7 +14,7 @@ import {
   markSessionIdle,
   setSessionIntent,
   isSessionUnobserved
-} from '../../src/storage.js';
+, updateSessionMeta } from '../../src/storage.js';
 import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -218,34 +218,38 @@ describe('session observation tracking (markSessionObserved, markSessionIdle, is
     expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
   });
   
-  it('session becomes unobserved after idle', () => {
+  it('a bare idle stamp does NOT arm the badge', () => {
+    // markSessionIdle is the COLDNESS signal (archive reaper, rotation), not the
+    // observation verdict. It runs for every real idle including agent-requested
+    // ones, so letting it arm the badge is precisely what made delegate targets
+    // light up in a batch (spec-observation-authority).
     ensureSessionMeta(TEST_SESSION_ID);
     markSessionIdle(TEST_SESSION_ID);
-    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(true);
+    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
   });
-  
-  it('session becomes observed after markSessionObserved', () => {
+
+  it('reads back the verdict the tracker persisted', () => {
     ensureSessionMeta(TEST_SESSION_ID);
-    markSessionIdle(TEST_SESSION_ID);
+    updateSessionMeta(TEST_SESSION_ID, m => { m.unobserved = true; });
     expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(true);
-    
+
     markSessionObserved(TEST_SESSION_ID);
     expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
   });
-  
-  it('session becomes unobserved again after new idle', async () => {
-    ensureSessionMeta(TEST_SESSION_ID);
-    markSessionIdle(TEST_SESSION_ID);
-    markSessionObserved(TEST_SESSION_ID);
-    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
-    
-    // Wait a tiny bit to ensure timestamp difference
-    await new Promise(r => setTimeout(r, 10));
-    
-    markSessionIdle(TEST_SESSION_ID);
+
+  it('falls back to timestamps for metadata written before the verdict existed', () => {
+    // Legacy meta: no `unobserved` field at all.
+    setSessionMeta(TEST_SESSION_ID, {
+      name: '', lastIdleAt: '2026-02-06T12:00:01Z', lastObservedAt: '2026-02-06T12:00:00Z',
+    } as never);
     expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(true);
+
+    setSessionMeta(TEST_SESSION_ID, {
+      name: '', lastIdleAt: '2026-02-06T12:00:00Z', lastObservedAt: '2026-02-06T12:00:01Z',
+    } as never);
+    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
   });
-  
+
   it('setSessionIntent stores intent', () => {
     ensureSessionMeta(TEST_SESSION_ID);
     setSessionIntent(TEST_SESSION_ID, 'Analyzing code');

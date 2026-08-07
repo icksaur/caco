@@ -46,14 +46,19 @@ export class UnobservedTracker {
    * @returns true if session became unobserved (wasn't already in set)
    */
   markIdle(sessionId: string): boolean {
-    // Update meta.json timestamp (best-effort; corrupt meta is not clobbered).
-    // Only reached for idles that NEED observation — the attended ones are
-    // stamped on the authority's unconditional path instead — so there is no
-    // kind test here: `kind === 'swarm'` used to stand in for "an agent is
-    // watching this", which the request source now answers for every kind
-    // (spec-observation-authority).
+    // Persist the VERDICT alongside the timestamp. Only idles that need
+    // observation reach here — the authority gates this call — so writing
+    // `unobserved: true` records exactly what the live set is about to hold, and
+    // hydrate reads it back rather than re-deriving it from timestamps that
+    // cannot express who requested the work (spec-observation-authority).
+    //
+    // No kind test: `kind === 'swarm'` used to stand in for "an agent is watching
+    // this", which is equally true of delegate targets — ordinary interactive
+    // sessions no kind could ever catch. The request source answers it for every
+    // kind, upstream at the authority.
     updateSessionMeta(sessionId, meta => {
       meta.lastIdleAt = new Date().toISOString();
+      meta.unobserved = true;
     });
     
     // Add to unobserved set
@@ -80,7 +85,7 @@ export class UnobservedTracker {
    */
   markObserved(sessionId: string): boolean {
     // Update meta.json timestamp (best-effort; corrupt meta is not clobbered)
-    updateSessionMeta(sessionId, meta => { meta.lastObservedAt = new Date().toISOString(); });
+    updateSessionMeta(sessionId, meta => { meta.lastObservedAt = new Date().toISOString(); meta.unobserved = false; });
     
     // Remove from unobserved set
     if (!this.unobservedSet.has(sessionId)) {

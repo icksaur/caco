@@ -44,6 +44,6 @@ describe('onSessionIdle guard (spec-idle-authority)', () => {
 
     // Threads the attendance verdict (spec-observation-authority): an unattended
     // idle stamps only lastIdleAt, so the badge still arms for the user.
-    expect(storage.markSessionIdle).toHaveBeenCalledWith('sess-1', false);
+    expect(storage.markSessionIdle).toHaveBeenCalledWith('sess-1');
   });
 });

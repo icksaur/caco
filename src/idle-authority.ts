@@ -28,10 +28,10 @@ export interface IdleAuthorityDeps {
    *  needsObservation being honored here). */
   markIdle(sessionId: string): void;
   /** Real-idle effect: the herd hook (parent wake / own-herd re-eval). Runs for
-   *  EVERY real idle, attended or not — so it receives the attendance verdict,
-   *  since its `lastIdleAt` stamp would otherwise arm the unobserved badge for
-   *  work an agent already observed (spec-observation-authority). */
-  herdOnSessionIdle(sessionId: string, attended: boolean): void;
+   *  EVERY real idle, attended or not — which is why it must NOT decide
+   *  observation: its `lastIdleAt` stamp is a coldness signal, and the observation
+   *  verdict is persisted by `markIdle` above (spec-observation-authority). */
+  herdOnSessionIdle(sessionId: string): void;
   /** Real-idle effect: refresh quota. */
   pollQuota(): void;
   /** Real-idle effect: publish the idle to the external idle feed (spec-idle-
@@ -86,6 +86,6 @@ export async function handleSessionIdle(
     deps.markIdle(sessionId);
     deps.notifyExternalIdle(sessionId);
   }
-  deps.herdOnSessionIdle(sessionId, !ctx.needsObservation);
+  deps.herdOnSessionIdle(sessionId);
   deps.pollQuota();
 }

@@ -210,6 +210,31 @@ describe('UnobservedTracker', () => {
     });
   });
 
+  describe('the persisted verdict', () => {
+    it('is written by markIdle and cleared by markObserved', () => {
+      // The /observe route goes through the tracker, not the meta store, so it
+      // needs its own clear — otherwise a session the user just read re-arms on
+      // the next restart (spec-observation-authority).
+      unobservedTracker.markIdle('session1');
+      expect(mockMeta.get('session1')?.unobserved).toBe(true);
+
+      unobservedTracker.markObserved('session1');
+      expect(mockMeta.get('session1')?.unobserved).toBe(false);
+    });
+
+    it('survives a rebuild: hydrate reads back what the live set held', () => {
+      unobservedTracker.markIdle('session1');
+      unobservedTracker.markIdle('session2');
+      unobservedTracker.markObserved('session2');
+      const live = ['session1', 'session2'].filter(id => unobservedTracker.isUnobserved(id));
+
+      const fresh = new UnobservedTracker(vi.fn());
+      fresh.hydrate(['session1', 'session2']);
+
+      expect(['session1', 'session2'].filter(id => fresh.isUnobserved(id))).toEqual(live);
+    });
+  });
+
   describe('sub-sessions are suppressed by attendance, not by kind', () => {
     // The kind test was a stand-in for "an agent is watching this", true of swarm
     // children but ALSO of delegate targets — which are ordinary interactive
@@ -234,11 +259,11 @@ describe('UnobservedTracker', () => {
       expect(mockMeta.get('child1')?.lastIdleAt).toBeDefined();
     });
 
-    it('hydrate suppresses on lastAttendedAt regardless of kind', () => {
+    it('hydrate reads the persisted verdict regardless of kind', () => {
       // A swarm child and an interactive delegate target, both attended: neither
       // may arm. The interactive one is the case the old kind check missed.
-      mockMeta.set('child1', { name: '', kind: 'swarm', lastIdleAt: '2026-02-06T12:00:00Z', lastAttendedAt: '2026-02-06T12:00:00Z' });
-      mockMeta.set('reviewer', { name: '', kind: 'interactive', lastIdleAt: '2026-02-06T12:00:00Z', lastAttendedAt: '2026-02-06T12:00:00Z' });
+      mockMeta.set('child1', { name: '', kind: 'swarm', lastIdleAt: '2026-02-06T12:00:00Z', unobserved: false });
+      mockMeta.set('reviewer', { name: '', kind: 'interactive', lastIdleAt: '2026-02-06T12:00:00Z', unobserved: false });
       mockMeta.set('normal1', { name: '', lastIdleAt: '2026-02-06T12:00:00Z' });
 
       unobservedTracker.hydrate(['child1', 'reviewer', 'normal1']);

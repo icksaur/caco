@@ -56,7 +56,7 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     expect(spies.runAutoContinue).toHaveBeenCalledWith(SID);
     expect(spies.signalDispatchIdle).toHaveBeenCalledWith(SID);
     expect(spies.markIdle).toHaveBeenCalledWith(SID);
-    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
+    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID, false);
     expect(spies.pollQuota).toHaveBeenCalled();
   });
 
@@ -67,7 +67,7 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     // end() already emitted a real idle (not suppressed), so no replacement emit.
     expect(spies.signalDispatchIdle).not.toHaveBeenCalled();
     expect(spies.markIdle).toHaveBeenCalledWith(SID);
-    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
+    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID, false);
     expect(spies.pollQuota).toHaveBeenCalled();
   });
 
@@ -79,7 +79,7 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     await handleSessionIdle(SID, { needsObservation: true }, deps);
     expect(spies.runAutoContinue).toHaveBeenCalledWith(SID);
     expect(spies.markIdle).toHaveBeenCalledWith(SID);
-    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
+    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID, false);
     expect(spies.pollQuota).toHaveBeenCalled();
   });
 
@@ -88,7 +88,10 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     await handleSessionIdle(SID, { needsObservation: false }, deps);
     expect(spies.markIdle).not.toHaveBeenCalled();
     expect(spies.notifyExternalIdle).not.toHaveBeenCalled();
-    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
+    // Attended: the herd hook runs regardless, but now learns the idle was
+    // agent-requested so its unconditional lastIdleAt stamp cannot arm the badge
+    // (spec-observation-authority).
+    expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID, true);
     expect(spies.pollQuota).toHaveBeenCalled();
   });
 

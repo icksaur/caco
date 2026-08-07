@@ -12,6 +12,14 @@ spec introduces a single idle authority + one shared "effectively idle" predicat
 so a reveal-driven idle is classified once and never leaks into herd-wake or
 delegate-completion.
 
+
+> **Amended by `spec-observation-authority`.** The authority's real-idle effects
+> now carry the observation verdict past the `needsObservation` gate:
+> `herdOnSessionIdle(sessionId, attended)` threads `!needsObservation` so the
+> unconditional `lastIdleAt` stamp also records `lastAttendedAt`. Without it the
+> live badge and the post-restart badge derived the same question two different
+> ways and disagreed for every agent-requested idle.
+
 ## Goals
 
 - A `caco_enable_tools` reveal-idle (one that will auto-continue) **MUST NOT** be

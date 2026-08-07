@@ -1,6 +1,6 @@
 import { getSessionMeta, updateSessionMeta } from './storage.js';
+import { isUnobservedFromMeta } from './session-meta-store.js';
 import { broadcastGlobalEvent } from './event-bus.js';
-import type { SessionKind } from './session-meta-store.js';
 
 type BroadcastCallback = (event: {
   type: string;
@@ -23,16 +23,13 @@ export class UnobservedTracker {
     if (this.initialized) return;
     
     for (const sessionId of sessionIds) {
-      const meta = getSessionMeta(sessionId);
-      if (!meta?.lastIdleAt) continue; // Never went idle
-      if (meta.kind === 'swarm') continue;
-      if (!meta.lastObservedAt) {
-        // Never observed - add to unobserved set
-        this.unobservedSet.add(sessionId);
-        continue;
-      }
-      // Check if idle occurred after last observation
-      if (new Date(meta.lastIdleAt) > new Date(meta.lastObservedAt)) {
+      // The SAME predicate the live path's decision produces, applied to the
+      // stamps that decision wrote. Deriving it differently here is what let the
+      // badge disagree with itself across a restart. Note there is deliberately
+      // no `kind` test: a delegate target is an ordinary interactive session, so
+      // attendance can only come from the request source, recorded as
+      // `lastAttendedAt` (spec-observation-authority).
+      if (isUnobservedFromMeta(getSessionMeta(sessionId))) {
         this.unobservedSet.add(sessionId);
       }
     }
@@ -49,18 +46,15 @@ export class UnobservedTracker {
    * @returns true if session became unobserved (wasn't already in set)
    */
   markIdle(sessionId: string): boolean {
-    // Update meta.json timestamp (best-effort; corrupt meta is not clobbered)
-    let kind: SessionKind | undefined;
+    // Update meta.json timestamp (best-effort; corrupt meta is not clobbered).
+    // Only reached for idles that NEED observation — the attended ones are
+    // stamped on the authority's unconditional path instead — so there is no
+    // kind test here: `kind === 'swarm'` used to stand in for "an agent is
+    // watching this", which the request source now answers for every kind
+    // (spec-observation-authority).
     updateSessionMeta(sessionId, meta => {
       meta.lastIdleAt = new Date().toISOString();
-      kind = meta.kind;
     });
-    
-    // Swarm sessions don't become unobserved — parent agent observes them
-    if (kind === 'swarm') {
-      console.log(`[UNOBSERVED] markIdle: ${sessionId.slice(0, 8)} (swarm session, skipping)`);
-      return false;
-    }
     
     // Add to unobserved set
     if (this.unobservedSet.has(sessionId)) {

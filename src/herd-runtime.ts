@@ -78,11 +78,16 @@ export function wakeParent(parentId: string): Promise<void> {
 /**
  * The child-idle / parent-idle hook — call on every `session.idle`.
  * Stamps `lastIdleAt` unconditionally (so agent-sourced children report a fresh
- * idle time), then: if the session is a herd child, resolve its parent and
- * self-heal (missing) / skip (corrupt) / wake (present); if the session is
- * itself a parent, re-evaluate its own herd.
+ * idle time) and `lastAttendedAt` when the idle was agent-requested, then: if the
+ * session is a herd child, resolve its parent and self-heal (missing) / skip
+ * (corrupt) / wake (present); if the session is itself a parent, re-evaluate its
+ * own herd.
+ *
+ * `attended` must be threaded from the idle authority: this hook runs OUTSIDE its
+ * `needsObservation` gate, so without it the unconditional stamp arms the badge
+ * for work an agent already observed (spec-observation-authority).
  */
-export async function onSessionIdle(sessionId: string): Promise<void> {
+export async function onSessionIdle(sessionId: string, attended = false): Promise<void> {
   // A caco_enable_tools reveal-idle is NOT a real idle: the session is about to
   // auto-continue in a fresh dispatch (spec-idle-authority). Skip the herd stamp
   // and parent wake so a herd child that reveals a tool does not wake its parent
@@ -90,7 +95,7 @@ export async function onSessionIdle(sessionId: string): Promise<void> {
   // away from this hook; this guard also protects any other future caller.
   if (sessionManager.hasPendingAutoContinue(sessionId)) return;
 
-  markSessionIdle(sessionId);
+  markSessionIdle(sessionId, attended);
 
   const meta = getSessionMeta(sessionId);
   const orchestratedBy = meta?.orchestratedBy;

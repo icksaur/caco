@@ -36,6 +36,9 @@ export interface SessionMeta {
   herdOriginParent?: string;
   lastObservedAt?: string;
   lastIdleAt?: string;
+  /** Set when an idle was requested by an agent (delegate, herd parent, scheduler)
+   *  and is therefore already accounted for. Never cleared, only advanced. */
+  lastAttendedAt?: string;
   lastUsedAt?: string;
   currentIntent?: string;
   intentHistory?: Array<{ text: string; ts: number }>;
@@ -222,23 +225,51 @@ export function markSessionObserved(sessionId: string): void {
   console.log(`[STORAGE] markSessionObserved: ${sessionId.slice(0, 8)} lastObservedAt=${ts}`);
 }
 
-/** Mark session as idle (assistant finished its turn). */
-export function markSessionIdle(sessionId: string): void {
+/**
+ * Mark session as idle (assistant finished its turn).
+ *
+ * `lastIdleAt` is stamped for EVERY idle, attended or not: the archive reaper and
+ * history rotation read it as a coldness signal, so skipping it would make an
+ * actively-delegated session look untouched for hours.
+ *
+ * `attended` records that an agent — a delegating session, a herd parent, a
+ * scheduler — requested this work and is therefore the one who observes it. That
+ * verdict is only known at the idle authority, so it is threaded here rather than
+ * re-derived; re-deriving it from timestamps is what made the badge disagree with
+ * itself across a restart (spec-observation-authority).
+ */
+export function markSessionIdle(sessionId: string, attended = false): void {
   const ts = new Date().toISOString();
-  updateSessionMeta(sessionId, meta => { meta.lastIdleAt = ts; });
-  console.log(`[STORAGE] markSessionIdle: ${sessionId.slice(0, 8)} lastIdleAt=${ts}`);
+  updateSessionMeta(sessionId, meta => {
+    meta.lastIdleAt = ts;
+    if (attended) meta.lastAttendedAt = ts;
+  });
+  console.log(`[STORAGE] markSessionIdle: ${sessionId.slice(0, 8)} lastIdleAt=${ts}${attended ? ' (attended)' : ''}`);
 }
 
-/** True if the session went idle after the user last observed it. */
+/**
+ * The single rule for "a human owes this session attention": it went idle after
+ * the last time anyone — the user, or the agent that requested the work —
+ * accounted for it. Both the live tracker's hydrate and any direct caller must use
+ * this, or the two derivations drift (spec-observation-authority).
+ */
+export function isUnobservedFromMeta(meta: Pick<SessionMeta, 'lastIdleAt' | 'lastObservedAt' | 'lastAttendedAt'> | undefined): boolean {
+  if (!meta?.lastIdleAt) return false; // never went idle
+  const idle = new Date(meta.lastIdleAt).getTime();
+  const observed = meta.lastObservedAt ? new Date(meta.lastObservedAt).getTime() : 0;
+  // Attendance is stamped in the SAME write as lastIdleAt, so an attended idle
+  // ties rather than exceeding — hence `>=` here against `>` for observation,
+  // which happens on a separate, earlier action. A tie against observation must
+  // still arm: an ISO millisecond is coarse enough for a user's read and the
+  // session's next idle to collide, and dropping the badge in that case loses
+  // work silently, whereas showing it costs one glance.
+  if (meta.lastAttendedAt && new Date(meta.lastAttendedAt).getTime() >= idle) return false;
+  return idle > observed;
+}
+
+/** True if the session went idle after it was last observed or attended. */
 export function isSessionUnobserved(sessionId: string): boolean {
-  const meta = getSessionMeta(sessionId);
-  if (!meta?.lastIdleAt) return false; // Never went idle
-  if (!meta.lastObservedAt) return true; // Never observed
-  const result = new Date(meta.lastIdleAt) > new Date(meta.lastObservedAt);
-  if (result) {
-    console.log(`[STORAGE] isSessionUnobserved: ${sessionId.slice(0, 8)} = true (idle=${meta.lastIdleAt}, obs=${meta.lastObservedAt})`);
-  }
-  return result;
+  return isUnobservedFromMeta(getSessionMeta(sessionId));
 }
 
 // ============================================================================

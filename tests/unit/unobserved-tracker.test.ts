@@ -210,52 +210,43 @@ describe('UnobservedTracker', () => {
     });
   });
 
-  describe('sub-sessions', () => {
-    it('markIdle skips swarm sessions', () => {
+  describe('sub-sessions are suppressed by attendance, not by kind', () => {
+    // The kind test was a stand-in for "an agent is watching this", true of swarm
+    // children but ALSO of delegate targets — which are ordinary interactive
+    // sessions, so no kind could ever classify them. The request source now
+    // answers it for every kind, recorded as lastAttendedAt on the authority's
+    // unconditional path (spec-observation-authority).
+
+    it('marks a swarm session whose idle was NOT attended', () => {
       mockMeta.set('child1', { name: '', kind: 'swarm' });
 
       const result = unobservedTracker.markIdle('child1');
 
-      expect(result).toBe(false);
-      expect(unobservedTracker.isUnobserved('child1')).toBe(false);
-      expect(unobservedTracker.getCount()).toBe(0);
+      expect(result).toBe(true);
+      expect(unobservedTracker.isUnobserved('child1')).toBe(true);
     });
 
-    it('markIdle still persists lastIdleAt for swarm sessions', () => {
+    it('markIdle still persists lastIdleAt', () => {
       mockMeta.set('child1', { name: '', kind: 'swarm' });
 
       unobservedTracker.markIdle('child1');
 
-      const meta = mockMeta.get('child1');
-      expect(meta?.lastIdleAt).toBeDefined();
+      expect(mockMeta.get('child1')?.lastIdleAt).toBeDefined();
     });
 
-    it('hydrate skips swarm sessions', () => {
-      mockMeta.set('child1', {
-        name: '',
-        kind: 'swarm',
-        lastIdleAt: '2026-02-06T12:00:00Z'
-      });
-      mockMeta.set('normal1', {
-        name: '',
-        lastIdleAt: '2026-02-06T12:00:00Z'
-      });
+    it('hydrate suppresses on lastAttendedAt regardless of kind', () => {
+      // A swarm child and an interactive delegate target, both attended: neither
+      // may arm. The interactive one is the case the old kind check missed.
+      mockMeta.set('child1', { name: '', kind: 'swarm', lastIdleAt: '2026-02-06T12:00:00Z', lastAttendedAt: '2026-02-06T12:00:00Z' });
+      mockMeta.set('reviewer', { name: '', kind: 'interactive', lastIdleAt: '2026-02-06T12:00:00Z', lastAttendedAt: '2026-02-06T12:00:00Z' });
+      mockMeta.set('normal1', { name: '', lastIdleAt: '2026-02-06T12:00:00Z' });
 
-      unobservedTracker.hydrate(['child1', 'normal1']);
+      unobservedTracker.hydrate(['child1', 'reviewer', 'normal1']);
 
       expect(unobservedTracker.isUnobserved('child1')).toBe(false);
+      expect(unobservedTracker.isUnobserved('reviewer')).toBe(false);
       expect(unobservedTracker.isUnobserved('normal1')).toBe(true);
       expect(unobservedTracker.getCount()).toBe(1);
-    });
-
-    it('does not broadcast for swarm session markIdle', () => {
-      const broadcastFn = vi.fn();
-      const tracker = new UnobservedTracker(broadcastFn);
-      mockMeta.set('child1', { name: '', kind: 'swarm' });
-
-      tracker.markIdle('child1');
-
-      expect(broadcastFn).not.toHaveBeenCalled();
     });
   });
 

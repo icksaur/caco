@@ -237,12 +237,16 @@ describe('session observation tracking (markSessionObserved, markSessionIdle, is
     expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
   });
 
-  it('falls back to timestamps for metadata written before the verdict existed', () => {
-    // Legacy meta: no `unobserved` field at all.
+  it('does not badge metadata written before the verdict existed', () => {
+    // Legacy meta: no `unobserved` field at all. This used to fall back to the
+    // timestamp comparison, which never terminated as a migration — a delegate
+    // target is never written a verdict by either writer, so every restart
+    // re-derived the badge from stamps that cannot express who asked for the work
+    // (spec-observation-verdict-completeness). Both orderings now read observed.
     setSessionMeta(TEST_SESSION_ID, {
       name: '', lastIdleAt: '2026-02-06T12:00:01Z', lastObservedAt: '2026-02-06T12:00:00Z',
     } as never);
-    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(true);
+    expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
 
     setSessionMeta(TEST_SESSION_ID, {
       name: '', lastIdleAt: '2026-02-06T12:00:00Z', lastObservedAt: '2026-02-06T12:00:01Z',

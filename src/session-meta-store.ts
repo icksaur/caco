@@ -121,12 +121,11 @@ export function ensureSessionMeta(sessionId: string): void {
   ensureDir(sessionDir);
   const metaPath = join(sessionDir, 'meta.json');
   if (!existsSync(metaPath)) {
-    // `unobserved: false` from birth: it makes the field's ABSENCE mean "written
-    // before this field existed", which is the only case the legacy timestamp
-    // fallback should serve. Without it a fresh session that has only ever had
-    // agent-requested idles carries no verdict, and the fallback's "never
-    // observed ⇒ unobserved" rule arms it — the very divergence this replaces
-    // (spec-observation-authority).
+    // `unobserved: false` from birth, so a session's verdict is explicit from its
+    // first moment rather than inferred. The field's ABSENCE now means only "meta
+    // written before the field existed", and reads as observed — there is no
+    // longer a fallback that could turn absence into a badge
+    // (spec-observation-verdict-completeness).
     writeFileSync(metaPath, JSON.stringify({ name: '', unobserved: false }, null, 2));
   }
 }
@@ -258,15 +257,16 @@ export function markSessionIdle(sessionId: string): void {
  * `lastIdleAt` while `lastObservedAt` stood still, arming every delegate target
  * until the next restart flipped them together.
  *
- * The timestamp comparison survives only as the migration path for metadata
- * written before the flag existed, where it reproduces the old behaviour exactly.
+ * An ABSENT verdict is not unobserved. It was previously a fallback to that same
+ * timestamp comparison, nominally to migrate metadata written before the field
+ * existed — but nothing ever migrated it. The verdict is written only by an idle
+ * that needs observation or by a human opening the session, so a session used
+ * solely as a delegate target and never clicked kept an absent field forever and
+ * was decided by the broken derivation on every restart. A fallback a population
+ * can never escape is not a migration path (spec-observation-verdict-completeness).
  */
-export function isUnobservedFromMeta(meta: Pick<SessionMeta, 'lastIdleAt' | 'lastObservedAt' | 'unobserved'> | undefined): boolean {
-  if (!meta) return false;
-  if (typeof meta.unobserved === 'boolean') return meta.unobserved;
-  if (!meta.lastIdleAt) return false; // never went idle
-  if (!meta.lastObservedAt) return true; // never observed
-  return new Date(meta.lastIdleAt) > new Date(meta.lastObservedAt);
+export function isUnobservedFromMeta(meta: Pick<SessionMeta, 'unobserved'> | undefined): boolean {
+  return meta?.unobserved === true;
 }
 
 /** True if the session went idle after it was last observed or attended. */

@@ -154,35 +154,39 @@ describe('UnobservedTracker', () => {
   });
 
   describe('hydrate', () => {
-    it('loads unobserved sessions from meta', () => {
-      // Setup: session1 has idle > observed (unobserved)
-      // session2 has observed > idle (observed)
-      // session3 has only idle (unobserved, never observed)
+    it('loads sessions carrying an unobserved VERDICT, ignoring timestamps', () => {
+      // The verdict is the only input (spec-observation-verdict-completeness).
+      // session1/2 carry contradictory timestamps to prove they are not read:
+      // session1 was observed AFTER it went idle yet is still owed, and session2
+      // went idle after being observed yet is not.
       mockMeta.set('session1', {
         name: '',
-        lastIdleAt: '2026-02-06T12:00:00Z',
+        unobserved: true,
+        lastIdleAt: '2026-02-06T10:00:00Z',
         lastObservedAt: '2026-02-06T11:00:00Z'
       });
       mockMeta.set('session2', {
         name: '',
-        lastIdleAt: '2026-02-06T10:00:00Z',
+        unobserved: false,
+        lastIdleAt: '2026-02-06T12:00:00Z',
         lastObservedAt: '2026-02-06T11:00:00Z'
       });
+      // No verdict: a delegate target whose meta predates the field. Formerly
+      // hydrated as unobserved from the timestamps alone — the reported bug.
       mockMeta.set('session3', {
         name: '',
         lastIdleAt: '2026-02-06T12:00:00Z'
-        // no lastObservedAt
       });
       
       unobservedTracker.hydrate(['session1', 'session2', 'session3']);
       
       expect(unobservedTracker.isUnobserved('session1')).toBe(true);
       expect(unobservedTracker.isUnobserved('session2')).toBe(false);
-      expect(unobservedTracker.isUnobserved('session3')).toBe(true);
-      expect(unobservedTracker.getCount()).toBe(2);
+      expect(unobservedTracker.isUnobserved('session3')).toBe(false);
+      expect(unobservedTracker.getCount()).toBe(1);
     });
 
-    it('skips sessions without lastIdleAt', () => {
+    it('skips sessions with no verdict', () => {
       mockMeta.set('session1', { name: '' });
       
       unobservedTracker.hydrate(['session1']);
@@ -193,7 +197,7 @@ describe('UnobservedTracker', () => {
     it('only hydrates once', () => {
       mockMeta.set('session1', {
         name: '',
-        lastIdleAt: '2026-02-06T12:00:00Z'
+        unobserved: true
       });
       
       unobservedTracker.hydrate(['session1']);
@@ -202,7 +206,7 @@ describe('UnobservedTracker', () => {
       // Second hydrate should be no-op
       mockMeta.set('session2', {
         name: '',
-        lastIdleAt: '2026-02-06T12:00:00Z'
+        unobserved: true
       });
       unobservedTracker.hydrate(['session1', 'session2']);
       
@@ -264,7 +268,7 @@ describe('UnobservedTracker', () => {
       // may arm. The interactive one is the case the old kind check missed.
       mockMeta.set('child1', { name: '', kind: 'swarm', lastIdleAt: '2026-02-06T12:00:00Z', unobserved: false });
       mockMeta.set('reviewer', { name: '', kind: 'interactive', lastIdleAt: '2026-02-06T12:00:00Z', unobserved: false });
-      mockMeta.set('normal1', { name: '', lastIdleAt: '2026-02-06T12:00:00Z' });
+      mockMeta.set('normal1', { name: '', lastIdleAt: '2026-02-06T12:00:00Z', unobserved: true });
 
       unobservedTracker.hydrate(['child1', 'reviewer', 'normal1']);
 

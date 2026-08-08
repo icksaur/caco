@@ -155,13 +155,48 @@ describe('the live set and a re-hydrated set agree', () => {
   });
 });
 
-describe('metadata written before this change still behaves as it did', () => {
-  it('falls back to the timestamp comparison when the verdict is absent', () => {    setSessionMeta('old', { name: 'old', lastIdleAt: '2026-01-02T00:00:00.000Z', lastObservedAt: '2026-01-01T00:00:00.000Z' } as never);
+describe('an absent verdict is not a badge (spec-observation-verdict-completeness)', () => {
+  it('does not badge metadata that carries no verdict, whatever its timestamps say', () => {
+    // This REPLACES a test that pinned the opposite. The old fallback was
+    // nominally a migration path, but nothing migrated: the verdict is written
+    // only by an idle needing observation or by a human opening the session, so a
+    // session used solely as a delegate target kept an absent field forever and
+    // was re-badged from timestamps on every restart. That was the reported bug.
+    setSessionMeta('old', { name: 'old', lastIdleAt: '2026-01-02T00:00:00.000Z', lastObservedAt: '2026-01-01T00:00:00.000Z' } as never);
     setSessionMeta('old-seen', { name: 'old', lastIdleAt: '2026-01-01T00:00:00.000Z', lastObservedAt: '2026-01-02T00:00:00.000Z' } as never);
 
     const t = rehydrated(['old', 'old-seen']);
 
-    expect(t.isUnobserved('old')).toBe(true);
+    expect(t.isUnobserved('old')).toBe(false);
     expect(t.isUnobserved('old-seen')).toBe(false);
+  });
+
+  it('an explicit verdict governs in BOTH directions, against contrary timestamps', () => {
+    // Guards over-deletion: the timestamps here point the opposite way from the
+    // verdict in each case, so a rule that read them at all would fail this.
+    setSessionMeta('owed', { name: 'owed', unobserved: true, lastIdleAt: '2026-01-01T00:00:00.000Z', lastObservedAt: '2026-01-02T00:00:00.000Z' } as never);
+    setSessionMeta('seen', { name: 'seen', unobserved: false, lastIdleAt: '2026-01-02T00:00:00.000Z', lastObservedAt: '2026-01-01T00:00:00.000Z' } as never);
+
+    const t = rehydrated(['owed', 'seen']);
+
+    expect(t.isUnobserved('owed')).toBe(true);
+    expect(t.isUnobserved('seen')).toBe(false);
+  });
+
+  it('survives a restart for a delegate target whose meta predates the verdict field', async () => {
+    // The reported reboot, reproduced end to end. The fixture must OMIT the field:
+    // seeding `unobserved: false` (as every other test here does) would pass
+    // without the fix and pin nothing.
+    setSessionMeta('reviewer-legacy', { name: 'reviewer', kind: 'interactive', lastObservedAt: '2026-01-01T00:00:00.000Z' } as never);
+    expect('unobserved' in meta('reviewer-legacy')).toBe(false);
+
+    // A delegation lands: markSessionIdle stamps lastIdleAt past lastObservedAt,
+    // which is exactly what used to arm the badge.
+    await idle(liveTracker(), 'reviewer-legacy', true);
+    expect('unobserved' in meta('reviewer-legacy')).toBe(false);
+    expect(new Date(meta('reviewer-legacy').lastIdleAt as string).getTime())
+      .toBeGreaterThan(new Date('2026-01-01T00:00:00.000Z').getTime());
+
+    expect(rehydrated(['reviewer-legacy']).isUnobserved('reviewer-legacy')).toBe(false);
   });
 });

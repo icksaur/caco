@@ -32,7 +32,7 @@ beforeEach(() => {
   mgr.enableTools.mockReset();
   (formatDeferredTools as unknown as ReturnType<typeof vi.fn>).mockClear();
   mgr.getToolCatalog.mockResolvedValue({ catalog: {}, excluded: new Set(), policyDisabled: new Set() });
-  mgr.enableTools.mockResolvedValue({ ok: true, enabled: ['x'], alreadyEnabled: [] });
+  mgr.enableTools.mockResolvedValue({ ok: true, enabled: ['x'], alreadyEnabled: [], phantom: [] });
 });
 
 describe('caco_enable_tools — no-args discovery mode', () => {

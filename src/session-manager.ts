@@ -32,7 +32,7 @@ import { estimateToolTokens } from './tool-size.js';
 import { buildPagerView, type PagerSessionInput } from './pager-view.js';
 import { planSessionRemoval, type RemovalPlan } from './session-removal.js';
 import { activityVersion } from './activity-version.js';
-import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys } from './session-tool-state.js';
+import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys, enableableToolKeys, advertisableToolKeys, partitionEnableNames } from './session-tool-state.js';
 import { excludedBuiltinNames, isDeferEligibleCacoEntry, isDeferEligibleBuiltin } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
 import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-defer-store.js';
@@ -408,6 +408,13 @@ export class SessionManager {
   // still enumerable for the mcp-servers applet. See docs/spec-tool-reveal.md.
   private cacoToolCatalog: CacoToolCatalogEntry[] = [];
   private builtinToolNames: string[] = [];
+
+  // sessionId → the catalog keys caco_enable_tools can act on for THAT session. The
+  // deferred-tools reminder intersects against this so it never advertises a key from an
+  // MCP server that is not loaded here (spec-enable-tools-catalog-divergence). A missing
+  // entry means "not known yet" and advertises everything; it is never an empty set
+  // standing in for unknown.
+  private enableableKeysBySession = new Map<string, Set<ToolKey>>();
   
   // sessionId → Promise (serializes concurrent caco_enable_tools reveals so the
   // read-modify-write of excludedTools is atomic; two enables in one turn compose).
@@ -873,6 +880,7 @@ export class SessionManager {
     syncModelCache(session.sessionId, resolved.cacoId);
     
     console.log(`✓ Created session ${session.sessionId} for ${cwd} with model ${config.model}`);
+    this.warmEnableableKeys(session.sessionId);
     return session.sessionId;
   }
 
@@ -1208,6 +1216,7 @@ export class SessionManager {
     }
     
     console.log(`✓ Resumed session ${sessionId} for ${cwd}${usedFallbackCwd ? ' (fallback)' : ''}${repairMessage ? ' (repaired)' : ''}`);
+    this.warmEnableableKeys(sessionId);
     // Cold-open latency attribution. ensureClient = first-call SDK client init;
     // mcp = loadMcpServers; sdkResume = SDK resumeSession (events.jsonl
     // rehydration, the dominant cost on large sessions); evict = stopping LRU
@@ -1232,9 +1241,9 @@ export class SessionManager {
     const active = this.activeSessions.get(sessionId);
     if (!active) return;
     this.activeSessions.delete(sessionId);
+    this.clearEnableableKeys(sessionId);
     disposeSessionRuntime(sessionId);
-    console.log(`[SDK] Dropped stale session ${sessionId} from active map`);
-  }
+    console.log(`[SDK] Dropped stale session ${sessionId} from active map`);  }
 
   /**
    * Best-effort abort of the ORIGINAL in-flight generation before a dispatch
@@ -1293,6 +1302,7 @@ export class SessionManager {
     // Clear dispatch state and untrack
     dispatchState.end(sessionId);
     this.activeSessions.delete(sessionId);
+    this.clearEnableableKeys(sessionId);
     
     disposeSessionRuntime(sessionId);
     
@@ -1337,6 +1347,7 @@ export class SessionManager {
       console.warn(`Warning: session.disconnect() during maintenance failed: ${message}`);
     }
     dispatchState.end(sessionId);
+    this.clearEnableableKeys(sessionId);
     disposeSessionRuntime(sessionId);
     console.log(`✓ Stopped idle session ${sessionId.slice(0, 8)} for maintenance`);
     return true;
@@ -1497,6 +1508,7 @@ export class SessionManager {
     this.sessionCache.delete(sessionId);
     activityVersion.bump();
     this.resetAutoContinue(sessionId);
+    this.clearEnableableKeys(sessionId);
     disposeSessionRuntime(sessionId);
 
     // Remove the whole Caco per-session directory (meta.json, files-cards.json,
@@ -2197,15 +2209,22 @@ export class SessionManager {
   /**
    * List MCP servers via session RPC. Returns server name, status, source, error.
    * Requires at least one active session. Returns empty array if none available.
+   *
+   * `onFailure` fires when the enumeration did NOT happen (no session, or the RPC threw).
+   * Callers that cache the result MUST use it: an empty array is otherwise
+   * indistinguishable between "no servers configured" and "the RPC failed", and caching
+   * the latter would filter every MCP tool out of the deferred-tools reminder
+   * (spec-enable-tools-catalog-divergence).
    */
-  async listMcpServers(sessionId?: string): Promise<McpServerInfo[]> {
+  async listMcpServers(sessionId?: string, onFailure?: () => void): Promise<McpServerInfo[]> {
     const target = sessionId ? this.activeSessions.get(sessionId) : this.activeSessions.values().next().value;
-    if (!target) return [];
+    if (!target) { onFailure?.(); return []; }
     try {
       const result = await target.session.rpc.mcp.list();
       return result.servers;
     } catch (e) {
       console.error('[MCP] Failed to list MCP servers:', e instanceof Error ? e.message : e);
+      onFailure?.();
       return [];
     }
   }
@@ -2328,15 +2347,18 @@ export class SessionManager {
    * List the tools exposed by ONE connected MCP server, via the session-scoped
    * `mcp.listTools` RPC. (Client-level `tools.list` returns built-in model tools,
    * NOT MCP server tools — see docs/spec-mcp-servers.md.) Empty on no session/error.
+   * `onFailure` distinguishes "this server exposes no tools" from "the enumeration
+   * failed" — see listMcpServers.
    */
-  async listMcpTools(serverName: string, sessionId?: string): Promise<{ name: string; description: string }[]> {
+  async listMcpTools(serverName: string, sessionId?: string, onFailure?: () => void): Promise<{ name: string; description: string }[]> {
     const target = sessionId ? this.activeSessions.get(sessionId) : this.activeSessions.values().next().value;
-    if (!target) return [];
+    if (!target) { onFailure?.(); return []; }
     try {
       const result = await target.session.rpc.mcp.listTools({ serverName });
       return result.tools.map(t => ({ name: t.name, description: t.description ?? '' }));
     } catch (e) {
       console.error(`[MCP] Failed to list tools for ${serverName}:`, e instanceof Error ? e.message : e);
+      onFailure?.();
       return [];
     }
   }
@@ -2354,7 +2376,17 @@ export class SessionManager {
     // list — otherwise a tool loaded in the target session could be omitted because a
     // DIFFERENT session's metadata was inspected.
     const target = sessionId ?? this.mostRecentActiveSessionId() ?? undefined;
-    const mcpServers = await this.listMcpServers(target);
+    // Captured for the cache-seed identity check below: the enumeration awaits several
+    // RPCs, during which the session can be torn down — or torn down and re-created under
+    // the same caller-supplied id — and an unconditional seed would then write a stale
+    // catalog for a session that never had it.
+    const activeAtEntry = sessionId ? this.activeSessions.get(sessionId) : undefined;
+    // An empty MCP enumeration is ambiguous (no servers configured vs. the RPC failed), so
+    // track whether it actually happened; only a successful one may seed the enable-able
+    // cache below (spec-enable-tools-catalog-divergence).
+    let enumerationOk = true;
+    const markEnumerationFailed = (): void => { enumerationOk = false; };
+    const mcpServers = await this.listMcpServers(target, markEnumerationFailed);
     const listedBuiltins = await this.listBuiltinTools();
     // Learn model-facing MCP keys from the resolved metadata of currently-loaded tools
     // (the authoritative source) before resolving the catalog. Persisted keys cover
@@ -2364,7 +2396,7 @@ export class SessionManager {
     recordObservedSizes(observed);
     const mcp = await Promise.all(
       mcpServers.map(async s => {
-        const raw = await this.listMcpTools(s.name, target);
+        const raw = await this.listMcpTools(s.name, target, markEnumerationFailed);
         // Resolve each raw MCP tool to its discovered model-facing key. If not yet
         // learned, still SHOW it (display-only `server/tool` id, excludable:false) so it
         // never silently vanishes from the catalog/applet — it just can't be deferred
@@ -2409,6 +2441,16 @@ export class SessionManager {
     // re-enableable — distinct from a dynamic session defer. (hardDisabled Caco tools are
     // carried per-entry on the catalog, so they need no separate set.)
     const policyDisabled = new Set<ToolKey>(excludedBuiltinNames() as ToolKey[]);
+    // Seed the reminder's intersection set, but ONLY for an explicitly-named session (the
+    // no-arg variant resolves an arbitrary most-recent session and must not write another
+    // session's cache), ONLY when the MCP enumeration actually succeeded (a failed
+    // enumeration leaves any prior entry untouched — writing an MCP-free set would turn
+    // this fix into a silent over-hide, which is worse than the bug), and ONLY while the
+    // SAME session object is still active (so a teardown that raced this enumeration is
+    // not undone, and a re-created session cannot inherit the dead one's catalog).
+    if (sessionId && enumerationOk && activeAtEntry && this.activeSessions.get(sessionId) === activeAtEntry) {
+      this.enableableKeysBySession.set(sessionId, enableableToolKeys(catalog));
+    }
     return { catalog, excluded, policyDisabled };
   }
 
@@ -2430,7 +2472,27 @@ export class SessionManager {
   nextDeferredToolsReminder(sessionId: string): { text: string | null; commit: () => void } {
     const policy = new Set<ToolKey>(excludedBuiltinNames() as ToolKey[]);
     const keys = deferredToolKeys(this.getExcludedToolKeys(sessionId), policy);
-    return computeDeferredReminder(sessionId, keys);
+    const advertisable = advertisableToolKeys(keys, this.enableableKeysBySession.get(sessionId));
+    return computeDeferredReminder(sessionId, advertisable);
+  }
+
+  /**
+   * Populate the session's enable-able key cache out-of-band, so the deferred-tools
+   * reminder is filtered without `nextDeferredToolsReminder` ever awaiting an RPC.
+   * Deliberately not awaited (it must add no latency to create/resume) and explicitly
+   * caught (a bare `void` on a rejecting promise is an unhandled rejection). A failure
+   * simply leaves the cache absent, which advertises unfiltered — the safe direction.
+   */
+  private warmEnableableKeys(sessionId: string): void {
+    this.getToolCatalog(sessionId).catch(e => {
+      console.warn(`[DEFER] enable-able cache warm failed for ${sessionId.slice(0, 8)}:`, e instanceof Error ? e.message : e);
+    });
+  }
+
+  /** Drop a torn-down session's enable-able key cache. Called wherever a session leaves
+   *  `activeSessions`; a warm recreate re-populates it via `warmEnableableKeys`. */
+  private clearEnableableKeys(sessionId: string): void {
+    this.enableableKeysBySession.delete(sessionId);
   }
 
   /**
@@ -2679,7 +2741,7 @@ export class SessionManager {
    * the latest stored set inside the lock). Returns a structured result for the tool.
    */
   async enableTools(sessionId: string, names: string[]): Promise<
-    | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[] }
+    | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[]; phantom: string[] }
     | { ok: false; error: string }
   > {
     // Per-session mutex: chain onto any in-flight reveal so the read-modify-write of
@@ -2788,17 +2850,23 @@ export class SessionManager {
   }
 
   private async enableToolsLocked(sessionId: string, names: string[]): Promise<
-    | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[] }
+    | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[]; phantom: string[] }
     | { ok: false; error: string }
   > {
     const active = this.activeSessions.get(sessionId);
     if (!active) return { ok: false, error: 'session is not active' };
     // Session-scoped catalog: MCP tools must come from THIS session, not an arbitrary one.
     const { catalog, policyDisabled } = await this.getToolCatalog(sessionId);
-    const resolved = resolveEnableTargets(names, catalog);
-    if (!resolved.ok) return { ok: false, error: resolved.error };
-    // Read the CURRENT set inside the lock (a prior queued reveal may have shrunk it).
+    // Read the CURRENT set inside the lock (a prior queued reveal may have shrunk it); it
+    // is also what separates a phantom name from an unknown one.
     const current = new Set<ToolKey>(this.getExcludedToolKeys(sessionId));
+    const { resolvable, phantom, unknown } = partitionEnableNames(names, catalog, current);
+    // Unknown DOMINATES: a batch containing any agent-side error rejects atomically with
+    // nothing mutated, so a syntax mistake still costs no cache-bust. Phantoms alone never
+    // reject — Caco advertised them, and failing the batch would punish a correct call.
+    if (unknown.length > 0) return { ok: false, error: `unknown tool: ${unknown.join(', ')}` };
+    const resolved = resolveEnableTargets(resolvable, catalog);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
     // Atomically reject hard-disabled + policy-disabled (not re-enableable); no-op
     // already-enabled; enable the deferred remainder. A mixed batch never blocks the
     // valid reveals.
@@ -2811,14 +2879,15 @@ export class SessionManager {
       else alreadyEnabled.push(key);
     }
     if (toEnable.length === 0) {
-      // Everything requested is already enabled — no cache-busting mutation needed.
-      return { ok: true, enabled: [], alreadyEnabled };
+      // Everything requested is already enabled or was a phantom — no cache-busting
+      // mutation needed, and a phantom-only batch must mutate nothing at all.
+      return { ok: true, enabled: [], alreadyEnabled, phantom };
     }
     const validated = validateEnable(toEnable, catalog, current, policyDisabled);
     if (!validated.ok) return { ok: false, error: validated.error };
     const applied = await this.setExcludedToolsLive(sessionId, [...validated.nextExcluded]);
     if (!applied.success) return { ok: false, error: applied.error ?? 'rpc.options.update did not succeed' };
-    return { ok: true, enabled: toEnable, alreadyEnabled };
+    return { ok: true, enabled: toEnable, alreadyEnabled, phantom };
   }
 
   isClientRunning(): boolean {

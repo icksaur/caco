@@ -48,6 +48,13 @@ Names may be the bare display name (e.g. "list_issues") or the full key (e.g. "g
       if (result.alreadyEnabled.length > 0) {
         parts.push(`Already enabled (no change): ${result.alreadyEnabled.join(', ')}.`);
       }
+      // A phantom was advertised by Caco but its MCP server is not loaded in this session,
+      // so it cannot be enabled here. Deliberately NO "call with no arguments" advice: that
+      // listing is built from the same session catalog that failed to resolve the name, so
+      // the tool would be absent there too and the agent would loop.
+      if (result.phantom.length > 0) {
+        parts.push(`Not available in this session: ${result.phantom.join(', ')} — Caco listed these but their MCP server is not loaded here, so they cannot be enabled. Do not retry them; proceed without them.`);
+      }
       if (parts.length === 0) parts.push('No tools to enable.');
       return { textResultForLlm: parts.join(' ') };
     },

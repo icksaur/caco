@@ -1,6 +1,15 @@
 # spec-enable-tools-catalog-divergence
 
-**Status:** draft
+**Status:** draft, reviewed once (findings folded — the review corrected the caching
+hazard).
+
+## Goals
+
+The deferred-tools reminder never names a tool `caco_enable_tools` would reject. When a
+name cannot be enabled, the agent is told something it can act on, and is never sent to a
+listing that cannot contain it. Filtering the reminder must never hide a tool that IS
+enable-able: over-advertising costs one bad attempt, over-hiding strands a capability with
+no discovery path.
 
 `caco_enable_tools` rejects a tool key that Caco itself advertised one turn earlier
 (`unknown tool: ADO-repo_get_file_content`), and the rejection message sends the agent
@@ -46,7 +55,7 @@ consult a list that cannot contain the name it was just handed, so it re-lists, 
 and re-fails. The remediation advice is unfollowable for precisely the case that triggers
 it.
 
-## Accepted debt: phantom keys stay in `excludedTools`
+## Known limitation: phantom keys stay in `excludedTools`
 
 R1 and R2 fix the *read* paths. The invalid keys themselves remain in the session's
 exclusion set, because the only place they could be removed is the seed, and the seed
@@ -180,6 +189,20 @@ The phantom report must state that the tool's MCP server is not loaded in this s
 that it is not available here, and must **not** direct the agent to re-list — the no-args
 listing cannot contain it either. The existing "call with no arguments" advice stays for
 the unknown-name case, where it is correct.
+
+## Acceptance
+
+* No key appears in a session's deferred-tools reminder unless `resolveEnableTargets`
+  resolves it against that session's catalog.
+* A tool that is deferred and whose MCP server IS loaded still appears in the reminder.
+* An MCP enumeration that failed — wholly or for one server — never seeds the filter, and
+  never overwrites a good cache entry.
+* With no cache entry the reminder is byte-identical to the pre-change unfiltered output.
+* A phantom-only enable request mutates nothing, calls no RPC, is not an error, and its
+  message does not tell the agent to re-list.
+* A batch containing an unknown name still rejects atomically with nothing mutated,
+  regardless of any phantom in the same batch.
+* The cache warm never surfaces an unhandled rejection and never fails create or resume.
 
 ## Plan
 

@@ -19,7 +19,7 @@ describe('caco_enable_tools result wording (spec-enable-tools-autocontinue P6)',
   beforeEach(() => vi.clearAllMocks());
 
   it('describes auto-continuation in a new request, not "next turn"', async () => {
-    sm.enableTools.mockResolvedValue({ ok: true, enabled: ['github-list_issues'], alreadyEnabled: [] });
+    sm.enableTools.mockResolvedValue({ ok: true, enabled: ['github-list_issues'], alreadyEnabled: [], phantom: [] });
     const res = await makeHandler()({ names: ['list_issues'] });
     expect(res.textResultForLlm).toMatch(/continue in a new request/i);
     expect(res.textResultForLlm).not.toMatch(/next turn/i);

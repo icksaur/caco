@@ -179,6 +179,73 @@ export function deferredToolKeys(excluded: Iterable<ToolKey>, policyDisabled: Re
 }
 
 /**
+ * The catalog keys `caco_enable_tools` can actually act on: everything except an MCP
+ * entry whose model-facing key has never been observed (`excludable: false`), whose `key`
+ * is a display-only `server/tool` id rather than a real exclusion string. A key that
+ * cannot be excluded cannot be un-excluded. Pure.
+ */
+export function enableableToolKeys(catalog: ToolCatalog): Set<ToolKey> {
+  const out = new Set<ToolKey>();
+  for (const t of catalog.values()) if (t.excludable) out.add(t.key);
+  return out;
+}
+
+/**
+ * Intersect the deferred keys with the session's enable-able catalog keys, so the
+ * discovery reminder never advertises a key `caco_enable_tools` would reject
+ * (spec-enable-tools-catalog-divergence). The exclusion set is seeded from the
+ * SYSTEM-WIDE learned-key registry and auto-defer latch, so it routinely contains keys
+ * for MCP servers that are not loaded in this session; those exclude nothing and cannot
+ * be enabled here.
+ *
+ * `undefined` means "the enable-able set is not known yet" and advertises everything —
+ * the pre-existing behaviour. It must NEVER collapse to an empty set: over-advertising
+ * costs the agent one bad enable attempt, while over-hiding silently strands a deferred
+ * tool with no discovery path at all. Pure.
+ */
+export function advertisableToolKeys(keys: readonly ToolKey[], enableable: ReadonlySet<ToolKey> | undefined): ToolKey[] {
+  if (!enableable) return [...keys];
+  return keys.filter(k => enableable.has(k));
+}
+
+export interface EnablePartition {
+  /** Names that resolve against the catalog (by key or display name). */
+  resolvable: string[];
+  /** Advertised by Caco but absent from this session's catalog — its MCP server is not
+   *  loaded here. Caco's mistake, not the agent's. */
+  phantom: string[];
+  /** Neither resolvable nor advertised: a typo or a hallucinated name. */
+  unknown: string[];
+}
+
+/**
+ * Split requested names into the three classes `caco_enable_tools` must treat
+ * differently (spec-enable-tools-catalog-divergence R2). A name is phantom rather than
+ * unknown when it is unresolvable against the catalog but IS in the session's live
+ * exclusion set — i.e. Caco advertised it in the deferred-tools reminder.
+ *
+ * The distinction exists because the remediation differs: an unknown name is an agent
+ * error whose fix is to re-list, while a phantom name is a Caco error that re-listing
+ * cannot fix (the no-args listing is built from the same catalog that just failed to
+ * resolve it), so telling the agent to re-list sends it into a loop. Pure.
+ */
+export function partitionEnableNames(
+  names: readonly string[],
+  catalog: ToolCatalog,
+  excluded: ReadonlySet<ToolKey>,
+): EnablePartition {
+  const byName = new Set<string>();
+  for (const t of catalog.values()) byName.add(t.name);
+  const out: EnablePartition = { resolvable: [], phantom: [], unknown: [] };
+  for (const name of names) {
+    if (catalog.has(name as ToolKey) || byName.has(name)) out.resolvable.push(name);
+    else if (excluded.has(name as ToolKey)) out.phantom.push(name);
+    else out.unknown.push(name);
+  }
+  return out;
+}
+
+/**
  * Render the change-triggered discovery reminder appended to the model prompt: the
  * deferred tool identifiers plus the one-line enable instruction. Caller guarantees
  * a non-empty key list (an empty deferred set emits no reminder). Names only — no

@@ -2529,17 +2529,35 @@ export class SessionManager {
    * The gross per-turn definition tokens CURRENTLY omitted by DYNAMIC deferral for a
    * session (spec-deferred-savings S6). Dynamic = the session's live `excludedTools`
    * MINUS the policy set (`excludedBuiltinNames()`) — only C2 auto-defer / D1 manual
-   * defer, never policy-disabled builtins (which were never an avoidable cost). For each
-   * dynamic key: a Caco-allowlist tool prices from the local catalog (schema is local, so
-   * always known); an MCP tool prices from the persisted observed-size store, or counts
-   * as `unknown` if never observed. Returns a GROSS estimate of omitted known definitions
-   * — NOT a proven saving; the caller must not fold it into net credits. Pure read of
-   * current state (no accumulation): the figure changes only on defer/reveal or when a
-   * size is learned.
+   * defer, never policy-disabled builtins (which were never an avoidable cost) — and
+   * INTERSECTED with the session's enable-able catalog keys. That intersection is
+   * load-bearing, not cosmetic: the exclusion set is seeded from the system-wide learned-
+   * key registry, so it routinely holds keys for MCP servers that are not loaded in this
+   * session (spec-enable-tools-catalog-divergence). Such a key omits no definition from
+   * the tool block and therefore saves exactly nothing, while this figure ACCRUES into
+   * `deferredDefsTokensAccrued` every turn and is priced into the headline — so counting
+   * one would inflate a credits figure permanently, not merely a display.
+   *
+   * When the enable-able set is not yet known, no key can be shown to save anything, so
+   * the whole dynamic set is reported as `unknown` and NOTHING is priced. This is the
+   * opposite fallback from the deferred-tools reminder, deliberately: an unverified
+   * advertisement costs one bad enable attempt, while an unverified saving is accrued
+   * forever. Both fall to the side that cannot mislead.
+   *
+   * For each remaining key: a Caco-allowlist tool prices from the local catalog (schema is
+   * local, so always known); an MCP tool prices from the persisted observed-size store, or
+   * counts as `unknown` if never observed. A GROSS estimate of omitted known definitions —
+   * NOT a proven saving. Pure read of current state (no accumulation): the figure changes
+   * only on defer/reveal, when a size is learned, or when the catalog is re-observed.
    */
   deferredDefsSavings(sessionId: string): { deferredDefsTokens: number; deferredDefsCount: number; deferredDefsUnknown: number } {
     const policy = new Set<string>(excludedBuiltinNames());
     const dynamic = this.getExcludedToolKeys(sessionId).filter(k => !policy.has(k as string));
+    const enableable = this.enableableKeysBySession.get(sessionId);
+    if (!enableable) {
+      return { deferredDefsTokens: 0, deferredDefsCount: dynamic.length, deferredDefsUnknown: dynamic.length };
+    }
+    const omitted = dynamic.filter(k => enableable.has(k));
     // Local Caco sizes by cacoKey, so a deferred Caco-allowlist tool is always priced.
     const cacoSizeByKey = new Map<ToolKey, number>();
     for (const c of this.getCacoToolCatalog()) {
@@ -2547,12 +2565,12 @@ export class SessionManager {
     }
     let deferredDefsTokens = 0;
     let deferredDefsUnknown = 0;
-    for (const key of dynamic) {
+    for (const key of omitted) {
       const size = cacoSizeByKey.get(key) ?? getToolSize(key);
       if (size === undefined) deferredDefsUnknown++;
       else deferredDefsTokens += size;
     }
-    return { deferredDefsTokens, deferredDefsCount: dynamic.length, deferredDefsUnknown };
+    return { deferredDefsTokens, deferredDefsCount: omitted.length, deferredDefsUnknown };
   }
 
   /**

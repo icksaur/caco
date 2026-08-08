@@ -64,8 +64,11 @@ const SID = 'sess-dd';
 const MCP_KNOWN = mcpKey('github-list_issues');
 const MCP_UNKNOWN = mcpKey('github-get_pr');
 const CACO_TOOL = cacoKey('caco_browser_navigate');
+// Learned in some OTHER session/repo: its server is not loaded here, so it omits no
+// definition from this session's tool block (spec-enable-tools-catalog-divergence).
+const PHANTOM = mcpKey('ado-get_file');
 
-async function makeManager(excluded: string[]) {
+async function makeManager(excluded: string[], enableable: string[] | null = null) {
   const { SessionManager } = await import('../../src/session-manager.js');
   const manager = new SessionManager();
   (manager as { getCacoToolCatalog: () => unknown[] }).getCacoToolCatalog = () => [
@@ -73,8 +76,16 @@ async function makeManager(excluded: string[]) {
   ];
   const active = (manager as unknown as { activeSessions: Map<string, FakeActive> }).activeSessions;
   active.set(SID, { cwd: '/x', session: {}, toolFactory: () => [], excludedTools: [...excluded], lastUsedAt: Date.now() });
+  // `null` models "the catalog has not been observed yet"; a list models a warmed cache.
+  if (enableable) {
+    (manager as unknown as { enableableKeysBySession: Map<string, Set<string>> })
+      .enableableKeysBySession.set(SID, new Set(enableable));
+  }
   return manager as unknown as { deferredDefsSavings: (id: string) => { deferredDefsTokens: number; deferredDefsCount: number; deferredDefsUnknown: number } };
 }
+
+// The keys this session's catalog can actually act on — everything except the phantom.
+const LOADED = [MCP_KNOWN, MCP_UNKNOWN, CACO_TOOL].map(String);
 
 beforeEach(() => { vi.clearAllMocks(); sizeStore.sizes.clear(); });
 
@@ -82,7 +93,7 @@ describe('SessionManager.deferredDefsSavings — gross omitted-definition figure
   it('sums known MCP sizes + local Caco size; counts unknown MCP; excludes policy builtins', async () => {
     sizeStore.sizes.set(MCP_KNOWN as string, 250);
     // excludedTools: a policy builtin (bash), a known MCP tool, an unknown MCP tool, a Caco-allowlist tool
-    const mgr = await makeManager(['builtin:bash', MCP_KNOWN as string, MCP_UNKNOWN as string, CACO_TOOL as string]);
+    const mgr = await makeManager(['builtin:bash', MCP_KNOWN as string, MCP_UNKNOWN as string, CACO_TOOL as string], LOADED);
     const r = mgr.deferredDefsSavings(SID);
     // dynamic set = the 3 non-policy keys; bash excluded from count
     expect(r.deferredDefsCount).toBe(3);
@@ -93,14 +104,36 @@ describe('SessionManager.deferredDefsSavings — gross omitted-definition figure
   });
 
   it('returns zeros when nothing is dynamically deferred (only policy builtins excluded)', async () => {
-    const mgr = await makeManager(['builtin:bash', 'builtin:powershell']);
+    const mgr = await makeManager(['builtin:bash', 'builtin:powershell'], LOADED);
     expect(mgr.deferredDefsSavings(SID)).toEqual({ deferredDefsTokens: 0, deferredDefsCount: 0, deferredDefsUnknown: 0 });
   });
 
   it('a policy builtin never contributes even if somehow also in the set', async () => {
-    const mgr = await makeManager(['builtin:powershell']);
+    const mgr = await makeManager(['builtin:powershell'], LOADED);
     const r = mgr.deferredDefsSavings(SID);
     expect(r.deferredDefsCount).toBe(0);
     expect(r.deferredDefsTokens).toBe(0);
+  });
+
+  it('a key whose MCP server is not loaded here is priced at nothing and not counted', async () => {
+    // The phantom has a KNOWN observed size (learned in the session that could load it),
+    // so without the intersection it would silently accrue 999 tokens every turn.
+    sizeStore.sizes.set(PHANTOM as string, 999);
+    sizeStore.sizes.set(MCP_KNOWN as string, 250);
+    const mgr = await makeManager([PHANTOM as string, MCP_KNOWN as string], LOADED);
+    const r = mgr.deferredDefsSavings(SID);
+    expect(r.deferredDefsTokens).toBe(250);
+    expect(r.deferredDefsCount).toBe(1);
+    expect(r.deferredDefsUnknown).toBe(0);
+  });
+
+  it('prices NOTHING until the catalog is known — an unverified saving is never accrued', async () => {
+    sizeStore.sizes.set(MCP_KNOWN as string, 250);
+    const mgr = await makeManager([PHANTOM as string, MCP_KNOWN as string], null);
+    const r = mgr.deferredDefsSavings(SID);
+    expect(r.deferredDefsTokens).toBe(0);
+    // Still reported as deferred, just unpriceable — the reader sees "N tools, N unknown".
+    expect(r.deferredDefsCount).toBe(2);
+    expect(r.deferredDefsUnknown).toBe(2);
   });
 });

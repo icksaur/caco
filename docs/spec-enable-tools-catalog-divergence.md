@@ -72,17 +72,18 @@ Current consumers and their obligations:
 * `nextDeferredToolsReminder` — intersects (R1).
 * `enableToolsLocked` — resolves against the catalog, so it is already immune; R2 only
   improves its diagnostics.
-* `deferredDefsSavings` (session-manager.ts:2478) — **does not** intersect, and so counts
-  phantom keys as deferred definitions. They were never in the session's tool block and
-  save nothing; they inflate `deferredDefsCount` and, once a size was learned in another
-  session, `deferredDefsTokens`. Out of scope here (it is an accounting error, not a
-  behavioural loop) but it is a real defect and should be tracked, not forgotten.
+* `deferredDefsSavings` (session-manager.ts) — intersects. It must, and for a stronger
+  reason than the reminder: its figure ACCRUES into `deferredDefsTokensAccrued` every turn
+  and is priced into the headline credits number, so counting a phantom would inflate a
+  money figure permanently rather than merely mis-render a list. Its cold-cache fallback
+  is the OPPOSITE of the reminder's — it prices nothing and reports the whole dynamic set
+  as `unknown`, because an unverified advertisement costs one bad enable attempt while an
+  unverified saving is accrued forever. Both fall to the side that cannot mislead.
 * The mcp-servers applet payload — same intersect obligation; verify during implementation.
 
-## Related over-reporting (out of scope, note only)
+## Related over-reporting
 
-See the `deferredDefsSavings` bullet above. R1 filters the reminder, not the savings math,
-so that defect survives this change and needs its own item.
+Fixed with the same intersection; see the `deferredDefsSavings` bullet above.
 
 ## Design
 
@@ -203,6 +204,8 @@ the unknown-name case, where it is correct.
 * A batch containing an unknown name still rejects atomically with nothing mutated,
   regardless of any phantom in the same batch.
 * The cache warm never surfaces an unhandled rejection and never fails create or resume.
+* No phantom key contributes to `deferredDefsTokens` or `deferredDefsCount`, and nothing
+  is priced at all until the session's catalog has been observed.
 
 ## Plan
 
@@ -215,7 +218,8 @@ the unknown-name case, where it is correct.
 | 4 | R1 cold-cache fallback | With no cache entry, the reminder is byte-identical to today's unfiltered output. Red if the filter treats a missing entry as an empty set |
 | 5 | R1 warm-on-create/resume with an explicit `.catch`, never a bare `void` | Once the warm settles, `nextDeferredToolsReminder` is filtered (assert on the settled state, not on the first dispatch — the warm races an immediate send and that race is accepted). A throwing `getToolCatalog` neither fails create nor produces an unhandled rejection; assert via a `process.on('unhandledRejection')` probe, red against a bare `void` |
 | 6 | R2 phantom vs unknown classification, precedence, and messaging | `[phantom]` alone: non-fatal report, no `setExcludedToolsLive` call, no mutation, no re-list advice. `[valid, phantom]` enables `valid` and reports the phantom. `[valid, typo]` and `[phantom, typo]` both reject atomically with no mutation and with the re-list advice. All red before the classification |
-| 7 | Full gate | `npm run build` + 10 phases green |
+| 7 | Intersect `deferredDefsSavings` with the same cache; price nothing when the catalog is unknown | A phantom key with a KNOWN observed size contributes 0 tokens and is not counted; with no cache entry nothing is priced and the whole dynamic set reports as `unknown`. Both red before the change |
+| 8 | Full gate | `npm run build` + 10 phases green |
 
 Every oracle must be mutation-checked: replace the R1 filter with identity and row 3 must
 go red; remove the enumeration-success gate and row 2 must go red; collapse the R2

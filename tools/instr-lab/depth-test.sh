@@ -53,7 +53,7 @@ COPILOT_HOME="$LAB/home" timeout 300 copilot -p "$PROMPT" --model "$MODEL" \
   --output-format json > "$OUT" 2>"$OUT.err" || true
 
 TEXT="$(jq -r 'select(.type=="assistant.message") | (.data.content // "")' "$OUT" 2>/dev/null)"
-TOOLS="$(jq -r 'select(.type=="tool.execution_start") | (.data.name // "?")' "$OUT" 2>/dev/null | sort -u | tr '\n' ',')"
+TOOLS="$(jq -r 'select(.type=="tool.execution_start") | (.data.toolName // .data.name // "?")' "$OUT" 2>/dev/null | sort -u | tr '\n' ',')"
 
 echo "### eager ancestor walk | $MODEL | cwd = proj/mid/deep"
 echo "tools_called: ${TOOLS:-none}"

@@ -19,7 +19,7 @@ TEXT="$(jq -r 'select(.type=="assistant.message") | (.data.content // .content /
 # may summarise rather than relay. Score the raw result too.
 TEXT="$TEXT
 $(jq -r 'select(.type=="tool.execution_complete") | (.data.result // .data.output // "" | tostring)' "$JSONL" 2>/dev/null || true)"
-TOOLS="$(jq -r 'select(.type=="tool.execution_start") | (.data.name // .data.toolName // "unknown")' "$JSONL" 2>/dev/null | sort -u | tr '\n' ',' || true)"
+TOOLS="$(jq -r 'select(.type=="tool.execution_start") | (.data.toolName // .data.name // "unknown")' "$JSONL" 2>/dev/null | sort -u | tr '\n' ',' || true)"
 
 # The runtime announces on-demand discovery as a first-class event. This is
 # ground truth, independent of anything the model says about itself.

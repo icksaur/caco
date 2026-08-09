@@ -280,6 +280,53 @@ ancestor walk from documentation and bundle reading without measuring it — the
 main matrix always ran with cwd at the repo root, so the intermediate case was
 never exercised. `tools/instr-lab/depth-test.sh` reproduces it.
 
+## Descendant instruction files
+
+No descendant file is *ever* eagerly loaded, under any convention. With tools
+removed entirely and the cwd at `proj/mid/deep`:
+
+<table>
+<thead><tr><th align="left">File below the cwd</th><th>eager (no tools)</th><th>after a <code>view</code> in <code>sub/</code></th></tr></thead>
+<tbody>
+<tr><td align="left"><code>sub/AGENTS.md</code></td><td>absent</td><td><b>LOADED</b></td></tr>
+<tr><td align="left"><code>sub/.github/copilot-instructions.md</code></td><td>absent</td><td><b>LOADED</b></td></tr>
+<tr><td align="left"><code>sub/copilot-instructions.md</code> (bare)</td><td>absent</td><td><b>absent</b></td></tr>
+</tbody>
+</table>
+
+So the answer differs by convention:
+
+- **`sub/.github/copilot-instructions.md` is reachable** — but only on demand.
+  The `.github` requirement applies to descendants exactly as it does at the
+  root, so the convention is consistent all the way down.
+- **A bare `sub/copilot-instructions.md` is reachable by nothing.** It is not
+  eagerly loaded, and the on-demand walk skips it too, because that walk applies
+  the same `(filename, convention directory)` table. There is no depth at which
+  a bare `copilot-instructions.md` works.
+
+The runtime names what it loaded, so this is observed rather than inferred:
+
+```
+runtime_discovery_events: mid/deep/sub/AGENTS.md
+                          mid/deep/sub/.github/copilot-instructions.md
+```
+
+Two files discovered, from one `view` of `sub/target.txt`. The bare file sat in
+the same directory and was not among them.
+
+### The trigger is the model's tool choice, not the file
+
+In the same arm with the same prompt and fixture, Sonnet called `view` then
+`edit` and received both descendant files; Terra used only `apply_patch`, never
+issued a `view`, and received neither — its transcript contains no discovery
+events at all. Confirmed from the recorded `toolName` of every tool call in both
+runs.
+
+This is the sharpest practical consequence in this document: **whether a
+subdirectory's rules apply depends on which editing tool the model happens to
+prefer.** Two models, same repo, same task, different governing instructions,
+with nothing in either transcript announcing the difference.
+
 ## How each cell is proven
 
 The question is not what a model says, but whether it could have gotten the
@@ -341,7 +388,8 @@ self-healing.
   A root `copilot-instructions.md` is read by nothing.
 - **Rules must live at or above the working directory.** Everything from the cwd
   up to the git root loads eagerly and unconditionally; anything below the cwd
-  loads only if the model happens to `view` a file there.
+  loads only if the model happens to `view` a file there. A bare
+  `copilot-instructions.md` below the cwd is loaded by nothing at all.
 - **Restart the host process after editing an instruction file.** For Caco that
   means restarting the server; a new session will not pick up the change.
 - **Do not rely on subdirectory instruction files.** They reach the model only
@@ -364,6 +412,7 @@ self-healing.
 ```sh
 tools/instr-lab/run-all.sh              # full matrix, both models
 tools/instr-lab/depth-test.sh           # eager ancestor walk from a deep cwd
+tools/instr-lab/descendant-test.sh <lab> <model> eager|ondemand
 tools/instr-lab/cache-test.sh           # stale-instruction-cache check
 node tools/instr-lab/run-sdk.mjs <lab> <model>   # systemMessage mode bisect
 INSTRLAB_MODELS="claude-sonnet-4.6 gpt-5.6-terra" tools/instr-lab/run-all.sh

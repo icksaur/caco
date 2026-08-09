@@ -343,6 +343,48 @@ subdirectory's rules apply depends on which editing tool the model happens to
 prefer.** Two models, same repo, same task, different governing instructions,
 with nothing in either transcript announcing the difference.
 
+### The walk does not leave the cwd tree
+
+On-demand discovery is bounded by the session's working directory. A `view` of a
+file in a *different* tree loads nothing from that tree — not the viewed file's
+own directory, and not that tree's repo root.
+
+Measured with both views in a **single session**, so the mechanism cannot be
+blamed for being inert and the model cannot be blamed for not viewing:
+
+```
+22:54:11.974  view  neutral/own/mine.txt        (inside the cwd tree)
+22:54:11.975  view  peer/deep/target.txt        (a separate git repo)
+
+DISCOVER  own/AGENTS.md  (trigger: view on mine.txt)
+                         ... and nothing else
+```
+
+<table>
+<thead><tr><th align="left">File</th><th align="left">Relationship</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td align="left"><code>own/AGENTS.md</code></td><td align="left">inside the cwd tree</td><td><b>LOADED</b></td></tr>
+<tr><td align="left"><code>peer/deep/AGENTS.md</code></td><td align="left">viewed file's own directory</td><td>absent</td></tr>
+<tr><td align="left"><code>peer/deep/.github/copilot-instructions.md</code></td><td align="left">viewed file's own directory</td><td>absent</td></tr>
+<tr><td align="left"><code>peer/AGENTS.md</code></td><td align="left">foreign repo root</td><td>absent</td></tr>
+<tr><td align="left"><code>peer/.github/copilot-instructions.md</code></td><td align="left">foreign repo root</td><td>absent</td></tr>
+</tbody>
+</table>
+
+Both `view` calls succeeded — the peer view returned the file's real contents —
+and they are one millisecond apart in the same turn. The only difference is
+which tree the file was in. The user-global instructions file still loaded, as
+it is not tree-scoped.
+
+A second arm confirms the same result when the cwd is not a git repository at
+all: the out-of-tree view produces no discovery events either way, so the
+boundary is the working directory rather than a git root.
+
+This closes a plausible worry: an agent reading a peer checkout does **not**
+silently absorb that project's rules. It also means the reverse — pointing a
+session at one directory and asking it to work in another gives you no
+instructions from the tree you are actually editing.
+
 ## How each cell is proven
 
 The question is not what a model says, but whether it could have gotten the
@@ -406,6 +448,10 @@ self-healing.
   up to the git root loads eagerly and unconditionally; anything below the cwd
   loads only if the model happens to `view` a file there. A bare
   `copilot-instructions.md` below the cwd is loaded by nothing at all.
+- **Point the session at the tree you intend to edit.** Discovery never leaves
+  the cwd tree, so a session working on files elsewhere gets none of that
+  project's rules — and conversely, reading a peer checkout does not import its
+  rules into your session.
 - **Restart the host process after editing an instruction file.** For Caco that
   means restarting the server; a new session will not pick up the change.
 - **Do not rely on subdirectory instruction files.** They reach the model only
@@ -429,6 +475,7 @@ self-healing.
 tools/instr-lab/run-all.sh              # full matrix, both models
 tools/instr-lab/depth-test.sh           # eager ancestor walk from a deep cwd
 tools/instr-lab/descendant-test.sh <lab> <model> eager|ondemand
+tools/instr-lab/outside-cwd-test.sh <lab> <model> neutral|paired
 tools/instr-lab/cache-test.sh           # stale-instruction-cache check
 node tools/instr-lab/run-sdk.mjs <lab> <model>   # systemMessage mode bisect
 INSTRLAB_MODELS="claude-sonnet-4.6 gpt-5.6-terra" tools/instr-lab/run-all.sh

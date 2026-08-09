@@ -158,6 +158,7 @@ interface CreateSessionConfig {
   contextTier?: ContextTier;
   configDirectory?: string;
   enableConfigDiscovery?: boolean;
+  enableOnDemandInstructionDiscovery?: boolean;
 }
 
 interface ResumeSessionConfig {
@@ -173,6 +174,7 @@ interface ResumeSessionConfig {
   contextTier?: ContextTier;
   configDirectory?: string;
   enableConfigDiscovery?: boolean;
+  enableOnDemandInstructionDiscovery?: boolean;
 }
 
 /**
@@ -846,6 +848,13 @@ export class SessionManager {
         // auto-loads a project's MCP config — acceptable under Caco's existing
         // approveAll trust posture (the user explicitly chose this cwd).
         enableConfigDiscovery: true,
+        // Also CLI parity: surface a nested AGENTS.md / .github/copilot-instructions.md
+        // when the agent views a file in that subtree. Eager loading only covers the
+        // git root, the cwd, and directories between them, so without this a session
+        // editing files in a subdirectory never sees the rules written for it. The SDK
+        // defaults this off; the CLI opts in. Requires the assembled prompt to survive,
+        // which is why it pairs with toSdkSystemMessage's customize mode.
+        enableOnDemandInstructionDiscovery: true,
         mcpServers: await loadMcpServers(),
         workingDirectory: cwd,
         largeOutput: sdkLargeOutputConfig(),
@@ -1106,9 +1115,13 @@ export class SessionManager {
       excludedTools: seededExclusions,
       onPermissionRequest: approveAll,
       // See createSession: correct option name + enable file-based agent/skill/MCP
-      // discovery so resumed sessions keep parity with the Copilot CLI.
+      // discovery so resumed sessions keep parity with the Copilot CLI, and surface
+      // nested instruction files on file view. Both must be re-supplied on every
+      // resume — the SDK does not persist them, so omitting them here would make a
+      // resumed session quietly behave differently from a fresh one.
       configDirectory: join(homedir(), '.copilot'),
       enableConfigDiscovery: true,
+      enableOnDemandInstructionDiscovery: true,
       mcpServers,
       workingDirectory: cwd,
       largeOutput: sdkLargeOutputConfig(),

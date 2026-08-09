@@ -183,9 +183,9 @@ Three conditions must all hold for on-demand discovery to fire:
 `skipCustomInstructions` false, and the `ON_DEMAND_INSTRUCTIONS` feature flag
 (granted broadly). Caco never sets the first, so it is off there regardless.
 
-Eager loading covers the git root, the cwd, and directories *between* them.
-Descendants of cwd are never eagerly loaded; recursive subfolder discovery is
-gated behind a staff-only flag.
+Eager loading covers the git root, the cwd, and directories *between* them —
+measured, see *The ancestor walk* below. Descendants of cwd are never eagerly
+loaded; recursive subfolder discovery is gated behind a staff-only flag.
 
 ## The fix, validated
 
@@ -244,6 +244,41 @@ More generally, three SDK surface claims failed to survive contact today:
 SDK guardrails including security restrictions" describes five prose bullets,
 and typed section keys are not type-checked. Treat the type definitions as
 hypotheses and verify against the recorded `system.message`.
+
+## The ancestor walk, measured
+
+Eager loading covers the git root, the cwd, and **every directory between
+them** — six independent sources reached one session at once. Run from
+`proj/mid/deep` in a tree carrying a distinct marker at each level, with tools
+removed entirely:
+
+<table>
+<thead><tr><th align="left">File</th><th align="left">Relationship to cwd</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td align="left"><code>$COPILOT_HOME/copilot-instructions.md</code></td><td align="left">user-global</td><td>LOADED</td></tr>
+<tr><td align="left"><code>proj/AGENTS.md</code></td><td align="left">git root</td><td>LOADED</td></tr>
+<tr><td align="left"><code>proj/.github/copilot-instructions.md</code></td><td align="left">git root</td><td>LOADED</td></tr>
+<tr><td align="left"><code>proj/mid/AGENTS.md</code></td><td align="left"><b>intermediate</b></td><td>LOADED</td></tr>
+<tr><td align="left"><code>proj/mid/.github/copilot-instructions.md</code></td><td align="left"><b>intermediate</b></td><td>LOADED</td></tr>
+<tr><td align="left"><code>proj/mid/deep/AGENTS.md</code></td><td align="left">cwd</td><td>LOADED</td></tr>
+<tr><td align="left"><code>proj/mid/deep/sub/AGENTS.md</code></td><td align="left"><b>descendant</b></td><td><b>absent</b></td></tr>
+<tr><td align="left"><code>proj/NOTES.md</code></td><td align="left">decoy, no convention</td><td>absent</td></tr>
+</tbody>
+</table>
+
+Both models agree on every row. The `.github` convention holds at every level:
+an intermediate `copilot-instructions.md` loads only inside a `.github`
+directory, exactly as at the root.
+
+The asymmetry is the point. **Upward is eager and unconditional; downward is
+lazy and conditional.** A descendant `AGENTS.md` is invisible at session start
+and arrives only if the model happens to `view` a file in that subtree. So a
+rule that must always apply belongs at or above the cwd, never below it.
+
+This section exists because the rest of this document originally asserted the
+ancestor walk from documentation and bundle reading without measuring it — the
+main matrix always ran with cwd at the repo root, so the intermediate case was
+never exercised. `tools/instr-lab/depth-test.sh` reproduces it.
 
 ## How each cell is proven
 
@@ -304,6 +339,9 @@ self-healing.
 
 - **Put repository rules in `AGENTS.md` or `.github/copilot-instructions.md`.**
   A root `copilot-instructions.md` is read by nothing.
+- **Rules must live at or above the working directory.** Everything from the cwd
+  up to the git root loads eagerly and unconditionally; anything below the cwd
+  loads only if the model happens to `view` a file there.
 - **Restart the host process after editing an instruction file.** For Caco that
   means restarting the server; a new session will not pick up the change.
 - **Do not rely on subdirectory instruction files.** They reach the model only
@@ -325,6 +363,7 @@ self-healing.
 
 ```sh
 tools/instr-lab/run-all.sh              # full matrix, both models
+tools/instr-lab/depth-test.sh           # eager ancestor walk from a deep cwd
 tools/instr-lab/cache-test.sh           # stale-instruction-cache check
 node tools/instr-lab/run-sdk.mjs <lab> <model>   # systemMessage mode bisect
 INSTRLAB_MODELS="claude-sonnet-4.6 gpt-5.6-terra" tools/instr-lab/run-all.sh

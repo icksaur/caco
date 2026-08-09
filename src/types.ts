@@ -46,6 +46,25 @@ export interface SystemMessage {
   content: string;
 }
 
+/**
+ * A section override in the SDK's `customize` system-message mode. Keys are
+ * section ids; unmentioned sections are preserved.
+ */
+export interface SdkSectionOverride {
+  action: 'replace' | 'remove';
+  content?: string;
+}
+
+/**
+ * The shape actually sent to the SDK. Caco's `SystemMessage` states intent;
+ * `toSdkSystemMessage` translates it to this. Never build one by hand at a call
+ * site — `mode: 'replace'` here also discards the SDK's `custom_instructions`
+ * section, which is where AGENTS.md and the user's global instructions live.
+ */
+export type SdkSystemMessage =
+  | { mode: 'append'; content: string }
+  | { mode: 'customize'; sections: Record<string, SdkSectionOverride> };
+
 export interface SessionConfig {
   model?: string;
   streaming?: boolean;

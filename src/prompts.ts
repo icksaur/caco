@@ -3,11 +3,14 @@
  */
 
 import { homedir } from 'os';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { listApplets } from './applet-store.js';
 import { formatMemoryForPrompt } from './memory-tool.js';
 import { WORKFLOW_ENABLED } from './config.js';
 import { getHostShell } from './workflow/shell.js';
-import type { SystemMessage } from './types.js';
+import type { SystemMessage, SdkSystemMessage, SdkSectionOverride } from './types.js';
 
 // ============================================================================
 // System Message
@@ -132,6 +135,118 @@ export function resolveSystemMessage(template: SystemMessage, cwd: string): Syst
     ...template,
     content: template.content.replace('{{SESSION_CWD}}', cwd)
   };
+}
+
+/**
+ * SDK prompt sections carrying the SDK's own prose. Caco writes its own guidance
+ * for all of these, so shipping both would send the model two sets of rules.
+ *
+ * `custom_instructions` is deliberately ABSENT and must stay absent: unmentioned
+ * sections are preserved, and that section is where AGENTS.md,
+ * .github/copilot-instructions.md, and ~/.copilot/copilot-instructions.md are
+ * compiled in. Naming it here would reintroduce the bug this list exists to fix.
+ *
+ * `safety` is removed rather than kept. It is not a sandbox or any enforcement
+ * mechanism -- it is content-policy prose that also asserts the environment is
+ * shared and forbids discussing the instructions, neither of which is true or
+ * wanted here. Caco states the rules it means in its own prompt.
+ */
+export const SDK_PROSE_SECTIONS = Object.freeze([
+  'preamble',
+  'tone',
+  'tool_efficiency',
+  'environment_context',
+  'code_change_rules',
+  'guidelines',
+  'safety',
+  'runtime_instructions',
+  'last_instructions',
+  'tool_instructions',
+] as const);
+
+/**
+ * Section ids the vendored SDK actually declares, or null when they cannot be
+ * read. The SDK ships as a per-platform package (@github/copilot-<platform>-<arch>),
+ * so the directory is discovered rather than hardcoded.
+ */
+export function readSdkSectionIds(): string[] | null {
+  try {
+    const scope = fileURLToPath(new URL('../node_modules/@github/', import.meta.url));
+    const pkg = readdirSync(scope).find((d) => existsSync(join(scope, d, 'sdk', 'index.d.ts')));
+    if (!pkg) return null;
+    const src = readFileSync(join(scope, pkg, 'sdk', 'index.d.ts'), 'utf8');
+    const grab = (name: string) => {
+      const m = new RegExp(`declare type ${name} =([^;]+);`).exec(src);
+      return m ? [...m[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]) : [];
+    };
+    const ids = [...grab('SystemPromptSection'), ...grab('SystemPromptSectionGroup')];
+    return ids.length ? ids : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compare the SDK's declared sections against the ones Caco handles.
+ *
+ * `missing` are sections Caco tries to remove that the SDK no longer declares —
+ * those removals are silent no-ops. `unexpected` are sections the SDK declares
+ * that Caco neither removes nor deliberately preserves, so their prose would
+ * ship alongside Caco's.
+ *
+ * Pure, so drift detection is testable without an SDK that has actually
+ * drifted. `custom_instructions` is excluded because preserving it is the point,
+ * and `identity` because Caco replaces rather than removes it.
+ */
+export function diffProseSections(
+  declared: readonly string[],
+  handled: readonly string[],
+): { missing: string[]; unexpected: string[] } {
+  return {
+    missing: handled.filter((id) => !declared.includes(id)),
+    unexpected: declared.filter(
+      (id) => id !== 'custom_instructions' && id !== 'identity' && !handled.includes(id),
+    ),
+  };
+}
+
+/**
+ * Check SDK_PROSE_SECTIONS against what the installed SDK declares.
+ *
+ * The section map is typed with an index signature, so a section renamed by an
+ * SDK upgrade is neither a compile error nor a runtime error -- the removal
+ * silently no-ops and the SDK's prose returns alongside Caco's, roughly five
+ * thousand tokens of duplicated and partly contradictory guidance.
+ *
+ * Note this degrades rather than breaks: measured, a fully renamed map still
+ * loads custom instructions correctly. So this warns loudly instead of refusing
+ * to start, which would take Caco down over a cosmetic regression.
+ *
+ * Returns null when the SDK's types cannot be read, since absence of evidence
+ * is not a mismatch.
+ */
+export function verifySdkProseSections(): { missing: string[]; unexpected: string[] } | null {
+  const declared = readSdkSectionIds();
+  if (!declared) return null;
+  return diffProseSections(declared, SDK_PROSE_SECTIONS);
+}
+
+/**
+ * Translate Caco's intent into the SDK's system-message config.
+ *
+ * Caco means "use my prose instead of the SDK's". The SDK's `mode: 'replace'`
+ * does that AND discards every custom-instruction source, silently, which left
+ * every Caco session running without the user's AGENTS.md or global rules.
+ * `customize` expresses the actual intent: override the prose sections, leave
+ * `custom_instructions` untouched.
+ */
+export function toSdkSystemMessage(message: SystemMessage): SdkSystemMessage {
+  if (message.mode === 'append') return { mode: 'append', content: message.content };
+  const sections: Record<string, SdkSectionOverride> = {
+    identity: { action: 'replace', content: message.content },
+  };
+  for (const id of SDK_PROSE_SECTIONS) sections[id] = { action: 'remove' };
+  return { mode: 'customize', sections };
 }
 
 // ============================================================================

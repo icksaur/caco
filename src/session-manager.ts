@@ -3,7 +3,7 @@ import type { ProviderConfig, ContextTier } from '@github/copilot-sdk';
 import { existsSync, mkdirSync, cpSync, rmSync, mkdtempSync, createWriteStream } from 'fs';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
-import type { CreateConfig, ResumeConfig, ResumeResult, SystemMessage, SessionEvent, ToolFactory } from './types.js';
+import type { CreateConfig, ResumeConfig, ResumeResult, SdkSystemMessage, SessionEvent, ToolFactory } from './types.js';
 import { ensureSessionMeta, getSessionMeta, updateSessionMeta, readSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
 import { getSessionDir } from './storage-paths.js';
 import { cancelCardPersist } from './file-edits-store.js';
@@ -44,7 +44,7 @@ import { AUTO_CONTINUE_CAP } from './auto-continue.js';
 
 
 import { formatMemoryForPrompt } from './memory-tool.js';
-import { buildSystemMessage, resolveSystemMessage } from './prompts.js';
+import { buildSystemMessage, resolveSystemMessage, toSdkSystemMessage } from './prompts.js';
 import { samePluginDirectories } from './plugin-directories.js';
 import { DEFAULT_MODEL } from './preferences.js';
 
@@ -149,7 +149,7 @@ export function sdkLargeOutputConfig(): LargeToolOutputConfig {
 interface CreateSessionConfig {
   model?: string;
   streaming?: boolean;
-  systemMessage?: SystemMessage;
+  systemMessage?: SdkSystemMessage;
   tools?: unknown[];
   excludedTools?: string[];
   provider?: ProviderConfig;
@@ -164,7 +164,7 @@ interface ResumeSessionConfig {
   streaming?: boolean;
   tools?: unknown[];
   excludedTools?: string[];
-  systemMessage?: { mode: 'append' | 'replace'; content: string };
+  systemMessage?: SdkSystemMessage;
   model?: string;
   reasoningEffort?: string;
   provider?: ProviderConfig;
@@ -822,7 +822,7 @@ export class SessionManager {
       session = await client.createSession({
         model: resolved.sdkModel,
         streaming: true,
-        systemMessage: config.systemMessage,
+        systemMessage: config.systemMessage && toSdkSystemMessage(config.systemMessage),
         tools,
         excludedTools: seededExclusions,
         onPermissionRequest: approveAll,
@@ -1113,7 +1113,7 @@ export class SessionManager {
       workingDirectory: cwd,
       largeOutput: sdkLargeOutputConfig(),
       hooks: { onPostToolUse: createObservationHook(cwd, sessionRef) },
-      ...(resumeSystemMessage && { systemMessage: resumeSystemMessage }),
+      ...(resumeSystemMessage && { systemMessage: toSdkSystemMessage(resumeSystemMessage) }),
       ...(applyModel && { model: resolved.sdkModel }),
       ...(resolved?.provider && { provider: resolved.provider }),
       ...(infinite && { infiniteSessions: infinite }),

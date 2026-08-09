@@ -25,6 +25,7 @@ import { createHerdTools } from './src/herd-tools.js';
 import { scanHerdsOnBoot, onSessionDeleted } from './src/herd-runtime.js';
 import { startAutoArchiveReaper } from './src/session-archive-reaper.js';
 import { createSessionHistoryTool } from './src/session-history-tool.js';
+import { verifySdkProseSections } from './src/prompts.js';
 import { createMemoryTools } from './src/memory-tool.js';
 import { createIndexTool } from './src/index-tool.js';
 import { createRetrieveOutputTool } from './src/observe/retrieve-tool.js';
@@ -362,6 +363,17 @@ async function start(): Promise<void> {
       console.log(`✓ Server running at http://${HOST}:${PORT}`);
       console.log(`  Local: http://localhost:${PORT}`);
       console.log('  Press Ctrl+C to stop');
+      // An SDK upgrade that renames a prompt section makes our section removals
+      // silent no-ops, so the SDK's prose returns alongside Caco's. Nothing
+      // errors, so say so here or nobody finds out.
+      const drift = verifySdkProseSections();
+      if (drift && (drift.missing.length || drift.unexpected.length)) {
+        console.error(
+          '[PROMPT] SDK prompt sections have drifted; Caco sessions may carry duplicated SDK prose. '
+          + `Update SDK_PROSE_SECTIONS in src/prompts.ts. Missing: [${drift.missing.join(', ')}] `
+          + `Unhandled: [${drift.unexpected.join(', ')}]`,
+        );
+      }
       // Post-listen herd boot scan: rebuild the membership index, self-heal
       // orphaned children, and re-wake any parent with a non-active child. Must
       // run after listen() because the wake POSTs the message route.

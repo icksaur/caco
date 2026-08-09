@@ -304,23 +304,39 @@ So the answer differs by convention:
   the same `(filename, convention directory)` table. There is no depth at which
   a bare `copilot-instructions.md` works.
 
-The runtime names what it loaded, so this is observed rather than inferred:
+The runtime names what it loaded, so this is observed rather than inferred. A
+single `view` of one ordinary source file loaded *both* instruction files in
+that directory, 9ms apart, with the same `triggerFile` and `triggerTool`:
 
 ```
-runtime_discovery_events: mid/deep/sub/AGENTS.md
-                          mid/deep/sub/.github/copilot-instructions.md
+22:43:31.347  TOOL  bash   echo "edited" >> .../sub/target.txt     <- no discovery
+22:43:33.631  TOOL  view   .../sub/target.txt
+22:43:33.640  DISCOVER  sub/.github/copilot-instructions.md  (trigger: view on target.txt)
+22:43:33.641  DISCOVER  sub/AGENTS.md                        (trigger: view on target.txt)
 ```
 
-Two files discovered, from one `view` of `sub/target.txt`. The bare file sat in
-the same directory and was not among them.
+Three things follow from that timeline. The walk loads **every** convention
+match in the directory, not just the nearest or first. The two events are
+chained (the second's `parentId` is the first's `id`), so they are one emission
+rather than two independent walks. And the bare `sub/copilot-instructions.md`
+sat in the same directory throughout and was not among them.
+
+The run also contains an unplanned control: the agent first modified that exact
+file with `bash`, and no discovery fired. Two seconds later it `view`ed the same
+file and both loaded. Same file, same directory, same session — the only
+variable is the tool.
 
 ### The trigger is the model's tool choice, not the file
 
-In the same arm with the same prompt and fixture, Sonnet called `view` then
-`edit` and received both descendant files; Terra used only `apply_patch`, never
-issued a `view`, and received neither — its transcript contains no discovery
-events at all. Confirmed from the recorded `toolName` of every tool call in both
-runs.
+Only `view` fires the walk. Writing to a file does not: in the timeline above,
+`bash` appended to `sub/target.txt` with no effect, and the same file `view`ed
+two seconds later loaded both instruction files. The SDK's own type comment
+agrees, describing `triggerTool` as "currently always 'view'".
+
+In the same arm with the same prompt and fixture, Sonnet called `view` and
+received both descendant files; Terra used only `apply_patch`, never issued a
+`view`, and received neither — its transcript contains no discovery events at
+all. Confirmed from the recorded `toolName` of every tool call in both runs.
 
 This is the sharpest practical consequence in this document: **whether a
 subdirectory's rules apply depends on which editing tool the model happens to

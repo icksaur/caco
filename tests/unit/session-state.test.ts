@@ -14,7 +14,6 @@ interface ResumeResult {
 }
 
 interface SessionStateConfig {
-  systemMessage: string;
   toolFactory: (sessionCwd: string, sessionRef: { id: string }) => unknown[];
   excludedTools?: string[];
 }
@@ -36,6 +35,7 @@ const deps = vi.hoisted(() => ({
   savePreferences: vi.fn(),
   resolveModelAlias: vi.fn(),
   resolveSystemMessage: vi.fn(),
+  buildSystemMessage: vi.fn(),
 }));
 
 vi.mock('../../src/session-manager.js', () => ({ sessionManager: deps.sessionManager }));
@@ -45,10 +45,12 @@ vi.mock('../../src/preferences.js', () => ({
   DEFAULT_MODEL: 'default-model',
   resolveModelAlias: deps.resolveModelAlias,
 }));
-vi.mock('../../src/prompts.js', () => ({ resolveSystemMessage: deps.resolveSystemMessage }));
+vi.mock('../../src/prompts.js', () => ({
+  resolveSystemMessage: deps.resolveSystemMessage,
+  buildSystemMessage: deps.buildSystemMessage,
+}));
 
 const config: SessionStateConfig = {
-  systemMessage: 'base prompt',
   toolFactory: () => [],
   excludedTools: ['disabled_tool'],
 };
@@ -83,6 +85,10 @@ beforeEach(() => {
   deps.savePreferences.mockReset().mockResolvedValue(undefined);
   deps.resolveModelAlias.mockReset().mockImplementation((model: string) => 'resolved-' + model);
   deps.resolveSystemMessage.mockReset().mockImplementation((message: string, cwd: string) => message + '@' + cwd);
+  // Returns a DIFFERENT value on each call, so a create that reuses a captured
+  // prompt instead of rebuilding is observable (spec-memory-frozen-in-startup-prompt).
+  let buildCount = 0;
+  deps.buildSystemMessage.mockReset().mockImplementation(async () => `built-prompt-${++buildCount}`);
 });
 
 describe('createSessionState', () => {
@@ -148,15 +154,33 @@ describe('SessionState.ensureSession', () => {
 
     expect(id).toBe('created-after-fail');
     expect(deps.resolveModelAlias).toHaveBeenCalledWith('alias-model');
-    expect(deps.resolveSystemMessage).toHaveBeenCalledWith('base prompt', '/workspace');
+    expect(deps.resolveSystemMessage).toHaveBeenCalledWith('built-prompt-1', '/workspace');
     expect(deps.sessionManager.create).toHaveBeenCalledWith('/workspace', {
       model: 'resolved-alias-model',
-      systemMessage: 'base prompt@/workspace',
+      systemMessage: 'built-prompt-1@/workspace',
       toolFactory: config.toolFactory,
       excludedTools: ['disabled_tool'],
     });
     expect(preferences.lastSessionId).toBe('created-after-fail');
     expect(preferences.lastCwd).toBe('/workspace');
+  });
+
+  it('rebuilds the system message on EVERY create, never reusing a captured one', async () => {
+    // The freeze bug (spec-memory-frozen-in-startup-prompt): the prompt was built once at
+    // server startup, so a memory edit never reached a later session. Asserting a single
+    // create pins nothing — a cached first value looks identical. Only a SECOND create can
+    // tell "rebuilt" from "captured", so this asserts the second build's value.
+    const preferences = freshPreferences({ lastCwd: '/workspace', lastSessionId: null });
+    deps.sessionManager.create.mockResolvedValue('created-1');
+    const state = await createState(preferences);
+
+    await state.ensureSession('m', true, '/workspace');
+    await state.ensureSession('m', true, '/workspace');
+
+    expect(deps.buildSystemMessage).toHaveBeenCalledTimes(2);
+    expect(deps.sessionManager.create).toHaveBeenLastCalledWith('/workspace', expect.objectContaining({
+      systemMessage: 'built-prompt-2@/workspace',
+    }));
   });
 
   it('uses provided cwd and default model when creating a new chat', async () => {

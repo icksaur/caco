@@ -16,6 +16,12 @@ import type { SystemMessage } from './types.js';
 /**
  * Build the applet discovery section for system message.
  * Lists available applets by slug.
+ *
+ * Sorted by SLUG, not by the recency order `listApplets` returns. This block sits in the
+ * cacheable system-prompt prefix, so it must depend only on WHICH applets are installed —
+ * `listApplets` orders by `updatedAt` for the applet UI, which would otherwise reshuffle
+ * this list every time an applet's contents were edited and bust the shared prefix for
+ * every session created afterwards (spec-prompt-stable-prefix).
  */
 async function buildAppletSection(): Promise<string> {
   try {
@@ -23,7 +29,7 @@ async function buildAppletSection(): Promise<string> {
     if (applets.length === 0) {
       return 'No applets installed.';
     }
-    const slugs = applets.map(a => a.slug).join(', ');
+    const slugs = applets.map(a => a.slug).sort().join(', ');
     return `Available: ${slugs}.`;
   } catch {
     return 'No applets installed.';
@@ -32,7 +38,12 @@ async function buildAppletSection(): Promise<string> {
 
 /**
  * Build the complete system message for new sessions.
- * Called at server startup and cached.
+ *
+ * Built FRESH per session creation, never captured at startup: the memory block below is a
+ * dynamic input, and freezing it meant a memory edit did not reach a new session until the
+ * process restarted (spec-memory-frozen-in-startup-prompt). Output is deterministic for a
+ * given memory + installed applet set — memory keys and applet slugs are both sorted — so
+ * rebuilding does not disturb the shared cacheable prefix.
  * 
  * Sections:
  * - Environment info (home, cwd)

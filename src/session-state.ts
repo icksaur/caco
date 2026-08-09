@@ -1,6 +1,6 @@
 import { sessionManager } from './session-manager.js';
 import { loadPreferences, savePreferences, DEFAULT_MODEL, resolveModelAlias } from './preferences.js';
-import { resolveSystemMessage } from './prompts.js';
+import { buildSystemMessage, resolveSystemMessage } from './prompts.js';
 import type { UserPreferences, SessionStateConfig, ResumeResult } from './types.js';
 
 /** @internal Exported only as a unit-test seam; routes use the `sessionState`
@@ -157,7 +157,7 @@ export class SessionState {
     
     const newSessionId = await sessionManager.create(sessionCwd, {
       model: finalModel,
-      systemMessage: resolveSystemMessage(this._config.systemMessage, sessionCwd),
+      systemMessage: resolveSystemMessage(await buildSystemMessage(), sessionCwd),
       toolFactory: this._config.toolFactory,
       excludedTools: this._config.excludedTools,
       ...(pluginDirectories?.length && { pluginDirectories })

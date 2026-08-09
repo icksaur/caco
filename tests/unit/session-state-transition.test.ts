@@ -43,6 +43,7 @@ vi.mock('../../src/preferences.js', () => ({
 
 vi.mock('../../src/prompts.js', () => ({
   resolveSystemMessage: () => ({ mode: 'append', content: '' }),
+  buildSystemMessage: async () => ({ mode: 'replace', content: '' }),
 }));
 
 import { SessionState } from '../../src/session-state.js';
@@ -56,7 +57,6 @@ function deferred<T>(): Deferred<T> {
 }
 
 const config: SessionStateConfig = {
-  systemMessage: { mode: 'append', content: '' },
   toolFactory: () => [],
   excludedTools: [],
 };

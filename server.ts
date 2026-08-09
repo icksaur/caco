@@ -34,7 +34,7 @@ import { isWorkflowRunnerAvailable, sweepWorkflowScratch } from './src/workflow/
 import { createSurfaceTools } from './src/surface-tools.js';
 import { createBrowserTools } from './src/browser-tools.js';
 import { createToolRevealTool } from './src/tool-reveal-tool.js';
-import type { SessionIdRef, SystemMessage, ToolFactory } from './src/types.js';
+import type { SessionIdRef, ToolFactory } from './src/types.js';
 import { sessionRoutes, apiRoutes, sessionMessageRoutes, workspaceRoutes, mcpAuthRoutes, scheduleRoutes, shellRoutes, surfaceRoutes, watchRoutes, fileEditsRoutes, draftRoutes, memoryRoutes, usageRoutes, idleRoutes, pagerRoutes } from './src/routes/index.js';
 import { initWatchRoutes } from './src/routes/watch.js';
 import { flushAll as flushAllFileEditsCardLists } from './src/file-edits-store.js';
@@ -51,7 +51,6 @@ import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { registerUsageSink } from './src/usage-metrics.js';
 import { appendUsageRecord } from './src/usage-store.js';
-import { buildSystemMessage } from './src/prompts.js';
 import { loadServerExtensions } from './src/extension-runtime.js';
 import { onAllIdle } from './src/restart-manager.js';
 import { PORT, HOST, WORKFLOW_ENABLED } from './src/config.js';
@@ -65,8 +64,6 @@ const app = express();
 process.env.CACO_SESSION = '1';
 
 const programCwd = process.cwd();
-
-let SYSTEM_MESSAGE: SystemMessage;
 
 // Middleware
 
@@ -207,9 +204,6 @@ app.use('/api', pagerRoutes);
 async function start(): Promise<void> {
   loadUsageCache();
   
-  SYSTEM_MESSAGE = await buildSystemMessage();
-  console.log('✓ System message built with applet discovery');
-  
   const extensionTools = await loadServerExtensions(app);
   
   const server = createServer(app);
@@ -294,7 +288,6 @@ async function start(): Promise<void> {
   };
   
   await createSessionState({
-    systemMessage: SYSTEM_MESSAGE,
     toolFactory,
     excludedTools: excludedBuiltins
   });

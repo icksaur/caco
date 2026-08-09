@@ -92,7 +92,6 @@ export interface SessionIdRef {
 export type ToolFactory = (sessionCwd: string, sessionRef: SessionIdRef) => unknown[];
 
 export interface SessionStateConfig {
-  systemMessage: SystemMessage;
   toolFactory: ToolFactory;
   excludedTools?: string[];
 }

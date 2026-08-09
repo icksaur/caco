@@ -52,8 +52,11 @@ the history reconstruction, and the final wire serialization.
 **Caco-authored prompt components (enumerated):**
 
 1. **System prompt body** (`src/prompts.ts:buildSystemMessage`): ~1,225 tokens (post
-   prompt-audit). Static — assembled once at server startup, cached. Content: env block
-   (`HOME`, `{{SESSION_CWD}}` placeholder), work-economy rules, capabilities, applet list,
+   prompt-audit). Rebuilt per session creation, but deterministic for a given memory +
+   applet set, so the prefix is stable in practice. (It was assembled once at startup and
+   cached when this was written; that froze the memory block until a restart — see
+   `spec-memory-frozen-in-startup-prompt`.) Content: env block (`HOME`,
+   `{{SESSION_CWD}}` placeholder), work-economy rules, capabilities, applet list,
    behavior guidelines.
 2. **Memory block** (`src/memory-tool.ts:formatMemoryForPrompt`): appended at session
    create/resume as `mode:'append'`. Format: `## User Memory\n- **key**: value\n…`

@@ -105,7 +105,10 @@ Copilot SDK → Copilot CLI → AI Models
 ## System Message
 
 The agent system message is built in \`src/prompts.ts\` → \`buildSystemMessage()\`.
-It includes applet discovery and is constructed at server startup.
+It includes applet discovery and memory, and is rebuilt on every session creation
+so a memory or applet change takes effect without a restart. Output is deterministic
+for a given memory + applet set (both sorted), so rebuilding does not disturb the
+shared prompt-cache prefix.
 
 ## Documentation
 

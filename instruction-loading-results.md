@@ -3,15 +3,13 @@
 What actually reaches a model's context, per entry point, for `AGENTS.md` and
 `copilot-instructions.md`. Measured 2026-08-09.
 
-**Versions, which are not the same across entry points.** The `copilot` CLI
-auto-updates itself and ran at 1.0.77, then 1.0.78 partway through the session.
-Caco's shared client is the copy vendored in this repo, launched with
-`--no-auto-update`, and is pinned at **1.0.65** — verified from the running
-process, not from `package.json`. So CLI rows describe 1.0.78 and Caco rows
-describe 1.0.65. Where both were measured they agree, which is useful
-cross-validation rather than a problem; the two places it could have mattered
-are called out inline below. Any bundle citation in this document is from
-1.0.65, i.e. it describes Caco's runtime exactly.
+**Versions.** Originally measured with the `copilot` CLI at 1.0.77/1.0.78 and
+Caco's vendored runtime pinned at 1.0.65, which meant the two entry points ran
+different code. Caco has since been bumped to `@github/copilot-sdk` 1.0.9 /
+runtime **1.0.78**, and the whole matrix was re-run: every result below
+reproduces unchanged, including the `customize` sizes and the on-demand
+discovery behaviour. Bundle citations were taken from 1.0.65 and re-checked
+against 1.0.78, where the `SystemPromptSection` union is identical.
 
 This supersedes the result table in `prompt-discovery.md`, confirms its central
 finding (Caco sessions receive nothing), and identifies the cause, which that
@@ -95,9 +93,10 @@ the `custom_instructions` section lives. Replacing the prompt therefore deletes
 every custom-instruction source as a side effect.
 
 Proven by single-variable bisect against the raw SDK, same fixture, same model,
-one field changed at a time (`tools/instr-lab/run-sdk.mjs`). This bisect runs on
-the *same* vendored 1.0.65 runtime that Caco itself uses, so the result is a
-property of the option rather than of a version difference:
+one field changed at a time (`tools/instr-lab/run-sdk.mjs`). This bisect runs
+in-process on the *same* vendored runtime Caco itself uses, so the result is a
+property of the option rather than of a version difference. It was run on both
+1.0.65 and 1.0.78 with identical outcomes:
 
 <table>
 <thead><tr><th align="left">Session options</th><th>global</th><th>root <code>AGENTS.md</code></th><th><code>.github/copilot-instructions.md</code></th></tr></thead>
@@ -149,9 +148,9 @@ caco sub-agent, after edit : 567ad678c351597223d27d8bbd355c64   <- stale
 ```
 
 The load-bearing comparison is the first and last lines: the *same* long-lived
-1.0.65 process read generation 1 correctly, then kept serving it after the file
-changed. The middle leg runs on the newer CLI and exists only to prove the write
-reached disk, so the version skew does not carry the conclusion.
+process read generation 1 correctly, then kept serving it after the file
+changed. The middle leg runs in a separate, freshly started process and exists
+only to prove the write reached disk.
 
 So for any long-running host — Caco's shared SDK client, or an interactive
 `copilot` session — **editing `AGENTS.md` does not affect anything until the
@@ -316,12 +315,11 @@ self-healing.
   see *The fix, validated* above for measured sizes.
 - **`explore` sub-agents get no instructions at all.** Give them their rules in
   the prompt.
-- **Caco and the CLI are not running the same runtime.** The CLI auto-updates;
-  Caco's vendored copy is pinned and launched with `--no-auto-update`, and drifts
-  further behind with every CLI release. Behaviour verified in one is not
-  automatically true of the other — re-run this harness after bumping the
-  vendored SDK. Upstream has already changed nested-`AGENTS.md` handling once in
-  this version range.
+- **Caco and the CLI can drift apart.** The CLI auto-updates; Caco's vendored
+  copy is pinned and launched with `--no-auto-update`. They are aligned at
+  1.0.78 today, but behaviour verified in one is not automatically true of the
+  other — re-run this harness after bumping the vendored SDK. `customize` mode
+  is itself a recent addition, so the section list is a moving target.
 
 ## Re-running
 

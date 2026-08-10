@@ -4,7 +4,7 @@ import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
 import { setActiveContextBudget, setActiveReasoningEffort } from './context-footer.js';
-import { archiveSession, renameSession } from './session-panel.js';
+import { archiveSession, stageSessionForArchive, renameSession } from './session-panel.js';
 import type { PopupItem } from './input-popup.js';
 
 export interface Command {
@@ -21,7 +21,7 @@ export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string
   { name: 'caco.session-rename', description: 'Rename current session' },
   { name: 'caco.session-cwd', description: 'Change session working directory' },
   { name: 'caco.session-folder', description: 'Move session to a folder (or "/" for root)' },
-  { name: 'caco.session-archive', description: 'Archive current session' },
+  { name: 'caco.session-archive', description: 'Stage session for archival (or "now" to archive immediately)' },
   { name: 'caco.session-model', description: 'Change session model' },
   { name: 'caco.restart', description: 'Restart the Caco server' },
   { name: 'caco.session-export', description: 'Export current session as .tar.gz' },
@@ -175,13 +175,24 @@ registerBuiltin('caco.session-folder', async (arg) => {
   }
 });
 
-registerBuiltin('caco.session-archive', async () => {
+registerBuiltin('caco.session-archive', async (arg) => {
   const sessionId = getActiveSessionId();
   if (!sessionId) { showToast('No active session'); return; }
-  const res = await fetch(`/api/sessions/${sessionId}/state`).catch(() => null);
-  const data = res?.ok ? await res.json().catch(() => null) : null;
-  const name = data?.name || data?.summary || undefined;
-  await archiveSession(sessionId, name);
+  const mode = arg.trim().toLowerCase();
+
+  // Immediate archival stays reachable: converting a destructive command into a
+  // deferred one would otherwise strand the user who wants the session gone now.
+  if (mode === 'now') {
+    const res = await fetch(`/api/sessions/${sessionId}/state`).catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => null) : null;
+    await archiveSession(sessionId, data?.name || data?.summary || undefined);
+    return;
+  }
+  // Anything unrecognized is refused rather than guessed at, so a typo cannot
+  // silently pick the wrong branch of a destructive command.
+  if (mode !== '') { showToast('Usage: /session-archive (stage) or /session-archive now'); return; }
+
+  await stageSessionForArchive(sessionId);
 });
 
 registerBuiltin('caco.session-model', async (modelId) => {

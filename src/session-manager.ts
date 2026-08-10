@@ -334,6 +334,9 @@ interface SessionListItem {
   hasIcon: boolean;
   scheduleSlug: string | null;
   scheduleNextRun: string | null;
+  /** When a staged session becomes archivable (epoch ms), or null when not staged
+   *  or nothing will reap it (spec-archive-staging). Filled by the list route. */
+  archiveEligibleAt?: number | null;
   folder?: string;
   /** Herd bond: this session's parent id, or null if not a herd child. */
   orchestratedBy: string | null;

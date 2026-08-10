@@ -1,5 +1,15 @@
 # spec-soft-archive-folder
 
+> **Superseded in part by `spec-archive-staging`.** That spec makes
+> `/caco.session-archive` stage into this same folder instead of removing the
+> session immediately, so manual parking is now a first-class entry path rather
+> than an incidental one. It also lengthens the shared retention window beyond
+> the day-long observation period described below — one window governs both
+> entry paths — and adds the release-on-stage that a session parked while still
+> loaded requires in order to ever reap. Read that spec for the manual path and
+> for the current window; this one remains authoritative for herd disown,
+> provenance, and the reaper's correctness model.
+
 ## Goals
 
 Stop disowned herd children (and any session the user parks) from polluting the

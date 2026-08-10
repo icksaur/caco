@@ -12,6 +12,7 @@ const mockState = vi.hoisted(() => ({
   setActiveContextBudget: vi.fn(),
   setActiveReasoningEffort: vi.fn(),
   archiveSession: vi.fn(),
+  stageSessionForArchive: vi.fn(),
   renameSession: vi.fn(),
   chatView: {
     activateSession: vi.fn(),
@@ -58,6 +59,7 @@ vi.mock('../../public/ts/context-footer.js', () => ({
 
 vi.mock('../../public/ts/session-panel.js', () => ({
   archiveSession: mockState.archiveSession,
+  stageSessionForArchive: mockState.stageSessionForArchive,
   renameSession: mockState.renameSession,
 }));
 
@@ -282,13 +284,38 @@ describe('session cwd and folder commands', () => {
 });
 
 describe('session archive, model, restart, fork, and compact commands', () => {
-  it('archives with the best available display name from session state', async () => {
+  it('stages the session by default rather than archiving it immediately', async () => {
     setActiveSession('s1');
     vi.stubGlobal('fetch', vi.fn(async () => response(true, { summary: 'Older summary' })));
 
     await findCommand('session-archive')?.handler('');
 
+    // The bare command must never hard-archive: staging is reversible, the
+    // DELETE it used to call is not (spec-archive-staging).
+    expect(mockState.stageSessionForArchive).toHaveBeenCalledWith('s1');
+    expect(mockState.archiveSession).not.toHaveBeenCalled();
+  });
+
+  it('archives immediately on "now", with the best available display name', async () => {
+    setActiveSession('s1');
+    vi.stubGlobal('fetch', vi.fn(async () => response(true, { summary: 'Older summary' })));
+
+    await findCommand('session-archive')?.handler('now');
+
     expect(mockState.archiveSession).toHaveBeenCalledWith('s1', 'Older summary');
+    expect(mockState.stageSessionForArchive).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unrecognized argument instead of guessing a branch', async () => {
+    setActiveSession('s1');
+    vi.stubGlobal('fetch', vi.fn(async () => response(true, {})));
+
+    await findCommand('session-archive')?.handler('nwo');
+
+    expect(mockState.archiveSession).not.toHaveBeenCalled();
+    expect(mockState.stageSessionForArchive).not.toHaveBeenCalled();
+    expect(mockState.showToast).toHaveBeenCalledWith(
+      'Usage: /session-archive (stage) or /session-archive now');
   });
 
   it('changes the active session model and reports server failures', async () => {

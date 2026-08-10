@@ -21,6 +21,7 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `PATCH /api/sessions/:id` - Update session metadata (name, env hint, context)
 - `PATCH /api/sessions/:id/applet` - Update active applet params and panel visibility
 - `DELETE /api/sessions/:id` - Delete a session
+- `POST /api/sessions/:id/stage-archive` - Stage a session for archival (soft; reaper archives it later)
 - `GET /api/sessions/:id/state` - Get session state (for agent-to-agent polling)
 - `GET /api/sessions/:id/throughput` - Get session token throughput (input/output tokens + 429 count)
 - `GET /api/sessions/:id/icon` - Serve session icon (icon.gif preferred, falls back to icon.png). Returns 404 if no icon exists.
@@ -129,6 +130,23 @@ Returns: `{ success: true }`
 **DELETE /api/sessions/:id** - Delete session
 
 Returns: `{ success: true, wasActive: true }`
+
+**POST /api/sessions/:id/stage-archive** - Stage a session for archival
+
+Soft counterpart to `DELETE` (spec-archive-staging). Moves the session into the
+`auto-archive` folder, where it stays visible in the session list, and releases
+it from the active map so the reaper can see it. The real archive happens once
+the session has sat there untouched past `AUTO_ARCHIVE_IDLE_MS`; moving it out
+of the folder cancels. Refused with 409 while a dispatch is in flight, writing
+neither the folder nor the schedule anchor.
+
+`eligibleAt` is null when auto-archive is disabled — the session is parked but
+nothing will reap it.
+
+Returns: `{ success: true, wasActive, folder, stagedAt, released, eligibleAt }`
+
+`released` is false when the session was parked but could not be closed: the
+park is durable, but nothing will archive it until it leaves the active map.
 
 **PATCH /api/sessions/:id/applet** - Update active applet state for a session
 

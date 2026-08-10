@@ -18,9 +18,13 @@ vi.mock('../../src/sdk-session-store.js', () => ({ listSessionIds: store.listSes
 vi.mock('../../src/session-meta-store.js', () => ({ getSessionMeta: store.getSessionMeta }));
 
 import { sweepAutoArchive } from '../../src/session-archive-reaper.js';
+import { AUTO_ARCHIVE_IDLE_MS } from '../../src/config.js';
 
 const HOUR = 60 * 60 * 1000;
-const AGED = Date.now() - 48 * HOUR;
+// Derived from the real window, not a fixed age: a fixture hardcoded to "48h
+// old" silently stops being aged the moment the window is lengthened, which is
+// exactly what happened when it became three days (spec-archive-staging).
+const AGED = Date.now() - AUTO_ARCHIVE_IDLE_MS - HOUR;
 
 beforeEach(() => {
   vi.clearAllMocks();

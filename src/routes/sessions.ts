@@ -21,7 +21,8 @@ import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, 
 import { readSessionWorkspace, searchSessionEvents, getEventVersion } from '../sdk-session-store.js';
 import { rotateSessionHistory } from '../session-history-rotation.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
-import { AUTO_ARCHIVE_FOLDER } from '../config.js';
+import { AUTO_ARCHIVE_FOLDER, AUTO_ARCHIVE_ENABLED } from '../config.js';
+import { stageForArchive, archiveEligibleAt } from '../session-archive-reaper.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { normalizePluginDirectories } from '../plugin-directories.js';
 import { broadcastGlobalEvent, broadcastEvent } from './websocket.js';
@@ -131,6 +132,11 @@ router.get('/sessions', async (_req: Request, res: Response) => {
       session.scheduleSlug = null;
       session.scheduleNextRun = null;
     }
+    // When a staged session becomes archivable, so the list can show the
+    // remaining window (spec-archive-staging). Null when it is not staged or
+    // when nothing will reap it, so the UI never promises a deadline that will
+    // not arrive.
+    session.archiveEligibleAt = AUTO_ARCHIVE_ENABLED ? archiveEligibleAt(session.sessionId) : null;
   }
 
   // Fetch peer sessions (non-blocking, best-effort)
@@ -648,6 +654,60 @@ router.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
     const message = error instanceof Error ? error.message : String(error);
     res.status(400).json({ error: message });
   }
+});
+
+/**
+ * POST /api/sessions/:sessionId/stage-archive
+ *
+ * Stage a session for archival rather than removing it now (spec-archive-staging):
+ * park it in the staging folder, where it stays visible in the session list, and
+ * let the reaper archive it once it has sat there untouched past the retention
+ * window. Moving it out of the folder cancels.
+ *
+ * Park and release are paired server-side so the browser cannot navigate between
+ * them and leave a session parked but still loaded — which would never reap.
+ */
+router.post('/sessions/:sessionId/stage-archive', async (req: Request, res: Response) => {
+  const sessionId = req.params.sessionId as string;
+  const clientId = req.headers['x-client-id'] as string | undefined;
+
+  const workspace = readSessionWorkspace(sessionId);
+  const cwd = workspace?.cwd || sessionManager.getSessionCwd(sessionId) || sessionState.preferences.lastCwd || process.cwd();
+
+  const result = await stageForArchive(sessionId);
+  if (!result.ok) {
+    // Busy is a conflict rather than a bad request: the caller is not wrong, the
+    // session is momentarily unavailable and the same call will work shortly.
+    const status = result.reason === 'busy' ? 409 : 404;
+    res.status(status).json({
+      error: result.reason === 'busy'
+        ? 'Session is processing; try staging it again when it is idle.'
+        : 'Session not found',
+      code: result.reason === 'busy' ? 'SESSION_BUSY' : 'SESSION_NOT_FOUND',
+    });
+    return;
+  }
+
+  // Read the client's active session AFTER staging, not before: if the user
+  // switched away while it ran, they should not be yanked into a new chat.
+  const wasActive = sessionId === sessionState.getActiveSessionId(clientId);
+  if (wasActive) {
+    await sessionState.prepareNewChat(cwd, clientId);
+  }
+
+  broadcastGlobalEvent({ type: 'session.listChanged', data: { reason: 'staged', sessionId } });
+
+  res.json({
+    success: true,
+    wasActive,
+    folder: result.folder,
+    stagedAt: result.stagedAt,
+    // The park is durable even when the release failed; say so rather than
+    // reporting a clean success the reaper cannot honour yet.
+    released: result.released,
+    // Absent when the reaper is disabled: no deadline exists to promise.
+    eligibleAt: AUTO_ARCHIVE_ENABLED ? result.eligibleAt : null,
+  });
 });
 
 /**

@@ -34,11 +34,16 @@ export const AGENT_MAX_AGE_SECONDS = 60 * 60;
 export const AGENT_RATE_LIMIT_CALLS = 10;
 export const AGENT_RATE_LIMIT_WINDOW_SECONDS = 60;
 
-// Soft-archive folder reaper (spec-soft-archive-folder). Sessions parked in the
-// AUTO_ARCHIVE_FOLDER and quiescent past AUTO_ARCHIVE_IDLE_MS are auto-archived
-// (the reversible export+remove). caco_herd disown parks children here.
+// Soft-archive folder reaper (spec-soft-archive-folder, spec-archive-staging).
+// Sessions parked in the AUTO_ARCHIVE_FOLDER and quiescent past
+// AUTO_ARCHIVE_IDLE_MS are auto-archived (the reversible export+remove).
+// Both entry paths share this window: `caco_herd disown` parks children here,
+// and `/caco.session-archive` stages the user's own session. The window is
+// sized for a human's second thoughts, which is the slower of the two needs;
+// it supersedes the shorter herd observation window spec-soft-archive-folder
+// originally described.
 export const AUTO_ARCHIVE_FOLDER = 'auto-archive';
-export const AUTO_ARCHIVE_IDLE_MS = Number(process.env.CACO_AUTO_ARCHIVE_IDLE_MS) || 24 * 60 * 60 * 1000;
+export const AUTO_ARCHIVE_IDLE_MS = Number(process.env.CACO_AUTO_ARCHIVE_IDLE_MS) || 3 * 24 * 60 * 60 * 1000;
 export const AUTO_ARCHIVE_SWEEP_INTERVAL_MS = Number(process.env.CACO_AUTO_ARCHIVE_SWEEP_INTERVAL_MS) || 60 * 60 * 1000;
 export const AUTO_ARCHIVE_ENABLED = process.env.CACO_AUTO_ARCHIVE !== '0';
 

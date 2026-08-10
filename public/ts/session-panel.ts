@@ -691,6 +691,19 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     row1.appendChild(herd);
   }
   
+  // Staged-for-archival badge: shows the remaining window so a folder of pending
+  // archives is legible without opening each one (spec-archive-staging). The
+  // deadline moves when the session is used, which the tooltip states, so a
+  // countdown that slips does not look broken.
+  if (typeof session.archiveEligibleAt === 'number') {
+    const staged = document.createElement('span');
+    staged.className = 'session-staged-badge';
+    staged.textContent = formatRelativeDeadline(session.archiveEligibleAt).replace(/^in about /, '');
+    staged.title = 'Staged for archival. The countdown runs from when this session '
+      + 'was last touched, so using it pushes the deadline out. Move it out of the folder to cancel.';
+    row1.appendChild(staged);
+  }
+
   if (session.updatedAt) {
     const ageSpan = document.createElement('span');
     ageSpan.className = 'session-age';
@@ -769,6 +782,56 @@ export async function archiveSession(sessionId: string, displayName?: string): P
   } catch (error) {
     showToast('Archive failed: ' + (error as Error).message);
   }
+}
+
+/**
+ * Stage a session for archival (spec-archive-staging): it moves into the staging
+ * folder, stays visible in the session list, and is archived for real only after
+ * it has sat there untouched past the retention window. Moving it out cancels.
+ *
+ * The toast states the deadline in the terms the window actually uses — time
+ * since the session was last touched, not since it was staged — so a session
+ * whose deadline moves does not look broken. When the reaper is disabled the
+ * server sends no deadline and none is claimed.
+ */
+export async function stageSessionForArchive(sessionId: string): Promise<void> {
+  try {
+    const response = await fetch(`/api/sessions/${sessionId}/stage-archive`, { method: 'POST' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showToast(data.error || 'Could not stage session for archival');
+      return;
+    }
+    showToast(
+      data.eligibleAt
+        ? `Staged for archival ${formatRelativeDeadline(data.eligibleAt)} — move it out of "${data.folder}" to cancel`
+        : `Moved to "${data.folder}" — auto-archive is off, so it stays until you archive it`,
+      { type: 'success', autoHideMs: 6000 },
+    );
+    if (data.released === false) {
+      // Parked but still loaded: durable, and self-healing on restart, but the
+      // countdown will not start until it leaves the active map. Say so rather
+      // than let a promised deadline quietly slip.
+      showToast('It is staged, but could not be closed — archival waits until it unloads.',
+        { autoHideMs: 8000 });
+    }
+    void loadSessions();
+    if (data.wasActive) {
+      newSessionClick();
+    }
+  } catch (error) {
+    showToast('Could not stage session: ' + (error as Error).message);
+  }
+}
+
+/** "in about 3 days" / "in about 5 hours" for a future epoch-ms deadline. */
+export function formatRelativeDeadline(epochMs: number): string {
+  const ms = epochMs - Date.now();
+  if (ms <= 0) return 'shortly';
+  const hours = Math.round(ms / (60 * 60 * 1000));
+  if (hours < 1) return 'within the hour';
+  if (hours < 48) return `in about ${hours} hour${hours === 1 ? '' : 's'}`;
+  return `in about ${Math.round(hours / 24)} days`;
 }
 
 /**

@@ -47,6 +47,10 @@ export interface SessionData {
   scheduleSlug?: string;
   scheduleNextRun?: string;
   folder?: string;
+  /** When a staged session becomes archivable (epoch ms), or null when it is not
+   *  staged or nothing will reap it (spec-archive-staging). Derived from the same
+   *  anchor the reaper uses, so it moves when the session is used. */
+  archiveEligibleAt?: number | null;
   /** Herd bond: this session's parent id, or absent if not a herd child. */
   orchestratedBy?: string | null;
   /** Whether this session is a herd parent (≥1 child claims it). */

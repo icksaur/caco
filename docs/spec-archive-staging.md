@@ -95,10 +95,31 @@ racing a dispatch, which the busy refusal covers, and a release racing the
 reaper, which the maintenance claim already covers. The distinction is that a
 viewer is a reader and a dispatch is a writer.
 
-Ordering within the endpoint is park-then-release, because the reverse leaves a
-window in which the session is released but not yet parked, which is
+**A failed release is reported, not rolled back.** If the release throws after
+the park is written, the session is parked but still loaded — the stuck state
+this feature is built to avoid. Staging still reports success, with the release
+flagged as incomplete, because the park is durable and is what the caller asked
+for: undoing it to produce a clean failure would discard the half of the
+operation that worked. The condition is self-limiting rather than permanent —
+the active map is in-memory, so a restart clears it — and the sweep announces it
+meanwhile. The caller is told, so a countdown that has not started is never
+presented as one that has.
+
+**The busy refusal is a UX guard, not a correctness guard.** A dispatch can
+begin between the check and the release, so the check cannot be relied on for
+safety. Correctness comes from downstream: the reaper re-checks eligibility
+under its maintenance claim, so a session that goes live is skipped rather than
+archived mid-turn. The check exists so the common case — staging something
+obviously mid-reply — fails fast and legibly instead of releasing a session
+about to produce output. Anyone reading it as stronger than that will build on
+a guarantee it does not provide.
+
+**Ordering within the endpoint** is park-then-release, because the reverse
+leaves a window in which the session is released but not yet parked, which is
 indistinguishable from an ordinary eviction and loses the user's intent if the
-process dies between the two.
+process dies between the two. The client's active session is read *after*
+staging rather than before: if the user navigated away while it ran, they should
+not be pulled into a new chat.
 
 **The retention window is the existing one, lengthened.**
 `AUTO_ARCHIVE_IDLE_MS` (overridable by `CACO_AUTO_ARCHIVE_IDLE_MS`) becomes
@@ -171,9 +192,15 @@ gains only the overdue report; `config.ts` owns the window.
   afterwards it is recoverable by importing the exported archive.
 - `/caco.session-archive` with no argument never hard-archives.
 - Staging is refused outright while a dispatch is in flight; a refused stage
-  writes neither the folder nor the anchor.
+  writes neither the folder nor the anchor. This is best-effort: the refusal
+  narrows a window rather than closing it, and the reaper's re-check under its
+  claim is what actually prevents archiving a live session.
 - A staged session that is past its window but ineligible is reported, not
   silently skipped. Being permanently stuck is permitted only if it is visible.
+- A stage that parks but fails to release still reports success, with the
+  incomplete release flagged. The park is never rolled back.
+- The overdue report remembers a session only while it remains staged, so the
+  bookkeeping cannot grow for the life of the process.
 - The reaper's existing serialization is untouched: eligibility is re-checked
   under the maintenance claim, so a session that goes live between scan and
   archive is skipped.
@@ -258,11 +285,17 @@ assertion must be about the transition, not the eventual state.
     with the disqualifying reason, exactly once per session per condition.
 11. The retention window is read from configuration, and overriding the
     environment variable changes eligibility with no code change.
-12. Every oracle above is mutation-tested. At minimum these mutations must each
+12. A stage whose release throws still parks the session, reports the release as
+    incomplete, and does not roll back the park.
+13. A session that leaves the staging folder is forgotten by the overdue report,
+    so a later stage of the same id is reported again rather than suppressed.
+14. Every oracle above is mutation-tested. At minimum these mutations must each
     turn something red: removing the release at stage time; dropping the anchor
     stamp; dropping the `now` branch; accepting an unknown argument; removing
-    the busy refusal; removing the overdue report; and reverting the anchor to
-    literal time-in-folder.
+    the busy refusal; removing the overdue report; reverting the anchor to
+    literal time-in-folder; letting a failed release throw; always claiming the
+    release succeeded; rolling back the park on a failed release; and never
+    pruning the overdue report.
 
 ## Plan
 

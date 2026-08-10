@@ -975,6 +975,17 @@ main {
   margin-left: var(--space-xs);
 }
 
+.session-staged-badge {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-xs);
+  margin-left: var(--space-xs);
+  opacity: 0.85;
+}
+
 .assistant-activity {
   background: var(--color-activity-bg);
   padding: var(--space-sm);

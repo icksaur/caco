@@ -12,8 +12,8 @@ discovery behaviour. Bundle citations were taken from 1.0.65 and re-checked
 against 1.0.78, where the `SystemPromptSection` union is identical.
 
 This supersedes the result table in `prompt-discovery.md`, confirms its central
-finding (Caco sessions receive nothing), and identifies the cause, which that
-document left open.
+finding (that Caco sessions received nothing), identifies the cause it left
+open, and records the fix.
 
 Harness and re-run instructions: `tools/instr-lab/`. Background research and
 citations into the SDK bundle: `research-instruction-loading.md`.
@@ -23,6 +23,11 @@ citations into the SDK bundle: `research-instruction-loading.md`.
 `YES` means the file's content reached the model with no tool call. Every `YES`
 below is backed by a trial in which the runtime touched no instruction file —
 see *How each cell is proven*.
+
+The Caco column describes Caco **after** the two fixes this investigation
+produced (`2fce380`, `9261189`); it was `NO` in every row before them, which is
+what prompted the work. The values below are re-measured against the running
+server, not inferred from the change.
 
 <table>
 <thead>
@@ -37,38 +42,41 @@ see *How each cell is proven*.
 <tbody>
 <tr>
   <td align="left"><code>~/.copilot/copilot-instructions.md</code></td>
-  <td>YES</td><td>YES</td><td>no</td><td><b>NO</b></td>
+  <td>YES</td><td>YES</td><td>no</td><td>YES</td>
 </tr>
 <tr>
   <td align="left"><code>&lt;root&gt;/AGENTS.md</code></td>
-  <td>YES</td><td>YES</td><td>no</td><td><b>NO</b></td>
+  <td>YES</td><td>YES</td><td>no</td><td>YES</td>
 </tr>
 <tr>
   <td align="left"><code>&lt;root&gt;/sub/AGENTS.md</code></td>
   <td>only after a <code>view</code> inside <code>sub/</code></td>
-  <td>no</td><td>no</td><td><b>NO</b></td>
+  <td>no</td><td>no</td>
+  <td>only after a <code>view</code> inside <code>sub/</code></td>
 </tr>
 <tr>
   <td align="left"><code>&lt;root&gt;/copilot-instructions.md</code></td>
-  <td><b>no</b></td><td>no</td><td>no</td><td><b>NO</b></td>
+  <td><b>no</b></td><td>no</td><td>no</td><td><b>no</b></td>
 </tr>
 <tr>
   <td align="left"><code>&lt;root&gt;/sub/copilot-instructions.md</code></td>
-  <td><b>no</b></td><td>no</td><td>no</td><td><b>NO</b></td>
+  <td><b>no</b></td><td>no</td><td>no</td><td><b>no</b></td>
 </tr>
 <tr>
   <td align="left"><code>&lt;root&gt;/.github/copilot-instructions.md</code></td>
-  <td>YES</td><td>YES</td><td>no</td><td><b>NO</b></td>
+  <td>YES</td><td>YES</td><td>no</td><td>YES</td>
 </tr>
 <tr>
   <td align="left"><code>&lt;root&gt;/sub/.github/copilot-instructions.md</code></td>
   <td>only after a <code>view</code> inside <code>sub/</code></td>
-  <td>no</td><td>no</td><td><b>NO</b></td>
+  <td>no</td><td>no</td>
+  <td>only after a <code>view</code> inside <code>sub/</code></td>
 </tr>
 </tbody>
 </table>
 
-Three results contradict a reasonable expectation:
+Caco now matches the CLI in every row. Two results still contradict a reasonable
+expectation, and both are properties of the runtime rather than of Caco:
 
 - **A project-root `copilot-instructions.md` is never loaded by anything.** Only
   `.github/copilot-instructions.md` is a real location. A bare root-level file
@@ -81,16 +89,28 @@ Three results contradict a reasonable expectation:
   `sub/.github/copilot-instructions.md` *is*, on demand. The subdirectory walk
   applies the same `.github` convention, so the nested file only counts when it
   keeps the convention directory.
-- **Caco sessions receive nothing at all** — no global file, no `AGENTS.md`, no
-  `.github/copilot-instructions.md`. Cause below.
 
-## Why Caco sessions receive nothing
+## Why Caco sessions received nothing, and what fixed it
 
-Caco passes `systemMessage: { mode: 'replace', ... }` (`src/prompts.ts:65`, used
-at `src/session-state.ts:160` and `src/session-manager.ts:1037`). `replace`
+Caco **used to** pass `systemMessage: { mode: 'replace', ... }`. `replace`
 discards the SDK's assembled system prompt, and the assembled prompt is where
-the `custom_instructions` section lives. Replacing the prompt therefore deletes
-every custom-instruction source as a side effect.
+the `custom_instructions` section lives, so replacing the prompt deleted every
+custom-instruction source as a side effect. The intent was only ever "use my
+prose instead of the SDK's"; the loss of the user's rules was collateral, and
+silent in both directions — a session could not tell it had loaded nothing, and
+neither could its caller.
+
+**Fixed in `2fce380`**: `toSdkSystemMessage` (`src/prompts.ts`) translates that
+intent into `mode: 'customize'` at the SDK boundary, overriding every SDK prose
+section by name while never mentioning `custom_instructions` — unmentioned
+sections are preserved, which is the whole mechanism. **`9261189`** then set
+`enableOnDemandInstructionDiscovery` on both the create and resume paths, which
+is what earns Caco the subdirectory rows; the SDK defaults it off and the CLI
+opts in.
+
+The order matters: on-demand discovery cannot fire while the assembled prompt is
+being discarded, so the second fix is inert without the first. That is measured,
+not assumed — see the `replace` + on-demand row below.
 
 Proven by single-variable bisect against the raw SDK, same fixture, same model,
 one field changed at a time (`tools/instr-lab/run-sdk.mjs`). This bisect runs
@@ -128,9 +148,39 @@ exonerate `systemMessage`. The harness now reads back the recorded
 `sysmsg:IGNORED` per variant, so a no-op variant can never again be read as
 evidence.
 
-An important consequence, since Caco is where standing reviewer and delegate
-sessions live: those sessions have never seen the operator's global rules. A
-session cannot tell that it loaded nothing, and neither can its caller.
+An important consequence, and the reason this was worth chasing: Caco is where
+the standing reviewer and delegate sessions live, so until these fixes those
+sessions ran on model priors instead of the operator's rules — including the
+instruction that a reviewer never modifies files, and the commit-message policy.
+Every review delegated before `2fce380` was produced without them.
+
+### Verified after the fix, against the running server
+
+The table's Caco column is re-measured, not inferred. Three trials through the
+live server on the shipped code:
+
+<table>
+<thead><tr><th align="left">Trial</th><th>global</th><th><code>AGENTS.md</code></th><th><code>.github/…</code></th><th><code>sub/AGENTS.md</code></th></tr></thead>
+<tbody>
+<tr><td align="left">no tools at all</td><td>LOADED</td><td>LOADED</td><td>LOADED</td><td>absent</td></tr>
+<tr><td align="left">edits <code>sub/</code>, agent chose <code>edit</code></td><td>LOADED</td><td>LOADED</td><td>LOADED</td><td>absent</td></tr>
+<tr><td align="left">edits <code>sub/</code>, <code>view</code> forced</td><td>LOADED</td><td>LOADED</td><td>LOADED</td><td><b>LOADED</b></td></tr>
+</tbody>
+</table>
+
+The first row is the strongest: tools were removed entirely, so injection is the
+only possible source. The last two are the same fixture and differ only in
+whether a `view` happened — and the runtime's own event names what it did:
+
+```
+runtime_discovery_events: sub/AGENTS.md (trigger: view on target.txt)
+```
+
+The middle row is worth keeping rather than discarding as a failed trial. Left
+to itself the agent reached for `caco_run_workflow` and `edit` and never issued
+a `view`, so the nested file never arrived. That is not a Caco defect — it is
+the tool-choice dependency described above, and Caco's richer tool surface makes
+it *more* likely than in the CLI, not less.
 
 ## A long-lived client serves stale instruction files
 
@@ -181,7 +231,10 @@ model-dependent difference in the rules an agent is following.
 Three conditions must all hold for on-demand discovery to fire:
 `enableOnDemandInstructionDiscovery` (SDK default **false**; the CLI opts in),
 `skipCustomInstructions` false, and the `ON_DEMAND_INSTRUCTIONS` feature flag
-(granted broadly). Caco never sets the first, so it is off there regardless.
+(granted broadly). Caco sets the first as of `9261189`, on both the create and
+the resume path — the SDK does not persist the option, so a resume that omitted
+it would leave a resumed session quietly behaving differently from a fresh one
+in the same directory.
 
 Eager loading covers the git root, the cwd, and directories *between* them —
 measured, see *The ancestor walk* below. Descendants of cwd are never eagerly
@@ -456,11 +509,16 @@ self-healing.
   means restarting the server; a new session will not pick up the change.
 - **Do not rely on subdirectory instruction files.** They reach the model only
   if it happens to `view` a file in that directory, which depends on the model's
-  tool choice. Anything that must always apply belongs at the root.
-- **Do not move Caco guidance out of Caco's system prompt into `AGENTS.md`**
-  while `mode: 'replace'` stands — Caco sessions would receive neither. The fix
-  is `customize` with every section overridden except `custom_instructions`;
-  see *The fix, validated* above for measured sizes.
+  tool choice — and in Caco that dependency is stronger, because an agent with
+  `caco_run_workflow` and `edit` may never issue a `view` at all. Measured: an
+  unforced Caco run edited the file without viewing it and received nothing;
+  the same fixture with a `view` received both nested files. Anything that must
+  always apply belongs at the root.
+- **Caco guidance can now live in `AGENTS.md`.** Before `2fce380` moving it out
+  of the system prompt would have silently dropped it for every Caco session;
+  `customize` mode preserves `custom_instructions`, so a repo's `AGENTS.md` and
+  Caco's own prose now both reach the model. See *The fix, validated* for the
+  measured prompt sizes.
 - **`explore` sub-agents get no instructions at all.** Give them their rules in
   the prompt.
 - **Caco and the CLI can drift apart.** The CLI auto-updates; Caco's vendored

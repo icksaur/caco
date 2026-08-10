@@ -228,6 +228,14 @@ export function toggleSessions(): void {
 }
 
 export async function sessionClick(sessionId: string): Promise<void> {
+  // Close the picker BEFORE loading, on mobile. The session list owns the whole
+  // screen there, which puts `.chat-panel` at display:none — and a chat with no
+  // layout cannot be scrolled, so loading first left the user at the top of the
+  // conversation. scrollToBottom retries for exactly this reason, but the retry
+  // is the safety net; giving the chat its layout first is the fix.
+  if (deviceClass() === 'mobile') {
+    getPanelState().set({ session: false }, 'user-session-pick');
+  }
   await chatView.activateSession(sessionId);
   // Write a clean URL containing only session=NEW. We deliberately use
   // history.pushState (not the Navigation API) so we don't fire
@@ -239,11 +247,6 @@ export async function sessionClick(sessionId: string): Promise<void> {
   clean.search = '';
   clean.searchParams.set('session', sessionId);
   history.pushState(null, '', clean.toString());
-  // Auto-dismiss the picker only on mobile widths. On desktop, keep the
-  // session list visible so the user can scrub through sessions.
-  if (deviceClass() === 'mobile') {
-    getPanelState().set({ session: false }, 'user-session-pick');
-  }
 }
 
 export function newSessionClick(): void {

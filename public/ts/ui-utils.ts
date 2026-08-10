@@ -3,13 +3,62 @@
  */
 
 /**
- * Scroll chat to bottom
+ * Scroll chat to bottom.
+ *
+ * The chat can have no layout at the moment this is called. On mobile the
+ * session list owns the screen, so `.chat-panel` is `display: none` while it is
+ * open. A hidden element reports `scrollHeight` 0 and discards writes to
+ * `scrollTop`, so the scroll silently did nothing and the user landed at the top
+ * of the conversation.
+ *
+ * So a scroll that cannot happen yet is retried until the element is laid out,
+ * rather than reported as done. Three bounds on that retry:
+ *
+ *  - a deadline, so a chat that is never shown cannot leave a timer running for
+ *    the life of the page;
+ *  - the retry is abandoned the moment the user has scrolled themselves, because
+ *    a delayed jump to the bottom under someone reading is worse than the
+ *    staleness it fixes;
+ *  - it is keyed to the element it was armed for, so a retry for one scroller
+ *    cannot be cancelled by, or fight with, a call about another.
  */
+const RETRY_INTERVAL_MS = 50;
+const RETRY_LIMIT_MS = 2000;
+const pendingRetries = new WeakMap<Element, ReturnType<typeof setTimeout>>();
+
+function cancelRetry(el: Element): void {
+  const t = pendingRetries.get(el);
+  if (t !== undefined) { clearTimeout(t); pendingRetries.delete(el); }
+}
+
 export function scrollToBottom(): void {
   const chatScroll = document.getElementById('chatScroll');
   if (!chatScroll) return;
-  
-  chatScroll.scrollTop = chatScroll.scrollHeight;
+  cancelRetry(chatScroll);
+
+  const deadline = Date.now() + RETRY_LIMIT_MS;
+  const attempt = (isRetry: boolean): void => {
+    pendingRetries.delete(chatScroll);
+
+    // A hidden scroller is pinned at 0, so a non-zero position means the user
+    // moved it once it appeared. That only disqualifies a DELAYED scroll: the
+    // caller's own call is an explicit request for now, and callers such as new
+    // streamed content are entitled to it. A retry is an obligation the user has
+    // since superseded by reading.
+    if (isRetry && chatScroll.scrollTop !== 0) return;
+
+    // Zero means "no layout yet", not "empty": an element with content but no
+    // box reports 0 for both. Either way there is nothing to scroll, so treat it
+    // as not-yet rather than done.
+    if (chatScroll.scrollHeight > 0) {
+      chatScroll.scrollTop = chatScroll.scrollHeight;
+      return;
+    }
+    if (Date.now() >= deadline) return;
+    pendingRetries.set(chatScroll, setTimeout(() => attempt(true), RETRY_INTERVAL_MS));
+  };
+
+  attempt(false);
 }
 
 /**

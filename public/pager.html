@@ -23,6 +23,8 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 .card-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
 .name { font-size: 17px; font-weight: 600; color: #eee; }
 .when { font-size: 13px; color: #777; margin-left: auto; white-space: nowrap; }
+.stale-note { font-size: 12px; color: #b95; margin-left: 8px; white-space: nowrap; }
+.card.stale .option { opacity: 0.45; }
 .cwd { font-size: 13px; color: #777; margin-bottom: 12px; word-break: break-all; }
 
 .options { display: flex; flex-direction: column; gap: 10px; }
@@ -159,6 +161,12 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 
   function renderCard(entry) {
     var card = el('div', 'card');
+    // Card identity, so a rebuild can recognize the card holding the caret and
+    // leave it standing rather than matching on position or name.
+    card.setAttribute('data-session', entry.sessionId);
+    // The offer these buttons were built from. A kept card is not rebuilt, so
+    // this is how a later render notices its options no longer match the server.
+    card.setAttribute('data-offer', (entry.options || []).join('\u0000'));
 
     var head = el('div', 'card-head');
     head.appendChild(el('span', 'name', entry.name || entry.sessionId.slice(0, 8)));
@@ -352,17 +360,107 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     (view.waiting || []).forEach(function (w) { present[w.sessionId] = true; });
     Object.keys(acted).forEach(function (id) { if (!present[id]) delete acted[id]; });
 
-    boardEl.textContent = '';
-    if (waiting.length === 0) {
-      boardEl.appendChild(el('div', 'empty', (view.busy || []).length > 0
-        ? 'Nothing waiting on you — work in progress.'
-        : 'Nothing waiting on you.'));
+    // The card holding the caret is never torn down. Restoring text into a fresh
+    // textarea is not enough: removing the focused node blurs it, and on a phone
+    // the keyboard stays up over a node no longer in the document, so everything
+    // typed after that lands nowhere and is lost without a trace. The hold above
+    // makes this rare; the backstop and any missed focus check make it possible,
+    // so the rebuild itself has to be non-destructive rather than merely
+    // infrequent. The node is kept in place and never re-appended, because moving
+    // an element is a remove-and-insert and blurs it just the same.
+    var keep = null;
+    var keepId = null;
+    var focused = document.activeElement;
+    if (focused && focused.classList && focused.classList.contains('well') && boardEl.contains(focused)) {
+      keep = focused.parentNode;
+      while (keep && keep !== boardEl && !(keep.classList && keep.classList.contains('card'))) {
+        keep = keep.parentNode;
+      }
+      if (keep === boardEl) keep = null;
+      if (keep) keepId = keep.getAttribute('data-session');
+      // A card the user has already acted on is on its way out; keeping it would
+      // hold a resolved session on the board and re-offer a second send.
+      if (keepId && acted[keepId]) { keep = null; keepId = null; }
+    }
+
+    if (!keep) {
+      boardEl.textContent = '';
+      if (waiting.length === 0) {
+        boardEl.appendChild(el('div', 'empty', (view.busy || []).length > 0
+          ? 'Nothing waiting on you — work in progress.'
+          : 'Nothing waiting on you.'));
+        return;
+      }
+      waiting.forEach(function (entry) { boardEl.appendChild(renderCard(entry)); });
+      if (view.waitingTruncated) {
+        boardEl.appendChild(el('div', 'truncated', 'More sessions are waiting than shown.'));
+      }
       return;
     }
-    waiting.forEach(function (entry) { boardEl.appendChild(renderCard(entry)); });
+
+    // Everything except the kept card goes; the kept one is left exactly where it
+    // is and the rest are inserted around it, preserving server order.
+    var child = boardEl.firstChild;
+    while (child) {
+      var next = child.nextSibling;
+      if (child !== keep) boardEl.removeChild(child);
+      child = next;
+    }
+    var seenKept = false;
+    var keptMatched = false;
+    waiting.forEach(function (entry) {
+      if (entry.sessionId === keepId) { seenKept = true; keptMatched = true; refreshCard(keep, entry); return; }
+      var node = renderCard(entry);
+      if (seenKept) boardEl.appendChild(node);
+      else boardEl.insertBefore(node, keep);
+    });
+    // The session left the board while its card held the caret. The card stays
+    // so the text being written is not destroyed, but it no longer represents a
+    // live offer, so it says so and stops offering options.
+    if (!keptMatched) markStale(keep);
     if (view.waitingTruncated) {
       boardEl.appendChild(el('div', 'truncated', 'More sessions are waiting than shown.'));
     }
+  }
+
+  /**
+   * Mark a kept card as no longer matching a live offer: its option buttons stop
+   * being clickable and it says why.
+   *
+   * Staging a stale option would overwrite what the user is writing with text
+   * from an offer the session has moved past — a wrong action, not merely an old
+   * label. Typing and Send stay available throughout, because the user's own
+   * words are valid regardless of what the offer says.
+   */
+  function markStale(card) {
+    if (!card || card.classList.contains('stale')) return;
+    card.classList.add('stale');
+    var opts = card.querySelectorAll('.option');
+    for (var i = 0; i < opts.length; i++) { opts[i].disabled = true; }
+    var head = card.querySelector('.card-head');
+    if (head && !card.querySelector('.stale-note')) {
+      head.appendChild(el('span', 'stale-note', 'moved on'));
+    }
+  }
+
+  /**
+   * Update the display fields of a card that is being kept because it holds the
+   * caret. Only the passive parts: a stale name or timestamp is the staleness the
+   * hold's backstop exists to clear, whereas swapping the option buttons or the
+   * textarea out from under someone mid-sentence is the harm it is trying to
+   * avoid. Those refresh on the next full rebuild, once focus leaves.
+   *
+   * If the OFFER itself changed, the buttons are not merely old, they are wrong:
+   * the card is marked stale instead of silently keeping them live.
+   */
+  function refreshCard(card, entry) {
+    var name = card.querySelector('.name');
+    if (name) name.textContent = entry.name || entry.sessionId.slice(0, 8);
+    var when = card.querySelector('.when');
+    if (when) when.textContent = relTime(entry.idleAt);
+    var cwd = card.querySelector('.cwd');
+    if (cwd && entry.cwd) cwd.textContent = entry.cwd;
+    if (card.getAttribute('data-offer') !== (entry.options || []).join('\u0000')) markStale(card);
   }
 
   /**

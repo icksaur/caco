@@ -97,6 +97,12 @@
   // so a cold-load ?diffMode=staged URL doesn't lose its mode
   // when drained after cachedCwd lands.
   var _pendingOpenPath = null;
+  /** A finder open requested before boot finished. onUrlParamsChange fires
+   *  synchronously on registration, which is BEFORE bootSession assigns
+   *  sessionId, and openPicker refuses without a session or an explicit root —
+   *  so a ?openFinder=1 arriving with the applet is held here and drained once
+   *  the session is known. Without it the first Ctrl+P did nothing at all. */
+  var _pendingOpenFinder = null;
   function _handleOpenPath(p, opts) {
     if (!p) return;
     openAnyPath(p, opts || {});
@@ -180,6 +186,19 @@
       var p = typeof pending === 'string' ? pending : pending.path;
       var opts = typeof pending === 'string' ? undefined : pending.opts;
       _handleOpenPath(p, opts);
+    }
+    _drainPendingOpenFinder();
+  }
+
+  /** Open a finder that was requested before the session was known. Gated on
+   *  sessionId rather than cachedCwd: openPicker needs the session, and it
+   *  resolves the root itself. */
+  function _drainPendingOpenFinder() {
+    if (!_pendingOpenFinder || !sessionId) return;
+    var pending = _pendingOpenFinder;
+    _pendingOpenFinder = null;
+    if (typeof openPicker === 'function') {
+      openPicker({ source: 'shortcut', rootOverride: pending.rootOverride });
     }
   }
 
@@ -3878,7 +3897,16 @@
               var rootOverride = params.openFinderRoot
                 ? String(params.openFinderRoot)
                 : undefined;
-              openPicker({ source: 'shortcut', rootOverride: rootOverride });
+              // Defer exactly as openPath does. onUrlParamsChange fires
+              // SYNCHRONOUSLY on registration, which happens before bootSession
+              // assigns sessionId — and openPicker refuses without a session or
+              // an explicit root. So the first Ctrl+P was silently swallowed and
+              // only the second worked, once the boot had finished.
+              if (sessionId || rootOverride) {
+                openPicker({ source: 'shortcut', rootOverride: rootOverride });
+              } else {
+                _pendingOpenFinder = { rootOverride: rootOverride };
+              }
             }
             if (typeof window.appletAPI.navigateAppletUrlParam === 'function') {
               window.appletAPI.navigateAppletUrlParam('openFinder', '');
@@ -3927,6 +3955,7 @@
         updateFollowButton();
         updateEmptyState();
         sessionId = sid;
+        _drainPendingOpenFinder();
         if (info && info.cwd) {
           var parts = info.cwd.split(/[/\\]/);
           repoEl.textContent = parts[parts.length - 1] || info.cwd;
@@ -3939,6 +3968,10 @@
 
     if (existingId) {
       sessionId = existingId;
+      // Drain synchronously: the picker only needs the session id, so a queued
+      // Ctrl+P should not wait on a metadata round trip. The async drain below
+      // still runs and is a no-op once this one has consumed the request.
+      _drainPendingOpenFinder();
       void (async function() {
         try {
           var meta = await window.appletAPI.getSessionMeta(existingId);

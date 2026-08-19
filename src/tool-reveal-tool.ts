@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { SessionIdRef } from './types.js';
 import { sessionManager } from './session-manager.js';
 import { formatDeferredTools } from './session-tool-state.js';
+import { messageForReason } from './mcp-freshness.js';
 
 /**
  * `caco_enable_tools` — the reveal + discovery half of on-demand tools
@@ -39,7 +40,13 @@ Names may be the bare display name (e.g. "list_issues") or the full key (e.g. "g
       }
       const result = await sessionManager.enableTools(sessionId, names);
       if (!result.ok) {
-        return { textResultForLlm: `caco_enable_tools failed: ${result.error}. Nothing was changed. Call caco_enable_tools with no arguments to list the exact names of tools you can enable.` };
+        // Only a genuine unknown-name rejection (relistable) is fixable by re-listing; a
+        // disabled/inactive/RPC failure is NOT — telling the agent to re-list there would
+        // waste a turn (and, for a name that keeps failing, loop). "only unknown re-lists."
+        const relistAdvice = result.relistable
+          ? ' Call caco_enable_tools with no arguments to list the exact names of tools you can enable.'
+          : '';
+        return { textResultForLlm: `caco_enable_tools failed: ${result.error}. Nothing was changed.${relistAdvice}` };
       }
       const parts: string[] = [];
       if (result.enabled.length > 0) {
@@ -48,11 +55,15 @@ Names may be the bare display name (e.g. "list_issues") or the full key (e.g. "g
       if (result.alreadyEnabled.length > 0) {
         parts.push(`Already enabled (no change): ${result.alreadyEnabled.join(', ')}.`);
       }
-      // A phantom was advertised by Caco but its MCP server is not loaded in this session,
-      // so it cannot be enabled here. Deliberately NO "call with no arguments" advice: that
-      // listing is built from the same session catalog that failed to resolve the name, so
-      // the tool would be absent there too and the agent would loop.
-      if (result.phantom.length > 0) {
+      // A phantom was advertised by Caco but is not enable-able in this session. When the
+      // Stage-2 freshness snapshot was available, render the PRECISE, non-looping reason per
+      // tool (removed / disabled / down / stale-unverified / not-available); otherwise fall
+      // back to the blanket message. NEVER re-list advice — a phantom is not `unknown`.
+      if (result.phantomReasons && result.phantomReasons.length > 0) {
+        for (const f of result.phantomReasons) {
+          parts.push(messageForReason(f.reason, String(f.key), f.server));
+        }
+      } else if (result.phantom.length > 0) {
         parts.push(`Not available in this session: ${result.phantom.join(', ')} — Caco listed these but their MCP server is not loaded here, so they cannot be enabled. Do not retry them; proceed without them.`);
       }
       if (parts.length === 0) parts.push('No tools to enable.');

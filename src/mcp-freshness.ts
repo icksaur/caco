@@ -89,13 +89,27 @@ export function classifyUnavailable(
   origin: KeyOrigin | undefined,
   inv: ServerInventory,
 ): EnableUnavailableReason {
+  return classifyUnavailableDetailed(origin, inv).reason;
+}
+
+/**
+ * Like `classifyUnavailable`, but also returns the server that PRODUCED the winning
+ * (most-available) reason — for the enable-failure message label. NOT `servers[0]`:
+ * labelling a `temporarily-unavailable` verdict with a *removed* server would mislead.
+ * `server` is undefined when no correlated server drove the verdict (no-origin /
+ * uncorrelated-only / no-server cases). Pure.
+ */
+export function classifyUnavailableDetailed(
+  origin: KeyOrigin | undefined,
+  inv: ServerInventory,
+): { reason: EnableUnavailableReason; server?: string } {
   // No association anywhere → a typo/hallucination. Only this says "re-list".
-  if (!origin) return 'unknown';
+  if (!origin) return { reason: 'unknown' };
   // If discovery failed we cannot assert a server is removed/disabled/down;
   // preserve uncertainty rather than mislabel. A key the registry knows but whose
   // inventory we can't trust is treated as temporarily-unavailable (retry-safe),
   // never not-configured/unknown.
-  if (!inv.discoverOk) return 'temporarily-unavailable';
+  if (!inv.discoverOk) return { reason: 'temporarily-unavailable' };
 
   const correlated = origin.servers ?? [];
   const rank: Record<EnableUnavailableReason, number> = {
@@ -106,8 +120,10 @@ export function classifyUnavailable(
     'stale-unverified': 4,
     'unknown': 5,                // least
   };
-  // Rank each CORRELATED server; take the most-available verdict.
+  // Rank each CORRELATED server; take the most-available verdict AND the server that
+  // produced it.
   let best: EnableUnavailableReason | null = null;
+  let bestServer: string | undefined;
   for (const server of correlated) {
     const conn = inv.state.get(server);
     let reason: EnableUnavailableReason;
@@ -115,19 +131,19 @@ export function classifyUnavailable(
     else if (conn === 'disabled') reason = 'server-disabled';
     else if (conn === 'down') reason = 'temporarily-unavailable';
     else reason = 'not-available';                            // enumerated, not exposing
-    if (best === null || rank[reason] < rank[best]) best = reason;
+    if (best === null || rank[reason] < rank[best]) { best = reason; bestServer = server; }
   }
   // An uncorrelated supplier is a POSSIBLE (unverifiable) home for the key. It does
   // not dominate a correlated verdict — if any correlated server gives a more
   // available state, that wins (most-available). Only when there is NO correlated
   // server at all does uncorrelated/none collapse to stale-unverified.
   if (best === null) {
-    return (origin.uncorrelated || correlated.length === 0) ? 'stale-unverified' : 'unknown';
+    return { reason: (origin.uncorrelated || correlated.length === 0) ? 'stale-unverified' : 'unknown' };
   }
   // A correlated verdict exists. If it is the least-available (not-configured) but
   // an uncorrelated supplier might still hold the key, prefer stale-unverified only
   // when that is MORE available — it isn't (rank 4 > 3), so keep `best`.
-  return best;
+  return { reason: best, server: bestServer };
 }
 
 /** The one class whose remediation is to re-list. Every other reason is

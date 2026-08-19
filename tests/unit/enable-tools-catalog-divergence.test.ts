@@ -289,6 +289,32 @@ describe('caco_enable_tools phantom vs unknown (spec-enable-tools-catalog-diverg
     if (!r.ok) expect(r.error).toMatch(/unknown tool: nonesuch/);
     expect(update).not.toHaveBeenCalled();
   });
+
+  it('relistable is TRUE only for an unknown-name rejection', async () => {
+    const { manager } = await makeManager([PHANTOM, REAL]);
+    const r = await manager.enableTools(SID, ['nonesuch']);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.relistable).toBe(true);
+  });
+
+  it('relistable is FALSE for an inactive session (operational failure, not re-listable)', async () => {
+    const { manager } = await makeManager([PHANTOM, REAL]);
+    const r = await manager.enableTools('no-such-session', [REAL]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.relistable).toBe(false);
+  });
+
+  it('relistable is FALSE for a disabled/policy tool (retry/re-list will not help)', async () => {
+    // A policy-disabled builtin: excluded at the process level, present in the catalog as
+    // disabled — enable must reject NON-relistable (re-listing shows the same disabled tool).
+    const { excludedBuiltinNames } = await import('../../src/tool-registry.js');
+    const disabledKey = excludedBuiltinNames()[0];
+    if (!disabledKey) return; // no policy builtins on this platform — skip
+    const { manager } = await makeManager([disabledKey]);
+    const r = await manager.enableTools(SID, [disabledKey]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.relistable).toBe(false);
+  });
 });
 
 describe('enable-able cache warming (spec-enable-tools-catalog-divergence R1)', () => {

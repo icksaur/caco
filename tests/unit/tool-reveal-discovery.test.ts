@@ -60,7 +60,7 @@ describe('caco_enable_tools — enable mode', () => {
   });
 
   it('surfaces an enable failure and points back at no-args discovery', async () => {
-    mgr.enableTools.mockResolvedValue({ ok: false, error: 'unknown tool: nope' });
+    mgr.enableTools.mockResolvedValue({ ok: false, error: 'unknown tool: nope', relistable: true });
     const out = await tool({ id: 'sess-1' }).handler({ names: ['nope'] });
     expect(out.textResultForLlm).toContain('unknown tool: nope');
     expect(out.textResultForLlm).toContain('no arguments');

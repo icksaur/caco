@@ -33,8 +33,8 @@ import { buildPagerView, type PagerSessionInput } from './pager-view.js';
 import { planSessionRemoval, type RemovalPlan } from './session-removal.js';
 import { activityVersion } from './activity-version.js';
 import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys, enableableToolKeys, advertisableToolKeys, partitionEnableNames, buildSyncSeed, shouldCommitWarmSet } from './session-tool-state.js';
-import { buildServerInventory, assembleKeyOrigin, type McpStatusLite } from './mcp-inventory.js';
-import { refineEnableableKeys } from './mcp-freshness.js';
+import { buildServerInventory, assembleKeyOrigin, classifyEnableFailures, type McpStatusLite, type EnableFailure } from './mcp-inventory.js';
+import { refineEnableableKeys, type ServerInventory, type KeyOrigin } from './mcp-freshness.js';
 import { excludedBuiltinNames, isDeferEligibleCacoEntry, isDeferEligibleBuiltin } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
 import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-defer-store.js';
@@ -2428,7 +2428,7 @@ export class SessionManager {
    * tools. `excluded` is the process-level builtin exclusion set as ToolKeys; live
    * session-level MCP exclusions join it in a later phase.
    */
-  async getToolCatalog(sessionId?: string): Promise<{ catalog: ToolCatalog; excluded: Set<ToolKey>; policyDisabled: Set<ToolKey> }> {
+  async getToolCatalog(sessionId?: string): Promise<{ catalog: ToolCatalog; excluded: Set<ToolKey>; policyDisabled: Set<ToolKey>; freshness?: { inv: ServerInventory; keyOrigin: Map<ToolKey, KeyOrigin> } }> {
     // Resolve ONE target session and thread it through every query below, so key
     // learning (from that session's getCurrentToolMetadata) matches the MCP tools we
     // list — otherwise a tool loaded in the target session could be omitted because a
@@ -2540,16 +2540,26 @@ export class SessionManager {
       configKeyForServer: (m: string) => configKeyForServer(m),
     });
     const refined = refineEnableableKeys({ seed, keyOrigin, inv });
-    // Commit ONLY under the lifecycle guard (never over-hide, never write another/dead
-    // session's cache) — the pure predicate is unit-tested (session-tool-state).
-    if (shouldCommitWarmSet({ sessionId, enumerationOk, activeAtEntry, activeNow: sessionId ? this.activeSessions.get(sessionId) : undefined })) {
+    // Two distinct guards (review MUST): the SAME active-session identity check protects
+    // both, but the refined-cache WRITE additionally requires a successful enumeration
+    // (writing an MCP-free set would over-hide), whereas EXPOSING `freshness` for the
+    // enable-message classifier does NOT — an `inv{discoverOk:false}` from a failed
+    // enumeration is still meaningful (it classifies known keys temporarily-unavailable,
+    // strictly better than the blanket fallback), and never over-hides.
+    const sameSession = !!sessionId && !!activeAtEntry && this.activeSessions.get(sessionId) === activeAtEntry;
+    const commit = shouldCommitWarmSet({ sessionId, enumerationOk, activeAtEntry, activeNow: sessionId ? this.activeSessions.get(sessionId) : undefined });
+    if (commit) {
       this.enableableKeysBySession.set(sessionId!, refined);
       // The CONFIRMED-omitted set for savings accounting: only keys the live catalog can
       // actually resolve (excludable) — i.e. definitions genuinely present-but-deferred
       // this session. Excludes retained phantoms/down keys so savings is never inflated.
       this.omittedDefKeysBySession.set(sessionId!, enableableToolKeys(catalog));
     }
-    return { catalog, excluded, policyDisabled };
+    // Expose the Stage-2 snapshot whenever the SAME session is still active (identity
+    // guard), regardless of enumeration success — `undefined` only for the no-session /
+    // replaced-session paths.
+    const freshness = sameSession ? { inv, keyOrigin } : undefined;
+    return { catalog, excluded, policyDisabled, freshness };
   }
 
   /** The session's current exclusion set as ToolKeys (the live truth; starts as the
@@ -2894,8 +2904,8 @@ export class SessionManager {
    * the latest stored set inside the lock). Returns a structured result for the tool.
    */
   async enableTools(sessionId: string, names: string[]): Promise<
-    | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[]; phantom: string[] }
-    | { ok: false; error: string }
+    | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[]; phantom: string[]; phantomReasons?: EnableFailure[] }
+    | { ok: false; error: string; relistable: boolean }
   > {
     // Per-session mutex: chain onto any in-flight reveal so the read-modify-write of
     // excludedTools is atomic across concurrent calls (spec monotonic-within-warm).
@@ -3003,23 +3013,30 @@ export class SessionManager {
   }
 
   private async enableToolsLocked(sessionId: string, names: string[]): Promise<
-    | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[]; phantom: string[] }
-    | { ok: false; error: string }
+    | { ok: true; enabled: ToolKey[]; alreadyEnabled: ToolKey[]; phantom: string[]; phantomReasons?: EnableFailure[] }
+    | { ok: false; error: string; relistable: boolean }
   > {
     const active = this.activeSessions.get(sessionId);
-    if (!active) return { ok: false, error: 'session is not active' };
+    if (!active) return { ok: false, error: 'session is not active', relistable: false };
     // Session-scoped catalog: MCP tools must come from THIS session, not an arbitrary one.
-    const { catalog, policyDisabled } = await this.getToolCatalog(sessionId);
+    const { catalog, policyDisabled, freshness } = await this.getToolCatalog(sessionId);
     // Read the CURRENT set inside the lock (a prior queued reveal may have shrunk it); it
     // is also what separates a phantom name from an unknown one.
     const current = new Set<ToolKey>(this.getExcludedToolKeys(sessionId));
     const { resolvable, phantom, unknown } = partitionEnableNames(names, catalog, current);
     // Unknown DOMINATES: a batch containing any agent-side error rejects atomically with
-    // nothing mutated, so a syntax mistake still costs no cache-bust. Phantoms alone never
-    // reject — Caco advertised them, and failing the batch would punish a correct call.
-    if (unknown.length > 0) return { ok: false, error: `unknown tool: ${unknown.join(', ')}` };
+    // nothing mutated, so a syntax mistake still costs no cache-bust. This is the ONLY
+    // failure whose remediation is to re-list (relistable:true) — a hallucinated name a
+    // fresh listing would correct. Phantoms alone never reject.
+    if (unknown.length > 0) return { ok: false, error: `unknown tool: ${unknown.join(', ')}`, relistable: true };
     const resolved = resolveEnableTargets(resolvable, catalog);
-    if (!resolved.ok) return { ok: false, error: resolved.error };
+    if (!resolved.ok) return { ok: false, error: resolved.error, relistable: false };
+    // Classify each phantom into its non-looping reason (cf-message). Requires the Stage-2
+    // snapshot; when absent (no per-session freshness), leave `phantomReasons` undefined so
+    // the caller renders the blanket (still non-looping) phantom message.
+    const phantomReasons = freshness
+      ? classifyEnableFailures({ phantomNames: phantom, keyOrigin: freshness.keyOrigin, inv: freshness.inv })
+      : undefined;
     // Atomically reject hard-disabled + policy-disabled (not re-enableable); no-op
     // already-enabled; enable the deferred remainder. A mixed batch never blocks the
     // valid reveals.
@@ -3027,20 +3044,20 @@ export class SessionManager {
     const alreadyEnabled: ToolKey[] = [];
     for (const key of resolved.keys) {
       const tool = catalog.get(key);
-      if (tool?.hardDisabled || policyDisabled.has(key)) return { ok: false, error: `tool is disabled and not re-enableable: ${key}` };
+      if (tool?.hardDisabled || policyDisabled.has(key)) return { ok: false, error: `tool is disabled and not re-enableable: ${key}`, relistable: false };
       if (current.has(key)) toEnable.push(key);
       else alreadyEnabled.push(key);
     }
     if (toEnable.length === 0) {
       // Everything requested is already enabled or was a phantom — no cache-busting
       // mutation needed, and a phantom-only batch must mutate nothing at all.
-      return { ok: true, enabled: [], alreadyEnabled, phantom };
+      return { ok: true, enabled: [], alreadyEnabled, phantom, phantomReasons };
     }
     const validated = validateEnable(toEnable, catalog, current, policyDisabled);
-    if (!validated.ok) return { ok: false, error: validated.error };
+    if (!validated.ok) return { ok: false, error: validated.error, relistable: false };
     const applied = await this.setExcludedToolsLive(sessionId, [...validated.nextExcluded]);
-    if (!applied.success) return { ok: false, error: applied.error ?? 'rpc.options.update did not succeed' };
-    return { ok: true, enabled: toEnable, alreadyEnabled, phantom };
+    if (!applied.success) return { ok: false, error: applied.error ?? 'rpc.options.update did not succeed', relistable: false };
+    return { ok: true, enabled: toEnable, alreadyEnabled, phantom, phantomReasons };
   }
 
   isClientRunning(): boolean {

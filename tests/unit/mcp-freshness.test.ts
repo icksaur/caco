@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   classifyUnavailable,
+  classifyUnavailableDetailed,
   reasonSaysRelist,
   messageForReason,
   refineEnableableKeys,
@@ -214,5 +215,46 @@ describe('refineEnableableKeys — refcount-safe, authoritative, never over-hide
       inv: inv({ ADO: 'enumerated', icm: 'down' }, { ADO: [] }), // ADO up-but-not-exposing, icm down
     });
     expect(out.has(k('combo'))).toBe(true); // icm down might still supply it → keep
+  });
+});
+
+describe('classifyUnavailableDetailed — winning reason carries the server that produced it', () => {
+  it('no origin → unknown, no server', () => {
+    expect(classifyUnavailableDetailed(undefined, inv({}))).toEqual({ reason: 'unknown' });
+  });
+
+  it('discoverOk false → temporarily-unavailable, no server (uncertain)', () => {
+    const out = classifyUnavailableDetailed(origin(['ADO']), inv({}, {}, false));
+    expect(out).toEqual({ reason: 'temporarily-unavailable' });
+  });
+
+  it('single correlated down server → temporarily-unavailable labelled with that server', () => {
+    const out = classifyUnavailableDetailed(origin(['icm']), inv({ icm: 'down' }));
+    expect(out).toEqual({ reason: 'temporarily-unavailable', server: 'icm' });
+  });
+
+  it('multi-server removed+down → temporarily-unavailable labelled with the DOWN server (not the removed one)', () => {
+    const out = classifyUnavailableDetailed(origin(['gone', 'live']), inv({ live: 'down' }));
+    expect(out).toEqual({ reason: 'temporarily-unavailable', server: 'live' });
+  });
+
+  it('multi-server disabled+removed → server-disabled labelled with the disabled server', () => {
+    const out = classifyUnavailableDetailed(origin(['gone', 'off']), inv({ off: 'disabled' }));
+    expect(out).toEqual({ reason: 'server-disabled', server: 'off' });
+  });
+
+  it('correlated but all removed → not-configured labelled with a removed server', () => {
+    const out = classifyUnavailableDetailed(origin(['gone']), inv({ other: 'enumerated' }));
+    expect(out).toEqual({ reason: 'not-configured', server: 'gone' });
+  });
+
+  it('uncorrelated only → stale-unverified, no server', () => {
+    const out = classifyUnavailableDetailed(origin([], true), inv({ ADO: 'enumerated' }));
+    expect(out).toEqual({ reason: 'stale-unverified' });
+  });
+
+  it('classifyUnavailable is the thin .reason wrapper', () => {
+    const i = inv({ icm: 'down' });
+    expect(classifyUnavailable(origin(['icm']), i)).toBe(classifyUnavailableDetailed(origin(['icm']), i).reason);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildServerInventory, assembleKeyOrigin } from '../../src/mcp-inventory.js';
+import { buildServerInventory, assembleKeyOrigin, classifyEnableFailures } from '../../src/mcp-inventory.js';
 import type { ToolKey } from '../../src/tool-key.js';
+import type { ServerInventory, KeyOrigin, ServerConnState } from '../../src/mcp-freshness.js';
 
 const K = (s: string) => s as ToolKey;
 
@@ -163,5 +164,64 @@ describe('assembleKeyOrigin — proven correlation vs uncorrelated retention', (
       configKeyForServer: configKeyForServer({ m1: 'same', m2: 'same' }),
     });
     expect(origin.get(K('dup'))).toEqual({ servers: ['same'], uncorrelated: false });
+  });
+});
+
+describe('classifyEnableFailures — non-looping per-phantom diagnostics (cf-message)', () => {
+  const mkInv = (state: Record<string, ServerConnState>, discoverOk = true): ServerInventory => ({
+    state: new Map(Object.entries(state)),
+    liveKeysByServer: new Map(),
+    discoverOk,
+  });
+  const mkOrigin = (entries: Record<string, KeyOrigin>): Map<ToolKey, KeyOrigin> =>
+    new Map(Object.entries(entries).map(([k, v]) => [K(k), v]));
+
+  it('classifies each of the five phantom reasons', () => {
+    const inv = mkInv({ up: 'enumerated', off: 'disabled', down: 'down' });
+    const keyOrigin = mkOrigin({
+      'k-notavail': { servers: ['up'], uncorrelated: false },     // enumerated, not exposing
+      'k-disabled': { servers: ['off'], uncorrelated: false },
+      'k-down': { servers: ['down'], uncorrelated: false },
+      'k-removed': { servers: ['gone'], uncorrelated: false },    // correlated but absent
+      'k-stale': { servers: [], uncorrelated: true },
+    });
+    const out = classifyEnableFailures({
+      phantomNames: ['k-notavail', 'k-disabled', 'k-down', 'k-removed', 'k-stale'],
+      keyOrigin, inv,
+    });
+    const byKey = Object.fromEntries(out.map(f => [f.key, f.reason]));
+    expect(byKey['k-notavail']).toBe('not-available');
+    expect(byKey['k-disabled']).toBe('server-disabled');
+    expect(byKey['k-down']).toBe('temporarily-unavailable');
+    expect(byKey['k-removed']).toBe('not-configured');
+    expect(byKey['k-stale']).toBe('stale-unverified');
+  });
+
+  it('BLOCKER: a proven phantom with NO keyOrigin entry ⇒ stale-unverified, NEVER unknown', () => {
+    const out = classifyEnableFailures({
+      phantomNames: ['orphan'],
+      keyOrigin: new Map(), // no origin at all
+      inv: mkInv({ other: 'enumerated' }),
+    });
+    expect(out[0].reason).toBe('stale-unverified');
+    expect(out[0].reason).not.toBe('unknown');
+  });
+
+  it('carries the winning-reason server for the message label', () => {
+    const out = classifyEnableFailures({
+      phantomNames: ['k'],
+      keyOrigin: mkOrigin({ k: { servers: ['gone', 'down'], uncorrelated: false } }),
+      inv: mkInv({ down: 'down' }),
+    });
+    expect(out[0]).toMatchObject({ reason: 'temporarily-unavailable', server: 'down' });
+  });
+
+  it('discoverOk false ⇒ temporarily-unavailable for a known key (uncertain, retry-safe)', () => {
+    const out = classifyEnableFailures({
+      phantomNames: ['k'],
+      keyOrigin: mkOrigin({ k: { servers: ['ADO'], uncorrelated: false } }),
+      inv: mkInv({}, false),
+    });
+    expect(out[0].reason).toBe('temporarily-unavailable');
   });
 });

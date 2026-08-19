@@ -17,7 +17,8 @@
  */
 
 import type { ToolKey } from './tool-key.js';
-import type { ServerConnState, ServerInventory, KeyOrigin } from './mcp-freshness.js';
+import type { ServerConnState, ServerInventory, KeyOrigin, EnableUnavailableReason } from './mcp-freshness.js';
+import { classifyUnavailableDetailed } from './mcp-freshness.js';
 
 /** The subset of `McpServerStatus` (SDK session-events.d.ts) this layer distinguishes. */
 export type McpStatusLite =
@@ -134,4 +135,47 @@ export function assembleKeyOrigin(args: {
     out.set(key, { servers, uncorrelated });
   }
   return out;
+}
+
+/** A classified enable failure for one requested-but-not-enable-able tool. */
+export interface EnableFailure {
+  /** The model-facing key the agent requested (== the phantom name). */
+  key: ToolKey;
+  /** The non-looping reason it can't be enabled here. NEVER `unknown` from this helper —
+   *  a proven phantom is floored to `stale-unverified` (see below). */
+  reason: EnableUnavailableReason;
+  /** The server that produced the winning reason, for the message label (may be absent). */
+  server?: string;
+}
+
+/**
+ * Classify each PROVEN phantom name (spec-enable-tools-config-freshness cf-message).
+ *
+ * A phantom name is, by construction, an EXACT exclusion `ToolKey` — a name that
+ * resolves against the live catalog is `resolvable`, never a phantom (so there is no
+ * name→key ambiguity to resolve here). Each is classified via
+ * `classifyUnavailableDetailed(origin, inv)`.
+ *
+ * INVARIANT (BLOCKER): a proven phantom can NEVER be `unknown`. `partitionEnableNames`
+ * already proved the name is advertised/excluded, so `unknown` (whose remediation is
+ * "re-list") would re-create the original loop. If the detailed classifier returns
+ * `unknown` (no origin / no correlated-or-uncorrelated server), we FLOOR it to
+ * `stale-unverified` — a non-looping "stale cache entry, will clear on operator purge"
+ * class. `unknown` stays reserved for the SEPARATE `partitionEnableNames.unknown` bucket
+ * (a name NOT in excluded), whose atomic-reject + re-list path is unchanged.
+ */
+export function classifyEnableFailures(args: {
+  phantomNames: readonly string[];
+  keyOrigin: ReadonlyMap<ToolKey, KeyOrigin>;
+  inv: ServerInventory;
+}): EnableFailure[] {
+  const { phantomNames, keyOrigin, inv } = args;
+  return phantomNames.map(name => {
+    const key = name as ToolKey;
+    const origin = keyOrigin.get(key);
+    const { reason, server } = classifyUnavailableDetailed(origin, inv);
+    // Floor a proven phantom: never `unknown` (would loop). stale-unverified is the
+    // retained-but-unverifiable class.
+    return { key, reason: reason === 'unknown' ? 'stale-unverified' : reason, server };
+  });
 }

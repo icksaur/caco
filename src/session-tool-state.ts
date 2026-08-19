@@ -191,6 +191,65 @@ export function enableableToolKeys(catalog: ToolCatalog): Set<ToolKey> {
 }
 
 /**
+ * The synchronous D3 superset seed for `enableableKeysBySession`, built at
+ * create/resume BEFORE the async warm (spec-enable-tools-config-freshness D3).
+ *
+ * A pure union across ALL enable-able origins so turn one never falls into the
+ * "cache absent ⇒ advertise everything" fallback yet never over-hides:
+ *  - Caco enable-able keys (known synchronously from the Caco catalog),
+ *  - builtin enable-able keys (registered builtins minus policy-disabled),
+ *  - every learned MCP key (`allLearnedKeys()` — the superset; no config filter),
+ *  - every uncertain dynamically-excluded key of ANY origin (the session's seeded
+ *    exclusions minus policy builtins) — because the builtin-name cache is populated
+ *    fire-and-forget and may still be empty here, so an excluded builtin must still be
+ *    advertised from its own reminder. Superset direction: an excluded key of unknown
+ *    provenance is advertised, never silently dropped.
+ *
+ * Superset by construction ⇒ worst case one redundant advertise, never a hidden
+ * tool. The async warm later refines it per-server (Stage 2). Pure.
+ */
+export function buildSyncSeed(args: {
+  cacoEnableableKeys: Iterable<ToolKey>;
+  builtinEnableableKeys: Iterable<ToolKey>;
+  learnedMcpKeys: Iterable<ToolKey>;
+  carriedExcluded: Iterable<ToolKey>;
+}): Set<ToolKey> {
+  const out = new Set<ToolKey>();
+  for (const k of args.cacoEnableableKeys) out.add(k);
+  for (const k of args.builtinEnableableKeys) out.add(k);
+  for (const k of args.learnedMcpKeys) out.add(k);
+  for (const k of args.carriedExcluded) out.add(k);
+  return out;
+}
+
+/**
+ * Whether the async warm may COMMIT its refined enable-able set for a session
+ * (spec-enable-tools-config-freshness, lifecycle guard). Pure predicate extracted
+ * so the write decision is unit-testable. True only when ALL hold:
+ *  - `sessionId` is an explicitly-named session (the no-arg catalog variant resolves
+ *    an arbitrary most-recent session and must not write another session's cache);
+ *  - `enumerationOk` — the MCP enumeration actually happened (a failed enumeration
+ *    must not write an MCP-free set, which would over-hide);
+ *  - `activeAtEntry` — a session object was captured at entry; and
+ *  - `activeAtEntry === activeNow` — the SAME session object is still active, so a
+ *    teardown (or teardown + recreate under the same id) that raced the enumeration
+ *    cannot inherit the dead session's catalog.
+ */
+export function shouldCommitWarmSet(args: {
+  sessionId: string | undefined;
+  enumerationOk: boolean;
+  activeAtEntry: object | undefined;
+  activeNow: object | undefined;
+}): boolean {
+  return (
+    !!args.sessionId &&
+    args.enumerationOk &&
+    !!args.activeAtEntry &&
+    args.activeAtEntry === args.activeNow
+  );
+}
+
+/**
  * Intersect the deferred keys with the session's enable-able catalog keys, so the
  * discovery reminder never advertises a key `caco_enable_tools` would reject
  * (spec-enable-tools-catalog-divergence). The exclusion set is seeded from the

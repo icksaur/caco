@@ -81,6 +81,9 @@ vi.mock('../../src/tool-key-registry.js', () => ({
   learnFromMetadata: vi.fn(),
   keysForServer: vi.fn(() => []),
   allLearnedKeys: vi.fn(() => []),
+  serversForKey: vi.fn(() => []),
+  learnServerCorrelation: vi.fn(),
+  configKeyForServer: vi.fn(() => undefined),
 }));
 
 const SID = 'sess-div';
@@ -147,21 +150,38 @@ describe('deferred-tools reminder ⊆ enable-able catalog (spec-enable-tools-cat
     expect(catalog.has(REAL as unknown as ToolKey)).toBe(true);
   });
 
-  it('does not advertise a key whose MCP server is not loaded in this session', async () => {
+  it('retains (does NOT over-hide) a learned key whose server is not loaded this session', async () => {
+    // spec-enable-tools-config-freshness (increment 3): the sibling's old "over-hide a
+    // phantom" behaviour is REPLACED by never-over-hide. A learned key whose server is
+    // absent from the live inventory AND uncorrelated is RETAINED (advertised) — it is
+    // not proven removed. Its enable attempt returns a NON-LOOPING stale-unverified
+    // diagnostic (wired in the cf-message increment), so retention does not re-create
+    // the loop. Here (server absent from mcp.discover+mcp.list, uncorrelated) PHANTOM
+    // stays advertised.
     const { manager } = await makeManager([PHANTOM, REAL]);
-    await manager.getToolCatalog(SID); // warms the enable-able cache
+    await manager.getToolCatalog(SID);
     const keys = reminderKeys(manager.nextDeferredToolsReminder(SID).text);
-    expect(keys).not.toContain(PHANTOM);
+    expect(keys).toContain(PHANTOM);
+    expect(keys).toContain(REAL);
   });
 
-  it('INVARIANT: every advertised key resolves against the session catalog', async () => {
+  it('INVARIANT (revised): every advertised key resolves live OR its enable path is non-looping (not unknown/re-list)', async () => {
+    // Revised sibling invariant (config-freshness reconciliation): an advertised key
+    // either resolves live, or its enable attempt returns a non-looping result — a
+    // phantom (Caco-advertised, registry-known) is reported as `phantom`, NEVER as an
+    // `unknown tool` that would send the agent to a re-list loop. Proven by executing the
+    // enable path, not by a tautological "is it in the exclusion set" check.
     const { manager } = await makeManager([PHANTOM, REAL]);
     const { catalog } = await manager.getToolCatalog(SID);
-    const { resolveEnableTargets } = await import('../../src/session-tool-state.js');
     const keys = reminderKeys(manager.nextDeferredToolsReminder(SID).text);
     expect(keys.length).toBeGreaterThan(0);
+    const { resolveEnableTargets } = await import('../../src/session-tool-state.js');
     for (const key of keys) {
-      expect(resolveEnableTargets([key], catalog).ok, `advertised but unresolvable: ${key}`).toBe(true);
+      if (resolveEnableTargets([key], catalog).ok) continue; // resolves live — fine
+      // Otherwise the enable path must be non-looping: reported as a phantom, not unknown.
+      const r = await manager.enableTools(SID, [key]);
+      expect(r.ok, `advertised key ${key} enable failed atomically (looping risk)`).toBe(true);
+      if (r.ok) expect(r.phantom).toContain(key);
     }
   });
 
@@ -180,6 +200,22 @@ describe('deferred-tools reminder ⊆ enable-able catalog (spec-enable-tools-cat
     expect(reminderKeys(manager.nextDeferredToolsReminder(SID).text)).toEqual([PHANTOM, REAL]);
   });
 
+  it('a retained phantom is advertised but contributes ZERO to savings accounting (omits no live definition)', async () => {
+    // spec-enable-tools-config-freshness accounting fix: the retained phantom lives in the
+    // ADVERTISEMENT set (so it is discoverable / non-over-hidden) but NOT in the
+    // confirmed-omitted set that drives deferredDefsSavings — it omits no live schema this
+    // session, so counting its token size would inflate savings.
+    const { manager } = await makeManager([PHANTOM, REAL]);
+    await manager.getToolCatalog(SID);
+    const advertised = reminderKeys(manager.nextDeferredToolsReminder(SID).text);
+    expect(advertised).toContain(PHANTOM); // advertised (retained)
+    const savings = (manager as unknown as {
+      deferredDefsSavings: (id: string) => { deferredDefsCount: number; deferredDefsTokens: number; deferredDefsUnknown: number };
+    }).deferredDefsSavings(SID);
+    // Only REAL (a live-catalog tool) is a genuinely-omitted definition; PHANTOM is not.
+    expect(savings.deferredDefsCount).toBe(1);
+  });
+
   it('does NOT cache an MCP enumeration that failed (never converts over-advertise into over-hide)', async () => {
     const { manager } = await makeManager([PHANTOM, REAL], { mcpServersThrows: true });
     await manager.getToolCatalog(SID);
@@ -196,11 +232,14 @@ describe('deferred-tools reminder ⊆ enable-able catalog (spec-enable-tools-cat
   it('a failed enumeration leaves a previously-good cache entry untouched', async () => {
     const { manager } = await makeManager([PHANTOM, REAL]);
     await manager.getToolCatalog(SID);
+    const good = reminderKeys(manager.nextDeferredToolsReminder(SID).text);
     stubCatalog(manager, { mcpServersThrows: true });
     await manager.getToolCatalog(SID);
-    const keys = reminderKeys(manager.nextDeferredToolsReminder(SID).text);
-    expect(keys).toContain(REAL);
-    expect(keys).not.toContain(PHANTOM);
+    // The failed pass must NOT overwrite the good cache (lifecycle guard: enumerationOk
+    // false ⇒ no commit). Whatever the good warm produced is preserved verbatim.
+    const after = reminderKeys(manager.nextDeferredToolsReminder(SID).text);
+    expect(after).toEqual(good);
+    expect(after).toContain(REAL);
   });
 
   it('a catalog fetched WITHOUT a session id does not write any session cache', async () => {
@@ -270,11 +309,13 @@ describe('enable-able cache warming (spec-enable-tools-catalog-divergence R1)', 
     expect(reminderKeys(manager.nextDeferredToolsReminder(SID).text)).toEqual([PHANTOM, REAL]);
   });
 
-  it('a successful warm filters subsequent reminders', async () => {
+  it('a successful warm retains the enable-able superset (never over-hides an uncorrelated key)', async () => {
+    // Under config-freshness the warm no longer over-hides a learned-but-unloaded key:
+    // PHANTOM (server absent from inventory, uncorrelated) is RETAINED alongside REAL.
     const { manager } = await makeManager([PHANTOM, REAL]);
     (manager as unknown as { warmEnableableKeys: (id: string) => void }).warmEnableableKeys(SID);
     await new Promise(r => setTimeout(r, 10));
-    expect(reminderKeys(manager.nextDeferredToolsReminder(SID).text)).toEqual([REAL]);
+    expect(reminderKeys(manager.nextDeferredToolsReminder(SID).text)).toEqual([PHANTOM, REAL]);
   });
 
   it('a warm that outlives its session does not resurrect the cache after teardown', async () => {

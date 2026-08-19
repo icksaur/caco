@@ -77,9 +77,12 @@ async function makeManager(excluded: string[], enableable: string[] | null = nul
   const active = (manager as unknown as { activeSessions: Map<string, FakeActive> }).activeSessions;
   active.set(SID, { cwd: '/x', session: {}, toolFactory: () => [], excludedTools: [...excluded], lastUsedAt: Date.now() });
   // `null` models "the catalog has not been observed yet"; a list models a warmed cache.
+  // This drives savings accounting, which reads the CONFIRMED-omitted set (keys the live
+  // catalog can act on), NOT the advertisement superset (spec-enable-tools-config-
+  // freshness accounting split).
   if (enableable) {
-    (manager as unknown as { enableableKeysBySession: Map<string, Set<string>> })
-      .enableableKeysBySession.set(SID, new Set(enableable));
+    (manager as unknown as { omittedDefKeysBySession: Map<string, Set<string>> })
+      .omittedDefKeysBySession.set(SID, new Set(enableable));
   }
   return manager as unknown as { deferredDefsSavings: (id: string) => { deferredDefsTokens: number; deferredDefsCount: number; deferredDefsUnknown: number } };
 }

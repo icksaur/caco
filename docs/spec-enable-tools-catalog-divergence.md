@@ -11,6 +11,19 @@ listing that cannot contain it. Filtering the reminder must never hide a tool th
 enable-able: over-advertising costs one bad attempt, over-hiding strands a capability with
 no discovery path.
 
+> **Invariant revision (spec-enable-tools-config-freshness reconciliation).** The
+> original "every advertised key resolves against the live catalog" invariant is
+> SUPERSEDED — it conflicted with config-freshness's required `down` /
+> `stale-unverified` retention (a configured-but-down or uncorrelated-legacy server's
+> key must stay advertised, never over-hidden). The correct invariant is now:
+> **every advertised key either resolves against the live catalog, OR is a known
+> deferred/registry key whose enable attempt returns a NON-LOOPING diagnostic
+> (`temporarily-unavailable` / `stale-unverified`) — never `unknown`/re-list.** The
+> loop is broken by the non-looping enable message (config-freshness cf-message), not
+> by over-hiding. The first-turn cache-absent window is now closed by that spec's
+> synchronous superset seed. All authoritative post-create narrowing (removed /
+> disabled / down / dropped-allowlist) lives in spec-enable-tools-config-freshness.
+
 `caco_enable_tools` rejects a tool key that Caco itself advertised one turn earlier
 (`unknown tool: ADO-repo_get_file_content`), and the rejection message sends the agent
 into a re-list loop. The name is correct. The *advertised* set and the *enable-able* set
@@ -194,7 +207,10 @@ the unknown-name case, where it is correct.
 ## Acceptance
 
 * No key appears in a session's deferred-tools reminder unless `resolveEnableTargets`
-  resolves it against that session's catalog.
+  resolves it against that session's catalog. **[SUPERSEDED — see the "Invariant revision"
+  note in Goals: an advertised key may instead be a known deferred/registry key whose
+  enable path is non-looping (phantom / `stale-unverified`), so a legitimately-`down` or
+  uncorrelated-legacy key stays advertised rather than being over-hidden.]**
 * A tool that is deferred and whose MCP server IS loaded still appears in the reminder.
 * An MCP enumeration that failed — wholly or for one server — never seeds the filter, and
   never overwrites a good cache entry.

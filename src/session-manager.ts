@@ -26,13 +26,15 @@ import { tokenLimitsForModel, effectiveContextTier } from './model-billing.js';
 import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './agent-command.js';
 import { buildToolCatalog, type ToolCatalog } from './tool-catalog.js';
 import { builtinKey, cacoKey, type ToolKey } from './tool-key.js';
-import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys } from './tool-key-registry.js';
+import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys, serversForKey, learnServerCorrelation, configKeyForServer } from './tool-key-registry.js';
 import { recordObservedSizes, getToolSize } from './tool-size-store.js';
 import { estimateToolTokens } from './tool-size.js';
 import { buildPagerView, type PagerSessionInput } from './pager-view.js';
 import { planSessionRemoval, type RemovalPlan } from './session-removal.js';
 import { activityVersion } from './activity-version.js';
-import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys, enableableToolKeys, advertisableToolKeys, partitionEnableNames } from './session-tool-state.js';
+import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys, enableableToolKeys, advertisableToolKeys, partitionEnableNames, buildSyncSeed, shouldCommitWarmSet } from './session-tool-state.js';
+import { buildServerInventory, assembleKeyOrigin, type McpStatusLite } from './mcp-inventory.js';
+import { refineEnableableKeys } from './mcp-freshness.js';
 import { excludedBuiltinNames, isDeferEligibleCacoEntry, isDeferEligibleBuiltin } from './tool-registry.js';
 import { getDeferredServers, setServerDeferred } from './manual-defer-store.js';
 import { getAutoDeferred, addAutoDeferred, removeAutoDeferred } from './auto-defer-store.js';
@@ -229,6 +231,7 @@ interface CopilotSessionInstance {
     mcp: {
       list(): Promise<{ servers: McpServerInfo[] }>;
       listTools(params: { serverName: string }): Promise<{ tools: { name: string; description?: string }[] }>;
+      discover(params?: { workingDirectory?: string }): Promise<{ servers: { name: string; enabled: boolean }[] }>;
     };
     tools: {
       getCurrentMetadata(): Promise<{ tools: CurrentToolMetadata[] | null }>;
@@ -419,7 +422,23 @@ export class SessionManager {
   // MCP server that is not loaded here (spec-enable-tools-catalog-divergence). A missing
   // entry means "not known yet" and advertises everything; it is never an empty set
   // standing in for unknown.
+  //
+  // NOTE (spec-enable-tools-config-freshness): this is the ADVERTISEMENT / discovery-
+  // candidate set — a safe SUPERSET that deliberately RETAINS `down` and uncorrelated
+  // legacy keys (never over-hide). It is NOT the set of definitions actually omitted
+  // from THIS session's live catalog — a retained phantom omits no live schema. Token/
+  // credit SAVINGS accounting must use `omittedDefKeysBySession` instead, or it would
+  // over-count savings for phantoms.
   private enableableKeysBySession = new Map<string, Set<ToolKey>>();
+
+  // sessionId → the keys whose live definition is actually present in THIS session's
+  // catalog but currently deferred (the CONFIRMED-omitted set, = enableableToolKeys of
+  // the live catalog). Distinct from `enableableKeysBySession`: this drives savings
+  // accounting only, so a retained-but-not-live phantom never inflates the saved-token
+  // figure (spec-enable-tools-config-freshness accounting fix). Missing entry ⇒ not
+  // known yet (savings falls back to counting all dynamic exclusions, the pre-existing
+  // over-estimate direction).
+  private omittedDefKeysBySession = new Map<string, Set<ToolKey>>();
   
   // sessionId → Promise (serializes concurrent caco_enable_tools reveals so the
   // read-modify-write of excludedTools is atomic; two enables in one turn compose).
@@ -892,6 +911,7 @@ export class SessionManager {
     syncModelCache(session.sessionId, resolved.cacoId);
     
     console.log(`✓ Created session ${session.sessionId} for ${cwd} with model ${config.model}`);
+    this.seedEnableableKeysSync(session.sessionId);
     this.warmEnableableKeys(session.sessionId);
     return session.sessionId;
   }
@@ -1232,6 +1252,7 @@ export class SessionManager {
     }
     
     console.log(`✓ Resumed session ${sessionId} for ${cwd}${usedFallbackCwd ? ' (fallback)' : ''}${repairMessage ? ' (repaired)' : ''}`);
+    this.seedEnableableKeysSync(sessionId);
     this.warmEnableableKeys(sessionId);
     // Cold-open latency attribution. ensureClient = first-call SDK client init;
     // mcp = loadMcpServers; sdkResume = SDK resumeSession (events.jsonl
@@ -2245,6 +2266,27 @@ export class SessionManager {
     }
   }
 
+  /**
+   * The authoritative configured MCP inventory via `mcp.discover` (user + workspace +
+   * plugin + builtin sources), each with its `enabled` state. This is the
+   * "is-this-server-configured-at-all" oracle for freshness narrowing
+   * (spec-enable-tools-config-freshness Stage 2). Returns `null` when there is no
+   * session or the RPC throws — the caller MUST treat null as discoverOk=false and
+   * narrow NOTHING (a missing inventory can never justify hiding a tool).
+   */
+  async mcpDiscover(sessionId?: string): Promise<{ name: string; enabled: boolean }[] | null> {
+    const target = sessionId ? this.activeSessions.get(sessionId) : this.activeSessions.values().next().value;
+    if (!target) return null;
+    try {
+      const workingDirectory = (sessionId && this.sessionCache.get(sessionId)?.cwd) || undefined;
+      const result = await target.session.rpc.mcp.discover({ workingDirectory });
+      return result.servers;
+    } catch (e) {
+      console.error('[MCP] Failed to discover MCP servers:', e instanceof Error ? e.message : e);
+      return null;
+    }
+  }
+
   /** Register Caco's own tool catalog (name+description+hardDisabled), captured
    *  once at startup before filterDisabledTools. Used by the mcp-servers applet. */
   setCacoToolCatalog(entries: CacoToolCatalogEntry[]): void {
@@ -2410,19 +2452,40 @@ export class SessionManager {
     const observed = await this.getCurrentToolMetadata(target);
     learnFromMetadata(observed);
     recordObservedSizes(observed);
+    // Per-server freshness signals collected during the SAME enumeration pass (no extra
+    // RPCs): live status, whether listTools SUCCEEDED (an empty-but-successful result is
+    // authoritative; a failed one must NOT be), and the resolved live keys. Feeds the
+    // Stage-2 ServerInventory below (spec-enable-tools-config-freshness).
+    const liveServers: { name: string; status: McpStatusLite }[] = [];
+    const enumeratedServers = new Set<string>();
+    const liveKeysByServer = new Map<string, Set<ToolKey>>();
     const mcp = await Promise.all(
       mcpServers.map(async s => {
-        const raw = await this.listMcpTools(s.name, target, markEnumerationFailed);
+        liveServers.push({ name: s.name, status: s.status as McpStatusLite });
+        let serverEnumOk = true;
+        const onServerFail = (): void => { serverEnumOk = false; markEnumerationFailed(); };
+        const raw = await this.listMcpTools(s.name, target, onServerFail);
         // Resolve each raw MCP tool to its discovered model-facing key. If not yet
         // learned, still SHOW it (display-only `server/tool` id, excludable:false) so it
         // never silently vanishes from the catalog/applet — it just can't be deferred
         // until first observed. Never fabricate an exclusion key.
+        const liveKeys = new Set<ToolKey>();
         const tools = raw.map(t => {
           const learned = lookupMcpKey(s.name, t.name);
+          if (learned) liveKeys.add(learned);
           return learned
             ? { key: learned, name: t.name, description: t.description, excludable: true }
             : { key: `${s.name}/${t.name}` as ToolKey, name: t.name, description: t.description, excludable: false };
         });
+        if (serverEnumOk) {
+          enumeratedServers.add(s.name);
+          liveKeysByServer.set(s.name, liveKeys);
+          // PROVEN identity (C6): a successful listTools whose tools resolve via
+          // lookupMcpKey(s.name, ...) uniquely links this mcp.list config-key name to
+          // the same composite server the metadata learner used — record the
+          // self-correlation so configKeyForServer() is populated. Only on proof.
+          if (liveKeys.size > 0) learnServerCorrelation(s.name, s.name);
+        }
         return { serverName: s.name, tools };
       }),
     );
@@ -2457,15 +2520,34 @@ export class SessionManager {
     // re-enableable — distinct from a dynamic session defer. (hardDisabled Caco tools are
     // carried per-entry on the catalog, so they need no separate set.)
     const policyDisabled = new Set<ToolKey>(excludedBuiltinNames() as ToolKey[]);
-    // Seed the reminder's intersection set, but ONLY for an explicitly-named session (the
-    // no-arg variant resolves an arbitrary most-recent session and must not write another
-    // session's cache), ONLY when the MCP enumeration actually succeeded (a failed
-    // enumeration leaves any prior entry untouched — writing an MCP-free set would turn
-    // this fix into a silent over-hide, which is worse than the bug), and ONLY while the
-    // SAME session object is still active (so a teardown that raced this enumeration is
-    // not undone, and a re-created session cannot inherit the dead one's catalog).
-    if (sessionId && enumerationOk && activeAtEntry && this.activeSessions.get(sessionId) === activeAtEntry) {
-      this.enableableKeysBySession.set(sessionId, enableableToolKeys(catalog));
+    // ── Stage 2 (spec-enable-tools-config-freshness): authoritative narrowing ──
+    // The over-advertising synchronous seed (D3) refined against the authoritative
+    // inventory. mcpDiscover returns null on failure ⇒ discoverOk=false ⇒ refine narrows
+    // nothing (and, with an empty state, widens nothing) — the safe direction.
+    const discover = await this.mcpDiscover(target);
+    const inv = buildServerInventory({ discover, liveServers, enumeratedServers, liveKeysByServer });
+    // D3 synchronous superset seed (same math as the create/resume seed, but now with the
+    // freshly-learned live keys in the registry): Caco ∪ builtin ∪ allLearnedKeys ∪ the
+    // session's uncertain excluded keys. refineEnableableKeys then narrows/widens it.
+    const seed = this.buildEnableableSyncSeed(sessionId);
+    // Assemble per-key origin for every seed key AND every live key (so a newly-exposed
+    // tool gets a correct origin before it lands in the seed).
+    const allKeys = new Set<ToolKey>(seed);
+    for (const ks of liveKeysByServer.values()) for (const k of ks) allKeys.add(k);
+    const keyOrigin = assembleKeyOrigin({
+      keys: allKeys,
+      serversForKey: (k: ToolKey) => serversForKey(k),
+      configKeyForServer: (m: string) => configKeyForServer(m),
+    });
+    const refined = refineEnableableKeys({ seed, keyOrigin, inv });
+    // Commit ONLY under the lifecycle guard (never over-hide, never write another/dead
+    // session's cache) — the pure predicate is unit-tested (session-tool-state).
+    if (shouldCommitWarmSet({ sessionId, enumerationOk, activeAtEntry, activeNow: sessionId ? this.activeSessions.get(sessionId) : undefined })) {
+      this.enableableKeysBySession.set(sessionId!, refined);
+      // The CONFIRMED-omitted set for savings accounting: only keys the live catalog can
+      // actually resolve (excludable) — i.e. definitions genuinely present-but-deferred
+      // this session. Excludes retained phantoms/down keys so savings is never inflated.
+      this.omittedDefKeysBySession.set(sessionId!, enableableToolKeys(catalog));
     }
     return { catalog, excluded, policyDisabled };
   }
@@ -2505,10 +2587,47 @@ export class SessionManager {
     });
   }
 
+  /**
+   * The synchronous D3 superset seed for a session's enable-able keys
+   * (spec-enable-tools-config-freshness): Caco ∪ builtin ∪ allLearnedKeys ∪ the
+   * session's uncertain dynamically-excluded keys (any origin). Pure set-math over
+   * in-memory state (catalog + registry + the session's live exclusion set) — no RPC,
+   * no added latency. A SUPERSET by construction (never over-hide); the async warm
+   * refines it. Used both at create/resume (before the async warm, to close the
+   * first-turn race) and inside getToolCatalog (as the base for Stage-2 refinement).
+   */
+  private buildEnableableSyncSeed(sessionId?: string): Set<ToolKey> {
+    const policyExcluded = new Set(excludedBuiltinNames().map(n => String(builtinKey(n.replace(/^builtin:/, '')))));
+    const cacoEnableableKeys = this.getCacoToolCatalog()
+      .filter(c => isDeferEligibleCacoEntry(c))
+      .map(c => cacoKey(c.name));
+    const builtinEnableableKeys = this.getBuiltinToolNames()
+      .map(n => builtinKey(n))
+      .filter(k => !policyExcluded.has(String(k)));
+    const carriedExcluded = sessionId
+      ? deferredToolKeys(this.getExcludedToolKeys(sessionId), new Set<ToolKey>(excludedBuiltinNames() as ToolKey[]))
+      : [];
+    return buildSyncSeed({
+      cacoEnableableKeys,
+      builtinEnableableKeys,
+      learnedMcpKeys: allLearnedKeys(),
+      carriedExcluded,
+    });
+  }
+
+  /** Seed a session's enable-able keys synchronously (D3), BEFORE the async warm, so the
+   *  first-turn deferred-tools reminder is filtered by a safe superset rather than the
+   *  "cache absent ⇒ advertise everything" fallback. Overwritten by the async warm's
+   *  refined set under the lifecycle guard. */
+  private seedEnableableKeysSync(sessionId: string): void {
+    this.enableableKeysBySession.set(sessionId, this.buildEnableableSyncSeed(sessionId));
+  }
+
   /** Drop a torn-down session's enable-able key cache. Called wherever a session leaves
    *  `activeSessions`; a warm recreate re-populates it via `warmEnableableKeys`. */
   private clearEnableableKeys(sessionId: string): void {
     this.enableableKeysBySession.delete(sessionId);
+    this.omittedDefKeysBySession.delete(sessionId);
   }
 
   /**
@@ -2569,7 +2688,7 @@ export class SessionManager {
   deferredDefsSavings(sessionId: string): { deferredDefsTokens: number; deferredDefsCount: number; deferredDefsUnknown: number } {
     const policy = new Set<string>(excludedBuiltinNames());
     const dynamic = this.getExcludedToolKeys(sessionId).filter(k => !policy.has(k as string));
-    const enableable = this.enableableKeysBySession.get(sessionId);
+    const enableable = this.omittedDefKeysBySession.get(sessionId);
     if (!enableable) {
       return { deferredDefsTokens: 0, deferredDefsCount: dynamic.length, deferredDefsUnknown: dynamic.length };
     }

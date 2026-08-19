@@ -67,6 +67,9 @@ vi.mock('../../src/tool-key-registry.js', () => ({
   learnFromMetadata: vi.fn(),
   keysForServer: vi.fn(() => []),
   allLearnedKeys: vi.fn(() => []),
+  serversForKey: vi.fn(() => []),
+  learnServerCorrelation: vi.fn(),
+  configKeyForServer: vi.fn(() => undefined),
 }));
 
 interface FakeActive {

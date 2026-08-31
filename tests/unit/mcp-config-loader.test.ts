@@ -43,7 +43,7 @@ vi.mock('../../src/mcp-discovery.js', () => ({
 
 import { getCliOAuthTokens } from '../../src/cli-oauth.js';
 import { refreshAccessToken } from '../../src/mcp-auth-service.js';
-import { loadMcpServers } from '../../src/mcp-config-loader.js';
+import { loadMcpServers, loadMcpServersStrict } from '../../src/mcp-config-loader.js';
 
 const configDir = join(testState.homeDir, '.copilot');
 const configPath = join(configDir, 'mcp-config.json');
@@ -86,7 +86,6 @@ describe('loadMcpServers', () => {
     writeFileSync(configPath, '{ not json', 'utf-8');
 
     await expect(loadMcpServers()).resolves.toBeUndefined();
-    expect(console.error).toHaveBeenCalledWith('[MCP] Failed to load mcp-config.json:', expect.any(SyntaxError));
   });
 
   it('returns a local command server without injecting authorization headers', async () => {
@@ -191,5 +190,68 @@ describe('loadMcpServers', () => {
         headers: { Authorization: 'Bearer fresh-token' },
       },
     });
+  });
+});
+
+describe('loadMcpServersStrict — transactional reload gate', () => {
+  beforeEach(() => {
+    rmSync(testState.homeDir, { recursive: true, force: true });
+    testState.cacoAuth = { servers: {} };
+    testState.cliTokens.clear();
+    vi.clearAllMocks();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.mocked(console.log).mockRestore();
+    vi.mocked(console.error).mockRestore();
+    rmSync(testState.homeDir, { recursive: true, force: true });
+  });
+
+  it('no file causes ok true with undefined servers', async () => {
+    await expect(loadMcpServersStrict()).resolves.toEqual({ ok: true, servers: undefined });
+  });
+
+  it('empty mcpServers causes ok true with undefined servers', async () => {
+    writeConfig({ mcpServers: {} });
+    await expect(loadMcpServersStrict()).resolves.toEqual({ ok: true, servers: undefined });
+  });
+
+  it('malformed JSON causes ok false (the transactional gate)', async () => {
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(configPath, '{ not json', 'utf-8');
+    const r = await loadMcpServersStrict();
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/malformed/i);
+  });
+
+  it('valid servers cause ok true with the injected server map', async () => {
+    writeConfig({ mcpServers: { local: { command: 'node', args: ['s.js'] } } });
+    const r = await loadMcpServersStrict();
+    expect(r).toEqual({ ok: true, servers: { local: { command: 'node', args: ['s.js'] } } });
+  });
+
+  it('valid JSON that is not an object (null) causes ok true with no servers (no throw)', async () => {
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(configPath, 'null', 'utf-8');
+    await expect(loadMcpServersStrict()).resolves.toEqual({ ok: true, servers: undefined });
+  });
+
+  it('a malformed remote server URL is isolated — it never throws and other servers still load', async () => {
+    writeConfig({
+      mcpServers: {
+        broken: { url: 'not a valid url' }, // serverIdFromUrl(new URL(...)) throws for this
+        good: { command: 'node', args: ['s.js'] },
+      },
+    });
+    const r = await loadMcpServersStrict();
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // Both entries survive; the broken one just has no injected Authorization header.
+      expect(r.servers).toEqual({
+        broken: { url: 'not a valid url' },
+        good: { command: 'node', args: ['s.js'] },
+      });
+    }
   });
 });

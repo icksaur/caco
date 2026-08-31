@@ -17,6 +17,7 @@ import { createServer } from 'http';
 import { getMcpAuth, setMcpAuth, getMcpServerAuth, updateMcpServerAuth, type MCPAuthState } from '../storage.js';
 import { listCliOAuthConfigs } from '../cli-oauth.js';
 import { discoverOAuthMetadata, serverIdFromUrl } from '../mcp-discovery.js';
+import { sessionManager } from '../session-manager.js';
 
 const router = Router();
 
@@ -461,5 +462,26 @@ if(window.opener){window.opener.postMessage({type:'mcp-auth-complete',server:'${
 window.close();
 </script></body></html>`;
 }
+
+/**
+ * POST /api/mcp/auth/reload  (this router is mounted at /api/mcp/auth)
+ * Reload ~/.copilot/mcp-config.json into WARM sessions without a full restart
+ * (spec-enable-tools-config-freshness D1). Operator-EXPLICIT: recreating warm sessions
+ * busts their prompt cache, so this is never a silent auto-watch. Transactional — a
+ * malformed config fails the whole reload (400) and leaves every session's prior config
+ * intact. On success returns which sessions were recreated / skipped (busy) / failed.
+ */
+router.post('/reload', async (_req: Request, res: Response) => {
+  try {
+    const result = await sessionManager.reloadMcpConfig();
+    if (!result.ok) {
+      res.status(400).json({ error: result.error ?? 'reload failed', ...result });
+      return;
+    }
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
 
 export { router };

@@ -81,6 +81,12 @@ export interface CreateConfig {
   /** Open-Plugins directories for the new session (spec-plugin-directories). Absolute +
    *  already normalized by the caller (the create route owns validation + meta persistence). */
   pluginDirectories?: string[];
+  /** Internal (spec-enable-tools-config-freshness cf-reload): a VALIDATED mcp-config
+   *  snapshot to use verbatim instead of re-reading disk. Absent ⇒ re-read via
+   *  `loadMcpServers()` (default). A concrete map ⇒ use it. `null` ⇒ validated "no
+   *  servers" (distinct from absent — passes undefined to the SDK, never a re-read). Closes
+   *  the reload TOCTOU (server set fixed at validation time). */
+  mcpServersOverride?: Record<string, unknown> | null;
 }
 
 export interface ResumeConfig {
@@ -94,6 +100,11 @@ export interface ResumeConfig {
    *  "warm/model-switch never auto-mutated" invariant. Genuine user cold-opens (the route
    *  resume paths) leave it unset. */
   warmRecreate?: boolean;
+  /** Internal (spec-enable-tools-config-freshness cf-reload): a VALIDATED mcp-config
+   *  snapshot to use verbatim instead of re-reading disk. Absent ⇒ re-read via
+   *  `loadMcpServers()` (default; every non-reload caller). A concrete map ⇒ use it.
+   *  `null` ⇒ validated "no servers" (distinct from absent). Closes the reload TOCTOU. */
+  mcpServersOverride?: Record<string, unknown> | null;
 }
 
 export interface ResumeResult {

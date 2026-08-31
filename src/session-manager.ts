@@ -13,7 +13,7 @@ import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './corr
 import { dispatchState } from './dispatch-state.js';
 import { setAnyPendingProvider } from './restart-manager.js';import { pollQuota } from './quota-poller.js';
 import type { QuotaSnapshot } from './usage-state.js';
-import { loadMcpServers } from './mcp-config-loader.js';
+import { loadMcpServers, loadMcpServersStrict } from './mcp-config-loader.js';
 import { createObservationHook } from './observe/hook.js';
 import { OBS_RAW_CEILING_BYTES } from './observe/types.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
@@ -101,6 +101,14 @@ interface CopilotClientInstance {
     };
     sessions: {
       fork(params: { sessionId: string; toEventId?: string }): Promise<{ sessionId: string }>;
+    };
+    // CLIENT-level MCP rpc (distinct from the per-session mcp rpc): `discover` is the
+    // authoritative configured inventory across user/workspace/plugin sources;
+    // `config.reload` drops the runtime's in-memory config-file cache so the next build
+    // reads disk. Both are process/client scoped, NOT per session (SDK rpc.d.ts:15852).
+    mcp: {
+      discover(params?: { workingDirectory?: string }): Promise<{ servers: { name: string; enabled: boolean }[] }>;
+      config: { reload(): Promise<void> };
     };
   };
 }
@@ -231,7 +239,6 @@ interface CopilotSessionInstance {
     mcp: {
       list(): Promise<{ servers: McpServerInfo[] }>;
       listTools(params: { serverName: string }): Promise<{ tools: { name: string; description?: string }[] }>;
-      discover(params?: { workingDirectory?: string }): Promise<{ servers: { name: string; enabled: boolean }[] }>;
     };
     tools: {
       getCurrentMetadata(): Promise<{ tools: CurrentToolMetadata[] | null }>;
@@ -476,6 +483,8 @@ export class SessionManager {
   // Shared SDK client — all sessions use one CLI backend process
   private sharedClient: CopilotClientInstance | null = null;
   private clientStarting: Promise<CopilotClientInstance> | null = null;
+  // cf-reload: serializes overlapping reloadMcpConfig() calls (no interleaved recreate loops).
+  private reloadInFlight: Promise<unknown> | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private healthTimer: NodeJS.Timeout | null = null;
   private static readonly SDK_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -877,7 +886,7 @@ export class SessionManager {
         // defaults this off; the CLI opts in. Requires the assembled prompt to survive,
         // which is why it pairs with toSdkSystemMessage's customize mode.
         enableOnDemandInstructionDiscovery: true,
-        mcpServers: await loadMcpServers(),
+        mcpServers: config.mcpServersOverride !== undefined ? (config.mcpServersOverride ?? undefined) : await loadMcpServers(),
         workingDirectory: cwd,
         largeOutput: sdkLargeOutputConfig(),
         hooks: { onPostToolUse: createObservationHook(cwd, sessionRef) },
@@ -1069,6 +1078,7 @@ export class SessionManager {
         systemMessage: resolveSystemMessage(await buildSystemMessage(), cwd),
         toolFactory: config.toolFactory,
         excludedTools: config.excludedTools,
+        mcpServersOverride: config.mcpServersOverride,
       }, sessionId);
       await this.evictInactiveSessions();
       return { sessionId, usedFallbackCwd };
@@ -1119,7 +1129,11 @@ export class SessionManager {
       memoryContent,
     });
     const tMcp0 = performance.now();
-    const mcpServers = await loadMcpServers();
+    // cf-reload: a validated snapshot (or `null` = validated-empty) is used verbatim so a
+    // mid-reload malformed edit cannot reach this recreate (TOCTOU). Absent ⇒ re-read disk.
+    const mcpServers = config.mcpServersOverride !== undefined
+      ? (config.mcpServersOverride ?? undefined)
+      : await loadMcpServers();
     const tMcp = performance.now() - tMcp0;
     // Seed exclusions = base (builtins from config) ∪ operator manual-defer preference
     // (Phase D) ∪ cold-resume auto-defer (Phase C2). Manual defer is re-applied on every
@@ -1994,9 +2008,98 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Reload MCP config into WARM sessions without a full server restart
+   * (spec-enable-tools-config-freshness D1). Operator-EXPLICIT (POST /api/mcp/reload);
+   * never a silent auto-watch of warm sessions (C4 — a recreate busts that session's
+   * prompt cache, so it must be a deliberate operator action).
+   *
+   * Transactional: re-reads `~/.copilot/mcp-config.json` via the STRICT loader FIRST; a
+   * malformed/partially-written file fails the whole reload as a no-op (`ok:false`), so
+   * every warm session keeps its prior config — never recreated with zero servers. The
+   * validated snapshot is threaded verbatim into each recreate (no TOCTOU re-read).
+   *
+   * Order: drop the runtime's process-wide MCP config cache via the CLIENT
+   * `mcp.config.reload()` BEFORE recreating, so recreates observe fresh project/plugin
+   * discovery; a `reload()` throw is itself a reported failure with nothing recreated. Each
+   * active session is then disconnected + warm-recreated independently (busy sessions
+   * skipped + reported; one failure neither aborts nor rolls back the others). With no
+   * active session the cache is still dropped (client rpc), and the next new session reads
+   * fresh config for free — no deferred machinery. Serialized so overlapping reloads never
+   * interleave.
+   */
+  async reloadMcpConfig(): Promise<{ ok: boolean; error?: string; recreated: string[]; failed: { sessionId: string; error: string }[]; skippedBusy: string[]; skippedReplaced: string[] }> {
+    const run = (this.reloadInFlight ?? Promise.resolve()).catch(() => {}).then(() => this.reloadMcpConfigLocked());
+    this.reloadInFlight = run;
+    try {
+      return await run;
+    } finally {
+      if (this.reloadInFlight === run) this.reloadInFlight = null;
+    }
+  }
+
+  private async reloadMcpConfigLocked(): Promise<{ ok: boolean; error?: string; recreated: string[]; failed: { sessionId: string; error: string }[]; skippedBusy: string[]; skippedReplaced: string[] }> {
+    const recreated: string[] = [];
+    const failed: { sessionId: string; error: string }[] = [];
+    const skippedBusy: string[] = [];
+    const skippedReplaced: string[] = [];
+
+    // 1. Transactional validation gate — a parse/read failure is a total no-op.
+    const strict = await loadMcpServersStrict();
+    if (!strict.ok) {
+      return { ok: false, error: strict.error, recreated, failed, skippedBusy, skippedReplaced };
+    }
+    // The ONE validated snapshot threaded into every recreate. `null` = validated-empty
+    // (distinct from `undefined`=re-read), so an empty config also bypasses the disk read.
+    const override: Record<string, unknown> | null = strict.servers ?? null;
+
+    // 2. Drop the runtime's process-wide MCP config-file cache so the next session build
+    //    (and the SDK's own project/plugin discovery) observes disk. This is a CLIENT rpc
+    //    (SDK rpc.d.ts:15852), so it works even with ZERO active sessions — no deferred
+    //    "pending" machinery needed. A throw is a transactional failure: nothing recreated.
+    if (this.sharedClient) {
+      try {
+        await this.sharedClient.rpc.mcp.config.reload();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { ok: false, error: `mcp.config.reload failed: ${msg}`, recreated, failed, skippedBusy, skippedReplaced };
+      }
+    }
+
+    // 3. Snapshot {id, session} PAIRS before mutating the map (identity-safe teardown), then
+    //    recreate each active session independently. With no active session this is a no-op —
+    //    the cache is already dropped, so the next new session reads fresh config for free.
+    const targets = [...this.activeSessions.entries()].map(([id, session]) => ({ id, session }));
+    for (const target of targets) {
+      const { id } = target;
+      if (this.isBusy(id)) { skippedBusy.push(id); continue; }
+      // Identity re-check: a session torn down / replaced under the same id since the
+      // snapshot must NOT be disconnected by us — report it so the caller can retry.
+      if (this.activeSessions.get(id) !== target.session) { skippedReplaced.push(id); continue; }
+      const { toolFactory, excludedTools } = target.session;
+      try {
+        await target.session.session.disconnect();
+      } catch (e) {
+        console.warn(`[MCP] disconnect during reload failed for ${id.slice(0, 8)}: ${e instanceof Error ? e.message : e}`);
+      }
+      dispatchState.end(id);
+      this.activeSessions.delete(id);
+      try {
+        await this.resume(id, { toolFactory, excludedTools, warmRecreate: true, mcpServersOverride: override });
+        recreated.push(id);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        failed.push({ sessionId: id, error: msg });
+        console.warn(`[MCP] reload recreate failed for ${id.slice(0, 8)}: ${msg}`);
+      }
+    }
+    return { ok: true, recreated, failed, skippedBusy, skippedReplaced };
+  }
+
   /** Clear stored reasoning effort when switching to a model that doesn't
    *  support it or doesn't include the stored value in supportedReasoningEfforts. */
-  private clearStaleReasoningEffort(sessionId: string, newModelId: string): void {    updateSessionMeta(sessionId, meta => {
+  private clearStaleReasoningEffort(sessionId: string, newModelId: string): void {
+    updateSessionMeta(sessionId, meta => {
       if (!meta.reasoningEffort) return;
       const newModel = this.cachedModels.find(m => m.id === newModelId);
       const supported = newModel?.supportedReasoningEfforts;
@@ -2267,19 +2370,20 @@ export class SessionManager {
   }
 
   /**
-   * The authoritative configured MCP inventory via `mcp.discover` (user + workspace +
-   * plugin + builtin sources), each with its `enabled` state. This is the
+   * The authoritative configured MCP inventory via the CLIENT-level `mcp.discover` (user +
+   * workspace + plugin + builtin sources), each with its `enabled` state. This is the
    * "is-this-server-configured-at-all" oracle for freshness narrowing
-   * (spec-enable-tools-config-freshness Stage 2). Returns `null` when there is no
-   * session or the RPC throws — the caller MUST treat null as discoverOk=false and
-   * narrow NOTHING (a missing inventory can never justify hiding a tool).
+   * (spec-enable-tools-config-freshness Stage 2). Returns `null` when the client is not
+   * running or the RPC throws — the caller MUST treat null as discoverOk=false and narrow
+   * NOTHING (a missing inventory can never justify hiding a tool). `discover` is a CLIENT
+   * rpc, not per-session (SDK rpc.d.ts:15852); the session id only supplies the working
+   * directory context for plugin resolution.
    */
   async mcpDiscover(sessionId?: string): Promise<{ name: string; enabled: boolean }[] | null> {
-    const target = sessionId ? this.activeSessions.get(sessionId) : this.activeSessions.values().next().value;
-    if (!target) return null;
+    if (!this.sharedClient) return null;
     try {
       const workingDirectory = (sessionId && this.sessionCache.get(sessionId)?.cwd) || undefined;
-      const result = await target.session.rpc.mcp.discover({ workingDirectory });
+      const result = await this.sharedClient.rpc.mcp.discover({ workingDirectory });
       return result.servers;
     } catch (e) {
       console.error('[MCP] Failed to discover MCP servers:', e instanceof Error ? e.message : e);

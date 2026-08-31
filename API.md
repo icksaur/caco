@@ -779,6 +779,7 @@ OAuth 2.0 (PKCE) flow for MCP servers that require authentication, mounted at `/
 - `GET /api/mcp/auth/start` - Initiate the OAuth flow. Query: `server` (server id, required), `origin?`. Redirects to the provider's authorization endpoint; renders an error page on a missing/unknown server.
 - `GET /api/mcp/auth/callback` - OAuth redirect target. Query: `code`, `state` (or `error`/`error_description`). Exchanges the code for a token, persists it, and returns an HTML page that signals the popup opener. 400 on a missing/expired/invalid `state`.
 - `POST /api/mcp/auth/config` - Update a server's config. Body: `{ serverId, clientId? }`. Returns `{ ok: true }`, or 400 (missing `serverId`) / 404 (unknown server).
+- `POST /api/mcp/auth/reload` - Reload `~/.copilot/mcp-config.json` into WARM sessions without a full restart (operator-explicit; recreating a warm session busts its prompt cache). Transactional: a malformed config returns 400 with nothing changed. Returns `{ ok, recreated: string[], failed: [{ sessionId, error }], skippedBusy: string[], skippedReplaced: string[] }` — recreated sessions picked up the new config; busy sessions and sessions concurrently replaced mid-reload are skipped and reported.
 
 ## Shell Execution
 

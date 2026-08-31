@@ -26,7 +26,7 @@ import { tokenLimitsForModel, effectiveContextTier } from './model-billing.js';
 import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './agent-command.js';
 import { buildToolCatalog, type ToolCatalog } from './tool-catalog.js';
 import { builtinKey, cacoKey, type ToolKey } from './tool-key.js';
-import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys, serversForKey, learnServerCorrelation, configKeyForServer } from './tool-key-registry.js';
+import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys, serversForKey, learnServerCorrelation, configKeyForServer, purgeServers, knownServers } from './tool-key-registry.js';
 import { recordObservedSizes, getToolSize } from './tool-size-store.js';
 import { estimateToolTokens } from './tool-size.js';
 import { buildPagerView, type PagerSessionInput } from './pager-view.js';
@@ -2084,6 +2084,7 @@ export class SessionManager {
       }
       dispatchState.end(id);
       this.activeSessions.delete(id);
+      this.clearEnableableKeys(id); // drop stale caches before the recreate (may fail)
       try {
         await this.resume(id, { toolFactory, excludedTools, warmRecreate: true, mcpServersOverride: override });
         recreated.push(id);
@@ -2094,6 +2095,79 @@ export class SessionManager {
       }
     }
     return { ok: true, recreated, failed, skippedBusy, skippedReplaced };
+  }
+
+  /**
+   * The SDK-metadata server names the key registry still knows (learned keys OR stale
+   * correlation orphans) — the candidate set for the operator "forget unknown tools"
+   * action (spec-enable-tools-config-freshness C6 legacy repair). Exposed via
+   * `GET /api/mcp/auth/registry-servers` so the operator can confirm which are stale
+   * before purging (a future mcp-servers applet button can consume it). Read-only.
+   */
+  listKnownRegistryServers(): string[] {
+    return knownServers();
+  }
+
+  /**
+   * Operator-EXPLICIT "forget unknown tools" purge (spec C6 legacy repair). Removes all
+   * learned keys + correlation for the given SDK-metadata server names — the ONLY way to
+   * converge a stranded legacy entry (e.g. a removed `ADO-*` server) whose identity can no
+   * longer be correlated via `mcp.discover` (a removed server is absent from discover, so
+   * the automatic drop path can never reach it; and an age-only auto-sweep would over-hide
+   * a merely-down/unused server, C5). Requires explicit operator confirmation of the names.
+   *
+   * Convergence requires clearing the key from EVERY place it is latched, not just the
+   * registry (otherwise the D3 seed re-advertises it from `excludedTools`/auto-defer):
+   *   1. capture the purged servers' model-facing keys BEFORE the registry purge;
+   *   2. purge the registry (learned keys + correlation);
+   *   3. remove those keys from the system-wide auto-defer latch (so NEW sessions don't
+   *      restore them);
+   *   4. remove them from each ACTIVE session's live exclusion set via the success-gated
+   *      `setExcludedToolsLive` (so the current reminder stops advertising them), then
+   *      re-seed that session's enable-able cache from the pruned registry.
+   * Returns `{ removed, persisted, failedSessions }` — `persisted:false` means the
+   * registry disk write failed (purge may not survive restart); `failedSessions` lists
+   * sessions whose live exclusion update did NOT succeed (their key is still excluded, so
+   * they were not re-seeded). The caller MUST surface both.
+   */
+  async forgetUnknownTools(serverNames: string[]): Promise<{ removed: number; persisted: boolean; failedSessions: string[] }> {
+    // 1. Capture every model-facing key the purged servers currently provide, BEFORE the
+    //    registry loses them.
+    const purgedKeys = new Set<ToolKey>();
+    for (const server of serverNames) for (const k of keysForServer(server)) purgedKeys.add(k);
+
+    // 2. Purge the registry.
+    const result = purgeServers(serverNames);
+
+    // 3. Un-latch from the system-wide auto-defer store so new sessions don't re-seed them.
+    if (purgedKeys.size > 0) removeAutoDeferred([...purgedKeys]);
+
+    // 4. Remove from each active session's LIVE exclusion set, then re-seed from the pruned
+    //    registry. Removing from excludedTools is what actually stops the reminder listing
+    //    the key this session (the D3 seed carries excludedTools forward). A session whose
+    //    live update did NOT succeed still has the key excluded, so it is reported in
+    //    `failedSessions` and NOT re-seeded (re-seeding a still-excluded key would re-advertise it).
+    const failedSessions: string[] = [];
+    for (const [sessionId, active] of this.activeSessions) {
+      const currentExcluded = (active.excludedTools ?? []) as ToolKey[];
+      const next = currentExcluded.filter(k => !purgedKeys.has(k));
+      if (next.length !== currentExcluded.length) {
+        let applied: { success: boolean } | undefined;
+        try {
+          applied = await this.setExcludedToolsLive(sessionId, next);
+        } catch (e) {
+          console.warn(`[MCP] forget-unknown: live exclusion update threw for ${sessionId.slice(0, 8)}: ${e instanceof Error ? e.message : e}`);
+        }
+        if (!applied?.success) {
+          failedSessions.push(sessionId);
+          continue; // key still live-excluded; don't re-seed (it would re-advertise it).
+        }
+      }
+      this.clearEnableableKeys(sessionId);
+      this.seedEnableableKeysSync(sessionId);
+      this.warmEnableableKeys(sessionId);
+    }
+    return { ...result, failedSessions };
   }
 
   /** Clear stored reasoning effort when switching to a model that doesn't

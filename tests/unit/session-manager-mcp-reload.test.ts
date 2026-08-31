@@ -41,6 +41,25 @@ const loader = vi.hoisted(() => ({
   ),
 }));
 
+const registry = vi.hoisted(() => ({
+  lookupMcpKey: vi.fn(() => undefined),
+  learnMcpKey: vi.fn(),
+  learnFromMetadata: vi.fn(),
+  keysForServer: vi.fn((server: string) => (server === 'ADO' ? ['ADO-x', 'ADO-y'] : [])),
+  allLearnedKeys: vi.fn(() => []),
+  serversForKey: vi.fn(() => []),
+  learnServerCorrelation: vi.fn(),
+  configKeyForServer: vi.fn(() => undefined),
+  purgeServers: vi.fn((names: Iterable<string>) => ({ removed: [...names].length, persisted: true })),
+  knownServers: vi.fn(() => ['ADO', 'icm-mcp']),
+}));
+
+const autoDefer = vi.hoisted(() => ({
+  getAutoDeferred: vi.fn(() => new Set()),
+  addAutoDeferred: vi.fn(),
+  removeAutoDeferred: vi.fn(),
+}));
+
 vi.mock('@github/copilot-sdk', () => sdk);
 vi.mock('../../src/storage.js', () => storage);
 vi.mock('../../src/session-runtime.js', () => ({ disposeSessionRuntime: vi.fn() }));
@@ -54,6 +73,8 @@ vi.mock('../../src/sdk-session-store.js', () => ({
   STATE_DIR: '/tmp/nonexistent-state',
 }));
 vi.mock('../../src/mcp-config-loader.js', () => loader);
+vi.mock('../../src/tool-key-registry.js', () => registry);
+vi.mock('../../src/auto-defer-store.js', () => autoDefer);
 vi.mock('../../src/provider-registry.js', () => ({
   hasProviders: vi.fn(() => false),
   listByokModels: vi.fn(() => []),
@@ -74,6 +95,9 @@ type Manager = {
   activeSessions: Map<string, FakeActive>;
   sharedClient: { rpc: { mcp: { config: { reload: ReturnType<typeof vi.fn> } } } } | null;
   reloadMcpConfig: () => Promise<{ ok: boolean; error?: string; recreated: string[]; failed: { sessionId: string; error: string }[]; skippedBusy: string[]; skippedReplaced: string[] }>;
+  forgetUnknownTools: (names: string[]) => Promise<{ removed: number; persisted: boolean; failedSessions: string[] }>;
+  listKnownRegistryServers: () => string[];
+  setExcludedToolsLive: (id: string, excluded: string[]) => Promise<{ success: boolean }>;
   resume: (id: string, cfg: unknown) => Promise<unknown>;
   isBusy: (id: string) => boolean;
 };
@@ -88,13 +112,15 @@ function fakeActive(): FakeActive {
   };
 }
 
-async function makeManager(reload = vi.fn(async () => {})): Promise<{ manager: Manager; resume: ReturnType<typeof vi.fn>; reload: ReturnType<typeof vi.fn> }> {
+type ResumeFn = (id: string, cfg?: unknown) => Promise<{ sessionId: string }>;
+
+async function makeManager(reload = vi.fn(async () => {})): Promise<{ manager: Manager; resume: ReturnType<typeof vi.fn<ResumeFn>>; reload: ReturnType<typeof vi.fn> }> {
   const { SessionManager } = await import('../../src/session-manager.js');
   const manager = new SessionManager() as unknown as Manager;
   // The client-level MCP config reload (spec: process-wide cache drop).
   manager.sharedClient = { rpc: { mcp: { config: { reload } } } };
   // Stub resume so a recreate re-inserts a fresh active session (as the real resume does).
-  const resume = vi.fn(async (id: string) => {
+  const resume = vi.fn<ResumeFn>(async (id: string) => {
     manager.activeSessions.set(id, fakeActive());
     return { sessionId: id };
   });
@@ -211,5 +237,72 @@ describe('SessionManager.reloadMcpConfig — transactional warm reload (cf-reloa
     expect(r.recreated).toEqual([]);
     expect(reload).toHaveBeenCalledTimes(1); // cache still dropped, even with no session
     expect(resume).not.toHaveBeenCalled();
+  });
+});
+
+describe('SessionManager.forgetUnknownTools — operator legacy purge (cf-verify / C6)', () => {
+  it('lists the registry server candidates for the operator', async () => {
+    const { manager } = await makeManager();
+    expect(manager.listKnownRegistryServers()).toEqual(['ADO', 'icm-mcp']);
+  });
+
+  it('purges the confirmed-stale server names and returns the registry result', async () => {
+    const { manager } = await makeManager();
+    const r = await manager.forgetUnknownTools(['ADO']);
+    expect(registry.purgeServers).toHaveBeenCalledWith(['ADO']);
+    expect(r).toEqual({ removed: 1, persisted: true, failedSessions: [] });
+  });
+
+  it('CONVERGES: un-latches the purged keys from auto-defer AND removes them from live exclusions', async () => {
+    const { manager } = await makeManager();
+    // A session currently deferring the purged server's keys plus an unrelated one.
+    const active = fakeActive();
+    active.excludedTools = ['ADO-x', 'ADO-y', 'keep-me'];
+    manager.activeSessions.set('s1', active);
+    const setLive = vi.fn(async () => ({ success: true }));
+    manager.setExcludedToolsLive = setLive as unknown as Manager['setExcludedToolsLive'];
+    const seedSpy = vi.spyOn(manager as unknown as { seedEnableableKeysSync: (id: string) => void }, 'seedEnableableKeysSync');
+
+    const r = await manager.forgetUnknownTools(['ADO']);
+
+    // auto-defer latch cleared for the purged server's keys (captured BEFORE purge).
+    expect(autoDefer.removeAutoDeferred).toHaveBeenCalledWith(expect.arrayContaining(['ADO-x', 'ADO-y']));
+    // live exclusion set rewritten WITHOUT the purged keys, keeping the unrelated one.
+    expect(setLive).toHaveBeenCalledWith('s1', ['keep-me']);
+    expect(seedSpy).toHaveBeenCalledWith('s1'); // successful update re-seeds
+    expect(r.failedSessions).toEqual([]);
+  });
+
+  it('a FAILED live exclusion update is reported and that session is NOT re-seeded', async () => {
+    const { manager } = await makeManager();
+    const active = fakeActive();
+    active.excludedTools = ['ADO-x', 'keep-me'];
+    manager.activeSessions.set('s1', active);
+    // The SDK update did not apply (success:false) — the key is still live-excluded.
+    manager.setExcludedToolsLive = (vi.fn(async () => ({ success: false }))) as unknown as Manager['setExcludedToolsLive'];
+    const seedSpy = vi.spyOn(manager as unknown as { seedEnableableKeysSync: (id: string) => void }, 'seedEnableableKeysSync');
+
+    const r = await manager.forgetUnknownTools(['ADO']);
+    expect(r.failedSessions).toEqual(['s1']);
+    expect(seedSpy).not.toHaveBeenCalledWith('s1'); // not re-seeded — would re-advertise
+  });
+
+  it('does not touch a session that was not deferring any purged key', async () => {
+    const { manager } = await makeManager();
+    const active = fakeActive();
+    active.excludedTools = ['keep-me'];
+    manager.activeSessions.set('s1', active);
+    const setLive = vi.fn(async () => ({ success: true }));
+    manager.setExcludedToolsLive = setLive as unknown as Manager['setExcludedToolsLive'];
+
+    const r = await manager.forgetUnknownTools(['ADO']);
+    expect(setLive).not.toHaveBeenCalled(); // no purged key in its exclusions → no live update
+    expect(r.failedSessions).toEqual([]);
+  });
+
+  it('surfaces a failed persist (persisted:false)', async () => {
+    const { manager } = await makeManager();
+    registry.purgeServers.mockReturnValueOnce({ removed: 1, persisted: false });
+    expect((await manager.forgetUnknownTools(['ADO'])).persisted).toBe(false);
   });
 });

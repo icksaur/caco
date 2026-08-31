@@ -484,4 +484,35 @@ router.post('/reload', async (_req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/mcp/auth/registry-servers
+ * List the SDK-metadata server names the key registry still knows (learned keys or stale
+ * correlation orphans) — the candidate set for the "forget unknown tools" operator action
+ * (spec-enable-tools-config-freshness C6 legacy repair). Read-only.
+ */
+router.get('/registry-servers', (_req: Request, res: Response) => {
+  res.json({ servers: sessionManager.listKnownRegistryServers() });
+});
+
+/**
+ * POST /api/mcp/auth/forget-unknown
+ * Operator-explicit "forget unknown tools" purge: removes all learned keys + correlation
+ * for the confirmed-stale server names. The ONLY way to converge a stranded legacy `ADO-*`
+ * entry whose server is gone (it can't be correlated via mcp.discover, and an age-only
+ * auto-sweep would over-hide). Body: { servers: string[] }. Returns { removed, persisted }.
+ */
+router.post('/forget-unknown', async (req: Request, res: Response) => {
+  const servers = (req.body as { servers?: unknown })?.servers;
+  if (!Array.isArray(servers) || servers.some(s => typeof s !== 'string')) {
+    res.status(400).json({ error: 'servers must be an array of strings' });
+    return;
+  }
+  if (servers.length === 0) {
+    res.status(400).json({ error: 'servers must be non-empty (an explicit operator confirmation is required — no automatic sweep)' });
+    return;
+  }
+  const result = await sessionManager.forgetUnknownTools(servers as string[]);
+  res.json(result);
+});
+
 export { router };

@@ -27,13 +27,15 @@ These are load-bearing facts the design MUST respect (all verified in code):
   migration/read exposes `server(key)` for the filter; see D2.)
 - **C3 — pre-create cannot know the full server inventory, so it must NOT drop.**
   The seed (`session-manager.ts:819-823`) is computed before the session exists;
-  `rpc.mcp.list`/`mcp.discover` need an active session (`:2235-2245`). Home
-  `~/.copilot/mcp-config.json` is Caco-owned, but workspace/plugin servers are
-  SDK-discovered (via `mcp.discover`, runtime-owned paths). Since pre-create
-  knowledge is incomplete, **Stage 1 drops nothing** — it only builds an
-  over-advertising synchronous seed to close the first-turn race. All narrowing is
-  deferred to Stage 2, which has the authoritative `mcp.discover` inventory + live
-  status. (This dissolves the home-vs-project filename hazard entirely.)
+  the per-session `rpc.mcp.list` needs an active session, and the CLIENT-level
+  `mcp.discover` needs the shared client running — both are only available
+  POST-create (`:2235-2245`). Home `~/.copilot/mcp-config.json` is Caco-owned, but
+  workspace/plugin servers are SDK-discovered (via the client `mcp.discover`,
+  runtime-owned paths). Since pre-create knowledge is incomplete, **Stage 1 drops
+  nothing** — it only builds an over-advertising synchronous seed to close the
+  first-turn race. All narrowing is deferred to Stage 2, which has the authoritative
+  `mcp.discover` inventory + live status. (This dissolves the home-vs-project filename
+  hazard entirely.)
 - **C4 — `setExcludedToolsLive` cannot change the server set.** It only calls
   `rpc.options.update({ excludedTools })` (`:2523-2529`). Warm reload requires a
   session recreate/rebind, not an exclusion update.
@@ -73,8 +75,10 @@ These are load-bearing facts the design MUST respect (all verified in code):
      **provably unique** — never guess from ambiguous shared-tool membership).
      Registry entries whose server is **already gone** (the stranded `ADO-*` case)
      can't be correlated via discover — so the ONLY safe repair is an **explicit
-     operator purge**: a "forget unknown tools" action in the mcp-servers applet that
-     removes registry entries the operator confirms are stale. **Do NOT use an
+     operator purge**: a "forget unknown tools" action (the
+     `POST /api/mcp/auth/forget-unknown` endpoint, with the candidate list from
+     `GET /api/mcp/auth/registry-servers`; a future mcp-servers applet button can consume
+     them) that removes registry entries the operator confirms are stale. **Do NOT use an
      automatic age-only staleness sweep** — a tool merely deferred/unused (or on a
      temporarily-down server) for N days is not evidence it was removed, so
      age-based auto-deletion would over-hide (C5 violation). An automatic sweep is
@@ -86,7 +90,7 @@ These are load-bearing facts the design MUST respect (all verified in code):
   keys (never drop)** — over-advertise, per C5. The forward mapping + migration make
   that residual set shrink to empty over normal use.
 
-## Goal (operator intent)
+## Goals
 
 > "We need to be able to use all tools configured, and not have any stale cache
 > issues."
@@ -245,8 +249,9 @@ home-config-name filter entirely.)
 **Stage 2 — post-create, AUTHORITATIVE via `mcp.discover` + live status.** The
 async warm uses two SDK RPCs that together give the complete picture:
 
-- **`session.rpc.mcp.discover({ workingDirectory })` → `DiscoveredMcpServer[]`**
-  (rpc.d.ts:6583, 15903) is the **configured inventory** across user + workspace +
+- **`client.rpc.mcp.discover({ workingDirectory })` → `DiscoveredMcpServer[]`**
+  (rpc.d.ts:6583, 15903 — a CLIENT rpc, NOT per-session; the session id only supplies
+  the working-directory context) is the **configured inventory** across user + workspace +
   plugin sources, each with a `type`/source and `enabled` state. This is the
   authoritative "is this server CONFIGURED at all" oracle — it distinguishes
   **removed** (absent from discover) from **configured**.
@@ -329,37 +334,7 @@ seed, and (b) cross-reference that authoritative post-create narrowing (removed 
 disabled / down / dropped-allowlist) lives here. Do not leave two specs with
 contradictory invariants.
 
-## Implementation plan (final, two-stage)
-
-1. **D1 home snapshot**: read `~/.copilot/mcp-config.json` once at create/resume top;
-   thread to SDK build. No pre-create seed filter (Stage 1 never drops).
-2. **D2 Stage 1 (pre-create superset seed)**: build the D3 seed only; drop nothing.
-3. **D2 Stage 2 (post-create, authoritative)**: in `warmEnableableKeys`, call
-   `session.rpc.mcp.discover({ workingDirectory })` for the configured inventory +
-   `mcp.list`/`listTools` for status/live tools. **Gate: on discover throw/failure,
-   narrow nothing.** Correlate registry server names to discover config-keys (C6) via
-   live `getCurrentToolMetadata` observation; drop keys only for a CORRELATED server
-   absent from discover. Handle `enabled:false` (drop + server-disabled). Per-server
-   refcount-safe merge; keep uncorrelated and down servers' keys.
-4. **D3 synchronous all-origin superset seed** (Caco ∪ builtin ∪ `allLearnedKeys()`
-   ∪ uncertain `config.excludedTools`) of `enableableKeysBySession` at create
-   (`:895`) / resume (`:1235`), before the async warm. Drops nothing.
-5. **Reverse-registry index** (name → server[s]) + **6-state** message
-   classification (not-available / not-configured / server-disabled /
-   temporarily-unavailable / stale-unverified / unknown) keyed off `mcp.discover` +
-   status, in `enableToolsLocked` / `tool-reveal-tool.ts`. Only `unknown` says
-   "re-list"; the stranded-legacy case is `stale-unverified` (non-looping).
-6. **C6 correlation + migration**: persist `metadataName ↔ configKey` at learn time
-   ONLY on provably-unique linkage; backfill for discoverable servers on first run;
-   add an operator "forget unknown tools" purge for already-stranded legacy entries.
-   NO automatic age-only sweep (over-hides); any auto-sweep must be gated on
-   authoritative correlated-absence.
-7. **D1 warm reload**: explicit endpoint/applet → session RECREATE (not
-   `setExcludedToolsLive`, C4); transactional (parse failure = no-op, keep prior).
-8. **Reconcile** `spec-enable-tools-catalog-divergence`.
-9. Tests + full unit suite.
-
-## Verification
+## Acceptance
 
 - Edit `mcp-config.json` to ADD a server/tool → a NEW session can enable+use it
   with no full restart. (D1/D2)
@@ -386,6 +361,40 @@ contradictory invariants.
   removes it, and assert NO automatic age-based deletion of a merely-unused key.
 - Regression: configured+observed tool still enables; icm non-whitelisted tool still
   reports not-available; NO over-hide of any enable-able tool at any point.
+
+## Plan
+
+Implemented in 6 reviewed, independently-committed increments (all landed on branch
+`enable-tools-config-freshness`; each typecheck + unit-tested + peer-reviewed):
+
+1. **D1 home snapshot**: read `~/.copilot/mcp-config.json` once at create/resume top;
+   thread to SDK build. No pre-create seed filter (Stage 1 never drops).
+2. **D2 Stage 1 (pre-create superset seed)**: build the D3 seed only; drop nothing.
+3. **D2 Stage 2 (post-create, authoritative)**: in `warmEnableableKeys`, call the
+   CLIENT `mcp.discover({ workingDirectory })` for the configured inventory +
+   `mcp.list`/`listTools` for status/live tools. **Gate: on discover throw/failure,
+   narrow nothing.** Correlate registry server names to discover config-keys (C6) via
+   live `getCurrentToolMetadata` observation; drop keys only for a CORRELATED server
+   absent from discover. Handle `enabled:false` (drop + server-disabled). Per-server
+   refcount-safe merge; keep uncorrelated and down servers' keys.
+4. **D3 synchronous all-origin superset seed** (Caco ∪ builtin ∪ `allLearnedKeys()`
+   ∪ uncertain `config.excludedTools`) of `enableableKeysBySession` at create
+   (`:895`) / resume (`:1235`), before the async warm. Drops nothing.
+5. **Reverse-registry index** (name → server[s]) + **6-state** message
+   classification (not-available / not-configured / server-disabled /
+   temporarily-unavailable / stale-unverified / unknown) keyed off `mcp.discover` +
+   status, in `enableToolsLocked` / `tool-reveal-tool.ts`. Only `unknown` says
+   "re-list"; the stranded-legacy case is `stale-unverified` (non-looping).
+6. **C6 correlation + migration**: persist `metadataName ↔ configKey` at learn time
+   ONLY on provably-unique linkage; backfill for discoverable servers on first run;
+   add an operator "forget unknown tools" purge for already-stranded legacy entries.
+   NO automatic age-only sweep (over-hides); any auto-sweep must be gated on
+   authoritative correlated-absence.
+7. **D1 warm reload**: explicit endpoint (`POST /api/mcp/auth/reload`) → session
+   RECREATE (not `setExcludedToolsLive`, C4); transactional (parse failure = no-op,
+   keep prior); client `mcp.config.reload()` drops the process-wide cache.
+8. **Reconcile** `spec-enable-tools-catalog-divergence` (invariant revision note).
+9. Tests + full unit suite (gate: typecheck + lint + specs + pii + suite green).
 
 ## Files
 

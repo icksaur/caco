@@ -125,7 +125,11 @@ function handleEvent(event: SessionEvent): void {
         if (eventType === 'session.idle') {
           void markSessionObserved(sessionId);
           adHocBar.clearSession(sessionId);
-          notifySessionComplete(sessionTracker.getIntent(sessionId) || '');
+          // Skip the completion notification for a spurious idle that the server
+          // is about to supersede with an auto-continuation (caco_enable_tools).
+          if (!data.willAutoContinue) {
+            notifySessionComplete(sessionTracker.getIntent(sessionId) || '');
+          }
           chatView.getChattingForm()?.resetSteerCount();
           // Final settle-scroll: the last streaming event scrolled before the
           // assistant message's markdown/code finished reflowing, so it can

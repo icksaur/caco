@@ -561,8 +561,18 @@ export async function dispatchMessage(
       dispatchState.notifyActivity(sessionId, event.type);
 
       // Forward the SDK event to the client (no transformation — caco.* events
-      // are emitted directly by their tool handlers).
-      onEvent(event);
+      // are emitted directly by their tool handlers). One exception: annotate a
+      // session.idle that is about to be superseded by an auto-continuation with
+      // `willAutoContinue` so the client suppresses the "session complete" browser
+      // notification for this spurious idle (the server immediately re-dispatches).
+      if (event.type === 'session.idle' && sessionManager.hasPendingAutoContinue(sessionId)) {
+        onEvent({
+          ...event,
+          data: { ...(event.data ?? {}), willAutoContinue: true },
+        } as SessionEvent);
+      } else {
+        onEvent(event);
+      }
 
       // Server-side side-effects: intent capture, auto-context, usage,
       // reload signal. Extracted so each event hook stays inspectable.

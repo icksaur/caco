@@ -108,6 +108,7 @@ export const EVENT_TO_OUTER: Record<string, string> = {
   'tool.execution_progress': 'assistant-activity',
   'tool.execution_partial_result': 'assistant-activity',
   'tool.execution_complete': 'assistant-activity',
+  'subagent.started': 'assistant-activity',
   'session.error': 'assistant-activity',
   'session.compaction_start': 'assistant-activity',
   'session.compaction_complete': 'assistant-activity',
@@ -145,6 +146,7 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
   'tool.execution_progress': 'tool-text',
   'tool.execution_partial_result': 'tool-text',
   'tool.execution_complete': 'tool-text',
+  'subagent.started': 'tool-text',
   'session.error': 'error-text',
   'session.compaction_start': 'compact-text',
   'session.compaction_complete': 'compact-text',
@@ -172,6 +174,9 @@ export const EVENT_KEY_PROPERTY: Record<string, string> = {
   'tool.execution_progress': 'toolCallId',
   'tool.execution_partial_result': 'toolCallId',
   'tool.execution_complete': 'toolCallId',
+  // Carries the resolved sub-agent model and the SAME toolCallId as the task
+  // tool call, so it lands on the already-rendered task line.
+  'subagent.started': 'toolCallId',
   // Reasoning events use reasoningId
   'assistant.reasoning': 'reasoningId',
   'assistant.reasoning_delta': 'reasoningId',
@@ -342,6 +347,20 @@ function appendPath(p: string): EventInserterFn {
 /** Safely extract a string from unknown SDK data. Returns fallback for non-strings. */
 function str(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+/**
+ * Headline for a tool activity line — the tool name plus the sub-agent model
+ * once it is known. Shared so the model annotation survives the re-render that
+ * tool.execution_complete performs.
+ *
+ * Do NOT source the model from a tool.execution_start / tool.execution_complete
+ * `data.model`: on a task call that field is the PARENT session's model, not the
+ * model the sub-agent runs with. Only subagent.* events carry the resolved one.
+ */
+function toolHeadline(element: InserterElement, name: string): string {
+  const model = element.dataset.subagentModel;
+  return model ? `${name}  ${model}` : name;
 }
 
 function extractToolMeta(element: InserterElement, data: Record<string, unknown>): { toolName: string; path: string; basename: string } {
@@ -532,7 +551,23 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
       return;
     }
 
-    element.textContent = input ? `${name}\n\`${input}\`` : name;
+    element.textContent = input ? `${toolHeadline(element, name)}\n\`${input}\`` : toolHeadline(element, name);
+  },
+
+  // A sub-agent (task tool) reports the model it actually resolved to. It shares
+  // the parent tool call's toolCallId, so the keyed lookup lands on the existing
+  // task line and this annotates it in place rather than adding a second line.
+  'subagent.started': (element, data) => {
+    const model = str(data.model);
+    if (!model) return;
+
+    element.dataset.subagentModel = model;
+
+    const name = element.dataset.toolName || 'task';
+    const input = element.dataset.toolInput || '';
+    element.textContent = input
+      ? `${toolHeadline(element, name)}\n\`${input}\``
+      : toolHeadline(element, name);
   },
 
   'tool.execution_complete': (element, data) => {
@@ -556,7 +591,7 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     const basename = storedPath.includes('/') || storedPath.includes('\\')
       ? storedPath.split(/[\\/]/).pop() || ''
       : '';
-    const header = basename ? `*${name}  ${basename}*` : `*${name}*`;
+    const header = basename ? `*${name}  ${basename}*` : `*${toolHeadline(element, name)}*`;
     
     const parts = [input, output].filter(Boolean);
     const content = `${header}\n\n\`\`\`${name}\n${parts.join('\n')}\n\`\`\``;

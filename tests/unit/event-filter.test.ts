@@ -105,6 +105,15 @@ describe('shouldFilter', () => {
         data: { agentName: 'coder', toolCallId: '123' } 
       })).toBe(false);
     });
+
+    // The chat annotates a task line with the sub-agent's resolved model, which
+    // only subagent.started carries. Dropping it here blanks that display.
+    it('keeps the subagent.started that carries the resolved model', () => {
+      expect(shouldFilter({
+        type: 'subagent.started',
+        data: { agentName: 'task', toolCallId: 'call-1', model: 'gemini-3.6-flash' },
+      })).toBe(false);
+    });
   });
 
   describe('returns false (keep event) - passthrough types', () => {

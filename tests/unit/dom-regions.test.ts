@@ -217,6 +217,11 @@ describe('EVENT_KEY_PROPERTY', () => {
     expect(EVENT_KEY_PROPERTY['assistant.reasoning']).toBe('reasoningId');
     expect(EVENT_KEY_PROPERTY['assistant.reasoning_delta']).toBe('reasoningId');
   });
+
+  it('keys subagent.started by toolCallId so it lands on the task line', async () => {
+    const { EVENT_KEY_PROPERTY } = await import('../../public/ts/dom-regions.js');
+    expect(EVENT_KEY_PROPERTY['subagent.started']).toBe('toolCallId');
+  });
 });
 
 // ── Event inserter tests (from event-inserter.test.ts) ──────────
@@ -335,6 +340,74 @@ describe('insertEvent', () => {
         result: {}
       } }, el);
       expect(el.textContent).toBe('Testing intent');
+    });
+  });
+
+  describe('sub-agent model annotation', () => {
+    /** Render a task call the way the SDK sequences it, up to subagent.started. */
+    async function startedTask(startData: Record<string, unknown> = {}) {
+      const { insertEvent } = await import('../../public/ts/dom-regions.js');
+      const el = mockElement();
+      insertEvent({ type: 'tool.execution_start', data: {
+        toolName: 'task',
+        toolCallId: 'call-1',
+        arguments: { description: 'Run the gate' },
+        ...startData,
+      } }, el);
+      return { insertEvent, el };
+    }
+
+    it('annotates the task line with the resolved sub-agent model', async () => {
+      const { insertEvent, el } = await startedTask();
+      expect(el.textContent).toBe('task\n`Run the gate`');
+
+      insertEvent({ type: 'subagent.started', data: {
+        toolCallId: 'call-1',
+        agentName: 'task',
+        model: 'gemini-3.6-flash',
+      } }, el);
+
+      expect(el.textContent).toBe('task  gemini-3.6-flash\n`Run the gate`');
+    });
+
+    it('keeps the model visible after the completion re-render', async () => {
+      const { insertEvent, el } = await startedTask();
+      insertEvent({ type: 'subagent.started', data: { toolCallId: 'call-1', model: 'gemini-3.6-flash' } }, el);
+
+      insertEvent({ type: 'tool.execution_complete', data: {
+        success: true,
+        result: { content: 'done' },
+      } }, el);
+
+      expect(el.textContent).toContain('*task  gemini-3.6-flash*');
+    });
+
+    it('ignores the parent model on the tool call itself', async () => {
+      // tool.execution_start carries the PARENT session's model. Showing it
+      // would report the caller's model as if it were the sub-agent's.
+      const { el } = await startedTask({ model: 'claude-opus-4.7' });
+
+      expect(el.textContent).toBe('task\n`Run the gate`');
+      expect(el.dataset.subagentModel).toBeUndefined();
+    });
+
+    it('leaves the line unannotated when the runtime omits the model', async () => {
+      const { insertEvent, el } = await startedTask();
+
+      insertEvent({ type: 'subagent.started', data: { toolCallId: 'call-1', agentName: 'explore' } }, el);
+
+      expect(el.textContent).toBe('task\n`Run the gate`');
+    });
+
+    it('does not annotate non-task tools that carry a model field', async () => {
+      const { insertEvent } = await import('../../public/ts/dom-regions.js');
+      const el = mockElement();
+      insertEvent({ type: 'tool.execution_start', data: {
+        toolName: 'bash',
+        arguments: { command: 'ls -la' },
+        model: 'claude-opus-4.7',
+      } }, el);
+      expect(el.textContent).toBe('bash\n`ls -la`');
     });
   });
 

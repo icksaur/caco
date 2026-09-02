@@ -306,6 +306,22 @@ describe('message-streaming additional controller coverage', () => {
     expect(ctx.mocks.scrollToBottom).toHaveBeenCalled();
   });
 
+  it('suppresses the completion notification for an idle the server will auto-continue', async () => {
+    const ctx = await loadMessageStreaming();
+    ctx.module.initMessageStreaming();
+
+    ctx.eventCallback?.({ type: 'session.idle', data: { willAutoContinue: true } });
+    await vi.waitFor(() => expect(ctx.mocks.formStateSet).toHaveBeenCalledWith({ options: ['Retry'] }));
+
+    expect(ctx.mocks.notifySessionComplete).not.toHaveBeenCalled();
+    // Every other idle side-effect must still run — the annotation suppresses
+    // the notification only, not the settle.
+    expect(ctx.mocks.sessionSetBusy).toHaveBeenCalledWith('sess-1', false);
+    expect(ctx.mocks.markSessionObserved).toHaveBeenCalledWith('sess-1');
+    expect(ctx.mocks.clearSession).toHaveBeenCalledWith('sess-1');
+    expect(ctx.mocks.scrollToBottom).toHaveBeenCalled();
+  });
+
   it('drops stale errors, finalizes reasoning, and renders content events with scroll', async () => {
     const ctx = await loadMessageStreaming();
     ctx.module.initMessageStreaming();

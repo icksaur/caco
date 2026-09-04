@@ -15,7 +15,6 @@
  * deletions — the code stays; only registration is skipped.
  */
 export const DEFAULT_DISABLED_TOOLS: string[] = [
-  'caco_session_store_sql', // cross-session history SQL — power tool, rarely used
   // MCP OAuth registration — the ONLY agent path that creates an MCP auth-store
   // entry (the applet /start + /config routes 404 without one). Disabled here
   // because it auto-opens OAuth browser tabs; to add a new OAuth MCP server,

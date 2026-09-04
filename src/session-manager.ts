@@ -1450,6 +1450,13 @@ export class SessionManager {
     const toEvict = Math.min(this.activeSessions.size - SessionManager.MAX_ACTIVE_SESSIONS, candidates.length);
     for (let i = 0; i < toEvict; i++) {
       const id = candidates[i];
+      // Re-check under the loop: `candidates` is a snapshot taken before any
+      // await, and stop() is async, so a session can start dispatching while an
+      // earlier eviction is in flight. stop() clears dispatch state
+      // unconditionally, so evicting a live turn kills it AND leaves the session
+      // reporting not-busy while it is still streaming. Staying over the cap is
+      // the strictly safer outcome.
+      if (dispatchState.isBusy(id)) continue;
       console.log(`[EVICT] Stopping inactive session ${id} (${this.activeSessions.size} active, max ${SessionManager.MAX_ACTIVE_SESSIONS})`);
       try {
         await this.stop(id);

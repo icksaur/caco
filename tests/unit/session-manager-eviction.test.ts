@@ -106,4 +106,35 @@ describe('SessionManager LRU eviction', () => {
     expect(runtime.disposeSessionRuntime).toHaveBeenCalledWith('s1');
     expect(runtime.disposeSessionRuntime).toHaveBeenCalledWith('s2');
   });
+
+  // The candidate list is a snapshot, but stopping is async. A session that
+  // starts dispatching while an earlier eviction awaits must not be torn down:
+  // stop() clears dispatch state unconditionally, so evicting a live turn both
+  // kills it and makes the session report not-busy while it is still streaming.
+  it('spares a session that becomes busy while an earlier eviction is awaiting', async () => {
+    const { SessionManager } = await import('../../src/session-manager.js');
+    const { dispatchState } = await import('../../src/dispatch-state.js');
+    const manager = new SessionManager();
+    const active = (manager as unknown as { activeSessions: Map<string, FakeActive> }).activeSessions;
+
+    const usedAt: Record<string, number> = { s0: 1000, s1: 100, s2: 200, s3: 300, s4: 400, s5: 500, s6: 600 };
+    for (const id of Object.keys(usedAt)) {
+      const disconnect = id === 's1'
+        // s1 is evicted first; its await is the window in which s2 goes busy.
+        ? vi.fn(async () => { dispatchState.start('s2', 'corr-s2'); })
+        : vi.fn(async () => {});
+      active.set(id, { cwd: '/x', session: { disconnect }, toolFactory: () => [], lastUsedAt: usedAt[id] });
+    }
+
+    try {
+      await (manager as unknown as { evictInactiveSessions: () => Promise<void> }).evictInactiveSessions();
+
+      expect(active.has('s1')).toBe(false);
+      expect(active.has('s2')).toBe(true);
+      expect(dispatchState.isBusy('s2')).toBe(true);
+      expect(runtime.disposeSessionRuntime).not.toHaveBeenCalledWith('s2');
+    } finally {
+      dispatchState.end('s2');
+    }
+  });
 });

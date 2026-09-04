@@ -487,8 +487,18 @@ export class SessionManager {
   private reloadInFlight: Promise<unknown> | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private healthTimer: NodeJS.Timeout | null = null;
+  // I4: concurrent probes collapse to one. ensureClientHealthy sits on the
+  // dispatch path, so N simultaneous sends would otherwise mean N ping storms
+  // against a client that is already suspected of being slow.
+  private healthProbeInFlight: Promise<{ healthy: boolean; probed: CopilotClientInstance }> | null = null;
   private static readonly SDK_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
   private static readonly HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+  private static readonly HEALTH_PING_TIMEOUT_MS = 5000;
+  // The runtime legitimately stalls for seconds under load (cold resume of a
+  // large session is the same order as the probe timeout), so a single timeout
+  // is not evidence of death — only a run of them is.
+  private static readonly HEALTH_PING_ATTEMPTS = 3;
+  private static readonly HEALTH_PING_RETRY_DELAY_MS = 500;
   
   private static readonly MAX_ACTIVE_SESSIONS = 5;
   private cachedModels: SDKModelInfo[] = [];
@@ -552,20 +562,37 @@ export class SessionManager {
   }
 
   /**
-   * Drop every active session as one unit: end its dispatch, dispose its
-   * runtime (queue + throughput + usage), and forget it. When `notify`, tell the
-   * FE the in-flight turn was reset so it doesn't sit on a dead dispatch.
+   * Tear down active sessions as one unit. A session with no in-flight dispatch
+   * is fully dropped: dispatch ended, runtime disposed, forgotten. When `notify`,
+   * the FE is told its turn was reset.
    *
-   * Returns the affected session ids. The SDK-level `_clientSessions` view
-   * pointers in SessionState are deliberately left intact — the next access
-   * re-resumes the session from disk; this only clears volatile runtime state.
+   * I1 — a session holding an in-flight dispatch is reported to, never dismantled.
+   * Its stale handle is forgotten (the next access re-resumes), but its dispatch
+   * state and runtime are left alone, because `dispatchMessage`'s own
+   * `completeDispatch` is the single owner of ending that turn. Clearing dispatch
+   * state here is what made a session report not-busy while it was still
+   * streaming; disposing its runtime is what corrupted that turn's later teardown.
+   *
+   * I5 — a spared session cannot rescue itself: `abortStaleGeneration` can no
+   * longer reach a force-stopped client, so `retryWithFreshClient` refuses to
+   * resend, and the `between-events` watchdog branch never retries at all. The
+   * boundary event below is therefore the only prompt notice a busy session gets,
+   * and must not be skipped for it.
+   *
+   * Returns the fully-dropped ids. The SDK-level `_clientSessions` view pointers
+   * in SessionState are deliberately left intact — the next access re-resumes the
+   * session from disk; this only clears volatile runtime state.
    */
   private dropActiveSessions(notify: boolean): string[] {
-    const affected = [...this.activeSessions.keys()];
+    const all = [...this.activeSessions.keys()];
     this.activeSessions.clear();
-    for (const id of affected) {
-      dispatchState.end(id);
-      disposeSessionRuntime(id);
+    const dropped: string[] = [];
+    for (const id of all) {
+      if (!dispatchState.isBusy(id)) {
+        dispatchState.end(id);
+        disposeSessionRuntime(id);
+        dropped.push(id);
+      }
       if (notify) {
         broadcastEvent(id, {
           type: 'session.error',
@@ -573,10 +600,11 @@ export class SessionManager {
         } as SessionEvent);
       }
     }
-    if (affected.length > 0) {
-      console.warn(`[SDK] Dropped ${affected.length} active session(s) on client restart`);
+    if (all.length > 0) {
+      const spared = all.length - dropped.length;
+      console.warn(`[SDK] Dropped ${dropped.length} active session(s) on client restart${spared > 0 ? ` (${spared} mid-dispatch, left to their own teardown)` : ''}`);
     }
-    return affected;
+    return dropped;
   }
 
   /**
@@ -595,19 +623,68 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Probe the shared client, retrying before reporting death.
+   *
+   * I2 — the client is declared dead only after HEALTH_PING_ATTEMPTS consecutive
+   * failures. A single slow ping is indistinguishable from a busy runtime, and
+   * the verdict's remediation (restart + drop) is destructive, so one sample is
+   * not enough to act on.
+   *
+   * Returns the client instance that was probed, so the caller can honor I3 and
+   * refuse to remediate a client that has already been replaced.
+   */
+  private async probeClientHealth(
+    client: CopilotClientInstance,
+    label: string
+  ): Promise<{ healthy: boolean; probed: CopilotClientInstance }> {
+    if (this.healthProbeInFlight) return this.healthProbeInFlight;
+    const probe = this.runHealthProbe(client, label);
+    this.healthProbeInFlight = probe;
+    try {
+      return await probe;
+    } finally {
+      // Cleared on settle so the next caller after completion probes afresh
+      // rather than reusing a verdict about a client that may since have changed.
+      if (this.healthProbeInFlight === probe) this.healthProbeInFlight = null;
+    }
+  }
+
+  private async runHealthProbe(
+    client: CopilotClientInstance,
+    label: string
+  ): Promise<{ healthy: boolean; probed: CopilotClientInstance }> {
+    for (let attempt = 1; attempt <= SessionManager.HEALTH_PING_ATTEMPTS; attempt++) {
+      try {
+        await Promise.race([
+          client.ping(label),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('ping timeout')), SessionManager.HEALTH_PING_TIMEOUT_MS)),
+        ]);
+        return { healthy: true, probed: client };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (attempt === SessionManager.HEALTH_PING_ATTEMPTS) {
+          console.warn(`[SDK] Health probe "${label}" failed ${attempt}/${SessionManager.HEALTH_PING_ATTEMPTS}: ${message}`);
+          return { healthy: false, probed: client };
+        }
+        console.warn(`[SDK] Health probe "${label}" attempt ${attempt}/${SessionManager.HEALTH_PING_ATTEMPTS} failed: ${message}; retrying`);
+        await new Promise(resolve => setTimeout(resolve, SessionManager.HEALTH_PING_RETRY_DELAY_MS));
+      }
+    }
+    return { healthy: false, probed: client };
+  }
+
   async ensureClientHealthy(): Promise<void> {
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     const client = await this.ensureClient();
-    try {
-      await Promise.race([
-        client.ping('health'),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('ping timeout')), 5000))
-      ]);
-    } catch (e) {
-      console.warn('[SDK] Ping failed, force-stopping client:', e instanceof Error ? e.message : e);
-      await this.restartSharedClient({ notify: true });
-      await this.ensureClient();
-    }
+    const { healthy, probed } = await this.probeClientHealth(client, 'health');
+    if (healthy) return;
+    // I3: a peer may have already restarted the client while this probe ran.
+    // Force-stopping now would kill the fresh client it just established.
+    if (this.sharedClient !== probed) return;
+    await this.restartSharedClient({ notify: true });
+    await this.ensureClient();
   }
 
   resetIdleTimer(): void {
@@ -615,6 +692,8 @@ export class SessionManager {
     this.idleTimer = setTimeout(() => {
       if (!this.sharedClient) return;
       if (dispatchState.getAllActive().size > 0) {
+        // Same rule as I1 at dropActiveSessions: a live turn is never torn down
+        // by a client-lifecycle decision.
         console.log('[SDK] Idle timeout skipped — active dispatches exist');
         this.resetIdleTimer();
         return;
@@ -646,18 +725,16 @@ export class SessionManager {
       return;
     }
 
-    try {
-      await Promise.race([
-        client.ping('health-check'),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('ping timeout')), 5000))
-      ]);
+    const { healthy, probed } = await this.probeClientHealth(client, 'health-check');
+    if (healthy) {
       // Piggyback a quota refresh on the health check cadence so usage stays
       // current even for long-idle sessions with no turns triggering pollQuota.
       void pollQuota(client);
-    } catch (e) {
-      console.warn('[SDK] Health check failed, force-stopping client:', e instanceof Error ? e.message : e);
-      await this.restartSharedClient({ notify: true });
+      return;
     }
+    // I3: only remediate the instance this probe actually examined.
+    if (this.sharedClient !== probed) return;
+    await this.restartSharedClient({ notify: true });
   }
 
   /**

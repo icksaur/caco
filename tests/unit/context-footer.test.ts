@@ -71,6 +71,10 @@ function text(sel: string): string {
   return footer().querySelector(sel)?.textContent ?? '';
 }
 
+function title(sel: string): string {
+  return (footer().querySelector(sel) as HTMLElement | null)?.title ?? '';
+}
+
 function throughput(overrides: Partial<ThroughputData> = {}): ThroughputData {
   return {
     requestIn: 11_000,
@@ -247,10 +251,13 @@ describe('context footer throughput rendering', () => {
     const rateLimit = footer().querySelector('.ratelimit') as HTMLElement;
     const saved = footer().querySelector('.context-saved') as HTMLElement;
 
-    expect(tp.textContent).toContain('2.0M in 1.0M cache 500.0k out');
     expect(cost?.textContent).toBe('≈9.50cr');
     expect(miss?.textContent).toBe('×≈0.20cr');
     expect(turns?.textContent).toBe('⟲4');
+    // Token counts are tooltip-only; the visible strip carries credits, not tokens.
+    expect(tp.textContent).not.toContain('in');
+    expect(tp.textContent).not.toContain('cache');
+    expect(tp.title).toContain('session: 2,000,000 in · 1,000,000 cache · 500,000 out');
     expect(tp.title).toContain('last request: 11,000 in · 22,000 cache · 3,000 out');
     expect(tp.title).toContain('cache misses: 1 turn · 100,000 tok re-encoded (≈0.20cr)');
     expect(rateLimit.textContent).toBe('⚠2');
@@ -272,11 +279,12 @@ describe('context footer throughput rendering', () => {
     clearThroughput();
     restoreThroughput('fresh-session');
 
-    expect(text('.context-throughput')).toContain('1.0k in 2.0k cache 3.0k out');
+    // Which session's numbers rendered is now only observable in the tooltip.
+    expect(title('.context-throughput span')).toContain('session: 1,000 in · 2,000 cache · 3,000 out');
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/fresh-session/throughput');
-    expect(text('.context-throughput')).toContain('3.0k in 4.0k cache 5.0k out');
+    expect(title('.context-throughput span')).toContain('session: 3,000 in · 4,000 cache · 5,000 out');
 
     restoreThroughput('missing-session');
 

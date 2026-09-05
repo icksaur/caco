@@ -514,11 +514,9 @@ function renderThroughput(data: ThroughputData): void {
     `\nlast request: ${data.requestIn.toLocaleString()} in · ${data.requestCache.toLocaleString()} cache · ${data.requestOut.toLocaleString()} out` +
     `\nround trips: ${turns} turn${turns !== 1 ? 's' : ''}${wallNote} · ${reasoning.toLocaleString()} reasoning · ${toolCalls} tool call${toolCalls !== 1 ? 's' : ''}${failNote}`;
 
-  const parts =
-    `${escapeHtml(kAbbrev(data.totalIn))} in ` +
-    `${escapeHtml(kAbbrev(data.totalCache))} cache ` +
-    `${escapeHtml(kAbbrev(data.totalOut))} out`;
-
+  // Token counts live in the tooltip only: the credit figure is the headline the
+  // footer is for, and the in/cache/out breakdown restates what pricing already
+  // summarizes. Keep them in `tooltip` — this is their only remaining surface.
   const cost = estimateCost(data);
   const costHtml = cost !== null
     ? ` <span class="tp-cost">≈${fmtCostCr(cost)}cr</span>`
@@ -539,7 +537,7 @@ function renderThroughput(data: ThroughputData): void {
 
   const turnHtml = turns > 0 ? ` <span class="tp-turns">⟲${turns}</span>` : '';
 
-  const tokenHtml = `<span title="${escapeHtml(tooltip + missLine)}">${parts}${costHtml}${missHtml}${turnHtml}</span>`;
+  const tokenHtml = `<span title="${escapeHtml(tooltip + missLine)}">${costHtml}${missHtml}${turnHtml}</span>`;
 
   let rateLimitHtml = '';
   if (data.rateLimitCount > 0) {

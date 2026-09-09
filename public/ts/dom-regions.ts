@@ -112,6 +112,8 @@ export const EVENT_TO_OUTER: Record<string, string> = {
   'session.error': 'assistant-activity',
   'session.compaction_start': 'assistant-activity',
   'session.compaction_complete': 'assistant-activity',
+  'session.model_change': 'assistant-activity',
+  'session.auto_mode_resolved': 'assistant-activity',
 
   // Caco synthetic types
   'caco.agent': 'agent-message',
@@ -150,6 +152,8 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
   'session.error': 'error-text',
   'session.compaction_start': 'compact-text',
   'session.compaction_complete': 'compact-text',
+  'session.model_change': 'model-text',
+  'session.auto_mode_resolved': 'model-text',
 
   // Caco synthetic types
   'caco.agent': 'agent-text',
@@ -568,6 +572,23 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     element.textContent = input
       ? `${toolHeadline(element, name)}\n\`${input}\``
       : toolHeadline(element, name);
+  },
+
+  // Auto mode's initial per-session model resolution. Renders once at start so
+  // the user can see which concrete model Auto picked (e.g. gpt-5-mini) rather
+  // than guessing from response style.
+  'session.auto_mode_resolved': (element, data) => {
+    const model = str(data.chosenModel);
+    if (!model) return;
+    element.textContent = `model: ${model}`;
+  },
+
+  // Effective model changed (Auto per-request switch, rate-limit fallback, etc.).
+  // Same compact one-liner as auto_mode_resolved so switches stay visible inline.
+  'session.model_change': (element, data) => {
+    const model = str(data.newModel);
+    if (!model) return;
+    element.textContent = `model: ${model}`;
   },
 
   'tool.execution_complete': (element, data) => {

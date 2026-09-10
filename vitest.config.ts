@@ -4,7 +4,15 @@ export default defineConfig({
   test: {
     // Run tests in Node environment (not browser)
     environment: 'node',
-    
+
+    // Windows cold-import of large ESM graphs (e.g. src/session-manager.js and its
+    // transitive SDK/type deps) can exceed the vitest default 5s under load, causing
+    // flaky "Test timed out in 5000ms" failures on the FIRST it() of a file that
+    // does `await import('../../src/session-manager.js')`. Bumping the ceiling to 15s
+    // absorbs the cold-cache spike without masking a hung test. Warm runs stay <3s.
+    testTimeout: 15000,
+    hookTimeout: 15000,
+
     // Include unit tests only (integration tests use node:test runner)
     include: ['tests/unit/**/*.test.ts'],
 

@@ -20,6 +20,8 @@ import { stampToolUsage } from './tool-usage-store.js';
 import { extractActionOptions } from './offer-action-parse.js';
 import { updateSessionMeta } from './storage.js';
 import { activityVersion } from './activity-version.js';
+import { setAutoResolvedModel } from './auto-model-cache.js';
+import type { TurnUsage, TurnInitiator } from './usage-metrics.js';
 
 // Set by server.ts after the poller is constructed. Optional — if absent
 // (e.g. unit tests), the file-edits triggers become no-ops.
@@ -43,6 +45,26 @@ export interface DispatchEventDeps {
    *  "measurement with no error path"). Tests with no interest in stamping pass
    *  `() => new Set()`. */
   cacoToolNames: () => ReadonlySet<string>;
+  /** Append one observed LLM call to the dispatch's per-turn ledger. REQUIRED for
+   *  the same reason as cacoToolNames: an optional member could silently drop
+   *  every turn and the record would quietly fall back to unpriced Auto. */
+  onTurnUsage: (turn: TurnUsage) => void;
+  /** Note a root model change seen during this dispatch (display-only). */
+  onModelSwitch: (change: { fromModel: string; toModel: string; cause?: string }) => void;
+  /** Per-MTOK rates for a model id, or null when it does not resolve. Lets the
+   *  session-lifetime credit accumulator price each turn at ITS model, which is
+   *  what makes the footer's spend figure correct under Auto and multi-model. */
+  resolveRates: (modelId: string) => { input: number; cache: number; output: number } | null;
+}
+
+/** SDK reports `initiator` only for non-user calls, and the vocabulary can grow.
+ *  Anything unrecognized is the root agent's own call. */
+function classifyInitiator(raw: unknown): TurnInitiator {
+  return raw === 'sub-agent' || raw === 'mcp-sampling' ? raw : 'root';
+}
+
+function tokenCount(value: unknown): number {
+  return typeof value === 'number' && isFinite(value) && value >= 0 ? Math.floor(value) : 0;
 }
 
 /**
@@ -105,8 +127,54 @@ export function applyDispatchEventEffects(
     const cacheReadTokens = extractProperty(event, 'cacheReadTokens');
     const cacheWriteTokens = extractProperty(event, 'cacheWriteTokens');
     const reasoningTokens = extractProperty(event, 'reasoningTokens');
-    recordUsage(sessionId, { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens });
+    const turnModel = extractProperty<string>(event, 'model');
+    const turnRates = typeof turnModel === 'string' && turnModel ? deps.resolveRates(turnModel) : null;
+    recordUsage(sessionId, { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens }, turnRates);
+
+    // Per-turn attribution. This event is the ONLY per-call carrier of a model
+    // id, so it is what makes Auto and mid-request switches priceable; the model
+    // captured at dispatch start reads 'auto' and prices nothing. Every event is
+    // captured — sub-agent calls run in this same SDK session and their spend is
+    // already in the token columns, so filtering them here would bill less than
+    // the tokens on the same row. The fresh/cached split mirrors recordUsage
+    // above so the two accumulators cannot disagree.
+    if (typeof turnModel === 'string' && turnModel) {
+      const input = tokenCount(inputTokens);
+      const cached = tokenCount(cacheReadTokens);
+      const copilotUsage = extractProperty<{ totalNanoAiu?: number }>(event, 'copilotUsage');
+      const nanoAiu = copilotUsage?.totalNanoAiu;
+      deps.onTurnUsage({
+        model: turnModel,
+        freshInputTokens: Math.max(0, input - cached),
+        cachedTokens: cached,
+        outputTokens: tokenCount(outputTokens),
+        initiator: classifyInitiator(extractProperty(event, 'initiator')),
+        ...(typeof nanoAiu === 'number' && isFinite(nanoAiu) && { nanoAiu }),
+      });
+    }
+
     deps.onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> });
+  }
+
+  // Display-only model metadata. Neither event is a pricing input — every turn
+  // carries its own model — so ordering against assistant.usage cannot matter.
+  if (event.type === 'session.auto_mode_resolved') {
+    const chosen = extractProperty<string>(event, 'chosenModel');
+    if (typeof chosen === 'string' && chosen) setAutoResolvedModel(sessionId, chosen);
+  }
+
+  if (event.type === 'session.model_change') {
+    // A sub-agent's model change is not the request's model.
+    const agentId = extractProperty<string>(event, 'agentId');
+    const toModel = extractProperty<string>(event, 'newModel');
+    if (!agentId && typeof toModel === 'string' && toModel) {
+      const cause = extractProperty<string>(event, 'cause');
+      deps.onModelSwitch({
+        fromModel: extractProperty<string>(event, 'previousModel') ?? '',
+        toModel,
+        ...(typeof cause === 'string' && cause && { cause }),
+      });
+    }
   }
 
   if (event.type === 'model.call_failure') {

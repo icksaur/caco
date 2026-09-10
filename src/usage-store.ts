@@ -117,6 +117,16 @@ export interface HourlyBucket {
   inputTokens: number;
   cachedTokens: number;
   outputTokens: number;
+  /** Σ per-call nano-AIU. Absent when no record in the hour reported it — 0
+   *  would claim the SDK priced these calls at nothing. */
+  sdkNanoAiu?: number;
+  /** Credits per model that ran in this hour. A key is null when any
+   *  contributing record could not price that model; other keys keep their sum. */
+  perModelCredits?: Record<string, number | null>;
+  /** Turns run by sub-agents. Their spend IS in `credits`; this only shows the split. */
+  subAgentTurns?: number;
+  /** Requests where some turns priced and some did not, so `credits` under-reports. */
+  partialRequests?: number;
 }
 
 /** UTC-hour buckets over [fromTs, toTs], dense (every hour present). `credits`
@@ -147,6 +157,28 @@ export function aggregateHourly(fromTs: string, toTs: string): HourlyBucket[] {
     } else {
       bucket.pricedRequests += 1;
       bucket.credits = (bucket.credits ?? 0) + r.requestCredits;
+    }
+
+    // Amendment fields. Each stays ABSENT unless a record actually carries it,
+    // so a pre-amendment hour is distinguishable from a measured zero.
+    if (r.sdkNanoAiu !== undefined) {
+      bucket.sdkNanoAiu = (bucket.sdkNanoAiu ?? 0) + r.sdkNanoAiu;
+    }
+    if (r.perModelBreakdown) {
+      const perModel = (bucket.perModelCredits ??= {});
+      for (const [model, group] of Object.entries(r.perModelBreakdown)) {
+        // Once a model is unpriced in this hour it stays null: a partial sum
+        // would read as the model's full cost.
+        if (model in perModel && perModel[model] === null) continue;
+        perModel[model] = group.credits === null ? null : (perModel[model] ?? 0) + group.credits;
+      }
+    }
+    const subAgent = r.initiatorBreakdown?.subAgent;
+    if (subAgent) {
+      bucket.subAgentTurns = (bucket.subAgentTurns ?? 0) + subAgent.turns;
+    }
+    if (r.creditsComplete === false) {
+      bucket.partialRequests = (bucket.partialRequests ?? 0) + 1;
     }
   }
 

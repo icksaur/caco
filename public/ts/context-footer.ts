@@ -358,6 +358,12 @@ export interface ThroughputData {
   totalReasoning?: number;
   totalToolCalls?: number;
   totalToolFailures?: number;
+  /** Session-lifetime credits, priced by the SERVER per turn at the model that
+   *  ran it. Authoritative over any client re-price (the client knows only one
+   *  active model). Absent on snapshots predating per-turn attribution. */
+  totalCreditsPriced?: number;
+  /** Turns the server could not price. > 0 means totalCreditsPriced under-reports. */
+  totalTurnsUnpriced?: number;
   /** Gross per-turn definition tokens currently omitted by dynamic deferral (spec
    *  -deferred-savings). An ESTIMATE of omitted known definitions, shown as a
    *  current-turn rate line in the tooltip. */
@@ -397,10 +403,23 @@ export function setActiveThroughputModel(modelId: string | null): void {
   activeModelId = modelId;
 }
 
-/** Compute approximate session-accumulated cost in AI credits from the active
- *  model's per-MTOK rates. Returns null when rates are unknown (e.g. Auto). Shares
- *  resolveModelRates with priceSaved so spent and saved never disagree. */
+/** Compute the session's accumulated spend in AI credits.
+ *
+ *  Prefers `totalCreditsPriced`, which the SERVER accumulates by pricing each
+ *  turn at the model that actually ran it. The client cannot reproduce that: it
+ *  knows only one active model, so re-pricing the session totals is wrong for
+ *  any multi-model session and impossible under Auto (no rates at all), which is
+ *  why the figure used to disappear there.
+ *
+ *  Falls back to client-side pricing only for a snapshot that predates the
+ *  server field. Returns null when neither source can price. */
 function estimateCost(d: ThroughputData): number | null {
+  if (typeof d.totalCreditsPriced === 'number') {
+    // A server that priced nothing and has nothing unpriced has simply not run a
+    // billable turn — fall through so an idle session shows no figure.
+    if (d.totalCreditsPriced > 0 || (d.totalTurnsUnpriced ?? 0) > 0) return d.totalCreditsPriced;
+    return null;
+  }
   const rates = resolveModelRates(getAvailableModels(), activeModelId);
   if (!rates) return null;
   return (d.totalIn * rates.input + d.totalCache * rates.cache + d.totalOut * rates.output) / 1_000_000;
@@ -518,13 +537,22 @@ function renderThroughput(data: ThroughputData): void {
   // footer is for, and the in/cache/out breakdown restates what pricing already
   // summarizes. Keep them in `tooltip` — this is their only remaining surface.
   const cost = estimateCost(data);
+  // A server figure that omits unpriceable turns is an under-report; say so
+  // rather than presenting it as the full spend.
+  const unpricedTurns = data.totalTurnsUnpriced ?? 0;
+  const partial = unpricedTurns > 0 && typeof data.totalCreditsPriced === 'number';
   const costHtml = cost !== null
-    ? ` <span class="tp-cost">≈${fmtCostCr(cost)}cr</span>`
+    ? ` <span class="tp-cost${partial ? ' partial' : ''}"${partial
+        ? ` title="${escapeHtml(`excludes ${unpricedTurns} turn${unpricedTurns !== 1 ? 's' : ''} whose model could not be priced`)}"`
+        : ''}>≈${fmtCostCr(cost)}cr</span>`
     : '';
 
   // Cache-miss slice: the portion of the yellow input spend billed fresh because those
   // turns read zero cache. Priced through the same resolveModelRates path, so the red
   // figure hides in lockstep with the yellow cost (Auto) and when there is no miss.
+  // Deliberately NOT rewired to the server's per-turn figure: a cache miss is a
+  // property of the prompt cache, orthogonal to which model ran, and it stays hidden
+  // under Auto rather than being priced at an arbitrary model's rate.
   const missTok = data.coldMissInputTokens ?? 0;
   const missTurns = data.coldMissTurns ?? 0;
   const missCredits = cacheMissCredits(resolveModelRates(getAvailableModels(), activeModelId), missTok);

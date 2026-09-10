@@ -62,6 +62,11 @@ function makeDeps() {
     autoAddFileContext: vi.fn(),
     onEvent: vi.fn(),
     cacoToolNames: () => new Set<string>(),
+    // Per-turn attribution is covered by dispatch-events-per-turn.test.ts; these
+    // exist so this suite's event-to-side-effect assertions still compile.
+    onTurnUsage: vi.fn(),
+    onModelSwitch: vi.fn(),
+    resolveRates: () => null,
   };
 }
 
@@ -264,7 +269,12 @@ describe('applyDispatchEventEffects', () => {
         type: 'assistant.usage',
         data: { inputTokens: 1000, outputTokens: 500 },
       } as never, deps);
-      expect(recordUsage).toHaveBeenCalledWith(SID, { inputTokens: 1000, outputTokens: 500 });
+      expect(recordUsage).toHaveBeenCalledWith(
+        SID,
+        expect.objectContaining({ inputTokens: 1000, outputTokens: 500 }),
+        // No model on this event ⇒ the turn cannot be priced.
+        null,
+      );
     });
 
     it('records token usage from root-shaped event (live format)', () => {
@@ -274,7 +284,24 @@ describe('applyDispatchEventEffects', () => {
         inputTokens: 800,
         outputTokens: 300,
       } as never, deps);
-      expect(recordUsage).toHaveBeenCalledWith(SID, { inputTokens: 800, outputTokens: 300 });
+      expect(recordUsage).toHaveBeenCalledWith(
+        SID,
+        expect.objectContaining({ inputTokens: 800, outputTokens: 300 }),
+        null,
+      );
+    });
+
+    it('prices the turn at the rates its own model resolves to', () => {
+      const deps = { ...makeDeps(), resolveRates: () => ({ input: 15, cache: 1.5, output: 75 }) };
+      applyDispatchEventEffects(SID, {
+        type: 'assistant.usage',
+        data: { model: 'claude-opus-4.6', inputTokens: 1000, outputTokens: 500 },
+      } as never, deps);
+      expect(recordUsage).toHaveBeenCalledWith(
+        SID,
+        expect.objectContaining({ inputTokens: 1000 }),
+        { input: 15, cache: 1.5, output: 75 },
+      );
     });
 
     it('emits caco.throughput session-scoped on assistant.usage', () => {
@@ -354,7 +381,7 @@ describe('applyDispatchEventEffects', () => {
   describe('tool-usage stamping (tool.execution_start → recordToolUse under the excludedTools key)', () => {
     const cacoNames = new Set(['caco_run_workflow', 'caco_docs']);
     function depsWithCaco() {
-      return { autoAddFileContext: vi.fn(), onEvent: vi.fn(), cacoToolNames: () => cacoNames };
+      return { autoAddFileContext: vi.fn(), onEvent: vi.fn(), cacoToolNames: () => cacoNames, onTurnUsage: vi.fn(), onModelSwitch: vi.fn(), resolveRates: () => null };
     }
 
     it('stamps an MCP tool under the model-facing key (what excludedTools matches)', () => {

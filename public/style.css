@@ -2443,6 +2443,13 @@ main {
   margin-left: var(--space-xs);
 }
 
+/* An under-report (some turns' models could not be priced) reads as provisional
+   rather than as the session's full spend. */
+.context-footer .tp-cost.partial {
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}
+
 .context-footer .tp-turns {
   color: var(--text-muted, #8b949e);
   margin-left: var(--space-xs);

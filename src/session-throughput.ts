@@ -42,6 +42,13 @@ interface SessionThroughput {
    *  lastCacheWriteTokens it shows the last turn's hit/miss split: high read = warm,
    *  high write = cold/busted cache. */
   lastCacheReadTokens: number;
+  /** Session-lifetime credits, priced PER TURN at the model that actually ran it.
+   *  The client cannot compute this: it only knows one active model, so it prices
+   *  a multi-model or Auto session at the wrong rate (or not at all). */
+  totalCreditsPriced: number;
+  /** Turns whose model resolved to no rates. Non-zero means totalCreditsPriced is
+   *  an under-report and the UI must say so rather than present it as complete. */
+  totalTurnsUnpriced: number;
   rateLimitCount: number;
   lastRateLimitAt?: string;
   /** Session-lifetime estimate of context tokens saved by caco_run_workflow runs. */
@@ -192,6 +199,8 @@ function blank(): SessionThroughput {
     totalCacheWrite: 0,
     lastCacheWriteTokens: 0,
     lastCacheReadTokens: 0,
+    totalCreditsPriced: 0,
+    totalTurnsUnpriced: 0,
     rateLimitCount: 0,
     workflowSavedTokens: 0,
     workflowRuns: 0,
@@ -238,6 +247,10 @@ function getOrCreate(sessionId: string): SessionThroughput {
 export function recordUsage(
   sessionId: string,
   tokens: { inputTokens?: unknown; outputTokens?: unknown; cacheReadTokens?: unknown; cacheWriteTokens?: unknown; reasoningTokens?: unknown },
+  /** Per-MTOK rates for the model that ran THIS turn, or null when it did not
+   *  resolve. Passed in (not looked up) so this module stays free of the model
+   *  registry; the caller already has the turn's model from `assistant.usage`. */
+  rates?: { input: number; cache: number; output: number } | null,
 ): void {
   const entry = getOrCreate(sessionId);
   const input = safeInt(tokens.inputTokens);
@@ -256,6 +269,13 @@ export function recordUsage(
   entry.totalIn += fresh;
   entry.totalCache += cache;
   entry.totalOut += out;
+  // Price this turn at ITS model's rates. An unresolved model is counted, not
+  // priced at zero — zero would silently under-report spend as if it were free.
+  if (rates) {
+    entry.totalCreditsPriced += (fresh * rates.input + cache * rates.cache + out * rates.output) / 1_000_000;
+  } else {
+    entry.totalTurnsUnpriced += 1;
+  }
   entry.requestCacheWrite += cacheWrite;
   entry.totalCacheWrite += cacheWrite;
   entry.lastCacheWriteTokens = cacheWrite;

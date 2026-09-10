@@ -292,6 +292,61 @@ describe('context footer throughput rendering', () => {
     expect(text('.context-saved')).toBe('↯≈0.00cr');
   });
 
+  // Under Auto (and any multi-model session) the client knows only ONE active
+  // model, so pricing the session's token totals at its rates is wrong — and for
+  // Auto there are no rates at all, which used to hide the credit figure
+  // entirely. The server prices each turn at the model that ran it and ships the
+  // sum, so the footer reports it rather than recomputing.
+  it('reports the server-priced credit total when the active model cannot price', () => {
+    setActiveThroughputModel('auto');
+
+    updateThroughput(throughput({ totalCreditsPriced: 4.25, totalTurnsUnpriced: 0 }), 'auto-session');
+
+    expect(text('.tp-cost')).toBe('≈4.25cr');
+  });
+
+  it('prefers the server total over a client re-price even when a model resolves', () => {
+    setActiveThroughputModel('model-1');
+
+    // Client math on these totals would give a different number; the server's
+    // per-turn sum is authoritative because it saw which model ran each turn.
+    updateThroughput(throughput({ totalCreditsPriced: 3, totalTurnsUnpriced: 0 }), 'multi-session');
+
+    expect(text('.tp-cost')).toBe('≈3.00cr');
+  });
+
+  it('marks the figure partial when some turns could not be priced', () => {
+    setActiveThroughputModel('auto');
+
+    updateThroughput(throughput({ totalCreditsPriced: 9, totalTurnsUnpriced: 2 }), 'partial-session');
+
+    const cost = footer().querySelector('.tp-cost') as HTMLElement;
+    expect(cost.textContent).toContain('9.00cr');
+    // An under-report must never read as complete.
+    expect(cost.title).toContain('2');
+    expect(cost.classList.contains('partial')).toBe(true);
+  });
+
+  it('still hides the figure when the server priced nothing and no model resolves', () => {
+    setActiveThroughputModel('auto');
+
+    updateThroughput(throughput({ totalCreditsPriced: 0, totalTurnsUnpriced: 0 }), 'unpriced-session');
+
+    expect(footer().querySelector('.tp-cost')).toBeNull();
+  });
+
+  it('falls back to client pricing for a session with no server credit figure', () => {
+    setActiveThroughputModel('model-1');
+
+    // Pre-amendment snapshot: no totalCreditsPriced at all.
+    const legacy = throughput();
+    delete (legacy as { totalCreditsPriced?: number }).totalCreditsPriced;
+    updateThroughput(legacy, 'legacy-session');
+
+    // 2M*2 + 1M*0.5 + 500k*10 / 1e6 = 9.5
+    expect(text('.tp-cost')).toBe('≈9.50cr');
+  });
+
   it('falls back to fetching when seeded without bundled throughput and ignores stale fetches', async () => {
     appState.activeSessionId = 'other-session';
     const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve(throughput({ totalIn: 9_999 })) }));

@@ -103,3 +103,43 @@
     transparent 4px
   );
 }
+
+/* An hour that priced only SOME of its turns: the height is real but understates
+   the spend, so it carries a hatched top edge rather than reading as complete. */
+.usage-bar-partial {
+  border-top: 3px double var(--color-text-muted);
+}
+
+/* Per-model split within one hour's bar. Stacked bottom-up; each segment's
+   inline background is the model's stable hue. */
+.usage-bar-seg {
+  width: 100%;
+  min-height: 1px;
+}
+
+.usage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin-top: var(--space-sm);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.usage-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-family: var(--font-mono);
+}
+
+.usage-legend-swatch {
+  width: var(--space-md);
+  height: var(--space-md);
+  border-radius: var(--radius-sm);
+  display: inline-block;
+}
+
+.usage-legend-note {
+  font-style: italic;
+}

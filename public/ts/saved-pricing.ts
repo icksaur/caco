@@ -12,8 +12,13 @@ export interface Rates {
 /** Resolve the active model's per-MTOK rates, or null when unknown (Auto / a model
  *  with no pricing). Handles context-window VARIANT ids the model list omits (e.g.
  *  `claude-opus-4.6-1m`, `claude-opus-4.7-1m-internal`) by falling back to the
- *  longest base id that is a segment-boundary prefix of the variant. Shared by the
- *  spent and saved figures so they never disagree about priced-vs-unpriced. */
+ *  longest base id that is a segment-boundary prefix of the variant.
+ *
+ *  Scope note: this still governs the SAVED side of the footer, where one active
+ *  model is the right lens. SPEND is no longer priced here — the server prices
+ *  each turn at the model that ran it and ships the sum, because a multi-model or
+ *  Auto session has no single rate to spend at. So spent and saved can legitimately
+ *  resolve differently; only the saved figure is bound to this function. */
 export function resolveModelRates(models: readonly ModelInfo[], id: string | null): Rates | null {
   if (!id) return null;
   let model = models.find(m => m.id === id);

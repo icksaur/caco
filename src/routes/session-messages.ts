@@ -28,8 +28,9 @@ import { dispatchState } from '../dispatch-state.js';
 import { retryWithFreshClient } from '../dispatch-retry.js';
 import { applyDispatchEventEffects } from '../dispatch-events.js';
 import { resetRequest, snapshot, markRequestComplete } from '../session-throughput.js';
+import { getAutoResolvedModel } from '../auto-model-cache.js';
 import { appendRequestMetrics } from '../request-metrics-log.js';
-import { buildUsageRecord, emitUsageRecord, resolveUsageRates, type UsageRates } from '../usage-metrics.js';
+import { buildUsageRecord, emitUsageRecord, resolveUsageRates, type UsageRates, type PricedModel, type TurnUsage } from '../usage-metrics.js';
 import { modelCostSummary } from '../model-billing.js';
 import { maybeAutoContinue, AUTOCONTINUE_IDENTIFIER, AUTO_CONTINUE_CAP } from '../auto-continue-runtime.js';
 import { isAutoContinueEnabled } from '../preferences.js';
@@ -354,11 +355,21 @@ export class DispatchHttpError extends Error {
 /** Snapshot the pricing context for a request at dispatch start: the session's
  *  model slug + its resolved per-MTOK rates + context window. Frozen here so a
  *  concurrent model change can never re-price the in-flight request's usage
- *  record (spec-usage-metrics). Unknown/unpriced model → null rates. */
-function capturePriceContext(sessionId: string): { model: string | null; rates: UsageRates | null; contextWindow: number | null } {
+ *  record (spec-usage-metrics). Unknown/unpriced model → null rates.
+ *
+ *  Under Auto the slug is unpriced, which is why the record prefers per-turn
+ *  attribution; this remains the fallback for a request that produced no turn.
+ *  Returns the priced model table too, so the per-turn path can resolve each
+ *  turn's own model without rebuilding it. */
+function capturePriceContext(sessionId: string): {
+  model: string | null;
+  rates: UsageRates | null;
+  contextWindow: number | null;
+  pricedModels: PricedModel[];
+} {
   const model = getSessionMeta(sessionId)?.model ?? null;
   const priced = sessionManager.getModels().map(m => ({ id: m.id, ...modelCostSummary(m) }));
-  return resolveUsageRates(priced, model);
+  return { ...resolveUsageRates(priced, model), pricedModels: priced };
 }
 
 /**
@@ -410,6 +421,13 @@ export async function dispatchMessage(
   let sendStarted = false;
   let watchdog: ReturnType<typeof createWatchdog> | null = null;
 
+  // Per-turn ledger for this request. Every `assistant.usage` appends one entry
+  // carrying its OWN model, which is what lets an Auto request (whose captured
+  // model prices nothing) and a mid-request switch be priced exactly. Ephemeral:
+  // only its derivations reach the record.
+  const perTurn: TurnUsage[] = [];
+  let switchedDuringRequest: { fromModel: string; toModel: string; cause?: string } | undefined;
+
   // Single dispatch-teardown owner. Every exit path routes through this so no
   // branch can forget part of the cleanup contract. Idempotent
   // (dispatchCompleted is set synchronously) and awaitable so pre-send paths
@@ -427,8 +445,12 @@ export async function dispatchMessage(
     const metrics = markRequestComplete(sessionId);
     if (metrics && metrics.requestTurns > 0) {
       appendRequestMetrics(sessionId, metrics);
-      // Durable usage record — one per completed request, priced by the
-      // dispatch-start model. Best-effort (emitUsageRecord swallows sink errors).
+      // Durable usage record — one per completed request. When any turn was
+      // observed, `perTurn` is the single source of the record's tokens, costs
+      // and turn count (it prices each turn at the model that actually ran);
+      // otherwise this falls back to the dispatch-start capture. Best-effort
+      // (emitUsageRecord swallows sink errors).
+      const autoResolvedTo = getAutoResolvedModel(sessionId);
       emitUsageRecord(buildUsageRecord({
         sessionId,
         model: priceCtx.model,
@@ -440,6 +462,10 @@ export async function dispatchMessage(
         },
         rates: priceCtx.rates,
         contextWindow: priceCtx.contextWindow,
+        perTurn,
+        models: priceCtx.pricedModels,
+        ...(autoResolvedTo !== undefined && { autoResolvedTo }),
+        ...(switchedDuringRequest !== undefined && { switchedDuringRequest }),
       }));
     }
     onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> } as unknown as SessionEvent);
@@ -580,6 +606,9 @@ export async function dispatchMessage(
         autoAddFileContext,
         onEvent,
         cacoToolNames: () => new Set(sessionManager.getCacoToolCatalog().map(t => t.name)),
+        onTurnUsage: turn => { perTurn.push(turn); },
+        onModelSwitch: change => { switchedDuringRequest = change; },
+        resolveRates: modelId => resolveUsageRates(priceCtx.pricedModels, modelId).rates,
       });
 
       if (event.type === 'session.idle' || event.type === 'session.error') {

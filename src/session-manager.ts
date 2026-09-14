@@ -527,13 +527,20 @@ export class SessionManager {
       if (cliDiag.found) {
         console.log(`[SDK-CLI] pinned cliPath: ${cliDiag.found}`);
       } else {
+        // Format one attempt per line-ish so the reason each package failed is
+        // visible. The SDK's own error message doesn't say why its resolver
+        // failed, so this is the only place to look when the workaround
+        // itself doesn't produce a path.
+        const attemptSummary = cliDiag.attempts
+          .map(a => a.error
+            ? `${a.name}: ${a.error}`
+            : `${a.name}: resolved=${a.resolvedPath} exists=${a.exists}`)
+          .join(' | ');
         console.warn(
-          `[SDK-CLI] resolver returned null; SDK will try its own resolver, ` +
-          `which is broken on @github/copilot@1.0.83. ` +
-          `platform packageNames=[${cliDiag.packageNames.join(', ')}], ` +
-          `searchPaths(${cliDiag.searchPaths.length})=[${cliDiag.searchPaths.slice(0, 6).join(' | ')}], ` +
-          `candidatesTried(${cliDiag.candidatesTried.length})=[${cliDiag.candidatesTried.slice(0, 6).join(' | ')}]` +
-          (cliDiag.error ? `, error=${cliDiag.error}` : '')
+          '[SDK-CLI] resolver returned null; SDK will try its own resolver, ' +
+          'which is broken on @github/copilot@1.0.83. ' +
+          `packageNames=[${cliDiag.packageNames.join(', ')}], ` +
+          `attempts=[${attemptSummary}]`
         );
       }
       const connection = buildBundledStdioConnection();

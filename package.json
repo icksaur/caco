@@ -12,6 +12,7 @@
     "check:coverage": "node scripts/check-backend-coverage.mjs",
     "check:frontend-coverage": "node scripts/check-frontend-coverage.mjs",
     "check:specs": "node tools/check-spec-conformance.mjs",
+    "check:pins": "node scripts/check-pins.mjs",
     "build:highlight": "node scripts/build-highlight.js",
     "build:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --minify --sourcemap",
     "watch:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --sourcemap --watch",
@@ -90,5 +91,9 @@
     "*.ts": [
       "eslint"
     ]
+  },
+  "overridesNote": "vite is pinned to 8.2.2 because Microsoft's internal npm feed (packagefeedproxy.microsoft.io) is not always in sync with the public registry. vitest@^4.1.11 otherwise resolves vite to 8.3.0, which the feed 404s on. `npm run check:pins` will fail the build once the feed carries a newer stable, prompting removal.",
+  "overrides": {
+    "vite": "8.2.2"
   }
 }

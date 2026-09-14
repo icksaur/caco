@@ -3,9 +3,7 @@
  */
 
 import { homedir } from 'os';
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
+import { SYSTEM_MESSAGE_SECTIONS } from '@github/copilot-sdk';
 import { listApplets } from './applet-store.js';
 import { formatMemoryForPrompt } from './memory-tool.js';
 import { WORKFLOW_ENABLED } from './config.js';
@@ -165,21 +163,19 @@ export const SDK_PROSE_SECTIONS = Object.freeze([
 ] as const);
 
 /**
- * Section ids the vendored SDK actually declares, or null when they cannot be
- * read. The SDK ships as a per-platform package (@github/copilot-<platform>-<arch>),
- * so the directory is discovered rather than hardcoded.
+ * Section ids the SDK actually declares, or null when they cannot be read.
+ *
+ * Uses the SDK's own runtime export (`SYSTEM_MESSAGE_SECTIONS`, a
+ * `Record<SystemMessageSection, ...>`) rather than parsing the vendored .d.ts.
+ * Regex-parsing the .d.ts was brittle: it broke every time the SDK moved the
+ * file, renamed the declared type, or changed `declare type` to `export type`.
+ * The runtime constant is a stable public export; if it ever disappears, the
+ * import itself is a compile error, which is a better signal than a silent
+ * null.
  */
 export function readSdkSectionIds(): string[] | null {
   try {
-    const scope = fileURLToPath(new URL('../node_modules/@github/', import.meta.url));
-    const pkg = readdirSync(scope).find((d) => existsSync(join(scope, d, 'sdk', 'index.d.ts')));
-    if (!pkg) return null;
-    const src = readFileSync(join(scope, pkg, 'sdk', 'index.d.ts'), 'utf8');
-    const grab = (name: string) => {
-      const m = new RegExp(`declare type ${name} =([^;]+);`).exec(src);
-      return m ? [...m[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]) : [];
-    };
-    const ids = [...grab('SystemPromptSection'), ...grab('SystemPromptSectionGroup')];
+    const ids = Object.keys(SYSTEM_MESSAGE_SECTIONS);
     return ids.length ? ids : null;
   } catch {
     return null;

@@ -43,6 +43,7 @@ import { getToolsUsed, setDeferredDefsProvider, recordCompaction } from './sessi
 import { computeDeferredReminder, clearDeferredReminder } from './deferred-reminder-store.js';
 import { isHerdParent } from './herd.js';
 import { AUTO_CONTINUE_CAP } from './auto-continue.js';
+import { buildBundledStdioConnection } from './sdk-cli-path.js';
 
 
 import { formatMemoryForPrompt } from './memory-tool.js';
@@ -515,6 +516,12 @@ export class SessionManager {
     this.clientStarting = (async () => {
       process.env.COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = String(OBS_RAW_CEILING_BYTES);
       const clientOptions: Record<string, unknown> = { workingDirectory: process.cwd() };
+      // Workaround: pin the CLI entry to bypass the SDK's broken bundled-path
+      // resolver on @github/copilot@1.0.83 (see src/sdk-cli-path.ts). When the
+      // helper can't locate one, fall back to the SDK's own resolver so future
+      // versions that fix the resolver still work without a code change.
+      const connection = buildBundledStdioConnection();
+      if (connection) clientOptions.connection = connection;
       // Only attach onListModels when BYOK providers are configured. With no
       // config the handler is never installed, so the SDK uses its native
       // models.list path unchanged — a no-config user sees zero behavior change.

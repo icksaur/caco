@@ -533,8 +533,8 @@ export class SessionManager {
         // itself doesn't produce a path.
         const attemptSummary = cliDiag.attempts
           .map(a => a.error
-            ? `${a.name}: ${a.error}`
-            : `${a.name}: resolved=${a.resolvedPath} exists=${a.exists}`)
+            ? `${a.name}@${a.anchor}: ${a.error}`
+            : `${a.name}@${a.anchor}: resolved=${a.resolvedPath} exists=${a.exists}`)
           .join(' | ');
         console.warn(
           '[SDK-CLI] resolver returned null; SDK will try its own resolver, ' +

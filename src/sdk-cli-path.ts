@@ -44,6 +44,7 @@
 
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 
 /**
  * Diagnostic detail from the resolver: which package names were tried,
@@ -56,7 +57,7 @@ export interface CliPathDiagnostic {
   packageNames: string[];
   attempts: Array<{
     name: string;
-    resolvedUrl?: string;
+    anchor: 'sdk' | 'self';
     resolvedPath?: string;
     exists?: boolean;
     error?: string;
@@ -76,33 +77,62 @@ export function resolveBundledCliPath(): string | null {
 /**
  * Same as {@link resolveBundledCliPath} but returns per-attempt detail.
  * Called from ensureClient() to emit a one-line summary at startup.
+ *
+ * Two anchors are tried per package name:
+ *   1. `sdk`  -- resolve from @github/copilot-sdk's module location.
+ *                Correct under strict pnpm / nested installs, where the
+ *                platform package is co-located with the SDK (which brings
+ *                it in as an optional dep) rather than hoisted next to us.
+ *   2. `self` -- resolve from this module's location (Caco's node_modules).
+ *                Correct under npm's default hoisting, where the platform
+ *                package sits at the top of node_modules alongside the SDK.
+ *
+ * npm hoists so `self` succeeds in practice; keeping `sdk` first is the
+ * defensive choice for future pnpm / npm workspace layouts.
  */
 export function resolveBundledCliPathDiagnostic(): CliPathDiagnostic {
   const arch = process.arch;
   const variants = process.platform === 'linux' ? ['linux', 'linuxmusl'] : [process.platform];
   const packageNames = variants.map((v) => `@github/copilot-${v}-${arch}`);
   const attempts: CliPathDiagnostic['attempts'] = [];
+
+  // Build the SDK-anchored resolver once; if @github/copilot-sdk itself can't
+  // be resolved, skip the sdk anchor entirely (the toast will show
+  // "Cannot find package @github/copilot-sdk" from the SDK's own import).
+  let sdkResolver: ((name: string) => string) | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sdkUrl = (import.meta as any).resolve('@github/copilot-sdk');
+    if (typeof sdkUrl === 'string') {
+      sdkResolver = createRequire(sdkUrl).resolve;
+    }
+  } catch { /* no sdk anchor available */ }
+
+  const selfResolver = createRequire(import.meta.url).resolve;
+
+  const strategies: Array<{ anchor: 'sdk' | 'self'; resolver: ((name: string) => string) | null }> = [
+    { anchor: 'sdk', resolver: sdkResolver },
+    { anchor: 'self', resolver: selfResolver },
+  ];
+
   for (const name of packageNames) {
-    try {
-      // Node ships `import.meta.resolve` as sync on modern versions; TS's
-      // libdef still types it Promise<string>|string, so cast defensively.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const raw = (import.meta as any).resolve(name);
-      if (typeof raw !== 'string') {
-        attempts.push({ name, error: `import.meta.resolve returned non-string (${typeof raw}); this Node version may still expose the async form -- upgrade or await` });
-        continue;
+    for (const { anchor, resolver } of strategies) {
+      if (!resolver) continue;
+      try {
+        const raw = resolver(name);
+        const resolvedPath = raw.startsWith('file:') ? fileURLToPath(raw) : raw;
+        const exists = existsSync(resolvedPath);
+        attempts.push({ name, anchor, resolvedPath, exists });
+        if (exists) {
+          return { found: resolvedPath, packageNames, attempts };
+        }
+      } catch (e) {
+        attempts.push({
+          name,
+          anchor,
+          error: e instanceof Error ? `${(e as { code?: string }).code ?? e.name}: ${e.message}` : String(e),
+        });
       }
-      const resolvedPath = raw.startsWith('file:') ? fileURLToPath(raw) : raw;
-      const exists = existsSync(resolvedPath);
-      attempts.push({ name, resolvedUrl: raw, resolvedPath, exists });
-      if (exists) {
-        return { found: resolvedPath, packageNames, attempts };
-      }
-    } catch (e) {
-      attempts.push({
-        name,
-        error: e instanceof Error ? `${(e as { code?: string }).code ?? e.name}: ${e.message}` : String(e),
-      });
     }
   }
   return { found: null, packageNames, attempts };

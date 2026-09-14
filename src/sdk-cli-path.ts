@@ -34,26 +34,59 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
+ * Diagnostic detail from the resolver: which paths were searched, which
+ * candidates were tested, and (on error) what threw.
+ */
+export interface CliPathDiagnostic {
+  found: string | null;
+  packageNames: string[];
+  searchPaths: string[];
+  candidatesTried: string[];
+  error?: string;
+}
+
+/**
  * Locate the platform package's CLI entry (`<platformPkg>/index.js`) using
  * Node's CJS resolve paths, which are unaffected by the platform package's
  * `exports` map. Returns null when none of the candidate paths exist.
  */
 export function resolveBundledCliPath(): string | null {
+  return resolveBundledCliPathDiagnostic().found;
+}
+
+/**
+ * Same as {@link resolveBundledCliPath} but returns the paths that were
+ * searched and the candidates that were tested. Called from ensureClient() to
+ * emit a one-line summary at startup so a failed resolve can be diagnosed
+ * without a repro build.
+ */
+export function resolveBundledCliPathDiagnostic(): CliPathDiagnostic {
+  const arch = process.arch;
+  const variants = process.platform === 'linux' ? ['linux', 'linuxmusl'] : [process.platform];
+  const packageNames = variants.map((v) => `@github/copilot-${v}-${arch}`);
+  const candidatesTried: string[] = [];
+  let searchPaths: string[] = [];
   try {
-    const arch = process.arch;
-    const variants = process.platform === 'linux' ? ['linux', 'linuxmusl'] : [process.platform];
-    const packageNames = variants.map((v) => `@github/copilot-${v}-${arch}`);
     const req = createRequire(import.meta.url);
-    const searchPaths = req.resolve.paths('@github/copilot') ?? [];
+    searchPaths = req.resolve.paths('@github/copilot') ?? [];
     for (const base of searchPaths) {
       for (const name of packageNames) {
         const candidate = join(base, ...name.split('/'), 'index.js');
-        if (existsSync(candidate)) return candidate;
+        candidatesTried.push(candidate);
+        if (existsSync(candidate)) {
+          return { found: candidate, packageNames, searchPaths, candidatesTried };
+        }
       }
     }
-    return null;
-  } catch {
-    return null;
+    return { found: null, packageNames, searchPaths, candidatesTried };
+  } catch (e) {
+    return {
+      found: null,
+      packageNames,
+      searchPaths,
+      candidatesTried,
+      error: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+    };
   }
 }
 
@@ -69,6 +102,6 @@ export function resolveBundledCliPath(): string | null {
  * `connection` and let the SDK try its own resolver instead.
  */
 export function buildBundledStdioConnection(): { kind: 'stdio'; path: string } | null {
-  const path = resolveBundledCliPath();
-  return path ? { kind: 'stdio', path } : null;
+  const d = resolveBundledCliPathDiagnostic();
+  return d.found ? { kind: 'stdio', path: d.found } : null;
 }

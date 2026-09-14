@@ -43,7 +43,7 @@ import { getToolsUsed, setDeferredDefsProvider, recordCompaction } from './sessi
 import { computeDeferredReminder, clearDeferredReminder } from './deferred-reminder-store.js';
 import { isHerdParent } from './herd.js';
 import { AUTO_CONTINUE_CAP } from './auto-continue.js';
-import { buildBundledStdioConnection } from './sdk-cli-path.js';
+import { buildBundledStdioConnection, resolveBundledCliPathDiagnostic } from './sdk-cli-path.js';
 
 
 import { formatMemoryForPrompt } from './memory-tool.js';
@@ -520,6 +520,22 @@ export class SessionManager {
       // resolver on @github/copilot@1.0.83 (see src/sdk-cli-path.ts). When the
       // helper can't locate one, fall back to the SDK's own resolver so future
       // versions that fix the resolver still work without a code change.
+      // Log the outcome once at startup — the SDK's own error message doesn't
+      // say why its resolver failed, so this is the only place to look when
+      // the workaround itself doesn't produce a path.
+      const cliDiag = resolveBundledCliPathDiagnostic();
+      if (cliDiag.found) {
+        console.log(`[SDK-CLI] pinned cliPath: ${cliDiag.found}`);
+      } else {
+        console.warn(
+          `[SDK-CLI] resolver returned null; SDK will try its own resolver, ` +
+          `which is broken on @github/copilot@1.0.83. ` +
+          `platform packageNames=[${cliDiag.packageNames.join(', ')}], ` +
+          `searchPaths(${cliDiag.searchPaths.length})=[${cliDiag.searchPaths.slice(0, 6).join(' | ')}], ` +
+          `candidatesTried(${cliDiag.candidatesTried.length})=[${cliDiag.candidatesTried.slice(0, 6).join(' | ')}]` +
+          (cliDiag.error ? `, error=${cliDiag.error}` : '')
+        );
+      }
       const connection = buildBundledStdioConnection();
       if (connection) clientOptions.connection = connection;
       // Only attach onListModels when BYOK providers are configured. With no

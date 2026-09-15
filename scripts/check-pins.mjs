@@ -79,6 +79,27 @@ function isStable(v) {
   return !/[-+]/.test(v);
 }
 
+/**
+ * The active registry. The pins this script guards exist because an internal
+ * mirror LAGS the public registry, so "a newer stable exists" only answers the
+ * real question ("has the mirror caught up?") when asked OF that mirror.
+ * Against the public registry the answer is trivially yes and permanent — the
+ * public registry is what the mirror is behind — so enforcing there would fail
+ * the build forever on every machine that isn't the one with the problem.
+ * Advisory there, blocking on a mirror.
+ */
+function activeRegistryHost() {
+  try {
+    const raw = execSync('npm config get registry', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return new URL(raw).host;
+  } catch {
+    return null;
+  }
+}
+
+const registryHost = activeRegistryHost();
+const isPublicRegistry = registryHost === 'registry.npmjs.org';
+
 let stalePins = 0;
 let unresolved = 0;
 
@@ -105,15 +126,28 @@ for (const [name, spec] of entries) {
   if (stableAbove.length > 0) {
     const highest = stableAbove.reduce((a, b) => (cmp(a, b) >= 0 ? a : b));
     const cmd = '`npm install`';
-    console.error(
-      `✗ ${name}: pinned to "${spec}" but the active registry now carries stable ${highest} (> ${floor}). ` +
+    const message =
+      `${name}: pinned to "${spec}" but ${registryHost ?? 'the active registry'} carries stable ${highest} (> ${floor}). ` +
       `Consider removing the override from package.json and re-running ${cmd} — ` +
-      'the reason we pinned may no longer apply.'
-    );
-    stalePins++;
+      'the reason we pinned may no longer apply.';
+    if (isPublicRegistry) {
+      // Expected and uninformative here: the pin exists because a mirror trails
+      // this registry, so this can never be the signal to remove it.
+      console.log(`ℹ  ${message}`);
+    } else {
+      console.error(`✗ ${message}`);
+      stalePins++;
+    }
   } else {
     console.log(`✓ ${name}: pin "${spec}" still current (registry max stable <= ${floor})`);
   }
+}
+
+if (isPublicRegistry) {
+  console.log(
+    `\nℹ  active registry is ${registryHost}; pin staleness is advisory here. ` +
+    'Run this on the machine whose mirror forced the pin to get a blocking answer.'
+  );
 }
 
 if (stalePins > 0) {

@@ -87,6 +87,12 @@
 
         <!-- Footer with chat input (inside chat panel) -->
         <footer id="chatFooter">
+          <!-- Floats above the footer's top edge, over the chat well. It lives
+               HERE rather than in #chatScroll because an absolutely positioned
+               child of a scroll container scrolls away with the content, and
+               because the footer already establishes a containing block. Must
+               stay outside both forms below, or pressing it submits one. -->
+          <button id="viewLatestBtn" class="view-latest-btn hidden" type="button">View latest</button>
           <div id="adHocBar" class="adhoc-bar">
           </div>
           <!-- Two forms, one per view. Both physically live in the

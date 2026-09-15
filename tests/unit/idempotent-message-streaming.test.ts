@@ -16,7 +16,7 @@ const sessionTracker = vi.hoisted(() => ({
 }));
 
 vi.mock('../../public/ts/debug.js', () => ({ debug: vi.fn() }));
-vi.mock('../../public/ts/ui-utils.js', () => ({ scrollToBottom: vi.fn() }));
+vi.mock('../../public/ts/chat-scroll.js', () => ({ followLatest: vi.fn(), pinToLatest: vi.fn() }));
 vi.mock('../../public/ts/app-state.js', () => ({
   getActiveSessionId: vi.fn(() => null),
   isLoadingHistory: vi.fn(() => false),

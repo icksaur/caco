@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * `display: none`. A chat with no layout reports `scrollHeight` 0 and discards
  * writes to `scrollTop`, so loading the history first — which is what scrolls to
  * the bottom — silently did nothing and left the user at the top of a long
- * conversation. `scrollToBottom` now retries as a safety net, but ordering is
+ * conversation. The requested scroll now retries as a safety net, but ordering is
  * the actual fix, and only ordering is asserted here.
  */
 

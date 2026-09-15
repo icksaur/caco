@@ -14,7 +14,7 @@ import { setFormEnabled } from './view-controller.js';
 import { onHistoryComplete, getConnectionId, subscribeToSession, requestHistory, advanceHistoryGeneration, onEvent, replayEvents, type SessionEvent } from './websocket.js';
 import { clearContextFooter, updateContextUsage } from './context-footer.js';
 import { regions } from './dom-regions.js';
-import { scrollToBottom } from './ui-utils.js';
+import { pinToLatest } from './chat-scroll.js';
 import { sessionTracker } from './session-state-tracker.js';
 import { loadModels } from './model-selector.js';
 import { getCachedTranscript, putCachedTranscript, versionsEqual, type EventVersion } from './transcript-cache.js';
@@ -165,7 +165,7 @@ class HistoryLoader {
     this.lastConnectionId = getConnectionId();
 
     setLoadingHistory(false);
-    scrollToBottom();
+    pinToLatest();
 
     const isBusy = data?.isBusy ?? false;
     sessionTracker.setBusy(sessionId, isBusy);

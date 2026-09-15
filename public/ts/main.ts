@@ -3,7 +3,7 @@
  */
 
 import { setupImagePaste, removeImage } from './image-paste.js';
-import { scrollToBottom } from './ui-utils.js';
+import { initChatScroll } from './chat-scroll.js';
 import { loadPreferences } from './history.js';
 import { archiveSession, initSessionPanel, loadSessions, loadSchedules, getCachedSessions } from './session-panel.js';
 import { selectModel, loadModels } from './model-selector.js';
@@ -34,7 +34,6 @@ import { bindPanelStateToDom, readPanelStateFromDom } from './panel-dom-binder.j
 declare global {
   interface Window {
     removeImage: typeof removeImage;
-    scrollToBottom: typeof scrollToBottom;
     toggleSessions: typeof toggleSessions;
     archiveSession: typeof archiveSession;
     selectModel: typeof selectModel;
@@ -46,7 +45,6 @@ declare global {
 }
 
 window.removeImage = removeImage;
-window.scrollToBottom = scrollToBottom;
 window.toggleSessions = toggleSessions;
 window.archiveSession = archiveSession;
 window.selectModel = selectModel;
@@ -110,6 +108,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize view state from DOM
     initViewState();
+
+    // Owns the chat well's scroll mode, its viewport anchor, and the
+    // "view latest" button. After initRegions so #chat exists to observe.
+    initChatScroll();
 
     // Wire the panel state store: read current DOM into the store, then
     // bind so any future store changes flow back to the DOM. During step 1

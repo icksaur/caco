@@ -14,7 +14,7 @@
  */
 
 import { debug } from './debug.js';
-import { scrollToBottom } from './ui-utils.js';
+import { followLatest, pinToLatest } from './chat-scroll.js';
 import { getActiveSessionId, isLoadingHistory, getSelectedModel, notifyMessageSent, onSessionArchived } from './app-state.js';
 import { isViewState } from './view-controller.js';
 import { onEvent, onReconnect, type SessionEvent } from './websocket.js';
@@ -135,7 +135,7 @@ function handleEvent(event: SessionEvent): void {
           // assistant message's markdown/code finished reflowing, so it can
           // undershoot. Defer past two frames so layout has settled, then snap
           // to the very bottom.
-          requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()));
+          requestAnimationFrame(() => requestAnimationFrame(() => followLatest()));
           void fetch(`/api/sessions/${sessionId}/state`).then(r => r.json()).then(d => {
             if (d.responseOptions?.length) {
               formStateStore.set({ options: d.responseOptions });
@@ -154,7 +154,7 @@ function handleEvent(event: SessionEvent): void {
   // Reasoning finalization (special case)
   if (eventType === 'assistant.reasoning') {
     if (chatRegion.finalizeReasoning(event)) {
-      if (!isLoadingHistory()) scrollToBottom();
+      if (!isLoadingHistory()) followLatest();
       return;
     }
   }
@@ -172,7 +172,7 @@ function handleEvent(event: SessionEvent): void {
   // events like caco.edit, caco.usage, caco.fs.changed unnecessarily yank
   // the chat scrollbar to the bottom on every poll.
   chatRegion.renderEvent(event);
-  if (!isLoadingHistory() && hasInserter(eventType)) scrollToBottom();
+  if (!isLoadingHistory() && hasInserter(eventType)) followLatest();
 }
 
 let messageStreamingInitialized = false;
@@ -244,7 +244,9 @@ export async function streamResponse(prompt: string, model: string, imageData: s
     chatView.setFormEnabled(false);
   }
   
-  scrollToBottom();
+  // The user just acted, so they are entitled to see their own message even if
+  // they were reading history a moment ago.
+  pinToLatest();
   
   try {
     const appletState = getAndClearPendingAppletState();

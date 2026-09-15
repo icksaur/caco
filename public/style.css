@@ -642,7 +642,44 @@ main {
   overflow-y: auto;
   overflow-x: hidden;
   width: 100%;
+  /* chat-scroll.ts owns anchoring while the reader holds a position, because
+     the native mechanism anchors on a leaf and the render path replaces leaves
+     (textContent assignment while streaming, textContent = '' on tool
+     completion). Two anchoring systems writing the same scrollTop is a race
+     with no observable owner, so the native one stays off.
+     Do NOT add scroll-behavior: smooth here either — the intermediate events of
+     an in-flight smooth scroll land outside the bottom zone and would trip
+     no-scroll on our own animation. */
+  overflow-anchor: none;
 }
+
+/* Floating "back to the live end" affordance, shown only in no-scroll.
+   Anchored to #chatFooter (already position: relative) so it rides above the
+   ad-hoc bar, the composer, and the terminal panel as those change height. */
+.view-latest-btn {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  margin-bottom: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  box-shadow: 0 2px 8px var(--color-shadow-heavy);
+}
+
+.view-latest-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.view-latest-btn.hidden { display: none; }
 
 /* Centered readable chat column */
 .chat-view {

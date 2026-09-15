@@ -24,7 +24,6 @@ export interface AppState {
   
   // === UI Flags
   loadingHistory: boolean;
-  autoScrollEnabled: boolean;
   hasImage: boolean;
 }
 
@@ -36,7 +35,6 @@ const state: AppState = {
   selectedModel: DEFAULT_MODEL,
   availableModels: [],
   loadingHistory: false,
-  autoScrollEnabled: true,
   hasImage: false
 };
 
@@ -62,10 +60,6 @@ export function getAvailableModels(): readonly ModelInfo[] {
 
 export function isLoadingHistory(): boolean {
   return state.loadingHistory;
-}
-
-export function isAutoScrollEnabled(): boolean {
-  return state.autoScrollEnabled;
 }
 
 export function hasImage(): boolean {
@@ -221,14 +215,6 @@ export function setAvailableModels(models: ModelInfo[]): void {
 
 export function setLoadingHistory(loading: boolean): void {
   state.loadingHistory = loading;
-}
-
-export function enableAutoScroll(): void {
-  state.autoScrollEnabled = true;
-}
-
-export function disableAutoScroll(): void {
-  state.autoScrollEnabled = false;
 }
 
 export function setHasImage(hasImage: boolean): void {

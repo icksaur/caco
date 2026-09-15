@@ -10,7 +10,7 @@
  * This manages VIEW state only. For session/model/UI flags, see app-state.ts.
  */
 
-import { scrollToBottom } from './ui-utils.js';
+import { pinToLatest } from './chat-scroll.js';
 import { getPanelState } from './panel-state.js';
 
 export type ViewState = 'newChat' | 'chatting';
@@ -113,6 +113,9 @@ export function setViewState(state: ViewState): void {
         if (ta) { ta.style.height = 'auto'; ta.style.overflowY = 'hidden'; }
       }
       els.appletBtn?.classList.remove('hidden');
+      // The footer is shown in this view too, so a mode left at no-scroll would
+      // strand the "view latest" button over the new-chat form.
+      pinToLatest();
       break;
 
     case 'chatting':
@@ -120,7 +123,7 @@ export function setViewState(state: ViewState): void {
       els.footer?.classList.remove('hidden');
       if (newChatForm) newChatForm.hidden = true;
       if (chattingForm) chattingForm.hidden = false;
-      requestAnimationFrame(() => scrollToBottom());
+      requestAnimationFrame(() => pinToLatest());
       els.appletBtn?.classList.remove('hidden');
       break;
   }

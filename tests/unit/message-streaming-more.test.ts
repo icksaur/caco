@@ -35,7 +35,8 @@ interface LoadResult {
     onReconnectDisposer: ReturnType<typeof vi.fn>;
     onTrackerDisposer: ReturnType<typeof vi.fn>;
     onArchiveDisposer: ReturnType<typeof vi.fn>;
-    scrollToBottom: ReturnType<typeof vi.fn>;
+    followLatest: ReturnType<typeof vi.fn>;
+    pinToLatest: ReturnType<typeof vi.fn>;
     fetch: ReturnType<typeof vi.fn>;
   };
 }
@@ -65,7 +66,8 @@ async function loadMessageStreaming(): Promise<LoadResult> {
   const notifySessionComplete = vi.fn();
   const clearSession = vi.fn();
   const dropCachedTranscript = vi.fn();
-  const scrollToBottom = vi.fn();
+  const followLatest = vi.fn();
+  const pinToLatest = vi.fn();
   const regionsChatClear = vi.fn();
   const chatView = {
     updateContextFiles: vi.fn(),
@@ -89,7 +91,7 @@ async function loadMessageStreaming(): Promise<LoadResult> {
     return 1;
   });
   vi.doMock('../../public/ts/debug.js', () => ({ debug: vi.fn() }));
-  vi.doMock('../../public/ts/ui-utils.js', () => ({ scrollToBottom }));
+  vi.doMock('../../public/ts/chat-scroll.js', () => ({ followLatest, pinToLatest }));
   vi.doMock('../../public/ts/app-state.js', () => ({
     getActiveSessionId: vi.fn(() => activeSessionId.value),
     isLoadingHistory: vi.fn(() => loadingHistory.value),
@@ -194,7 +196,8 @@ async function loadMessageStreaming(): Promise<LoadResult> {
       onReconnectDisposer,
       onTrackerDisposer,
       onArchiveDisposer,
-      scrollToBottom,
+      followLatest,
+      pinToLatest,
       fetch: fetchMock,
     },
   };
@@ -303,7 +306,8 @@ describe('message-streaming additional controller coverage', () => {
     expect(ctx.mocks.clearSession).toHaveBeenCalledWith('sess-1');
     expect(ctx.mocks.notifySessionComplete).toHaveBeenCalledWith('answering');
     expect(ctx.mocks.fetch).toHaveBeenCalledWith('/api/sessions/sess-1/state');
-    expect(ctx.mocks.scrollToBottom).toHaveBeenCalled();
+    expect(ctx.mocks.followLatest).toHaveBeenCalled();
+    expect(ctx.mocks.pinToLatest).not.toHaveBeenCalled();
   });
 
   it('suppresses the completion notification for an idle the server will auto-continue', async () => {
@@ -319,7 +323,8 @@ describe('message-streaming additional controller coverage', () => {
     expect(ctx.mocks.sessionSetBusy).toHaveBeenCalledWith('sess-1', false);
     expect(ctx.mocks.markSessionObserved).toHaveBeenCalledWith('sess-1');
     expect(ctx.mocks.clearSession).toHaveBeenCalledWith('sess-1');
-    expect(ctx.mocks.scrollToBottom).toHaveBeenCalled();
+    expect(ctx.mocks.followLatest).toHaveBeenCalled();
+    expect(ctx.mocks.pinToLatest).not.toHaveBeenCalled();
   });
 
   it('drops stale errors, finalizes reasoning, and renders content events with scroll', async () => {
@@ -339,6 +344,7 @@ describe('message-streaming additional controller coverage', () => {
     ctx.eventCallback?.({ type: 'assistant.message', data: { text: 'hi' } });
     expect(ctx.chatRegionInstance?.removeThinking).toHaveBeenCalled();
     expect(ctx.chatRegionInstance?.renderEvent).toHaveBeenCalledWith({ type: 'assistant.message', data: { text: 'hi' } });
-    expect(ctx.mocks.scrollToBottom).toHaveBeenCalled();
+    expect(ctx.mocks.followLatest).toHaveBeenCalled();
+    expect(ctx.mocks.pinToLatest).not.toHaveBeenCalled();
   });
 });

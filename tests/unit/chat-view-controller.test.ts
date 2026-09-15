@@ -29,6 +29,10 @@ vi.mock('../../public/ts/applet-loader.js', () => ({
   loadApplet: vi.fn(() => Promise.resolve()),
 }));
 
+vi.mock('../../public/ts/chat-scroll.js', () => ({
+  pinToLatest: vi.fn(),
+}));
+
 vi.mock('../../public/ts/context-footer.js', () => ({
   renderSessionStatus: vi.fn(),
   renderNewChatStatus: vi.fn(),
@@ -115,6 +119,7 @@ import { sessionActivateHandler } from '../../public/ts/chat-view-controller.js'
 import { updateMenuIndicators } from '../../public/ts/session-panel.js';
 import { notifySessionChange } from '../../public/ts/applet-runtime.js';
 import { adHocBar } from '../../public/ts/adhoc-bar.js';
+import { pinToLatest } from '../../public/ts/chat-scroll.js';
 
 describe('ChatViewController', () => {
   let cvc: ChatViewController;
@@ -161,6 +166,23 @@ describe('ChatViewController', () => {
       expect(historyLoader.load).toHaveBeenCalledWith('test-id', undefined, false);
       expect(setViewState).toHaveBeenCalledWith('chatting');
       expect(cvc.getViewState()).toBe('chatting');
+    });
+
+    it('releases no-scroll before the load, not after it', async () => {
+      // A switch that pins only at settle leaves the previous session's "view
+      // latest" button up for the whole load — and forever if it never returns.
+      let release!: (v: unknown) => void;
+      vi.mocked(fetchWithTimeout).mockReturnValue(
+        new Promise(r => { release = r; }) as unknown as Promise<Response>
+      );
+
+      const pending = cvc.activateSession('test-id');
+      expect(vi.mocked(pinToLatest)).toHaveBeenCalled();
+
+      release({ ok: false, status: 500, json: vi.fn().mockResolvedValue({}) });
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await pending;
+      errSpy.mockRestore();
     });
 
     it('shows toast and stays on current view on resume failure', async () => {

@@ -1,18 +1,18 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-let scrollToBottom: ReturnType<typeof vi.fn>;
+let pinToLatest: ReturnType<typeof vi.fn>;
 let panelSnapshot: { session: boolean; applet: boolean };
 let panelSet: ReturnType<typeof vi.fn>;
 
 async function loadViewController() {
   vi.resetModules();
-  scrollToBottom = vi.fn();
+  pinToLatest = vi.fn();
   panelSnapshot = { session: false, applet: false };
   panelSet = vi.fn((patch: Partial<typeof panelSnapshot>) => {
     panelSnapshot = { ...panelSnapshot, ...patch };
   });
-  vi.doMock('../../public/ts/ui-utils.js', () => ({ scrollToBottom }));
+  vi.doMock('../../public/ts/chat-scroll.js', () => ({ pinToLatest }));
   vi.doMock('../../public/ts/panel-state.js', () => ({
     getPanelState: vi.fn(() => ({
       get: vi.fn(() => panelSnapshot),
@@ -61,7 +61,7 @@ describe('view-controller', () => {
     expect((document.getElementById('newChatForm') as HTMLFormElement).hidden).toBe(true);
     expect((document.getElementById('chattingForm') as HTMLFormElement).hidden).toBe(false);
     expect(document.getElementById('appletBtn')?.classList.contains('hidden')).toBe(false);
-    expect(scrollToBottom).toHaveBeenCalledTimes(1);
+    expect(pinToLatest).toHaveBeenCalledTimes(1);
     expect(view.getViewState()).toBe('chatting');
     expect(view.isViewState('chatting')).toBe(true);
   });
@@ -82,6 +82,9 @@ describe('view-controller', () => {
     expect(textarea!.style.height).toBe('auto');
     expect(textarea!.style.overflowY).toBe('hidden');
     expect(document.activeElement).toBe(textarea);
+    // The footer is shown in this view too, so the mode must be released or the
+    // button strands over the new-chat form.
+    expect(pinToLatest).toHaveBeenCalledTimes(2);
   });
 
   it('marks only the active form and shared footer affordances busy', async () => {

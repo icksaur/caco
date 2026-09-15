@@ -21,7 +21,7 @@ const sessionTracker = vi.hoisted(() => ({ setBusy: vi.fn() }));
 const fetchWithTimeout = vi.hoisted(() => vi.fn());
 
 vi.mock('../../public/ts/debug.js', () => ({ debug: vi.fn() }));
-vi.mock('../../public/ts/ui-utils.js', () => ({ scrollToBottom: vi.fn() }));
+vi.mock('../../public/ts/chat-scroll.js', () => ({ followLatest: vi.fn(), pinToLatest: vi.fn() }));
 vi.mock('../../public/ts/app-state.js', () => ({
   getActiveSessionId: vi.fn(() => state.activeId),
   isLoadingHistory: vi.fn(() => false),

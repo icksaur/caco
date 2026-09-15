@@ -50,8 +50,8 @@ vi.mock('../../public/ts/dom-regions.js', () => ({
   },
 }));
 
-vi.mock('../../public/ts/ui-utils.js', () => ({
-  scrollToBottom: vi.fn(),
+vi.mock('../../public/ts/chat-scroll.js', () => ({
+  pinToLatest: vi.fn(),
 }));
 
 import { HistoryLoader } from '../../public/ts/history-loader.js';

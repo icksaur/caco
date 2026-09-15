@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { scrollToBottom } from '../../public/ts/ui-utils.js';
+import { initChatScroll, pinToLatest, _resetChatScrollForTests } from '../../public/ts/chat-scroll.js';
 
 /**
  * Selecting a session on mobile left the chat scrolled to the top.
@@ -18,7 +18,7 @@ import { scrollToBottom } from '../../public/ts/ui-utils.js';
  * jsdom does no layout, so it cannot reproduce "display:none makes scrollHeight
  * 0" on its own. These fixtures model the browser fact explicitly: a hidden
  * container reports 0, a laid-out one reports its content height. What is under
- * test is whether scrollToBottom NOTICES that it cannot scroll yet.
+ * test is whether the requested scroll NOTICES that it cannot happen yet.
  */
 
 interface Harness { scroller: HTMLElement; setHidden: (hidden: boolean) => void }
@@ -53,12 +53,12 @@ function mount(): Harness {
   };
 }
 
-beforeEach(() => { vi.useFakeTimers(); });
+beforeEach(() => { vi.useFakeTimers(); _resetChatScrollForTests(); });
 
-describe('scrollToBottom while the chat panel has no layout', () => {
+describe('a scroll requested while the chat panel has no layout', () => {
   it('scrolls once the panel is laid out', () => {
     const h = mount();
-    scrollToBottom();
+    pinToLatest();
     expect(h.scroller.scrollTop).toBe(5000);
   });
 
@@ -66,7 +66,7 @@ describe('scrollToBottom while the chat panel has no layout', () => {
     const h = mount();
     h.setHidden(true);
 
-    scrollToBottom();
+    pinToLatest();
     expect(h.scroller.scrollTop).toBe(0);   // nothing to scroll yet, as expected
 
     // The panel opens a moment later, exactly as it does when the mobile
@@ -82,7 +82,7 @@ describe('scrollToBottom while the chat panel has no layout', () => {
     const h = mount();
     h.setHidden(true);
 
-    scrollToBottom();
+    pinToLatest();
     await vi.advanceTimersByTimeAsync(10_000);
 
     // Still 0 — but the point is that the timers have drained, so a hidden
@@ -94,10 +94,10 @@ describe('scrollToBottom while the chat panel has no layout', () => {
   it('a later successful scroll cancels an outstanding retry', async () => {
     const h = mount();
     h.setHidden(true);
-    scrollToBottom();          // arms a retry
+    pinToLatest();          // arms a retry
 
     h.setHidden(false);
-    scrollToBottom();          // succeeds immediately
+    pinToLatest();          // succeeds immediately
     expect(h.scroller.scrollTop).toBe(5000);
 
     h.scroller.scrollTop = 1200;   // user scrolls up to read something
@@ -108,29 +108,30 @@ describe('scrollToBottom while the chat panel has no layout', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('abandons the retry once the user has scrolled, with no second call', async () => {
+  it('abandons the retry once the reader has taken the well over', async () => {
     const h = mount();
+    initChatScroll();
     h.setHidden(true);
-    scrollToBottom();              // arms a retry; nothing cancels it later
+    pinToLatest();                 // arms a retry; no later call cancels it
 
-    // The panel appears and the user immediately scrolls up to read. There is no
-    // further scrollToBottom call, so only the retry's own guard can protect them.
+    // The panel appears and the reader immediately scrolls up. There is no
+    // further scroll request, so only the mode can protect them.
     h.setHidden(false);
     h.scroller.scrollTop = 900;
+    h.scroller.dispatchEvent(new Event('scroll'));
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(h.scroller.scrollTop).toBe(900);
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('still honours a direct call while the user is scrolled up', () => {
-    // The guard is for delayed scrolls only. A direct call is an explicit
-    // request — streamed content calls this on every chunk — and must keep
-    // working exactly as it did before the retry existed.
+  it('still honours a direct request while the reader is scrolled up', () => {
+    // The guard is for delayed scrolls only. A direct request is explicit —
+    // pressing "view latest" is one — and must keep working.
     const h = mount();
     h.scroller.scrollTop = 900;
 
-    scrollToBottom();
+    pinToLatest();
 
     expect(h.scroller.scrollTop).toBe(5000);
   });
@@ -139,9 +140,9 @@ describe('scrollToBottom while the chat panel has no layout', () => {
     const h = mount();
     h.setHidden(true);
 
-    scrollToBottom();
-    scrollToBottom();
-    scrollToBottom();
+    pinToLatest();
+    pinToLatest();
+    pinToLatest();
 
     // Each call supersedes the last rather than stacking timers that all fire.
     expect(vi.getTimerCount()).toBe(1);

@@ -9,6 +9,7 @@
  * Delegates to: view-controller (DOM), context-footer (DOM), model-selector (DOM)
  */
 
+import { pinToLatest } from './chat-scroll.js';
 import { debug } from './debug.js';
 import { setActiveSession, getActiveSessionId, getCurrentCwd, getSelectedModel, getAvailableModels, releaseActiveSessionForNewChat, getNewChatCwd, onSessionActivate, notifySessionActivated, type SessionActivateCtx } from './app-state.js';
 import { setFormEnabled as vcSetFormEnabled, setViewState, getViewState as vcGetViewState, showSessionPanel, type ViewState } from './view-controller.js';
@@ -176,6 +177,10 @@ class ChatViewController {
 
     const token = ++this.navGeneration;
     const flight = perfFlight(`session.activate(${sessionId.slice(0, 8)})`);
+    // Release no-scroll at the START of the switch, not at settle: otherwise the
+    // previous session's "view latest" button stays up for the whole load, and
+    // forever if the load fails or times out.
+    pinToLatest();
     // (ChatFormController.bind() in showChat below will flush the
     // prior binding's pending debounce, so no explicit saveDraft
     // here.)

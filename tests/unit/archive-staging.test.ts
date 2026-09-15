@@ -36,7 +36,10 @@ const store = vi.hoisted(() => ({
 
 vi.mock('../../src/session-manager.js', () => ({ sessionManager: sm }));
 vi.mock('../../src/herd.js', () => ({ isHerdParent: herd.isHerdParent }));
-vi.mock('../../src/sdk-session-store.js', () => ({ listSessionIds: store.listSessionIds }));
+vi.mock('../../src/sdk-session-store.js', () => ({
+  listSessionIds: store.listSessionIds,
+  readSessionHeadResult: () => ({ ok: false, kind: 'missing' } as const),
+}));
 vi.mock('../../src/session-meta-store.js', () => ({
   getSessionMeta: store.getSessionMeta,
   updateSessionMeta: store.updateSessionMeta,

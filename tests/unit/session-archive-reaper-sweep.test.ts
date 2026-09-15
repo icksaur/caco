@@ -14,7 +14,13 @@ const store = vi.hoisted(() => ({
 
 vi.mock('../../src/session-manager.js', () => ({ sessionManager: sm }));
 vi.mock('../../src/herd.js', () => ({ isHerdParent: herd.isHerdParent }));
-vi.mock('../../src/sdk-session-store.js', () => ({ listSessionIds: store.listSessionIds }));
+vi.mock('../../src/sdk-session-store.js', () => ({
+  listSessionIds: store.listSessionIds,
+  // Auto-park's creationMs fallback (spec-auto-park-idle-root) calls this;
+  // the existing sweep fixtures always provide autoArchiveTaggedAt so no
+  // candidate ever falls through to it, but the mock has to be present.
+  readSessionHeadResult: () => ({ ok: false, kind: 'missing' } as const),
+}));
 vi.mock('../../src/session-meta-store.js', () => ({ getSessionMeta: store.getSessionMeta }));
 
 import { sweepAutoArchive } from '../../src/session-archive-reaper.js';
@@ -51,7 +57,7 @@ describe('sweepAutoArchive wiring', () => {
 
     expect(sm.reapArchive).toHaveBeenCalledTimes(1);
     expect(sm.reapArchive).toHaveBeenCalledWith('aged', expect.any(Function));
-    expect(result).toEqual({ scanned: 3, archived: 1 }); // aged, fresh, busy are in-folder; only aged eligible
+    expect(result).toEqual({ scanned: 3, archived: 1, parked: 0 }); // aged, fresh, busy are in-folder; only aged eligible
   });
 
   it('continues past a reapArchive that throws (best-effort)', async () => {

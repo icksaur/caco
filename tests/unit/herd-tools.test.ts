@@ -448,7 +448,7 @@ describe('caco_herd acquire, resume, and disown', () => {
     expect(trackerFake.markObserved).not.toHaveBeenCalled();
   });
 
-  it('acquire un-tags a parked session (clears auto-archive folder + tag)', async () => {
+  it('acquire un-tags a parked session (clears auto-archive folder + tag, stamps movedToRootAt)', async () => {
     storageFake.getSessionMeta.mockImplementation(sessionId => (
       sessionId === 'target-child-0004' ? { folder: 'auto-archive', autoArchiveTaggedAt: 123 } : undefined
     ));
@@ -456,10 +456,13 @@ describe('caco_herd acquire, resume, and disown', () => {
     await tools().herdTool.handler({ action: 'acquire', sessionId: 'target-child-0004' });
 
     const updater = storageFake.updateSessionMeta.mock.calls.at(-1)![1];
-    const m: { orchestratedBy?: string; folder?: string; autoArchiveTaggedAt?: number } = { folder: 'auto-archive', autoArchiveTaggedAt: 123 };
+    const m: { orchestratedBy?: string; folder?: string; autoArchiveTaggedAt?: number; movedToRootAt?: number } = { folder: 'auto-archive', autoArchiveTaggedAt: 123 };
     updater(m);
     expect(m.orchestratedBy).toBe('parent-session-0001');
     expect(m.folder).toBeUndefined();
     expect(m.autoArchiveTaggedAt).toBeUndefined();
+    // spec-auto-park-idle-root: any → root transition stamps movedToRootAt so
+    // auto-park treats the un-park as "user just said keep this at the root".
+    expect(typeof m.movedToRootAt).toBe('number');
   });
 });

@@ -10,6 +10,7 @@
     "tests/**/*.ts"
   ],
   "ignore": [
+    ".husky/**",
     "public/*.min.js",
     "public/bundle.js",
     "public/chat.js",
@@ -23,6 +24,7 @@
     "@lezer/*",
     "@vscode/ripgrep",
     "highlight.js",
+    "lint-staged",
     "tree-sitter-c-sharp",
     "tree-sitter-cpp",
     "tree-sitter-javascript",

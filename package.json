@@ -13,6 +13,7 @@
     "check:frontend-coverage": "node scripts/check-frontend-coverage.mjs",
     "check:specs": "node tools/check-spec-conformance.mjs",
     "check:pins": "node scripts/check-pins.mjs",
+    "check:lockfile": "node scripts/check-lockfile.mjs",
     "build:highlight": "node scripts/build-highlight.js",
     "build:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --minify --sourcemap",
     "watch:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --sourcemap --watch",
@@ -92,7 +93,7 @@
       "eslint"
     ]
   },
-  "overridesNote": "vite is pinned to 8.2.2 because Microsoft's internal npm feed (packagefeedproxy.microsoft.io) is not always in sync with the public registry. vitest@^4.1.11 otherwise resolves vite to 8.3.0, which the feed 404s on. `npm run check:pins` will fail the build once the feed carries a newer stable, prompting removal.",
+  "overridesNote": "vite is pinned because an internal npm mirror used by some contributors is not always in sync with the public registry. vitest@^4.1.11 otherwise resolves vite to a version that mirror 404s on. `npm run check:pins` fails once that mirror carries a newer stable, prompting removal; it is advisory-only when run against the public registry, which cannot answer whether the mirror has caught up.",
   "overrides": {
     "vite": "8.2.2"
   }

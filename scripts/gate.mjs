@@ -35,6 +35,7 @@ const PHASES = [
   { name: 'check:vendor', after: [] },
   { name: 'check:specs', after: [] },
   { name: 'check:pins', after: [] },
+  { name: 'check:lockfile', after: [] },
   { name: 'test', after: [] },
   { name: 'check:coverage', after: ['test'] },
   { name: 'check:frontend-coverage', after: ['test'] },

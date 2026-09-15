@@ -167,7 +167,14 @@ You do NOT wait for children; they run and you are re-woken when one needs atten
         // child is never left scheduled for archival (spec-soft-archive-folder).
         updateSessionMeta(targetId, meta => {
           meta.orchestratedBy = callerId;
-          if (meta.folder === AUTO_ARCHIVE_FOLDER) { meta.folder = undefined; meta.autoArchiveTaggedAt = undefined; }
+          if (meta.folder === AUTO_ARCHIVE_FOLDER) {
+            meta.folder = undefined;
+            meta.autoArchiveTaggedAt = undefined;
+            // Same rule as the folder PATCH route: any-folder → root stamps
+            // movedToRootAt so auto-park does not re-park a session the herd
+            // just un-parked (spec-auto-park-idle-root).
+            meta.movedToRootAt = Date.now();
+          }
         });
         registerHerdBond(targetId, callerId);
         // Apply plugin dirs BEFORE any prompt so the child's first turn already has them.

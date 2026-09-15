@@ -21,7 +21,8 @@ import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, 
 import { readSessionWorkspace, searchSessionEvents, getEventVersion } from '../sdk-session-store.js';
 import { rotateSessionHistory } from '../session-history-rotation.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
-import { AUTO_ARCHIVE_FOLDER, AUTO_ARCHIVE_ENABLED } from '../config.js';
+import { AUTO_ARCHIVE_ENABLED } from '../config.js';
+import { applyFolderChange } from '../folder-transitions.js';
 import { stageForArchive, archiveEligibleAt } from '../session-archive-reaper.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { normalizePluginDirectories } from '../plugin-directories.js';
@@ -873,11 +874,7 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
     if (envHint !== undefined) meta.envHint = envHint;
     if (folder !== undefined) {
       const next = normalizeFolder(folder) || undefined;
-      meta.folder = next;
-      // Keep the auto-archive schedule anchor in sync with folder membership: stamp
-      // on entry (fresh grace window), clear on exit (spec-soft-archive-folder).
-      if (next === AUTO_ARCHIVE_FOLDER) { if (meta.autoArchiveTaggedAt === undefined) meta.autoArchiveTaggedAt = Date.now(); }
-      else meta.autoArchiveTaggedAt = undefined;
+      applyFolderChange(meta, next, Date.now());
     }
 
     if (setContext) {

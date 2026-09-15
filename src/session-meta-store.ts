@@ -55,6 +55,17 @@ export interface SessionMeta {
    *  idle before parking still gets the full grace window from the moment it was
    *  tagged. Set on entry to the folder (disown / folder PATCH), cleared on exit. */
   autoArchiveTaggedAt?: number;
+  /** Epoch ms of the user's most recent explicit "this session belongs at the root"
+   *  action, i.e. any folder mutation transitioning `folder` from a non-empty value
+   *  to root (undefined/empty). Written by the folder PATCH route and by the
+   *  `caco_herd acquire` clear-parked branch (spec-auto-park-idle-root). Consulted
+   *  ONLY by auto-park's `rootAnchorMs` — the reaper and every other quiescence
+   *  question ignore it — so it cannot mis-signal anywhere else. Never cleared;
+   *  re-stamped on each qualifying transition (the user's most recent decision is
+   *  what matters). Without this, a session dragged from `auto-archive` or a user
+   *  folder to root would be re-parked on the next hourly sweep because the folder
+   *  PATCH does not touch `lastUsedAt`. */
+  movedToRootAt?: number;
   /** Per-session context-window budget (absolute tokens). When set, the SDK's
    *  infiniteSessions.backgroundCompactionThreshold is derived as T/W so the
    *  session compacts earlier, cutting per-call cache cost. Absent = SDK default. */

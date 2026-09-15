@@ -47,6 +47,18 @@ export const AUTO_ARCHIVE_IDLE_MS = Number(process.env.CACO_AUTO_ARCHIVE_IDLE_MS
 export const AUTO_ARCHIVE_SWEEP_INTERVAL_MS = Number(process.env.CACO_AUTO_ARCHIVE_SWEEP_INTERVAL_MS) || 60 * 60 * 1000;
 export const AUTO_ARCHIVE_ENABLED = process.env.CACO_AUTO_ARCHIVE !== '0';
 
+// Auto-park (spec-auto-park-idle-root): a fourth entry path into the auto-archive
+// folder. Root sessions (folder unset) that have sat untouched past AUTO_PARK_IDLE_MS
+// are moved into auto-archive, but ONLY when the root population is at or above
+// AUTO_PARK_ROOT_THRESHOLD (volume + age conjunction, not a rolling age cull). The
+// reaper's 3-day grace period runs from parking, so nothing is destroyed for at
+// least AUTO_PARK_IDLE_MS + AUTO_ARCHIVE_IDLE_MS after last activity. Off with
+// CACO_AUTO_PARK=0.
+export const AUTO_PARK_ENABLED = process.env.CACO_AUTO_PARK !== '0';
+export const AUTO_PARK_ROOT_THRESHOLD = Number(process.env.CACO_AUTO_PARK_ROOT_THRESHOLD) || 30;
+export const AUTO_PARK_IDLE_MS = Number(process.env.CACO_AUTO_PARK_IDLE_MS) || 21 * 24 * 60 * 60 * 1000;
+export const AUTO_PARK_MAX_PER_TICK = Number(process.env.CACO_AUTO_PARK_MAX_PER_TICK) || 100;
+
 // caco_run_workflow (code-execution orchestration). On by default: it runs
 // arbitrary code auto-approved, but only ever the read-oriented `caco` facade
 // inside a bounded child process. Opt out with CACO_WORKFLOW=0.

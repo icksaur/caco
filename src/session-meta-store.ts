@@ -45,6 +45,16 @@ export interface SessionMeta {
   lastUsedAt?: string;
   currentIntent?: string;
   intentHistory?: Array<{ text: string; ts: number }>;
+  /** Write-once display fallback captured from the FIRST valid intent this session
+   *  ever recorded (spec-auto-name-sessions). Stamped in setSessionIntent under the
+   *  `!meta.autoName && hasValidText(intent)` guard, never overwritten or cleared.
+   *  Consulted only by list()'s title ladder as level 3 (after `meta.name` and
+   *  workspace.summary, before the UI's "No summary" literal), so it cannot
+   *  mis-signal elsewhere. Kept separate from `intentHistory[0]` because the
+   *  history is bounded and evicts from the front — a chatty session would lose
+   *  its lifetime-first intent, making the title shimmer. Absent on every session
+   *  that has never emitted a valid intent (unhelpful string; unhelpful title). */
+  autoName?: string;
   envHint?: string;
   context?: Record<string, string[]>;
   model?: string;
@@ -289,7 +299,26 @@ export function isSessionUnobserved(sessionId: string): boolean {
 // Intent
 // ============================================================================
 
-/** Update the session's current intent and append to its bounded history. */
+/**
+ * True iff `x` is a string with at least one non-whitespace character
+ * (spec-auto-name-sessions). The load-bearing property is `.trim().length > 0`:
+ * an empty or whitespace-only string is a false positive for "the model reported
+ * a real intent" and, if latched to `meta.autoName`, would render as a blank
+ * title. Applied at BOTH stamp time (in `setSessionIntent`) and projection time
+ * (`list()`'s ladder) so no path ever promotes an unhelpful string to a title.
+ *
+ * Accepts `unknown` so callers passing untrusted persisted data (e.g. a JSON
+ * value that might not actually be a string) don't need a separate type check.
+ */
+export function hasValidText(x: unknown): x is string {
+  return typeof x === 'string' && x.trim().length > 0;
+}
+
+/** Update the session's current intent and append to its bounded history.
+ *  On the FIRST valid intent this session ever records, ALSO latch it to
+ *  `meta.autoName` as a stable display-title fallback (spec-auto-name-sessions).
+ *  The latch is write-once: subsequent intents update `currentIntent` and push
+ *  to `intentHistory` as before but leave `autoName` untouched. */
 export function setSessionIntent(sessionId: string, intent: string): void {
   updateSessionMeta(sessionId, meta => {
     meta.currentIntent = intent;
@@ -299,6 +328,14 @@ export function setSessionIntent(sessionId: string, intent: string): void {
       history.splice(0, history.length - INTENT_HISTORY_LIMIT);
     }
     meta.intentHistory = history;
+    // Write-once auto-name latch. The `!meta.autoName` guard makes this
+    // idempotent under any replay and stable across every later intent, even
+    // after the bounded history has evicted the original one. Empty/whitespace
+    // intents are skipped so the first VALID intent — not the first raw one —
+    // wins the latch.
+    if (!meta.autoName && hasValidText(intent)) {
+      meta.autoName = intent;
+    }
   });
 }
 

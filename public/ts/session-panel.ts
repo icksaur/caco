@@ -15,6 +15,7 @@ import { showToast } from './toast.js';
 import { buildSessionListModel } from './session-list-model.js';
 import { refreshUsageDisplays, repaintUsageDisplays } from './usage-display.js';
 import type { SessionListModel, FolderGroup } from './session-list-model.js';
+import { displayTitleFor, truncateForTitle, shouldSuppressIntentSubline } from './session-title.js';
 
 // Module state
 let allSessions: SessionData[] = [];
@@ -623,7 +624,11 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     item.classList.add('dragging');
     sessionDragActive = true;
     if (window.parent !== window) {
-      const dragName = session.name || session.summary || 'No summary';
+      // Drag payload uses the SAME truncated title the row displays, so a
+      // drop receiver sees exactly what the user was dragging — a runaway
+      // autoName clipped to 60 chars, not the full paragraph
+      // (spec-auto-name-sessions).
+      const dragName = truncateForTitle(displayTitleFor(session));
       window.parent.postMessage({
         type: 'caco:transfer:dragstart',
         sessionId: session.sessionId,
@@ -662,16 +667,31 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     row1.appendChild(icon);
   }
   
-  const displayName = session.name || session.summary || 'No summary';
+  // Title ladder (spec-auto-name-sessions): name → workspace.summary →
+  // autoName → "No summary". `displayTitleFor` picks the winning candidate;
+  // `truncateForTitle` clips it to the sidebar-safe width.
+  const rawTitle = displayTitleFor(session);
+  const displayName = truncateForTitle(rawTitle);
   const titleSpan = document.createElement('span');
   titleSpan.className = 'session-title';
-  titleSpan.title = displayName;
-  
+  // Tooltip shows the UNTRUNCATED candidate so the user can inspect a long
+  // autoName without hovering to see "...".
+  titleSpan.title = rawTitle;
+
   const nameText = document.createTextNode(displayName);
   titleSpan.appendChild(nameText);
-  
+
+  // Italicised sub-line — the session's current activity. Suppress it iff the
+  // title was drawn from `autoName` AND the current intent is the SAME string
+  // (avoids rendering the same phrase twice on the row). Every other case —
+  // user-named session, workspace-summary title, or an auto-named session
+  // whose current intent has moved on — renders as before
+  // (spec-auto-name-sessions).
   const intent = tracked?.intent || session.currentIntent;
-  if (intent) {
+  const suppressSubline =
+    shouldSuppressIntentSubline(session)
+    && (intent === session.autoName);
+  if (intent && !suppressSubline) {
     const intentSpan = document.createElement('span');
     intentSpan.className = 'session-intent';
     intentSpan.textContent = intent;

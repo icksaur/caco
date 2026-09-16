@@ -21,7 +21,7 @@ export {
   ensureSessionMeta, getSessionMeta, setSessionMeta, updateSessionMeta, readSessionMeta,
   getSessionIconPath,
   markSessionObserved, markSessionIdle, isSessionUnobserved,
-  setSessionIntent,
+  setSessionIntent, hasValidText,
   getSessionOrder, setSessionOrder,
 } from './session-meta-store.js';
 

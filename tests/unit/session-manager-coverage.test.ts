@@ -52,6 +52,9 @@ const storage = vi.hoisted(() => {
     }),
     getSessionIconPath: vi.fn(() => null),
     setSessionOrder: vi.fn(),
+    // spec-auto-name-sessions: SessionManager.list() imports hasValidText from
+    // this module to validate title-ladder candidates.
+    hasValidText: (x: unknown) => typeof x === 'string' && x.trim().length > 0,
   };
 });
 

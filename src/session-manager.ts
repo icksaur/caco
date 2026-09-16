@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, cpSync, rmSync, mkdtempSync, createWriteStream }
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import type { CreateConfig, ResumeConfig, ResumeResult, SdkSystemMessage, SessionEvent, ToolFactory } from './types.js';
-import { ensureSessionMeta, getSessionMeta, updateSessionMeta, readSessionMeta, getSessionIconPath, setSessionOrder, type SessionKind } from './storage.js';
+import { ensureSessionMeta, getSessionMeta, updateSessionMeta, readSessionMeta, getSessionIconPath, setSessionOrder, hasValidText, type SessionKind } from './storage.js';
 import { getSessionDir } from './storage-paths.js';
 import { cancelCardPersist } from './file-edits-store.js';
 import { readSessionWorkspace, readSessionEvents, readSessionHeadResult, parseSessionModel, listSessionIds } from './sdk-session-store.js';
@@ -337,6 +337,18 @@ interface SessionListItem {
   name: string;
   kind: SessionKind;
   summary: string | null;
+  /** Persisted first-valid-intent fallback, projected untruncated
+   *  (spec-auto-name-sessions). Null when the session has never emitted a valid
+   *  intent. The UI truncates for display; the wire carries the full string so
+   *  the sub-line suppression rule can compare against untruncated
+   *  `currentIntent` without a truncation-driven mismatch. */
+  autoName: string | null;
+  /** Which ladder level supplied the display title
+   *  (spec-auto-name-sessions). The UI's sub-line suppression rule keys off
+   *  this rather than inferring provenance from string equality — a coincidental
+   *  match between a real workspace summary and `currentIntent` should render
+   *  the sub-line as before. */
+  titleSource: 'name' | 'workspace-summary' | 'auto-name' | 'none';
   updatedAt: string | Date | null;
   isBusy: boolean;
   isUnobserved: boolean;
@@ -1796,17 +1808,27 @@ export class SessionManager {
   }
 
   /**
-   * List all sessions (from cache) with updatedAt
+   * List all sessions (from cache) with updatedAt.
+   *
+   * Title fields (`summary`, `autoName`, `titleSource`) implement the
+   * spec-auto-name-sessions ladder: `meta.name` → workspace.summary → autoName
+   * → "No summary" (in the UI). Every level is validated via `hasValidText`, so
+   * an empty-string field never wins over a valid downstream level. The
+   * workspace summary is read FRESH from the `readSessionWorkspace` call this
+   * method already makes for `updatedAt` (not from `sessionCache.summary`,
+   * which is populated only at discovery/import and does not reflect a summary
+   * the SDK writes mid-session).
    */
   list(): SessionListItem[] {
     const result: SessionListItem[] = [];
-    for (const [sessionId, { cwd, summary }] of this.sessionCache) {
+    for (const sessionId of this.sessionCache.keys()) {
+      const cachedCwd = this.sessionCache.get(sessionId)?.cwd ?? null;
       let updatedAt: string | null = null;
       const workspace = readSessionWorkspace(sessionId);
       if (workspace?.updatedAt) updatedAt = workspace.updatedAt;
       const isBusy = this.isBusy(sessionId);
       const meta = getSessionMeta(sessionId);
-      const name = meta?.name || '';
+      const rawName = meta?.name || '';
       const model = meta?.model || null;
       const isUnobserved = unobservedTracker.isUnobserved(sessionId);
       const currentIntent = meta?.currentIntent || null;
@@ -1815,7 +1837,42 @@ export class SessionManager {
       const scheduleSlug = null;
       const scheduleNextRun = null;
       const hasIcon = getSessionIconPath(sessionId) !== null;
-      result.push({ sessionId, cwd, model, name, kind, summary, updatedAt, isBusy, isUnobserved, currentIntent, contextFiles, hasIcon, scheduleSlug, scheduleNextRun, folder: meta?.folder, orchestratedBy: meta?.orchestratedBy ?? null, isHerdParent: isHerdParent(sessionId) });
+
+      // Title ladder (spec-auto-name-sessions). `summary` is projected iff the
+      // workspace summary is a real string; likewise `autoName`. The
+      // `titleSource` tag makes the winning level explicit for the UI's
+      // sub-line suppression rule (which cannot infer provenance from string
+      // equality — a real workspace summary that coincidentally matches
+      // `currentIntent` must render the sub-line unchanged).
+      const summary = hasValidText(workspace?.summary) ? workspace!.summary! : null;
+      const autoName = hasValidText(meta?.autoName) ? meta!.autoName! : null;
+      const titleSource: SessionListItem['titleSource'] =
+        hasValidText(rawName) ? 'name'
+        : summary ? 'workspace-summary'
+        : autoName ? 'auto-name'
+        : 'none';
+
+      result.push({
+        sessionId,
+        cwd: cachedCwd,
+        model,
+        name: rawName,
+        kind,
+        summary,
+        autoName,
+        titleSource,
+        updatedAt,
+        isBusy,
+        isUnobserved,
+        currentIntent,
+        contextFiles,
+        hasIcon,
+        scheduleSlug,
+        scheduleNextRun,
+        folder: meta?.folder,
+        orchestratedBy: meta?.orchestratedBy ?? null,
+        isHerdParent: isHerdParent(sessionId),
+      });
     }
     return result;
   }

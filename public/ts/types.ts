@@ -38,6 +38,18 @@ export interface SessionData {
   name?: string;
   kind?: SessionKind;
   summary?: string;
+  /** Persisted first-valid-intent fallback (spec-auto-name-sessions). Absent
+   *  when the session has never emitted a valid intent. Truncated for display
+   *  in the UI's title render, but sent untruncated on the wire so provenance
+   *  checks (see `titleSource`) can compare against `currentIntent` cleanly. */
+  autoName?: string | null;
+  /** Which ladder level supplied the display title
+   *  (spec-auto-name-sessions). The UI uses this to scope the sub-line
+   *  suppression rule: only when `titleSource === 'auto-name'` AND
+   *  `currentIntent === autoName` is the italicised sub-line hidden (to avoid
+   *  rendering the same string twice). Every other value renders the sub-line
+   *  as before. */
+  titleSource?: 'name' | 'workspace-summary' | 'auto-name' | 'none';
   updatedAt?: string;
   isBusy?: boolean;
   isUnobserved?: boolean;

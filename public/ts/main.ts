@@ -14,6 +14,7 @@ import { initViewState, setViewState, showSessionPanel } from './view-controller
 import { initAppletRuntime, loadAppletFromUrl } from './applet-runtime.js';
 import { initInputRouter } from './input-router.js';
 import { registerPoundProvider } from './multiline-input.js';
+import { displayTitleFor, truncateForTitle, NO_SUMMARY } from './session-title.js';
 import { ChatFormController } from './chat-form-controller.js';
 import { chatView } from './chat-view-controller.js';
 import { connectWs, waitForConnect, reconnectIfNeeded } from './websocket.js';
@@ -144,12 +145,24 @@ document.addEventListener('DOMContentLoaded', () => {
     registerPoundProvider(() => {
       return getCachedSessions()
         .filter(s => s.kind !== 'swarm')
-        .map(s => ({
-          id: `session:${s.sessionId}`,
-          label: s.name || s.summary || s.sessionId.slice(0, 8),
-          description: 'session',
-          value: '`caco-session:' + s.sessionId + '`',
-        }));
+        .map(s => {
+          // Use the same title ladder the session list itself displays
+          // (spec-auto-name-sessions): name → summary → autoName → sessionId
+          // slice. Without this the pound picker showed only meta.name +
+          // workspace.summary and hex slugs for auto-named sessions — users
+          // could see the session in the sidebar as "fix routing bug" and
+          // still not find it via #completion.
+          const ladderTitle = displayTitleFor(s);
+          const label = ladderTitle === NO_SUMMARY
+            ? s.sessionId.slice(0, 8)
+            : truncateForTitle(ladderTitle);
+          return {
+            id: `session:${s.sessionId}`,
+            label,
+            description: 'session',
+            value: '`caco-session:' + s.sessionId + '`',
+          };
+        });
     });
     
     // Connect WebSocket — MUST run AFTER initMessageStreaming()

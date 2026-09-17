@@ -56,9 +56,9 @@ describe('isDeferEligibleCacoTool', () => {
   // The inversion (spec-defer-default-inversion): deferrable is the DEFAULT, and
   // only these four are protected. An allowlist made forgetting cost permanent
   // per-turn rent; a blocklist makes it cost a recoverable enable round-trip.
-  it('protects exactly the four named tools', () => {
+  it('protects exactly the five named tools', () => {
     expect([...NEVER_DEFER_CACO_TOOLS].sort()).toEqual(
-      ['caco_docs', 'caco_enable_tools', 'caco_run_workflow', 'retrieve_output'],
+      ['caco_docs', 'caco_enable_tools', 'caco_run_workflow', 'report_intent', 'retrieve_output'],
     );
     for (const name of NEVER_DEFER_CACO_TOOLS) {
       expect(isDeferEligibleCacoTool(name)).toBe(false);

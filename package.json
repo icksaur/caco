@@ -93,8 +93,5 @@
       "eslint"
     ]
   },
-  "overridesNote": "vite is pinned because an internal npm mirror used by some contributors is not always in sync with the public registry. vitest@^4.1.11 otherwise resolves vite to a version that mirror 404s on. `npm run check:pins` fails once that mirror carries a newer stable, prompting removal; it is advisory-only when run against the public registry, which cannot answer whether the mirror has caught up.",
-  "overrides": {
-    "vite": "8.2.2"
-  }
+  "overridesNote": "No active overrides. Add pins here with a note explaining the rationale (e.g. internal mirror lag) so `check:pins` can track removal."
 }

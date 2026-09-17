@@ -4,7 +4,7 @@
 
 import { debug } from './debug.js';
 import type { SessionsResponse, SessionData } from './types.js';
-import { formatAge, formatStatusParts } from './ui-utils.js';
+import { formatAge, formatStatusParts, fuzzyScore } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels, notifySessionArchived } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { showSessionPanel } from './view-controller.js';
@@ -27,11 +27,45 @@ const collapsedFolders = new Set<string>(
 // Track active session drags (iframe may restrict dataTransfer.types during dragover)
 let sessionDragActive = false;
 
+// Fuzzy-find query for the session-list filter input (session-title-fuzzyfind).
+// Empty or whitespace-only means no filter; the input is a persistent per-tab
+// UI toy — no persistence across reload. Focus + caret are re-hydrated across
+// re-renders because renderFromModel blows away the container each keystroke.
+let sessionFilterQuery = '';
+let sessionFilterHadFocus = false;
+let sessionFilterCaret: [number, number] = [0, 0];
+
 let sessionPanelInitialized = false;
 const sessionPanelDisposers: Array<() => void> = [];
 
 export function getCachedSessions(): SessionData[] {
   return allSessions;
+}
+
+/**
+ * Filter sessions by fuzzy-matching the displayed title against the query.
+ * An empty or whitespace-only query returns the input unchanged so the panel
+ * shows every session when the input is cleared. Uses `displayTitleFor` so
+ * auto-named sessions (spec-report-intent-tool) participate — the visible
+ * title is what the user searches for.
+ *
+ * Exported for unit testing; not otherwise used outside this module.
+ */
+export function filterSessionsByQuery(sessions: SessionData[], query: string): SessionData[] {
+  const q = query.trim().toLowerCase();
+  if (q.length === 0) return sessions;
+  return sessions.filter(s => fuzzyScore(displayTitleFor(s).toLowerCase(), q) >= 0);
+}
+
+/**
+ * Filter allSessions by the current search query then rebuild + render the
+ * grouped model. All callers that previously called `renderFromModel` +
+ * `buildSessionListModel` funnel through here so the filter is honored
+ * uniformly across load, folder toggle, and filter-input keystrokes.
+ */
+function renderList(): void {
+  const filtered = filterSessionsByQuery(allSessions, sessionFilterQuery);
+  renderFromModel(buildSessionListModel(filtered, currentSessionOrder, collapsedFolders));
 }
 
 /**
@@ -409,7 +443,7 @@ export async function loadSessions(): Promise<void> {
     allSessions = flatSessions.filter(s => s.kind !== 'swarm' || s.isBusy);
     currentSessionOrder = sessionOrder || [];
     
-    renderFromModel(buildSessionListModel(allSessions, currentSessionOrder, collapsedFolders));
+    renderList();
   } catch (error) {
     console.error('Failed to load sessions:', error);
   }
@@ -429,7 +463,7 @@ function toggleFolder(name: string): void {
     collapsedFolders.add(name);
   }
   saveCollapsedFolders();
-  renderFromModel(buildSessionListModel(allSessions, currentSessionOrder, collapsedFolders));
+  renderList();
 }
 
 const movingSessionIds = new Set<string>();
@@ -518,11 +552,43 @@ function renderFromModel(model: SessionListModel): void {
 
   container.appendChild(heading);
   repaintUsageDisplays();
-  
+
+  // Fuzzy-find filter input (session-title-fuzzyfind). Sits below the sessions
+  // header + "+" button and above the folder zones. Empty/whitespace query
+  // shows everything; nonempty filters by fuzzyScore against displayTitleFor.
+  // Caret + focus are re-hydrated because renderFromModel blows the container
+  // away on each keystroke.
+  const filterInput = document.createElement('input');
+  filterInput.type = 'text';
+  filterInput.className = 'session-filter-input';
+  filterInput.placeholder = 'find session';
+  filterInput.value = sessionFilterQuery;
+  filterInput.autocomplete = 'off';
+  filterInput.spellcheck = false;
+  filterInput.setAttribute('aria-label', 'Find session');
+  filterInput.oninput = () => {
+    sessionFilterQuery = filterInput.value;
+    sessionFilterHadFocus = true;
+    sessionFilterCaret = [filterInput.selectionStart ?? filterInput.value.length,
+                          filterInput.selectionEnd ?? filterInput.value.length];
+    renderList();
+  };
+  filterInput.onfocus = () => { sessionFilterHadFocus = true; };
+  filterInput.onblur = () => { sessionFilterHadFocus = false; };
+  container.appendChild(filterInput);
+  if (sessionFilterHadFocus) {
+    // Re-focus after the DOM insertion completes; a microtask is enough
+    // because the element is already parented at this point.
+    queueMicrotask(() => {
+      filterInput.focus();
+      try { filterInput.setSelectionRange(sessionFilterCaret[0], sessionFilterCaret[1]); } catch { /* ignore */ }
+    });
+  }
+
   if (model.root.length === 0 && model.folders.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'schedules-empty';
-    empty.textContent = 'no sessions';
+    empty.textContent = sessionFilterQuery.trim().length > 0 ? 'no matching sessions' : 'no sessions';
     container.appendChild(empty);
     return;
   }

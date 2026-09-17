@@ -151,12 +151,18 @@ export function excludedBuiltinNames(): string[] {
  *    for these (deferred ⇒ invisible ⇒ unused ⇒ stale forever), so its idle age
  *    measures the deferral, not disuse. A judgment call, not a proof: the
  *    `caco_enable_tools` listing does keep deferred tools nominally discoverable.
+ *  - `report_intent` — the prompt's Behavior section names this tool by name and
+ *    tells the model to call it on turn 1 of a new session. Auto-defer would
+ *    strand the tool on the very turn the nudge fires, and the tool's whole
+ *    value is landing a title before the model produces enough output to force
+ *    an enable round-trip. See spec-report-intent-tool.
  */
 export const NEVER_DEFER_CACO_TOOLS: string[] = [
   'caco_enable_tools',
   'caco_run_workflow',
   'retrieve_output',
   'caco_docs',
+  'report_intent',
 ];
 
 /**

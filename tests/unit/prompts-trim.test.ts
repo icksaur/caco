@@ -33,9 +33,11 @@ describe('the prompt does not restate tool mechanics', () => {
   });
 
   it('names no tool that does not exist', async () => {
-    // Both were referenced by the prompt while absent from the tool list.
+    // `list_applets` was referenced by the prompt while absent from the tool
+    // list. `report_intent` was too, but has since been reinstated as a real
+    // Caco tool (spec-report-intent-tool) and is now legitimately named.
     const text = await body();
-    for (const ghost of ['report_intent', 'list_applets']) expect(text).not.toContain(ghost);
+    for (const ghost of ['list_applets']) expect(text).not.toContain(ghost);
   });
 
   it('drops the sections whose content moved to tool descriptions', async () => {

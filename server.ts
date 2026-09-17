@@ -27,6 +27,7 @@ import { startAutoArchiveReaper } from './src/session-archive-reaper.js';
 import { createSessionHistoryTool } from './src/session-history-tool.js';
 import { verifySdkProseSections } from './src/prompts.js';
 import { createMemoryTools } from './src/memory-tool.js';
+import { createReportIntentTool } from './src/report-intent-tool.js';
 import { createIndexTool } from './src/index-tool.js';
 import { createRetrieveOutputTool } from './src/observe/retrieve-tool.js';
 import { createWorkflowTool } from './src/workflow/tool.js';
@@ -251,6 +252,7 @@ async function start(): Promise<void> {
     const herdTools = createHerdTools(sessionRef, (id) => sessionManager.getDispatchCorrelationId(id));
     const sessionHistoryTools = createSessionHistoryTool();
     const memoryTools = createMemoryTools();
+    const reportIntentTools = createReportIntentTool(sessionRef);
     const indexTools = createIndexTool(sessionCwd);
     const retrieveTools = createRetrieveOutputTool(sessionCwd, sessionRef);
     const workflowTools = workflowAvailable ? createWorkflowTool(sessionCwd, sessionRef) : [];
@@ -258,7 +260,7 @@ async function start(): Promise<void> {
     const browserTools = createBrowserTools(sessionRef);
     const toolRevealTools = createToolRevealTool(sessionRef);
     
-    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...herdTools, ...sessionHistoryTools, ...memoryTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools, ...toolRevealTools];
+    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...herdTools, ...sessionHistoryTools, ...memoryTools, ...reportIntentTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools, ...toolRevealTools];
     // Capture the full Caco tool catalog (pre-filter, incl. hard-disabled) once, for
     // the mcp-servers applet. See docs/spec-tool-reveal.md Phase A.
     if (sessionManager.getCacoToolCatalog().length === 0) {

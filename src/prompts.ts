@@ -58,7 +58,7 @@ export async function buildSystemMessage(): Promise<SystemMessage> {
   const appletPrompt = await buildAppletSection();
   // Name the workflow tool only when it is actually registered. A prompt that
   // points at a tool that does not exist is the exact bug this trim removed
-  // twice over (`report_intent`, `list_applets`).
+  // (see the removal of `list_applets` from this prompt).
   const facadeClause = WORKFLOW_ENABLED
     ? ` Prefer \`index\` over reading a large source file whole, and one \`caco_run_workflow\` (${getHostShell().label} via \`caco.sh\`) over many single-file reads.`
     : ' Prefer `index` over reading a large source file whole.';
@@ -116,7 +116,8 @@ Call \`caco_docs section="applets:usage"\` for URL patterns, \`section="applets:
 - Answer directly, without unnecessary caveats.
 - Access any file or directory the user mentions — you have full permission, so just do it rather than asking.
 - Be concise unless detail is requested.
-- **Never run stop.sh or start.sh** — use the \`restart_server\` tool. Running stop.sh kills your own session.`
+- **Never run stop.sh or start.sh** — use the \`restart_server\` tool. Running stop.sh kills your own session.
+- On the first turn of a new session, call \`report_intent\` once with a short phrase describing what the USER wants accomplished (their goal, not your current activity). This becomes the session title.`
     + formatMemoryForPrompt()
     // Per-session cwd goes LAST: it is the ONLY per-session-variable token, so keeping
     // it after the stable body + system-wide memory lets sessions in different

@@ -44,6 +44,12 @@ function jsonResponse(data: unknown, ok = true, status = ok ? 200 : 500): Respon
 function fixture(): void {
   document.body.innerHTML = [
     '<div id="sessionView"></div>',
+    '<div id="sessionListHeader" class="section-header">',
+    '  <span>sessions</span>',
+    '  <div id="usageInfo" class="usage-info usage-display" data-usage-display="panel"></div>',
+    '  <button type="button" id="sessionAddBtn" class="session-add-btn">+</button>',
+    '</div>',
+    '<input type="text" id="sessionFilterInput" class="session-filter-input" placeholder="find session">',
     '<div id="sessionList"></div>',
     '<div id="schedulesList"></div>',
     '<span id="unobservedBadge" class="hidden"></span>',

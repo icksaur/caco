@@ -28,12 +28,11 @@ const collapsedFolders = new Set<string>(
 let sessionDragActive = false;
 
 // Fuzzy-find query for the session-list filter input (session-title-fuzzyfind).
-// Empty or whitespace-only means no filter; the input is a persistent per-tab
-// UI toy — no persistence across reload. Focus + caret are re-hydrated across
-// re-renders because renderFromModel blows away the container each keystroke.
+// Empty or whitespace-only means no filter. The input element itself lives in
+// index.html above #sessionList so it survives the container wipe in
+// renderFromModel — that's what keeps focus + caret stable across keystrokes.
 let sessionFilterQuery = '';
-let sessionFilterHadFocus = false;
-let sessionFilterCaret: [number, number] = [0, 0];
+let sessionFilterWired = false;
 
 let sessionPanelInitialized = false;
 const sessionPanelDisposers: Array<() => void> = [];
@@ -525,65 +524,39 @@ function setupZoneDragHandlers(zone: HTMLElement, folderName: string): void {
   });
 }
 
+/**
+ * Wire the persistent header controls (new-session "+" and the fuzzy-find
+ * filter input) exactly once. They live in index.html above #sessionList so
+ * they survive the container wipe in renderFromModel — that's what keeps the
+ * filter input's focus + caret stable across per-keystroke re-renders.
+ */
+function wireHeaderControls(): void {
+  if (sessionFilterWired) return;
+  const addBtn = document.getElementById('sessionAddBtn');
+  if (addBtn) addBtn.onclick = (e) => { e.stopPropagation(); newSessionClick(); };
+  const input = document.getElementById('sessionFilterInput') as HTMLInputElement | null;
+  if (input) {
+    input.value = sessionFilterQuery;
+    input.oninput = () => {
+      sessionFilterQuery = input.value;
+      renderList();
+    };
+  }
+  sessionFilterWired = true;
+}
+
 function renderFromModel(model: SessionListModel): void {
   const container = document.getElementById('sessionList');
   if (!container) return;
-  
+
   const activeSessionId = getActiveSessionId();
-  
+
   container.innerHTML = '';
-  
-  const heading = document.createElement('div');
-  heading.className = 'section-header';
-  heading.textContent = 'sessions';
 
-  const usageInfo = document.createElement('div');
-  usageInfo.id = 'usageInfo';
-  usageInfo.className = 'usage-info usage-display';
-  usageInfo.dataset.usageDisplay = 'panel';
-  heading.appendChild(usageInfo);
-
-  const addBtn = document.createElement('button');
-  addBtn.className = 'session-add-btn';
-  addBtn.textContent = '+';
-  addBtn.title = 'New session';
-  addBtn.onclick = (e) => { e.stopPropagation(); newSessionClick(); };
-  heading.appendChild(addBtn);
-
-  container.appendChild(heading);
+  // The header + filter input live in index.html above #sessionList so they
+  // survive the container wipe; wire their handlers exactly once.
+  wireHeaderControls();
   repaintUsageDisplays();
-
-  // Fuzzy-find filter input (session-title-fuzzyfind). Sits below the sessions
-  // header + "+" button and above the folder zones. Empty/whitespace query
-  // shows everything; nonempty filters by fuzzyScore against displayTitleFor.
-  // Caret + focus are re-hydrated because renderFromModel blows the container
-  // away on each keystroke.
-  const filterInput = document.createElement('input');
-  filterInput.type = 'text';
-  filterInput.className = 'session-filter-input';
-  filterInput.placeholder = 'find session';
-  filterInput.value = sessionFilterQuery;
-  filterInput.autocomplete = 'off';
-  filterInput.spellcheck = false;
-  filterInput.setAttribute('aria-label', 'Find session');
-  filterInput.oninput = () => {
-    sessionFilterQuery = filterInput.value;
-    sessionFilterHadFocus = true;
-    sessionFilterCaret = [filterInput.selectionStart ?? filterInput.value.length,
-                          filterInput.selectionEnd ?? filterInput.value.length];
-    renderList();
-  };
-  filterInput.onfocus = () => { sessionFilterHadFocus = true; };
-  filterInput.onblur = () => { sessionFilterHadFocus = false; };
-  container.appendChild(filterInput);
-  if (sessionFilterHadFocus) {
-    // Re-focus after the DOM insertion completes; a microtask is enough
-    // because the element is already parented at this point.
-    queueMicrotask(() => {
-      filterInput.focus();
-      try { filterInput.setSelectionRange(sessionFilterCaret[0], sessionFilterCaret[1]); } catch { /* ignore */ }
-    });
-  }
 
   if (model.root.length === 0 && model.folders.length === 0) {
     const empty = document.createElement('div');

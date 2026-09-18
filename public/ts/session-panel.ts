@@ -768,12 +768,12 @@ export async function renameSession(sessionId: string, newName: string): Promise
     if (response.ok) {
       void loadSessions(); // Refresh list
     } else {
-      const data = await response.json();
-      alert(`Failed to rename: ${data.error || 'Unknown error'}`);
+      const data = await response.json().catch(() => ({ error: 'Unknown error' }));
+      showToast(`Failed to rename: ${data.error || 'Unknown error'}`);
     }
   } catch (error) {
     console.error('Failed to rename session:', error);
-    alert('Failed to rename session');
+    showToast('Failed to rename session');
   }
 }
 

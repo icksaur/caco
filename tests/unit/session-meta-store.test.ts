@@ -112,3 +112,47 @@ describe('markSessionObserved (background mutator)', () => {
     expect(getSessionMeta(SID)?.lastObservedAt).toBeTruthy();
   });
 });
+
+describe('atomic write + zero-byte self-heal (spec-atomic-meta-write)', () => {
+  it('writes via a temp sibling + rename, leaving no .tmp litter on success', () => {
+    setSessionMeta(SID, { name: 'atomic', kind: 'interactive' });
+    // Post-write the directory holds meta.json only — no tmp sidecars.
+    const stragglers = readdirSync(metaDir()).filter(f => f.startsWith('meta.json.tmp'));
+    expect(stragglers).toEqual([]);
+    // And the destination is intact.
+    expect(getSessionMeta(SID)?.name).toBe('atomic');
+  });
+
+  it('treats a zero-byte meta.json as missing (auto-heal, not permanent break)', () => {
+    // Simulates the observed defect: a crash between fs open-with-truncate and
+    // the buffer write leaves meta.json at 0 bytes. Before this change, EVERY
+    // subsequent read classified the session as corrupt and refused to write —
+    // so /session-rename permanently failed until manual repair.
+    writeFileSync(metaPath(), '');
+    const r = readSessionMeta(SID);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.kind).toBe('missing');
+  });
+
+  it('lets updateSessionMeta recreate defaults over a zero-byte file', () => {
+    writeFileSync(metaPath(), '');
+    const wrote = updateSessionMeta(SID, m => { m.name = 'recovered'; });
+    expect(wrote).toBe(true);
+    expect(getSessionMeta(SID)?.name).toBe('recovered');
+    // No corrupt-backup produced: a 0-byte file has nothing to preserve.
+    const backups = readdirSync(metaDir()).filter(f => f.startsWith('meta.json.corrupt-'));
+    expect(backups).toEqual([]);
+  });
+
+  it('does NOT waste the once-per-session backup slot when the corrupt source is 0 bytes', () => {
+    // Belt-and-suspenders check: if a future readSessionMeta change ever
+    // classifies 0-byte as corrupt again, the backup-skip inside
+    // backupCorruptMeta must still prevent an empty .corrupt-* placeholder
+    // from being created (that placeholder would then block a real recovery
+    // later — the exact papercut seen with session 40685ef0).
+    writeFileSync(metaPath(), '');
+    updateSessionMeta(SID, m => { m.lastIdleAt = 'x'; });
+    const backups = readdirSync(metaDir()).filter(f => f.startsWith('meta.json.corrupt-'));
+    expect(backups).toEqual([]);
+  });
+});

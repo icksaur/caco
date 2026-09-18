@@ -590,7 +590,6 @@ describe('session-panel API actions', () => {
 
   it('renames sessions and reports rename failures', async () => {
     const panel = await importPanel();
-    const alertMock = vi.mocked(window.alert);
     mockFetch((input: FetchInput, init?: FetchInit) => {
       if (String(input) === '/api/sessions/rename-me' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ ok: true }));
@@ -606,11 +605,11 @@ describe('session-panel API actions', () => {
 
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'bad name' }, false, 400));
     await panel.renameSession('bad-rename', 'Bad');
-    expect(alertMock).toHaveBeenCalledWith('Failed to rename: bad name');
+    expect(showToastMock).toHaveBeenCalledWith('Failed to rename: bad name');
 
     fetchMock.mockRejectedValueOnce(new Error('offline'));
     await panel.renameSession('throw-rename', 'Nope');
-    expect(alertMock).toHaveBeenCalledWith('Failed to rename session');
+    expect(showToastMock).toHaveBeenCalledWith('Failed to rename session');
   });
 
   it('leaves the session list untouched when loading sessions fails', async () => {

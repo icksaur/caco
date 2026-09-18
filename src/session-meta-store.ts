@@ -9,7 +9,7 @@
  * metadata separate to avoid coupling with SDK internals.
  */
 
-import { writeFileSync, readFileSync, existsSync, copyFileSync, readdirSync } from 'fs';
+import { readFileSync, existsSync, copyFileSync, readdirSync, statSync, renameSync, openSync, writeSync, fsyncSync, closeSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { STORAGE_ROOT, getSessionDir, ensureDir } from './storage-paths.js';
 import { readJsonFileSync, type DiskRead } from './disk-read.js';
@@ -147,7 +147,7 @@ export function ensureSessionMeta(sessionId: string): void {
     // written before the field existed", and reads as observed — there is no
     // longer a fallback that could turn absence into a badge
     // (spec-observation-verdict-completeness).
-    writeFileSync(metaPath, JSON.stringify({ name: '', unobserved: false }, null, 2));
+    writeJsonAtomicSync(metaPath, { name: '', unobserved: false });
   }
 }
 
@@ -158,6 +158,19 @@ export function ensureSessionMeta(sessionId: string): void {
  */
 export function readSessionMeta(sessionId: string): DiskRead<SessionMeta> {
   const metaPath = join(getSessionDir(sessionId), 'meta.json');
+
+  // Auto-heal previously-corrupted zero-byte meta.json (spec-atomic-meta-write).
+  // A crash between fs open-with-truncate and the buffer write leaves a 0-byte
+  // file; that state can never represent a valid meta and there's nothing to
+  // preserve, so treat it as missing. `updateSessionMeta` then recreates
+  // defaults on the next mutation, restoring writability without operator
+  // intervention. Atomic writes below prevent NEW 0-byte states.
+  try {
+    if (existsSync(metaPath) && statSync(metaPath).size === 0) {
+      return { ok: false, kind: 'missing' };
+    }
+  } catch { /* fall through to normal read */ }
+
   const result = readJsonFileSync<unknown>(metaPath);
   if (!result.ok) return result;
 
@@ -187,7 +200,39 @@ export function getSessionMeta(sessionId: string): SessionMeta | undefined {
 export function setSessionMeta(sessionId: string, meta: SessionMeta): void {
   const sessionDir = getSessionDir(sessionId);
   ensureDir(sessionDir);
-  writeFileSync(join(sessionDir, 'meta.json'), JSON.stringify(meta, null, 2));
+  writeJsonAtomicSync(join(sessionDir, 'meta.json'), meta);
+}
+
+/**
+ * Atomic JSON write: temp file + fsync + rename. The truncate-then-write of
+ * plain writeFileSync leaves a 0-byte file if the process is killed between
+ * open and write — a real defect that stranded live sessions in
+ * "metadata unreadable; refusing to overwrite" until manual repair. renameSync
+ * of a same-directory sibling is atomic on Windows (ReplaceFile semantics) and
+ * POSIX, so the destination is always either the previous valid content or the
+ * complete new content.
+ *
+ * The temp name embeds the PID so two Caco processes writing concurrently
+ * (which shouldn't happen but is defensible cheap insurance) don't collide on
+ * the same temp path and blow away each other's in-flight write.
+ */
+function writeJsonAtomicSync(destPath: string, value: unknown): void {
+  const tmp = `${destPath}.tmp.${process.pid}`;
+  const payload = JSON.stringify(value, null, 2);
+  const fd = openSync(tmp, 'w');
+  try {
+    writeSync(fd, payload);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    renameSync(tmp, destPath);
+  } catch (err) {
+    // Best-effort cleanup so a failed rename doesn't leave the .tmp litter behind.
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+    throw err;
+  }
 }
 
 /**
@@ -228,6 +273,17 @@ function backupCorruptMeta(sessionId: string, error: Error): void {
   const dir = getSessionDir(sessionId);
   const metaPath = join(dir, 'meta.json');
   try {
+    // Skip: a zero-byte file has nothing to preserve. Copying it would waste
+    // the once-per-session backup slot on empty bytes, masking a later,
+    // genuinely-recoverable corruption. (Observed with 40685ef0 — a crash
+    // between fs write's truncate and its buffer flush left both meta.json
+    // and its .corrupt-* sidecar at 0 bytes.)
+    let sourceEmpty = false;
+    try { sourceEmpty = statSync(metaPath).size === 0; } catch { /* fall through */ }
+    if (sourceEmpty) {
+      console.error(`[STORAGE] updateSessionMeta: meta.json is 0 bytes for ${sessionId.slice(0, 8)} (${error.message}); skipping backup and refusing to overwrite`);
+      return;
+    }
     // Back up at most once per corrupt file: a unique timestamped path is always
     // absent, so we must scan for any pre-existing corrupt-* backup instead.
     const alreadyBackedUp = readdirSync(dir).some(f => f.startsWith('meta.json.corrupt-'));
@@ -354,5 +410,5 @@ export function getSessionOrder(): string[] {
 
 export function setSessionOrder(ids: string[]): void {
   ensureDir(STORAGE_ROOT);
-  writeFileSync(SESSION_ORDER_FILE, JSON.stringify(ids));
+  writeJsonAtomicSync(SESSION_ORDER_FILE, ids);
 }

@@ -16,6 +16,7 @@ const testStorageRoot = mkdtempSync(join(tmpdir(), 'caco-auto-name-'));
 process.env.CACO_HOME = testStorageRoot;
 
 const { hasValidText, setSessionIntent } = await import('../../src/session-meta-store.js');
+const { getCurrentIntent, getIntentHistory, _resetIntentRuntimeForTests } = await import('../../src/intent-runtime.js');
 
 const SESSION_DIR = join(testStorageRoot, 'sessions');
 
@@ -33,6 +34,7 @@ beforeEach(() => {
   // Clean between tests — each test starts with a fresh session tree.
   try { rmSync(SESSION_DIR, { recursive: true, force: true }); } catch { /* first run */ }
   mkdirSync(SESSION_DIR, { recursive: true });
+  _resetIntentRuntimeForTests();
 });
 
 afterEach(() => {
@@ -70,7 +72,9 @@ describe('setSessionIntent — autoName latch (spec-auto-name-sessions)', () => 
     setSessionIntent('s1', 'plan the migration');
     const meta = readMeta('s1');
     expect(meta.autoName).toBe('plan the migration');
-    expect(meta.currentIntent).toBe('plan the migration');
+    // currentIntent lives in the runtime map (spec-intent-in-memory), not meta.
+    expect(getCurrentIntent('s1')).toBe('plan the migration');
+    expect(meta.currentIntent).toBeUndefined();
   });
 
   it('Oracle 3: write-once — a later valid intent does NOT overwrite autoName', () => {
@@ -79,9 +83,13 @@ describe('setSessionIntent — autoName latch (spec-auto-name-sessions)', () => 
     setSessionIntent('s1', 'run the tests');
     const meta = readMeta('s1');
     expect(meta.autoName).toBe('plan the migration'); // latched
-    expect(meta.currentIntent).toBe('run the tests');  // moves on
-    const history = meta.intentHistory as Array<{ text: string }>;
+    // currentIntent moves on — but in runtime state, not meta.
+    expect(getCurrentIntent('s1')).toBe('run the tests');
+    expect(meta.currentIntent).toBeUndefined();
+    const history = getIntentHistory('s1');
     expect(history.map(h => h.text)).toEqual(['plan the migration', 'run the tests']);
+    // History is runtime-only too.
+    expect(meta.intentHistory).toBeUndefined();
   });
 
   it('Oracle 4: empty/whitespace intents do NOT stamp autoName', () => {
@@ -108,7 +116,7 @@ describe('setSessionIntent — autoName latch (spec-auto-name-sessions)', () => 
     setSessionIntent('s1', 'intent-6');
 
     const meta = readMeta('s1');
-    const history = meta.intentHistory as Array<{ text: string }>;
+    const history = getIntentHistory('s1');
     // Sanity: the history has evicted intent-1 (bounded at 5).
     expect(history.length).toBe(5);
     expect(history[0].text).toBe('intent-2');

@@ -5,6 +5,7 @@ import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import type { CreateConfig, ResumeConfig, ResumeResult, SdkSystemMessage, SessionEvent, ToolFactory } from './types.js';
 import { ensureSessionMeta, getSessionMeta, updateSessionMeta, readSessionMeta, getSessionIconPath, setSessionOrder, hasValidText, type SessionKind } from './storage.js';
+import { getCurrentIntent, forgetIntent } from './intent-runtime.js';
 import { getSessionDir } from './storage-paths.js';
 import { cancelCardPersist } from './file-edits-store.js';
 import { readSessionWorkspace, readSessionEvents, readSessionHeadResult, parseSessionModel, listSessionIds } from './sdk-session-store.js';
@@ -1687,6 +1688,7 @@ export class SessionManager {
     this.resetAutoContinue(sessionId);
     this.clearEnableableKeys(sessionId);
     disposeSessionRuntime(sessionId);
+    forgetIntent(sessionId);
 
     // Remove the whole Caco per-session directory (meta.json, files-cards.json,
     // surface.json, chat-draft.txt, outputs/, …). client.deleteSession only
@@ -1798,6 +1800,7 @@ export class SessionManager {
       this.sessionCache.delete(sessionId);
       activityVersion.bump();
       this.resetAutoContinue(sessionId);
+      forgetIntent(sessionId);
       console.log(plan.kind === 'full'
         ? `✓ Archived session ${sessionId} → ${archivePath}`
         : `✓ Removed ${plan.kind} session ${sessionId}${archivePath ? ` → ${archivePath}` : ' (nothing on disk to archive)'}`);
@@ -1831,7 +1834,7 @@ export class SessionManager {
       const rawName = meta?.name || '';
       const model = meta?.model || null;
       const isUnobserved = unobservedTracker.isUnobserved(sessionId);
-      const currentIntent = meta?.currentIntent || null;
+      const currentIntent = getCurrentIntent(sessionId, meta ?? undefined) || null;
       const contextFiles = meta?.context?.files?.slice(0, 3) || null;
       const kind: SessionKind = meta?.kind ?? 'interactive';
       const scheduleSlug = null;

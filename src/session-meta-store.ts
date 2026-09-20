@@ -13,6 +13,7 @@ import { readFileSync, existsSync, copyFileSync, readdirSync, statSync, renameSy
 import { join } from 'path';
 import { STORAGE_ROOT, getSessionDir, ensureDir } from './storage-paths.js';
 import { readJsonFileSync, type DiskRead } from './disk-read.js';
+import { recordIntent, needsAutoNameCheck, markAutoNameChecked } from './intent-runtime.js';
 
 export type SessionKind = 'interactive' | 'agent' | 'swarm' | 'scheduled';
 
@@ -43,7 +44,13 @@ export interface SessionMeta {
    *  (spec-observation-authority). Absent on metadata predating the field. */
   unobserved?: boolean;
   lastUsedAt?: string;
+  /** @deprecated Runtime-only signal — read via `intent-runtime.getCurrentIntent`.
+   *  Kept in the SessionMeta type only so legacy on-disk files parse cleanly and
+   *  can be lazily seeded (spec-intent-in-memory). Do not write. */
   currentIntent?: string;
+  /** @deprecated Runtime-only signal — read via `intent-runtime.getIntentHistory`.
+   *  Kept in the SessionMeta type only for legacy parse compatibility; new code
+   *  must not write it (spec-intent-in-memory). */
   intentHistory?: Array<{ text: string; ts: number }>;
   /** Write-once display fallback captured from the FIRST valid intent this session
    *  ever recorded (spec-auto-name-sessions). Stamped in setSessionIntent under the
@@ -119,8 +126,6 @@ export interface SessionMeta {
    *  doesn't re-spin the isolated verify client on every deactivation. */
   lastRotateAttemptAt?: number;
 }
-
-const INTENT_HISTORY_LIMIT = 5;
 
 // ============================================================================
 // Icon
@@ -370,29 +375,30 @@ export function hasValidText(x: unknown): x is string {
   return typeof x === 'string' && x.trim().length > 0;
 }
 
-/** Update the session's current intent and append to its bounded history.
- *  On the FIRST valid intent this session ever records, ALSO latch it to
- *  `meta.autoName` as a stable display-title fallback (spec-auto-name-sessions).
- *  The latch is write-once: subsequent intents update `currentIntent` and push
- *  to `intentHistory` as before but leave `autoName` untouched. */
+/** Update the session's current intent. The runtime signal (`currentIntent`
+ *  and its bounded history) lives in the process — see `intent-runtime.ts`
+ *  for the rationale (spec-intent-in-memory). This function's ONLY disk write
+ *  is the write-once latch of the first valid intent into `meta.autoName`,
+ *  which is load-bearing: `meta.autoName` is the persistent display-title
+ *  fallback in the spec-auto-name-sessions ladder and must survive restarts.
+ *  Once the latch has been checked once per process (`autoNameChecked`), every
+ *  subsequent call is a pure in-memory update — zero fs traffic. */
 export function setSessionIntent(sessionId: string, intent: string): void {
-  updateSessionMeta(sessionId, meta => {
-    meta.currentIntent = intent;
-    const history = meta.intentHistory ?? [];
-    history.push({ text: intent, ts: Date.now() });
-    if (history.length > INTENT_HISTORY_LIMIT) {
-      history.splice(0, history.length - INTENT_HISTORY_LIMIT);
-    }
-    meta.intentHistory = history;
-    // Write-once auto-name latch. The `!meta.autoName` guard makes this
-    // idempotent under any replay and stable across every later intent, even
-    // after the bounded history has evicted the original one. Empty/whitespace
-    // intents are skipped so the first VALID intent — not the first raw one —
-    // wins the latch.
-    if (!meta.autoName && hasValidText(intent)) {
-      meta.autoName = intent;
-    }
-  });
+  recordIntent(sessionId, intent);
+  if (!hasValidText(intent)) return;
+  if (!needsAutoNameCheck(sessionId)) return;
+  // First intent for this session in this process: consult meta, latch if
+  // autoName is still empty. Runs at most once per (session × process). If
+  // autoName was already latched by a prior process, skip the write path
+  // entirely — updateSessionMeta writes unconditionally, and this is the
+  // common case for any reopened session.
+  const existing = getSessionMeta(sessionId);
+  if (existing && !existing.autoName) {
+    updateSessionMeta(sessionId, meta => {
+      if (!meta.autoName) meta.autoName = intent;
+    });
+  }
+  markAutoNameChecked(sessionId);
 }
 
 // ============================================================================

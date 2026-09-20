@@ -16,6 +16,7 @@ process.env.CACO_HOME = testStorageRoot;
 
 const { createReportIntentTool } = await import('../../src/report-intent-tool.js');
 const { getSessionMeta } = await import('../../src/session-meta-store.js');
+const { getCurrentIntent, getIntentHistory, _resetIntentRuntimeForTests } = await import('../../src/intent-runtime.js');
 
 const SESSION_DIR = join(testStorageRoot, 'sessions');
 
@@ -43,6 +44,7 @@ function makeHandler(sessionId: string | undefined): Handler {
 beforeEach(() => {
   try { rmSync(SESSION_DIR, { recursive: true, force: true }); } catch { /* first run */ }
   mkdirSync(SESSION_DIR, { recursive: true });
+  _resetIntentRuntimeForTests();
 });
 
 afterEach(() => {
@@ -61,8 +63,11 @@ describe('report_intent tool', () => {
 
     const meta = readMeta('s1');
     expect(meta.autoName).toBe('fix routing bug');
-    expect(meta.currentIntent).toBe('fix routing bug');
-    expect(meta.intentHistory).toHaveLength(1);
+    // currentIntent/intentHistory are runtime-only (spec-intent-in-memory).
+    expect(getCurrentIntent('s1')).toBe('fix routing bug');
+    expect(getIntentHistory('s1')).toHaveLength(1);
+    expect(meta.currentIntent).toBeUndefined();
+    expect(meta.intentHistory).toBeUndefined();
   });
 
   it('is write-once: second call updates currentIntent but not autoName', async () => {
@@ -76,8 +81,9 @@ describe('report_intent tool', () => {
 
     const meta = readMeta('s1');
     expect(meta.autoName).toBe('fix routing bug');
-    expect(meta.currentIntent).toBe('actually, refactor auth');
-    expect(meta.intentHistory).toHaveLength(2);
+    expect(getCurrentIntent('s1')).toBe('actually, refactor auth');
+    expect(getIntentHistory('s1')).toHaveLength(2);
+    expect(meta.currentIntent).toBeUndefined();
   });
 
   it('rejects empty string at the tool boundary', async () => {
@@ -88,8 +94,8 @@ describe('report_intent tool', () => {
     expect(result.resultType).toBe('error');
     const meta = readMeta('s1');
     expect(meta.autoName).toBeUndefined();
-    expect(meta.currentIntent).toBeUndefined();
-    expect(meta.intentHistory ?? []).toHaveLength(0);
+    expect(getCurrentIntent('s1')).toBeUndefined();
+    expect(getIntentHistory('s1')).toHaveLength(0);
   });
 
   it('rejects whitespace-only string at the tool boundary', async () => {
@@ -142,7 +148,7 @@ describe('report_intent tool', () => {
 
     const meta = readMeta('s1');
     expect(meta.autoName).toBe('fix routing bug');
-    expect(meta.intentHistory).toHaveLength(2);
+    expect(getIntentHistory('s1')).toHaveLength(2);
   });
 
   it('returns an actionable error when no session ref is available', async () => {

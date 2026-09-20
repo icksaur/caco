@@ -18,6 +18,7 @@ import { sessionManager } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
 import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind } from '../storage.js';
+import { getCurrentIntent } from '../intent-runtime.js';
 import { readSessionWorkspace, searchSessionEvents, getEventVersion } from '../sdk-session-store.js';
 import { rotateSessionHistory } from '../session-history-rotation.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
@@ -309,7 +310,7 @@ router.post('/sessions/:sessionId/resume', async (req: Request, res: Response) =
       gitBranch,
       name: meta?.name || null,
       kind: meta?.kind || 'interactive',
-      currentIntent: meta?.currentIntent || null,
+      currentIntent: getCurrentIntent(result.sessionId, meta ?? undefined) || null,
       hasIcon: getSessionIconPath(result.sessionId) !== null,
       cwdFallback: result.usedFallbackCwd,
       repairMessage: result.repairMessage || null,
@@ -970,7 +971,7 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
     model,
     name: meta?.name || null,
     kind: meta?.kind || 'interactive',
-    currentIntent: meta?.currentIntent || null,
+    currentIntent: getCurrentIntent(sessionId, meta ?? undefined) || null,
     responseOptions: meta?.responseOptions || null,
     contextBudgetTokens: meta?.contextBudgetTokens ?? null,
     pluginDirectories: meta?.pluginDirectories ?? [],

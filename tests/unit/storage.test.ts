@@ -254,20 +254,33 @@ describe('session observation tracking (markSessionObserved, markSessionIdle, is
     expect(isSessionUnobserved(TEST_SESSION_ID)).toBe(false);
   });
 
-  it('setSessionIntent stores intent', () => {
+  it('setSessionIntent stores intent in the runtime map (not meta.json)', async () => {
+    // spec-intent-in-memory: currentIntent is no longer persisted to meta.
+    // The runtime map is now the source of truth; meta only carries autoName.
+    const { getCurrentIntent, _resetIntentRuntimeForTests } = await import('../../src/intent-runtime.js');
+    _resetIntentRuntimeForTests();
+
     ensureSessionMeta(TEST_SESSION_ID);
     setSessionIntent(TEST_SESSION_ID, 'Analyzing code');
-    
+
+    expect(getCurrentIntent(TEST_SESSION_ID)).toBe('Analyzing code');
+    // On-disk meta stays out of the currentIntent business.
     const meta = getSessionMeta(TEST_SESSION_ID);
-    expect(meta?.currentIntent).toBe('Analyzing code');
+    expect(meta?.currentIntent).toBeUndefined();
+    // But autoName IS latched (persistent title fallback).
+    expect(meta?.autoName).toBe('Analyzing code');
   });
-  
-  it('setSessionIntent preserves other meta fields', () => {
+
+  it('setSessionIntent preserves other meta fields when latching autoName', async () => {
+    const { getCurrentIntent, _resetIntentRuntimeForTests } = await import('../../src/intent-runtime.js');
+    _resetIntentRuntimeForTests();
+
     setSessionMeta(TEST_SESSION_ID, { name: 'My Session' });
     setSessionIntent(TEST_SESSION_ID, 'Working on task');
-    
+
     const meta = getSessionMeta(TEST_SESSION_ID);
     expect(meta?.name).toBe('My Session');
-    expect(meta?.currentIntent).toBe('Working on task');
+    expect(meta?.autoName).toBe('Working on task');
+    expect(getCurrentIntent(TEST_SESSION_ID)).toBe('Working on task');
   });
 });

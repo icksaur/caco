@@ -132,6 +132,20 @@ function parseCodexPatch(content: string): EditDiff | null {
   return { hunks, stats: countStats(hunks), path: firstPath };
 }
 
+/**
+ * File paths a codex patch touches, in document order. Each
+ * `*** {Update,Add,Delete} File: <path>` header names one file. Used to label
+ * the apply_patch tool line with its target, at parity with edit/create.
+ */
+export function patchFilePaths(patch: string): string[] {
+  const paths: string[] = [];
+  for (const line of patch.split('\n')) {
+    const m = line.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/);
+    if (m) { const p = m[1].trim(); if (p) paths.push(p); }
+  }
+  return paths;
+}
+
 function candidateStrings(data: Record<string, unknown>, result: Record<string, unknown> | undefined): string[] {
   const values: string[] = [];
   const args = data.arguments;

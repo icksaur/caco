@@ -33,6 +33,31 @@ export function setGitEditPoller(p: GitEditPoller | null): void {
 /** Tools that mutate files. Triggers a file-edits poll on success. */
 const WRITE_TOOLS = new Set(['edit', 'create', 'write', 'apply_patch']);
 
+/**
+ * File paths a codex apply_patch touches. The patch arrives as the tool's raw
+ * arguments — a string in practice, occasionally an object carrying it under
+ * patch/input/content. Every `*** {Update,Add,Delete} File:` header names one
+ * file, so a multi-file patch records each into the session context, reaching
+ * footer parity with the edit/create tools (which pass a single { path }).
+ */
+export function applyPatchFilePaths(args: unknown): string[] {
+  let text = '';
+  if (typeof args === 'string') text = args;
+  else if (args && typeof args === 'object') {
+    const rec = args as Record<string, unknown>;
+    for (const key of ['patch', 'input', 'content']) {
+      if (typeof rec[key] === 'string') { text = rec[key] as string; break; }
+    }
+  }
+  if (!text) return [];
+  const paths: string[] = [];
+  for (const line of text.split('\n')) {
+    const m = line.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/);
+    if (m) { const p = m[1].trim(); if (p) paths.push(p); }
+  }
+  return paths;
+}
+
 export interface DispatchEventDeps {
   /** Caller-provided file tracker. Updates the session-context list when
    *  the agent edits or creates a file. */
@@ -93,6 +118,13 @@ export function applyDispatchEventEffects(
     // Auto-populate session context from file-modifying tools only.
     if (typeof args?.path === 'string' && (toolName === 'create' || toolName === 'edit')) {
       deps.autoAddFileContext(sessionId, args.path);
+    }
+    // apply_patch names its files inside the patch, not as a { path } arg, so it
+    // needs its own extraction to reach the same context/footer parity.
+    if (toolName === 'apply_patch') {
+      for (const p of applyPatchFilePaths(eventData.arguments)) {
+        deps.autoAddFileContext(sessionId, p);
+      }
     }
     // Stamp tool usage under the canonical ToolKey (the SAME key excludedTools
     // uses), so the reveal C-phase never mis-keys a used tool. Only tool.execution_start

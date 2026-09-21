@@ -302,6 +302,26 @@ describe('insertEvent', () => {
       expect(el.dataset.toolInput).toBe('ls -la');
     });
 
+    it('names the target file on an apply_patch start and stores its path', async () => {
+      const { insertEvent } = await import('../../public/ts/dom-regions.js');
+      const el = mockElement();
+      const patch = '*** Begin Patch\n*** Update File: /repo/foo/bar.ts\n@@\n-a\n+b\n*** End Patch';
+      insertEvent({ type: 'tool.execution_start', data: { toolName: 'apply_patch', arguments: patch } }, el);
+      // Shows the basename like edit/create, not the whole patch.
+      expect(el.textContent).toBe('apply_patch  bar.ts');
+      expect(el.dataset.toolName).toBe('apply_patch');
+      // Stashed so the completion render finds the same file.
+      expect(el.dataset.toolInput).toBe('/repo/foo/bar.ts');
+    });
+
+    it('shows a bare apply_patch when the patch names no file', async () => {
+      const { insertEvent } = await import('../../public/ts/dom-regions.js');
+      const el = mockElement();
+      insertEvent({ type: 'tool.execution_start', data: { toolName: 'apply_patch', arguments: 'garbage' } }, el);
+      expect(el.textContent).toBe('apply_patch');
+      expect(el.dataset.toolInput).toBeUndefined();
+    });
+
     it('formats successful tool.execution_complete reading stored data', async () => {
       const { insertEvent } = await import('../../public/ts/dom-regions.js');
       const el = mockElement('', { toolName: 'bash', toolInput: 'ls -la' });

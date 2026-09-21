@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-import { lineDiff, parseEditResult } from '../../public/ts/edit-diff.js';
+import { lineDiff, parseEditResult, patchFilePaths } from '../../public/ts/edit-diff.js';
 import type { EditDiff } from '../../public/ts/edit-diff.js';
 
 function fixture(name: string): Record<string, unknown> {
@@ -57,6 +57,17 @@ describe('lineDiff', () => {
 });
 
 // ── parseEditResult ─────────────────────────────────────────────
+
+describe('patchFilePaths', () => {
+  it('reads each file header in document order', () => {
+    const patch = '*** Begin Patch\n*** Update File: a.ts\n@@\n+x\n*** Add File: b/c.ts\n+y\n*** End Patch';
+    expect(patchFilePaths(patch)).toEqual(['a.ts', 'b/c.ts']);
+  });
+
+  it('returns nothing when no header is present', () => {
+    expect(patchFilePaths('just some text\n@@\n+x')).toEqual([]);
+  });
+});
 
 describe('parseEditResult', () => {
   it('returns null for status-only result.content', () => {

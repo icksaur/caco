@@ -52,7 +52,7 @@ vi.mock('../../src/tool-usage-store.js', () => ({
   stampToolUsage: (...args: unknown[]) => stampToolUsage(...(args as [])),
 }));
 
-import { applyDispatchEventEffects, setGitEditPoller } from '../../src/dispatch-events.js';
+import { applyDispatchEventEffects, setGitEditPoller, applyPatchFilePaths } from '../../src/dispatch-events.js';
 import { mcpKey, cacoKey, builtinKey } from '../../src/tool-key.js';
 
 const SID = 'session-1';
@@ -86,6 +86,31 @@ beforeEach(() => {
   updateSessionMeta.mockClear();
   snapshotMock.mockClear();
   setGitEditPoller(null);
+});
+
+describe('applyPatchFilePaths', () => {
+  it('reads the file from a string patch', () => {
+    expect(applyPatchFilePaths('*** Begin Patch\n*** Update File: /a/b.ts\n@@\n+x\n*** End Patch'))
+      .toEqual(['/a/b.ts']);
+  });
+
+  it('reads every file header, in order, across verbs', () => {
+    const patch = '*** Update File: a.ts\n*** Add File: b.ts\n*** Delete File: c.ts';
+    expect(applyPatchFilePaths(patch)).toEqual(['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('reads the patch from an object arg under patch/input/content', () => {
+    expect(applyPatchFilePaths({ patch: '*** Update File: p.ts' })).toEqual(['p.ts']);
+    expect(applyPatchFilePaths({ input: '*** Update File: i.ts' })).toEqual(['i.ts']);
+    expect(applyPatchFilePaths({ content: '*** Update File: c.ts' })).toEqual(['c.ts']);
+  });
+
+  it('returns nothing for absent, empty, or headerless input', () => {
+    expect(applyPatchFilePaths(undefined)).toEqual([]);
+    expect(applyPatchFilePaths('')).toEqual([]);
+    expect(applyPatchFilePaths('no file headers here')).toEqual([]);
+    expect(applyPatchFilePaths({ nope: '*** Update File: x.ts' })).toEqual([]);
+  });
 });
 
 describe('applyDispatchEventEffects', () => {
@@ -129,6 +154,42 @@ describe('applyDispatchEventEffects', () => {
       data: { toolName: 'view', arguments: { path: '/tmp/baz.ts' } },
     } as never, deps);
     expect(deps.autoAddFileContext).not.toHaveBeenCalled();
+  });
+
+  it('auto-adds file context for apply_patch from the patch string', () => {
+    const deps = makeDeps();
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: /tmp/one.ts',
+      '@@',
+      '-a',
+      '+b',
+      '*** End Patch',
+    ].join('\n');
+    applyDispatchEventEffects(SID, {
+      type: 'tool.execution_start',
+      data: { toolName: 'apply_patch', arguments: patch },
+    } as never, deps);
+    expect(deps.autoAddFileContext).toHaveBeenCalledWith(SID, '/tmp/one.ts');
+  });
+
+  it('auto-adds every file a multi-file apply_patch touches', () => {
+    const deps = makeDeps();
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: /tmp/one.ts',
+      '@@',
+      '+b',
+      '*** Add File: /tmp/two.ts',
+      '+new',
+      '*** End Patch',
+    ].join('\n');
+    applyDispatchEventEffects(SID, {
+      type: 'tool.execution_start',
+      data: { toolName: 'apply_patch', arguments: patch },
+    } as never, deps);
+    expect(deps.autoAddFileContext).toHaveBeenNthCalledWith(1, SID, '/tmp/one.ts');
+    expect(deps.autoAddFileContext).toHaveBeenNthCalledWith(2, SID, '/tmp/two.ts');
   });
 
   it('passes quotaSnapshots from assistant.usage', () => {

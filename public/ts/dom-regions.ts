@@ -13,7 +13,7 @@
 
 import type { SessionEvent } from './types.js';
 import { handleDelta, finalize } from './streaming-markdown.js';
-import { parseEditResult } from './edit-diff.js';
+import { parseEditResult, patchFilePaths } from './edit-diff.js';
 
 declare global {
   interface Window {
@@ -539,6 +539,29 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     if (name === 'report_intent' && args?.intent) {
       element.textContent = `${args.intent}`;
       element.dataset.toolName = name;
+      return;
+    }
+
+    // apply_patch carries its patch as the raw arguments (a string), not a
+    // { path }, so the generic path branch below never names its target. Pull
+    // the file out of the patch so the tool line reads "apply_patch <file>" like
+    // edit/create, and stash it so the completion render (renderEditEvent) finds
+    // the same basename — the SDK's completion diff omits the path.
+    if (name === 'apply_patch') {
+      element.dataset.toolName = name;
+      const raw = data.arguments;
+      const argRecord = raw as Record<string, unknown> | undefined;
+      const patch = typeof raw === 'string'
+        ? raw
+        : str(argRecord?.patch ?? argRecord?.input ?? argRecord?.content);
+      const [firstPath] = patch ? patchFilePaths(patch) : [];
+      if (firstPath) {
+        element.dataset.toolInput = firstPath;
+        const basename = firstPath.split(/[\\/]/).pop() || firstPath;
+        element.textContent = `${name}  ${basename}`;
+      } else {
+        element.textContent = toolHeadline(element, name);
+      }
       return;
     }
 

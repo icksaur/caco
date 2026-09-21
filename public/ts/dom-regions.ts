@@ -367,6 +367,34 @@ function toolHeadline(element: InserterElement, name: string): string {
   return model ? `${name}  ${model}` : name;
 }
 
+/**
+ * The task tool's one-line intent: its short description (the schema field the
+ * SDK documents as the UI intent), or its name as a fallback. Collapsed to the
+ * first line and length-capped so a stray long value can't blow out the
+ * headline. Empty when the call carried neither.
+ */
+const TASK_INTENT_MAX = 80;
+function taskIntent(args: Record<string, unknown> | undefined): string {
+  const raw = str(args?.description) || str(args?.name);
+  const line = raw.split('\n')[0].trim();
+  return line.length > TASK_INTENT_MAX ? `${line.slice(0, TASK_INTENT_MAX - 1).trimEnd()}…` : line;
+}
+
+/**
+ * Enriched task headline: `task ( <intent>  <model> )`. Either piece can be
+ * missing — the intent when a call omits both description and name, the model
+ * until subagent.started reports it — so the parens hold whatever is known, and
+ * an empty pair falls back to the bare name. The task div itself stays grey: it
+ * is a primary, possibly-batched tool call, so it must NOT get the sub-agent
+ * pink bar (which keys on data-agent-id, present only on the sub-agent's own
+ * boxes). This enrichment is text only.
+ */
+function taskHeadline(element: InserterElement, name: string, intent: string): string {
+  const model = element.dataset.subagentModel || '';
+  const inner = [intent, model].filter(Boolean).join('  ');
+  return inner ? `${name} ( ${inner} )` : name;
+}
+
 function extractToolMeta(element: InserterElement, data: Record<string, unknown>): { toolName: string; path: string; basename: string } {
   const toolName = str(data.toolName) || str(data.name) || element.dataset.toolName || 'tool';
   const args = data.arguments as Record<string, unknown> | undefined;
@@ -542,6 +570,18 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
       return;
     }
 
+    // task: enrich the grey tool line with its one-line intent now, and its
+    // resolved model once subagent.started reports it. The intent is stashed in
+    // its own dataset key (not toolInput) so the completion render puts it in
+    // the header rather than duplicating it as a body line.
+    if (name === 'task') {
+      element.dataset.toolName = name;
+      const intent = taskIntent(args);
+      if (intent) element.dataset.taskIntent = intent;
+      element.textContent = taskHeadline(element, name, intent);
+      return;
+    }
+
     // apply_patch carries its patch as the raw arguments (a string), not a
     // { path }, so the generic path branch below never names its target. Pull
     // the file out of the patch so the tool line reads "apply_patch <file>" like
@@ -591,10 +631,8 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     element.dataset.subagentModel = model;
 
     const name = element.dataset.toolName || 'task';
-    const input = element.dataset.toolInput || '';
-    element.textContent = input
-      ? `${toolHeadline(element, name)}\n\`${input}\``
-      : toolHeadline(element, name);
+    const intent = element.dataset.taskIntent || '';
+    element.textContent = taskHeadline(element, name, intent);
   },
 
   // Auto mode's initial per-session model resolution. Renders once at start so
@@ -629,6 +667,18 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
     const rawError = data.error;
     const error = (typeof rawError === 'string' ? rawError : JSON.stringify(rawError) ?? '').trim();
     const output = success ? result : error;
+
+    // task: header carries the enriched `task ( intent  model )`, and the intent
+    // is NOT repeated as a body line (it lives in dataset.taskIntent, not
+    // toolInput), so the collapsed headline reads richly without duplication.
+    if (name === 'task') {
+      const header = `*${taskHeadline(element, name, element.dataset.taskIntent || '')}*`;
+      element.textContent = output ? `${header}\n\n\`\`\`task\n${output}\n\`\`\`` : header;
+      if (typeof window !== 'undefined' && window.renderMarkdownElement) {
+        window.renderMarkdownElement(element as unknown as Element);
+      }
+      return;
+    }
 
     // Build header: name + filename if available
     const storedPath = element.dataset.toolInput || '';

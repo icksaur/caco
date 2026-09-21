@@ -377,9 +377,15 @@ describe('insertEvent', () => {
       return { insertEvent, el };
     }
 
-    it('annotates the task line with the resolved sub-agent model', async () => {
+    it('shows the intent in the headline before the model resolves', async () => {
+      const { el } = await startedTask();
+      // The task div stays grey (a primary, possibly-batched tool call), so the
+      // enrichment is text only: intent now, model once subagent.started reports it.
+      expect(el.textContent).toBe('task ( Run the gate )');
+    });
+
+    it('adds the resolved sub-agent model beside the intent', async () => {
       const { insertEvent, el } = await startedTask();
-      expect(el.textContent).toBe('task\n`Run the gate`');
 
       insertEvent({ type: 'subagent.started', data: {
         toolCallId: 'call-1',
@@ -387,10 +393,10 @@ describe('insertEvent', () => {
         model: 'gemini-3.6-flash',
       } }, el);
 
-      expect(el.textContent).toBe('task  gemini-3.6-flash\n`Run the gate`');
+      expect(el.textContent).toBe('task ( Run the gate  gemini-3.6-flash )');
     });
 
-    it('keeps the model visible after the completion re-render', async () => {
+    it('keeps the enriched headline after the completion re-render', async () => {
       const { insertEvent, el } = await startedTask();
       insertEvent({ type: 'subagent.started', data: { toolCallId: 'call-1', model: 'gemini-3.6-flash' } }, el);
 
@@ -399,7 +405,55 @@ describe('insertEvent', () => {
         result: { content: 'done' },
       } }, el);
 
-      expect(el.textContent).toContain('*task  gemini-3.6-flash*');
+      // The completion render is what survives collapsed, so the intent+model
+      // must live in ITS header, and the intent must not also repeat in the body.
+      expect(el.textContent).toBe('*task ( Run the gate  gemini-3.6-flash )*\n\n```task\ndone\n```');
+    });
+
+    it('falls back to the task name when no description is given', async () => {
+      const { insertEvent } = await import('../../public/ts/dom-regions.js');
+      const el = mockElement();
+      insertEvent({ type: 'tool.execution_start', data: {
+        toolName: 'task',
+        toolCallId: 'call-2',
+        arguments: { name: 'port-mod' },
+      } }, el);
+      expect(el.textContent).toBe('task ( port-mod )');
+    });
+
+    it('collapses a multi-line intent to its first line', async () => {
+      const { insertEvent } = await import('../../public/ts/dom-regions.js');
+      const el = mockElement();
+      insertEvent({ type: 'tool.execution_start', data: {
+        toolName: 'task',
+        toolCallId: 'call-3',
+        arguments: { description: 'First line\nsecond line should not show' },
+      } }, el);
+      expect(el.textContent).toBe('task ( First line )');
+    });
+
+    it('caps an over-long single-line intent with an ellipsis', async () => {
+      const { insertEvent } = await import('../../public/ts/dom-regions.js');
+      const el = mockElement();
+      insertEvent({ type: 'tool.execution_start', data: {
+        toolName: 'task',
+        toolCallId: 'call-3b',
+        arguments: { description: 'x'.repeat(200) },
+      } }, el);
+      const shown = (el.textContent || '').replace(/^task \( | \)$/g, '');
+      expect(shown.endsWith('…')).toBe(true);
+      expect(shown.length).toBeLessThanOrEqual(80);
+      expect(shown.length).toBeGreaterThan(40);
+    });
+
+    it('shows only the model in parens when the call carries no intent', async () => {
+      const { insertEvent } = await import('../../public/ts/dom-regions.js');
+      const el = mockElement();
+      insertEvent({ type: 'tool.execution_start', data: { toolName: 'task', toolCallId: 'call-4', arguments: {} } }, el);
+      expect(el.textContent).toBe('task');
+
+      insertEvent({ type: 'subagent.started', data: { toolCallId: 'call-4', model: 'gemini-3.6-flash' } }, el);
+      expect(el.textContent).toBe('task ( gemini-3.6-flash )');
     });
 
     it('ignores the parent model on the tool call itself', async () => {
@@ -407,16 +461,16 @@ describe('insertEvent', () => {
       // would report the caller's model as if it were the sub-agent's.
       const { el } = await startedTask({ model: 'claude-opus-4.7' });
 
-      expect(el.textContent).toBe('task\n`Run the gate`');
+      expect(el.textContent).toBe('task ( Run the gate )');
       expect(el.dataset.subagentModel).toBeUndefined();
     });
 
-    it('leaves the line unannotated when the runtime omits the model', async () => {
+    it('leaves the headline without a model when the runtime omits it', async () => {
       const { insertEvent, el } = await startedTask();
 
       insertEvent({ type: 'subagent.started', data: { toolCallId: 'call-1', agentName: 'explore' } }, el);
 
-      expect(el.textContent).toBe('task\n`Run the gate`');
+      expect(el.textContent).toBe('task ( Run the gate )');
     });
 
     it('does not annotate non-task tools that carry a model field', async () => {

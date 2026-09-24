@@ -51,6 +51,7 @@ import { formatMemoryForPrompt } from './memory-tool.js';
 import { buildSystemMessage, resolveSystemMessage, toSdkSystemMessage } from './prompts.js';
 import { samePluginDirectories } from './plugin-directories.js';
 import { DEFAULT_MODEL } from './preferences.js';
+import { dedupeToolCalls } from './tool-call-dedup.js';
 
 
 interface McpServerInfo {
@@ -959,7 +960,9 @@ export class SessionManager {
     const resolved = resolveModel(config.model);
     
     const sessionRef = { id: 'PENDING' };
-    const tools = config.toolFactory(cwd, sessionRef);
+    // Wrapped at the seam where tools reach the SDK: a sub-agent's call arrives as
+    // two request events and would otherwise execute twice (tool-call-dedup.ts).
+    const tools = dedupeToolCalls(config.toolFactory(cwd, sessionRef));
     // Seed exclusions = base (builtins) ∪ operator manual-defer preference (Phase D) ∪
     // new-session auto-defer (Phase C3). A brand-new session has no prompt-cache prefix,
     // so applying the system-wide staleness verdict here is free — this is why a
@@ -1210,7 +1213,7 @@ export class SessionManager {
     const tEnsure = performance.now() - tEnsure0;
     
     const sessionRef = { id: sessionId };
-    const tools = config.toolFactory(cwd, sessionRef);
+    const tools = dedupeToolCalls(config.toolFactory(cwd, sessionRef));
     
     // Re-derive the provider binding from the persisted Caco model id. For BYOK
     // sessions the namespaced id (e.g. "openrouter:...") encodes the provider;

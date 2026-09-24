@@ -1,5 +1,14 @@
 export type Hunk = { added: string[]; removed: string[] };
-export type EditDiff = { hunks: Hunk[]; stats: { added: number; removed: number }; path?: string };
+export type EditDiff = {
+  hunks: Hunk[];
+  stats: { added: number; removed: number };
+  path?: string;
+  /** For multi-file patches (Codex apply_patch), every path the envelope
+   *  touches in document order. `path` mirrors `paths[0]` for callers that
+   *  only need one; render sites that want to label every file (dom-regions
+   *  `renderEditEvent`, the in-progress apply_patch tool line) read this. */
+  paths?: string[];
+};
 
 export function lineDiff(before: string, after: string): Hunk[] {
   const a = before ? before.split('\n') : [];
@@ -88,7 +97,7 @@ function parseCodexPatch(content: string): EditDiff | null {
   let cur: Hunk | null = null;
   let inPatch = false;
   let inFile = false;
-  let firstPath: string | undefined;
+  const paths: string[] = [];
 
   for (const line of content.split('\n')) {
     if (line === '*** Begin Patch') {
@@ -105,7 +114,8 @@ function parseCodexPatch(content: string): EditDiff | null {
     if (fileMatch) {
       cur = pushChangedHunk(hunks, cur);
       inFile = true;
-      firstPath ??= fileMatch[1];
+      const p = fileMatch[1].trim();
+      if (p) paths.push(p);
       continue;
     }
 
@@ -129,7 +139,7 @@ function parseCodexPatch(content: string): EditDiff | null {
   }
 
   if (hunks.length === 0) return null;
-  return { hunks, stats: countStats(hunks), path: firstPath };
+  return { hunks, stats: countStats(hunks), path: paths[0], paths };
 }
 
 /**

@@ -314,6 +314,29 @@ describe('insertEvent', () => {
       expect(el.dataset.toolInput).toBe('/repo/foo/bar.ts');
     });
 
+    it('names every file a multi-file apply_patch touches', async () => {
+      const { insertEvent } = await import('../../public/ts/dom-regions.js');
+      const el = mockElement();
+      const patch = [
+        '*** Begin Patch',
+        '*** Update File: src/one.ts',
+        '@@',
+        '-a',
+        '+b',
+        '*** Add File: src/two.ts',
+        '+hello',
+        '*** Delete File: src/three.ts',
+        '*** End Patch',
+      ].join('\n');
+      insertEvent({ type: 'tool.execution_start', data: { toolName: 'apply_patch', arguments: patch } }, el);
+      // A multi-file patch previously rendered only the first basename, so a
+      // 3-file change looked like a 1-file change. All basenames now appear.
+      expect(el.textContent).toBe('apply_patch  one.ts, two.ts, three.ts');
+      // Full paths stashed, semicolon-joined so a stray comma in a filename
+      // can't split the dataset value on the completion side.
+      expect(el.dataset.toolInput).toBe('src/one.ts;src/two.ts;src/three.ts');
+    });
+
     it('shows a bare apply_patch when the patch names no file', async () => {
       const { insertEvent } = await import('../../public/ts/dom-regions.js');
       const el = mockElement();
@@ -1075,6 +1098,40 @@ describe('edit events', () => {
     expect(hSpans.some(s => s.textContent === 'example.ts')).toBe(true);
     expect(findClass(hSpans, 'edit-stat-add')?.textContent).toBe('+1');
     expect(findClass(hSpans, 'edit-stat-rem')?.textContent).toBe('-1');
+  });
+
+  it('renders every basename a multi-file apply_patch touches in the completion header', async () => {
+    const { insertEvent } = await import('../../public/ts/dom-regions.js');
+    // Simulate the start-side stash so the completion render has the
+    // authoritative full path list even if the SDK's completion diff
+    // omits path headers for later files.
+    const el = editEl({ toolName: 'apply_patch', toolInput: 'src/one.ts;pkg/two.ts;three.ts' });
+
+    insertEvent({ type: 'tool.execution_complete', data: {
+      toolName: 'apply_patch',
+      toolCallId: 'tc-patch-multi',
+      success: true,
+      arguments: {
+        patch: [
+          '*** Begin Patch',
+          '*** Update File: src/one.ts',
+          '@@',
+          '-a',
+          '+b',
+          '*** Add File: pkg/two.ts',
+          '+hello',
+          '*** Delete File: three.ts',
+          '*** End Patch',
+        ].join('\n'),
+      },
+      result: { content: 'Done!' }
+    } }, el);
+
+    expect(el.classList.contains('edit-event')).toBe(true);
+    const hSpans = childSpans(childSpans(el)[0]);
+    // Every basename must appear — the previous behavior swallowed two.ts and
+    // three.ts, making a three-file edit look like a one-file edit.
+    expect(hSpans.some(s => s.textContent === 'one.ts, two.ts, three.ts')).toBe(true);
   });
 
   it('keeps generic rendering for opaque apply_patch completions', async () => {

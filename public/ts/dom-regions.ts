@@ -403,6 +403,39 @@ function extractToolMeta(element: InserterElement, data: Record<string, unknown>
   return { toolName, path, basename };
 }
 
+/** Every file path an apply_patch call touches, merged from the completion's
+ *  arguments patch (if the SDK forwarded it), the stashed start-side dataset
+ *  (`toolInput`, `;`-joined at start), and the parsed result diff paths. All
+ *  sources agree on order in practice; we dedupe while preserving first
+ *  appearance so a single-file patch renders one basename and a multi-file
+ *  patch renders all of them. */
+function readApplyPatchPaths(element: InserterElement, data: Record<string, unknown>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (p: string): void => {
+    const trimmed = p.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+  const stashed = element.dataset.toolInput || '';
+  if (stashed) for (const p of stashed.split(';')) push(p);
+
+  const args = data.arguments;
+  if (typeof args === 'string') {
+    for (const p of patchFilePaths(args)) push(p);
+  } else if (args && typeof args === 'object') {
+    const argRecord = args as Record<string, unknown>;
+    for (const key of ['patch', 'input', 'content']) {
+      const value = argRecord[key];
+      if (typeof value === 'string') {
+        for (const p of patchFilePaths(value)) push(p);
+      }
+    }
+  }
+  return out;
+}
+
 function makeSpan(className: string, text: string): HTMLElement {
   const span = document.createElement('span');
   span.className = className;
@@ -431,6 +464,20 @@ function renderEditEvent(element: InserterElement, data: Record<string, unknown>
   let basename = metaBasename;
   const el = element as unknown as HTMLElement;
 
+  // apply_patch touches N files, and both the tool-start line and this
+  // completion header must name every one — otherwise a 3-file patch looks
+  // like a 1-file edit. `dataset.toolInput` was set to `paths.join(';')` at
+  // start; the SDK's completion diff may also strip path headers, so we prefer
+  // the parsed diff.paths if present, falling back to the stashed list. The
+  // basename from extractToolMeta (which pops the last path segment) is
+  // meaningless for a `;`-joined multi-file value, so override it here.
+  const applyPatchPaths = toolName === 'apply_patch'
+    ? readApplyPatchPaths(element, data)
+    : null;
+  if (applyPatchPaths && applyPatchPaths.length > 0) {
+    basename = applyPatchPaths.map(p => p.split(/[\\/]/).pop() || p).join(', ');
+  }
+
   if (data.success === false) {
     const errorText = extractErrorText(data);
     el.textContent = '';
@@ -455,7 +502,13 @@ function renderEditEvent(element: InserterElement, data: Record<string, unknown>
 
   const diff = parseEditResult(data);
   if (!diff) return false;
-  basename ||= diff.path ? (diff.path.split(/[\\/]/).pop() || diff.path) : '';
+  if (applyPatchPaths && applyPatchPaths.length > 0) {
+    // Already computed above from the merged path list.
+  } else if (diff.paths && diff.paths.length > 0) {
+    basename = diff.paths.map(p => p.split(/[\\/]/).pop() || p).join(', ');
+  } else {
+    basename ||= diff.path ? (diff.path.split(/[\\/]/).pop() || diff.path) : '';
+  }
 
   el.textContent = '';
   const header = document.createElement('p');
@@ -584,9 +637,12 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
 
     // apply_patch carries its patch as the raw arguments (a string), not a
     // { path }, so the generic path branch below never names its target. Pull
-    // the file out of the patch so the tool line reads "apply_patch <file>" like
-    // edit/create, and stash it so the completion render (renderEditEvent) finds
-    // the same basename — the SDK's completion diff omits the path.
+    // every file the patch touches so the tool line reads "apply_patch <a.ts, b.ts, …>"
+    // — a multi-file patch that only advertised its first file made it look
+    // like a single-file edit and swallowed the rest. Stash the full path list
+    // (semicolon-joined so a stray comma in a filename can't split it) so the
+    // completion render (renderEditEvent) has the same authoritative set even
+    // when the SDK's completion diff omits path headers.
     if (name === 'apply_patch') {
       element.dataset.toolName = name;
       const raw = data.arguments;
@@ -594,11 +650,11 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
       const patch = typeof raw === 'string'
         ? raw
         : str(argRecord?.patch ?? argRecord?.input ?? argRecord?.content);
-      const [firstPath] = patch ? patchFilePaths(patch) : [];
-      if (firstPath) {
-        element.dataset.toolInput = firstPath;
-        const basename = firstPath.split(/[\\/]/).pop() || firstPath;
-        element.textContent = `${name}  ${basename}`;
+      const paths = patch ? patchFilePaths(patch) : [];
+      if (paths.length > 0) {
+        element.dataset.toolInput = paths.join(';');
+        const basenames = paths.map(p => p.split(/[\\/]/).pop() || p);
+        element.textContent = `${name}  ${basenames.join(', ')}`;
       } else {
         element.textContent = toolHeadline(element, name);
       }

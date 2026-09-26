@@ -19,7 +19,6 @@
     "tests/api.test.ts"
   ],
   "ignoreDependencies": [
-    "@types/tar",
     "@codemirror/*",
     "@lezer/*",
     "@vscode/ripgrep",

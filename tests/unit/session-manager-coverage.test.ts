@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { join } from 'path';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 
 const sdk = vi.hoisted(() => {
   const fakeClient = {
@@ -64,7 +66,11 @@ const sdkStore = vi.hoisted(() => {
   const events = new Map<string, unknown[]>();
   const workspace = new Map<string, unknown>();
   const parsedModels = new Map<string, string>();
+  // Read through a getter so one test can point the fork guard at real files;
+  // every other test keeps the nonexistent default.
+  const stateDirHolder = { path: 'tests/unit/nonexistent-state' };
   return {
+    stateDirHolder,
     listedSessionIds,
     eventsResult,
     events,
@@ -79,7 +85,7 @@ const sdkStore = vi.hoisted(() => {
     }),
     parseSessionModel: vi.fn((sessionId: string) => parsedModels.get(sessionId) ?? null),
     listSessionIds: vi.fn(() => [...listedSessionIds]),
-    STATE_DIR: 'tests/unit/nonexistent-state',
+    get STATE_DIR() { return stateDirHolder.path; },
   };
 });
 
@@ -748,9 +754,19 @@ describe('SessionManager coverage seams', () => {
     expect(storage.meta.get(sessionId)?.cwd).toBe(nextCwd);
     expect(runtime.disposeSessionRuntime).toHaveBeenCalledWith(sessionId);
 
-    const forked = await manager.forkSession(sessionId, 'event-1');
-    expect(forked).toEqual({ sessionId: 'forked-session', cwd: nextCwd });
-    expect(sdk.fakeClient.rpc.sessions.fork).toHaveBeenCalledWith({ sessionId, toEventId: 'event-1' });
+    const forkState = mkdtempSync(join(tmpdir(), 'coverage-fork-'));
+    sdkStore.stateDirHolder.path = forkState;
+    try {
+      // The fork guard refuses a parent with no history, so give it some.
+      mkdirSync(join(forkState, sessionId), { recursive: true });
+      writeFileSync(join(forkState, sessionId, 'events.jsonl'), '{"type":"session.start","id":"e0","parentId":null,"data":{}}\n');
+      const forked = await manager.forkSession(sessionId, 'event-1');
+      expect(forked).toEqual({ sessionId: 'forked-session', cwd: nextCwd });
+      expect(sdk.fakeClient.rpc.sessions.fork).toHaveBeenCalledWith({ sessionId, toEventId: 'event-1' });
+    } finally {
+      sdkStore.stateDirHolder.path = 'tests/unit/nonexistent-state';
+      rmSync(forkState, { recursive: true, force: true });
+    }
 
     await manager.delete(sessionId);
     expect(sdk.fakeClient.deleteSession).toHaveBeenCalledWith(sessionId);

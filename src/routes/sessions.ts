@@ -14,7 +14,7 @@ import express from 'express';
 import { existsSync, statSync, createReadStream, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { sessionManager } from '../session-manager.js';
+import { sessionManager, ForkRefusedError } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
 import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind } from '../storage.js';
@@ -566,6 +566,12 @@ router.post('/sessions/:sessionId/fork', async (req: Request, res: Response) => 
     newId = result.sessionId;
     cwd = result.cwd;
   } catch (e) {
+    // A refusal forked nothing: the parent was busy, loading, under maintenance,
+    // empty, or could not be detached. It is a conflict the user can retry.
+    if (e instanceof ForkRefusedError) {
+      res.status(409).json({ error: e.message, code: 'FORK_REFUSED', reason: e.reason });
+      return;
+    }
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[FORK] SDK fork failed:', msg);
     res.status(500).json({ error: `Fork failed: ${msg}` });

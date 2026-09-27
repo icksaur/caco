@@ -235,7 +235,14 @@ const resolveAgentSelection = vi.fn((): AgentResolution => ({ ok: true, agentId:
 const filterSkillCommands = vi.fn((commands: Array<{ name: string; description?: string }>) => commands.filter(c => c.name.startsWith('skill-')));
 const skillToolEnabled = vi.fn(() => true);
 
-vi.mock('../../src/session-manager.js', () => ({ sessionManager }));
+vi.mock('../../src/session-manager.js', () => {
+  // The route tells a refusal apart with instanceof, so the mock must supply
+  // the same class the route imports.
+  class ForkRefusedError extends Error {
+    constructor(readonly reason: string, message: string) { super(message); this.name = 'ForkRefusedError'; }
+  }
+  return { sessionManager, ForkRefusedError };
+});
 vi.mock('../../src/session-state.js', () => ({ sessionState }));
 vi.mock('../../src/schedule-store.js', () => ({ getScheduleForSession }));
 vi.mock('../../src/storage.js', () => ({
@@ -608,5 +615,28 @@ describe('sessions route harness', () => {
     expect(sessionManager.forkSession).toHaveBeenCalledWith(knownId, 'evt-1');
     expect(setSessionMeta).toHaveBeenCalledWith('fork-id', expect.objectContaining({ name: '[fork] Parent', folder: 'Work', parentSessionId: knownId, kind: 'interactive' }));
     expect(broadcastGlobalEvent).toHaveBeenCalledWith({ type: 'session.listChanged', data: { reason: 'forked', sessionId: 'fork-id', parentId: knownId } });
+  });
+
+  it('answers a refused fork with a conflict and the refusal message', async () => {
+    const { ForkRefusedError } = await import('../../src/session-manager.js');
+    vi.mocked(sessionManager.forkSession).mockRejectedValueOnce(
+      new ForkRefusedError('busy', 'Session is busy. Fork it after the current turn finishes.'),
+    );
+
+    const res = await postJson('/sessions/known/fork', {});
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'Session is busy. Fork it after the current turn finishes.', code: 'FORK_REFUSED', reason: 'busy' });
+    // A refusal forked nothing, so no child is registered.
+    expect(setSessionMeta).not.toHaveBeenCalledWith('fork-id', expect.anything());
+  });
+
+  it('keeps a server error for a fork that failed for any other reason', async () => {
+    vi.mocked(sessionManager.forkSession).mockRejectedValueOnce(new Error('rpc exploded'));
+
+    const res = await postJson('/sessions/known/fork', {});
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toContain('rpc exploded');
   });
 });

@@ -8,7 +8,7 @@ import { ensureSessionMeta, getSessionMeta, updateSessionMeta, readSessionMeta, 
 import { getCurrentIntent, forgetIntent } from './intent-runtime.js';
 import { getSessionDir } from './storage-paths.js';
 import { cancelCardPersist } from './file-edits-store.js';
-import { readSessionWorkspace, readSessionEvents, readSessionHeadResult, parseSessionModel, listSessionIds } from './sdk-session-store.js';
+import { readSessionWorkspace, readSessionEvents, readSessionHeadResult, parseSessionModel, listSessionIds, STATE_DIR } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
 import { dispatchState } from './dispatch-state.js';
@@ -19,6 +19,7 @@ import { createObservationHook } from './observe/hook.js';
 import { OBS_RAW_CEILING_BYTES } from './observe/types.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
 import { reconcileRotation, autoRotateIfEligible } from './session-history-rotation.js';
+import { guardedFork, reconcileFork } from './fork-guard.js';
 import { disposeSessionRuntime } from './session-runtime.js';
 import { broadcastEvent } from './event-bus.js';
 import { hasProviders, listByokModels, resolveModel } from './provider-registry.js';
@@ -418,6 +419,19 @@ function readModelFromEvents(sessionId: string): string | null {
 }
 
 // ============================================================================
+
+export type ForkRefusalReason = 'busy' | 'resuming' | 'maintenance' | 'empty' | 'teardown-failed';
+
+/**
+ * A fork declined before the runtime was asked, because the parent could not be
+ * forked safely. The message is user-facing; the route maps this to a conflict.
+ */
+export class ForkRefusedError extends Error {
+  constructor(readonly reason: ForkRefusalReason, message: string) {
+    super(message);
+    this.name = 'ForkRefusedError';
+  }
+}
 
 /**
  * SessionManager - Singleton that owns all SDK interactions
@@ -889,35 +903,63 @@ export class SessionManager {
    * Scan ~/.copilot/session-state/ and extract sessionId, cwd, summary
    */
   private _discoverSessions(): void {
+    const previous = new Map(this.sessionCache);
     this.sessionCache.clear();
     
     for (const sessionId of listSessionIds()) {
+      // CONTRACT: a session under a maintenance claim (fork, rotation, archive)
+      // belongs to the claim holder, which owns its files mid-change. Keep its
+      // previous record. Reconciling here could delete a fork's live snapshot,
+      // and re-deriving could read a file the holder is rewriting.
+      if (this.isUnderMaintenance(sessionId)) {
+        const kept = previous.get(sessionId);
+        if (kept) this.sessionCache.set(sessionId, kept);
+        continue;
+      }
+
       // A rotation that crashed mid-swap may have left this session with its
       // events.jsonl renamed aside (no events.jsonl on disk). Reconcile from the
       // sidecars BEFORE the events read below, or the session would look missing
       // and silently vanish. Cheap (two existsSync) when nothing is pending.
       const recovery = reconcileRotation(sessionId);
       if (recovery !== 'clean') console.warn(`[DISCOVER] Rotation recovery for ${sessionId}: ${recovery}`);
+      // Same for a fork that crashed after the runtime truncated the parent. A
+      // failure here must not abort the whole scan.
+      let forkPending = false;
+      try {
+        const forkRecovery = reconcileFork(sessionId);
+        if (forkRecovery !== 'clean') console.warn(`[DISCOVER] Fork recovery for ${sessionId}: ${forkRecovery}`);
+      } catch (e) {
+        forkPending = true;
+        console.error(`[DISCOVER] Fork recovery failed for ${sessionId}; snapshot kept:`, e instanceof Error ? e.message : e);
+      }
 
       const record: CachedSession = { cwd: null, summary: null };
 
-      const headResult = readSessionHeadResult(sessionId);
-      if (!headResult.ok && headResult.kind === 'missing') continue;
-
-      if (headResult.ok) {
-        const startEvent = headResult.value.start;
-        if (startEvent === null) continue;
-
-        if (startEvent.type === 'session.start') {
-          const ctx = startEvent.data?.context as Record<string, unknown> | undefined;
-          record.cwd = typeof ctx?.cwd === 'string' ? ctx.cwd : null;
-        }
-      } else {
-        // Corrupt events file: a transient read failure or all-malformed JSONL
-        // must not erase a real session from the UI. Register it anyway, deriving
-        // cwd from the meta override or workspace, and log loudly.
-        console.error(`[DISCOVER] Corrupt events for ${sessionId}; registering with fallback cwd (${headResult.error.message})`);
+      if (forkPending) {
+        // The real history is in the pending snapshot; the live head is the
+        // runtime's marker or nothing. Register from the workspace so a resume,
+        // which retries the restore, stays reachable.
         record.cwd = readSessionWorkspace(sessionId)?.cwd ?? null;
+      } else {
+        const headResult = readSessionHeadResult(sessionId);
+        if (!headResult.ok && headResult.kind === 'missing') continue;
+
+        if (headResult.ok) {
+          const startEvent = headResult.value.start;
+          if (startEvent === null) continue;
+
+          if (startEvent.type === 'session.start') {
+            const ctx = startEvent.data?.context as Record<string, unknown> | undefined;
+            record.cwd = typeof ctx?.cwd === 'string' ? ctx.cwd : null;
+          }
+        } else {
+          // Corrupt events file: a transient read failure or all-malformed JSONL
+          // must not erase a real session from the UI. Register it anyway, deriving
+          // cwd from the meta override or workspace, and log loudly.
+          console.error(`[DISCOVER] Corrupt events for ${sessionId}; registering with fallback cwd (${headResult.error.message})`);
+          record.cwd = readSessionWorkspace(sessionId)?.cwd ?? null;
+        }
       }
 
       // Caco-side cwd override (from /session-cwd) wins over the immutable
@@ -1193,6 +1235,7 @@ export class SessionManager {
     // budget is not applied to the still-empty session, but self-heals on the
     // first real resume once it has history — see spec-session-orchestration M4.)
     reconcileRotation(sessionId);
+    reconcileFork(sessionId);
     const eventsProbe = readSessionHeadResult(sessionId);
     if (!eventsProbe.ok && eventsProbe.kind === 'missing') {
       console.log(`[RESUME] ${sessionId} has no events.jsonl (never messaged) — recreating under id as an empty session`);
@@ -1506,6 +1549,16 @@ export class SessionManager {
    * @returns false if the session was busy (nothing was touched); true otherwise.
    */
   async stopIfIdle(sessionId: string): Promise<boolean> {
+    return this.stopForMaintenance(sessionId, { strict: false });
+  }
+
+  /**
+   * The body of `stopIfIdle`. `strict` rethrows a disconnect failure instead of
+   * swallowing it, for callers that must not act on a session the runtime may
+   * still hold, such as a fork. Teardown runs either way: the session has
+   * already left `activeSessions`, so the next use re-resumes it.
+   */
+  private async stopForMaintenance(sessionId: string, { strict }: { strict: boolean }): Promise<boolean> {
     // ---- synchronous prefix: no await may be introduced inside this block ----
     if (this.isBusy(sessionId)) return false;
     const active = this.activeSessions.get(sessionId);
@@ -1514,15 +1567,21 @@ export class SessionManager {
     // ---- end synchronous prefix ----
 
     const { session } = active;
+    let disconnectError: unknown;
     try {
       await session.disconnect();
     } catch (e) {
+      disconnectError = e;
       const message = e instanceof Error ? e.message : String(e);
       console.warn(`Warning: session.disconnect() during maintenance failed: ${message}`);
     }
-    dispatchState.end(sessionId);
+    // CONTRACT: end only a dispatch this teardown owned. A dispatch that
+    // started during the disconnect await is waiting to resume the session;
+    // ending it would wipe its state and broadcast a false idle.
+    if (!this.isBusy(sessionId)) dispatchState.end(sessionId);
     this.clearEnableableKeys(sessionId);
     disposeSessionRuntime(sessionId);
+    if (strict && disconnectError !== undefined) throw disconnectError;
     console.log(`✓ Stopped idle session ${sessionId.slice(0, 8)} for maintenance`);
     return true;
   }
@@ -3425,6 +3484,15 @@ export class SessionManager {
    * Mirrors the post-creation registration steps that create() does:
    * sessionCache.set, ensureSessionMeta.
    *
+   * The runtime's fork RPC replaces the parent's events.jsonl with a single fork
+   * marker, so the call is wrapped by `guardedFork` (fork-guard.ts).
+   *
+   * CONTRACT: this is the only caller of `sessions.fork`. The RPC runs only
+   * under the parent's maintenance claim, with the parent not loaded in the
+   * runtime. A refusal throws `ForkRefusedError` and never calls it. Do NOT add
+   * an await between the refusal checks and `runExclusiveMaintenance`: a resume
+   * or dispatch could slip into that gap.
+   *
    * The caller is responsible for writing the new session's caco meta
    * (name, folder, model, parentSessionId, kind) before this returns to the user.
    */
@@ -3437,8 +3505,43 @@ export class SessionManager {
       throw new Error(`Parent session ${parentSessionId} has no cwd`);
     }
     const parentCwd = parentRecord.cwd;
-    const client = await this.ensureClient();
-    const result = await client.rpc.sessions.fork({ sessionId: parentSessionId, toEventId });
+
+    if (this.isBusy(parentSessionId)) {
+      throw new ForkRefusedError('busy', 'Session is busy. Fork it after the current turn finishes.');
+    }
+    if (this.resumeInProgress.has(parentSessionId)) {
+      throw new ForkRefusedError('resuming', 'Session is still loading. Try the fork again in a moment.');
+    }
+    if (this.isUnderMaintenance(parentSessionId)) {
+      throw new ForkRefusedError('maintenance', 'Session is being archived or rotated. Try again shortly.');
+    }
+    // A never-messaged session has nothing to inherit, and the runtime would
+    // leave it a marker-only file that can no longer be recreated as empty.
+    if (!existsSync(join(STATE_DIR, parentSessionId, 'events.jsonl'))) {
+      throw new ForkRefusedError('empty', 'Session has no messages yet, so there is nothing to fork.');
+    }
+
+    const result = await this.runExclusiveMaintenance(parentSessionId, async () => {
+      // CONTRACT: snapshot only after a strict stop. The stop's disconnect
+      // may append to the file; a snapshot taken first would miss it, and a stop
+      // that cannot prove teardown means the runtime may still hold the parent.
+      let stopped: boolean;
+      try {
+        stopped = await this.stopForMaintenance(parentSessionId, { strict: true });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        throw new ForkRefusedError('teardown-failed', `Could not safely detach the session for forking (${message}). Try again.`);
+      }
+      if (!stopped) {
+        throw new ForkRefusedError('busy', 'Session is busy. Fork it after the current turn finishes.');
+      }
+      const client = await this.ensureClient();
+      return guardedFork(
+        parentSessionId,
+        () => client.rpc.sessions.fork({ sessionId: parentSessionId, toEventId }),
+        { stateDir: STATE_DIR, log: message => console.warn(message) },
+      );
+    });
     const newId = result.sessionId;
 
     // Mirror what create() does for cache registration

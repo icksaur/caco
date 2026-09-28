@@ -103,14 +103,17 @@ describe('isDeferEligibleCacoEntry', () => {
 });
 
 describe('isDeferEligibleBuiltin', () => {
-  it('protects exactly the two named builtins', () => {
-    expect([...NEVER_DEFER_BUILTINS].sort()).toEqual(['skill', 'str_replace_editor']);
+  it('protects exactly the named file-editing and discovery builtins', () => {
+    expect([...NEVER_DEFER_BUILTINS].sort()).toEqual(['create', 'edit', 'skill', 'str_replace_editor', 'view']);
   });
 
-  it('never defers the only file-edit tool', () => {
-    // Every other builtin's enable round-trip lands at a pause point; this one
-    // would land mid-edit, and Caco ships no replacement.
+  it('never defers file-edit tools (legacy or split)', () => {
+    // Every other builtin's enable round-trip lands at a pause point; these
+    // would land mid-edit, and Caco ships no replacement for them.
     expect(isDeferEligibleBuiltin('str_replace_editor')).toBe(false);
+    expect(isDeferEligibleBuiltin('view')).toBe(false);
+    expect(isDeferEligibleBuiltin('edit')).toBe(false);
+    expect(isDeferEligibleBuiltin('create')).toBe(false);
   });
 
   it('never defers skill, whose description embeds the skill list', () => {

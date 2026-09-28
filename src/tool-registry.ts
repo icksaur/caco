@@ -201,9 +201,13 @@ export function isDeferEligibleCacoEntry(
  * tools — builtins were previously all-or-nothing: hard-excluded and
  * unrecoverable, or sent every turn forever.
  *
- *  - `str_replace_editor` — the SDK's only view/edit/create tool, and Caco ships
- *    no replacement. Every other builtin's enable round-trip lands at a natural
- *    pause; this one would land mid-edit.
+ *  - `str_replace_editor` — the legacy SDK single-tool for view/edit/create.
+ *    Kept in case a session still exposes it under this name.
+ *  - `view`, `edit`, `create` — the SDK's current split file tools. Every
+ *    other builtin's enable round-trip lands at a natural pause; these three
+ *    would land mid-edit, and losing any one of them mid-task means the model
+ *    can no longer read or change a file until it re-enables. Recovery is
+ *    theoretically possible but disruptive enough to be worth avoiding.
  *  - `skill` — its description EMBEDS the `<available_skills>` block listing every
  *    skill. Deferring it hides not just the invoker but the existence of skills,
  *    so the model could never know to re-enable it: the same self-reinforcing
@@ -212,6 +216,9 @@ export function isDeferEligibleCacoEntry(
  */
 export const NEVER_DEFER_BUILTINS: string[] = [
   'str_replace_editor',
+  'view',
+  'edit',
+  'create',
   'skill',
 ];
 

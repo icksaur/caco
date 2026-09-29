@@ -47,6 +47,15 @@
       <!-- Session panel (left side, toggled independently) -->
       <div id="sessionView" class="session-panel hidden">
         <div class="session-content">
+          <!-- Persistent header + filter input; the list body below is
+               replaced on every render but these two survive so the filter
+               input keeps focus/caret across keystrokes. -->
+          <div id="sessionListHeader" class="section-header">
+            <span>sessions</span>
+            <div id="usageInfo" class="usage-info usage-display" data-usage-display="panel"></div>
+            <button type="button" id="sessionAddBtn" class="session-add-btn" title="New session" aria-label="New session">+</button>
+          </div>
+          <input type="text" id="sessionFilterInput" class="session-filter-input" placeholder="find session" autocomplete="off" spellcheck="false" aria-label="Find session">
           <div id="sessionList"></div>
           
           <div id="schedulesSection" class="schedules-section">

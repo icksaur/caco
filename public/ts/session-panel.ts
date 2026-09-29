@@ -4,7 +4,7 @@
 
 import { debug } from './debug.js';
 import type { SessionsResponse, SessionData } from './types.js';
-import { formatAge, formatStatusParts } from './ui-utils.js';
+import { formatAge, formatStatusParts, fuzzyScore } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels, notifySessionArchived } from './app-state.js';
 import { setAvailableModels } from './model-selector.js';
 import { showSessionPanel } from './view-controller.js';
@@ -27,11 +27,44 @@ const collapsedFolders = new Set<string>(
 // Track active session drags (iframe may restrict dataTransfer.types during dragover)
 let sessionDragActive = false;
 
+// Fuzzy-find query for the session-list filter input (session-title-fuzzyfind).
+// Empty or whitespace-only means no filter. The input element itself lives in
+// index.html above #sessionList so it survives the container wipe in
+// renderFromModel — that's what keeps focus + caret stable across keystrokes.
+let sessionFilterQuery = '';
+let sessionFilterWired = false;
+
 let sessionPanelInitialized = false;
 const sessionPanelDisposers: Array<() => void> = [];
 
 export function getCachedSessions(): SessionData[] {
   return allSessions;
+}
+
+/**
+ * Filter sessions by fuzzy-matching the displayed title against the query.
+ * An empty or whitespace-only query returns the input unchanged so the panel
+ * shows every session when the input is cleared. Uses `displayTitleFor` so
+ * auto-named sessions (spec-report-intent-tool) participate — the visible
+ * title is what the user searches for.
+ *
+ * Exported for unit testing; not otherwise used outside this module.
+ */
+export function filterSessionsByQuery(sessions: SessionData[], query: string): SessionData[] {
+  const q = query.trim().toLowerCase();
+  if (q.length === 0) return sessions;
+  return sessions.filter(s => fuzzyScore(displayTitleFor(s).toLowerCase(), q) >= 0);
+}
+
+/**
+ * Filter allSessions by the current search query then rebuild + render the
+ * grouped model. All callers that previously called `renderFromModel` +
+ * `buildSessionListModel` funnel through here so the filter is honored
+ * uniformly across load, folder toggle, and filter-input keystrokes.
+ */
+function renderList(): void {
+  const filtered = filterSessionsByQuery(allSessions, sessionFilterQuery);
+  renderFromModel(buildSessionListModel(filtered, currentSessionOrder, collapsedFolders));
 }
 
 /**
@@ -409,7 +442,7 @@ export async function loadSessions(): Promise<void> {
     allSessions = flatSessions.filter(s => s.kind !== 'swarm' || s.isBusy);
     currentSessionOrder = sessionOrder || [];
     
-    renderFromModel(buildSessionListModel(allSessions, currentSessionOrder, collapsedFolders));
+    renderList();
   } catch (error) {
     console.error('Failed to load sessions:', error);
   }
@@ -429,7 +462,7 @@ function toggleFolder(name: string): void {
     collapsedFolders.add(name);
   }
   saveCollapsedFolders();
-  renderFromModel(buildSessionListModel(allSessions, currentSessionOrder, collapsedFolders));
+  renderList();
 }
 
 const movingSessionIds = new Set<string>();
@@ -491,38 +524,44 @@ function setupZoneDragHandlers(zone: HTMLElement, folderName: string): void {
   });
 }
 
+/**
+ * Wire the persistent header controls (new-session "+" and the fuzzy-find
+ * filter input) exactly once. They live in index.html above #sessionList so
+ * they survive the container wipe in renderFromModel — that's what keeps the
+ * filter input's focus + caret stable across per-keystroke re-renders.
+ */
+function wireHeaderControls(): void {
+  if (sessionFilterWired) return;
+  const addBtn = document.getElementById('sessionAddBtn');
+  if (addBtn) addBtn.onclick = (e) => { e.stopPropagation(); newSessionClick(); };
+  const input = document.getElementById('sessionFilterInput') as HTMLInputElement | null;
+  if (input) {
+    input.value = sessionFilterQuery;
+    input.oninput = () => {
+      sessionFilterQuery = input.value;
+      renderList();
+    };
+  }
+  sessionFilterWired = true;
+}
+
 function renderFromModel(model: SessionListModel): void {
   const container = document.getElementById('sessionList');
   if (!container) return;
-  
+
   const activeSessionId = getActiveSessionId();
-  
+
   container.innerHTML = '';
-  
-  const heading = document.createElement('div');
-  heading.className = 'section-header';
-  heading.textContent = 'sessions';
 
-  const usageInfo = document.createElement('div');
-  usageInfo.id = 'usageInfo';
-  usageInfo.className = 'usage-info usage-display';
-  usageInfo.dataset.usageDisplay = 'panel';
-  heading.appendChild(usageInfo);
-
-  const addBtn = document.createElement('button');
-  addBtn.className = 'session-add-btn';
-  addBtn.textContent = '+';
-  addBtn.title = 'New session';
-  addBtn.onclick = (e) => { e.stopPropagation(); newSessionClick(); };
-  heading.appendChild(addBtn);
-
-  container.appendChild(heading);
+  // The header + filter input live in index.html above #sessionList so they
+  // survive the container wipe; wire their handlers exactly once.
+  wireHeaderControls();
   repaintUsageDisplays();
-  
+
   if (model.root.length === 0 && model.folders.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'schedules-empty';
-    empty.textContent = 'no sessions';
+    empty.textContent = sessionFilterQuery.trim().length > 0 ? 'no matching sessions' : 'no sessions';
     container.appendChild(empty);
     return;
   }

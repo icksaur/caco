@@ -153,6 +153,14 @@ describe('builtin auto-defer candidate enumeration', () => {
     expect(got).toEqual(['builtin:task']);
   });
 
+  it.each(['view', 'edit', 'create'])('never emits the %s file tool, even when maximally stale', async (name) => {
+    // The split file tools replaced str_replace_editor. Deferring one mid-task
+    // leaves the model unable to read or change a file until it re-enables it.
+    const got = await builtinCandidatesFor([name, 'task']);
+
+    expect(got).toEqual(['builtin:task']);
+  });
+
   it('never emits a policy-excluded builtin, even when maximally stale', async () => {
     // These are already gone via the base seed and must classify 'disabled', never
     // 'deferred'; emitting them would make them look re-enableable.
@@ -171,6 +179,17 @@ describe('builtin auto-defer candidate enumeration', () => {
     latch.keys = new Set(['builtin:str_replace_editor']);
 
     const got = await builtinCandidatesFor(['str_replace_editor', 'task']);
+
+    expect(got).toEqual(['builtin:task']);
+    expect([...latch.keys]).toEqual([]);
+  });
+
+  it('purges latched file-tool keys from before they were protected', async () => {
+    // A build that predates their protection could have latched these. Unpurged,
+    // the latch is unioned into every seed and would hide them again.
+    latch.keys = new Set(['builtin:view', 'builtin:edit', 'builtin:create']);
+
+    const got = await builtinCandidatesFor(['view', 'edit', 'create', 'task']);
 
     expect(got).toEqual(['builtin:task']);
     expect([...latch.keys]).toEqual([]);

@@ -38,8 +38,14 @@ $Port | Out-File "server.port" -NoNewline
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "npx tsx server.ts > server.log 2>&1" `
     -WindowStyle Hidden
 
-# Wait for node to start listening (up to 10 seconds)
-for ($i = 0; $i -lt 10; $i++) {
+# Wait for node to start listening. Windows Defender scans every node_modules
+# file on a cold start, which can take well past the old 10 s and made a healthy
+# server report [FAIL]. CACO_START_TIMEOUT_SEC raises it further if needed.
+$StartTimeoutSec = 30
+if ($env:CACO_START_TIMEOUT_SEC -match '^\d+$' -and [int]$env:CACO_START_TIMEOUT_SEC -gt 0) {
+    $StartTimeoutSec = [int]$env:CACO_START_TIMEOUT_SEC
+}
+for ($i = 0; $i -lt $StartTimeoutSec; $i++) {
     Start-Sleep -Seconds 1
     $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     if ($conn) { break }
@@ -49,7 +55,7 @@ if ($conn) {
     Write-Host "[OK] Server started on port $Port"
     Write-Host "  URL: http://localhost:$Port"
 } else {
-    Write-Host "[FAIL] Server failed to start"
+    Write-Host "[FAIL] Server not listening on port $Port after ${StartTimeoutSec}s (set CACO_START_TIMEOUT_SEC to wait longer)"
     if (Test-Path server.log) { Get-Content server.log }
     exit 1
 }

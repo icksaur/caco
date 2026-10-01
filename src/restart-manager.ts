@@ -184,6 +184,16 @@ function checkAndRestart(): void {
   }
 }
 
+/**
+ * The replacement server's environment: ours, plus the pid it takes over from.
+ * The replacement waits for exactly this pid to release the server lock
+ * (server-lock.ts); without it, the still-exiting parent's lock reads as another
+ * live Caco and the restart refuses itself.
+ */
+export function replacementEnv(env: NodeJS.ProcessEnv, parentPid: number): NodeJS.ProcessEnv {
+  return { ...env, CACO_RESTART_HANDOFF: String(parentPid) };
+}
+
 function spawnServer(): void {
   log('Spawning new server...');
   try {
@@ -212,7 +222,7 @@ function spawnServer(): void {
       detached: true,
       stdio: ['ignore', outFd, outFd],
       windowsHide: true,
-      env: { ...process.env }
+      env: replacementEnv(process.env, process.pid)
     });
 
     // Diagnostic: don't unref immediately. Briefly listen for early death so

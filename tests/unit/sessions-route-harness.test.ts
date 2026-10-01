@@ -317,6 +317,30 @@ describe('sessions route harness', () => {
     expect(setPeers).toHaveBeenCalledWith([{ url: 'http://other:53000', hostname: 'other' }]);
   });
 
+  it('recognizes self by loopback host and the bound port, not by text', async () => {
+    const { setBoundPort, PORT } = await import('../../src/config.js');
+    setBoundPort(53001);
+    try {
+      const saved = await postJson('/peers', [
+        { url: 'http://localhost:53001', hostname: 'self-a' },
+        { url: 'http://127.0.0.1:53001/', hostname: 'self-b' },
+        { url: 'http://[::1]:53001', hostname: 'self-c' },
+        // The default port is no longer this server's after a fallback.
+        { url: 'http://localhost:53000', hostname: 'old-default' },
+        // The port text in a path or a remote host must not read as self.
+        { url: 'http://remote:53001/localhost:53001', hostname: 'remote' },
+      ]);
+
+      expect(await saved.json()).toEqual({ ok: true, count: 2 });
+      expect(setPeers).toHaveBeenLastCalledWith([
+        { url: 'http://localhost:53000', hostname: 'old-default' },
+        { url: 'http://remote:53001/localhost:53001', hostname: 'remote' },
+      ]);
+    } finally {
+      setBoundPort(PORT);
+    }
+  });
+
   it('returns current session fallback and active session details', async () => {
     state.activeSessionId = null;
     expect(await (await request('/session')).json()).toMatchObject({ sessionId: null, isActive: false, hasMessages: false });

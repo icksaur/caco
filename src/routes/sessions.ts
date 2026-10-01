@@ -22,7 +22,7 @@ import { getCurrentIntent } from '../intent-runtime.js';
 import { readSessionWorkspace, searchSessionEvents, getEventVersion } from '../sdk-session-store.js';
 import { rotateSessionHistory } from '../session-history-rotation.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
-import { AUTO_ARCHIVE_ENABLED } from '../config.js';
+import { AUTO_ARCHIVE_ENABLED, getBoundPort } from '../config.js';
 import { applyFolderChange } from '../folder-transitions.js';
 import { stageForArchive, archiveEligibleAt } from '../session-archive-reaper.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
@@ -91,10 +91,20 @@ router.post('/peers', (req: Request, res: Response) => {
     return;
   }
   // Only store remote peers (skip self)
-  const remote = peers.filter(p => p.url && p.hostname && !p.url.includes('localhost:53000'));
+  const remote = peers.filter(p => p.url && p.hostname && !isSelfPeerUrl(p.url));
   setPeers(remote);
   res.json({ ok: true, count: remote.length });
 });
+
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** Self is a loopback host on the port this server bound, which may be a fallback port. */
+function isSelfPeerUrl(url: string): boolean {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return false; }
+  const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
+  return LOOPBACK_HOSTNAMES.has(parsed.hostname.toLowerCase()) && port === getBoundPort();
+}
 
 router.get('/session', async (req: Request, res: Response) => {
   const sessionId = (req.query.sessionId as string) || sessionState.activeSessionId;

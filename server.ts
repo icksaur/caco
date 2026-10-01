@@ -55,7 +55,12 @@ import { registerUsageSink } from './src/usage-metrics.js';
 import { appendUsageRecord } from './src/usage-store.js';
 import { loadServerExtensions } from './src/extension-runtime.js';
 import { onAllIdle } from './src/restart-manager.js';
-import { PORT, HOST, WORKFLOW_ENABLED } from './src/config.js';
+import { PORT, HOST, WORKFLOW_ENABLED, setBoundPort, serverUrlFor } from './src/config.js';
+import { listenWithFallback, formatStartupFailure, StartupPortError, EXIT_STARTUP_FAILED } from './src/server-listen.js';
+import {
+  acquireServerLock, markServerReady, releaseServerLock, formatLockRefusal,
+  ServerLockHeldError, EXIT_ALREADY_RUNNING,
+} from './src/server-lock.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -203,15 +208,41 @@ app.use('/api', pagerRoutes);
 
 // Server Lifecycle
 
+/** Startup progress, stamped with seconds since the process began (module load included). */
+function bootLog(message: string): void {
+  console.log(`[BOOT +${process.uptime().toFixed(1)}s] ${message}`);
+}
+
 async function start(): Promise<void> {
+  // Snapshot and drop the restart handoff marker before anything can spawn a
+  // child that would inherit it.
+  const handoffParentPid = Number(process.env.CACO_RESTART_HANDOFF) || undefined;
+  delete process.env.CACO_RESTART_HANDOFF;
+
+  bootLog(`Caco starting: pid ${process.pid}, node ${process.version}, requested ${serverUrlFor(HOST, PORT)}`);
+
+  // CONTRACT: take the single-instance lock before anything below runs.
+  // Initialization repairs session files, and starts the scheduler, sweepers,
+  // and child processes. A process that can't own the session state must do
+  // none of it. Do not move work above this line.
+  //
+  // Rejected: binding a throwaway listener before init to choose the port (the
+  // lock already keeps a non-owner from touching state, and a preflight adds a
+  // close-and-rebind gap), and binding first with a not-ready 503 gate (it
+  // changes what an open tab sees during every restart).
+  await acquireServerLock({ handoffParentPid });
+  process.on('exit', () => releaseServerLock());
+
   loadUsageCache();
-  
+
+  bootLog('loading extensions');
   const extensionTools = await loadServerExtensions(app);
   
   const server = createServer(app);
   
   const { wss, pushStateToApplet } = setupWebSocket(server);
 
+  bootLog('checking the workflow runner');
   const workflowAvailable = WORKFLOW_ENABLED && await isWorkflowRunnerAvailable();
   if (WORKFLOW_ENABLED && !workflowAvailable) {
     console.warn('[WORKFLOW] tsx runner is unavailable; caco_run_workflow not registered');
@@ -290,6 +321,7 @@ async function start(): Promise<void> {
     return kept as typeof allTools;
   };
   
+  bootLog('starting the session manager');
   await createSessionState({
     toolFactory,
     excludedTools: excludedBuiltins
@@ -321,6 +353,7 @@ async function start(): Promise<void> {
     idleFeed.remove(sid);
   });
   
+  bootLog('starting background services');
   startScheduleManager();
 
   // Durable usage metrics: persist one record per completed request to the
@@ -348,54 +381,43 @@ async function start(): Promise<void> {
     setTimeout(midnightSnapshot, 24 * 60 * 60 * 1000);
   }, msToMidnight);
   
-  // Start server with retry (for restart scenarios where port may not be free yet)
-  const MAX_RETRIES = 10;
-  const RETRY_DELAY_MS = 500;
-  
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(PORT, HOST, () => {
-          server.removeListener('error', reject);
-          resolve();
-        });
-      });
-      
-      console.log(`✓ Server running at http://${HOST}:${PORT}`);
-      console.log(`  Local: http://localhost:${PORT}`);
-      console.log('  Press Ctrl+C to stop');
-      // An SDK upgrade that renames a prompt section makes our section removals
-      // silent no-ops, so the SDK's prose returns alongside Caco's. Nothing
-      // errors, so say so here or nobody finds out.
-      const drift = verifySdkProseSections();
-      if (drift && (drift.missing.length || drift.unexpected.length)) {
-        console.error(
-          '[PROMPT] SDK prompt sections have drifted; Caco sessions may carry duplicated SDK prose. '
-          + `Update SDK_PROSE_SECTIONS in src/prompts.ts. Missing: [${drift.missing.join(', ')}] `
-          + `Unhandled: [${drift.unexpected.join(', ')}]`,
-        );
-      }
-      // Post-listen herd boot scan: rebuild the membership index, self-heal
-      // orphaned children, and re-wake any parent with a non-active child. Must
-      // run after listen() because the wake POSTs the message route.
-      void scanHerdsOnBoot();
-      // Start the soft-archive reaper: periodically archive sessions parked in the
-      // auto-archive folder that have been idle past the threshold (spec-soft-archive-folder).
-      startAutoArchiveReaper();
-      return; // Success
-    } catch (err: unknown) {
-      const error = err as NodeJS.ErrnoException;
-      if (error.code === 'EADDRINUSE' && attempt < MAX_RETRIES) {
-        console.log(`Port ${PORT} in use, retrying (${attempt}/${MAX_RETRIES})...`);
-        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-      } else {
-        throw err;
-      }
-    }
+  // Bind the requested port, or one of the next few if it is reserved or taken.
+  // Another Caco was already excluded by the lock above, so a held port here
+  // is just an unavailable port.
+  bootLog(`binding ${serverUrlFor(HOST, PORT)}`);
+  const { port, skipped } = await listenWithFallback(server, { host: HOST, port: PORT }, {
+    sleep: ms => new Promise(r => setTimeout(r, ms)),
+  });
+  setBoundPort(port);
+  const url = serverUrlFor(HOST, port);
+  markServerReady(url, port);
+
+  // An SDK upgrade that renames a prompt section makes our section removals
+  // silent no-ops, so the SDK's prose returns alongside Caco's. Nothing
+  // errors, so say so here or nobody finds out.
+  const drift = verifySdkProseSections();
+  if (drift && (drift.missing.length || drift.unexpected.length)) {
+    console.error(
+      '[PROMPT] SDK prompt sections have drifted; Caco sessions may carry duplicated SDK prose. '
+      + `Update SDK_PROSE_SECTIONS in src/prompts.ts. Missing: [${drift.missing.join(', ')}] `
+      + `Unhandled: [${drift.unexpected.join(', ')}]`,
+    );
   }
-  
-  throw new Error(`Failed to bind to port ${PORT} after ${MAX_RETRIES} attempts`);
+  // Post-listen herd boot scan: rebuild the membership index, self-heal
+  // orphaned children, and re-wake any parent with a non-active child. Must
+  // run after listen() because the wake POSTs the message route.
+  void scanHerdsOnBoot();
+  // Start the soft-archive reaper: periodically archive sessions parked in the
+  // auto-archive folder that have been idle past the threshold (spec-soft-archive-folder).
+  startAutoArchiveReaper();
+
+  for (const s of skipped) {
+    bootLog(`${serverUrlFor(HOST, s.port)} unavailable (${s.code}); using port ${port} instead`);
+  }
+  console.log('  Press Ctrl+C to stop');
+  // CONTRACT: the ready URL is the last line start() prints, so the start
+  // scripts and a terminal user find it at the bottom. Startup work goes above.
+  console.log(`Caco ready: ${url}`);
 }
 
 // Crash logging: persist fatal errors to a dedicated dir that start
@@ -496,4 +518,16 @@ process.on('unhandledRejection', (reason, _promise) => {
   recordCrash('unhandledRejection', reason);
 });
 
-start().catch(console.error);
+// CONTRACT: a failed start exits the process. Lingering would keep the
+// scheduler and sweepers alive in a process with no port, which the stop
+// scripts cannot find or kill.
+start().catch((err: unknown) => {
+  if (err instanceof ServerLockHeldError) {
+    // Expected, not a crash: another Caco owns the session state.
+    console.error(formatLockRefusal(err));
+    process.exit(EXIT_ALREADY_RUNNING);
+  }
+  console.error(err instanceof StartupPortError ? formatStartupFailure(err, process.platform) : err);
+  recordCrash('startup', err);
+  process.exit(EXIT_STARTUP_FAILED);
+});

@@ -12,7 +12,34 @@ export const PORT = parseInt(
 
 export const HOST = process.env.CACO_HOST || DEFAULT_HOST;
 
-export const SERVER_URL = process.env.CACO_SERVER_URL || `http://localhost:${PORT}`;
+/**
+ * Address for server self-calls (agent tools, delegate, herd, scheduler).
+ *
+ * CONTRACT: an ESM live binding, reassigned by `setBoundPort` once the server
+ * binds, which may be a fallback port. Read it at call time; never copy it into
+ * a module-level constant or a closure built at import, or that copy keeps the
+ * requested port and self-calls miss the server. CACO_SERVER_URL, when set,
+ * always wins.
+ */
+export let SERVER_URL = process.env.CACO_SERVER_URL || `http://localhost:${PORT}`;
+
+let boundPort = PORT;
+
+/** The port the server is listening on; the requested port until it binds. */
+export function getBoundPort(): number {
+  return boundPort;
+}
+
+export function setBoundPort(port: number): void {
+  boundPort = port;
+  if (!process.env.CACO_SERVER_URL) SERVER_URL = `http://localhost:${port}`;
+}
+
+/** A browsable URL for a bind address: a wildcard host becomes localhost, an IPv6 literal is bracketed. */
+export function serverUrlFor(host: string, port: number): string {
+  if (!host || host === '0.0.0.0' || host === '::') return `http://localhost:${port}`;
+  return host.includes(':') ? `http://[${host}]:${port}` : `http://${host}:${port}`;
+}
 
 // Timeouts (milliseconds)
 export const DISPATCH_TIMEOUT_MS = 5 * 60 * 1000;

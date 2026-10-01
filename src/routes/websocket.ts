@@ -81,6 +81,13 @@ export function setupWebSocket(server: Server) {
     verifyClient: (info: { origin: string; req: IncomingMessage }) => verifyWsUpgrade(info.origin, info.req.headers.host),
   });
 
+  // CONTRACT: keep this listener. `ws` re-emits the HTTP server's 'error'
+  // event on the WebSocketServer, and an 'error' with no listener throws. A
+  // failed bind (EACCES, EADDRINUSE) would become an uncaught exception that
+  // kills startup before listenWithFallback (server-listen.ts) can handle it.
+  // The HTTP server's own error listeners own those errors; nothing to do here.
+  wss.on('error', () => {});
+
   wss.on('connection', (ws, _req) => {
     allConnections.add(ws);
     wsAlive.set(ws, true);

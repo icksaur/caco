@@ -6,9 +6,26 @@ import {
   onAllIdle,
   _resetForTest,
   _setTestHandlers,
-  setAnyPendingProvider
+  setAnyPendingProvider,
+  replacementEnv,
 } from '../../src/restart-manager.js';
 import { dispatchState } from '../../src/dispatch-state.js';
+
+describe('replacement environment', () => {
+  it('tells the replacement which pid it is taking over from', () => {
+    // The child waits for exactly this pid to release the server lock. Without
+    // it, the still-exiting parent's lock reads as another live Caco, and the
+    // restart refuses itself, leaving no server.
+    const env = replacementEnv({ PATH: '/bin', CACO_PORT: '53000' }, 4321);
+    expect(env.CACO_RESTART_HANDOFF).toBe('4321');
+    expect(env.PATH).toBe('/bin');
+    expect(env.CACO_PORT).toBe('53000');
+  });
+
+  it('replaces a stale marker inherited from an earlier restart', () => {
+    expect(replacementEnv({ CACO_RESTART_HANDOFF: '1' }, 4321).CACO_RESTART_HANDOFF).toBe('4321');
+  });
+});
 
 // Convenience wrappers: restart-manager no longer counts dispatches itself,
 // it watches dispatchState. Tests drive the source-of-truth directly.

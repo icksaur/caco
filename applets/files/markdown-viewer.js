@@ -188,7 +188,9 @@
   MarkdownViewer.prototype._renderToDom = function(text) {
     this._mdEl.textContent = text;
     if (typeof window.renderMarkdownElement === 'function') {
-      window.renderMarkdownElement(this._mdEl);
+      // A file is a document, not chat: a lone newline is a space, so a
+      // paragraph a model hard-wrapped at 80 columns reads as one paragraph.
+      window.renderMarkdownElement(this._mdEl, { breaks: false });
     }
     if (typeof window.hljs !== 'undefined') {
       var blocks = this._mdEl.querySelectorAll('pre code');

@@ -17,7 +17,7 @@ import { parseEditResult, patchFilePaths } from './edit-diff.js';
 
 declare global {
   interface Window {
-    renderMarkdownElement?: (element: Element) => void;
+    renderMarkdownElement?: (element: Element, options?: { breaks?: boolean }) => void;
   }
 }
 

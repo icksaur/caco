@@ -143,6 +143,6 @@ export interface OutputData {
 declare global {
   interface Window {
     renderMarkdown?: () => Promise<void>;
-    renderMarkdownElement?: (element: Element) => void;
+    renderMarkdownElement?: (element: Element, options?: { breaks?: boolean }) => void;
   }
 }

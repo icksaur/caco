@@ -49,7 +49,7 @@ async function getMermaid(): Promise<MermaidAPI> {
 
 declare const marked: {
   use(options: { renderer?: object; breaks?: boolean }): void;
-  parse(markdown: string): string;
+  parse(markdown: string, options?: { breaks?: boolean }): string;
 };
 
 declare const DOMPurify: {
@@ -266,15 +266,24 @@ async function renderMarkdown(): Promise<void> {
  * Render markdown for a single element (for incremental streaming)
  * Unlike renderMarkdown(), this doesn't mark as processed and skips mermaid/hljs
  * for performance during streaming.
+ *
+ * `breaks` defaults to the chat convention set in configureMarked, where a lone
+ * newline is a line break. A document preview passes `breaks: false`: models
+ * hard-wrap Markdown files near 80 columns, and treating each wrap as a break
+ * turns every paragraph into ragged short lines. CommonMark, GitHub's file view
+ * and VS Code render a lone newline as a space.
  * 
  * @param element - Element containing markdown text (uses element directly, not a child)
  */
-export function renderMarkdownElement(element: Element): void {
+export function renderMarkdownElement(element: Element, options?: { breaks?: boolean }): void {
   const markdownText = element.textContent ?? '';
   if (!markdownText.trim()) return;
   
-  // Parse markdown
-  const rawHtml = marked.parse(markdownText);
+  // Parse markdown. A per-call option overrides the configured default for
+  // this call only; the code renderer from configureMarked still applies.
+  const rawHtml = options?.breaks === undefined
+    ? marked.parse(markdownText)
+    : marked.parse(markdownText, { breaks: options.breaks });
   
   // Sanitize HTML
   const html = DOMPurify.sanitize(rawHtml, {

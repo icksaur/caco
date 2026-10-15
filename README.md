@@ -88,17 +88,13 @@ To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Star
 | `/caco.plugin-directory [paths\|clear]` | Load Open Plugins directories into this session only (never into `~/.copilot`); no arg shows the current list |
 | `/caco.restart` | Restart the Caco server |
 
-### Portal
-
-Open `/portal.html` to aggregate multiple Caco instances in a single view. Each instance runs on a different machine or directory and is accessed by its URL.
-
-- **Sidebar** shows connected instances as icons. Click to switch between them.
-- **Add instances** by clicking the `+` button and entering the Caco URL (e.g., `http://work-machine:53000`).
-- **Drag-and-drop sessions** between instances to transfer them. Drag a session from one instance's session list and drop it on another instance's sidebar icon. The session archive is exported from the source and imported at the destination.
-- Instances are saved in `localStorage` and reconnect on reload.
-
 ### Terminal Emulator
 
+Each session has an integrated terminal — a real, user-identity shell (PowerShell on
+Windows; your login `$SHELL`, e.g. bash/fish/zsh, on macOS/Linux) running in the session's
+working directory.
+
+- **Toggle** with the `>` glyph mid-right in the context footer, or press `` Ctrl+` ``. The
   panel opens below the footer; opening it is what starts the shell.
 - **Long-press the glyph to restart** the shell (kill + respawn) — an escape hatch for a
   wedged terminal.

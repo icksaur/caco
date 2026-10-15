@@ -1,6 +1,7 @@
 # Custom instruction loading across Caco runtimes
 
-> **Superseded by `instruction-loading-results.md`** (2026-08-09), which
+> **Superseded by `instruction-loading-results.md`** (2026-08-09; since removed
+> from the tree, read it with `git show b2e8647:instruction-loading-results.md`), which
 > reproduces the table below under stricter controls, extends it to
 > `copilot-instructions.md` in every location, and answers the open questions:
 > the cause is `systemMessage: { mode: 'replace' }`, and the "stale copy"

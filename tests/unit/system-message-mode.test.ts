@@ -9,7 +9,8 @@ import {
  * `mode: 'replace'` also discarded the `custom_instructions` section, so every
  * Caco session ran without the user's AGENTS.md, .github/copilot-instructions.md,
  * and ~/.copilot/copilot-instructions.md -- silently, with no way for the session
- * or its caller to notice. See instruction-loading-results.md.
+ * or its caller to notice. Measured in instruction-loading-results.md, removed
+ * from the tree; read it with `git show b2e8647:instruction-loading-results.md`.
  */
 describe('toSdkSystemMessage', () => {
   it('never sends the SDK replace mode, which destroys custom instructions', () => {

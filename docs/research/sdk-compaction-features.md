@@ -89,7 +89,8 @@ users on the work box, and the work box's lockfile has previously carried a Micr
 `resolved` URL that breaks `npm install` off-network. Any bump to 1.0.11 must re-verify the
 lockfile `resolved` URLs point at `registry.npmjs.org`. 1.0.11 also moves the runtime floor to
 `^1.0.79` (installed runtime is 1.0.78), so the runtime upgrades with it — the instruction-loading
-matrix in `instruction-loading-results.md` should be re-run after any bump.
+matrix in `instruction-loading-results.md` (removed from the tree; `git show
+b2e8647:instruction-loading-results.md`) should be re-run after any bump.
 
 ## Bottom line
 

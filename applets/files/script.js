@@ -85,10 +85,33 @@
   var cachedCwd = '';
   // True until the snapshot fetch proves the cwd is not a git repo
   // (404). A non-git cwd can't use the diff/edit path (/file-edits/open
-  // resolves files via git HEAD), so in-cwd opens fall back to the
-  // read-only external viewer. See openAnyPath.
+  // resolves files via git HEAD) — but that only disqualifies the Diff
+  // card; every other viewer (markdown/html/source/image/audio) has no
+  // git dependency. See openAnyPath / routeOpenInCwdNoGit.
   var cwdIsGit = true;
   var TAB_CAP = 50;
+
+  /** Latch the non-git discovery: flips cwdIsGit false and, the FIRST
+   *  time this fires, also flips shell.capabilities.canDiff false so
+   *  cardsForFile (read live at every TabContainer construction) stops
+   *  offering a Diff card that would only 404 — for every file opened
+   *  from here on, not just the one that triggered the discovery. */
+  function markCwdNonGit() {
+    cwdIsGit = false;
+    if (shell.capabilities && shell.capabilities.canDiff !== false) {
+      shell.capabilities = Object.assign({}, shell.capabilities, { canDiff: false });
+    }
+  }
+
+  /** Inverse of markCwdNonGit: a later snapshot can discover the cwd
+   *  became a git repo mid-session (e.g. `git init`). Restores canDiff
+   *  so the Diff card reappears for subsequently opened files. */
+  function markCwdGit() {
+    cwdIsGit = true;
+    if (shell.capabilities && shell.capabilities.canDiff !== true) {
+      shell.capabilities = Object.assign({}, shell.capabilities, { canDiff: true });
+    }
+  }
 
   // V3.y.1: deep-link queue. cold-load fires onUrlParamsChange
   // before cachedCwd is set; queue the openPath and drain when
@@ -157,7 +180,8 @@
     return isWin ? norm.toLowerCase() : norm;
   }
   /** Single routing chokepoint: resolve input to absolute, dispatch
-   *  to routeOpenExternal (external) or routeOpen (in-cwd). */
+   *  to routeOpenExternal (external), routeOpenInCwdNoGit (in-cwd,
+   *  non-git), or routeOpen (in-cwd, git). */
   function openAnyPath(input, opts) {
     if (!input) return;
     if (!sessionId) {
@@ -166,14 +190,20 @@
     }
     if (_isAbsolutePath(input) && isExternal(input)) {
       void routeOpenExternal(input, opts || {});
-    } else if (!cwdIsGit) {
-      // In-cwd file but the cwd is not a git repo: the diff path
-      // (/file-edits/open) would 404 on git HEAD resolution. Open
-      // read-only via the external viewer using the absolute path.
-      void routeOpenExternal(absPathOf(input), opts || {});
     } else {
       var relPath = _relativizePath(input);
-      void routeOpen(relPath, opts || {});
+      if (!cwdIsGit) {
+        // In-cwd file but the cwd is not a git repo: the diff path
+        // (/file-edits/open) would 404 on git HEAD resolution — but
+        // only the Diff card actually needs git. The file's own viewer
+        // (markdown/html/source/image/audio) has no git dependency at
+        // all, so route through the no-git in-cwd path (persisted,
+        // editable, relPath-keyed) rather than the read-only external
+        // viewer. See routeOpenInCwdNoGit.
+        void routeOpenInCwdNoGit(relPath, opts || {});
+      } else {
+        void routeOpen(relPath, opts || {});
+      }
     }
   }
   function _drainPendingOpenPath() {
@@ -2866,16 +2896,88 @@
       container.destroy();
       // The diff path 404s when the file isn't resolvable in git (e.g.
       // the cwd is not a git repo, or a race where cwdIsGit wasn't set
-      // yet). Fall back to the read-only external viewer on the absolute
-      // path. Update cwdIsGit so subsequent in-cwd opens skip the diff
-      // path directly.
+      // yet). Only the Diff card actually needs git — fall back to the
+      // no-git in-cwd path (persisted, editable) rather than the
+      // read-only external viewer. Latch cwdIsGit so subsequent in-cwd
+      // opens skip the diff attempt directly.
       if (err && err.httpStatus === 404) {
-        cwdIsGit = false;
+        markCwdNonGit();
         pendingOpenIds.delete(pendKey);
-        void routeOpenExternal(abs, openOpts);
+        void routeOpenInCwdNoGit(relativePath, openOpts);
         return;
       }
       console.warn('[files-applet] routeOpen failed', relativePath, err);
+      return;
+    } finally {
+      pendingOpenIds.delete(pendKey);
+    }
+    enforceTabCap();
+    tabs.set(container.id, container);
+    tabsEl.appendChild(container.tabEl);
+    paneEl.appendChild(container.contentEl);
+    container.updateToggle();
+    followEdits = false;
+    updateFollowButton();
+    setActiveTab(container.id);
+    updateEmptyState();
+    reconcileTabDom();
+    _pushRecentFile(abs);
+  }
+
+  /** Route an in-cwd file once the session's cwd is known NOT to be a
+   *  git repo: the diff path (/file-edits/open) would 404 on git HEAD
+   *  resolution, but only the Diff card actually depends on git — the
+   *  file's own viewer (markdown/html/source/image/audio) has none.
+   *  Opens through the SAME relPath-keyed, persisted TabContainer
+   *  machinery as routeOpen (not routeOpenExternal's read-only
+   *  "external:" tabs reserved for genuinely out-of-cwd paths), using
+   *  defaultExternalViewer to pick straight past the diff descriptor.
+   *  See docs/spec-files-applet.md (cwdIsGit) and markCwdNonGit. */
+  async function routeOpenInCwdNoGit(relativePath, openOpts) {
+    openOpts = openOpts || {};
+    var abs = absPathOf(relativePath);
+    var existing = findContainerByRelPath(relativePath, { mode: 'unstaged' });
+    if (existing) {
+      followEdits = false;
+      updateFollowButton();
+      setActiveTab(existing.id);
+      _pushRecentFile(abs);
+      return;
+    }
+    var pendKey = relativePath;
+    if (pendingOpenIds.has(pendKey)) return;
+    pendingOpenIds.add(pendKey);
+    var desc = defaultExternalViewer(abs);
+    if (!desc) {
+      console.warn('[files-applet] no viewer for', relativePath);
+      pendingOpenIds.delete(pendKey);
+      return;
+    }
+    var container = new TabContainer(shell, desc, abs, relativePath);
+    try {
+      var caps = shell.capabilities;
+      var viewer = await desc.open(shell, container, abs, relativePath, {
+        readOnly: !!(caps && caps.canEdit === false),
+        watch: !caps || caps.canWatch !== false,
+      });
+      // Re-check after await: another caller may have created the
+      // tab while we were suspended. Discard our container if so.
+      var raceCheck = findContainerByRelPath(relativePath, { mode: 'unstaged' });
+      if (raceCheck) {
+        if (viewer && typeof viewer.destroy === 'function') {
+          try { viewer.destroy(); } catch (_e) { /* ignore */ }
+        }
+        container.destroy();
+        setActiveTab(raceCheck.id);
+        _pushRecentFile(abs);
+        return;
+      }
+      if (!viewer) { container.destroy(); return; }
+      container.viewers.set(desc.viewerType, viewer);
+    } catch (err) {
+      if (err && err.name === 'AbortError') { container.destroy(); return; }
+      container.destroy();
+      console.warn('[files-applet] routeOpenInCwdNoGit failed', relativePath, err);
       return;
     } finally {
       pendingOpenIds.delete(pendKey);
@@ -3647,15 +3749,15 @@
     try {
       var res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/snapshot');
       if (!res.ok) {
-        if (res.status === 404) cwdIsGit = false;
+        if (res.status === 404) markCwdNonGit();
         return;
       }
       var data = await res.json();
       // V7.x: snapshot reports whether the cwd is a git repo. A non-git
       // cwd returns 200 with isGit:false (not a 404); this is the
       // authoritative signal for routing in-cwd opens to the diff path
-      // vs the read-only viewer.
-      cwdIsGit = data.isGit !== false;
+      // vs the no-git in-cwd path (see openAnyPath / routeOpenInCwdNoGit).
+      if (data.isGit !== false) markCwdGit(); else markCwdNonGit();
       if (Array.isArray(data.edits)) {
         for (var i = 0; i < data.edits.length; i++) {
           // On reopen (updateOnly), the snapshot refreshes the content of

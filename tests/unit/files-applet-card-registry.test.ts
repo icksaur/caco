@@ -41,6 +41,20 @@ describe('cardsForFile — the reachable card set per file type (impossible-stat
     expect(ids('a.ts', { canEdit: true, canDiff: false })).toEqual(['source', 'edit']);
   });
 
+  it('non-git in-cwd shape (canEdit:true, canDiff:false) keeps Edit for every editable type, drops only Diff', () => {
+    // This is the exact capability shape routeOpenInCwdNoGit's markCwdNonGit
+    // produces for a session whose cwd is not a git repo: the file's own
+    // viewer has no git dependency, only Diff does. Regression pin for the
+    // "files applet never shows Edit for markdown" bug (spec-files-applet,
+    // cwdIsGit) — before the fix, this cwd shape was never reached at all
+    // because every in-cwd open was forced through the read-only external
+    // path regardless of capability.
+    const NO_GIT = { canEdit: true, canDiff: false };
+    expect(ids('README.md', NO_GIT)).toEqual(['preview', 'edit', 'source']);
+    expect(ids('page.html', NO_GIT)).toEqual(['html', 'edit', 'source']);
+    expect(ids('a.ts', NO_GIT)).toEqual(['source', 'edit']);
+  });
+
   it('markdown → [preview, edit, diff, source]', () => {
     expect(ids('README.md', FULL)).toEqual(['preview', 'edit', 'diff', 'source']);
   });

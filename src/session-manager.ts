@@ -15,6 +15,7 @@ import { dispatchState } from './dispatch-state.js';
 import { setAnyPendingProvider } from './restart-manager.js';import { pollQuota } from './quota-poller.js';
 import type { QuotaSnapshot } from './usage-state.js';
 import { loadMcpServers, loadMcpServersStrict } from './mcp-config-loader.js';
+import { refreshNearExpiryTokens } from './mcp-auth-service.js';
 import { createObservationHook } from './observe/hook.js';
 import { OBS_RAW_CEILING_BYTES } from './observe/types.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
@@ -516,12 +517,21 @@ export class SessionManager {
   private reloadInFlight: Promise<unknown> | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private healthTimer: NodeJS.Timeout | null = null;
+  // spec-mcp-auth-keepalive: proactively refreshes Caco-managed MCP OAuth
+  // tokens nearing expiry so a long-warm session's already-injected
+  // Authorization header never goes stale mid-session (the only prior path
+  // back was a full session recreate, which only happens at explicit reload
+  // or a Caco restart — see mcp-auth-service.ts for the "why" in depth).
+  private mcpAuthRefreshTimer: NodeJS.Timeout | null = null;
   // I4: concurrent probes collapse to one. ensureClientHealthy sits on the
   // dispatch path, so N simultaneous sends would otherwise mean N ping storms
   // against a client that is already suspected of being slow.
   private healthProbeInFlight: Promise<{ healthy: boolean; probed: CopilotClientInstance }> | null = null;
   private static readonly SDK_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
   private static readonly HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+  // Shorter than PROACTIVE_REFRESH_WINDOW_MS (10 min) so a token entering the
+  // window is caught well before it actually expires, not right at the edge.
+  private static readonly MCP_AUTH_REFRESH_INTERVAL_MS = 3 * 60 * 1000;
   private static readonly HEALTH_PING_TIMEOUT_MS = 5000;
   // The runtime legitimately stalls for seconds under load (cold resume of a
   // large session is the same order as the probe timeout), so a single timeout
@@ -583,6 +593,7 @@ export class SessionManager {
       await client.start();
       this.sharedClient = client;
       this.startHealthCheck();
+      this.startMcpAuthRefresh();
       console.log('[SDK] Shared client started');
       void pollQuota(client);
       // Fill the builtin-name cache that auto-defer enumeration reads. Startup, not
@@ -614,6 +625,7 @@ export class SessionManager {
       const client = this.sharedClient;
       this.sharedClient = null;
       this.stopHealthCheck();
+      this.stopMcpAuthRefresh();
       this.dropActiveSessions(true);
       if (client) client.forceStop().catch(() => {});
     }
@@ -673,6 +685,7 @@ export class SessionManager {
    */
   private async restartSharedClient(opts: { notify: boolean; graceful?: boolean }): Promise<void> {
     this.stopHealthCheck();
+    this.stopMcpAuthRefresh();
     const client = this.sharedClient;
     this.sharedClient = null;
     this.dropActiveSessions(opts.notify);
@@ -772,8 +785,42 @@ export class SessionManager {
     if (this.healthTimer) { clearInterval(this.healthTimer); this.healthTimer = null; }
   }
 
+  private startMcpAuthRefresh(): void {
+    this.stopMcpAuthRefresh();
+    this.mcpAuthRefreshTimer = setInterval(() => {
+      void this.proactiveMcpAuthRefresh();
+    }, SessionManager.MCP_AUTH_REFRESH_INTERVAL_MS);
+  }
+
+  private stopMcpAuthRefresh(): void {
+    if (this.mcpAuthRefreshTimer) { clearInterval(this.mcpAuthRefreshTimer); this.mcpAuthRefreshTimer = null; }
+  }
+
+  /** spec-mcp-auth-keepalive. Skips the refresh network round-trip entirely
+   *  when there are no active (warm) sessions — a brand-new session reads a
+   *  fresh token for itself at creation time via loadMcpServers's own
+   *  expired-token check, so there is nothing for this tick to improve on.
+   *  When a refresh DOES land, reuses reloadMcpConfig — the same transactional,
+   *  busy-session-skipping warm-recreate the manual "Reload MCP config"
+   *  operator action already uses — so a session mid-dispatch is left alone
+   *  and simply gets the fresh token next time this tick finds it idle. */
+  private async proactiveMcpAuthRefresh(): Promise<void> {
+    if (this.activeSessions.size === 0) return;
+    try {
+      const refreshed = await refreshNearExpiryTokens();
+      if (refreshed.length === 0) return;
+      console.log(`[MCP-AUTH] Proactively refreshed ${refreshed.length} server(s): ${refreshed.join(', ')}`);
+      const result = await this.reloadMcpConfig();
+      if (!result.ok) {
+        console.warn(`[MCP-AUTH] Post-refresh config reload failed: ${result.error}`);
+      }
+    } catch (e) {
+      console.warn(`[MCP-AUTH] Proactive refresh tick failed: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
   private async proactiveHealthCheck(): Promise<void> {
-    if (!this.sharedClient) { this.stopHealthCheck(); return; }
+    if (!this.sharedClient) { this.stopHealthCheck(); this.stopMcpAuthRefresh(); return; }
     
     const client = this.sharedClient;
     const state = (client as unknown as { getState?: () => string }).getState?.();
@@ -3557,6 +3604,7 @@ export class SessionManager {
    */
   async shutdown(): Promise<void> {
     this.stopHealthCheck();
+    this.stopMcpAuthRefresh();
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     if (this.sharedClient) {
       try {

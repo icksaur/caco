@@ -60,6 +60,10 @@ const autoDefer = vi.hoisted(() => ({
   removeAutoDeferred: vi.fn(),
 }));
 
+const mcpAuthService = vi.hoisted(() => ({
+  refreshNearExpiryTokens: vi.fn(async (): Promise<string[]> => []),
+}));
+
 vi.mock('@github/copilot-sdk', () => sdk);
 vi.mock('../../src/storage.js', () => storage);
 vi.mock('../../src/session-runtime.js', () => ({ disposeSessionRuntime: vi.fn() }));
@@ -73,6 +77,7 @@ vi.mock('../../src/sdk-session-store.js', () => ({
   STATE_DIR: '/tmp/nonexistent-state',
 }));
 vi.mock('../../src/mcp-config-loader.js', () => loader);
+vi.mock('../../src/mcp-auth-service.js', () => mcpAuthService);
 vi.mock('../../src/tool-key-registry.js', () => registry);
 vi.mock('../../src/auto-defer-store.js', () => autoDefer);
 vi.mock('../../src/provider-registry.js', () => ({
@@ -95,6 +100,7 @@ type Manager = {
   activeSessions: Map<string, FakeActive>;
   sharedClient: { rpc: { mcp: { config: { reload: ReturnType<typeof vi.fn> } } } } | null;
   reloadMcpConfig: () => Promise<{ ok: boolean; error?: string; recreated: string[]; failed: { sessionId: string; error: string }[]; skippedBusy: string[]; skippedReplaced: string[] }>;
+  proactiveMcpAuthRefresh: () => Promise<void>;
   forgetUnknownTools: (names: string[]) => Promise<{ removed: number; persisted: boolean; failedSessions: string[] }>;
   listKnownRegistryServers: () => string[];
   setExcludedToolsLive: (id: string, excluded: string[]) => Promise<{ success: boolean }>;
@@ -128,7 +134,12 @@ async function makeManager(reload = vi.fn(async () => {})): Promise<{ manager: M
   return { manager, resume, reload };
 }
 
-beforeEach(() => { vi.clearAllMocks(); storage.meta.clear(); loader.loadMcpServersStrict.mockResolvedValue({ ok: true, servers: { github: {} } }); });
+beforeEach(() => {
+  vi.clearAllMocks();
+  storage.meta.clear();
+  loader.loadMcpServersStrict.mockResolvedValue({ ok: true, servers: { github: {} } });
+  mcpAuthService.refreshNearExpiryTokens.mockResolvedValue([]);
+});
 
 describe('SessionManager.reloadMcpConfig — transactional warm reload (cf-reload)', () => {
   it('parse failure is a total no-op (ok:false, nothing recreated, no cache drop)', async () => {
@@ -237,6 +248,61 @@ describe('SessionManager.reloadMcpConfig — transactional warm reload (cf-reloa
     expect(r.recreated).toEqual([]);
     expect(reload).toHaveBeenCalledTimes(1); // cache still dropped, even with no session
     expect(resume).not.toHaveBeenCalled();
+  });
+});
+
+describe('SessionManager.proactiveMcpAuthRefresh — spec-mcp-auth-keepalive', () => {
+  it('skips the refresh network round-trip entirely with no active (warm) sessions', async () => {
+    const { manager } = await makeManager();
+    await manager.proactiveMcpAuthRefresh();
+    expect(mcpAuthService.refreshNearExpiryTokens).not.toHaveBeenCalled();
+  });
+
+  it('checks for near-expiry tokens when a session is warm, but does nothing further if none are due', async () => {
+    const { manager, resume } = await makeManager();
+    manager.activeSessions.set('s1', fakeActive());
+    mcpAuthService.refreshNearExpiryTokens.mockResolvedValue([]);
+
+    await manager.proactiveMcpAuthRefresh();
+    expect(mcpAuthService.refreshNearExpiryTokens).toHaveBeenCalledTimes(1);
+    expect(resume).not.toHaveBeenCalled(); // no refresh landed ⇒ no reload/recreate
+  });
+
+  it('reuses reloadMcpConfig (the same transactional, busy-skipping warm recreate) when a refresh lands', async () => {
+    const { manager, resume, reload } = await makeManager();
+    manager.activeSessions.set('s1', fakeActive());
+    mcpAuthService.refreshNearExpiryTokens.mockResolvedValue(['icm-mcp-prod-azure-api-net']);
+
+    await manager.proactiveMcpAuthRefresh();
+    expect(reload).toHaveBeenCalledTimes(1); // client-level MCP cache drop
+    expect(resume).toHaveBeenCalledTimes(1); // warm recreate picks up the fresh token
+  });
+
+  it('a busy session is left alone even when a refresh lands — reloadMcpConfig already skips it', async () => {
+    const { manager, resume } = await makeManager();
+    manager.activeSessions.set('busy', fakeActive());
+    manager.isBusy = ((id: string) => id === 'busy') as Manager['isBusy'];
+    mcpAuthService.refreshNearExpiryTokens.mockResolvedValue(['srv']);
+
+    await manager.proactiveMcpAuthRefresh();
+    expect(resume).not.toHaveBeenCalled(); // the one active session was busy ⇒ skipped
+  });
+
+  it('a reload failure after a successful refresh is logged, not thrown (tick must not crash the timer)', async () => {
+    const { manager } = await makeManager();
+    manager.activeSessions.set('s1', fakeActive());
+    mcpAuthService.refreshNearExpiryTokens.mockResolvedValue(['srv']);
+    loader.loadMcpServersStrict.mockResolvedValue({ ok: false, error: 'disk gone mid-tick' });
+
+    await expect(manager.proactiveMcpAuthRefresh()).resolves.toBeUndefined();
+  });
+
+  it('a thrown refresh error does not propagate out of the tick', async () => {
+    const { manager } = await makeManager();
+    manager.activeSessions.set('s1', fakeActive());
+    mcpAuthService.refreshNearExpiryTokens.mockRejectedValue(new Error('network down'));
+
+    await expect(manager.proactiveMcpAuthRefresh()).resolves.toBeUndefined();
   });
 });
 

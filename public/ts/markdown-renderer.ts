@@ -157,13 +157,29 @@ async function renderMermaidIn(container: Element): Promise<void> {
       continue;
     }
 
+    // parse() only validates grammar; some failures (e.g. an edge referencing
+    // an undefined node class, a bad gantt date) surface only during render's
+    // internal draw step. render() still throws for these, but the "mermaid
+    // bomb": mermaid 10.x's own render() builds its scratch SVG directly in
+    // document.body via d3 (not our container) BEFORE its final `if (error)
+    // throw error`, and throws before reaching the line that would remove that
+    // scratch node — so on every render failure mermaid leaks an orphan
+    // "Syntax error in text / mermaid version …" SVG into the page, with no
+    // positioning of its own, landing wherever body layout puts it. The ids
+    // are deterministic from the render id we pass in (`<id>` for the inner
+    // svg, `d<id>` for its wrapper div, `i<id>` for the sandboxed-iframe
+    // variant), so clean them up ourselves on failure — mermaid never will.
+    const renderId = mermaidId + '-svg';
     try {
-      const { svg } = await m.render(mermaidId + '-svg', code);
+      const { svg } = await m.render(renderId, code);
       div.innerHTML = svg;
     } catch (error) {
       console.error('Mermaid rendering error:', error);
       const message = error instanceof Error ? error.message : 'Unknown error';
       div.innerHTML = `<pre class="mermaid-error">Error rendering diagram: ${message}</pre>`;
+      for (const leakId of [renderId, 'd' + renderId, 'i' + renderId]) {
+        document.getElementById(leakId)?.remove();
+      }
     }
   }
 }

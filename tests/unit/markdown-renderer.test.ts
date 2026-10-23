@@ -256,6 +256,38 @@ describe('renderMarkdownElement', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(consoleError).toHaveBeenCalledWith('Mermaid rendering error:', expect.any(Error));
     expect(renderError.querySelector('.mermaid-error')?.textContent).toBe('Error rendering diagram: boom');
+
+    // Known mermaid 10.x bug (the "mermaid bomb"): render() builds its own
+    // "Syntax error in text" scratch SVG directly in document.body via d3
+    // (not inside our container) before its final `if (error) throw error`,
+    // and throws before reaching the line that would remove that scratch
+    // node — so every render failure leaks an unstyled orphan SVG into the
+    // page. The ids are deterministic from the render id we pass in, so the
+    // fix cleans them up itself; simulate the leak to prove it.
+    let leakedRenderId = '';
+    mermaid.parse.mockResolvedValueOnce(undefined);
+    mermaid.render.mockImplementationOnce((id: string) => {
+      leakedRenderId = id;
+      const wrapper = document.createElement('div');
+      wrapper.id = 'd' + id;
+      const leakedSvg = document.createElement('svg');
+      leakedSvg.id = id;
+      leakedSvg.textContent = 'Syntax error in text';
+      wrapper.appendChild(leakedSvg);
+      document.body.appendChild(wrapper);
+      return Promise.reject(new Error('render failed'));
+    });
+    const leakTarget = document.createElement('div');
+    leakTarget.textContent = '```mermaid\ngraph TD; C-->D;\n```';
+    renderMarkdownElement(leakTarget);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(leakedRenderId).toMatch(/-svg$/);
+    // The leaked nodes must not survive in document.body — before the fix,
+    // these would still be present.
+    expect(document.getElementById(leakedRenderId)).toBeNull();
+    expect(document.getElementById('d' + leakedRenderId)).toBeNull();
+    expect(leakTarget.querySelector('.mermaid-error')?.textContent).toBe('Error rendering diagram: render failed');
   });
 
   it('renders caco-embed fallbacks as safe links or text for non-whitelisted values', () => {

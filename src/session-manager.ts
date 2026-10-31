@@ -2293,9 +2293,14 @@ export class SessionManager {
 
   /**
    * Reload MCP config into WARM sessions without a full server restart
-   * (spec-enable-tools-config-freshness D1). Operator-EXPLICIT (POST /api/mcp/reload);
-   * never a silent auto-watch of warm sessions (C4 — a recreate busts that session's
-   * prompt cache, so it must be a deliberate operator action).
+   * (spec-enable-tools-config-freshness D1). Callers: the operator's POST
+   * /api/mcp/reload, and proactiveMcpAuthRefresh after it refreshes an OAuth token.
+   *
+   * A warm recreate does not by itself cost the session its prompt cache: the provider
+   * cache keys on the prompt, and a recreate with the same tools sends the same prefix.
+   * Measured: the first turn after a recreate, including one that changed an MCP
+   * server's token, read nearly all of its input from cache. A reload that changes
+   * the tool definitions changes the prompt itself, so that case can still miss.
    *
    * Transactional: re-reads `~/.copilot/mcp-config.json` via the STRICT loader FIRST; a
    * malformed/partially-written file fails the whole reload as a no-op (`ok:false`), so

@@ -170,12 +170,19 @@ direction is a redundant advertise, never a stranded capability.
   project/plugin config files.
 - **Warm-session reload requires a session RECREATE, not an exclusion update (C4).**
   `setExcludedToolsLive` only mutates `excludedTools` and cannot add/remove/re-scope
-  MCP servers. An operator reload must rebuild the SDK session with the fresh
-  `mcpServers` map (the existing warm-recreate path that re-passes
-  `ActiveSession.excludedTools`), which busts that session's prompt cache once — so
-  it MUST be explicit (a `POST /api/mcp/reload` or mcp-servers applet button), never
-  a silent auto-watch-reload of warm sessions. New sessions get the change for free;
-  warm sessions get it on explicit reload or their next cold resume.
+  MCP servers. A reload must rebuild the SDK session with the fresh `mcpServers` map
+  (the existing warm-recreate path that re-passes `ActiveSession.excludedTools`).
+  The recreate does not by itself cost the prompt cache: the provider cache keys on
+  the prompt, and a recreate with the same tools sends the same prefix. Measured: the
+  first turn after a recreate, including one that changed an MCP server's token, read
+  nearly all of its input from cache. A config edit that changes the tool definitions
+  changes the prompt itself, so it can still miss. That is why config-file changes
+  reach warm sessions only on an explicit reload (a `POST /api/mcp/reload` or
+  mcp-servers applet button), never a silent auto-watch of the config file. The one
+  automatic caller is the proactive MCP OAuth token refresh. It reloads to deliver a
+  new token, but it re-reads the whole config file, so a pending config edit lands
+  with it. New sessions get a config change for free; warm sessions get it on
+  explicit reload, a token-refresh reload, or their next cold resume.
 - **Transactional reload (SHOULD).** A malformed/partially-written
   `mcp-config.json` must FAIL the reload and retain each warm session's prior config,
   never recreate a session with zero MCP servers. `loadMcpServers`

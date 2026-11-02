@@ -30,14 +30,22 @@ copilot --version  # Verify CLI works
 ## Quick Start
 
 ```bash
-npm install && npm run build && ./start.sh
+npm ci && npm run build && ./start.sh
 ```
 
 ```powershell
-npm install && npm run build && .\start.ps1
+npm ci && npm run build && .\start.ps1
 ```
 
 Open `http://localhost:53000`
+
+> Use `npm ci`, not `npm install`, for a plain checkout — it installs exactly
+> what's committed in `package-lock.json` and never rewrites it. This matters
+> on a network whose npm registry is a corporate feed/mirror: `npm install`
+> can re-resolve packages through that feed and silently downgrade the
+> lockfile's integrity hashes / rewrite its URLs, which the `check:lockfile`
+> gate will then reject on your next push. If you need to add or upgrade a
+> dependency (which does require `npm install`), see **Development** below.
 
 ## Usage
 
@@ -248,6 +256,15 @@ npm run build      # Build + typecheck + lint + test
 npm run dev        # Development server (nodemon)
 npm test           # Run tests
 ```
+
+Adding or upgrading a dependency requires `npm install`, which can mutate
+`package-lock.json`. On a corporate npm feed this can rewrite `resolved` URLs
+and downgrade integrity hashes to sha1 — a pre-push gate (`check:lockfile`)
+catches this before it reaches the repo. If it flags your lockfile, run
+`npm run fix:lockfile` to restore the committed public-registry metadata for
+unchanged packages and fetch fresh sha512 metadata for anything new (this
+needs a path to the real `registry.npmjs.org` for that one command, even if
+your default registry is a corporate feed).
 
 ## Project Structure
 

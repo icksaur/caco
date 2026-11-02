@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * The gate runner: every check that must pass before a push (husky pre-push runs
- * `npm run build`, which is this).
+ * `npm run build:push`, which is this with --with-lockfile).
  *
  * Runs phases concurrently, because most of them are independent readers of the
  * same tree and the sequential chain spent most of its wall time idle on one core
@@ -12,9 +12,12 @@
  * Portable: Node ESM, zero dependencies, no shell builtins.
  *
  * Usage:
- *   node scripts/gate.mjs            run every phase
- *   node scripts/gate.mjs --serial   run strictly in order (debugging a suspected
- *                                    concurrency problem, or a loaded machine)
+ *   node scripts/gate.mjs                  run every phase except check:lockfile
+ *   node scripts/gate.mjs --with-lockfile  also run check:lockfile (push-time gate)
+ *   node scripts/gate.mjs --serial         run strictly in order (debugging a
+ *                                          suspected concurrency problem, or a
+ *                                          loaded machine) — combinable with
+ *                                          --with-lockfile
  */
 
 import { spawn } from 'node:child_process';
@@ -25,8 +28,18 @@ const isWindows = process.platform === 'win32';
  * `after` names the phases that must SUCCEED first. The coverage checks read
  * `coverage/coverage-summary.json`, which `test` writes — the only real ordering
  * constraint in the gate. Everything else is an independent reader.
+ *
+ * `check:lockfile` is NOT in this base set. It asserts that the COMMITTED
+ * lockfile is clean (public registry, sha512) — a concern for whoever is about
+ * to push, not for an ordinary user running `npm run build` to build and run
+ * the app locally. A corporate npm feed/mirror can rewrite a LOCAL, uncommitted
+ * lockfile the moment `npm install` touches it (see scripts/check-lockfile.mjs),
+ * and gating every local build on that would block `npm run build` for anyone
+ * on such a network even when they changed nothing worth rejecting. It still
+ * runs at push time via `--with-lockfile` (see buildPhases below), which is
+ * what `npm run build:push` (husky pre-push) uses.
  */
-const PHASES = [
+const BASE_PHASES = [
   { name: 'build:client', after: [] },
   { name: 'typecheck', after: [] },
   { name: 'lint:strict', after: [] },
@@ -35,11 +48,20 @@ const PHASES = [
   { name: 'check:vendor', after: [] },
   { name: 'check:specs', after: [] },
   { name: 'check:pins', after: [] },
-  { name: 'check:lockfile', after: [] },
   { name: 'test', after: [] },
   { name: 'check:coverage', after: ['test'] },
   { name: 'check:frontend-coverage', after: ['test'] },
 ];
+
+/** `--with-lockfile` appends `check:lockfile` to the base set — used by the
+ *  push-time gate (`npm run build:push`, husky pre-push), not by a plain
+ *  `npm run build`. See BASE_PHASES's doc comment for why they're split. */
+function buildPhases(argv) {
+  if (!argv.includes('--with-lockfile')) return BASE_PHASES;
+  return [...BASE_PHASES, { name: 'check:lockfile', after: [] }];
+}
+
+const PHASES = buildPhases(process.argv);
 
 /**
  * Phase names in dependency order, which also proves the table is well-formed.

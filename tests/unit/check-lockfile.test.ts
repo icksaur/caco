@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { findLockfileViolations, type LockfileShape } from '../../scripts/check-lockfile.mjs';
+import { findLockfileViolations, repairLockfile, type LockfileShape } from '../../scripts/check-lockfile.mjs';
 
 const PUBLIC = 'https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz';
 const MIRROR = 'https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/left-pad/-/left-pad-1.3.0.tgz';
@@ -28,6 +28,60 @@ describe('findLockfileViolations', () => {
     }));
 
     expect(v).toEqual([]);
+  });
+
+  describe('repairLockfile', () => {
+    it('restores both metadata fields by exact version even when a dependency moved', () => {
+      const input = lock({
+        'node_modules/left-pad': { version: '1.3.0', resolved: MIRROR, integrity: SHA1, optional: true },
+      });
+      const result = repairLockfile(input, lock({
+        'node_modules/parent/node_modules/left-pad': { version: '1.3.0', resolved: PUBLIC, integrity: SHA512 },
+      }), () => { throw new Error('unexpected network lookup'); });
+
+      expect(result.packages?.['node_modules/left-pad']).toEqual({
+        version: '1.3.0', resolved: PUBLIC, integrity: SHA512, optional: true,
+      });
+      expect(input.packages?.['node_modules/left-pad']?.integrity).toBe(SHA1);
+      expect(findLockfileViolations(result)).toEqual([]);
+    });
+
+    it('uses registry SHA-512 metadata for a new scoped version without changing versions', () => {
+      const specs: string[] = [];
+      const result = repairLockfile(lock({
+        'node_modules/@scope/pkg': { version: '2.0.0', resolved: MIRROR, integrity: SHA1 },
+      }), lock({
+        'node_modules/@scope/pkg': { version: '1.0.0', resolved: PUBLIC, integrity: SHA512 },
+      }), spec => {
+        specs.push(spec);
+        return { integrity: SHA512 };
+      });
+
+      expect(specs).toEqual(['@scope/pkg@2.0.0']);
+      expect(result.packages?.['node_modules/@scope/pkg']).toEqual({
+        version: '2.0.0',
+        resolved: 'https://registry.npmjs.org/@scope/pkg/-/pkg-2.0.0.tgz',
+        integrity: SHA512,
+      });
+    });
+
+    it('rejects weak registry metadata and leaves the input untouched', () => {
+      const input = lock({
+        'node_modules/left-pad': { version: '1.3.0', resolved: MIRROR, integrity: SHA1 },
+      });
+      const before = structuredClone(input);
+      expect(() => repairLockfile(input, {}, () => ({ integrity: SHA1 }))).toThrow('no SHA-512 integrity');
+      expect(input).toEqual(before);
+    });
+
+    it('does not reuse weakened reference metadata or swallow registry failures', () => {
+      const input = lock({
+        'node_modules/left-pad': { version: '1.3.0', resolved: MIRROR, integrity: SHA1 },
+      });
+      expect(() => repairLockfile(input, input, () => {
+        throw new Error('registry unavailable');
+      })).toThrow('registry unavailable');
+    });
   });
 
   it('flags a resolved URL pointing at an internal mirror', () => {

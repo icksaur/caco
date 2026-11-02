@@ -21,3 +21,8 @@ export interface LockfileShape {
 }
 
 export function findLockfileViolations(lock: LockfileShape | null | undefined): LockfileViolation[];
+export function repairLockfile(
+  lock: LockfileShape,
+  reference: LockfileShape,
+  getDist: (spec: string) => { integrity?: string },
+): LockfileShape;

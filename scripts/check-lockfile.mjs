@@ -30,7 +30,8 @@
  * Zero deps, ESM, portable. Usage: node scripts/check-lockfile.mjs
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -39,6 +40,45 @@ const lockPath = join(__dirname, '..', 'package-lock.json');
 
 /** The only host a committed `resolved` URL may point at. */
 const PUBLIC_REGISTRY_HOST = 'registry.npmjs.org';
+
+/**
+ * Restore known-good metadata by exact package/version, not installation path.
+ * Only query the registry for versions absent from the committed lockfile.
+ * Work on a copy so a failed lookup never leaves a partially repaired file.
+ */
+export function repairLockfile(lock, reference, getDist) {
+  const repaired = structuredClone(lock);
+  const known = new Map();
+  const packageName = (path, entry) => entry.name ?? path.split('node_modules/').at(-1);
+  for (const [path, entry] of Object.entries(reference.packages ?? {})) {
+    if (!entry?.resolved || !entry.version) continue;
+    if (findLockfileViolations({ packages: { [path]: entry } }).length > 0) continue;
+    if (!entry.integrity?.startsWith('sha512-')) continue;
+    known.set(`${packageName(path, entry)}@${entry.version}`, entry);
+  }
+  const paths = new Set(findLockfileViolations(repaired).map(v => v.path));
+  for (const path of paths) {
+    const entry = repaired.packages[path];
+    const name = packageName(path, entry);
+    if (!entry.version) throw new Error(`${path}: cannot repair without an exact version`);
+    const spec = `${name}@${entry.version}`;
+    let dist = known.get(spec);
+    if (!dist) {
+      const metadata = getDist(spec);
+      if (!metadata?.integrity?.startsWith('sha512-')) {
+        throw new Error(`${spec}: registry metadata has no SHA-512 integrity; retry with a registry that preserves it`);
+      }
+      dist = {
+        resolved: `https://${PUBLIC_REGISTRY_HOST}/${name}/-/${name.split('/').at(-1)}-${entry.version}.tgz`,
+        integrity: metadata.integrity,
+      };
+      known.set(spec, dist);
+    }
+    entry.resolved = dist.resolved;
+    entry.integrity = dist.integrity;
+  }
+  return repaired;
+}
 
 /**
  * Pure over the lockfile object so the rules are testable without a fixture
@@ -73,7 +113,19 @@ export function findLockfileViolations(lock) {
 /** Run the check and exit. Guarded so importing this module for its rules
  *  (the unit test does) neither reads the real lockfile nor calls process.exit. */
 function main() {
-  const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+  let lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+  if (process.argv.includes('--fix')) {
+    const reference = JSON.parse(execFileSync('git', ['show', 'HEAD:package-lock.json'], {
+      cwd: join(__dirname, '..'),
+      encoding: 'utf8',
+    }));
+    if (!process.env.npm_execpath) throw new Error('Run repairs with npm run fix:lockfile');
+    lock = repairLockfile(lock, reference, spec => JSON.parse(execFileSync(process.execPath, [
+      process.env.npm_execpath, 'view', spec, 'dist', '--json',
+      '--fetch-retries=0', '--fetch-timeout=15000',
+    ], { encoding: 'utf8' })));
+    writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+  }
   const violations = findLockfileViolations(lock);
 
   if (violations.length === 0) {
@@ -99,7 +151,8 @@ function main() {
     '\nThis lockfile was almost certainly produced by an `npm install` run against ' +
     'an internal mirror. Re-resolve the offending entries against ' +
     `https://${PUBLIC_REGISTRY_HOST}, taking BOTH dist.tarball and dist.integrity ` +
-    '(the URL alone is not enough — the mirror also rewrites the hash).'
+    '(the URL alone is not enough — the mirror also rewrites the hash). ' +
+    'Run npm run fix:lockfile to restore committed metadata and resolve new versions through the active registry.'
   );
   return 1;
 }

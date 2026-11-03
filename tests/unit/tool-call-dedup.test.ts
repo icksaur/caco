@@ -59,11 +59,27 @@ function dispatch(session: SdkSessionInternals, event: unknown): void {
 
 beforeEach(() => { _resetToolCallMemoForTests(); });
 
+/** Run a tool to completion before its duplicate is delivered. The SDK's own
+ *  guard (`pendingExternalTools`) is cleared in `finally`, so this ordering is
+ *  the one it cannot see. */
+async function dispatchSettledThenDuplicate(session: SdkSessionInternals): Promise<void> {
+  dispatch(session, requested('req-1', 'call-1', 'probe', 'a'));
+  await flush();
+  dispatch(session, requested('req-1', 'call-1', 'probe', 'b'));
+  await flush();
+}
+
 describe('the upstream premise', () => {
-  it('the SDK runs a raw handler once per duplicated request event', async () => {
-    // Pins the fact the fix exists for. If a future SDK dedups on its own this
-    // fails, which is the signal to re-evaluate the wrapper rather than keep it
-    // on faith.
+  // @github/copilot-sdk 1.0.28 added an in-flight guard keyed by requestId
+  // (`pendingExternalTools`), so overlapping duplicates no longer double-run on
+  // their own. The guard is per CopilotSession instance and is deleted in
+  // `finally` when the call settles — so a duplicate delivered AFTER the first
+  // call finished, or onto a fresh session object after a resume, still runs
+  // again. These pin both halves: if the first starts failing the SDK regressed;
+  // if the second starts failing the SDK closed the remaining gap and the
+  // wrapper should be re-evaluated rather than kept on faith.
+
+  it('the SDK drops a duplicate that overlaps the in-flight call', async () => {
     const { session } = makeSession();
     const handler = vi.fn(async () => 'ok');
     session.registerTools([{ name: 'probe', handler }]);
@@ -72,12 +88,22 @@ describe('the upstream premise', () => {
     dispatch(session, requested('req-1', 'call-1', 'probe', 'b'));
     await flush();
 
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('the SDK re-runs a duplicate that arrives after the first call settled', async () => {
+    const { session } = makeSession();
+    const handler = vi.fn(async () => 'ok');
+    session.registerTools([{ name: 'probe', handler }]);
+
+    await dispatchSettledThenDuplicate(session);
+
     expect(handler).toHaveBeenCalledTimes(2);
   });
 });
 
 describe('dedupeToolCalls through the real SDK dispatch', () => {
-  it('runs a tool once when its request is broadcast twice', async () => {
+  it('runs a tool once when its request is broadcast twice, overlapping', async () => {
     const { session, handlePendingToolCall } = makeSession();
     const handler = vi.fn(async () => 'ran');
     session.registerTools(dedupeToolCalls([{ name: 'probe', handler }]));
@@ -87,8 +113,23 @@ describe('dedupeToolCalls through the real SDK dispatch', () => {
     await flush();
 
     expect(handler).toHaveBeenCalledTimes(1);
-    // Both deliveries still get answered with the one result, so the runtime's
-    // pending call resolves exactly as it would have.
+    // The SDK's in-flight guard drops the overlapping duplicate before it
+    // reaches the handler, so only the first delivery is answered.
+    expect(handlePendingToolCall).toHaveBeenCalledTimes(1);
+    expect(handlePendingToolCall).toHaveBeenCalledWith({ requestId: 'req-1', result: 'ran' });
+  });
+
+  it('runs a tool once when its duplicate arrives after the first settled', async () => {
+    // The case the SDK's guard cannot see, and the reason the wrapper stays.
+    const { session, handlePendingToolCall } = makeSession();
+    const handler = vi.fn(async () => 'ran');
+    session.registerTools(dedupeToolCalls([{ name: 'probe', handler }]));
+
+    await dispatchSettledThenDuplicate(session);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    // Both deliveries are answered with the one memoized result, so the
+    // runtime's pending call resolves exactly as it would have.
     expect(handlePendingToolCall).toHaveBeenCalledTimes(2);
     for (const [arg] of handlePendingToolCall.mock.calls) {
       expect(arg).toEqual({ requestId: 'req-1', result: 'ran' });

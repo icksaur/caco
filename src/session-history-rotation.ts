@@ -159,11 +159,8 @@ export function defaultPreserveModel(sessionId: string): boolean {
 
 async function verifyWithIsolatedClient(stagedDir: string, stagedId: string): Promise<void> {
   const { CopilotClient, approveAll } = await import('@github/copilot-sdk');
-  const { buildBundledStdioConnection } = await import('./sdk-cli-path.js');
   void stagedDir;
   const opts: Record<string, unknown> = { workingDirectory: process.cwd() };
-  const connection = buildBundledStdioConnection();
-  if (connection) opts.connection = connection;
   const client = new CopilotClient(opts) as unknown as {
     start(): Promise<void>;
     resumeSession(id: string, cfg: unknown): Promise<{ disconnect?: () => Promise<void> }>;

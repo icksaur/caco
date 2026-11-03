@@ -2,17 +2,25 @@
  * Makes every Caco tool handler idempotent per tool call.
  *
  * WHY: the runtime emits `external_tool.requested` twice for one sub-agent tool
- * call (same requestId and toolCallId, on two separate event chains), and the
- * SDK client's `_handleBroadcastEvent` runs the handler once per such event with
- * no dedup. Unwrapped, every workflow, build, and file append a sub-agent issues
- * executes twice, concurrently. Root-agent calls are delivered once and are
- * unaffected. `tests/unit/tool-call-dedup.test.ts` pins that upstream fact, so a
- * future SDK that dedups on its own is noticed rather than wrapped on faith.
+ * call (same requestId and toolCallId, on two separate event chains). Before
+ * @github/copilot-sdk 1.0.28 the client ran the handler once per such event
+ * with no dedup, so every workflow, build, and file append a sub-agent issued
+ * executed twice, concurrently. Root-agent calls are delivered once and are
+ * unaffected.
+ *
+ * 1.0.28 added an in-flight guard (`pendingExternalTools`, keyed by requestId),
+ * which drops a duplicate that OVERLAPS the running call. It does not make this
+ * wrapper redundant: that guard is per CopilotSession instance and is deleted in
+ * `finally` when the call settles, so a duplicate delivered after a fast tool
+ * finished — or onto a fresh session object after a resume — still runs again.
+ * `tests/unit/tool-call-dedup.test.ts` pins both halves of that upstream
+ * behaviour, so a future SDK that closes the remaining gap is noticed rather
+ * than wrapped on faith.
  *
  * A duplicate is handed the first execution's promise, so it resolves to the
  * same result or rejection and the runtime's pending call is answered exactly as
- * before. Do NOT narrow this to in-flight calls only: a fast tool can settle
- * before its duplicate is dispatched, and would then run again.
+ * before. Do NOT narrow this to in-flight calls only: that is the case the SDK
+ * now covers, and the settled-then-duplicate case is the one left for us.
  */
 import type { ToolInvocation } from '@github/copilot-sdk';
 

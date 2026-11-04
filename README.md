@@ -47,6 +47,33 @@ Open `http://localhost:53000`
 > gate will then reject on your next push. If you need to add or upgrade a
 > dependency (which does require `npm install`), see **Development** below.
 
+### Updating
+
+```bash
+git pull && npm ci && npm run build
+```
+
+`npm ci` deletes and reinstalls all of `node_modules`. On Linux and macOS
+that works while Caco is running: a running process keeps its open files
+even after they are deleted, and the next restart picks up the new ones.
+
+**On Windows, a running Caco locks its executables** (`esbuild.exe` from tsx,
+the SDK's `copilot-runtime.exe`, node-pty's native module), so `npm ci` fails
+with `EPERM` while Caco is up. Pull first, then choose by whether the pull
+changed `package-lock.json` (`git diff --stat HEAD@{1} -- package-lock.json`):
+
+- **Lockfile unchanged:** update in place with `npm install && npm run build`,
+  then restart Caco. `npm install` only touches packages whose versions
+  changed, so with nothing changed it leaves the locked files alone.
+- **Lockfile changed:** stop Caco, run `npm ci && npm run build`, then start
+  it again.
+
+If `npm ci` does fail with `EPERM` while Caco is running, `node_modules` is
+left partially deleted. Caco keeps working on what it already has loaded, but
+fails as soon as it needs a fresh SDK runtime (after the 30-minute idle
+reconnect, or a restart) with `Could not resolve @github/copilot-sdk-<platform>`.
+Run `npm install` (in place) or stop Caco and `npm ci` to restore it.
+
 ## Usage
 
 Toggle the session-view UI via the session button.  Scheduled sessions appear here.  You can select and create new sessions here.

@@ -393,7 +393,8 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       if (inst.status === 'live') return;
       var text;
       if (inst.status === 'refused') {
-        text = inst.name + ': not connected. On that instance set CACO_PORTAL_ORIGINS=' + (view.portalOrigin || '') + ' and restart it.';
+        text = inst.name + ': not connected. This portal is at ' + (view.portalOrigin || '?') +
+          '; on that instance set CACO_PORTAL_ORIGINS=' + (view.portalOrigin || '') + ' and restart it.';
       } else if (inst.status === 'pending') {
         text = inst.name + ': connecting';
       } else {

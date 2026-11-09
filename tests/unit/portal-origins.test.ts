@@ -1,10 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { parsePortalOrigins } from '../../src/security/portal-origins.js';
+import { parsePortalOrigins, DEFAULT_PORTAL_ORIGINS } from '../../src/security/portal-origins.js';
 
 describe('parsePortalOrigins (spec-portal-pager P9)', () => {
-  it('is empty when unset', () => {
-    expect(parsePortalOrigins(undefined)).toEqual([]);
-    expect(parsePortalOrigins('')).toEqual([]);
+  it('defaults to the portal at the default Caco port on localhost when unset', () => {
+    expect(DEFAULT_PORTAL_ORIGINS).toEqual(['http://localhost:53000', 'http://127.0.0.1:53000']);
+    expect(parsePortalOrigins(undefined)).toEqual(['http://localhost:53000', 'http://127.0.0.1:53000']);
+    expect(parsePortalOrigins('  ')).toEqual(['http://localhost:53000', 'http://127.0.0.1:53000']);
+  });
+
+  it('a set list replaces the default entirely', () => {
+    expect(parsePortalOrigins('http://localhost:54000')).toEqual(['http://localhost:54000']);
+  });
+
+  it('none disables other origins, case-insensitively', () => {
+    expect(parsePortalOrigins('none')).toEqual([]);
+    expect(parsePortalOrigins(' NONE ')).toEqual([]);
   });
 
   it('normalizes entries to exact origins', () => {

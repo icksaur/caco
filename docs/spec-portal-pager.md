@@ -42,11 +42,23 @@ portal would need CORS with credentials on `/api/pager` and `/api/sessions/:id/m
 **Trust on the instance side.** An instance answers a bridge request only when
 `event.source === window.parent` AND `event.origin` is its own origin or on
 `CACO_PORTAL_ORIGINS` (comma list, exact origins, injected into `index.html`
-like `SERVER_HOSTNAME`). There is no loopback wildcard: the same-origin guard
-(`src/security/same-origin.ts`) already refuses other localhost ports, and the
-bridge can send prompts, so it must not be wider. A disallowed parent gets only
+like `SERVER_HOSTNAME`). A disallowed parent gets only
 `caco:pager:refused`, which carries no data, so the portal can say what to set.
 Every reply is posted with an explicit targetOrigin, never `'*'`.
+
+**Default allowlist.** Unset, `CACO_PORTAL_ORIGINS` allows exactly
+`http://localhost:53000` and `http://127.0.0.1:53000`, derived from the
+default port constant (`DEFAULT_PORT`, `src/config.ts`), not the instance's bound
+port, because the portal is served by a different machine. Carl opens the
+portal on his laptop at that address and reaches devboxes through devtunnel port
+forwards on other localhost ports, so every remote instance needs the same
+value. The default adds almost no exposure: anything able to serve a page at
+localhost:53000 on the browser's machine can already drive the forwarded
+instances directly, because they are plain localhost ports and the API accepts
+requests with no Origin header. It stays exact: no port wildcard and no other
+localhost ports. A set value replaces the default entirely; `none`
+(case-insensitive) allows no other origin. The instance's own origin is always
+allowed.
 
 **Trust on the portal side.** A message counts for a peer only when
 `event.origin === new URL(peer.url).origin` exactly AND `event.source` is that
@@ -92,6 +104,7 @@ of them and an unloaded frame would read as unreachable.
 | Risk | Mitigation |
 |---|---|
 | A foreign page frames an instance and drives sends | Exact allowlist on the parent origin, plus `source === parent` |
+| The default allows localhost:53000 on every instance | Exact origin only. Whatever serves that origin can already call forwarded localhost instances directly with no Origin header, so the default adds no real reach. `none` turns it off |
 | A sibling iframe spoofs another instance's cards | Portal checks source window and exact origin per peer |
 | Remote not configured, board silently missing a machine | `refused` state shown with the origin to add |
 | Action sent but no reply (instance went away) | 20 s timeout, reported as a send failure. The card stays, with its draft |
@@ -109,7 +122,7 @@ of them and an unloaded frame would read as unreachable.
 | P6 | Unanswered action times out as an error, and instance status degrades to unreachable - `portal-pager.test.ts` |
 | P7 | Portal-mode `pager.html` renders labels, sends through the bridge, keeps drafts per key - `pager-page-portal.test.ts` |
 | P8 | Existing standalone pager DOM tests still pass - `pager-page-dom.test.ts` |
-| P9 | `CACO_PORTAL_ORIGINS` parsing normalizes to exact origins - `portal-origins.test.ts` |
+| P9 | `CACO_PORTAL_ORIGINS` parsing: default localhost:53000 pair when unset, a set list replaces it, `none` empties it, entries normalize to exact origins - `portal-origins.test.ts` |
 
 ## Plan
 

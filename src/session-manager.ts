@@ -34,7 +34,7 @@ import { builtinKey, cacoKey, type ToolKey } from './tool-key.js';
 import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys, serversForKey, learnServerCorrelation, configKeyForServer, purgeServers, knownServers } from './tool-key-registry.js';
 import { recordObservedSizes, getToolSize } from './tool-size-store.js';
 import { estimateToolTokens } from './tool-size.js';
-import { buildPagerView, type PagerSessionInput } from './pager-view.js';
+import { buildPagerView, pagerTitle, type PagerSessionInput } from './pager-view.js';
 import { planSessionRemoval, type RemovalPlan } from './session-removal.js';
 import { activityVersion } from './activity-version.js';
 import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys, enableableToolKeys, advertisableToolKeys, partitionEnableNames, buildSyncSeed, shouldCommitWarmSet } from './session-tool-state.js';
@@ -1994,7 +1994,8 @@ export class SessionManager {
 
   /** The current pager board, at the given version. */
   pagerView(version: number): ReturnType<typeof buildPagerView> {
-    return buildPagerView(this.listForPager(), dispatchState.getActiveCount(), version, Date.now());
+    return buildPagerView(this.listForPager(), dispatchState.getActiveCount(), version, Date.now(),
+      i => pagerTitle(i.name, () => readSessionWorkspace(i.sessionId)?.summary, getSessionMeta(i.sessionId)?.autoName));
   }
 
   snapshotSessionOrder(): void {

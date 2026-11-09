@@ -4,6 +4,9 @@ import {
   buildPagerView,
   offerAtOf,
   pagerWakeBadge,
+  pagerTitle,
+  PAGER_NO_SUMMARY,
+  PAGER_TITLE_MAX_CHARS,
   PAGER_MAX_WAITING,
   PAGER_MAX_OFFER_AGE_MS,
   type PagerSessionInput,
@@ -25,6 +28,23 @@ function input(over: Partial<PagerSessionInput> = {}): PagerSessionInput {
     ...over,
   };
 }
+
+describe('pagerTitle (session list ladder)', () => {
+  it('prefers a manual name and skips the summary read', () => {
+    let read = false;
+    expect(pagerTitle('Mine', () => { read = true; return 'sum'; }, 'auto')).toBe('Mine');
+    expect(read).toBe(false);
+  });
+  it('falls back to the workspace summary, then autoName, then No summary', () => {
+    expect(pagerTitle('', () => 'Summary', 'auto')).toBe('Summary');
+    expect(pagerTitle('  ', () => '  ', 'fix routing bug')).toBe('fix routing bug');
+    expect(pagerTitle(undefined, () => null, undefined)).toBe(PAGER_NO_SUMMARY);
+  });
+  it('clips long titles', () => {
+    const t = pagerTitle('', () => 'x'.repeat(500), undefined);
+    expect(t).toBe('x'.repeat(PAGER_TITLE_MAX_CHARS) + '…');
+  });
+});
 
 describe('offerAtOf', () => {
   it('prefers the offer stamp', () => {
@@ -187,6 +207,17 @@ describe('buildPagerView ordering', () => {
 
     expect(forward.busy.map(b => b.sessionId)).toEqual(['s-1', 's-2', 's-3']);
     expect(reversed.busy.map(b => b.sessionId)).toEqual(forward.busy.map(b => b.sessionId));
+  });
+
+  it('uses the title resolver for both running rows and cards, and sorts on it', () => {
+    const titles: Record<string, string> = { a: 'zeta', b: 'alpha', c: 'card title' };
+    const view = buildPagerView([
+      input({ sessionId: 'a', name: '', isBusy: true, responseOptions: undefined }),
+      input({ sessionId: 'b', name: '', isBusy: true, responseOptions: undefined }),
+      input({ sessionId: 'c', name: '' }),
+    ], 2, 1, NOW, i => titles[i.sessionId]);
+    expect(view.busy).toEqual([{ sessionId: 'b', name: 'alpha' }, { sessionId: 'a', name: 'zeta' }]);
+    expect(view.waiting[0].name).toBe('card title');
   });
 
   it('tie-breaks running rows with identical names on session id', () => {

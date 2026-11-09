@@ -146,11 +146,44 @@ export function needsTriage(input: PagerSessionInput, now: number): boolean {
 /** Running rows: by the same string the page displays, then by session id.
  *  The `busy` array follows session-cache insertion order, which changes across a
  *  restart, and rows that reshuffle under a glance are worse than useless. */
-function compareBusy(a: PagerSessionInput, b: PagerSessionInput): number {
+function compareBusy(a: { sessionId: string; name: string }, b: { sessionId: string; name: string }): number {
   const an = a.name || a.sessionId;
   const bn = b.name || b.sessionId;
   if (an !== bn) return an < bn ? -1 : 1;
   return a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0;
+}
+
+/** Display title for one entry. The server passes the session list's title ladder
+ *  (spec-auto-name-sessions); it is called only for entries that reach the board,
+ *  so a ladder that reads from disk costs nothing for undisplayed sessions. */
+export type PagerTitleOf = (input: PagerSessionInput) => string;
+
+const nameOnly: PagerTitleOf = i => i.name;
+
+/** Terminal fallback, the same literal the session list shows. */
+export const PAGER_NO_SUMMARY = 'No summary';
+/** Workspace summaries can run to a paragraph; a card head needs a line. */
+export const PAGER_TITLE_MAX_CHARS = 100;
+
+function hasText(x: unknown): x is string {
+  return typeof x === 'string' && x.trim().length > 0;
+}
+
+/**
+ * The session list's title ladder (spec-auto-name-sessions): manual name, then the
+ * SDK's workspace summary, then the first reported intent (`autoName`), then
+ * "No summary". `summary` is a thunk so the disk read happens only when no manual
+ * name exists.
+ */
+export function pagerTitle(name: string | undefined, summary: () => string | null | undefined, autoName: string | undefined): string {
+  let title: string = PAGER_NO_SUMMARY;
+  if (hasText(name)) title = name;
+  else {
+    const s = summary();
+    if (hasText(s)) title = s;
+    else if (hasText(autoName)) title = autoName;
+  }
+  return title.length > PAGER_TITLE_MAX_CHARS ? title.slice(0, PAGER_TITLE_MAX_CHARS) + '…' : title;
 }
 
 /** Newest offer first, tie-broken by session id so two renders of one state agree
@@ -175,11 +208,12 @@ export function buildPagerView(
   busyCount: number,
   version: number,
   now: number,
+  titleOf: PagerTitleOf = nameOnly,
 ): PagerView {
   const busy = inputs
     .filter(i => i.isBusy)
-    .sort(compareBusy)
-    .map(i => withWake({ sessionId: i.sessionId, name: i.name }, i.wake));
+    .map(i => withWake({ sessionId: i.sessionId, name: titleOf(i) }, i.wake))
+    .sort(compareBusy);
 
   const triaged = inputs.filter(i => needsTriage(i, now)).sort(compareWaiting);
 
@@ -189,7 +223,7 @@ export function buildPagerView(
     busy,
     waiting: triaged.slice(0, PAGER_MAX_WAITING).map(i => withWake({
       sessionId: i.sessionId,
-      name: i.name,
+      name: titleOf(i),
       cwd: i.cwd,
       kind: i.kind,
       idleAt: i.responseOptionsAt ?? i.lastIdleAt ?? null,

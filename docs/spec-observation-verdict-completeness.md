@@ -84,7 +84,7 @@ to that same session. Under the symmetric change that attended idle writes `fals
 badge the human was owed disappears, unseen. Only human observation may clear a `true`.
 
 **`needsObservation: false` does not mean "an agent owns this".** Auto-continue dispatches
-send `needsObservation: false` (`session-messages.ts:74`), so a *human-initiated* turn that
+sent `needsObservation: false` (before the fix below), so a *human-initiated* turn that
 happened to involve a `caco_enable_tools` reveal continues under that flag, and its real
 idle would be classified as attended. The flag distinguishes "this dispatch was not typed
 by a human" from "no human is waiting on the result", and those are different questions.
@@ -93,16 +93,45 @@ And it buys nothing: once absence reads as observed, materialising absent → `f
 no observable behaviour. It is pure risk surface. Dropping it also removes any new injected
 dependency, and with it the silent-drop wiring hazard that made the previous fix ship inert.
 
-### Found, not fixed: continuations lose their badge
+### Fixed: continuations inherit the originating observation policy
 
-The second reason above is a live defect in its own right, in the opposite direction. A
-human-initiated turn that triggers a tool reveal auto-continues with
-`needsObservation: false`; the original idle returns early (`willFire && started`) and the
-continuation's real idle is never marked. The human is owed attention and gets no badge.
+The second reason above was also a live defect in the opposite direction. A
+human-initiated turn that triggered a tool reveal auto-continued with
+`needsObservation: false`; the original idle returned early (`willFire && started`)
+and the continuation's real idle was never marked. The human was owed attention and
+got no badge.
 
-That is a false *negative*, distinct from the false positive this spec fixes, and correcting
-it means propagating the originating dispatch's observation need through the continuation
-rather than defaulting it. Out of scope here; tracked separately so it is not lost.
+Fix: `runAutoContinue(sessionId, ctx)` receives the idle authority's ctx, and the
+continuation dispatch is sent with that same ctx (`needsObservation` and any
+`offerBaseline`). The continuation's own idle passes it on again, so a chain of
+continuations is judged once, at its last real idle, by the policy of the dispatch
+that started it. Delegate and herd turns keep `needsObservation: false` through
+their continuations, so the false-positive fix above is unaffected.
+
+### Scheduler turns badge only on a new offer
+
+Track sessions are woken by the scheduler and end each wake either quietly or with a
+`caco-actions` decision for the human. Scheduler messages used to dispatch with
+`needsObservation: false`, so a decision never set the dot.
+
+* The route gives a `source:'scheduler'` dispatch `needsObservation: true` plus
+  `offerBaseline: { at }`, the `meta.responseOptionsAt` captured when the message
+  is received (`null` if there is none).
+* At the real idle (after any continuations, which inherit the baseline), the
+  authority's `observesIdle` predicate marks the session unobserved only if
+  `responseOptionsAt` now differs from the baseline, i.e. the turn wrote a NEW
+  offer. A quiet turn runs herd and quota as usual and nothing else.
+* The external idle feed uses the same predicate, so it stays the machine analog
+  of the dot (spec-idle-notifications).
+* A scheduler message does not clear a pending `responseOptions` on receipt. User
+  messages and steering still clear it, and agent/system/applet behaviour is
+  unchanged.
+* Re-offering exactly the pending options (same strings, same order) keeps the
+  existing `responseOptionsAt` (`dispatch-events.ts`). That keeps a pager-dismissed
+  card dismissed, and makes an identical re-offer count as quiet for the rule above.
+
+Other sources are unchanged: user and skill dispatches observe unconditionally;
+agent, system and applet dispatches never do.
 
 ### Note, not in scope
 
@@ -120,6 +149,9 @@ rather than divergence. Worth collapsing; not part of this fix.
   having opened it.
 * An unattended idle still persists `unobserved: true`, and a human observation still
   clears it.
+* A human turn that reveals tools badges at its continuation's real idle; a scheduler
+  turn badges iff it wrote a new offer; a scheduler message keeps the pending offer;
+  an identical re-offer keeps its stamp.
 * `lastIdleAt` is still stamped on every idle, attended or not — the reaper's coldness
   signal is unchanged.
 

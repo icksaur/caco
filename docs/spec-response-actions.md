@@ -38,7 +38,13 @@ always end that reply with a `caco-actions` block.
 - The block text is hidden from the transcript (closed blocks via the markdown
   renderer; an unclosed/partial block is suppressed during streaming).
 - Options persist on `meta.responseOptions` and are restored on session switch,
-  cleared on the next send.
+  cleared on the next send. A `source:'scheduler'` message does NOT clear them, so
+  a wake cannot wipe an offer the human has not read; user, steering, agent,
+  system, and applet messages still do.
+- `meta.responseOptionsAt` stamps the offer. Re-offering exactly the pending
+  options (same strings, same order) keeps the existing stamp: the offer is not
+  new, so a pager-dismissed card stays dismissed and a scheduler turn that only
+  repeats it stays quiet (spec-observation-verdict-completeness).
 - A prior `caco-actions` block already in the conversation is already-rendered UI —
   do not act on it as data.
 

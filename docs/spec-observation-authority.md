@@ -66,6 +66,9 @@ read `lastIdleAt` as a *coldness* signal, and rotation treats a missing one as
 delegate look idle for hours and expose it to auto-archive. The timestamp stays
 honest; the observation decision gets its own field.
 
+> **Superseded for schedules by spec-observation-verdict-completeness:** a
+> scheduler turn now badges iff it wrote a new `caco-actions` offer.
+
 **Scheduled sessions currently do NOT badge, and this spec does not change that.**
 An earlier draft claimed they send `needsObservation: true`; that was a misreading
 of `sessions.ts:481`, which is the **skill** route. `schedule-manager.ts` sends

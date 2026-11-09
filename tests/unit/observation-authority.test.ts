@@ -60,6 +60,7 @@ async function idle(tracker: UnobservedTracker, sessionId: string, attended: boo
     hasPendingAutoContinue: () => false,
     pendingToolCount: () => 0,
     runAutoContinue: () => Promise.resolve(false),
+    currentOfferAt: () => undefined,
     markIdle: id => { tracker.markIdle(id); },
     // The unconditional effect, wired EXACTLY as production does
     // (session-messages.ts). It no longer carries the verdict — that is persisted

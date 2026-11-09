@@ -4,8 +4,9 @@
  * One global, append-only, monotonic-seq ring of "a session reached a real idle"
  * events, exposed to out-of-process automation via a long-poll HTTP read. It is
  * the machine-observable analog of the UI's unobserved dot: the idle authority
- * appends here on exactly the real idles it marks unobserved (needsObservation),
- * so herd children, delegates, and tool-enable auto-continuations never appear.
+ * appends here on exactly the real idles it marks unobserved (`observesIdle`),
+ * so herd children, delegates, and quiet scheduler turns never appear. A
+ * tool-enable reveal appears once, at the continuation's real idle.
  *
  * The cursor is the point of the design: a reader passes back the `cursor` it last
  * saw, so an idle that lands between two reads is returned IMMEDIATELY on the next

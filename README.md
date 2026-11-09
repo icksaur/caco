@@ -170,6 +170,10 @@ Open `/pager.html` to triage finished work in one place, away from the main UI.
   or another machine has viewed the session, and dismissing here does not clear the
   dot anywhere. Its unit of work is the *offer*, not the session: dismiss hides the
   current offer, and a card returns only when a session makes a **new** one.
+  Repeating the same options word for word is not a new offer.
+- **Scheduled wakes keep the offer.** A scheduler message does not clear a pending
+  offer, and a scheduled turn sets the unobserved dot only when it makes a new
+  offer. A wake that finds nothing to decide stays silent.
 - **Offers expire after 7 days.** An old offer refers to a state of the world that
   has moved on, so the board decays on its own rather than needing to be tended.
 - The board updates on its own — no reload — via `GET /api/pager?since=<version>&wait=<ms>`,

@@ -30,6 +30,11 @@ export function setGitEditPoller(p: GitEditPoller | null): void {
   gitEditPoller = p;
 }
 
+/** Same strings in the same order. */
+export function sameOffer(a: readonly string[] | undefined, b: readonly string[]): boolean {
+  return !!a && a.length === b.length && a.every((s, i) => s === b[i]);
+}
+
 /** Tools that mutate files. Triggers a file-edits poll on success. */
 const WRITE_TOOLS = new Set(['edit', 'create', 'write', 'apply_patch']);
 
@@ -246,13 +251,19 @@ export function applyDispatchEventEffects(
       const options = extractActionOptions(content);
       if (options.length > 0) {
         // Stamp the offer's age in the SAME write, so the two can never disagree.
+        // An identical re-offer of the still-pending options keeps its stamp: the
+        // offer is not new, so a pager-dismissed card stays dismissed and a
+        // scheduler turn that merely repeats it stays quiet (the idle authority
+        // reads an advanced stamp as "wrote a new offer").
         const at = new Date().toISOString();
+        let isNew = true;
         updateSessionMeta(sessionId, meta => {
+          isNew = !(meta.responseOptionsAt && sameOffer(meta.responseOptions, options));
           meta.responseOptions = options;
-          meta.responseOptionsAt = at;
+          if (isNew) meta.responseOptionsAt = at;
         });
         // New options are exactly what puts a session on the pager board.
-        activityVersion.bump();
+        if (isNew) activityVersion.bump();
       }
     }
   }

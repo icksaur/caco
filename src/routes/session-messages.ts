@@ -35,7 +35,7 @@ import { modelCostSummary } from '../model-billing.js';
 import { maybeAutoContinue, AUTOCONTINUE_IDENTIFIER, AUTO_CONTINUE_CAP } from '../auto-continue-runtime.js';
 import { isAutoContinueEnabled } from '../preferences.js';
 import { onSessionIdle } from '../herd-runtime.js';
-import { handleSessionIdle } from '../idle-authority.js';
+import { handleSessionIdle, type IdleAuthorityCtx } from '../idle-authority.js';
 import { getLastAssistantMessage } from '../session-history.js';
 import { idleFeed } from '../idle-feed.js';
 
@@ -53,7 +53,7 @@ setAutoContinuePrefProvider(() => isAutoContinueEnabled(sessionState.preferences
  * by the idle authority only when a pending reveal exists. Resolves `true` iff a
  * continuation dispatch actually started.
  */
-function runAutoContinue(sessionId: string): Promise<boolean> {
+function runAutoContinue(sessionId: string, ctx: IdleAuthorityCtx): Promise<boolean> {
   return maybeAutoContinue(sessionId, {
     getPendingTools: id => sessionManager.getPendingTools(id),
     getAttempts: id => sessionManager.getAutoContinueAttempts(id),
@@ -68,11 +68,19 @@ function runAutoContinue(sessionId: string): Promise<boolean> {
       // Broadcast the continuation's events to WS viewers (same as the HTTP route),
       // otherwise the operator sees nothing live until a page refresh replays history.
       // A continuation is NOT a root: carry the revealing dispatch's captured depth so
-      // nested work cannot regain delegation budget (spec-herd-depth-breadth).
+      // nested work cannot regain delegation budget (spec-herd-depth-breadth). It also
+      // inherits the originating dispatch's observation policy, so a human turn that
+      // revealed tools still badges at the continuation's real idle, and chained
+      // continuations pass it on again (spec-observation-verdict-completeness).
       await dispatchMessage(
         id,
         prompt,
-        { needsObservation: false, requestId: `autocontinue-${Date.now().toString(36)}`, depth: sessionManager.getRevealDepth(id) },
+        {
+          needsObservation: ctx.needsObservation,
+          ...(ctx.offerBaseline && { offerBaseline: ctx.offerBaseline }),
+          requestId: `autocontinue-${Date.now().toString(36)}`,
+          depth: sessionManager.getRevealDepth(id),
+        },
         { onEvent: (evt) => broadcastEvent(id, evt) }
       );
     },
@@ -89,18 +97,19 @@ function runAutoContinue(sessionId: string): Promise<boolean> {
  * (via the shared `hasPendingAutoContinue` predicate, consumed by dispatch-state),
  * and unobserved-marking. A real idle propagates to all three as before.
  */
-export function handleIdle(sessionId: string, needsObservation: boolean, correlationId?: string): void {
-  void handleSessionIdle(sessionId, { needsObservation }, {
+export function handleIdle(sessionId: string, ctx: IdleAuthorityCtx, correlationId?: string): void {
+  void handleSessionIdle(sessionId, ctx, {
     hasPendingAutoContinue: id => sessionManager.hasPendingAutoContinue(id),
     pendingToolCount: id => sessionManager.getPendingTools(id).length,
     runAutoContinue,
+    currentOfferAt: id => getSessionMeta(id)?.responseOptionsAt,
     markIdle: id => unobservedTracker.markIdle(id),
     herdOnSessionIdle: id => { void onSessionIdle(id); },
     pollQuota: () => { void sessionManager.pollQuota(); },
     signalDispatchIdle: id => dispatchState.signalIdle(id),
     // Publish to the external idle feed (spec-idle-notifications). The idle
-    // authority calls this only inside its needsObservation branch, so herd
-    // children / delegates / auto-continuations never reach the feed. The final
+    // authority calls this only where it marks the session unobserved, so herd
+    // children / delegates / quiet scheduler turns never reach the feed. The final
     // response text is read here (same source as delegate/herd) and size-capped
     // by the feed.
     notifyExternalIdle: id => {
@@ -251,10 +260,18 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   
   const tempFilePaths: string[] = [];
 
-  // Clear response options when user sends a message
-  updateSessionMeta(sessionId, meta => {
-    if (meta.responseOptions) meta.responseOptions = undefined;
-  }, { createIfMissing: false });
+  // A pending offer is cleared by any message EXCEPT a scheduler wake: a wake
+  // must not wipe a card the human has not read yet. The wake's turn is then
+  // judged against the offer stamp as it stands now: it earns the unobserved dot
+  // only by writing a NEW offer (spec-observation-verdict-completeness).
+  let offerBaseline: { at: string | null } | undefined;
+  if (source === 'scheduler') {
+    offerBaseline = { at: getSessionMeta(sessionId)?.responseOptionsAt ?? null };
+  } else {
+    updateSessionMeta(sessionId, meta => {
+      if (meta.responseOptions) meta.responseOptions = undefined;
+    }, { createIfMissing: false });
+  }
   // Pre-process images (multiple supported, newline-separated)
   if (imageData) {
     const imageStrings = imageData.split('\n').filter(Boolean);
@@ -312,7 +329,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     await dispatchMessage(
       sessionId, 
       promptToSend, 
-      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId, needsObservation: !source, depth: dispatchDepth },
+      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId, needsObservation: !source || source === 'scheduler', ...(offerBaseline && { offerBaseline }), depth: dispatchDepth },
       {
         onEvent: (evt) => broadcastEvent(sessionId, evt)
       }
@@ -382,11 +399,11 @@ function capturePriceContext(sessionId: string): {
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; displayPrompt?: string; beforeSend?: () => Promise<void>; depth?: number },
+  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; offerBaseline?: { at: string | null }; displayPrompt?: string; beforeSend?: () => Promise<void>; depth?: number },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePaths, correlationId, requestId, needsObservation, displayPrompt, beforeSend, depth } = options || {};
+  const { tempFilePaths, correlationId, requestId, needsObservation, offerBaseline, displayPrompt, beforeSend, depth } = options || {};
   const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
 
@@ -619,7 +636,7 @@ export async function dispatchMessage(
           // classifies false idle (reveal → auto-continue, suppress completion
           // signals) vs real idle (mark unobserved + herd wake + quota). An
           // errored dispatch is never an idle, so nothing propagates.
-          if (wasIdle) handleIdle(sessionId, needsObservation ?? false, effectiveCorrelationId);
+          if (wasIdle) handleIdle(sessionId, { needsObservation: needsObservation ?? false, ...(offerBaseline && { offerBaseline }) }, effectiveCorrelationId);
         });
         unsubscribe();
       }

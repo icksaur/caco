@@ -7,11 +7,13 @@ function makeDeps(over: Partial<{
   willFire: boolean;
   pending: number;
   started: boolean;
+  offerAt: string | undefined;
 }> = {}): { deps: IdleAuthorityDeps; spies: Record<string, ReturnType<typeof vi.fn>> } {
   const spies = {
     hasPendingAutoContinue: vi.fn(() => over.willFire ?? false),
     pendingToolCount: vi.fn(() => over.pending ?? 0),
     runAutoContinue: vi.fn(async () => over.started ?? false),
+    currentOfferAt: vi.fn(() => over.offerAt),
     markIdle: vi.fn(),
     herdOnSessionIdle: vi.fn(),
     pollQuota: vi.fn(),
@@ -22,6 +24,7 @@ function makeDeps(over: Partial<{
     hasPendingAutoContinue: spies.hasPendingAutoContinue as unknown as IdleAuthorityDeps['hasPendingAutoContinue'],
     pendingToolCount: spies.pendingToolCount as unknown as IdleAuthorityDeps['pendingToolCount'],
     runAutoContinue: spies.runAutoContinue as unknown as IdleAuthorityDeps['runAutoContinue'],
+    currentOfferAt: spies.currentOfferAt as unknown as IdleAuthorityDeps['currentOfferAt'],
     markIdle: spies.markIdle,
     herdOnSessionIdle: spies.herdOnSessionIdle,
     pollQuota: spies.pollQuota,
@@ -37,7 +40,7 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
   it('FALSE idle (willFire + continuation STARTED): fires and suppresses ALL real-idle effects', async () => {
     const { deps, spies } = makeDeps({ willFire: true, pending: 1, started: true });
     await handleSessionIdle(SID, { needsObservation: true }, deps);
-    expect(spies.runAutoContinue).toHaveBeenCalledWith(SID);
+    expect(spies.runAutoContinue).toHaveBeenCalledWith(SID, { needsObservation: true });
     // none of the completion consumers fire on a false idle
     expect(spies.signalDispatchIdle).not.toHaveBeenCalled();
     expect(spies.markIdle).not.toHaveBeenCalled();
@@ -53,7 +56,7 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     // waitForIdle/restart are stranded).
     const { deps, spies } = makeDeps({ willFire: true, pending: 1, started: false });
     await handleSessionIdle(SID, { needsObservation: true }, deps);
-    expect(spies.runAutoContinue).toHaveBeenCalledWith(SID);
+    expect(spies.runAutoContinue).toHaveBeenCalledWith(SID, { needsObservation: true });
     expect(spies.signalDispatchIdle).toHaveBeenCalledWith(SID);
     expect(spies.markIdle).toHaveBeenCalledWith(SID);
     expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
@@ -77,7 +80,7 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     // reported done to herd/delegate/unobserved.
     const { deps, spies } = makeDeps({ willFire: false, pending: 1 });
     await handleSessionIdle(SID, { needsObservation: true }, deps);
-    expect(spies.runAutoContinue).toHaveBeenCalledWith(SID);
+    expect(spies.runAutoContinue).toHaveBeenCalledWith(SID, { needsObservation: true });
     expect(spies.markIdle).toHaveBeenCalledWith(SID);
     expect(spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
     expect(spies.pollQuota).toHaveBeenCalled();
@@ -119,5 +122,72 @@ describe('handleSessionIdle (spec-idle-authority)', () => {
     const predOrder = spies.hasPendingAutoContinue.mock.invocationCallOrder[0];
     const runOrder = spies.runAutoContinue.mock.invocationCallOrder[0];
     expect(predOrder).toBeLessThan(runOrder);
+  });
+});
+
+describe('observation policy across continuations + scheduler offer gate (spec-observation-verdict-completeness)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('a user turn with a reveal gets its badge at the continuation\'s real idle', async () => {
+    const userCtx = { needsObservation: true };
+    // Reveal idle: the continuation starts, so this idle is false and marks nothing,
+    // but the continuation is handed the originating ctx.
+    const reveal = makeDeps({ willFire: true, pending: 1, started: true });
+    await handleSessionIdle(SID, userCtx, reveal.deps);
+    expect(reveal.spies.markIdle).not.toHaveBeenCalled();
+    const inherited = reveal.spies.runAutoContinue.mock.calls[0][1] as typeof userCtx;
+    expect(inherited).toEqual(userCtx);
+
+    // The continuation's own (real) idle runs under the inherited ctx and badges.
+    const real = makeDeps({ willFire: false, pending: 0 });
+    await handleSessionIdle(SID, inherited, real.deps);
+    expect(real.spies.markIdle).toHaveBeenCalledWith(SID);
+    expect(real.spies.notifyExternalIdle).toHaveBeenCalledWith(SID);
+  });
+
+  it('a scheduler turn that wrote a NEW offer marks unobserved and reaches the feed', async () => {
+    const { deps, spies } = makeDeps({ offerAt: '2026-11-09T10:30:00.000Z' });
+    await handleSessionIdle(SID, { needsObservation: true, offerBaseline: { at: '2026-11-09T10:00:00.000Z' } }, deps);
+    expect(spies.markIdle).toHaveBeenCalledWith(SID);
+    expect(spies.notifyExternalIdle).toHaveBeenCalledWith(SID);
+  });
+
+  it('a scheduler turn whose first-ever offer appears (baseline null) marks unobserved', async () => {
+    const { deps, spies } = makeDeps({ offerAt: '2026-11-09T10:30:00.000Z' });
+    await handleSessionIdle(SID, { needsObservation: true, offerBaseline: { at: null } }, deps);
+    expect(spies.markIdle).toHaveBeenCalledWith(SID);
+  });
+
+  it('a quiet scheduler turn (stamp unchanged, or still no offer) stays silent but runs herd + quota', async () => {
+    const same = makeDeps({ offerAt: '2026-11-09T10:00:00.000Z' });
+    await handleSessionIdle(SID, { needsObservation: true, offerBaseline: { at: '2026-11-09T10:00:00.000Z' } }, same.deps);
+    expect(same.spies.markIdle).not.toHaveBeenCalled();
+    expect(same.spies.notifyExternalIdle).not.toHaveBeenCalled();
+    expect(same.spies.herdOnSessionIdle).toHaveBeenCalledWith(SID);
+    expect(same.spies.pollQuota).toHaveBeenCalled();
+
+    const none = makeDeps({ offerAt: undefined });
+    await handleSessionIdle(SID, { needsObservation: true, offerBaseline: { at: null } }, none.deps);
+    expect(none.spies.markIdle).not.toHaveBeenCalled();
+    expect(none.spies.notifyExternalIdle).not.toHaveBeenCalled();
+  });
+
+  it('a scheduler wake that reveals tools is judged at the continuation\'s idle, gate intact', async () => {
+    const ctx = { needsObservation: true, offerBaseline: { at: '2026-11-09T10:00:00.000Z' } };
+    const reveal = makeDeps({ willFire: true, pending: 1, started: true, offerAt: '2026-11-09T10:00:00.000Z' });
+    await handleSessionIdle(SID, ctx, reveal.deps);
+    expect(reveal.spies.runAutoContinue).toHaveBeenCalledWith(SID, ctx);
+    expect(reveal.spies.markIdle).not.toHaveBeenCalled();
+
+    const real = makeDeps({ offerAt: '2026-11-09T10:45:00.000Z' });
+    await handleSessionIdle(SID, ctx, real.deps);
+    expect(real.spies.markIdle).toHaveBeenCalledWith(SID);
+  });
+
+  it('needsObservation:false still never marks, whatever the offer did', async () => {
+    const { deps, spies } = makeDeps({ offerAt: '2026-11-09T10:30:00.000Z' });
+    await handleSessionIdle(SID, { needsObservation: false, offerBaseline: { at: null } }, deps);
+    expect(spies.markIdle).not.toHaveBeenCalled();
+    expect(spies.currentOfferAt).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
@@ -30,6 +30,7 @@ const routeMocks = vi.hoisted(() => {
     endDispatch: vi.fn(),
     getDispatchDepth: vi.fn((_sessionId: string): number | undefined => 1),
     getRevealDepth: vi.fn((_sessionId: string): number => 1),
+    nextDeferredToolsReminder: vi.fn(() => ({ text: '', commit: vi.fn() })),
   };
   return {
     sessionManager,
@@ -39,6 +40,7 @@ const routeMocks = vi.hoisted(() => {
     getLastAssistantMessage: vi.fn(async (_sessionId: string) => 'last response'),
     handleSessionIdle: vi.fn((_sessionId: string, _options: unknown, _deps: unknown): void => undefined),
     idleFeedAppend: vi.fn(),
+    getSessionMeta: vi.fn((_sessionId: string): Record<string, unknown> | null => null),
     maybeAutoContinue: vi.fn(async (_sessionId: string, _deps: unknown): Promise<boolean> => false),
     updateSessionMeta: vi.fn((_sessionId: string, updater: (meta: { responseOptions?: object }) => void): boolean => {
       updater({ responseOptions: {} });
@@ -52,12 +54,12 @@ vi.mock('../../src/session-state.js', () => ({ sessionState: { preferences: {}, 
 vi.mock('../../src/applet-state.js', () => ({ setAppletUserState: vi.fn(), setAppletNavigation: vi.fn() }));
 vi.mock('../../src/image-utils.js', () => ({ parseImageDataUrl: vi.fn(() => null) }));
 vi.mock('../../src/routes/websocket.js', () => ({ broadcastEvent: routeMocks.broadcastEvent, broadcastGlobalEvent: routeMocks.broadcastGlobalEvent }));
-vi.mock('../../src/storage.js', () => ({ getSessionMeta: vi.fn(() => null), updateSessionMeta: routeMocks.updateSessionMeta }));
+vi.mock('../../src/storage.js', () => ({ getSessionMeta: routeMocks.getSessionMeta, updateSessionMeta: routeMocks.updateSessionMeta }));
 vi.mock('../../src/unobserved-tracker.js', () => ({ unobservedTracker: { markIdle: vi.fn() } }));
 vi.mock('../../src/config.js', () => ({ DISPATCH_TIMEOUT_MS: 1000, AGENT_MAX_DEPTH: 3 }));
 vi.mock('../../src/message-source.js', () => ({ prefixMessageSource: vi.fn((source: string, id: string, text: string) => `[${source}:${id}] ${text}`) }));
-vi.mock('../../src/dispatch-watchdog.js', () => ({ createWatchdog: vi.fn(() => ({ cancel: vi.fn() })) }));
-vi.mock('../../src/dispatch-state.js', () => ({ dispatchState: { signalIdle: vi.fn(), waitForIdle: vi.fn(async () => 'timeout'), getCorrelationId: vi.fn() } }));
+vi.mock('../../src/dispatch-watchdog.js', () => ({ createWatchdog: vi.fn(() => ({ cancel: vi.fn(), reset: vi.fn(), notifyEvent: vi.fn() })) }));
+vi.mock('../../src/dispatch-state.js', () => ({ dispatchState: { signalIdle: vi.fn(), notifyActivity: vi.fn(), waitForIdle: vi.fn(async () => 'timeout'), getCorrelationId: vi.fn() } }));
 vi.mock('../../src/dispatch-retry.js', () => ({ retryWithFreshClient: vi.fn() }));
 vi.mock('../../src/dispatch-events.js', () => ({ applyDispatchEventEffects: vi.fn() }));
 vi.mock('../../src/session-throughput.js', () => ({ resetRequest: vi.fn(), snapshot: vi.fn(() => ({})), markRequestComplete: vi.fn(() => null) }));
@@ -73,7 +75,7 @@ vi.mock('../../src/idle-feed.js', () => ({ idleFeed: { append: routeMocks.idleFe
 
 let server: Server;
 let base: string;
-let handleIdle: (sessionId: string, needsObservation: boolean, correlationId?: string) => void;
+let handleIdle: (sessionId: string, ctx: { needsObservation: boolean; offerBaseline?: { at: string | null } }, correlationId?: string) => void;
 
 beforeAll(async () => {
   const mod = await import('../../src/routes/session-messages.js');
@@ -258,11 +260,11 @@ describe('session messages route harness', () => {
 
   it('wires idle authority dependencies without starting a message dispatch', async () => {
     routeMocks.handleSessionIdle.mockImplementation((_sessionId: string, _options: unknown, rawDeps: unknown) => {
-      const deps = rawDeps as { hasPendingAutoContinue: (id: string) => boolean; pendingToolCount: (id: string) => number; runAutoContinue: (id: string) => Promise<boolean>; markIdle: (id: string) => void; herdOnSessionIdle: (id: string) => void; pollQuota: () => void; signalDispatchIdle: (id: string) => void; notifyExternalIdle: (id: string) => void };
+      const deps = rawDeps as { hasPendingAutoContinue: (id: string) => boolean; pendingToolCount: (id: string) => number; runAutoContinue: (id: string, ctx: { needsObservation: boolean }) => Promise<boolean>; markIdle: (id: string) => void; herdOnSessionIdle: (id: string) => void; pollQuota: () => void; signalDispatchIdle: (id: string) => void; notifyExternalIdle: (id: string) => void };
       expect(deps.hasPendingAutoContinue('s1')).toBe(false);
       expect(deps.pendingToolCount('s1')).toBe(0);
       deps.markIdle('s1'); deps.herdOnSessionIdle('s1'); deps.pollQuota(); deps.signalDispatchIdle('s1'); deps.notifyExternalIdle('s1');
-      void deps.runAutoContinue('s1');
+      void deps.runAutoContinue('s1', { needsObservation: true });
     });
     routeMocks.maybeAutoContinue.mockImplementationOnce(async (_sessionId: string, rawDeps: unknown) => {
       const deps = rawDeps as { getPendingTools: (id: string) => string[]; getAttempts: (id: string) => number; isBusy: (id: string) => boolean; reassert: (id: string, tools: string[]) => Promise<void>; clearPendingTools: (id: string) => void; markContinuing: (id: string) => void; clearContinuing: (id: string) => void; bumpAttempts: (id: string) => void; emitSystem: (id: string, text: string) => void; enabled: () => boolean };
@@ -274,7 +276,7 @@ describe('session messages route harness', () => {
       expect(deps.enabled()).toBe(false);
       return false;
     });
-    handleIdle('s1', true, 'corr-1');
+    handleIdle('s1', { needsObservation: true }, 'corr-1');
     await vi.waitFor(() => { expect(routeMocks.idleFeedAppend).toHaveBeenCalledWith('s1', 'last response', 'interactive', 'corr-1'); });
     expect(routeMocks.maybeAutoContinue).toHaveBeenCalled();
     expect(routeMocks.broadcastEvent).toHaveBeenCalledWith('s1', { type: 'session.info', data: { message: 'continuing' } });
@@ -295,5 +297,79 @@ describe('session messages route harness', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, forced: true });
     expect(routeMocks.broadcastGlobalEvent).toHaveBeenCalledWith({ type: 'session.busy', data: { sessionId: 's1', isBusy: false } });
+  });
+
+  describe('observation policy through real dispatches (spec-observation-verdict-completeness)', () => {
+    type Ctx = { needsObservation: boolean; offerBaseline?: { at: string | null } };
+    type IdleDeps = { runAutoContinue: (id: string, ctx: Ctx) => Promise<boolean>; currentOfferAt: (id: string) => string | undefined };
+    type Meta = { responseOptions?: string[]; responseOptionsAt?: string };
+    let meta: Meta;
+    let emitters: Array<(e: unknown) => void>;
+    const getSession = routeMocks.sessionManager.getSession as unknown as Mock;
+    const fireIdle = (i: number) => emitters[i]({ type: 'session.idle', data: {} });
+    const idleCtx = (n: number) => routeMocks.handleSessionIdle.mock.calls[n][1] as Ctx;
+
+    beforeEach(() => {
+      meta = { responseOptions: ['Approve', 'Reject'], responseOptionsAt: 'T0' };
+      emitters = [];
+      routeMocks.getSessionMeta.mockImplementation(() => meta);
+      routeMocks.updateSessionMeta.mockImplementation((_id: string, updater: (m: Meta) => void) => { updater(meta); return true; });
+      getSession.mockImplementation(() => ({ on: (cb: (e: unknown) => void) => { emitters.push(cb); return () => {}; } }));
+    });
+    afterEach(() => {
+      routeMocks.getSessionMeta.mockImplementation(() => null);
+      getSession.mockImplementation(() => null);
+    });
+
+    it('a scheduler message keeps the pending offer; its idle carries the offer baseline', async () => {
+      const res = await postJson('/sessions/s1/messages', { prompt: 'wake', source: 'scheduler', scheduleSlug: 'track' });
+      expect(res.status).toBe(200);
+      expect(meta.responseOptions).toEqual(['Approve', 'Reject']);
+      fireIdle(0);
+      await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(1); });
+      expect(idleCtx(0)).toEqual({ needsObservation: true, offerBaseline: { at: 'T0' } });
+      // currentOfferAt reads the live stamp, so a new offer during the turn is visible.
+      meta.responseOptionsAt = 'T1';
+      const deps = routeMocks.handleSessionIdle.mock.calls[0][2] as IdleDeps;
+      expect(deps.currentOfferAt('s1')).toBe('T1');
+    });
+
+    it('a user message still clears the pending offer and observes unconditionally', async () => {
+      const res = await postJson('/sessions/s1/messages', { prompt: 'hello' });
+      expect(res.status).toBe(200);
+      expect(meta.responseOptions).toBeUndefined();
+      fireIdle(0);
+      await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(1); });
+      expect(idleCtx(0)).toEqual({ needsObservation: true });
+    });
+
+    it('an applet message keeps today\'s behavior: clears the offer, not observed', async () => {
+      await postJson('/sessions/s1/messages', { prompt: 'state', source: 'applet', appletSlug: 'x' });
+      expect(meta.responseOptions).toBeUndefined();
+      fireIdle(0);
+      await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(1); });
+      expect(idleCtx(0)).toEqual({ needsObservation: false });
+    });
+
+    it.each([
+      ['user', {}, { needsObservation: true }],
+      ['scheduler', { source: 'scheduler', scheduleSlug: 'track' }, { needsObservation: true, offerBaseline: { at: 'T0' } }],
+    ])('chained auto-continuations inherit the %s dispatch\'s policy', async (_label, body, expected) => {
+      routeMocks.handleSessionIdle.mockImplementation((id: string, ctx: unknown, rawDeps: unknown) => {
+        if (routeMocks.handleSessionIdle.mock.calls.length < 3) void (rawDeps as IdleDeps).runAutoContinue(id, ctx as Ctx);
+      });
+      routeMocks.maybeAutoContinue.mockImplementation(async (id: string, rawDeps: unknown) => {
+        await (rawDeps as { dispatch: (id: string, text: string) => Promise<void> }).dispatch(id, 'continue');
+        return true;
+      });
+      await postJson('/sessions/s1/messages', { prompt: 'go', ...body });
+      fireIdle(0);
+      await vi.waitFor(() => { expect(emitters).toHaveLength(2); });
+      fireIdle(1);
+      await vi.waitFor(() => { expect(emitters).toHaveLength(3); });
+      fireIdle(2);
+      await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(3); });
+      expect([idleCtx(0), idleCtx(1), idleCtx(2)]).toEqual([expected, expected, expected]);
+    });
   });
 });

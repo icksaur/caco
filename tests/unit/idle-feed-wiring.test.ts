@@ -42,7 +42,7 @@ beforeEach(() => {
 
 describe('idle-feed route wiring', () => {
   it('appends the last response + correlationId on a needsObservation idle', async () => {
-    handleIdle(SID, true, 'corr-42');
+    handleIdle(SID, { needsObservation: true }, 'corr-42');
     // The notifier awaits getLastAssistantMessage before appending.
     await vi.waitFor(async () => {
       const r = await idleFeed.read({ after: 0, wait: 0 });
@@ -58,7 +58,7 @@ describe('idle-feed route wiring', () => {
   });
 
   it('does NOT append when needsObservation is false (herd child / delegate / auto-continue)', async () => {
-    handleIdle(SID, false, 'corr-99');
+    handleIdle(SID, { needsObservation: false }, 'corr-99');
     await new Promise((r) => setTimeout(r, 20));
     const r = await idleFeed.read({ after: 0, wait: 0 });
     expect(r.events).toEqual([]);

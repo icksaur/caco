@@ -76,12 +76,19 @@ classifies the idle exactly once:
    pending.
 4. Otherwise ⇒ **real idle** (nothing pending, OR pending-but-capped, OR
    pref-off): run the real-idle effects in order — `unobservedTracker.markIdle`
-   (still gated on `needsObservation`), the herd `onSessionIdle` hook,
-   `pollQuota`. A capped session therefore correctly reports done to
-   herd/delegate/unobserved *after* its cap message.
+   and `notifyExternalIdle` (both gated on `observesIdle(ctx)`), the herd
+   `onSessionIdle` hook, `pollQuota`. A capped session therefore correctly
+   reports done to herd/delegate/unobserved *after* its cap message.
 
-`ctx` carries `{ needsObservation }`. The route's `session.idle` branch collapses
-to a single `void handleSessionIdle(sessionId, { needsObservation }, deps)` call
+`ctx` carries `{ needsObservation, offerBaseline? }`. `observesIdle` is
+`needsObservation`, further narrowed for scheduler turns (which carry
+`offerBaseline`) to "`meta.responseOptionsAt` moved off the baseline captured at
+receipt", i.e. the turn wrote a new offer. `runAutoContinue(sessionId, ctx)`
+receives the ctx and the continuation dispatch inherits it unchanged, so a
+chain of continuations is judged once, at its last real idle, by the policy of
+the dispatch that started it (spec-observation-verdict-completeness). The
+route's `session.idle` branch collapses
+to a single `void handleSessionIdle(sessionId, ctx, deps)` call
 after `completeDispatch` resolves (so `isBusy` is already false and the
 continuation can start). `triggerAutoContinue` is subsumed into the authority; the
 scattered inline calls (markIdle, onSessionIdle, quota, triggerAutoContinue) are

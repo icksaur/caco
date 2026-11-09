@@ -130,9 +130,12 @@ resume or protection.
 - **Guaranteed usable**: the continuation dispatch re-asserts the reveal, so the
   tool is present in `getCurrentToolMetadata` at continuation start regardless of
   any resume between dispatches.
-- **Unobserved-safe**: the continuation is dispatched with
-  `needsObservation:false`, so the machine re-prompt never marks the session
-  unobserved (no stray status dot).
+- **Unobserved-correct**: the continuation inherits the originating dispatch's
+  observation policy (`needsObservation`, plus a scheduler's offer baseline), so
+  the reveal idle marks nothing and the continuation's real idle badges exactly
+  when the original turn would have. Originally dispatched with
+  `needsObservation:false`, which dropped the badge for human turns that revealed
+  tools (spec-observation-verdict-completeness).
 - **Purple is scoped**: only `[system:autocontinue]` renders purple; `[system:*]`
   (herd, etc.) stays gray.
 

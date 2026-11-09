@@ -10,8 +10,16 @@
 
 export interface IdleAuthorityCtx {
   /** Whether this dispatch's idle should mark the session unobserved
-   *  (false for agent/system/applet-sourced dispatches). */
+   *  (false for agent/system/applet-sourced dispatches). Carried unchanged into
+   *  every auto-continuation the turn spawns, so the turn's REAL idle is judged by
+   *  the policy of the dispatch that started it (spec-observation-verdict-
+   *  completeness). */
   needsObservation: boolean;
+  /** Scheduler turns only: observation is earned only by writing a NEW offer,
+   *  i.e. `meta.responseOptionsAt` at the real idle differs from this baseline
+   *  captured when the message was received (`null`: no offer existed then).
+   *  Absent: `needsObservation` alone decides. */
+  offerBaseline?: { at: string | null };
 }
 
 export interface IdleAuthorityDeps {
@@ -22,8 +30,12 @@ export interface IdleAuthorityDeps {
   pendingToolCount(sessionId: string): number;
   /** Drive the auto-continue runtime: fires a continuation and resolves `true`
    *  iff a continuation dispatch actually STARTED; `false` at cap / skip / a
-   *  failed fire (so the authority runs real-idle effects instead). */
-  runAutoContinue(sessionId: string): Promise<boolean>;
+   *  failed fire (so the authority runs real-idle effects instead). The ctx is
+   *  passed so the continuation dispatch inherits this turn's observation policy. */
+  runAutoContinue(sessionId: string, ctx: IdleAuthorityCtx): Promise<boolean>;
+  /** The session's current `meta.responseOptionsAt` (read only when the ctx
+   *  carries an `offerBaseline`). */
+  currentOfferAt(sessionId: string): string | undefined;
   /** Real-idle effect: mark the session unobserved (already gated by caller on
    *  needsObservation being honored here). */
   markIdle(sessionId: string): void;
@@ -35,8 +47,8 @@ export interface IdleAuthorityDeps {
   /** Real-idle effect: refresh quota. */
   pollQuota(): void;
   /** Real-idle effect: publish the idle to the external idle feed (spec-idle-
-   *  notifications). Gated on needsObservation exactly like markIdle, so herd
-   *  children / delegates / auto-continuations never reach it. */
+   *  notifications). Gated exactly like markIdle (see `observesIdle`), so the feed
+   *  and the unobserved dot always agree. */
   notifyExternalIdle(sessionId: string): void;
   /** Force-emit the dispatch-level idle (dispatchState.signalIdle) when a
    *  continuation was expected — so end() suppressed its idle emit — but failed to
@@ -59,8 +71,8 @@ export interface IdleAuthorityDeps {
  *     continuation was expected but did NOT start (cap, pref-off, or a failed
  *     fire that yields no further idle), fall through — otherwise herd-wake /
  *     delegate-completion / unobserved would be dropped forever for this turn.
- *  4. REAL idle: run the real-idle effects — markIdle (if needsObservation),
- *     herd hook, pollQuota.
+ *  4. REAL idle: run the real-idle effects — markIdle + notifyExternalIdle (if
+ *     `observesIdle`), herd hook, pollQuota.
  */
 export async function handleSessionIdle(
   sessionId: string,
@@ -71,7 +83,7 @@ export async function handleSessionIdle(
 
   let started = false;
   if (deps.pendingToolCount(sessionId) > 0) {
-    started = await deps.runAutoContinue(sessionId);
+    started = await deps.runAutoContinue(sessionId, ctx);
   }
 
   if (willFire && started) return; // false idle — a continuation is genuinely running
@@ -82,10 +94,22 @@ export async function handleSessionIdle(
   // continuation; since it did NOT start, replace that suppressed emit so the
   // dispatch-emit consumers aren't stranded (spec-idle-suppression-central).
   if (willFire && !started) deps.signalDispatchIdle(sessionId);
-  if (ctx.needsObservation) {
+  if (observesIdle(sessionId, ctx, deps)) {
     deps.markIdle(sessionId);
     deps.notifyExternalIdle(sessionId);
   }
   deps.herdOnSessionIdle(sessionId);
   deps.pollQuota();
+}
+
+/** Whether a REAL idle under this ctx is owed a human's attention: the dot and
+ *  the external feed both follow this one predicate. */
+export function observesIdle(
+  sessionId: string,
+  ctx: IdleAuthorityCtx,
+  deps: Pick<IdleAuthorityDeps, 'currentOfferAt'>,
+): boolean {
+  if (!ctx.needsObservation) return false;
+  if (!ctx.offerBaseline) return true;
+  return (deps.currentOfferAt(sessionId) ?? null) !== ctx.offerBaseline.at;
 }

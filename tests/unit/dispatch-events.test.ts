@@ -54,6 +54,8 @@ vi.mock('../../src/tool-usage-store.js', () => ({
 
 import { applyDispatchEventEffects, setGitEditPoller, applyPatchFilePaths } from '../../src/dispatch-events.js';
 import { mcpKey, cacoKey, builtinKey } from '../../src/tool-key.js';
+import { activityVersion } from '../../src/activity-version.js';
+import { needsTriage } from '../../src/pager-view.js';
 
 const SID = 'session-1';
 
@@ -320,6 +322,47 @@ describe('applyDispatchEventEffects', () => {
         data: { content: 'Example:\n```caco-actions\nsample\n```\nbut not really.' },
       } as never, makeDeps());
       expect(updateSessionMeta).not.toHaveBeenCalled();
+    });
+
+    describe('identical re-offer keeps its stamp (spec-response-actions)', () => {
+      const T0 = '2026-11-09T10:00:00.000Z';
+      const DISMISSED = '2026-11-09T10:05:00.000Z';
+      type Meta = { responseOptions?: string[]; responseOptionsAt?: string };
+
+      function reoffer(meta: Meta, lines: string[]): Meta {
+        updateSessionMeta.mockImplementationOnce((_id: string, mutate: (m: Meta) => void) => { mutate(meta); return true; });
+        applyDispatchEventEffects(SID, { type: 'assistant.message', data: { content: 'Done.\n```caco-actions\n' + lines.join('\n') + '\n```' } } as never, makeDeps());
+        return meta;
+      }
+
+      it('same strings, same order: keeps responseOptionsAt, does not bump the pager, and a dismissed card stays dismissed', () => {
+        const v0 = activityVersion.version;
+        const meta = reoffer({ responseOptions: ['Approve', 'Reject'], responseOptionsAt: T0 }, ['Approve', 'Reject']);
+        expect(meta.responseOptionsAt).toBe(T0);
+        expect(meta.responseOptions).toEqual(['Approve', 'Reject']);
+        expect(activityVersion.version).toBe(v0);
+        const now = Date.parse(DISMISSED) + 60_000;
+        const card = { sessionId: SID, name: 's', cwd: null, kind: 'interactive' as const, isBusy: false, ...meta, pagerDismissedAt: DISMISSED };
+        expect(needsTriage(card, now)).toBe(false);
+      });
+
+      it('different options restamp (and so resurface past a dismissal)', () => {
+        const meta = reoffer({ responseOptions: ['Approve', 'Reject'], responseOptionsAt: T0 }, ['Approve', 'Defer']);
+        expect(meta.responseOptionsAt).not.toBe(T0);
+        const now = Date.parse(meta.responseOptionsAt!) + 1_000;
+        const card = { sessionId: SID, name: 's', cwd: null, kind: 'interactive' as const, isBusy: false, ...meta, pagerDismissedAt: DISMISSED };
+        expect(needsTriage(card, now)).toBe(true);
+      });
+
+      it('same strings in a different order restamp', () => {
+        const meta = reoffer({ responseOptions: ['Approve', 'Reject'], responseOptionsAt: T0 }, ['Reject', 'Approve']);
+        expect(meta.responseOptionsAt).not.toBe(T0);
+      });
+
+      it('an offer cleared by a user message restamps even if the text repeats', () => {
+        const meta = reoffer({ responseOptions: undefined, responseOptionsAt: T0 }, ['Approve', 'Reject']);
+        expect(meta.responseOptionsAt).not.toBe(T0);
+      });
     });
   });
 

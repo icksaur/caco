@@ -64,6 +64,15 @@ appear on the feed. So the contract is stated purely in terms of
 (`src/session-history.ts`, already the delegate/herd response source) and calls
 `idleFeed.append`.
 
+> **Amended (spec-observation-verdict-completeness).** The gate is now
+> `observesIdle(ctx)`, the same predicate as the unobserved dot, so the feed and
+> the dot cannot disagree. It equals `needsObservation` except for scheduler
+> turns: those carry `needsObservation:true` plus an `offerBaseline`, and fire
+> only when the turn wrote a new `caco-actions` offer (`responseOptionsAt`
+> advanced). Quiet scheduler turns, and identical re-offers, do not fire.
+> Auto-continuations inherit the originating dispatch's ctx, so a user turn that
+> revealed tools fires once, at the continuation's real idle.
+
 **Transport — long-poll GET (`src/routes/idle.ts`, mounted at `/api`).**
 `GET /api/idle?after=<seq>&session=<id?>&wait=<ms>`. Returns
 `{ cursor, events, reset? }`. This is the primary decision:
@@ -107,8 +116,9 @@ well-behaved poller never evicts an unseen event.
 ## Invariants
 
 - **idle-fires-iff-needsObservation.** The external idle notification fires
-  exactly for a real idle with `needsObservation === true`. It MUST NOT fire for
-  herd children, delegates, or tool-enable reveal-idle. Enforced structurally by
+  exactly for a real idle where `observesIdle(ctx)` holds (`needsObservation`,
+  narrowed for scheduler turns to "wrote a new offer"). It MUST NOT fire for
+  herd children, delegates, quiet scheduler turns, or tool-enable reveal-idle. Enforced structurally by
   hooking inside the idle authority's `needsObservation` branch — after the
   `willFire && started` false-idle return — not by a parallel predicate.
 - **one classification authority.** No new "is this externally observable"

@@ -27,7 +27,8 @@ text behaviour, and persistence across session switch should be preserved.
   `.response-option-btn` buttons (text = `data-prompt`, both escaped). Click sets the
   textarea to the option text and submits it as the next message.
 - `responseOptions` is cleared on the next send and is restored on session switch
-  (`chat-view-controller` reads `data.responseOptions`).
+  (`chat-view-controller` reads `data.responseOptions`). Scheduler sends do not
+  clear it (see spec-response-actions).
 - The button label **is** the prompt — there is no separate label/payload today.
 
 ## Design

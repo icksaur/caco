@@ -848,8 +848,12 @@ Returns:
 A long-poll feed of "a session reached a real idle" events, for out-of-process
 automation (bash/python/powershell) — not a browser. It fires ONLY for
 externally/human-driven idles (dispatches with `needsObservation`, i.e. a normal
-`POST /messages`); it never fires for herd children, delegate targets, or
-tool-enable auto-continuations, which are already observed by an in-process actor.
+`POST /messages`), on exactly the idles that set the unobserved dot. It never
+fires for herd children or delegate targets, which are already observed by an
+in-process actor. A `source:"scheduler"` turn fires only if it wrote a NEW
+`caco-actions` offer; a quiet wake, or one that repeats the pending offer
+verbatim, does not. A turn that enabled tools fires once, after its
+auto-continuation finishes.
 
 - `GET /api/idle?after=<seq>&session=<id?>&wait=<ms>` — Return idle events with
   `seq > after`, optionally filtered to one session, long-polling up to `wait` ms
@@ -939,7 +943,10 @@ session never removes a card.
 
 - `POST /api/sessions/:id/pager-dismiss` — take the current offer off the board.
   Writes only `pagerDismissedAt`; it does NOT mark the session observed. The
-  watermark is monotonic, so a strictly newer offer brings the card back.
+  watermark is monotonic, so a strictly newer offer brings the card back. A
+  session that re-offers exactly the pending options (same strings, same order)
+  keeps the old offer time, so the card stays dismissed. A `source:"scheduler"`
+  message does not clear a pending offer; any other message does.
 
 Act on an entry by POSTing its option text verbatim to
 `POST /api/sessions/:id/messages` with `{ "prompt": "<option text>" }` and no

@@ -103,6 +103,40 @@ html, body { height: 100%; background: #1a1a1a; color: #d4d4d4; font-family: -ap
 
 .spacer { flex: 1; }
 
+.pager-btn {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 8px;
+  position: relative;
+  color: #888;
+  font-size: 11px;
+  font-weight: 600;
+  border-bottom: 1px solid #2a2a2a;
+  margin-bottom: 4px;
+}
+.pager-btn:hover { background: #2a2a2a; color: #ccc; }
+.pager-btn.active { background: #333; border-left: 3px solid #007acc; color: #ddd; }
+.pager-count {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #b13333;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  display: none;
+}
+.pager-count.show { display: block; }
+
 .main { flex: 1; position: relative; }
 .main iframe {
   position: absolute;
@@ -128,6 +162,7 @@ html, body { height: 100%; background: #1a1a1a; color: #d4d4d4; font-family: -ap
 <body>
 <div class="portal">
   <div class="sidebar" id="sidebar">
+    <div class="pager-btn" id="pagerBtn" title="Pager: waiting work from every instance">PG<span class="pager-count" id="pagerCount"></span></div>
     <div class="spacer"></div>
     <div class="add-btn" id="addBtn" title="Add Caco instance">+</div>
   </div>
@@ -140,6 +175,7 @@ html, body { height: 100%; background: #1a1a1a; color: #d4d4d4; font-family: -ap
 var PEERS_KEY = 'caco:portal:peers';
 var ACTIVE_KEY = 'caco:portal:active';
 var OFFLINE_TIMEOUT = 15000;
+var PAGER_ID = 'pager';
 
 var peers = [];
 var activePeerId = null;
@@ -156,6 +192,7 @@ function loadPeers() {
     savePeers();
   }
   activePeerId = localStorage.getItem(ACTIVE_KEY) || peers[0]?.id;
+  if (window.location.hash === '#pager') activePeerId = PAGER_ID;
 }
 
 function savePeers() {
@@ -251,7 +288,23 @@ function renderSidebar() {
     sidebar.insertBefore(el, addBtn.parentElement === sidebar ? sidebar.querySelector('.spacer') : addBtn);
   });
   
+  document.getElementById('pagerBtn').classList.toggle('active', activePeerId === PAGER_ID);
   updateBadges();
+}
+
+function peerOrigin(peer) {
+  try { return new URL(peer.url).origin; } catch { return null; }
+}
+
+function ensurePagerFrame() {
+  var existing = document.getElementById('frame-' + PAGER_ID);
+  if (existing) return existing;
+  var iframe = document.createElement('iframe');
+  iframe.id = 'frame-' + PAGER_ID;
+  iframe.src = '/pager.html?portal=1';
+  document.getElementById('main').appendChild(iframe);
+  document.getElementById('emptyState').style.display = 'none';
+  return iframe;
 }
 
 function ensureIframe(peer) {
@@ -262,6 +315,10 @@ function ensureIframe(peer) {
   iframe.id = 'frame-' + peer.id;
   iframe.src = peer.url;
   iframe.allow = 'clipboard-write';
+  // A reloaded instance page has lost its pager feed; renew it at once.
+  iframe.addEventListener('load', function() {
+    if (window.cacoPortalPager) window.cacoPortalPager.kick();
+  });
   document.getElementById('main').appendChild(iframe);
   
   startOfflineTimer(peer);
@@ -273,6 +330,7 @@ function switchTo(peerId) {
   activePeerId = peerId;
   saveActive();
   
+  if (peerId === PAGER_ID) ensurePagerFrame();
   var peer = peers.find(function(p) { return p.id === peerId; });
   if (peer) ensureIframe(peer);
   
@@ -455,14 +513,44 @@ window.addEventListener('message', function(e) {
 });
 
 document.getElementById('addBtn').addEventListener('click', addPeer);
+document.getElementById('pagerBtn').addEventListener('click', function() { switchTo(PAGER_ID); });
+
+// Host API for the merged pager (portal-pager.js, spec-portal-pager).
+window.cacoPortal = {
+  getPeers: function() { return peers.slice(); },
+  getFrameWindow: function(peerId) {
+    var f = document.getElementById('frame-' + peerId);
+    return f && f.contentWindow ? f.contentWindow : null;
+  },
+  openSession: function(peerId, sessionId) {
+    var peer = peers.find(function(p) { return p.id === peerId; });
+    var origin = peer && peerOrigin(peer);
+    if (!peer || !origin) return;
+    var frame = ensureIframe(peer);
+    switchTo(peer.id);
+    if (frame.contentWindow) frame.contentWindow.postMessage({ type: 'caco:navigateSession', sessionId: sessionId }, origin);
+  },
+  setPagerCount: function(n) {
+    var el = document.getElementById('pagerCount');
+    el.textContent = n > 0 ? String(n) : '';
+    el.classList.toggle('show', n > 0);
+  }
+};
 
 loadPeers();
 renderSidebar();
 
-if (activePeerId) {
+// Every instance frame loads up front: the merged pager needs all of them, and
+// an unloaded frame would read as unreachable.
+peers.forEach(function(p) { ensureIframe(p); });
+
+if (activePeerId === PAGER_ID) {
+  switchTo(PAGER_ID);
+} else if (activePeerId) {
   var activePeer = peers.find(function(p) { return p.id === activePeerId; });
   if (activePeer) switchTo(activePeerId);
 }
 </script>
+<script type="module" src="/portal-pager.js"></script>
 </body>
 </html>

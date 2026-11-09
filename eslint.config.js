@@ -179,6 +179,8 @@ export default [
       'public/*.min.js',
       'public/bundle.js',
       'public/bundle.js.map',
+      'public/portal-pager.js',
+      'public/portal-pager.js.map',
       'applets/**',
       'tests/api.test.ts' // Integration test using node:test, not vitest
     ]

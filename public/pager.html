@@ -66,6 +66,12 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 .run-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid #2a2a2a; font-size: 15px; color: #bbb; }
 .run-row:last-child { border-bottom: none; }
 .run-name { word-break: break-word; }
+/* Portal mode (spec-portal-pager): which instance a card or row belongs to. */
+.inst { font-size: 12px; color: #9cc3e0; background: #1f2d38; border-radius: 4px; padding: 2px 7px; white-space: nowrap; }
+.name.link { cursor: pointer; }
+.name.link:hover { text-decoration: underline; }
+.inst-row { padding: 8px 4px; font-size: 14px; color: #b95; border-bottom: 1px solid #2a2a2a; word-break: break-word; }
+.inst-row.refused { color: #d89; }
 </style>
 </head>
 <body>
@@ -82,6 +88,10 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
   'use strict';
 
   var WAIT_MS = 10000;
+  // Inside the portal the board comes from every instance through the portal
+  // (spec-portal-pager); standalone it is this instance's /api/pager.
+  var portalMode = /[?&]portal=1(&|$)/.test(window.location.search);
+  var bridge = null;
   var boardEl = document.getElementById('board');
   var runningEl = document.getElementById('running');
   var connEl = document.getElementById('conn');
@@ -159,17 +169,47 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     });
   }
 
+  // Card identity. Standalone a session id is unique; on the merged board the
+  // same id could exist on two instances, so the portal supplies an
+  // instance-qualified key.
+  function keyOf(entry) {
+    return entry.key || entry.sessionId;
+  }
+
+  function sendTo(entry, text) {
+    if (bridge) return bridge.send(entry.key, text);
+    return post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/messages', { prompt: text });
+  }
+
+  function dismissAt(entry) {
+    if (bridge) return bridge.dismiss(entry.key);
+    return post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/pager-dismiss');
+  }
+
   function renderCard(entry) {
     var card = el('div', 'card');
     // Card identity, so a rebuild can recognize the card holding the caret and
     // leave it standing rather than matching on position or name.
-    card.setAttribute('data-session', entry.sessionId);
+    card.setAttribute('data-session', keyOf(entry));
     // The offer these buttons were built from. A kept card is not rebuilt, so
     // this is how a later render notices its options no longer match the server.
     card.setAttribute('data-offer', (entry.options || []).join('\u0000'));
 
     var head = el('div', 'card-head');
-    head.appendChild(el('span', 'name', entry.name || entry.sessionId.slice(0, 8)));
+    if (entry.instanceName) head.appendChild(el('span', 'inst', entry.instanceName));
+    var nameEl = el('span', 'name', entry.name || entry.sessionId.slice(0, 8));
+    if (bridge && entry.key) {
+      // Opens the session in its instance, inside the portal.
+      nameEl.className = 'name link';
+      nameEl.setAttribute('role', 'link');
+      nameEl.tabIndex = 0;
+      nameEl.title = 'Open this session';
+      nameEl.addEventListener('click', function () { bridge.open(entry.key); });
+      nameEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') bridge.open(entry.key);
+      });
+    }
+    head.appendChild(nameEl);
     head.appendChild(el('span', 'when', relTime(entry.idleAt)));
     card.appendChild(head);
 
@@ -195,13 +235,13 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       // unlocked, draft intact — and a second tap would deliver the message twice.
       // Releasing the board hold on blur makes that rebuild the common case
       // rather than a race.
-      acted[entry.sessionId] = true;
-      post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/messages', { prompt: text })
+      acted[keyOf(entry)] = true;
+      sendTo(entry, text)
         .then(function () {
           // The send makes the session busy, which bumps the version and wakes
           // the parked poll on its own; hide the card now so it cannot be
           // clicked twice in the gap.
-          clearDraft(entry.sessionId);
+          clearDraft(keyOf(entry));
           card.remove();
         })
         .catch(function (err) {
@@ -216,7 +256,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
           }
           // Nothing was sent, so the card belongs back on the board with its
           // text; lift the suppression or the next render would drop it.
-          delete acted[entry.sessionId];
+          delete acted[keyOf(entry)];
           lock(false);
           msg.textContent = 'Send failed: ' + err.message;
         });
@@ -264,7 +304,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
         send.hidden = well.value.trim().length === 0;
       }
 
-      well.value = drafts[entry.sessionId] || '';
+      well.value = drafts[keyOf(entry)] || '';
       syncSend();
       // A restored draft must be grown too: rebuilds are frequent and unattended,
       // so without this a multi-line message reappears clipped to one row and
@@ -272,7 +312,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       grow();
 
       well.addEventListener('input', function () {
-        setDraft(entry.sessionId, well.value);
+        setDraft(keyOf(entry), well.value);
         syncSend();
         grow();
       });
@@ -285,7 +325,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       // without this the board could rebuild while the user is deciding.
       stage = function (optionText) {
         well.value = optionText;
-        setDraft(entry.sessionId, optionText);
+        setDraft(keyOf(entry), optionText);
         syncSend();
         grow();
         well.focus();
@@ -311,15 +351,15 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     dismiss.addEventListener('click', function () {
       msg.textContent = '';
       lock(true);
-      acted[entry.sessionId] = true;
-      post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/pager-dismiss')
+      acted[keyOf(entry)] = true;
+      dismissAt(entry)
         .then(function () {
           // The dismissal bumps the version, so the parked poll refreshes itself.
-          clearDraft(entry.sessionId);
+          clearDraft(keyOf(entry));
           card.remove();
         })
         .catch(function (err) {
-          delete acted[entry.sessionId];
+          delete acted[keyOf(entry)];
           lock(false);
           msg.textContent = 'Dismiss failed: ' + err.message;
         });
@@ -343,13 +383,28 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     running.forEach(function (b) {
       var row = el('div', 'run-row');
       row.appendChild(el('span', 'spinner'));
+      if (b.instanceName) row.appendChild(el('span', 'inst', b.instanceName));
       row.appendChild(el('span', 'run-name', b.name || b.sessionId.slice(0, 8)));
       runningEl.appendChild(row);
+    });
+    // Portal mode: an instance that is not live says so in its own row, so a
+    // missing machine is visible rather than silently absent from the board.
+    (view.instances || []).forEach(function (inst) {
+      if (inst.status === 'live') return;
+      var text;
+      if (inst.status === 'refused') {
+        text = inst.name + ': not connected. On that instance set CACO_PORTAL_ORIGINS=' + (view.portalOrigin || '') + ' and restart it.';
+      } else if (inst.status === 'pending') {
+        text = inst.name + ': connecting';
+      } else {
+        text = inst.name + ': unreachable';
+      }
+      runningEl.appendChild(el('div', 'inst-row ' + inst.status, text));
     });
   }
 
   function renderBoard(view) {
-    var waiting = (view.waiting || []).filter(function (w) { return !acted[w.sessionId]; });
+    var waiting = (view.waiting || []).filter(function (w) { return !acted[keyOf(w)]; });
 
     // Drop stale local suppressions once the server agrees the session is gone
     // from the board, so acting on it again later still works. Lives here rather
@@ -357,7 +412,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     // drawn: pruning against a view whose cards were never rendered would
     // un-suppress a card that then reappears on the next rebuild.
     var present = Object.create(null);
-    (view.waiting || []).forEach(function (w) { present[w.sessionId] = true; });
+    (view.waiting || []).forEach(function (w) { present[keyOf(w)] = true; });
     Object.keys(acted).forEach(function (id) { if (!present[id]) delete acted[id]; });
 
     // The card holding the caret is never torn down. Restoring text into a fresh
@@ -409,7 +464,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     var seenKept = false;
     var keptMatched = false;
     waiting.forEach(function (entry) {
-      if (entry.sessionId === keepId) { seenKept = true; keptMatched = true; refreshCard(keep, entry); return; }
+      if (keyOf(entry) === keepId) { seenKept = true; keptMatched = true; refreshCard(keep, entry); return; }
       var node = renderCard(entry);
       if (seenKept) boardEl.appendChild(node);
       else boardEl.insertBefore(node, keep);
@@ -549,7 +604,32 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       });
   }
 
-  poll(true);
+  function instancesConn(view) {
+    var list = view.instances || [];
+    var live = list.filter(function (i) { return i.status === 'live'; }).length;
+    if (list.length === 0) { setConn('no instances', true); return; }
+    if (live === list.length) { setConn(live === 1 ? 'live' : 'live: ' + live + ' instances', false); return; }
+    setConn(live + ' of ' + list.length + ' instances live', true);
+  }
+
+  function connectBridge(attempt) {
+    var b = null;
+    try { b = window.parent && window.parent.cacoPortalPager; } catch (_) { b = null; }
+    if (!b) {
+      // The portal's module may still be loading; give it a few seconds.
+      if (attempt < 50) { setTimeout(function () { connectBridge(attempt + 1); }, 100); return; }
+      setConn('open this page from the portal', true);
+      return;
+    }
+    bridge = b;
+    bridge.subscribe(function (view) {
+      instancesConn(view);
+      render(view);
+    });
+  }
+
+  if (portalMode) connectBridge(0);
+  else poll(true);
 })();
 </script>
 </body>

@@ -31,6 +31,7 @@ import { adHocBar } from './adhoc-bar.js';
 import { initUsageDisplays, refreshUsageDisplays } from './usage-display.js';
 import { getPanelState } from './panel-state.js';
 import { bindPanelStateToDom, readPanelStateFromDom } from './panel-dom-binder.js';
+import { installPagerBridge } from './pager-bridge.js';
 
 declare global {
   interface Window {
@@ -257,6 +258,15 @@ document.addEventListener('DOMContentLoaded', () => {
       void sessionClick(e.data.sessionId);
     }
   });
+
+  // Merged portal pager: answer an allowed portal's pager requests (spec-portal-pager).
+  if (window.parent !== window) {
+    installPagerBridge({
+      win: window,
+      allowed: (window as unknown as { CACO_PORTAL_ORIGINS?: string[] }).CACO_PORTAL_ORIGINS ?? [],
+      fetchFn: (...args) => fetch(...args),
+    });
+  }
 
   // Initialize hostname-based favicon and button colors
   initHostnameHash();

@@ -22,6 +22,8 @@ dist/
 build/
 public/bundle.js
 public/bundle.js.map
+public/portal-pager.js
+public/portal-pager.js.map
 
 # Misc
 *.swp

@@ -147,11 +147,14 @@ Open `/portal.html` to aggregate multiple Caco instances in a single view. Each 
 - **Sidebar** shows connected instances as icons. Click to switch between them.
 - **Add instances** by clicking the `+` button and entering the Caco URL (e.g., `http://work-machine:53000`).
 - **Drag-and-drop sessions** between instances to transfer them. Drag a session from one instance's session list and drop it on another instance's sidebar icon. The session archive is exported from the source and imported at the destination.
-- Instances are saved in `localStorage` and reconnect on reload.
+- Instances are saved in `localStorage` and reconnect on reload. Every instance loads at startup, so badges and the merged pager cover all of them.
+- **Merged pager.** The `PG` button at the top of the sidebar (or `/portal.html#pager`) opens one pager board for every instance. Each card and busy row is labeled with its instance. Send and Dismiss go to the instance that owns the session, and clicking a session name opens it in that instance. An instance that is down shows as `unreachable` without breaking the board. Its count badge shows how many cards are waiting.
+- **Enable remote instances for the merged pager.** Each remote instance only answers a portal on an origin it trusts, because the board can send prompts. On every remote instance, set `CACO_PORTAL_ORIGINS` to the portal's origin and restart it, for example `CACO_PORTAL_ORIGINS=http://localhost:53000` (comma-separate several). The instance that serves the portal needs nothing. Until it is set, the board lists the instance as not connected and shows the value to use. See [docs/spec-portal-pager.md](docs/spec-portal-pager.md).
 
 ### Pager
 
 Open `/pager.html` to triage finished work in one place, away from the main UI.
+To triage several machines on one board, use the merged pager in the [Portal](#portal).
 
 - **One row per running session**, each with its own indicator, so you can read which
   session is working rather than just how many are.

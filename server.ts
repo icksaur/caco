@@ -49,6 +49,7 @@ import { idleFeed } from './src/idle-feed.js';
 import { initTerminalManager } from './src/terminal-manager.js';
 import { startRotationSweeper, startQuietMaintenance } from './src/session-history-rotation.js';
 import { requireSameOrigin } from './src/security/same-origin.js';
+import { portalOrigins } from './src/security/portal-origins.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { startWakeManager, stopWakeManager, wakeManager } from './src/wake-runtime.js';
@@ -110,7 +111,8 @@ const indexHtmlPath = join(__dirname, 'public', 'index.html');
 const serverHostname = hostname();
 const cachedIndexHtml = readFileSync(indexHtmlPath, 'utf-8').replace(
   '</head>',
-  `<script>window.SERVER_HOSTNAME = ${JSON.stringify(serverHostname)};</script></head>`
+  `<script>window.SERVER_HOSTNAME = ${JSON.stringify(serverHostname)};` +
+  `window.CACO_PORTAL_ORIGINS = ${JSON.stringify(portalOrigins).replace(/</g, '\\u003c')};</script></head>`
 );
 
 app.get('/', (req, res) => {

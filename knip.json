@@ -13,6 +13,7 @@
     ".husky/**",
     "public/*.min.js",
     "public/bundle.js",
+    "public/portal-pager.js",
     "public/chat.js",
     "public/markdown-renderer.js",
     "public/script.js",

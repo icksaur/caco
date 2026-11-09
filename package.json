@@ -17,7 +17,7 @@
     "check:lockfile": "node scripts/check-lockfile.mjs",
     "fix:lockfile": "node scripts/check-lockfile.mjs --fix",
     "build:highlight": "node scripts/build-highlight.js",
-    "build:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --minify --sourcemap",
+    "build:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --minify --sourcemap && esbuild public/ts/portal-pager.ts --bundle --outfile=public/portal-pager.js --format=esm --target=es2020 --minify --sourcemap",
     "watch:client": "esbuild public/ts/main.ts --bundle --outfile=public/bundle.js --format=esm --target=es2020 --sourcemap --watch",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.frontend.json",
     "lint": "eslint .",

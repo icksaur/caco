@@ -242,12 +242,17 @@ Adding `caco_wake` to `CACO_DISABLED_TOOLS` turns wakes off entirely. See
 Agents don't send messages people read. In a turn you didn't start (wakes,
 slug schedules, delegated or herd workers, agent, system and applet messages,
 and their continuations), Caco denies tools that send mail, Teams messages, PR
-or work item comments, reviewer changes, or IcM posts and state changes. The
+or work item comments (including work item updates that write
+`System.History`), reviewer changes, or IcM posts and state changes, plus the
+general-purpose `workiq-do_action`/`create_entity`/`update_entity`/`delete_entity`
+and `computer-use-*` tools. The
 model is told to write a draft and offer it as a `caco-actions` option.
 Drafts (`CreateDraftMessage`, `UpdateDraft`), `teams-SendMessageToSelf`, and
 resolving PR threads stay allowed. Turns you start by typing a message or
 invoking a skill are not blocked. Each denial is logged as
-`[COMMS-GUARD] Denied <tool> in <session>`.
+`[COMMS-GUARD] Denied <tool> in <session>`. This is defense in depth, not a
+sandbox: a turn with shell access can still reach anything, including Caco's
+own message route.
 
 Set it with `POST /api/preferences`:
 

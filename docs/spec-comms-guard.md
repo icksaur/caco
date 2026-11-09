@@ -16,8 +16,9 @@ this for turns the user did not start.
   untouched.
 - Carl can widen the guard to every turn, turn it off, or replace the list.
 
-Non-goals: guarding generic automation that can reach anything (shell,
-`computer-use-*`, `workiq-do_action`). See Risks.
+Non-goals: a sandbox. A turn with shell access can still reach anything (see
+Risks). The guard is defense in depth against direct tool calls and prompt
+injection.
 
 ## Design
 
@@ -102,6 +103,18 @@ Defaults (`DEFAULT_COMMS_GUARD_PATTERNS`). Names were checked against
   `acknowledge_incident`, `mitigate_incident`, `resolve_incident`,
   `reactivate_incident`, `transfer_incident`, `update_incident`,
   `update_incident_severity`, `request_assistance`.
+- General-purpose channels that can reach mail, Teams, or the desktop:
+  `workiq-do_action`, `workiq-create_entity`, `workiq-update_entity`,
+  `workiq-delete_entity`, `computer-use-*`. Allowed: workiq reads (`ask`,
+  `fetch`, `retrieve`, ...). In the default mode this only affects unattended
+  turns, so interactive use is unchanged.
+
+**Work item history.** Writing `System.History` posts a work item discussion
+comment. A fixed rule (`WORK_ITEM_HISTORY_TOOLS`, not a pattern, so custom
+patterns don't remove it) guards `wit_work_item_write`, `wit_update_work_item`,
+`wit_update_work_items_batch`, `wit_create_work_item`, and
+`wit_add_child_work_items` when their serialized arguments contain
+`System.History` (case-insensitive). Other work item writes stay allowed.
 
 ## Invariants
 
@@ -127,8 +140,9 @@ Defaults (`DEFAULT_COMMS_GUARD_PATTERNS`). Names were checked against
 | risk | mitigation |
 |---|---|
 | A new MCP server adds a send tool | The pattern list is a preference; the README names it. Unknown tools are not guarded. |
-| Generic tools reach comms anyway (`bash` + curl, `computer-use-*`, `workiq-do_action`) | Out of scope. The prompt rule still applies. Listed as an open question. |
-| ADO `wit_update_work_item` can write `System.History`, which shows as a discussion comment | Not guarded, because that would need field inspection. Open question. |
+| Shell reaches comms anyway (`bash`/`powershell`, `caco_run_workflow`/`caco.sh` + curl or a CLI) | Not closable by a tool hook. The prompt rule still applies. |
+| **Known bypass:** a turn with shell access can POST to the local `/api/sessions/:id/messages` route with no `source`, which starts a human-rooted turn in another session (or its own, once idle) | Can't be closed locally: a local process can forge any header or token the browser could send. The guard is defense in depth against direct tool calls and prompt injection, not a sandbox. |
+| Work item `System.History` written in an unexpected argument shape | The check is a substring test over the serialized arguments, so any shape that names the field matches. |
 | The SDK changes the hook contract | `comms-guard.test.ts` pins the output shape; typecheck pins the hook type. |
 
 ## Acceptance
@@ -142,9 +156,12 @@ Defaults (`DEFAULT_COMMS_GUARD_PATTERNS`). Names were checked against
 | G5 | Server-prefixed names match; `SendMessageToSelf`, `CreateDraftMessage`, thread `update_status` stay allowed | `comms-guard.test.ts` |
 | G6 | Denial log has no arguments; no root fails closed | `comms-guard.test.ts` |
 | G7 | Preference validation | `session-state.test.ts` |
+| G8 | workiq writes and `computer-use-*` guarded; workiq reads allowed | `comms-guard.test.ts` |
+| G9 | Work item writes guarded only when they set `System.History`, even with custom patterns | `comms-guard.test.ts` |
 
 ## Plan
 
 | phase | scope | status |
 |---|---|---|
 | 1 | `src/comms-guard.ts`, hook wiring, dispatch root, preferences, tests, docs | done |
+| 2 | General-purpose channels, `System.History` rule, documented shell bypass | done |

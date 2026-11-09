@@ -66,6 +66,31 @@ describe('comms guard patterns (spec-comms-guard)', () => {
     expect(isGuardedCall('ADO-repo_pull_request_thread_write', {}, D)).toBe(true);
     expect(isGuardedCall('ADO-repo_pull_request_thread_write', undefined, D)).toBe(true);
   });
+
+  it.each(['workiq-do_action', 'workiq-create_entity', 'workiq-update_entity', 'workiq-delete_entity', 'computer-use-click', 'computer-use-type_text'])(
+    'guards the general-purpose channel %s', (name) => {
+      expect(isGuardedCall(name, {}, D)).toBe(true);
+    });
+
+  it.each(['workiq-ask', 'workiq-fetch', 'workiq-retrieve'])('leaves workiq reads allowed: %s', (name) => {
+    expect(isGuardedCall(name, {}, D)).toBe(false);
+  });
+
+  it.each([
+    ['ADO-wit_update_work_item', { id: 1, updates: [{ path: '/fields/System.History', value: 'hi' }] }],
+    ['ADO-wit_update_work_items_batch', { updates: [{ id: 1, path: '/fields/system.history', value: 'hi' }] }],
+    ['ADO-wit_work_item_write', { action: 'update', fields: [{ name: 'System.History', value: 'hi' }] }],
+    ['ADO-wit_create_work_item', { fields: [{ name: 'System.History', value: 'hi' }] }],
+    ['ADO-wit_add_child_work_items', { items: [{ history: 'x', fields: { 'System.History': 'hi' } }] }],
+  ])('guards %s when it writes System.History', (name, args) => {
+    expect(isGuardedCall(name, args, D)).toBe(true);
+  });
+
+  it('allows work item writes that do not touch System.History, even with custom patterns', () => {
+    expect(isGuardedCall('ADO-wit_update_work_item', { id: 1, updates: [{ path: '/fields/System.State', value: 'Active' }] }, D)).toBe(false);
+    expect(isGuardedCall('ADO-wit_work_item_write', { action: 'update', fields: [{ name: 'System.Title', value: 'x' }] }, D)).toBe(false);
+    expect(isGuardedCall('ADO-wit_update_work_item', { updates: [{ path: '/fields/System.History' }] }, ['Nothing'])).toBe(true);
+  });
 });
 
 describe('comms guard decision', () => {

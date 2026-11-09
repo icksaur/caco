@@ -56,7 +56,33 @@ export const DEFAULT_COMMS_GUARD_PATTERNS: readonly string[] = [
   'update_incident',
   'update_incident_severity',
   'request_assistance',
+  // General-purpose channels that can reach mail, Teams, or the desktop.
+  'workiq-do_action',
+  'workiq-create_entity',
+  'workiq-update_entity',
+  'workiq-delete_entity',
+  'computer-use-*',
 ];
+
+/**
+ * Work item write tools. A call is guarded when its serialized arguments
+ * mention `System.History`, which posts a discussion comment. A fixed rule,
+ * applied alongside the patterns (custom patterns do not remove it).
+ */
+export const WORK_ITEM_HISTORY_TOOLS: readonly string[] = [
+  'wit_work_item_write',
+  'wit_update_work_item',
+  'wit_update_work_items_batch',
+  'wit_create_work_item',
+  'wit_add_child_work_items',
+];
+
+function writesWorkItemHistory(names: string[], args: unknown): boolean {
+  if (!WORK_ITEM_HISTORY_TOOLS.some(t => names.some(n => n.toLowerCase() === t))) return false;
+  let text: string;
+  try { text = JSON.stringify(args) ?? ''; } catch { return true; }
+  return /system\.history/i.test(text);
+}
 
 const SEPARATOR = /(?:__|[-/.:])/g;
 
@@ -87,6 +113,7 @@ function actionOf(args: unknown): string | undefined {
  *  matches a call with no string `action` (fail closed). */
 export function isGuardedCall(toolName: string, args: unknown, patterns: readonly string[]): boolean {
   const names = nameCandidates(toolName);
+  if (writesWorkItemHistory(names, args)) return true;
   const action = actionOf(args);
   for (const p of patterns) {
     const hash = p.indexOf('#');

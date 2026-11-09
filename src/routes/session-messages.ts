@@ -38,6 +38,7 @@ import { onSessionIdle } from '../herd-runtime.js';
 import { handleSessionIdle, type IdleAuthorityCtx } from '../idle-authority.js';
 import { getLastAssistantMessage } from '../session-history.js';
 import { idleFeed } from '../idle-feed.js';
+import { emitTurnOutcome } from '../turn-outcome.js';
 
 const router = Router();
 
@@ -107,6 +108,7 @@ export function handleIdle(sessionId: string, ctx: IdleAuthorityCtx, correlation
     herdOnSessionIdle: id => { void onSessionIdle(id); },
     pollQuota: () => { void sessionManager.pollQuota(); },
     signalDispatchIdle: id => dispatchState.signalIdle(id),
+    onRealIdle: id => emitTurnOutcome(id, 'ok'),
     // Publish to the external idle feed (spec-idle-notifications). The idle
     // authority calls this only where it marks the session unobserved, so herd
     // children / delegates / quiet scheduler turns never reach the feed. The final
@@ -183,6 +185,9 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     }
     updateSessionMeta(sessionId, meta => {
       if (meta.responseOptions) meta.responseOptions = undefined;
+      // A steer is human activity: the wake loop's quiet window and expiry key on
+      // lastUsedAt (spec-session-wake).
+      meta.lastUsedAt = new Date().toISOString();
     }, { createIfMissing: false });
     try {
       await sessionManager.sendStream(sessionId, prompt!, { mode: 'immediate' });
@@ -487,6 +492,9 @@ export async function dispatchMessage(
     }
     onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> } as unknown as SessionEvent);
     console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
+    // Every non-idle teardown ends the turn as a failure. An idle's outcome is
+    // decided by the idle authority instead (a reveal-idle is not the end).
+    if (reason !== 'session.idle') emitTurnOutcome(sessionId, 'error', reason);
   };
 
   try {

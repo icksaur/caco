@@ -46,6 +46,21 @@ export const DISPATCH_TIMEOUT_MS = 5 * 60 * 1000;
 export const SCHEDULE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 export const SCHEDULE_BUSY_DELAY_MS = 60 * 60 * 1000;
 
+// Session self-wakes (spec-session-wake). A separate, finer loop than the slug
+// scheduler so a 1 h cadence is not late by up to 30 min.
+export const WAKE_CHECK_INTERVAL_MS = Number(process.env.CACO_WAKE_CHECK_INTERVAL_MS) || 5 * 60 * 1000;
+export const WAKE_MIN_HOURS = 1;
+export const WAKE_MAX_HOURS = 24;
+export const WAKE_NOTE_MAX = 200;
+export const WAKE_MAX_ACTIVE = Number(process.env.CACO_WAKE_MAX) || 20;
+export const WAKE_MAX_RUNNING = Number(process.env.CACO_WAKE_MAX_RUNNING) || 2;
+export const WAKE_MAX_FAILURES = 3;
+export const WAKE_HUMAN_QUIET_MS = 30 * 60 * 1000;
+export const WAKE_EXPIRE_MS = Number(process.env.CACO_WAKE_EXPIRE_MS) || 7 * 24 * 60 * 60 * 1000;
+export const WAKE_TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+export const WAKE_WINDOW_DEFAULT = 'Mon-Fri 07:00-19:00';
+export const WAKE_WINDOW = process.env.CACO_WAKE_WINDOW || WAKE_WINDOW_DEFAULT;
+
 // Cache TTLs (milliseconds)
 export const OUTPUT_CACHE_TTL_MS = 30 * 60 * 1000;
 export const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;

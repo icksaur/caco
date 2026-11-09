@@ -56,6 +56,9 @@ export interface IdleAuthorityDeps {
    *  restart-manager) would never see an idle for this turn
    *  (spec-idle-suppression-central). */
   signalDispatchIdle(sessionId: string): void;
+  /** Real-idle effect: the turn has truly ended, after any continuations
+   *  (spec-session-wake settles a running wake on this). */
+  onRealIdle?(sessionId: string): void;
 }
 
 /**
@@ -100,6 +103,7 @@ export async function handleSessionIdle(
   }
   deps.herdOnSessionIdle(sessionId);
   deps.pollQuota();
+  deps.onRealIdle?.(sessionId);
 }
 
 /** Whether a REAL idle under this ctx is owed a human's attention: the dot and

@@ -51,6 +51,8 @@ import { startRotationSweeper, startQuietMaintenance } from './src/session-histo
 import { requireSameOrigin } from './src/security/same-origin.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
+import { startWakeManager, stopWakeManager, wakeManager } from './src/wake-runtime.js';
+import { createWakeTool } from './src/wake-tool.js';
 import { registerUsageSink } from './src/usage-metrics.js';
 import { appendUsageRecord } from './src/usage-store.js';
 import { loadServerExtensions } from './src/extension-runtime.js';
@@ -290,8 +292,9 @@ async function start(): Promise<void> {
     const surfaceTools = createSurfaceTools(sessionRef);
     const browserTools = createBrowserTools(sessionRef);
     const toolRevealTools = createToolRevealTool(sessionRef);
+    const wakeTools = createWakeTool(sessionRef);
     
-    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...herdTools, ...sessionHistoryTools, ...memoryTools, ...reportIntentTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools, ...toolRevealTools];
+    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...herdTools, ...sessionHistoryTools, ...memoryTools, ...reportIntentTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools, ...toolRevealTools, ...wakeTools];
     // Capture the full Caco tool catalog (pre-filter, incl. hard-disabled) once, for
     // the mcp-servers applet. See docs/spec-tool-reveal.md Phase A.
     if (sessionManager.getCacoToolCatalog().length === 0) {
@@ -351,6 +354,8 @@ async function start(): Promise<void> {
     onSessionDeleted(sid);
     // Drop the idle feed's per-session bookkeeping for the deleted session.
     idleFeed.remove(sid);
+    // Drop a deleted session's wake from the index (re-reads meta; a no-op otherwise).
+    wakeManager.refresh(sid);
   });
   
   bootLog('starting background services');
@@ -407,6 +412,8 @@ async function start(): Promise<void> {
   // orphaned children, and re-wake any parent with a non-active child. Must
   // run after listen() because the wake POSTs the message route.
   void scanHerdsOnBoot();
+  // Session self-wakes (spec-session-wake): post-listen for the same reason.
+  startWakeManager();
   // Start the soft-archive reaper: periodically archive sessions parked in the
   // auto-archive folder that have been idle past the threshold (spec-soft-archive-folder).
   startAutoArchiveReaper();
@@ -468,6 +475,7 @@ process.on('SIGINT', () => {
   console.log('\n✓ Shutting down gracefully...');
   flushAllFileEditsCardLists();
   stopScheduleManager();
+  stopWakeManager();
   sessionState.shutdown()
     .then(() => sessionManager.shutdown())
     .then(() => {

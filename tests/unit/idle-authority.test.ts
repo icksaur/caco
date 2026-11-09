@@ -37,6 +37,16 @@ function makeDeps(over: Partial<{
 describe('handleSessionIdle (spec-idle-authority)', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it('onRealIdle fires on a real idle only, never on a reveal false idle (spec-session-wake)', async () => {
+    const onRealIdle = vi.fn();
+    const falseIdle = makeDeps({ willFire: true, pending: 1, started: true });
+    await handleSessionIdle(SID, { needsObservation: true }, { ...falseIdle.deps, onRealIdle });
+    expect(onRealIdle).not.toHaveBeenCalled();
+    const realIdle = makeDeps();
+    await handleSessionIdle(SID, { needsObservation: false }, { ...realIdle.deps, onRealIdle });
+    expect(onRealIdle).toHaveBeenCalledWith(SID);
+  });
+
   it('FALSE idle (willFire + continuation STARTED): fires and suppresses ALL real-idle effects', async () => {
     const { deps, spies } = makeDeps({ willFire: true, pending: 1, started: true });
     await handleSessionIdle(SID, { needsObservation: true }, deps);

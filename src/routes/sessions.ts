@@ -36,6 +36,11 @@ import { modelCostSummary } from '../model-billing.js';
 import { snapshot as throughputSnapshot } from '../session-throughput.js';
 import { resolveAgentSelection, visibleAgents, filterSkillCommands } from '../agent-command.js';
 import { skillToolEnabled } from '../tool-registry.js';
+import { wakeManager } from '../wake-runtime.js';
+
+/** Written into an export's caco/<id>/ when the export also deletes the source
+ *  (a migration). Import consumes it (spec-session-wake). */
+export const WAKE_MIGRATION_MARKER = 'wake-migration.json';
 
 /** Canonical wrapper instructing the agent to actually call its `skill` tool. Matches
  *  the SDK's own `commands.invoke` agent-prompt; used as a fallback when the SDK result
@@ -1092,7 +1097,7 @@ router.get('/sessions/:sessionId/export', async (req: Request, res: Response) =>
 
   try {
     const tar = await import('tar');
-    const { mkdtempSync, cpSync, rmSync } = await import('fs');
+    const { mkdtempSync, cpSync, rmSync, writeFileSync } = await import('fs');
     const { tmpdir } = await import('os');
 
     // Build a staging directory with the archive structure
@@ -1101,6 +1106,9 @@ router.get('/sessions/:sessionId/export', async (req: Request, res: Response) =>
       cpSync(join(sdkBase, sessionId), join(staging, 'sdk', sessionId), { recursive: true });
       if (existsSync(join(cacoBase, sessionId))) {
         cpSync(join(cacoBase, sessionId), join(staging, 'caco', sessionId), { recursive: true });
+        // A migration (export + delete) keeps the session's wake armed on import;
+        // a plain copy arrives paused (spec-session-wake).
+        if (shouldDelete) writeFileSync(join(staging, 'caco', sessionId, WAKE_MIGRATION_MARKER), JSON.stringify({ exportedAt: new Date().toISOString() }));
       }
 
       res.setHeader('Content-Type', 'application/gzip');
@@ -1218,9 +1226,14 @@ router.post('/sessions/import', async (req: Request, res: Response) => {
 
       // Copy to target locations
       cpSync(join(sdkDir, sessionId), targetSdk, { recursive: true, force: true });
+      let wakeMigrated = false;
       if (ex(join(cacoDir, sessionId))) {
+        const marker = join(cacoDir, sessionId, WAKE_MIGRATION_MARKER);
+        wakeMigrated = ex(marker);
+        if (wakeMigrated) rmSync(marker, { force: true });
         cpSync(join(cacoDir, sessionId), targetCaco, { recursive: true, force: true });
       }
+      wakeManager.applyImport(sessionId, wakeMigrated);
 
       // Refresh session cache
       sessionManager.refreshCache();

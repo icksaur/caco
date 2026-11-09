@@ -156,6 +156,10 @@ export function excludedBuiltinNames(): string[] {
  *    strand the tool on the very turn the nudge fires, and the tool's whole
  *    value is landing a title before the model produces enough output to force
  *    an enable round-trip. See spec-report-intent-tool.
+ *  - `caco_wake` — every wake prompt tells the session to call it with "clear"
+ *    once it stops waiting. A wake-only session calls it rarely, so it would go
+ *    stale and be deferred, stranding that promise and leaving the loop running.
+ *    Same reasoning as `retrieve_output`. See spec-session-wake.
  */
 export const NEVER_DEFER_CACO_TOOLS: string[] = [
   'caco_enable_tools',
@@ -163,6 +167,7 @@ export const NEVER_DEFER_CACO_TOOLS: string[] = [
   'retrieve_output',
   'caco_docs',
   'report_intent',
+  'caco_wake',
 ];
 
 /**

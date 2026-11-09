@@ -271,6 +271,7 @@ vi.mock('../../src/model-billing.js', () => ({ modelCostSummary }));
 vi.mock('../../src/session-throughput.js', () => ({ snapshot: throughputSnapshot }));
 vi.mock('../../src/agent-command.js', () => ({ resolveAgentSelection, visibleAgents, filterSkillCommands }));
 vi.mock('../../src/tool-registry.js', () => ({ skillToolEnabled }));
+vi.mock('../../src/wake-runtime.js', () => ({ wakeManager: { applyImport: vi.fn() } }));
 
 let server: Server;
 let base: string;

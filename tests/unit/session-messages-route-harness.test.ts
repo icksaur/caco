@@ -371,5 +371,55 @@ describe('session messages route harness', () => {
       await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(3); });
       expect([idleCtx(0), idleCtx(1), idleCtx(2)]).toEqual([expected, expected, expected]);
     });
+
+    it('a session.error ends the turn with an error outcome; an idle does not (spec-session-wake)', async () => {
+      const { onTurnOutcome } = await import('../../src/turn-outcome.js');
+      const seen: Array<[string, string]> = [];
+      const off = onTurnOutcome((id, outcome) => { seen.push([id, outcome]); });
+      try {
+        await postJson('/sessions/s1/messages', { prompt: 'wake', source: 'scheduler', scheduleSlug: 'wake' });
+        fireIdle(0);
+        await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(1); });
+        expect(seen).toEqual([]);
+        await postJson('/sessions/s1/messages', { prompt: 'wake', source: 'scheduler', scheduleSlug: 'wake' });
+        emitters[1]({ type: 'session.error', data: { message: 'boom' } });
+        await vi.waitFor(() => { expect(seen).toEqual([['s1', 'error']]); });
+      } finally { off(); }
+    });
+  });
+
+  describe('wake support (spec-session-wake)', () => {
+    it('a steer stamps lastUsedAt, so wakes treat it as human activity', async () => {
+      routeMocks.sessionManager.isBusy.mockReturnValue(true);
+      const meta: { lastUsedAt?: string; responseOptions?: object } = {};
+      routeMocks.updateSessionMeta.mockImplementation((_id: string, updater: (m: typeof meta) => void) => { updater(meta); return true; });
+      const res = await postJson('/sessions/s1/messages', { prompt: 'steer now', mode: 'immediate' });
+      expect(res.status).toBe(200);
+      expect(typeof meta.lastUsedAt).toBe('string');
+    });
+
+    it('the idle authority deps emit an ok outcome on real idle', async () => {
+      const { onTurnOutcome } = await import('../../src/turn-outcome.js');
+      const seen: string[] = [];
+      const off = onTurnOutcome((id, outcome) => { seen.push(`${id}:${outcome}`); });
+      try {
+        routeMocks.handleSessionIdle.mockImplementation((id: string, _ctx: unknown, rawDeps: unknown) => {
+          (rawDeps as { onRealIdle: (id: string) => void }).onRealIdle(id);
+        });
+        handleIdle('s1', { needsObservation: true });
+        expect(seen).toEqual(['s1:ok']);
+      } finally { off(); }
+    });
+
+    it('a pre-session teardown ends the turn with an error outcome', async () => {
+      const { onTurnOutcome } = await import('../../src/turn-outcome.js');
+      const seen: string[] = [];
+      const off = onTurnOutcome((id, outcome, reason) => { seen.push(`${id}:${outcome}:${reason}`); });
+      try {
+        routeMocks.sessionManager.getSession.mockReturnValueOnce(null);
+        await postJson('/sessions/s1/messages', { prompt: 'x' });
+        expect(seen).toEqual(['s1:error:no-session']);
+      } finally { off(); }
+    });
   });
 });

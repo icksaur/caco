@@ -125,6 +125,27 @@ export interface SessionMeta {
    *  Auto-rotation backs off on this so a session that keeps failing verify
    *  doesn't re-spin the isolated verify client on every deactivation. */
   lastRotateAttemptAt?: number;
+  /** Session self-wake (spec-session-wake). Owned by wake-manager; written only
+   *  through it so the in-memory index stays in step. */
+  wake?: WakeState;
+}
+
+export interface WakeState {
+  everyMinutes: number;
+  note?: string;
+  /** ISO. Kept when `set` replaces an existing wake. */
+  registeredAt: string;
+  /** ISO. Advanced on fire and on an off-hours defer, never on a busy/human/concurrency defer. */
+  nextWakeAt: string;
+  /** ISO, when the wake prompt was handed to the session. */
+  lastWakeAt?: string;
+  lastResult?: 'ok' | 'error' | 'running';
+  /** A fixed reason string only, never exception or prompt text. */
+  lastError?: string;
+  consecutiveFailures: number;
+  /** ISO, set when the expiry wake fired; the wake pauses when that turn ends. */
+  finalWakeAt?: string;
+  pausedReason?: 'failures' | 'expired' | 'imported';
 }
 
 // ============================================================================

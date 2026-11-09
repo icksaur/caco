@@ -299,6 +299,27 @@ describe('session messages route harness', () => {
     expect(routeMocks.broadcastGlobalEvent).toHaveBeenCalledWith({ type: 'session.busy', data: { sessionId: 's1', isBusy: false } });
   });
 
+  it('a Stop on a busy session emits a cancelled outcome before aborting; an idle session emits none', async () => {
+    const { onTurnOutcome } = await import('../../src/turn-outcome.js');
+    const seen: Array<[string, string, string | undefined]> = [];
+    const off = onTurnOutcome((id, outcome, reason) => {
+      seen.push([id, outcome, reason]);
+      expect(routeMocks.sessionManager.cancelSession).not.toHaveBeenCalled();
+    });
+    try {
+      routeMocks.sessionManager.isBusy.mockReturnValue(false);
+      await postJson('/sessions/s1/cancel', {});
+      expect(seen).toEqual([]);
+      routeMocks.sessionManager.cancelSession.mockClear();
+      routeMocks.sessionManager.isBusy.mockReturnValue(true);
+      await postJson('/sessions/s1/cancel', {});
+      expect(seen).toEqual([['s1', 'cancelled', 'stopped by user']]);
+    } finally {
+      off();
+      routeMocks.sessionManager.isBusy.mockReturnValue(false);
+    }
+  });
+
   describe('observation policy through real dispatches (spec-observation-verdict-completeness)', () => {
     type Ctx = { needsObservation: boolean; offerBaseline?: { at: string | null } };
     type IdleDeps = { runAutoContinue: (id: string, ctx: Ctx) => Promise<boolean>; currentOfferAt: (id: string) => string | undefined };

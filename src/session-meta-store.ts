@@ -139,7 +139,7 @@ export interface WakeState {
   nextWakeAt: string;
   /** ISO, when the wake prompt was handed to the session. */
   lastWakeAt?: string;
-  lastResult?: 'ok' | 'error' | 'running';
+  lastResult?: 'ok' | 'error' | 'running' | 'cancelled';
   /** A fixed reason string only, never exception or prompt text. */
   lastError?: string;
   consecutiveFailures: number;

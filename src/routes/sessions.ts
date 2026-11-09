@@ -1090,6 +1090,14 @@ router.get('/sessions/:sessionId/export', async (req: Request, res: Response) =>
   const sdkBase = join(homedir(), '.copilot', 'session-state');
   const cacoBase = join(homedir(), '.caco', 'sessions');
 
+  // A migration (delete=true) must really delete, or the source and the
+  // imported copy would both carry an armed wake. Refuse while busy rather than
+  // export a "migration" that leaves the source behind.
+  if (shouldDelete && sessionManager.isBusy(sessionId)) {
+    res.status(409).json({ error: 'Session is busy; retry the move when it is idle' });
+    return;
+  }
+
   if (!existsSync(join(sdkBase, sessionId))) {
     res.status(404).json({ error: `Session not found: ${sessionId}` });
     return;
@@ -1121,11 +1129,17 @@ router.get('/sessions/:sessionId/export', async (req: Request, res: Response) =>
 
       stream.on('end', () => {
         rmSync(staging, { recursive: true, force: true });
-        if (shouldDelete && !sessionManager.isBusy(sessionId)) {
-          void sessionState.deleteSession(sessionId).then(() => {
-            broadcastGlobalEvent({ type: 'session.listChanged', data: { reason: 'deleted', sessionId } });
-          }).catch(e => console.error(`[EXPORT] Delete after export failed: ${e}`));
+        if (!shouldDelete) return;
+        if (sessionManager.isBusy(sessionId)) {
+          // Became busy while streaming (e.g. a wake fired): the delete is
+          // skipped, so the archive alone owns the wake.
+          wakeManager.clear(sessionId);
+          console.warn(`[EXPORT] ${sessionId.slice(0, 8)} became busy during a move; kept it and cleared its wake`);
+          return;
         }
+        void sessionState.deleteSession(sessionId).then(() => {
+          broadcastGlobalEvent({ type: 'session.listChanged', data: { reason: 'deleted', sessionId } });
+        }).catch(e => console.error(`[EXPORT] Delete after export failed: ${e}`));
       });
     } catch (err) {
       rmSync(staging, { recursive: true, force: true });

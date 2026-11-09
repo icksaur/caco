@@ -194,6 +194,18 @@ describe('wake loop', () => {
     expect(t.wake('a')!.consecutiveFailures).toBe(0);
   });
 
+  it("a user's Stop is recorded as cancelled and never counts toward the failure pause", async () => {
+    t.advance(H); await t.mgr.tick(); t.mgr.settle('a', 'error', 'session.error');
+    for (let i = 0; i < 3; i++) {
+      t.advance(H); await t.mgr.tick();
+      t.mgr.settle('a', 'cancelled', 'stopped by user');
+      t.mgr.settle('a', 'error', 'session.error'); // the abort's own teardown: already settled
+    }
+    expect(t.wake('a')).toMatchObject({ lastResult: 'cancelled', consecutiveFailures: 1 });
+    expect(t.wake('a')!.pausedReason).toBeUndefined();
+    expect(t.markUnobserved).not.toHaveBeenCalled();
+  });
+
   it('a running wake past the turn timeout is recorded as failed', async () => {
     t.advance(H);
     await t.mgr.tick();

@@ -271,7 +271,13 @@ vi.mock('../../src/model-billing.js', () => ({ modelCostSummary }));
 vi.mock('../../src/session-throughput.js', () => ({ snapshot: throughputSnapshot }));
 vi.mock('../../src/agent-command.js', () => ({ resolveAgentSelection, visibleAgents, filterSkillCommands }));
 vi.mock('../../src/tool-registry.js', () => ({ skillToolEnabled }));
-vi.mock('../../src/wake-runtime.js', () => ({ wakeManager: { applyImport: vi.fn() } }));
+vi.mock('../../src/wake-runtime.js', () => ({
+  wakeManager: {
+    applyImport: vi.fn(),
+    clear: vi.fn(),
+    list: vi.fn(() => [{ sessionId: knownId, wake: { everyMinutes: 120, registeredAt: 'r', nextWakeAt: 'n', consecutiveFailures: 0, pausedReason: 'expired' } }]),
+  },
+}));
 
 let server: Server;
 let base: string;
@@ -357,6 +363,14 @@ describe('sessions route harness', () => {
     expect(body.unobservedCount).toBe(3);
     expect(body.sessions[0]).toMatchObject({ sessionId: knownId, scheduleSlug: 'daily', scheduleNextRun: 'tomorrow' });
     expect(body.models[0]).toMatchObject({ id: 'model-a', cost: 1, supportsReasoningEffort: true });
+  });
+
+  it('refuses to move (export with delete=true) a busy session, so a migration always deletes its source', async () => {
+    const id = '11111111-2222-4333-8444-555555555555';
+    state.busyIds.add(id);
+    const res = await request(`/sessions/${id}/export?delete=true`);
+    expect(res.status).toBe(409);
+    expect(sessionState.deleteSession).not.toHaveBeenCalled();
   });
 
   it('searches session events and ignores empty queries and swarm sessions', async () => {

@@ -152,6 +152,10 @@ export function createWakeManager(deps: WakeManagerDeps) {
         next.lastResult = 'ok';
         delete next.lastError;
         next.consecutiveFailures = 0;
+      } else if (outcome === 'cancelled') {
+        // The user stopped it: neither a success nor a failure.
+        next.lastResult = 'cancelled';
+        delete next.lastError;
       } else {
         next.lastResult = 'error';
         next.lastError = reason ?? 'error';

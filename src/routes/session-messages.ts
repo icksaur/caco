@@ -747,6 +747,10 @@ router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) =
   updateSessionMeta(sessionId, meta => {
     if (meta.responseOptions) meta.responseOptions = undefined;
   }, { createIfMissing: false });
+
+  // A user Stop is not a failure. Emitted before the abort so it settles a
+  // running wake or slug run first; the abort's idle/error then finds it settled.
+  if (sessionManager.isBusy(sessionId)) emitTurnOutcome(sessionId, 'cancelled', 'stopped by user');
   
   const { forced } = await sessionManager.cancelSession(sessionId);
   if (forced) {

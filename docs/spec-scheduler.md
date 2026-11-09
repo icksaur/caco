@@ -17,7 +17,7 @@ Fire a stored prompt into a Caco session on a cron or fixed-interval cadence, un
 
 **Storage.** Per-schedule directory `~/.caco/schedule/<slug>/` with two files:
 - `definition.json` — `ScheduleDefinition`: `slug`, `prompt`, `enabled`, `schedule{type:'cron'|'interval', expression?, intervalMinutes?}`, `sessionConfig{model?, persistSession}`, `createdAt`, `updatedAt`.
-- `last-run.json` — `LastRunState`: `lastRun` (ISO|null), `lastResult` (`'success'|'error'|null`), `lastError` (string|null), `sessionId` (string|null), `nextRun` (ISO).
+- `last-run.json` — `LastRunState`: `lastRun` (ISO|null), `lastResult` (`'success'|'error'|'running'|'cancelled'|null`), `lastError` (string|null), `sessionId` (string|null), `nextRun` (ISO).
 
 Definition and last-run are split so a run outcome never rewrites the user's definition. Reads are typed `ok|missing|corrupt` via `readJsonFile` (`src/disk-read.ts`); the manager treats these three cases distinctly (see Considerations). Writes are plain `writeFile(JSON.stringify(…, null, 2))` — no temp-rename/lock protocol (Risk 1). IDs are the slug from the route param; there is no schedule-specific slug validator (Risk 2).
 
@@ -32,7 +32,9 @@ Definition and last-run are split so a run outcome never rewrites the user's def
   - other non-2xx → throw → error branch.
 - No prior session → `createAndExecute`: `POST /api/sessions` with `cwd: process.cwd()`, `model: sessionConfig.model ?? 'claude-sonnet'`, `kind:'scheduled'`, `description: slug`, then send the message.
 
-**Post-run state.** Success → `lastResult:'success'`, clear error, `nextRun=calculateNextRun(def)`. `persistSession:false` stores `sessionId:null` (forces a fresh session next fire). Error → `lastResult:'error'`, `lastError`, keep prior sessionId, still advances `nextRun`.
+**Post-run state.** Accepted → `lastResult:'running'`, clear error, `nextRun=calculateNextRun(def)`. `persistSession:false` stores `sessionId:null` (forces a fresh session next fire). Error → `lastResult:'error'`, `lastError`, keep prior sessionId, still advances `nextRun`.
+
+**Outcome at the real end of the turn.** A run is not `success` when its POST is accepted. The manager tracks accepted runs in memory by session (`pendingRuns`) and subscribes to `src/turn-outcome.ts`, the same seam session wakes use ([spec-session-wake](spec-session-wake.md), "Outcome at real idle"). The session's next real idle (including reveal continuations) writes `success`; a dispatch error writes `error` with a fixed reason; a user Stop writes `cancelled`. An outcome that arrives before the accept is written is held and applied. Only a `running` last-run is settled, so a late second outcome is ignored. While a tracked run is `running`, the check loop skips the slug and "Run now" is a no-op (no second POST). A tracked run still `running` after `SCHEDULE_TURN_TIMEOUT_MS` (2 h) becomes `error` "no idle within timeout"; a `running` last-run with no tracked run (the server restarted mid-turn) becomes `error` "interrupted by restart", then the normal due check applies. Storage and the 1 h busy defer are unchanged.
 
 **Next-run** (`calculateNextRun`): cron via `CronExpressionParser.parse(expr, {currentDate: now})` `.next()`; interval via `now + intervalMinutes*60_000`. No other type; missing/invalid schedule throws (no silent fallback). No timezone option is passed — cron evaluates in the server process's local time (Risk 4).
 
@@ -75,17 +77,18 @@ Exported testable helper: `validateSchedulePutBody`.
 
 ## Applet (jobs)
 
-`applets/jobs/` — bundled applet, opened at `/?applet=jobs`. `meta.json`: slug `jobs`, empty `params`, no `stateSchema`. On DOM-ready it `GET /api/schedule` and renders one card per schedule showing slug, enabled badge, last result, prompt, schedule type/expression, next/last run, sessionId, model, persistSession, lastError. States: loading / error / list / empty. Only action is `refreshJobs()` (a refresh button) — no mutation. Served user-dir-first then bundled (`src/applet-store.ts`) via `POST /api/applets/:slug/load`.
+`applets/jobs/` — bundled applet, opened at `/?applet=jobs`. `meta.json`: slug `jobs`, empty `params`, no `stateSchema`. On DOM-ready it fetches `GET /api/schedule` and `GET /api/wakes` in parallel. A "Session wakes" section (see [spec-session-wake](spec-session-wake.md)) renders above the "Slug schedules" cards; each slug card shows slug, enabled badge, last result (`running`, `cancelled` shown as "stopped"), prompt, schedule type/expression, next/last run, sessionId, model, persistSession, lastError. States: loading / error / list / empty (empty only when both lists are). Slug cards are read-only; the only slug action is `refreshJobs()`. Wake cards have a Stop button (`DELETE /api/wakes/:id`). Served user-dir-first then bundled (`src/applet-store.ts`) via `POST /api/applets/:slug/load`.
 
 ## Acceptance
 
-- Observable: schedule created via `PUT`, appears in `GET /api/schedule` and the `jobs` applet with a computed `nextRun`; when due, a session receives a `[scheduler:<slug>]`-prefixed prompt and `last-run.json` records `success` + a new `nextRun`.
+- Observable: schedule created via `PUT`, appears in `GET /api/schedule` and the `jobs` applet with a computed `nextRun`; when due, a session receives a `[scheduler:<slug>]`-prefixed prompt, `last-run.json` records `running` + a new `nextRun`, and `success` once the turn really ends.
 - Budgets: min cadence 60 min; check granularity 30 min. n/a otherwise.
 - Gates: `npm test` (green; coverage thresholds enforced).
 - Oracles (existing, in-tree):
   - `tests/unit/schedule-store.test.ts` — typed `ok|missing|corrupt` classification; min-interval validation.
   - `tests/unit/schedule-next-run.test.ts` — `calculateNextRun`: valid cron → future date; interval → exact minutes added; invalid/incomplete → throws.
   - `tests/unit/schedule-route-logic.test.ts` — exact `validateSchedulePutBody` messages; min-interval enforcement incl. too-frequent cron.
+  - `tests/unit/schedule-manager-more.test.ts` — accept writes `running`; `ok`/`error`/`cancelled` settle once; early outcome; Run now mid-run; loop skip, 2 h timeout, and restart orphan.
 
 ## Plan
 

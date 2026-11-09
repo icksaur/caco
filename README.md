@@ -187,7 +187,7 @@ Open `/pager.html` to triage finished work in one place, away from the main UI.
 
 ### Scheduled Sessions
 
-Caco runs agentic sessions on a cron schedule — unattended, recurring automation. Scheduled sessions appear in the session panel with a clock icon. Create them via the REST API (see `API.md`) or ask your agent to set one up.
+Caco runs agentic sessions on a cron schedule — unattended, recurring automation. Slug schedules and session wakes are listed in the Job Scheduler applet (`/?applet=jobs`). Create schedules via the REST API (see `API.md`) or ask your agent to set one up. A run's result reads `running` until its turn really ends, then `success`, `error`, or `cancelled` (you pressed Stop).
 
 **Example scenarios:**
 
@@ -206,6 +206,36 @@ curl -X PUT http://localhost:53000/api/schedule/weekly-review \
     "sessionConfig": { "model": "claude-sonnet-4.5", "persistSession": true }
   }'
 ```
+
+#### Session wakes
+
+A session can ask to be woken later with the always-available `caco_wake` tool,
+for example a long-lived session waiting on a PR review or a deployment. The
+wake prompt is short (local time, time since the last wake, the session's own
+note, and how to stop). A wake that ends quietly leaves no badge. A wake that
+writes a new `caco-actions` offer marks the session unobserved and lands in the
+pager. Sessions with a wake show a "wake Nh" badge in the session list
+("wake paused" when paused), and the Job Scheduler applet lists every wake
+with a Stop button.
+
+- Cadence is 1-24 hours, one wake per session. Archiving a session clears its wake.
+- A wake skips a busy session, a session with a human message in the last 30
+  minutes, and off-hours. Skipped wakes retry on the next check (every 5 min).
+- After 3 failed wakes in a row the wake pauses and the session is marked unobserved.
+- After 7 days with no human message, one final wake asks you whether to keep
+  waiting. If you don't renew, the wake pauses.
+- An imported copy arrives paused. A move (`export?delete=true`) stays armed.
+
+| env var | default | meaning |
+|---|---|---|
+| `CACO_WAKE_WINDOW` | `Mon-Fri 07:00-19:00` (server-local) | Hours when wakes may fire. Add an IANA zone if the machine's zone isn't yours, e.g. `Mon-Fri 07:00-19:00 America/Los_Angeles`. `always` disables the window. |
+| `CACO_WAKE_MAX` | `20` | Active (unpaused) wakes allowed across all sessions |
+| `CACO_WAKE_MAX_RUNNING` | `2` | Wake turns allowed to run at once; the rest wait a tick |
+| `CACO_WAKE_EXPIRE_MS` | `604800000` (7 days) | Time without a human message before the final wake |
+| `CACO_WAKE_CHECK_INTERVAL_MS` | `300000` (5 min) | Wake loop check interval |
+
+Adding `caco_wake` to `CACO_DISABLED_TOOLS` turns wakes off entirely. See
+[docs/spec-session-wake.md](docs/spec-session-wake.md).
 
 ### Copilot-CLI Configuration
 

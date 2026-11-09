@@ -263,8 +263,8 @@ Wakes need no new observation logic. The only exceptions are the two pauses
 
 ### Outcome at real idle
 
-Today a slug run is recorded as a success at accept (`schedule-manager.ts`
-162-165). The real end of a turn is known in two places:
+Before Phase 3, a slug run was recorded as a success at accept. The real end
+of a turn is known in two places:
 
 - The idle authority's real-idle branch, past the false-idle return in
   `handleSessionIdle`. It calls a new optional `onRealIdle` dep, which the
@@ -290,15 +290,20 @@ and the correlation chain.
 - `ok` resets `consecutiveFailures`.
 - `error` increments it. At `WAKE_MAX_FAILURES` (3) it sets
   `pausedReason:'failures'` and marks the session unobserved.
+- `cancelled` is a user Stop. The cancel route
+  (`POST /api/sessions/:id/cancel`, the only caller of `cancelSession`) emits
+  it while the session is busy, before the abort, so the teardown that follows
+  finds the wake already settled. It records `lastResult:'cancelled'` and
+  leaves `consecutiveFailures` unchanged. A cancelled final wake still pauses
+  as `expired`.
 
 A `running` wake that has not settled after `WAKE_TURN_TIMEOUT_MS` (2 h) is
 recorded as an error, "no idle within timeout".
 
-**Slug schedules.** Recommendation: slug runs settle the same way, by
-session (Phase 3). The applet shows `lastResult` for them as well, and today
-"success" only means "the POST got through". Their storage and their 1 h busy
-defer stay unchanged. The C3 work (binding a session, archive awareness) is a
-separate task.
+**Slug schedules (done in Phase 3).** Slug runs settle the same way, by
+session, through `turn-outcome`: `running` at accept, then `success`, `error`,
+or `cancelled`. See [spec-scheduler](spec-scheduler.md), "Outcome at the real
+end of the turn". Their storage and 1 h busy defer are unchanged.
 
 ### Guards
 
@@ -316,9 +321,14 @@ applet and the session's `status` can explain why it is quiet.
 
 ### API and applet
 
-- `GET /api/wakes` returns
-  `[{sessionId, sessionName, note, everyMinutes, nextWakeAt, lastWakeAt, lastResult, lastError, pausedReason}]`.
-- `DELETE /api/wakes/:sessionId` clears a wake.
+- `GET /api/wakes` returns `{wakes:[{sessionId, sessionName, everyHours,
+  nextWakeAt, note?, lastWakeAt?, lastResult?, lastError?, pausedReason?}]}`,
+  soonest first (`src/routes/wakes.ts`, `summarizeWake` in `src/wake-core.ts`).
+  Implemented as an object with `everyHours`, not the bare array with
+  `everyMinutes` first sketched here: it matches `{schedules:[...]}` and the
+  tool's unit.
+- `DELETE /api/wakes/:sessionId` clears a wake (`{ok:true}`, or 404).
+- `GET /api/sessions` items carry `wake` (the same summary, or null).
 
 Wakes live under their own route rather than on `/api/schedule/:slug`
 (`src/routes/schedule.ts`) because they have no slug.
@@ -335,6 +345,14 @@ Wakes live under their own route rather than on `/api/schedule/:slug`
 
 There is no Resume button. Re-arming goes through the session, so the session
 knows it is being woken.
+
+**Sidebar.** The spec first proposed reusing the session list's
+"scheduled-session clock icon". There is none: `scheduleSlug` and
+`scheduleNextRun` are in the list payload but are never rendered. Instead the
+session list shows a small `wake Nh` badge (`public/ts/session-panel.ts`),
+`wake paused` with a dashed muted style when paused, and red when the last
+wake failed. Its tooltip gives the cadence or paused reason, next wake, note,
+and last result. Slug-scheduled sessions render as before.
 
 ## Invariants
 
@@ -390,7 +408,7 @@ knows it is being woken.
 | Wake is hidden by tool deferral | Listed in `NEVER_DEFER_CACO_TOOLS` with a reason. |
 | Hard-disabling `caco_wake` strands wakes | The loop does not fire while the tool is disabled. |
 | A copied wake fires on two machines | A copy arrives paused with reason `imported`. Only a migration export (which deletes the source) keeps it armed. |
-| A migration export of a busy session writes the marker but skips the delete | Both copies can wake. Rare (the export route only skips delete while busy); the imported copy's `status` and the applet show it. |
+| A migration export of a busy session writes the marker but skips the delete | The export route refuses `delete=true` with 409 while the session is busy, so a migration always deletes its source. If the session becomes busy while the archive streams, the delete is skipped and the source's wake is cleared, so only the archive carries it. |
 | PII in `lastError` | Only fixed reason strings (`HTTP 500`, `session.error`, `timeout`). Never exception text. |
 
 ## Acceptance
@@ -412,11 +430,14 @@ knows it is being woken.
 | A13 | Global cap | a set past the cap errors; paused wakes and the caller's own wake are not counted |
 | A14 | Copy import pauses; migration import stays armed | `applyImport(id, false)` -> `imported`; `applyImport(id, true)` -> armed, `running` -> error |
 | A15 | Quiet wake keeps the offer and does not badge; a new offer badges | Task 1 route-harness and idle-authority tests (source-based, so they hold for `scheduleSlug:'wake'`) |
-| A16 | `GET /api/wakes` and `DELETE` | route test; DELETE clears meta and index |
+| A16 | `GET /api/wakes` and `DELETE` | `wakes-route.test.ts`: sort, names, fields; DELETE 200 then 404; `sessions-route-harness.test.ts`: list items carry `wake` |
 | A17 | Applet renders a wake card with Stop | `npm run build:client` passes; manual check against a seeded wake |
 | A18 | At most 2 running; the third fires after a settle | three due wakes -> 2 POSTs; waiting wake's `nextWakeAt` unchanged; third POST after one settles |
 | A19 | Expiry cannot be extended by the agent | re-arm with an old `lastUsedAt` -> next wake is final; `set` during the final turn keeps the pause |
 | A20 | 409 restores the pre-fire state; non-2xx is a failure; turn timeout is a failure; restart turns `running` into `interrupted by restart` | `wake-manager.test.ts` |
+| A21 | A user Stop is `cancelled`, not a failure | `wake-manager.test.ts`: cancelled never reaches the failure pause; route harness: Stop on a busy session emits `cancelled` before the abort, an idle one emits nothing |
+| A22 | A busy session cannot be moved | `sessions-route-harness.test.ts`: `export?delete=true` on a busy session -> 409, no delete |
+| A23 | Slug runs settle at the real end | `schedule-manager-more.test.ts`: `running` at accept; ok/error/cancelled settle once; timeout and restart orphan become `error` |
 
 ## Plan
 
@@ -424,5 +445,5 @@ knows it is being woken.
 |---|---|---|---|
 | 1 | `meta.wake`, index and boot rebuild, `caco_wake` tool with limits and cap, never-defer entry, steering `lastUsedAt` stamp | A1-A3, A6, A13; typecheck | done |
 | 2 | Wake loop (`src/wake-manager.ts`, `src/wake-core.ts`, `src/wake-runtime.ts`): window with zone, defers, concurrency, archive clear, expiry with final wake, fire; `src/turn-outcome.ts` and settle by session; failure pause with dot; import copy/migration | A4, A5, A7-A12, A14, A15, A18-A20 | done |
-| 3 | `/api/wakes` routes, jobs applet section with Stop; slug schedules settle via `turn-outcome`; optional: fill the session list's schedule fields so the sidebar clock shows on sessions with an armed wake | A16, A17; slug tests updated so `success` is written at the real end | |
-| 4 | Docs: API.md, README Scheduler/Pager, spec-scheduler cross-link | review | |
+| 3 | `/api/wakes` routes, jobs applet section with Stop; slug schedules settle via `turn-outcome`; sidebar wake badge (no clock icon existed); fixes: busy-move 409, user Stop is `cancelled` | A16, A17, A21-A23 | done |
+| 4 | Docs: API.md (routes, `caco_wake`, export 409), README Session wakes, spec-scheduler outcome and cross-link | review | done |

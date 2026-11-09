@@ -41,6 +41,10 @@ the same pattern as `createHerdTools`, `src/herd-tools.ts:74`).
 | `clear` | none | Removes the wake. Calling it with no wake set is fine. |
 | `status` | none | Returns cadence, note, next wake, last wake, last result, and paused reason. |
 
+The tool description states the 1-24 h range, that wakes skip live
+conversations and off-hours, the pause rules, and that the session should
+call `clear` as soon as it is no longer waiting on anything external.
+
 **Interval only, in hours.** A groggy human and a model both get "every 4
 hours" right. Cron is more than a "check back later" loop needs, and it is
 where models make mistakes. A one-shot wake is just `set` followed by `clear`
@@ -93,29 +97,44 @@ The wake lives on the session's own meta, `src/session-meta-store.ts`:
 meta.wake?: {
   everyMinutes: number;      // 60..1440. Stored in minutes, so a later finer step needs no migration.
   note?: string;
-  registeredAt: string;      // ISO
-  nextWakeAt: string;        // ISO. Advanced on fire, not on deferral.
+  registeredAt: string;      // ISO. Kept when `set` replaces an existing wake.
+  nextWakeAt: string;        // ISO. Advanced on fire and on an off-hours defer only.
   lastWakeAt?: string;       // ISO, when the prompt was accepted
   lastResult?: 'ok' | 'error' | 'running';
-  lastError?: string;        // error type or short reason only, never prompt or exception text (PII)
+  lastError?: string;        // fixed reason string only, never prompt or exception text (PII)
   consecutiveFailures: number;
+  finalWakeAt?: string;      // ISO, set when the expiry wake fired
   pausedReason?: 'failures' | 'expired' | 'imported';
 }
 ```
 
 Because it is meta, the wake goes away when the session is deleted or
-hard-archived. On boot an in-memory index (`Map<sessionId, nextWakeAtMs>`) is
+hard-archived. On boot an in-memory index (`Map<sessionId, WakeState>`) is
 rebuilt by a meta scan, like `rebuildHerdIndexFromDisk`
-(`src/herd-runtime.ts:31`, called in the post-listen scan at 127). Every
-`updateSessionMeta` that touches `wake` (`src/session-meta-store.ts:253`)
-updates the index in the same place.
+(`src/herd-runtime.ts:31`). Every write of `meta.wake` goes through the wake
+manager's single write helper (`src/wake-manager.ts`), which updates the
+index in the same step.
 
 **Imported sessions.** The export tar has a `caco/` tree that includes meta
-(`src/routes/sessions.ts:1142` and following), so `wake` comes along.
-Importing sets `pausedReason: 'imported'`. A session dragged onto another
-machine must not start waking there without someone asking. The applet shows
-it as paused. It comes back when the session calls `caco_wake set` again,
-which a human prompt or the paused status in `status` will lead to.
+(`src/routes/sessions.ts`, export and import routes), so `wake` comes along.
+What it means depends on how the archive was made:
+
+- **Migration** (`GET /sessions/:id/export?delete=true`, which deletes the
+  source after export): the export writes a `wake-migration.json` marker into
+  `caco/<id>/`. Import consumes the marker and keeps the wake armed, because
+  the source no longer exists.
+- **Copy** (no `delete`): the source keeps its wake. Import sets
+  `pausedReason: 'imported'` so two machines never wake one session. The
+  copy re-arms with `caco_wake set`.
+
+Portal drag (`public/portal.html` `transferSession`) currently exports
+**without** `delete=true`. It is a copy, the source keeps waking, and the
+copy arrives paused. That is consistent, not silent: the track keeps running
+where it was. If drag should become a move, the portal adds `delete=true`, and
+the marker carries the wake over. That is a portal decision outside this spec.
+
+A `running` wake in either kind of import becomes `error`/"interrupted by
+transfer".
 
 ### Lifecycle and archive
 
@@ -126,7 +145,7 @@ herd disown, and folder PATCH, since they all stage into that folder
 wake is **cleared**, not paused. Archiving means "done". If the session is
 rescued, it re-arms with `set` like any other session. Hard archive and delete
 remove the meta (and with it the wake). The index drops the entry when its
-meta read comes back empty.
+meta read comes back empty, and on `sessionState.onSessionEnd`.
 
 Auto-park will not park an active track. Its anchor includes `lastIdleAt`
 (`docs/spec-auto-park-idle-root.md`), and each wake ends with an idle.
@@ -134,8 +153,9 @@ Auto-park will not park an active track. Its anchor includes `lastIdleAt`
 ### Wake loop
 
 The wake loop is separate from the slug loop:
-`startWakeManager()` next to `startScheduleManager()` (`server.ts:357`), with
-`WAKE_CHECK_INTERVAL_MS = 5 min` (env `CACO_WAKE_CHECK_INTERVAL_MS`).
+`startWakeManager()` (`src/wake-runtime.ts`) starts after listen, next to
+`scanHerdsOnBoot()` in `server.ts`, with `WAKE_CHECK_INTERVAL_MS = 5 min`
+(env `CACO_WAKE_CHECK_INTERVAL_MS`).
 
 **Why not the 30 min slug tick?** `SCHEDULE_CHECK_INTERVAL_MS`
 (`src/config.ts:46`) would add up to 30 min of lateness to a 60 min cadence,
@@ -143,103 +163,139 @@ which is 50% jitter. With 5 min ticks the jitter stays under 9%. Each tick only
 reads the in-memory index and opens meta for due entries, so 5 min costs
 nothing. The slug tick stays as it is.
 
-On each tick, for each due entry (`nextWakeAtMs <= now`), in order:
+Each tick first records any `running` wake older than `WAKE_TURN_TIMEOUT_MS`
+as failed. Then, for each due entry (`nextWakeAt <= now`, not paused, not
+running), oldest first:
 
 1. Read meta. If it is gone, drop the entry. If the folder is
-   `auto-archive`, clear the wake. If `pausedReason` is set, skip.
-2. **Expiry.** If `now - max(lastUsedAt, registeredAt) > WAKE_EXPIRE_MS`
-   (7 d), set `pausedReason: 'expired'` and skip.
-3. **Active hours.** If `now` is outside `WAKE_WINDOW`, set `nextWakeAt` to
+   `auto-archive`, clear the wake.
+2. **Active hours.** If `now` is outside `WAKE_WINDOW`, set `nextWakeAt` to
    the next window start and skip. This gives "due outside the window fires
    once at the window start". Missed wakes collapse into one and never stack.
-4. **Live conversation.** If the session is busy (`dispatchState.isBusy`,
+3. **Live conversation.** If the session is busy (`dispatchState.isBusy`,
    `src/dispatch-state.ts:106`), or a human message arrived within
-   `WAKE_HUMAN_QUIET_MS` (30 min, by `lastUsedAt`), skip. **`nextWakeAt` is
-   not touched**, so the next tick tries again. A skip is neither a fire nor
-   a failure. There is no fixed 1 h busy delay.
-5. **Fire.** POST `/api/sessions/:id/messages` with `source:'scheduler'`,
-   `scheduleSlug:'wake'`, and a correlationId generated by the wake manager.
-   Then set `lastWakeAt = now`, `lastResult = 'running'`, and
-   `nextWakeAt = now + everyMinutes`. A 409 means a race lost to the busy
-   check, so do the same as step 4. Any other non-2xx counts as a failed wake.
+   `WAKE_HUMAN_QUIET_MS` (30 min, by `lastUsedAt`), skip.
+4. **Concurrency.** If `WAKE_MAX_RUNNING` (2) wakes are already `running`,
+   skip. At Monday 07:00 or after a restart every due wake would otherwise
+   fire in one tick: N parallel model turns and a burst against shared
+   downstream throttles (ADO allows 200 TSTU per 5 min, shared by every
+   track). Deferring staggers them naturally as earlier wakes settle.
+5. **Fire.** POST `/api/sessions/:id/messages` with `source:'scheduler'` and
+   `scheduleSlug:'wake'`. Before the POST, set `lastWakeAt = now`,
+   `lastResult = 'running'`, and `nextWakeAt = now + everyMinutes` (and
+   `finalWakeAt` for an expiry wake, see below). A 409 means a race lost to
+   the busy check: the pre-fire fields are restored, as in step 3. Any other
+   non-2xx, or a network error, is a failed wake.
+
+Steps 3 and 4 never touch `nextWakeAt`; the next tick simply asks again. A
+skip is neither a fire nor a failure. There is no fixed 1 h busy delay.
 
 Wakes fire one after another inside a tick, under an `isExecuting` guard, the
 same pattern as `src/schedule-manager.ts:13, 38`. A fire only waits for the
-POST to be accepted, not for the turn to finish, so one slow wake does not hold
-up the others.
+POST to be accepted, not for the turn to finish.
 
-**Human recency gap.** `lastUsedAt` is only stamped for messages with no
-`source` (`src/routes/session-messages.ts:326`). Steering
-(`mode:'immediate'`, 175-197) does not stamp it, but it is human activity.
-Phase 1 adds the stamp there. `lastUsedAt` is already defined as "the user
-touched this session" (it anchors cold-resume and archive), so stamping it for
-steering fixes that meaning too.
+**Expiry and the final wake.** Expiry keys on human activity only:
+`now - (lastUsedAt ?? registeredAt) > WAKE_EXPIRE_MS` (7 d). `registeredAt`
+is only the fallback for a session no human ever wrote to, and `set` keeps it
+when it replaces a wake. So an agent that re-arms its own wake, even with
+`clear` then `set`, cannot extend it. A silent pause would be invisible: a
+track waiting two weeks on a deployment has only quiet wakes, never badges,
+and would stop where nobody looks. Instead, the first due wake past expiry
+fires once as the **final wake**:
 
-**Restart.** The index is rebuilt from meta. Any wake whose `nextWakeAt` has
-passed fires once on the first tick, after going through the same checks.
-`lastResult:'running'` left over from before a restart becomes
-`'error'`/"interrupted by restart".
+- Its prompt says it is the last unless renewed, and asks the session to end
+  with a `caco-actions` block offering to keep waiting. By Task 1 a new offer
+  badges and lands in the pager.
+- When that turn ends (either outcome), the wake pauses with
+  `pausedReason:'expired'` and the session is marked unobserved, so the dot
+  shows even if the model forgot the offer.
+- A `set` during the final turn itself keeps `finalWakeAt`, so the pause
+  still happens.
+- If Carl taps renew, his message stamps `lastUsedAt` and the session calls
+  `set`. That clears the pause and the final marker.
+
+**Human recency gap.** `lastUsedAt` was only stamped for messages with no
+`source` (`src/routes/session-messages.ts`, `if (!source)` before dispatch).
+Steering (`mode:'immediate'`) did not stamp it, but it is human activity. It
+now does. `lastUsedAt` already means "the user touched this session" (it
+anchors cold-resume and archive), so stamping it for steering fixes that
+meaning too.
+
+**Restart.** The index is rebuilt from meta. A `running` wake left over from
+before the restart becomes `error`/"interrupted by restart" and is not counted
+as a failure. Any wake whose `nextWakeAt` has passed is due on the first tick
+and goes through the same checks, including the concurrency cap.
+
+**Hard-disabled tool.** While `caco_wake` is in `CACO_DISABLED_TOOLS`, the
+tick does nothing: a wake that cannot be cleared is the runaway case.
 
 ### Wake prompt
 
 ```
-[scheduler:wake] Scheduled wake. Local time Tue 2026-11-03 14:05.
-Last wake 4h 2m ago. Note: waiting on PR 5504426 review.
-Check whether what you are waiting on has changed. If you are no longer
-waiting on external data, call caco_wake with action "clear" to stop these wakes.
+[scheduler:wake] Scheduled wake. Local time Tue 2026-11-03 14:05 America/Los_Angeles. Last wake 4h 2m ago.
+Note: waiting on PR 5504426 review
+Check whether what you are waiting on has changed.
+If you are no longer waiting on external data, call caco_wake with action "clear" to stop these wakes.
 ```
 
 The prefix comes from `prefixMessageSource`
-(`src/message-source.ts:91-100`), the same as slug runs (`session-messages.ts:319`).
+(`src/message-source.ts:91-100`), the same as slug runs.
 The first wake says "Registered 4h 0m ago." The note line is left out when
-there is no note. The prompt never mentions defers or pauses, so the
-transcript only grows by these four lines.
+there is no note. The local time uses the window's zone when one is
+configured (shown after the time), otherwise server-local. The final wake
+replaces the last two lines with the renewal request described above.
 
 ### Task 1 semantics, applied to wakes
 
 A wake POSTs with `source:'scheduler'`, so the rules from commit 52f83e1
 apply as they are:
 
-- The pending `responseOptions` is **not** cleared when the wake is received
-  (`session-messages.ts:268`).
+- The pending `responseOptions` is **not** cleared when the wake is received.
 - The turn, including any `caco_enable_tools` continuations, marks the session
   unobserved and fires the external idle feed **only if
-  `responseOptionsAt` advanced** (`observesIdle`, `src/idle-authority.ts:107`).
+  `responseOptionsAt` advanced** (`observesIdle`, `src/idle-authority.ts`).
   A quiet wake, or an identical re-offer (`sameOffer`,
   `src/dispatch-events.ts`), stays silent, and a card dismissed in the pager
   stays dismissed.
 
-Wakes need no new observation logic.
+Wakes need no new observation logic. The only exceptions are the two pauses
+(failures, expiry), which mark the session unobserved directly.
 
 ### Outcome at real idle
 
-Today a slug run is recorded as a success at accept (162-165). The real end
-of a turn is known in exactly two places in `dispatchMessage`:
+Today a slug run is recorded as a success at accept (`schedule-manager.ts`
+162-165). The real end of a turn is known in two places:
 
-- `session.idle` -> `handleIdle` (`session-messages.ts:631-639`), whose
-  real-idle branch is past the false-idle return at `idle-authority.ts:89`.
-- `session.error`, or a thrown dispatch error (588, 695-726).
+- The idle authority's real-idle branch, past the false-idle return in
+  `handleSessionIdle`. It calls a new optional `onRealIdle` dep, which the
+  route wires to `emitTurnOutcome(id, 'ok')`.
+- `completeDispatch(reason)` in `dispatchMessage`, the single teardown every
+  exit path goes through. Any reason other than `session.idle` (an SDK
+  `session.error`, watchdog timeout, send error, failed retry, no session)
+  emits `emitTurnOutcome(id, 'error', reason)`. The reason is a fixed string,
+  never message text.
 
-A small `turn-outcome` emitter is added. `handleIdle`'s real-idle branch emits
-`{sessionId, correlationId, result:'ok'}`. The error paths emit
-`result:'error'` with an error type. Continuations keep the original
-correlationId (Task 1), so a chain reports once, at its real end. The wake
-manager listens and settles the matching `running` wake:
+`src/turn-outcome.ts` is a small listener set. The wake manager subscribes
+and **settles by session**: a `running` wake settles on that session's next
+outcome after accept. It does not use correlationId, because
+continuations do not keep it: `dispatchMessage` mints `correlationId ||
+randomUUID()` and `runAutoContinue` passes none, so each continuation gets a
+fresh id. Settling by session is safe because a session has at most one wake,
+the session was idle when the wake fired, and any other send while it is busy
+gets a 409. A reveal-idle never reaches `onRealIdle`, so a chain of
+continuations settles once, at its real end. No correlationId is sent in the
+wake POST, which also keeps scheduler messages out of the agent-call guard
+and the correlation chain.
 
 - `ok` resets `consecutiveFailures`.
 - `error` increments it. At `WAKE_MAX_FAILURES` (3) it sets
-  `pausedReason:'failures'`.
+  `pausedReason:'failures'` and marks the session unobserved.
 
 A `running` wake that has not settled after `WAKE_TURN_TIMEOUT_MS` (2 h) is
-recorded as an error, "no idle".
+recorded as an error, "no idle within timeout".
 
-The wake manager sends its own correlationId in the body. Phase 1 confirms
-that `effectiveCorrelationId` uses the body value for `source:'scheduler'` and
-adds that if it does not. Otherwise the route returns `correlationId` (today
-it returns only `{ok, sessionId}`, 339).
-
-**Slug schedules.** Recommendation: slug runs should use the same outcome
-recording (Phase 3). The applet shows `lastResult` for them as well, and today
+**Slug schedules.** Recommendation: slug runs settle the same way, by
+session (Phase 3). The applet shows `lastResult` for them as well, and today
 "success" only means "the POST got through". Their storage and their 1 h busy
 defer stay unchanged. The C3 work (binding a session, archive awareness) is a
 separate task.
@@ -250,9 +306,10 @@ separate task.
 |---|---|---|
 | Wakes per session | 1 | `set` replaces. There is nothing to leak. |
 | Global active wakes | 20 (`CACO_WAKE_MAX`) | Bounds spend. `set` past the cap returns an error that names the cap. Paused wakes don't count toward it. |
-| Consecutive failures | 3, then pause | Keeps a broken session from burning a turn every hour. |
-| Inactivity expiry | 7 d without a human message, then pause | Same as Claude Code's 7-day recurring expiry. A track nobody reads should stop. Re-arm with `set`. |
-| Active hours | `CACO_WAKE_WINDOW`, default `Mon-Fri 07:00-19:00` local | The model never has to think about nights or weekends. `always` turns it off. |
+| Wakes running at once | 2 (`CACO_WAKE_MAX_RUNNING`) | Staggers a Monday-morning or post-restart backlog instead of N parallel turns. |
+| Consecutive failures | 3, then pause and mark unobserved | Keeps a broken session from burning a turn every hour, visibly. |
+| Inactivity expiry | 7 d without a human message (`CACO_WAKE_EXPIRE_MS`), then one final wake, then pause and mark unobserved | Same horizon as Claude Code's 7-day recurring expiry. Keyed on human activity only. The final wake asks Carl, so a long legitimate wait is renewed with one tap. |
+| Active hours | `CACO_WAKE_WINDOW`, default `Mon-Fri 07:00-19:00` server-local, optional IANA zone (`Mon-Fri 07:00-19:00 America/Los_Angeles`) | The model never has to think about nights or weekends. Devboxes may run in another system zone, so the zone is configurable and the prompt's local time uses it. `always` turns the window off. An invalid value logs and falls back to the default. |
 
 Expired and failed wakes are **paused**, not cleared, so Carl sees them in the
 applet and the session's `status` can explain why it is quiet.
@@ -287,13 +344,20 @@ knows it is being woken.
    paused, or had a human message within 30 min.
 3. A wake never fires outside the active window, and a single window start
    never fires more than once for the same wake.
-4. A deferral never advances `nextWakeAt` and never counts as a failure.
+4. A busy, human-recent, or concurrency deferral never advances `nextWakeAt`
+   and never counts as a failure.
 5. `lastResult` is written at the real idle or error of the turn, never at
-   accept. `running` is the only state written at accept.
-6. A wake is `source:'scheduler'` in every respect. It does not clear the
-   pending offer, and it badges only on a new offer.
-7. `caco_wake` is never auto-deferred while it is registered.
-8. Imported wakes do not fire until the session re-arms them.
+   accept. `running` is the only state written at accept. A running wake
+   settles on its own session's next outcome, never by correlationId.
+6. At most `WAKE_MAX_RUNNING` wakes are running at once.
+7. A wake is `source:'scheduler'` in every respect. It does not clear the
+   pending offer, and it badges only on a new offer. The two pauses
+   (failures, expiry) always mark the session unobserved.
+8. Expiry keys on human activity only. No agent action can extend it.
+   Expiry is never silent: one final wake, then a pause with the dot.
+9. `caco_wake` is never auto-deferred while it is registered.
+10. A copied session's wake does not fire until the session re-arms it. A
+    migrated session's wake stays armed.
 
 ## Considerations
 
@@ -306,49 +370,59 @@ knows it is being woken.
   disappears looks the same as one that never existed.
 - **Why clear rather than pause on archive.** Staging means "done". Rescue
   stays possible, and re-arming is one call.
-- **Window timezone** is server-local, which is Carl's machine. A multi-user
-  server would need a per-session setting. Not in scope.
+- **Why settle by session.** It is the only key that survives
+  continuations, and the one-wake-per-session plus busy-409 rules make it
+  unambiguous.
+- **Window timezone** defaults to server-local. A zone in `CACO_WAKE_WINDOW`
+  covers devboxes whose system zone is not Carl's. A multi-user server would
+  need a per-session setting. Not in scope.
 
 ## Risks and Mitigations
 
 | risk | mitigation |
 |---|---|
-| A model forgets to clear and wakes forever | Expiry after 7 d without human contact. Every prompt includes the clear instruction. Stop button. |
+| A model forgets to clear and wakes forever | Expiry after 7 d without human contact, keyed on human activity only. Every prompt includes the clear instruction. Stop button. |
+| A long legitimate wait expires unseen | The final wake asks for renewal with a `caco-actions` offer, and the pause marks the session unobserved. |
 | Many tracks multiply cost | Global cap of 20, 1 h floor, active window. |
+| A backlog fires at once (Monday 07:00, restart) and bursts shared throttles | At most 2 wakes running; the rest defer a tick at a time. |
 | A wake lands while Carl is typing | 30 min human-quiet defer, steering stamps `lastUsedAt`, plus the busy check. 409 means defer. |
 | `running` stuck after a crash or restart | 2 h timeout. On boot, a stale `running` becomes "interrupted by restart". |
 | Wake is hidden by tool deferral | Listed in `NEVER_DEFER_CACO_TOOLS` with a reason. |
 | Hard-disabling `caco_wake` strands wakes | The loop does not fire while the tool is disabled. |
-| An imported wake fires on a new machine | Arrives paused with reason `imported`. |
-| PII in `lastError` | Only error type or a fixed reason string. Never exception text. |
+| A copied wake fires on two machines | A copy arrives paused with reason `imported`. Only a migration export (which deletes the source) keeps it armed. |
+| A migration export of a busy session writes the marker but skips the delete | Both copies can wake. Rare (the export route only skips delete while busy); the imported copy's `status` and the applet show it. |
+| PII in `lastError` | Only fixed reason strings (`HTTP 500`, `session.error`, `timeout`). Never exception text. |
 
 ## Acceptance
 
 | # | behavior | oracle (unit test) |
 |---|---|---|
-| A1 | `set` stores meta and index; `set` again replaces | meta has one `wake` with the new cadence; index has one entry |
-| A2 | `everyHours` 0, 25, or 1.5 is rejected | tool returns an error naming 1-24; meta unchanged |
-| A3 | `caco_wake` is never auto-deferred | `isDeferEligibleCacoTool('caco_wake') === false` |
-| A4 | A due wake fires with `source:'scheduler'`, `scheduleSlug:'wake'`, and the prompt lines | fetch mock body; prompt has local time, elapsed time, note, and "clear" |
-| A5 | Busy or human-recent session defers | no POST; `nextWakeAt` unchanged; failures unchanged; fires on the next tick when clear |
+| A1 | `set` stores meta and index; `set` again replaces and keeps `registeredAt` | `wake-manager.test.ts` |
+| A2 | `everyHours` 0, 25, 1.5, or a string is rejected; note over 200 rejected | error names 1-24; meta unchanged |
+| A3 | `caco_wake` is never auto-deferred | `tool-registry.test.ts`: in `NEVER_DEFER_CACO_TOOLS` |
+| A4 | A due wake fires with the prompt lines and is `running` | fake `post`; prompt has local time, elapsed time, note, and "clear" |
+| A5 | Busy or human-recent session defers | no POST; `nextWakeAt` and failures unchanged; fires on a later tick when clear |
 | A6 | Steering stamps `lastUsedAt` | route harness: immediate-mode POST updates meta |
-| A7 | A due wake outside the window fires once at window start | clock fake: Saturday due -> `nextWakeAt` = Monday 07:00; one POST at Monday's tick |
+| A7 | A due wake outside the window fires once at window start, in the configured zone | Saturday due -> `nextWakeAt` = Monday 07:00; one POST; zone and DST cases in `wake-core.test.ts` |
 | A8 | Staged session's wake is cleared, not fired | `folder:'auto-archive'` -> `wake` undefined, no POST |
-| A9 | Outcome recorded at real idle, not at accept | after POST: `running`; after emitted real idle with the matching correlationId: `ok` |
-| A10 | Reveal continuation reports once, at its real end | false idle emits nothing; continuation's idle emits `ok` |
-| A11 | Three errors pause | third `error` sets `pausedReason:'failures'`; next tick does not POST |
-| A12 | 7 d without human contact pauses | `pausedReason:'expired'` |
-| A13 | Global cap | 21st `set` returns an error; paused wakes are not counted |
-| A14 | Import pauses | import fixture with `wake` -> `pausedReason:'imported'` |
-| A15 | Quiet wake keeps the offer and does not badge; a new offer badges | reuse Task 1 harness with `source:'scheduler'`, `scheduleSlug:'wake'` |
+| A9 | Outcome recorded at real end, settled by session | `running` after fire; another session's outcome ignored; own `ok` settles; route harness: `session.error` and pre-session teardown emit `error`, a scheduler idle does not emit directly |
+| A10 | Reveal continuation reports once, at its real end | `idle-authority.test.ts`: `onRealIdle` not called on a false idle, called on the real one; route harness wires it to `ok` |
+| A11 | Three errors pause and mark unobserved | `pausedReason:'failures'`; `markUnobserved` called; next tick does not POST |
+| A12 | Expiry fires one final wake, then pauses and marks unobserved | prompt contains "FINAL wake" and `caco-actions`; after settle `pausedReason:'expired'`; no further POST |
+| A13 | Global cap | a set past the cap errors; paused wakes and the caller's own wake are not counted |
+| A14 | Copy import pauses; migration import stays armed | `applyImport(id, false)` -> `imported`; `applyImport(id, true)` -> armed, `running` -> error |
+| A15 | Quiet wake keeps the offer and does not badge; a new offer badges | Task 1 route-harness and idle-authority tests (source-based, so they hold for `scheduleSlug:'wake'`) |
 | A16 | `GET /api/wakes` and `DELETE` | route test; DELETE clears meta and index |
 | A17 | Applet renders a wake card with Stop | `npm run build:client` passes; manual check against a seeded wake |
+| A18 | At most 2 running; the third fires after a settle | three due wakes -> 2 POSTs; waiting wake's `nextWakeAt` unchanged; third POST after one settles |
+| A19 | Expiry cannot be extended by the agent | re-arm with an old `lastUsedAt` -> next wake is final; `set` during the final turn keeps the pause |
+| A20 | 409 restores the pre-fire state; non-2xx is a failure; turn timeout is a failure; restart turns `running` into `interrupted by restart` | `wake-manager.test.ts` |
 
 ## Plan
 
-| phase | scope | gate |
-|---|---|---|
-| 1 | `meta.wake`, index and boot rebuild, `caco_wake` tool with limits and cap, never-defer entry, steering `lastUsedAt` stamp, correlationId plumbing | A1-A3, A6, A13; typecheck |
-| 2 | `wake-manager` loop: window, defers, archive clear, expiry, fire; `turn-outcome` emitter and settle; import pause | A4, A5, A7-A12, A14, A15 |
-| 3 | `/api/wakes` routes, jobs applet section with Stop; slug schedules use `turn-outcome` | A16, A17; slug tests updated so `success` is written at idle |
-| 4 | Docs: API.md, README Scheduler/Pager, spec-scheduler cross-link | review |
+| phase | scope | gate | status |
+|---|---|---|---|
+| 1 | `meta.wake`, index and boot rebuild, `caco_wake` tool with limits and cap, never-defer entry, steering `lastUsedAt` stamp | A1-A3, A6, A13; typecheck | done |
+| 2 | Wake loop (`src/wake-manager.ts`, `src/wake-core.ts`, `src/wake-runtime.ts`): window with zone, defers, concurrency, archive clear, expiry with final wake, fire; `src/turn-outcome.ts` and settle by session; failure pause with dot; import copy/migration | A4, A5, A7-A12, A14, A15, A18-A20 | done |
+| 3 | `/api/wakes` routes, jobs applet section with Stop; slug schedules settle via `turn-outcome`; optional: fill the session list's schedule fields so the sidebar clock shows on sessions with an armed wake | A16, A17; slug tests updated so `success` is written at the real end | |
+| 4 | Docs: API.md, README Scheduler/Pager, spec-scheduler cross-link | review | |

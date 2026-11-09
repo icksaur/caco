@@ -77,6 +77,18 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 .wake { font-size: 12px; color: #4fa3e0; border: 1px solid #4fa3e0; border-radius: 4px; padding: 0 6px; white-space: nowrap; }
 .wake.paused { color: #888; border: 1px dashed #555; }
 .wake.failed { color: #e66; border-color: #e66; }
+.run-name.link { cursor: pointer; }
+.run-name.link:hover { text-decoration: underline; }
+/* Scheduled wakes (spec-session-wake): read-only, one compact card per session. */
+.wakes { margin-top: 26px; }
+.section-title { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 10px 2px; }
+.wake-card { background: #1f1f1f; border: 1px solid #2e2e2e; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+.wake-card.paused { border-style: dashed; }
+.wake-card .name { font-size: 15px; }
+.wake-line { font-size: 13px; color: #999; margin-top: 4px; }
+.wake-line.error { color: #e66; }
+.wake-note { font-size: 14px; color: #bbb; margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
+.tag { font-size: 12px; color: #ddb; background: #3a3420; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -86,6 +98,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
   </header>
   <div class="running" id="running"></div>
   <div id="board"></div>
+  <div class="wakes" id="wakes"></div>
 </div>
 
 <script>
@@ -99,6 +112,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
   var bridge = null;
   var boardEl = document.getElementById('board');
   var runningEl = document.getElementById('running');
+  var wakesEl = document.getElementById('wakes');
   var connEl = document.getElementById('conn');
 
   var lastVersion = null;
@@ -193,6 +207,74 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     return node;
   }
 
+  // Make a session title open that session: inside the portal through the
+  // owning instance, standalone in this instance's main page.
+  function linkName(node, entry) {
+    var open;
+    if (bridge) {
+      if (!entry.key) return node;
+      open = function () { bridge.open(entry.key); };
+    } else {
+      open = function () { window.location.href = '/?session=' + encodeURIComponent(entry.sessionId); };
+    }
+    node.classList.add('link');
+    node.setAttribute('role', 'link');
+    node.tabIndex = 0;
+    node.title = 'Open this session';
+    node.addEventListener('click', open);
+    node.addEventListener('keydown', function (e) { if (e.key === 'Enter') open(); });
+    return node;
+  }
+
+  // Short local clock time, plus the day when it is not today.
+  function clockTime(iso) {
+    var d = new Date(iso);
+    if (!isFinite(d.getTime())) return '';
+    var t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return d.toDateString() === new Date().toDateString()
+      ? t : d.toLocaleDateString([], { weekday: 'short' }) + ' ' + t;
+  }
+
+  function untilTime(iso) {
+    var secs = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+    if (!isFinite(secs)) return '';
+    if (secs <= 60) return 'due now';
+    if (secs < 3600) return 'in ' + Math.round(secs / 60) + 'm';
+    if (secs < 86400) return 'in ' + Math.round(secs / 3600) + 'h';
+    return 'in ' + Math.round(secs / 86400) + 'd';
+  }
+
+  function renderWakeCard(w) {
+    var card = el('div', 'wake-card' + (w.pausedReason ? ' paused' : ''));
+    var head = el('div', 'card-head');
+    if (w.instanceName) head.appendChild(el('span', 'inst', w.instanceName));
+    head.appendChild(linkName(el('span', 'name', w.name || w.sessionId.slice(0, 8)), w));
+    var badge = wakeBadge({ everyHours: w.everyHours, pausedReason: w.pausedReason, failed: w.lastResult === 'error' });
+    if (badge) head.appendChild(badge);
+    if (w.waiting) head.appendChild(el('span', 'tag', 'waiting on you'));
+    else if (w.busy) head.appendChild(el('span', 'tag', 'running'));
+    card.appendChild(head);
+
+    card.appendChild(el('div', 'wake-line', w.pausedReason
+      ? 'Paused (' + w.pausedReason + '). It will not wake again until it is set again.'
+      : 'Next wake ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + ')'));
+    if (w.lastWakeAt) {
+      card.appendChild(el('div', 'wake-line' + (w.lastResult === 'error' ? ' error' : ''),
+        'Last wake ' + relTime(w.lastWakeAt) + (w.lastResult ? ': ' + w.lastResult : '')));
+    }
+    if (w.note) card.appendChild(el('div', 'wake-note', w.note));
+    return card;
+  }
+
+  // Read-only and input-free, so like the running rows it always re-renders.
+  function renderWakes(view) {
+    var wakes = view.wakes || [];
+    wakesEl.textContent = '';
+    if (wakes.length === 0) return;
+    wakesEl.appendChild(el('div', 'section-title', 'Scheduled wakes (' + wakes.length + ')'));
+    wakes.forEach(function (w) { wakesEl.appendChild(renderWakeCard(w)); });
+  }
+
   function sendTo(entry, text) {
     if (bridge) return bridge.send(entry.key, text);
     return post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/messages', { prompt: text });
@@ -214,19 +296,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 
     var head = el('div', 'card-head');
     if (entry.instanceName) head.appendChild(el('span', 'inst', entry.instanceName));
-    var nameEl = el('span', 'name', entry.name || entry.sessionId.slice(0, 8));
-    if (bridge && entry.key) {
-      // Opens the session in its instance, inside the portal.
-      nameEl.className = 'name link';
-      nameEl.setAttribute('role', 'link');
-      nameEl.tabIndex = 0;
-      nameEl.title = 'Open this session';
-      nameEl.addEventListener('click', function () { bridge.open(entry.key); });
-      nameEl.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') bridge.open(entry.key);
-      });
-    }
-    head.appendChild(nameEl);
+    head.appendChild(linkName(el('span', 'name', entry.name || entry.sessionId.slice(0, 8)), entry));
     var badge = wakeBadge(entry.wake);
     if (badge) head.appendChild(badge);
     head.appendChild(el('span', 'when', relTime(entry.idleAt)));
@@ -403,7 +473,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       var row = el('div', 'run-row');
       row.appendChild(el('span', 'spinner'));
       if (b.instanceName) row.appendChild(el('span', 'inst', b.instanceName));
-      row.appendChild(el('span', 'run-name', b.name || b.sessionId.slice(0, 8)));
+      row.appendChild(linkName(el('span', 'run-name', b.name || b.sessionId.slice(0, 8)), b));
       var rb = wakeBadge(b.wake);
       if (rb) row.appendChild(rb);
       runningEl.appendChild(row);
@@ -561,6 +631,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 
   function render(view) {
     renderRunning(view);
+    renderWakes(view);
     if (boardIsHeld()) {
       // Latest wins, not a queue: every response is a complete snapshot, so an
       // older one is never worth applying.

@@ -35,7 +35,21 @@ describe('parsePagerView', () => {
         { sessionId: 'w3', name: '', cwd: '', idleAt: '', options: ['ok'] },
       ],
       waitingTruncated: true,
+      wakes: [],
     });
+  });
+
+  it('validates wake entries and tolerates instances that send none', () => {
+    const v = parsePagerView({
+      busy: [], waiting: [],
+      wakes: [
+        { sessionId: 'k1', name: 'track', everyHours: 2, nextWakeAt: '2026-01-01T00:00:00Z', note: 'PR', lastResult: 'ok', waiting: true, extra: 1 },
+        { sessionId: '../bad', everyHours: 1 },
+        { sessionId: 'k2', everyHours: 0 },
+      ],
+    })!;
+    expect(v.wakes).toEqual([{ sessionId: 'k1', name: 'track', everyHours: 2, nextWakeAt: '2026-01-01T00:00:00Z', note: 'PR', lastResult: 'ok', waiting: true }]);
+    expect(parsePagerView({ busy: [], waiting: [] })!.wakes).toEqual([]);
   });
 
   it('rejects non-views', () => {
@@ -93,6 +107,17 @@ describe('mergeBoards (P4)', () => {
     expect(m.waitingTruncated).toBe(true);
     expect(m.instances.map(i => i.status)).toEqual(['live', 'live', 'unreachable']);
     expect(m.portalOrigin).toBe('http://localhost:53000');
+  });
+
+  it('merges wakes across instances, labeled, soonest first and paused last', () => {
+    const now = 100_000;
+    const k = (sessionId: string, nextWakeAt: string, over: Record<string, unknown> = {}) => ({ sessionId, name: sessionId, everyHours: 1, nextWakeAt, ...over });
+    const records = new Map<string, InstanceRecord>([
+      ['local', { view: parsePagerView({ busy: [], waiting: [], wakes: [k('a', '2026-01-01T05:00:00Z'), k('p', '2026-01-01T01:00:00Z', { pausedReason: 'expired' })] }), lastSeen: now, refused: false }],
+      ['b1', { view: parsePagerView({ busy: [], waiting: [], wakes: [k('b', '2026-01-01T03:00:00Z')] }), lastSeen: now, refused: false }],
+    ]);
+    const m = mergeBoards(peers, records, now, 0, 'x');
+    expect(m.wakes.map(w => [w.key, w.instanceName])).toEqual([['b1:b', 'devbox1'], ['local:a', 'laptop'], ['local:p', 'laptop']]);
   });
 });
 

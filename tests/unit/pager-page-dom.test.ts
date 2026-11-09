@@ -561,3 +561,35 @@ describe('wake badge', () => {
     expect(rowBadge.className).toBe('wake paused');
   });
 });
+
+describe('scheduled wakes list', () => {
+  it('renders read-only cards with linked titles, state and note', async () => {
+    const soon = new Date(Date.now() + 2 * 3600_000).toISOString();
+    await deliver({
+      ...view([entry()], [{ sessionId: 'b-1', name: 'busy one' }]),
+      wakes: [
+        { sessionId: 'k-1', name: 'track one', everyHours: 2, nextWakeAt: soon, note: 'waiting on PR 5', waiting: true },
+        { sessionId: 'k-2', name: 'track two', everyHours: 1, nextWakeAt: soon, pausedReason: 'failures', lastResult: 'error', lastWakeAt: new Date().toISOString() },
+      ],
+    });
+    const wakeCards = [...document.querySelectorAll('.wake-card')] as HTMLElement[];
+    expect(document.querySelector('.section-title')!.textContent).toBe('Scheduled wakes (2)');
+    expect(wakeCards).toHaveLength(2);
+    expect(wakeCards[0].querySelector('.name.link')!.textContent).toBe('track one');
+    expect(wakeCards[0].querySelector('.tag')!.textContent).toBe('waiting on you');
+    expect(wakeCards[0].querySelector('.wake-line')!.textContent).toMatch(/^Next wake in 2h/);
+    expect(wakeCards[0].querySelector('.wake-note')!.textContent).toBe('waiting on PR 5');
+    expect(wakeCards[0].querySelector('button, textarea')).toBeNull();
+    expect(wakeCards[1].className).toBe('wake-card paused');
+    expect(wakeCards[1].querySelector('.wake')!.className).toBe('wake paused failed');
+    expect(wakeCards[1].querySelector('.wake-line.error')!.textContent).toMatch(/: error$/);
+    // Running rows and action cards link to their session too.
+    expect(document.querySelector('.run-name')!.classList.contains('link')).toBe(true);
+    expect(cards()[0].querySelector('.name')!.classList.contains('link')).toBe(true);
+  });
+
+  it('shows nothing when no session has a wake', async () => {
+    await deliver(view([entry()]));
+    expect(document.getElementById('wakes')!.textContent).toBe('');
+  });
+});

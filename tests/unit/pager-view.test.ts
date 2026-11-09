@@ -144,6 +144,7 @@ describe('buildPagerView', () => {
         { sessionId: 'wait-01', name: 'older', cwd: '/w', kind: 'interactive', idleAt: ago(3 * DAY), options: ['resume A'] },
       ],
       waitingTruncated: false,
+      wakes: [],
     };
 
     expect(buildPagerView(inputs, 3, 7, NOW)).toEqual(expected);
@@ -172,8 +173,26 @@ describe('buildPagerView', () => {
 
   it('reports an empty board without inventing entries', () => {
     expect(buildPagerView([], 0, 3, NOW)).toEqual({
-      version: 3, busyCount: 0, busy: [], waiting: [], waitingTruncated: false,
+      version: 3, busyCount: 0, busy: [], waiting: [], waitingTruncated: false, wakes: [],
     });
+  });
+
+  it('lists every wake, soonest first, paused last, flagged waiting or running', () => {
+    const wake = (nextWakeAt: string, over: Record<string, unknown> = {}) =>
+      ({ everyMinutes: 120, note: '', registeredAt: ago(DAY), nextWakeAt, consecutiveFailures: 0, ...over }) as unknown as PagerSessionInput['wake'];
+    const view = buildPagerView([
+      input({ sessionId: 'late', name: 'L', responseOptions: undefined, wake: wake('2026-08-03T18:00:00.000Z') }),
+      input({ sessionId: 'paused', name: 'P', responseOptions: undefined, wake: wake('2026-08-03T13:00:00.000Z', { pausedReason: 'failures', lastResult: 'error', lastWakeAt: ago(3600000) }) }),
+      input({ sessionId: 'soon', name: 'S', wake: wake('2026-08-03T13:00:00.000Z', { note: 'waiting on PR' }) }),
+      input({ sessionId: 'run', name: 'R', isBusy: true, responseOptions: undefined, wake: wake('2026-08-03T15:00:00.000Z') }),
+      input({ sessionId: 'nowake', name: 'N' }),
+    ], 1, 1, NOW, i => 'T-' + i.name);
+    expect(view.wakes).toEqual([
+      { sessionId: 'soon', name: 'T-S', everyHours: 2, nextWakeAt: '2026-08-03T13:00:00.000Z', note: 'waiting on PR', waiting: true },
+      { sessionId: 'run', name: 'T-R', everyHours: 2, nextWakeAt: '2026-08-03T15:00:00.000Z', busy: true },
+      { sessionId: 'late', name: 'T-L', everyHours: 2, nextWakeAt: '2026-08-03T18:00:00.000Z' },
+      { sessionId: 'paused', name: 'T-P', everyHours: 2, nextWakeAt: '2026-08-03T13:00:00.000Z', lastWakeAt: ago(3600000), lastResult: 'error', pausedReason: 'failures' },
+    ]);
   });
 
   it('surfaces a legacy offer dated only by lastIdleAt', () => {

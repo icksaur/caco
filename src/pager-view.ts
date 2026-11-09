@@ -94,12 +94,28 @@ export interface PagerWaitingEntry {
   wake?: PagerWakeBadge;
 }
 
+/** One session with a self-wake, for the read-only "Scheduled wakes" list. */
+export interface PagerWakeEntry {
+  sessionId: string;
+  name: string;
+  everyHours: number;
+  nextWakeAt: string;
+  note?: string;
+  lastWakeAt?: string;
+  lastResult?: WakeState['lastResult'];
+  pausedReason?: WakeState['pausedReason'];
+  /** The session is holding an offer on the board right now. */
+  waiting?: true;
+  busy?: true;
+}
+
 export interface PagerView {
   version: number;
   busyCount: number;
   busy: PagerBusyEntry[];
   waiting: PagerWaitingEntry[];
   waitingTruncated: boolean;
+  wakes: PagerWakeEntry[];
 }
 
 /** Epoch ms of a timestamp, or null when absent or unparseable. */
@@ -216,6 +232,7 @@ export function buildPagerView(
     .sort(compareBusy);
 
   const triaged = inputs.filter(i => needsTriage(i, now)).sort(compareWaiting);
+  const shown = new Set(triaged.slice(0, PAGER_MAX_WAITING).map(i => i.sessionId));
 
   return {
     version,
@@ -230,5 +247,32 @@ export function buildPagerView(
       options: i.responseOptions ?? [],
     }, i.wake)),
     waitingTruncated: triaged.length > PAGER_MAX_WAITING,
+    wakes: inputs
+      .filter((i): i is PagerSessionInput & { wake: WakeState } => !!i.wake)
+      .map(i => wakeEntry(i, titleOf(i), shown.has(i.sessionId)))
+      .sort(compareWakes),
   };
+}
+
+function wakeEntry(i: PagerSessionInput & { wake: WakeState }, name: string, waiting: boolean): PagerWakeEntry {
+  const w = i.wake;
+  const e: PagerWakeEntry = { sessionId: i.sessionId, name, everyHours: w.everyMinutes / 60, nextWakeAt: w.nextWakeAt };
+  if (w.note) e.note = w.note;
+  if (w.lastWakeAt) e.lastWakeAt = w.lastWakeAt;
+  if (w.lastResult) e.lastResult = w.lastResult;
+  if (w.pausedReason) e.pausedReason = w.pausedReason;
+  if (waiting) e.waiting = true;
+  if (i.isBusy) e.busy = true;
+  return e;
+}
+
+/** Soonest next wake first; paused wakes, which will not fire, go last. */
+function compareWakes(a: PagerWakeEntry, b: PagerWakeEntry): number {
+  const ap = a.pausedReason ? 1 : 0;
+  const bp = b.pausedReason ? 1 : 0;
+  if (ap !== bp) return ap - bp;
+  const at = parseTime(a.nextWakeAt) ?? Infinity;
+  const bt = parseTime(b.nextWakeAt) ?? Infinity;
+  if (at !== bt) return at < bt ? -1 : 1;
+  return a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0;
 }

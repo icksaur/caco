@@ -177,6 +177,12 @@ To triage several machines on one board, use the merged pager in the [Portal](#p
 - **Wake badges.** A session with a self-wake shows the same `wake 1h` badge as the
   session list on its card and running row: dashed for `wake paused`, red when the
   last wake failed.
+- **Scheduled wakes list.** Below the board, every session with a self-wake gets a
+  read-only card: next wake (or why it is paused), last wake and result, its note,
+  and a `waiting on you` or `running` tag. Paused wakes sort last.
+- **Click a title to open the session.** Works on action cards, running rows and
+  wake cards. Standalone it opens `/?session=<id>`; in the portal it switches to
+  the owning instance.
 - **Scheduled wakes keep the offer.** A scheduler message does not clear a pending
   offer, and a scheduled turn sets the unobserved dot only when it makes a new
   offer. A wake that finds nothing to decide stays silent.

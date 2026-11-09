@@ -19,7 +19,11 @@ export interface PortalPeer { id: string; url: string; name: string }
 export interface WakeBadge { everyHours: number; pausedReason?: string; failed?: true }
 export interface BusyEntry { sessionId: string; name: string; wake?: WakeBadge }
 export interface WaitingEntry { sessionId: string; name: string; cwd: string; idleAt: string; options: string[]; wake?: WakeBadge }
-export interface PagerView { busy: BusyEntry[]; waiting: WaitingEntry[]; waitingTruncated: boolean }
+export interface WakeEntry {
+  sessionId: string; name: string; everyHours: number; nextWakeAt: string;
+  note?: string; lastWakeAt?: string; lastResult?: string; pausedReason?: string; waiting?: true; busy?: true;
+}
+export interface PagerView { busy: BusyEntry[]; waiting: WaitingEntry[]; waitingTruncated: boolean; wakes: WakeEntry[] }
 
 export type InstanceStatus = 'pending' | 'live' | 'unreachable' | 'refused';
 
@@ -34,6 +38,7 @@ export interface MergedView {
   busy: Array<BusyEntry & Labeled>;
   waiting: Array<WaitingEntry & Labeled>;
   waitingTruncated: boolean;
+  wakes: Array<WakeEntry & Labeled>;
   instances: Array<{ id: string; name: string; status: InstanceStatus }>;
   portalOrigin: string;
 }
@@ -48,6 +53,22 @@ export function parseWakeBadge(raw: unknown): WakeBadge | undefined {
   if (typeof r.pausedReason === 'string' && r.pausedReason) badge.pausedReason = r.pausedReason.slice(0, 40);
   if (r.failed === true) badge.failed = true;
   return badge;
+}
+
+/** A wake list entry. Older instances send no `wakes`, which is an empty list, not an error. */
+export function parseWakeEntry(raw: unknown): WakeEntry | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (!isValidSessionId(o.sessionId)) return null;
+  if (typeof o.everyHours !== 'number' || !Number.isFinite(o.everyHours) || o.everyHours <= 0) return null;
+  const e: WakeEntry = { sessionId: o.sessionId, name: str(o.name, 300), everyHours: o.everyHours, nextWakeAt: str(o.nextWakeAt, 64) };
+  if (typeof o.note === 'string' && o.note) e.note = o.note.slice(0, 300);
+  if (typeof o.lastWakeAt === 'string' && o.lastWakeAt) e.lastWakeAt = o.lastWakeAt.slice(0, 64);
+  if (typeof o.lastResult === 'string' && o.lastResult) e.lastResult = o.lastResult.slice(0, 20);
+  if (typeof o.pausedReason === 'string' && o.pausedReason) e.pausedReason = o.pausedReason.slice(0, 40);
+  if (o.waiting === true) e.waiting = true;
+  if (o.busy === true) e.busy = true;
+  return e;
 }
 
 /** Re-validate a view from an instance: it crosses a trust boundary even from an allowed origin. */
@@ -71,7 +92,14 @@ export function parsePagerView(raw: unknown): PagerView | null {
     const wake = parseWakeBadge(o.wake);
     waiting.push({ sessionId: o.sessionId, name: str(o.name, 300), cwd: str(o.cwd, 1000), idleAt: str(o.idleAt, 64), options, ...(wake ? { wake } : {}) });
   }
-  return { busy, waiting, waitingTruncated: r.waitingTruncated === true };
+  const wakes: WakeEntry[] = [];
+  if (Array.isArray(r.wakes)) {
+    for (const x of (r.wakes as unknown[]).slice(0, 200)) {
+      const e = parseWakeEntry(x);
+      if (e) wakes.push(e);
+    }
+  }
+  return { busy, waiting, waitingTruncated: r.waitingTruncated === true, wakes };
 }
 
 export function cardKey(peerId: string, sessionId: string): string {
@@ -106,6 +134,7 @@ export function mergeBoards(
 ): MergedView {
   const busy: MergedView['busy'] = [];
   const waiting: MergedView['waiting'] = [];
+  const wakes: MergedView['wakes'] = [];
   const instances: MergedView['instances'] = [];
   let waitingTruncated = false;
   for (const p of peers) {
@@ -116,12 +145,15 @@ export function mergeBoards(
     const label = { instanceId: p.id, instanceName: p.name };
     for (const b of rec.view.busy) busy.push({ ...b, ...label, key: cardKey(p.id, b.sessionId) });
     for (const w of rec.view.waiting) waiting.push({ ...w, ...label, key: cardKey(p.id, w.sessionId) });
+    for (const k of rec.view.wakes) wakes.push({ ...k, ...label, key: cardKey(p.id, k.sessionId) });
     waitingTruncated ||= rec.view.waitingTruncated;
   }
   const t = (iso: string): number => { const n = Date.parse(iso); return Number.isFinite(n) ? n : 0; };
   // Array.prototype.sort is stable, so ties keep sidebar and server order.
   waiting.sort((a, b) => t(b.idleAt) - t(a.idleAt));
-  return { busy, waiting, waitingTruncated, instances, portalOrigin };
+  // Same order as one instance's list: soonest first, paused last.
+  wakes.sort((a, b) => (a.pausedReason ? 1 : 0) - (b.pausedReason ? 1 : 0) || t(a.nextWakeAt) - t(b.nextWakeAt));
+  return { busy, waiting, waitingTruncated, wakes, instances, portalOrigin };
 }
 
 export interface PortalPagerDeps {

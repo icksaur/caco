@@ -977,7 +977,19 @@ Returns:
       "options": ["Fix the failing test", "Add a regression test"]
     }
   ],
-  "waitingTruncated": false
+  "waitingTruncated": false,
+  "wakes": [
+    {
+      "sessionId": "uuid",
+      "name": "Bus support",
+      "everyHours": 2,
+      "nextWakeAt": "2026-08-03T12:00:00.000Z",
+      "note": "waiting on PR 5504426 review",
+      "lastWakeAt": "2026-08-03T10:00:00.000Z",
+      "lastResult": "ok",
+      "waiting": true
+    }
+  ]
 }
 ```
 
@@ -988,6 +1000,12 @@ entries with `waitingTruncated` set rather than silently cut.
 A `busy` or `waiting` entry for a session with a self-wake also carries
 `"wake": { "everyHours": 1, "pausedReason"?: "failures"|"expired"|"imported", "failed"?: true }`
 for the pager's wake badge. Wake changes bump `version`.
+
+`wakes` lists every session with a self-wake, paused ones included, soonest
+`nextWakeAt` first and paused last. Optional fields: `note`, `lastWakeAt`,
+`lastResult`, `pausedReason`, and `waiting`/`busy` (`true` when the session is
+on the board or running right now). `name` in all three lists is the session
+list's title ladder: manual name, workspace summary, first intent, "No summary".
 
 A session appears in `waiting` only when all of these hold: not busy, holding
 non-empty `responseOptions`, that offer not already dismissed, and the offer made

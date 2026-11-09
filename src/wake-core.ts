@@ -186,3 +186,24 @@ export function buildWakePrompt(o: { nowMs: number; wake: WakeState; final: bool
   }
   return lines.join('\n');
 }
+
+/** The wire shape of a wake for the session list and `/api/wakes`. */
+export interface WakeSummary {
+  everyHours: number;
+  nextWakeAt: string;
+  note?: string;
+  lastWakeAt?: string;
+  lastResult?: WakeState['lastResult'];
+  lastError?: string;
+  pausedReason?: WakeState['pausedReason'];
+}
+
+export function summarizeWake(w: WakeState): WakeSummary {
+  const s: WakeSummary = { everyHours: w.everyMinutes / 60, nextWakeAt: w.nextWakeAt };
+  if (w.note) s.note = w.note;
+  if (w.lastWakeAt) s.lastWakeAt = w.lastWakeAt;
+  if (w.lastResult) s.lastResult = w.lastResult;
+  if (w.lastError) s.lastError = w.lastError;
+  if (w.pausedReason) s.pausedReason = w.pausedReason;
+  return s;
+}

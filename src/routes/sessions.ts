@@ -37,6 +37,7 @@ import { snapshot as throughputSnapshot } from '../session-throughput.js';
 import { resolveAgentSelection, visibleAgents, filterSkillCommands } from '../agent-command.js';
 import { skillToolEnabled } from '../tool-registry.js';
 import { wakeManager } from '../wake-runtime.js';
+import { summarizeWake } from '../wake-core.js';
 
 /** Written into an export's caco/<id>/ when the export also deletes the source
  *  (a migration). Import consumes it (spec-session-wake). */
@@ -140,6 +141,7 @@ router.get('/sessions', async (_req: Request, res: Response) => {
   const models = sessionManager.getModels();
   
   const unobservedCount = unobservedTracker.getCount();
+  const wakes = new Map(wakeManager.list().map(w => [w.sessionId, w.wake]));
   for (const session of sessions) {
     const scheduleInfo = await getScheduleForSession(session.sessionId);
     if (scheduleInfo) {
@@ -154,6 +156,9 @@ router.get('/sessions', async (_req: Request, res: Response) => {
     // when nothing will reap it, so the UI never promises a deadline that will
     // not arrive.
     session.archiveEligibleAt = AUTO_ARCHIVE_ENABLED ? archiveEligibleAt(session.sessionId) : null;
+    // Self-wake summary so the sidebar can mark tracks (spec-session-wake).
+    const wake = wakes.get(session.sessionId);
+    session.wake = wake ? summarizeWake(wake) : null;
   }
 
   // Fetch peer sessions (non-blocking, best-effort)

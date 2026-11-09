@@ -132,6 +132,68 @@
   color: var(--color-error);
 }
 
+.result-running, .result-cancelled {
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+}
+
+.section-title {
+  margin: var(--space-lg) 0 var(--space-md);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.wakes-section {
+  margin-bottom: var(--space-lg);
+}
+
+.wake-session {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.wake-session:hover {
+  text-decoration: underline;
+}
+
+.wake-stop {
+  background: transparent;
+  border: 1px solid var(--color-error);
+  color: var(--color-error);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+}
+
+.wake-stop:hover {
+  background: var(--color-error-bg);
+}
+
+.wake-note {
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.wake-status {
+  font-size: var(--text-md, var(--text-sm));
+  font-weight: 600;
+  color: var(--color-success-bright);
+}
+
+.wake-status.paused {
+  color: var(--color-error);
+}
+
+.wake-card.wake-paused {
+  border-style: dashed;
+}
+
 .job-prompt {
   background: var(--color-bg-hover);
   border: 1px solid var(--color-border);

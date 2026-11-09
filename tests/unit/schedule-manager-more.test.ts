@@ -14,9 +14,10 @@ vi.mock('../../src/config.js', () => ({
   SERVER_URL: 'http://scheduler.test',
   SCHEDULE_CHECK_INTERVAL_MS: 1_000,
   SCHEDULE_BUSY_DELAY_MS: 7_200_000,
+  SCHEDULE_TURN_TIMEOUT_MS: 7_200_000,
 }));
 
-import { calculateNextRun, startScheduleManager, stopScheduleManager, triggerSchedule } from '../../src/schedule-manager.js';
+import { calculateNextRun, settleScheduleRun, startScheduleManager, stopScheduleManager, triggerSchedule } from '../../src/schedule-manager.js';
 
 function definition(schedule: ScheduleDefinition['schedule'], persistSession = true): ScheduleDefinition {
   return {
@@ -100,7 +101,7 @@ describe('triggerSchedule branch behavior', () => {
       body: JSON.stringify({ prompt: 'run the job', source: 'scheduler', scheduleSlug: 'daily-job' }),
     }));
     expect(store.saveLastRun).toHaveBeenCalledWith('daily-job', expect.objectContaining({
-      lastResult: 'success',
+      lastResult: 'running',
       lastError: null,
       sessionId: 'created-1',
       nextRun: '2026-07-10T13:00:00.000Z',
@@ -113,7 +114,7 @@ describe('triggerSchedule branch behavior', () => {
 
     await triggerSchedule('daily-job');
 
-    expect(store.saveLastRun).toHaveBeenCalledWith('daily-job', expect.objectContaining({ sessionId: null, lastResult: 'success' }));
+    expect(store.saveLastRun).toHaveBeenCalledWith('daily-job', expect.objectContaining({ sessionId: null, lastResult: 'running' }));
   });
 
   it('reuses an existing session and records the next run on success', async () => {
@@ -124,7 +125,7 @@ describe('triggerSchedule branch behavior', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('http://scheduler.test/api/sessions/existing-1/messages', expect.objectContaining({ method: 'POST' }));
     expect(store.saveLastRun).toHaveBeenCalledWith('daily-job', expect.objectContaining({
-      lastResult: 'success',
+      lastResult: 'running',
       lastError: null,
       sessionId: 'existing-1',
       nextRun: '2026-07-10T13:00:00.000Z',
@@ -152,7 +153,7 @@ describe('triggerSchedule branch behavior', () => {
     await triggerSchedule('daily-job');
 
     expect(fetchMock).toHaveBeenNthCalledWith(2, 'http://scheduler.test/api/sessions', expect.objectContaining({ method: 'POST' }));
-    expect(store.saveLastRun).toHaveBeenCalledWith('daily-job', expect.objectContaining({ sessionId: 'replacement-1', lastResult: 'success' }));
+    expect(store.saveLastRun).toHaveBeenCalledWith('daily-job', expect.objectContaining({ sessionId: 'replacement-1', lastResult: 'running' }));
   });
 
   it('records create failures as schedule errors while triggerSchedule reports handled execution', async () => {
@@ -222,6 +223,93 @@ describe('schedule manager loop', () => {
     startScheduleManager();
     await vi.waitFor(() => expect(store.saveLastRun).toHaveBeenCalledTimes(1));
 
-    expect(store.saveLastRun).toHaveBeenCalledWith('due', expect.objectContaining({ sessionId: 'loop-session', lastResult: 'success' }));
+    expect(store.saveLastRun).toHaveBeenCalledWith('due', expect.objectContaining({ sessionId: 'loop-session', lastResult: 'running' }));
+  });
+
+  it('a running run waits for its outcome; an orphaned one (restart) is recorded as interrupted', async () => {
+    const due = definition({ type: 'interval', intervalMinutes: 60 });
+    store.listSchedules.mockResolvedValue(['orphan']);
+    store.loadDefinitionResult.mockResolvedValue({ ok: true, value: due });
+    store.loadLastRunResult.mockResolvedValue({ ok: true, value: { ...lastRun('s-orphan', '2026-07-10T13:00:00.000Z'), lastResult: 'running' } });
+
+    startScheduleManager();
+    await vi.waitFor(() => expect(store.saveLastRun).toHaveBeenCalledTimes(1));
+    expect(store.saveLastRun).toHaveBeenCalledWith('orphan', expect.objectContaining({ lastResult: 'error', lastError: 'interrupted by restart' }));
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('slug runs settle at the real end of the turn (spec-scheduler, Outcome)', () => {
+  let fetchMock: ReturnType<typeof vi.fn<() => Promise<unknown>>>;
+  let saved: LastRunState | null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    saved = null;
+    store.loadDefinitionResult.mockResolvedValue({ ok: true, value: definition({ type: 'interval', intervalMinutes: 60 }) });
+    store.loadLastRunResult.mockImplementation(async () => (saved ? { ok: true, value: { ...saved } } : { ok: true, value: lastRun('existing-1') }));
+    store.saveLastRun.mockImplementation(async (_slug, state) => { saved = { ...state }; });
+    store.validateScheduleInterval.mockReturnValue(null);
+    fetchMock = vi.fn<() => Promise<unknown>>().mockResolvedValue(okResponse());
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    stopScheduleManager();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ['ok', undefined, 'success', null],
+    ['error', 'session.error', 'error', 'session.error'],
+    ['cancelled', 'stopped by user', 'cancelled', null],
+  ] as const)('accept writes running; a %s outcome writes %s', async (outcome, reason, result, error) => {
+    await triggerSchedule('daily-job');
+    expect(saved).toMatchObject({ lastResult: 'running', sessionId: 'existing-1' });
+    settleScheduleRun('other-session', 'ok');
+    expect(saved).toMatchObject({ lastResult: 'running' });
+    settleScheduleRun('existing-1', outcome, reason);
+    await vi.waitFor(() => expect(saved).toMatchObject({ lastResult: result, lastError: error }));
+    settleScheduleRun('existing-1', 'error', 'late');
+    await Promise.resolve();
+    expect(saved).toMatchObject({ lastResult: result });
+  });
+
+  it('an outcome that arrives before the accept is written still settles the run', async () => {
+    fetchMock.mockImplementationOnce(() => {
+      settleScheduleRun('existing-1', 'error', 'no-session');
+      return Promise.resolve(okResponse());
+    });
+    await triggerSchedule('daily-job');
+    expect(saved).toMatchObject({ lastResult: 'error', lastError: 'no-session' });
+  });
+
+  it('"Run now" during a running turn does not POST again or overwrite the run', async () => {
+    await triggerSchedule('daily-job');
+    await triggerSchedule('daily-job');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(saved).toMatchObject({ lastResult: 'running' });
+  });
+
+  it('the loop skips a tracked running run and times it out after 2 hours', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-07-10T12:00:00.000Z'));
+      await triggerSchedule('daily-job');
+      store.listSchedules.mockResolvedValue(['daily-job']);
+      vi.setSystemTime(new Date('2026-07-10T13:30:00.000Z')); // due, but still running
+      startScheduleManager();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(saved).toMatchObject({ lastResult: 'running' });
+      stopScheduleManager();
+      // pendingRuns is cleared by stop; re-arm by triggering a fresh run first.
+      await triggerSchedule('daily-job');
+      vi.setSystemTime(new Date('2026-07-10T16:00:00.000Z'));
+      startScheduleManager();
+      await vi.waitFor(() => expect(store.saveLastRun).toHaveBeenCalledWith('daily-job', expect.objectContaining({ lastResult: 'error', lastError: 'no idle within timeout' })));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

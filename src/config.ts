@@ -45,6 +45,8 @@ export function serverUrlFor(host: string, port: number): string {
 export const DISPATCH_TIMEOUT_MS = 5 * 60 * 1000;
 export const SCHEDULE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 export const SCHEDULE_BUSY_DELAY_MS = 60 * 60 * 1000;
+/** A slug run still `running` this long after accept is recorded as failed. */
+export const SCHEDULE_TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
 // Session self-wakes (spec-session-wake). A separate, finer loop than the slug
 // scheduler so a 1 h cadence is not late by up to 30 min.

@@ -763,6 +763,22 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     row1.appendChild(staged);
   }
 
+  // Self-wake badge (spec-session-wake): marks long-lived "track" sessions.
+  // A paused wake reads differently so a stopped track is obvious at a glance.
+  if (session.wake) {
+    const w = session.wake;
+    const wakeBadge = document.createElement('span');
+    wakeBadge.className = `session-wake-badge${w.pausedReason ? ' paused' : ''}${w.lastResult === 'error' ? ' failed' : ''}`;
+    wakeBadge.textContent = w.pausedReason ? 'wake paused' : `wake ${w.everyHours}h`;
+    const lines = [w.pausedReason
+      ? `Wake paused (${w.pausedReason}). The session re-arms it with caco_wake.`
+      : `Wakes every ${w.everyHours}h. Next: ${new Date(w.nextWakeAt).toLocaleString()}`];
+    if (w.note) lines.push(`Note: ${w.note}`);
+    if (w.lastResult) lines.push(`Last result: ${w.lastResult}${w.lastError ? ` (${w.lastError})` : ''}`);
+    wakeBadge.title = lines.join('\n');
+    row1.appendChild(wakeBadge);
+  }
+
   if (session.updatedAt) {
     const ageSpan = document.createElement('span');
     ageSpan.className = 'session-age';

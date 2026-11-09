@@ -25,8 +25,8 @@ async function loadJobs() {
   empty.style.display = 'none';
 
   try {
-    console.log('[Jobs Applet] Fetching /api/schedule...');
-    const response = await fetch('/api/schedule');
+    console.log('[Jobs Applet] Fetching /api/schedule and /api/wakes...');
+    const [response, wakes] = await Promise.all([fetch('/api/schedule'), loadWakes()]);
     console.log('[Jobs Applet] Response:', response.status, response.statusText);
     
     if (!response.ok) {
@@ -37,9 +37,11 @@ async function loadJobs() {
     const jobs = data.schedules || [];
     
     loading.style.display = 'none';
+    renderWakes(wakes);
+    document.getElementById('jobs-title').style.display = wakes.length > 0 && jobs.length > 0 ? 'block' : 'none';
 
-    if (!jobs || jobs.length === 0) {
-      empty.style.display = 'block';
+    if (jobs.length === 0) {
+      if (wakes.length === 0) empty.style.display = 'block';
       return;
     }
 
@@ -143,6 +145,101 @@ function createJobCard(job) {
   card.appendChild(details);
 
   return card;
+}
+
+const WAKE_RESULT_LABELS = { ok: 'ok', error: 'failed', running: 'running', cancelled: 'stopped' };
+const WAKE_PAUSE_LABELS = {
+  failures: 'paused: 3 failed wakes in a row',
+  expired: 'paused: expired, no human message in the session for too long',
+  imported: 'paused: copied from another machine',
+};
+
+async function loadWakes() {
+  try {
+    const res = await fetch('/api/wakes');
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.wakes || [];
+  } catch (err) {
+    console.error('[Jobs Applet] Failed to load wakes:', err);
+    return [];
+  }
+}
+
+function renderWakes(wakes) {
+  const section = document.getElementById('wakes-section');
+  const list = document.getElementById('wakes-list');
+  list.innerHTML = '';
+  section.style.display = wakes.length > 0 ? 'block' : 'none';
+  wakes.forEach(w => list.appendChild(createWakeCard(w)));
+}
+
+function createWakeCard(w) {
+  const card = document.createElement('div');
+  card.className = `job-card wake-card${w.pausedReason ? ' wake-paused' : ''}`;
+
+  const header = document.createElement('div');
+  header.className = 'job-header';
+  const title = document.createElement('div');
+  title.className = 'job-title';
+  const link = document.createElement('a');
+  link.className = 'wake-session';
+  link.href = '/?session=' + encodeURIComponent(w.sessionId);
+  link.textContent = w.sessionName || w.sessionId.slice(0, 8);
+  title.appendChild(link);
+  const cadence = document.createElement('span');
+  cadence.className = 'status-badge status-enabled';
+  cadence.textContent = `every ${w.everyHours}h`;
+  title.appendChild(cadence);
+  header.appendChild(title);
+
+  const stop = document.createElement('button');
+  stop.className = 'wake-stop';
+  stop.textContent = 'Stop';
+  stop.title = 'Remove this wake. The session can re-arm it with caco_wake.';
+  stop.addEventListener('click', () => { void stopWake(w, stop); });
+  header.appendChild(stop);
+  card.appendChild(header);
+
+  if (w.note) {
+    const note = document.createElement('div');
+    note.className = 'wake-note';
+    note.textContent = w.note;
+    card.appendChild(note);
+  }
+
+  const status = document.createElement('div');
+  status.className = `wake-status${w.pausedReason ? ' paused' : ''}`;
+  status.textContent = w.pausedReason
+    ? (WAKE_PAUSE_LABELS[w.pausedReason] || `paused (${w.pausedReason})`)
+    : `Next wake ${formatDateTime(w.nextWakeAt)}`;
+  card.appendChild(status);
+
+  const details = document.createElement('div');
+  details.className = 'job-details';
+  details.appendChild(createDetailItem('Last Wake', w.lastWakeAt ? formatDateTime(w.lastWakeAt) : 'never', 'time'));
+  if (w.lastResult) {
+    const label = WAKE_RESULT_LABELS[w.lastResult] || w.lastResult;
+    details.appendChild(createDetailItem('Last Result', label, w.lastResult === 'error' ? 'error' : ''));
+  }
+  if (w.lastError) details.appendChild(createDetailItem('Last Error', w.lastError, 'error'));
+  card.appendChild(details);
+  return card;
+}
+
+async function stopWake(w, button) {
+  if (!confirm(`Stop waking "${w.sessionName || w.sessionId.slice(0, 8)}"?`)) return;
+  button.disabled = true;
+  try {
+    const res = await fetch('/api/wakes/' + encodeURIComponent(w.sessionId), { method: 'DELETE' });
+    if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    console.error('[Jobs Applet] Failed to stop wake:', err);
+    button.disabled = false;
+    button.textContent = 'Stop failed, retry';
+    return;
+  }
+  loadJobs();
 }
 
 function createDetailItem(label, value, className = '') {

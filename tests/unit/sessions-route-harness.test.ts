@@ -362,6 +362,8 @@ describe('sessions route harness', () => {
     expect(body.sessionOrder).toEqual([knownId, inactiveId]);
     expect(body.unobservedCount).toBe(3);
     expect(body.sessions[0]).toMatchObject({ sessionId: knownId, scheduleSlug: 'daily', scheduleNextRun: 'tomorrow' });
+    expect(body.sessions[0].wake).toEqual({ everyHours: 2, nextWakeAt: 'n', pausedReason: 'expired' });
+    expect(body.sessions[1].wake).toBeNull();
     expect(body.models[0]).toMatchObject({ id: 'model-a', cost: 1, supportsReasoningEffort: true });
   });
 

@@ -5,15 +5,66 @@ import {
   loadLastRunResult, 
   saveLastRun,
   validateScheduleInterval,
+  type LastRunState,
   type ScheduleDefinition
 } from './schedule-store.js';
-import { SERVER_URL, SCHEDULE_CHECK_INTERVAL_MS, SCHEDULE_BUSY_DELAY_MS } from './config.js';
+import { SERVER_URL, SCHEDULE_CHECK_INTERVAL_MS, SCHEDULE_BUSY_DELAY_MS, SCHEDULE_TURN_TIMEOUT_MS } from './config.js';
+import { onTurnOutcome, type TurnOutcome } from './turn-outcome.js';
 
 let checkTimer: NodeJS.Timeout | null = null;
 let isExecuting = false;
+let unsubscribeOutcome: (() => void) | null = null;
+
+/**
+ * Runs whose prompt was POSTed, keyed by the session running the turn. A run is
+ * `running` in last-run.json from accept until its turn really ends; the turn
+ * outcome (spec-session-wake, turn-outcome.ts) then writes the result. An
+ * outcome that lands before the accept is written is held in `early`.
+ */
+interface PendingRun { slug: string; accepted: boolean; early?: { outcome: TurnOutcome; reason?: string } }
+const pendingRuns = new Map<string, PendingRun>();
+
+function pendingForSlug(slug: string): string | undefined {
+  for (const [sessionId, run] of pendingRuns) if (run.slug === slug) return sessionId;
+  return undefined;
+}
+
+async function recordOutcome(slug: string, outcome: TurnOutcome, reason?: string): Promise<void> {
+  const r = await loadLastRunResult(slug);
+  if (!r.ok || r.value.lastResult !== 'running') return;
+  await saveLastRun(slug, {
+    ...r.value,
+    lastResult: outcome === 'ok' ? 'success' : outcome === 'cancelled' ? 'cancelled' : 'error',
+    lastError: outcome === 'error' ? (reason ?? 'error') : null,
+  });
+  console.log(`[SCHEDULER] ${slug} finished: ${outcome}`);
+}
+
+/** Turn-outcome listener: settles the slug run (if any) on this session. */
+export function settleScheduleRun(sessionId: string, outcome: TurnOutcome, reason?: string): void {
+  const run = pendingRuns.get(sessionId);
+  if (!run) return;
+  if (!run.accepted) { run.early ??= { outcome, reason }; return; }
+  pendingRuns.delete(sessionId);
+  recordOutcome(run.slug, outcome, reason).catch(err => {
+    console.error(`[SCHEDULER] Failed to record outcome for ${run.slug}:`, err instanceof Error ? err.name : typeof err);
+  });
+}
+
+async function markAccepted(runSessionId: string, slug: string, state: Omit<LastRunState, 'lastResult' | 'lastError'>): Promise<void> {
+  await saveLastRun(slug, { ...state, lastResult: 'running', lastError: null });
+  const run = pendingRuns.get(runSessionId);
+  if (!run) return;
+  run.accepted = true;
+  if (run.early) {
+    pendingRuns.delete(runSessionId);
+    await recordOutcome(slug, run.early.outcome, run.early.reason);
+  }
+}
 
 export function startScheduleManager(): void {
   console.log('[SCHEDULER] Starting schedule manager');
+  if (!unsubscribeOutcome) unsubscribeOutcome = onTurnOutcome(settleScheduleRun);
   
   checkSchedules().catch(err => {
     console.error('[SCHEDULER] Error in initial check:', err);
@@ -31,6 +82,9 @@ export function stopScheduleManager(): void {
     clearInterval(checkTimer);
     checkTimer = null;
   }
+  unsubscribeOutcome?.();
+  unsubscribeOutcome = null;
+  pendingRuns.clear();
   console.log('[SCHEDULER] Stopped schedule manager');
 }
 
@@ -75,6 +129,18 @@ async function checkSchedules(): Promise<void> {
         continue;
       }
       const lastRun = lastRunResult.ok ? lastRunResult.value : null;
+      if (lastRun?.lastResult === 'running') {
+        const runSessionId = pendingForSlug(slug);
+        const startedAt = lastRun.lastRun ? Date.parse(lastRun.lastRun) : 0;
+        if (runSessionId && now.getTime() - startedAt <= SCHEDULE_TURN_TIMEOUT_MS) {
+          // Still in its turn: wait for the outcome rather than POST into a 409.
+          continue;
+        }
+        if (runSessionId) pendingRuns.delete(runSessionId);
+        lastRun.lastResult = 'error';
+        lastRun.lastError = runSessionId ? 'no idle within timeout' : 'interrupted by restart';
+        await saveLastRun(slug, lastRun);
+      }
       const nextRun = lastRun?.nextRun ? new Date(lastRun.nextRun) : now;
 
       if (nextRun <= now) {
@@ -123,15 +189,29 @@ async function executeSchedule(slug: string): Promise<void> {
   try {
     // Try to POST to existing session
     if (lastRun?.sessionId) {
-      const response = await fetch(`${SERVER_URL}/api/sessions/${lastRun.sessionId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: definition.prompt,
-          source: 'scheduler',
-          scheduleSlug: slug
-        })
-      });
+      const runSessionId = lastRun.sessionId;
+      if (pendingRuns.has(runSessionId)) {
+        // A run on this session is still in its turn (e.g. "Run now" clicked mid-run).
+        console.log(`[SCHEDULER] ${slug} is already running; not starting another`);
+        return;
+      }
+      pendingRuns.set(runSessionId, { slug, accepted: false });
+      let response: Response;
+      try {
+        response = await fetch(`${SERVER_URL}/api/sessions/${runSessionId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            prompt: definition.prompt,
+            source: 'scheduler',
+            scheduleSlug: slug
+          })
+        });
+      } catch (err) {
+        pendingRuns.delete(runSessionId);
+        throw err;
+      }
+      if (!response.ok) pendingRuns.delete(runSessionId);
       
       if (response.status === 409) {
         // Session busy - delay 1 hour
@@ -157,14 +237,12 @@ async function executeSchedule(slug: string): Promise<void> {
         throw new Error(`HTTP ${response.status}`);
       }
       
-      await saveLastRun(slug, {
+      await markAccepted(runSessionId, slug, {
         lastRun: new Date().toISOString(),
-        lastResult: 'success',
-        lastError: null,
-        sessionId: lastRun.sessionId,
+        sessionId: runSessionId,
         nextRun: calculateNextRun(definition).toISOString()
       });
-      console.log(`[SCHEDULER] Executed ${slug} successfully`);
+      console.log(`[SCHEDULER] Started ${slug}; the result is recorded when the turn ends`);
       return;
     }
     
@@ -204,29 +282,35 @@ async function createAndExecute(slug: string, definition: ScheduleDefinition): P
   const { sessionId } = await createResponse.json();
   console.log(`[SCHEDULER] Created session ${sessionId} for ${slug}`);
   
-  const messageResponse = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
-      prompt: definition.prompt,
-      source: 'scheduler',
-      scheduleSlug: slug
-    })
-  });
+  pendingRuns.set(sessionId, { slug, accepted: false });
+  let messageResponse: Response;
+  try {
+    messageResponse = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        prompt: definition.prompt,
+        source: 'scheduler',
+        scheduleSlug: slug
+      })
+    });
+  } catch (err) {
+    pendingRuns.delete(sessionId);
+    throw err;
+  }
   
   if (!messageResponse.ok) {
+    pendingRuns.delete(sessionId);
     throw new Error(`Failed to send message: HTTP ${messageResponse.status}`);
   }
   
-  await saveLastRun(slug, {
+  await markAccepted(sessionId, slug, {
     lastRun: new Date().toISOString(),
-    lastResult: 'success',
-    lastError: null,
     sessionId: definition.sessionConfig.persistSession ? sessionId : null,
     nextRun: calculateNextRun(definition).toISOString()
   });
   
-  console.log(`[SCHEDULER] Executed ${slug} successfully with new session`);
+  console.log(`[SCHEDULER] Started ${slug} in a new session; the result is recorded when the turn ends`);
 }
 
 export function calculateNextRun(definition: ScheduleDefinition, from?: Date): Date {

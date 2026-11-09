@@ -28,6 +28,7 @@ import { thresholdForBudget, type ModelTokenLimits } from './context-budget.js';
 import { tokenLimitsForModel, effectiveContextTier } from './model-billing.js';
 import type { SdkAgentInfo, SdkCommandInfo, SdkCommandInvokeResult } from './agent-command.js';
 import { buildToolCatalog, type ToolCatalog } from './tool-catalog.js';
+import type { WakeSummary } from './wake-core.js';
 import { builtinKey, cacoKey, type ToolKey } from './tool-key.js';
 import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys, serversForKey, learnServerCorrelation, configKeyForServer, purgeServers, knownServers } from './tool-key-registry.js';
 import { recordObservedSizes, getToolSize } from './tool-size-store.js';
@@ -363,6 +364,8 @@ interface SessionListItem {
   /** When a staged session becomes archivable (epoch ms), or null when not staged
    *  or nothing will reap it (spec-archive-staging). Filled by the list route. */
   archiveEligibleAt?: number | null;
+  /** Self-wake summary, or null without one (spec-session-wake). Filled by the list route. */
+  wake?: WakeSummary | null;
   folder?: string;
   /** Herd bond: this session's parent id, or null if not a herd child. */
   orchestratedBy: string | null;

@@ -66,6 +66,7 @@ Returns:
       "currentIntent": "Reading file...",
       "scheduleSlug": "daily-backup",
       "scheduleNextRun": "2026-01-28T00:00:00.000Z",
+      "wake": { "everyHours": 4, "nextWakeAt": "2026-11-09T20:00:00.000Z", "pausedReason": "expired" },
       "folder": "work"
     }
   ],
@@ -74,6 +75,8 @@ Returns:
 ```
 
 Session display: Use `name || summary` - custom name takes precedence over SDK summary.
+`wake` is the session's self-wake summary (same fields as `GET /api/wakes`
+entries, without `sessionId`/`sessionName`), or null when it has none.
 
 **POST /api/sessions** - Create new session
 ```json
@@ -686,6 +689,48 @@ Returns: `{ success: true }`
 
 Returns: `{ slug: "daily-backup", status: "executed", sessionId: "uuid" }`
 
+`lastResult` is `running` from the moment the prompt is accepted until the
+turn really ends (its real idle or a dispatch error), then `success`, `error`,
+or `cancelled` (the user pressed Stop). A run never reads `success` while its
+turn is still going. See [spec-scheduler](docs/spec-scheduler.md).
+
+## Session Wakes
+
+A session arms its own wake with the `caco_wake` tool (see Agent Tools). These
+routes list wakes and let a human stop one. See
+[spec-session-wake](docs/spec-session-wake.md).
+
+- `GET /api/wakes` - List all session wakes, soonest first
+- `DELETE /api/wakes/:id` - Stop (clear) a session's wake
+
+**GET /api/wakes**
+
+Returns:
+```json
+{
+  "wakes": [
+    {
+      "sessionId": "uuid",
+      "sessionName": "PR track",
+      "everyHours": 4,
+      "nextWakeAt": "2026-11-09T20:00:00.000Z",
+      "note": "waiting on PR 5504426 review",
+      "lastWakeAt": "2026-11-09T16:00:00.000Z",
+      "lastResult": "ok | error | running | cancelled",
+      "lastError": "session.error",
+      "pausedReason": "failures | expired | imported"
+    }
+  ]
+}
+```
+
+Optional fields are omitted when unset. `sessionName` is null when the session
+has no name, summary, or auto-name.
+
+**DELETE /api/wakes/:id**
+
+Returns `{ ok: true }`, or 404 when the session has no wake.
+
 ## MCP Tools (HTTP Proxy)
 
 HTTP endpoints for applet JS to call MCP tools directly.
@@ -984,7 +1029,11 @@ Export and import sessions between Caco instances (e.g., work → home).
 **GET /api/sessions/:id/export** — Download session as `.tar.gz` archive.
 
 Query params:
-- `?delete=true` — Remove session after export (migration mode)
+- `?delete=true` — Remove session after export (migration mode). Returns 409
+  while the session is busy, so a migration always deletes its source. A
+  migration archive carries a marker that keeps the session's wake armed on
+  import; a plain export (no `delete`, including portal drag) imports with the
+  wake paused as `imported` (spec-session-wake).
 
 Archive structure:
 ```
@@ -1151,6 +1200,26 @@ Executes read-only SQL against `~/.copilot/session-store.db` — the cross-sessi
 Uses `sql.js` (WASM SQLite). Returns up to 500 rows as `{ columns, rows, rowCount, truncated }`.
 
 This works around a limitation where SDK-spawned sessions don't get the CLI's built-in `session_store` SQL routing.
+
+### Session Wake Tool
+
+Defined in `src/wake-tool.ts` (loop in `src/wake-manager.ts`). Always in the
+tool list: it is on `NEVER_DEFER_CACO_TOOLS`, so auto-defer never hides it.
+
+- `caco_wake` - Ask Caco to wake this session again later
+
+**caco_wake** parameters:
+- `action` (`set` | `clear` | `status`, required)
+- `everyHours` (integer 1-24, required for `set`) - Cadence; the first wake is due this long from now
+- `note` (string, max 200 chars, optional) - Why the session is waiting; echoed in every wake prompt and the jobs applet
+
+Acts only on the calling session. `set` replaces an existing wake. A wake is a
+`source:"scheduler"` message, so it keeps a pending offer and only badges the
+session when it writes a new one. Wakes skip busy sessions, sessions with a
+human message in the last 30 min, and off-hours (`CACO_WAKE_WINDOW`). After 3
+failed wakes in a row, or 7 days with no human message (after one final wake
+that asks to renew), the wake pauses and the session is marked unobserved. The
+session should call `clear` when it is no longer waiting on anything external.
 
 ### Dev and Extension Tools
 

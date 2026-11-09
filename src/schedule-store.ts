@@ -36,7 +36,8 @@ export interface ScheduleDefinition {
 
 export interface LastRunState {
   lastRun: string | null;      // ISO timestamp
-  lastResult: 'success' | 'error' | null;
+  /** `running` from accept until the turn's real end (spec-scheduler, Outcome). */
+  lastResult: 'success' | 'error' | 'running' | 'cancelled' | null;
   lastError: string | null;
   sessionId: string | null;
   nextRun: string;              // ISO timestamp

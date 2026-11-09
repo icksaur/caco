@@ -985,6 +985,10 @@ Returns:
 staleness and can never leave a client's board wrong. `waiting` is capped at 50
 entries with `waitingTruncated` set rather than silently cut.
 
+A `busy` or `waiting` entry for a session with a self-wake also carries
+`"wake": { "everyHours": 1, "pausedReason"?: "failures"|"expired"|"imported", "failed"?: true }`
+for the pager's wake badge. Wake changes bump `version`.
+
 A session appears in `waiting` only when all of these hold: not busy, holding
 non-empty `responseOptions`, that offer not already dismissed, and the offer made
 within the last 7 days. It is deliberately INDEPENDENT of unobserved state — the

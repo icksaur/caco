@@ -72,6 +72,11 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 .name.link:hover { text-decoration: underline; }
 .inst-row { padding: 8px 4px; font-size: 14px; color: #b95; border-bottom: 1px solid #2a2a2a; word-break: break-word; }
 .inst-row.refused { color: #d89; }
+/* Self-wake badge, matching the session list's: armed in blue, paused dashed
+   and muted, red when the last wake failed (spec-session-wake). */
+.wake { font-size: 12px; color: #4fa3e0; border: 1px solid #4fa3e0; border-radius: 4px; padding: 0 6px; white-space: nowrap; }
+.wake.paused { color: #888; border: 1px dashed #555; }
+.wake.failed { color: #e66; border-color: #e66; }
 </style>
 </head>
 <body>
@@ -176,6 +181,18 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     return entry.key || entry.sessionId;
   }
 
+  // Mirrors the session list's wake badge. Only ever textContent.
+  function wakeBadge(wake) {
+    if (!wake) return null;
+    var paused = !!wake.pausedReason;
+    var node = el('span', 'wake' + (paused ? ' paused' : '') + (wake.failed ? ' failed' : ''),
+      paused ? 'wake paused' : 'wake ' + wake.everyHours + 'h');
+    node.title = paused
+      ? 'Wake paused (' + wake.pausedReason + ')'
+      : 'Wakes every ' + wake.everyHours + 'h' + (wake.failed ? '. The last wake failed' : '');
+    return node;
+  }
+
   function sendTo(entry, text) {
     if (bridge) return bridge.send(entry.key, text);
     return post('/api/sessions/' + encodeURIComponent(entry.sessionId) + '/messages', { prompt: text });
@@ -210,6 +227,8 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       });
     }
     head.appendChild(nameEl);
+    var badge = wakeBadge(entry.wake);
+    if (badge) head.appendChild(badge);
     head.appendChild(el('span', 'when', relTime(entry.idleAt)));
     card.appendChild(head);
 
@@ -385,6 +404,8 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       row.appendChild(el('span', 'spinner'));
       if (b.instanceName) row.appendChild(el('span', 'inst', b.instanceName));
       row.appendChild(el('span', 'run-name', b.name || b.sessionId.slice(0, 8)));
+      var rb = wakeBadge(b.wake);
+      if (rb) row.appendChild(rb);
       runningEl.appendChild(row);
     });
     // Portal mode: an instance that is not live says so in its own row, so a

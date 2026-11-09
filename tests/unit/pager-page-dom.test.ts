@@ -545,3 +545,19 @@ describe('a failed send does not cost the user their typing', () => {
     expect(well()!.value).toBe('never delivered');
   });
 });
+
+describe('wake badge', () => {
+  it('shows the cadence on a card and a running row, paused and failed variants', async () => {
+    await deliver(view(
+      [entry({ wake: { everyHours: 1 } }), entry({ sessionId: 's-2', wake: { everyHours: 2, failed: true } }), entry({ sessionId: 's-3' })],
+      [{ sessionId: 'b-1', name: 'busy one', wake: { everyHours: 4, pausedReason: 'expired' } }],
+    ));
+    const badges = cards().map(c => c.querySelector('.wake'));
+    expect(badges[0]!.textContent).toBe('wake 1h');
+    expect(badges[1]!.className).toBe('wake failed');
+    expect(badges[2]).toBeNull();
+    const rowBadge = document.querySelector('.run-row .wake')!;
+    expect(rowBadge.textContent).toBe('wake paused');
+    expect(rowBadge.className).toBe('wake paused');
+  });
+});

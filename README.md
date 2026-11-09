@@ -174,6 +174,9 @@ To triage several machines on one board, use the merged pager in the [Portal](#p
   dot anywhere. Its unit of work is the *offer*, not the session: dismiss hides the
   current offer, and a card returns only when a session makes a **new** one.
   Repeating the same options word for word is not a new offer.
+- **Wake badges.** A session with a self-wake shows the same `wake 1h` badge as the
+  session list on its card and running row: dashed for `wake paused`, red when the
+  last wake failed.
 - **Scheduled wakes keep the offer.** A scheduler message does not clear a pending
   offer, and a scheduled turn sets the unobserved dot only when it makes a new
   offer. A wake that finds nothing to decide stays silent.

@@ -44,6 +44,21 @@ describe('parsePagerView', () => {
   });
 });
 
+describe('wake badge passthrough', () => {
+  it('keeps a valid badge and drops a malformed one', () => {
+    const v = parsePagerView({
+      busy: [{ sessionId: 'b1', name: 'x', wake: { everyHours: 2, pausedReason: 'expired', extra: 1 } }],
+      waiting: [
+        waiting('w1', '', { wake: { everyHours: 1, failed: true } }),
+        waiting('w2', '', { wake: { everyHours: 'soon' } }),
+      ],
+    })!;
+    expect(v.busy[0].wake).toEqual({ everyHours: 2, pausedReason: 'expired' });
+    expect(v.waiting[0].wake).toEqual({ everyHours: 1, failed: true });
+    expect(v.waiting[1]).not.toHaveProperty('wake');
+  });
+});
+
 describe('card keys', () => {
   it('round-trips and rejects bad keys', () => {
     expect(parseCardKey(cardKey('b1', 's-1'))).toEqual({ peerId: 'b1', sessionId: 's-1' });

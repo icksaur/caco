@@ -16,8 +16,9 @@ const TICK_MS = 5_000;
 
 export interface PortalPeer { id: string; url: string; name: string }
 
-export interface BusyEntry { sessionId: string; name: string }
-export interface WaitingEntry { sessionId: string; name: string; cwd: string; idleAt: string; options: string[] }
+export interface WakeBadge { everyHours: number; pausedReason?: string; failed?: true }
+export interface BusyEntry { sessionId: string; name: string; wake?: WakeBadge }
+export interface WaitingEntry { sessionId: string; name: string; cwd: string; idleAt: string; options: string[]; wake?: WakeBadge }
 export interface PagerView { busy: BusyEntry[]; waiting: WaitingEntry[]; waitingTruncated: boolean }
 
 export type InstanceStatus = 'pending' | 'live' | 'unreachable' | 'refused';
@@ -39,6 +40,16 @@ export interface MergedView {
 
 const str = (v: unknown, max = 2000): string => (typeof v === 'string' ? v.slice(0, max) : '');
 
+export function parseWakeBadge(raw: unknown): WakeBadge | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.everyHours !== 'number' || !Number.isFinite(r.everyHours) || r.everyHours <= 0) return undefined;
+  const badge: WakeBadge = { everyHours: r.everyHours };
+  if (typeof r.pausedReason === 'string' && r.pausedReason) badge.pausedReason = r.pausedReason.slice(0, 40);
+  if (r.failed === true) badge.failed = true;
+  return badge;
+}
+
 /** Re-validate a view from an instance: it crosses a trust boundary even from an allowed origin. */
 export function parsePagerView(raw: unknown): PagerView | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -48,7 +59,8 @@ export function parsePagerView(raw: unknown): PagerView | null {
   for (const b of r.busy as unknown[]) {
     const o = (b ?? {}) as Record<string, unknown>;
     if (!isValidSessionId(o.sessionId)) continue;
-    busy.push({ sessionId: o.sessionId, name: str(o.name, 300) });
+    const wake = parseWakeBadge(o.wake);
+    busy.push({ sessionId: o.sessionId, name: str(o.name, 300), ...(wake ? { wake } : {}) });
   }
   const waiting: WaitingEntry[] = [];
   for (const w of r.waiting as unknown[]) {
@@ -56,7 +68,8 @@ export function parsePagerView(raw: unknown): PagerView | null {
     if (!isValidSessionId(o.sessionId) || !Array.isArray(o.options)) continue;
     const options = (o.options as unknown[]).filter((x): x is string => typeof x === 'string').map(x => x.slice(0, 20_000));
     if (options.length === 0) continue;
-    waiting.push({ sessionId: o.sessionId, name: str(o.name, 300), cwd: str(o.cwd, 1000), idleAt: str(o.idleAt, 64), options });
+    const wake = parseWakeBadge(o.wake);
+    waiting.push({ sessionId: o.sessionId, name: str(o.name, 300), cwd: str(o.cwd, 1000), idleAt: str(o.idleAt, 64), options, ...(wake ? { wake } : {}) });
   }
   return { busy, waiting, waitingTruncated: r.waitingTruncated === true };
 }

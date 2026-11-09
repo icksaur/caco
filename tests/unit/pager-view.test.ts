@@ -3,6 +3,7 @@ import {
   needsTriage,
   buildPagerView,
   offerAtOf,
+  pagerWakeBadge,
   PAGER_MAX_WAITING,
   PAGER_MAX_OFFER_AGE_MS,
   type PagerSessionInput,
@@ -201,5 +202,29 @@ describe('buildPagerView ordering', () => {
       input({ sessionId: 'old', responseOptionsAt: ago(5 * DAY) }),
     ], 0, 1, NOW);
     expect(view.waiting.map(w => w.sessionId)).toEqual(['new', 'mid', 'old']);
+  });
+});
+
+describe('wake badge', () => {
+  const wake = (over: Record<string, unknown> = {}) => ({
+    everyMinutes: 60, registeredAt: ago(DAY), nextWakeAt: ago(-3600000), consecutiveFailures: 0, ...over,
+  }) as NonNullable<PagerSessionInput['wake']>;
+
+  it('summarizes cadence, paused and failed', () => {
+    expect(pagerWakeBadge(undefined)).toBeUndefined();
+    expect(pagerWakeBadge(wake())).toEqual({ everyHours: 1 });
+    expect(pagerWakeBadge(wake({ everyMinutes: 180, lastResult: 'error' }))).toEqual({ everyHours: 3, failed: true });
+    expect(pagerWakeBadge(wake({ pausedReason: 'expired' }))).toEqual({ everyHours: 1, pausedReason: 'expired' });
+  });
+
+  it('rides on busy and waiting entries only when the session has a wake', () => {
+    const view = buildPagerView([
+      input({ sessionId: 'a', wake: wake() }),
+      input({ sessionId: 'b' }),
+      input({ sessionId: 'c', isBusy: true, wake: wake({ pausedReason: 'failures' }) }),
+    ], 1, 1, NOW);
+    expect(view.waiting.find(w => w.sessionId === 'a')!.wake).toEqual({ everyHours: 1 });
+    expect(view.waiting.find(w => w.sessionId === 'b')).not.toHaveProperty('wake');
+    expect(view.busy).toEqual([{ sessionId: 'c', name: 'a session', wake: { everyHours: 1, pausedReason: 'failures' } }]);
   });
 });

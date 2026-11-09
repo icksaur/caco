@@ -17,6 +17,7 @@ import { disabledToolNames } from './tool-registry.js';
 import { onTurnOutcome } from './turn-outcome.js';
 import { parseWakeWindow, type WakeWindowSpec } from './wake-core.js';
 import { createWakeManager } from './wake-manager.js';
+import { activityVersion } from './activity-version.js';
 
 export const WAKE_TOOL_NAME = 'caco_wake';
 
@@ -33,7 +34,12 @@ export const wakeManager = createWakeManager({
   now: () => Date.now(),
   listSessionIds,
   getMeta: id => getSessionMeta(id),
-  updateMeta: (id, mutate) => updateSessionMeta(id, mutate, { createIfMissing: false }),
+  updateMeta: (id, mutate) => {
+    const written = updateSessionMeta(id, mutate, { createIfMissing: false });
+    // The pager shows a wake badge, so a wake change must wake its long-poll.
+    if (written) activityVersion.bump();
+    return written;
+  },
   isBusy: id => sessionManager.isBusy(id),
   post: async (id, prompt) => {
     const res = await fetch(`${SERVER_URL}/api/sessions/${id}/messages`, {

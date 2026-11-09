@@ -13,7 +13,7 @@
  * machine viewing the session silently emptied the board.
  */
 
-import type { SessionKind } from './session-meta-store.js';
+import type { SessionKind, WakeState } from './session-meta-store.js';
 
 /** Max waiting cards in one snapshot; beyond this `waitingTruncated` is set. */
 export const PAGER_MAX_WAITING = 50;
@@ -59,11 +59,29 @@ export interface PagerSessionInput {
   /** Monotonic dismissal watermark; an offer at or before it is hidden. */
   pagerDismissedAt?: string;
   lastIdleAt?: string;
+  /** The session's self-wake, if it has one (spec-session-wake). */
+  wake?: WakeState;
+}
+
+/** Just enough of a wake for the pager's badge: cadence, paused, failing. */
+export interface PagerWakeBadge {
+  everyHours: number;
+  pausedReason?: WakeState['pausedReason'];
+  failed?: true;
+}
+
+export function pagerWakeBadge(wake: WakeState | undefined): PagerWakeBadge | undefined {
+  if (!wake) return undefined;
+  const badge: PagerWakeBadge = { everyHours: wake.everyMinutes / 60 };
+  if (wake.pausedReason) badge.pausedReason = wake.pausedReason;
+  if (wake.lastResult === 'error') badge.failed = true;
+  return badge;
 }
 
 export interface PagerBusyEntry {
   sessionId: string;
   name: string;
+  wake?: PagerWakeBadge;
 }
 
 export interface PagerWaitingEntry {
@@ -73,6 +91,7 @@ export interface PagerWaitingEntry {
   kind: SessionKind;
   idleAt: string | null;
   options: string[];
+  wake?: PagerWakeBadge;
 }
 
 export interface PagerView {
@@ -143,6 +162,12 @@ function compareWaiting(a: PagerSessionInput, b: PagerSessionInput): number {
   return a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0;
 }
 
+/** Attach a wake badge only when there is one, so wake-less entries keep their old shape. */
+function withWake<T extends object>(entry: T, wake: WakeState | undefined): T & { wake?: PagerWakeBadge } {
+  const badge = pagerWakeBadge(wake);
+  return badge ? { ...entry, wake: badge } : entry;
+}
+
 /** Build the full board. Always a complete snapshot — never a delta — which is
  *  what makes a missed wake-up self-correcting rather than corrupting. */
 export function buildPagerView(
@@ -154,7 +179,7 @@ export function buildPagerView(
   const busy = inputs
     .filter(i => i.isBusy)
     .sort(compareBusy)
-    .map(i => ({ sessionId: i.sessionId, name: i.name }));
+    .map(i => withWake({ sessionId: i.sessionId, name: i.name }, i.wake));
 
   const triaged = inputs.filter(i => needsTriage(i, now)).sort(compareWaiting);
 
@@ -162,14 +187,14 @@ export function buildPagerView(
     version,
     busyCount,
     busy,
-    waiting: triaged.slice(0, PAGER_MAX_WAITING).map(i => ({
+    waiting: triaged.slice(0, PAGER_MAX_WAITING).map(i => withWake({
       sessionId: i.sessionId,
       name: i.name,
       cwd: i.cwd,
       kind: i.kind,
       idleAt: i.responseOptionsAt ?? i.lastIdleAt ?? null,
       options: i.responseOptions ?? [],
-    })),
+    }, i.wake)),
     waitingTruncated: triaged.length > PAGER_MAX_WAITING,
   };
 }

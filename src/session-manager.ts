@@ -1986,6 +1986,7 @@ export class SessionManager {
         responseOptionsAt: meta?.responseOptionsAt,
         pagerDismissedAt: meta?.pagerDismissedAt,
         lastIdleAt: meta?.lastIdleAt,
+        wake: meta?.wake,
       });
     }
     return result;

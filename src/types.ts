@@ -16,6 +16,12 @@ export interface UserPreferences {
    *  tools via caco_enable_tools, Caco auto-sends one follow-up so the tools are
    *  usable. Default on; set false to require a manual message instead. */
   autoContinueEnabled?: boolean;
+  /** Comms guard (spec-comms-guard): deny tools that send human-facing
+   *  communication in turns the user did not start (`unattended`, default), in
+   *  every turn (`always`), or never (`off`). */
+  commsGuard?: 'unattended' | 'always' | 'off';
+  /** Replaces the default guarded tool-name patterns when set and non-empty. */
+  commsGuardPatterns?: string[];
 }
 
 export interface SessionCacheEntry {

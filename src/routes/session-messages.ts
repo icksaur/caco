@@ -39,6 +39,7 @@ import { handleSessionIdle, type IdleAuthorityCtx } from '../idle-authority.js';
 import { getLastAssistantMessage } from '../session-history.js';
 import { idleFeed } from '../idle-feed.js';
 import { emitTurnOutcome } from '../turn-outcome.js';
+import { setTurnRoot, clearTurnRoot, setCommsGuardConfigProvider, resolveCommsGuardConfig } from '../comms-guard.js';
 
 const router = Router();
 
@@ -46,6 +47,7 @@ const router = Router();
 // predicate (spec-idle-authority) — injection so SessionManager needs no
 // session-state/preferences import. One registration at module load.
 setAutoContinuePrefProvider(() => isAutoContinueEnabled(sessionState.preferences));
+setCommsGuardConfigProvider(() => resolveCommsGuardConfig(sessionState.preferences));
 
 /**
  * Drive the auto-continue runtime for a session (spec-enable-tools-autocontinue):
@@ -79,6 +81,7 @@ function runAutoContinue(sessionId: string, ctx: IdleAuthorityCtx): Promise<bool
         {
           needsObservation: ctx.needsObservation,
           ...(ctx.offerBaseline && { offerBaseline: ctx.offerBaseline }),
+          humanRooted: ctx.humanRooted === true,
           requestId: `autocontinue-${Date.now().toString(36)}`,
           depth: sessionManager.getRevealDepth(id),
         },
@@ -334,7 +337,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     await dispatchMessage(
       sessionId, 
       promptToSend, 
-      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId, needsObservation: !source || source === 'scheduler', ...(offerBaseline && { offerBaseline }), depth: dispatchDepth },
+      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId, needsObservation: !source || source === 'scheduler', ...(offerBaseline && { offerBaseline }), depth: dispatchDepth, humanRooted: !source },
       {
         onEvent: (evt) => broadcastEvent(sessionId, evt)
       }
@@ -404,11 +407,11 @@ function capturePriceContext(sessionId: string): {
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; offerBaseline?: { at: string | null }; displayPrompt?: string; beforeSend?: () => Promise<void>; depth?: number },
+  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; offerBaseline?: { at: string | null }; displayPrompt?: string; beforeSend?: () => Promise<void>; depth?: number; humanRooted?: boolean },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePaths, correlationId, requestId, needsObservation, offerBaseline, displayPrompt, beforeSend, depth } = options || {};
+  const { tempFilePaths, correlationId, requestId, needsObservation, offerBaseline, displayPrompt, beforeSend, depth, humanRooted } = options || {};
   const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
 
@@ -422,6 +425,8 @@ export async function dispatchMessage(
   // send-to-SDK happens later but the busy state is already true here.
   const effectiveCorrelationId = correlationId || randomUUID();
   sessionManager.startDispatch(sessionId, effectiveCorrelationId, depth ?? 1);
+  // Comms guard: only a user-sent root may use guarded tools (spec-comms-guard).
+  setTurnRoot(sessionId, humanRooted === true);
 
   // Fresh user send → reset request-scoped throughput counters and push
   // the cleared snapshot so the footer zeroes at send. Accumulation then
@@ -460,6 +465,7 @@ export async function dispatchMessage(
     dispatchCompleted = true;
     watchdog?.cancel();
     sessionManager.endDispatch(sessionId);
+    clearTurnRoot(sessionId);
     broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
     if (tempFilePaths) await Promise.all(tempFilePaths.map(p => unlink(p).catch(() => {})));
     // Stamp wall-clock + persist a benchmark row for requests that ran a model
@@ -644,7 +650,7 @@ export async function dispatchMessage(
           // classifies false idle (reveal → auto-continue, suppress completion
           // signals) vs real idle (mark unobserved + herd wake + quota). An
           // errored dispatch is never an idle, so nothing propagates.
-          if (wasIdle) handleIdle(sessionId, { needsObservation: needsObservation ?? false, ...(offerBaseline && { offerBaseline }) }, effectiveCorrelationId);
+          if (wasIdle) handleIdle(sessionId, { needsObservation: needsObservation ?? false, ...(offerBaseline && { offerBaseline }), humanRooted: humanRooted === true }, effectiveCorrelationId);
         });
         unsubscribe();
       }

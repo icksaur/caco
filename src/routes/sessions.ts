@@ -506,7 +506,7 @@ router.post('/sessions/:sessionId/skill-invoke', async (req: Request, res: Respo
       await dispatchMessage(
         sessionId,
         agentPrompt,
-        { requestId, needsObservation: true, displayPrompt },
+        { requestId, needsObservation: true, displayPrompt, humanRooted: true },
         { onEvent: (evt) => broadcastEvent(sessionId, evt) }
       );
       res.json({ ok: true, sessionId });

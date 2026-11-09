@@ -324,6 +324,11 @@ Returns: `{ preferenceKey: value, ... }`
 Body: `{ preferenceKey: newValue, ... }`
 Returns: Updated preferences object
 
+Comms guard keys ([spec-comms-guard](docs/spec-comms-guard.md)):
+- `commsGuard`: `unattended` (default) | `always` | `off`. Invalid values are ignored.
+- `commsGuardPatterns`: string array of tool-name globs that replaces the
+  default guarded list; `[]` or `null` restores the defaults.
+
 **GET /api/models**
 
 Returns:
@@ -1220,6 +1225,13 @@ human message in the last 30 min, and off-hours (`CACO_WAKE_WINDOW`). After 3
 failed wakes in a row, or 7 days with no human message (after one final wake
 that asks to renew), the wake pauses and the session is marked unobserved. The
 session should call `clear` when it is no longer waiting on anything external.
+
+### Comms Guard
+
+Not a tool: an `onPreToolUse` hook on every session (`src/comms-guard.ts`).
+Tools that send communication a person will read are denied in turns the user
+did not start, with a reason telling the model to draft instead. See
+[spec-comms-guard](docs/spec-comms-guard.md).
 
 ### Dev and Extension Tools
 

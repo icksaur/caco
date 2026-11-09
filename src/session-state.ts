@@ -2,6 +2,7 @@ import { sessionManager } from './session-manager.js';
 import { loadPreferences, savePreferences, DEFAULT_MODEL, resolveModelAlias } from './preferences.js';
 import { buildSystemMessage, resolveSystemMessage } from './prompts.js';
 import type { UserPreferences, SessionStateConfig, ResumeResult } from './types.js';
+import { COMMS_GUARD_MODES } from './comms-guard.js';
 
 /** @internal Exported only as a unit-test seam; routes use the `sessionState`
  *  singleton below. */
@@ -292,6 +293,14 @@ export class SessionState {
       if (updates.lastModel) this._preferences.lastModel = updates.lastModel;
       if (updates.lastCwd) this._preferences.lastCwd = updates.lastCwd;
       if (updates.lastSessionId !== undefined) this._preferences.lastSessionId = updates.lastSessionId;
+      if (updates.commsGuard !== undefined && (COMMS_GUARD_MODES as readonly unknown[]).includes(updates.commsGuard)) {
+        this._preferences.commsGuard = updates.commsGuard;
+      }
+      if (updates.commsGuardPatterns !== undefined) {
+        const p = updates.commsGuardPatterns as unknown;
+        if (p === null || (Array.isArray(p) && p.length === 0)) delete this._preferences.commsGuardPatterns;
+        else if (Array.isArray(p) && p.every(x => typeof x === 'string' && x.trim())) this._preferences.commsGuardPatterns = p;
+      }
 
       await savePreferences(this._preferences);
       return this._preferences;

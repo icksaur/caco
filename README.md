@@ -237,6 +237,34 @@ with a Stop button.
 Adding `caco_wake` to `CACO_DISABLED_TOOLS` turns wakes off entirely. See
 [docs/spec-session-wake.md](docs/spec-session-wake.md).
 
+### Comms guard
+
+Agents don't send messages people read. In a turn you didn't start (wakes,
+slug schedules, delegated or herd workers, agent, system and applet messages,
+and their continuations), Caco denies tools that send mail, Teams messages, PR
+or work item comments, reviewer changes, or IcM posts and state changes. The
+model is told to write a draft and offer it as a `caco-actions` option.
+Drafts (`CreateDraftMessage`, `UpdateDraft`), `teams-SendMessageToSelf`, and
+resolving PR threads stay allowed. Turns you start by typing a message or
+invoking a skill are not blocked. Each denial is logged as
+`[COMMS-GUARD] Denied <tool> in <session>`.
+
+Set it with `POST /api/preferences`:
+
+```bash
+# Block in every turn, including yours ('unattended' is the default, 'off' disables)
+curl -X POST http://localhost:53000/api/preferences -H "Content-Type: application/json" \
+  -d '{"commsGuard": "always"}'
+# Replace the guarded tool-name patterns ([] restores the defaults)
+curl -X POST http://localhost:53000/api/preferences -H "Content-Type: application/json" \
+  -d '{"commsGuardPatterns": ["SendEmail*", "Reply*ToMessage", "repo_pull_request_thread_write#create,reply"]}'
+```
+
+Patterns are case-insensitive globs and match with or without the server
+prefix (`ReplyToMessage` matches `mail-ReplyToMessage`). `#a,b` limits a
+pattern to those `action` values. The default list is in
+[docs/spec-comms-guard.md](docs/spec-comms-guard.md).
+
 ### Copilot-CLI Configuration
 
 Caco wraps the Copilot SDK which wraps Copilot-CLI. You can configure Copilot-CLI behavior, and Caco agents can help set these up:

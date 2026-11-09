@@ -17,6 +17,7 @@ import type { QuotaSnapshot } from './usage-state.js';
 import { loadMcpServers, loadMcpServersStrict } from './mcp-config-loader.js';
 import { refreshNearExpiryTokens } from './mcp-auth-service.js';
 import { createObservationHook } from './observe/hook.js';
+import { createCommsGuardHook } from './comms-guard.js';
 import { OBS_RAW_CEILING_BYTES } from './observe/types.js';
 import { shouldAutoRepairSessionError, repairSessionEvents } from './session-auto-repair.js';
 import { reconcileRotation, autoRotateIfEligible } from './session-history-rotation.js';
@@ -1074,7 +1075,7 @@ export class SessionManager {
         mcpServers: config.mcpServersOverride !== undefined ? (config.mcpServersOverride ?? undefined) : await loadMcpServers(),
         workingDirectory: cwd,
         largeOutput: sdkLargeOutputConfig(),
-        hooks: { onPostToolUse: createObservationHook(cwd, sessionRef) },
+        hooks: { onPostToolUse: createObservationHook(cwd, sessionRef), onPreToolUse: createCommsGuardHook(sessionRef) },
         ...(resolved.provider && { provider: resolved.provider }),
         ...(this.contextTierFor(resolved.cacoId) && { contextTier: this.contextTierFor(resolved.cacoId) }),
         // No infiniteSessions here: a brand-new session has no persisted budget
@@ -1348,7 +1349,7 @@ export class SessionManager {
       mcpServers,
       workingDirectory: cwd,
       largeOutput: sdkLargeOutputConfig(),
-      hooks: { onPostToolUse: createObservationHook(cwd, sessionRef) },
+      hooks: { onPostToolUse: createObservationHook(cwd, sessionRef), onPreToolUse: createCommsGuardHook(sessionRef) },
       ...(resumeSystemMessage && { systemMessage: toSdkSystemMessage(resumeSystemMessage) }),
       ...(applyModel && { model: resolved.sdkModel }),
       ...(resolved?.provider && { provider: resolved.provider }),

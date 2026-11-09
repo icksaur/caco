@@ -321,7 +321,7 @@ describe('session messages route harness', () => {
   });
 
   describe('observation policy through real dispatches (spec-observation-verdict-completeness)', () => {
-    type Ctx = { needsObservation: boolean; offerBaseline?: { at: string | null } };
+    type Ctx = { needsObservation: boolean; offerBaseline?: { at: string | null }; humanRooted?: boolean };
     type IdleDeps = { runAutoContinue: (id: string, ctx: Ctx) => Promise<boolean>; currentOfferAt: (id: string) => string | undefined };
     type Meta = { responseOptions?: string[]; responseOptionsAt?: string };
     let meta: Meta;
@@ -348,7 +348,7 @@ describe('session messages route harness', () => {
       expect(meta.responseOptions).toEqual(['Approve', 'Reject']);
       fireIdle(0);
       await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(1); });
-      expect(idleCtx(0)).toEqual({ needsObservation: true, offerBaseline: { at: 'T0' } });
+      expect(idleCtx(0)).toEqual({ needsObservation: true, offerBaseline: { at: 'T0' }, humanRooted: false });
       // currentOfferAt reads the live stamp, so a new offer during the turn is visible.
       meta.responseOptionsAt = 'T1';
       const deps = routeMocks.handleSessionIdle.mock.calls[0][2] as IdleDeps;
@@ -361,7 +361,7 @@ describe('session messages route harness', () => {
       expect(meta.responseOptions).toBeUndefined();
       fireIdle(0);
       await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(1); });
-      expect(idleCtx(0)).toEqual({ needsObservation: true });
+      expect(idleCtx(0)).toEqual({ needsObservation: true, humanRooted: true });
     });
 
     it('an applet message keeps today\'s behavior: clears the offer, not observed', async () => {
@@ -369,12 +369,12 @@ describe('session messages route harness', () => {
       expect(meta.responseOptions).toBeUndefined();
       fireIdle(0);
       await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(1); });
-      expect(idleCtx(0)).toEqual({ needsObservation: false });
+      expect(idleCtx(0)).toEqual({ needsObservation: false, humanRooted: false });
     });
 
     it.each([
-      ['user', {}, { needsObservation: true }],
-      ['scheduler', { source: 'scheduler', scheduleSlug: 'track' }, { needsObservation: true, offerBaseline: { at: 'T0' } }],
+      ['user', {}, { needsObservation: true, humanRooted: true }],
+      ['scheduler', { source: 'scheduler', scheduleSlug: 'track' }, { needsObservation: true, offerBaseline: { at: 'T0' }, humanRooted: false }],
     ])('chained auto-continuations inherit the %s dispatch\'s policy', async (_label, body, expected) => {
       routeMocks.handleSessionIdle.mockImplementation((id: string, ctx: unknown, rawDeps: unknown) => {
         if (routeMocks.handleSessionIdle.mock.calls.length < 3) void (rawDeps as IdleDeps).runAutoContinue(id, ctx as Ctx);
@@ -391,6 +391,46 @@ describe('session messages route harness', () => {
       fireIdle(2);
       await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(3); });
       expect([idleCtx(0), idleCtx(1), idleCtx(2)]).toEqual([expected, expected, expected]);
+    });
+
+    describe('comms guard turn root (spec-comms-guard)', () => {
+      it.each([
+        ['a user message', {}, true],
+        ['a wake', { source: 'scheduler', scheduleSlug: 'wake' }, false],
+        ['a slug schedule', { source: 'scheduler', scheduleSlug: 'daily' }, false],
+        ['an agent message', { source: 'agent', fromSession: 'parent', correlationId: 'corr-1' }, false],
+        ['a system message', { source: 'system' }, false],
+        ['an applet message', { source: 'applet', appletSlug: 'x' }, false],
+      ])('%s sets the turn root to human=%s for the whole dispatch, cleared at teardown', async (_label, body, human) => {
+        const { isTurnHumanRooted } = await import('../../src/comms-guard.js');
+        const res = await postJson('/sessions/s1/messages', { prompt: 'go', ...body });
+        expect(res.status).toBe(200);
+        expect(isTurnHumanRooted('s1')).toBe(human);
+        fireIdle(0);
+        await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(1); });
+        expect(isTurnHumanRooted('s1')).toBe(false);
+      });
+
+      it.each([
+        ['user', {}, true],
+        ['wake', { source: 'scheduler', scheduleSlug: 'wake' }, false],
+      ])('a continuation of a %s turn keeps its root', async (_label, body, human) => {
+        const { isTurnHumanRooted } = await import('../../src/comms-guard.js');
+        routeMocks.handleSessionIdle.mockImplementation((id: string, ctx: unknown, rawDeps: unknown) => {
+          if (routeMocks.handleSessionIdle.mock.calls.length < 2) void (rawDeps as IdleDeps).runAutoContinue(id, ctx as Ctx);
+        });
+        routeMocks.maybeAutoContinue.mockImplementation(async (id: string, rawDeps: unknown) => {
+          await (rawDeps as { dispatch: (id: string, text: string) => Promise<void> }).dispatch(id, 'continue');
+          return true;
+        });
+        await postJson('/sessions/s1/messages', { prompt: 'go', ...body });
+        fireIdle(0);
+        await vi.waitFor(() => { expect(emitters).toHaveLength(2); });
+        expect(isTurnHumanRooted('s1')).toBe(human);
+        fireIdle(1);
+        await vi.waitFor(() => { expect(routeMocks.handleSessionIdle).toHaveBeenCalledTimes(2); });
+        expect(isTurnHumanRooted('s1')).toBe(false);
+      });
     });
 
     it('a session.error ends the turn with an error outcome; an idle does not (spec-session-wake)', async () => {

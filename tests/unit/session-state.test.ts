@@ -253,6 +253,17 @@ describe('SessionState transitions and preferences', () => {
     expect(deps.savePreferences).toHaveBeenCalledWith(updated);
   });
 
+  it('updatePreferences validates the comms guard mode and patterns (spec-comms-guard)', async () => {
+    const state = await createState(freshPreferences());
+    type P = Parameters<typeof state.updatePreferences>[0];
+    await state.updatePreferences({ commsGuard: 'always', commsGuardPatterns: ['Send*'] } as P);
+    expect(state.preferences).toMatchObject({ commsGuard: 'always', commsGuardPatterns: ['Send*'] });
+    await state.updatePreferences({ commsGuard: 'bogus', commsGuardPatterns: [42] } as unknown as P);
+    expect(state.preferences).toMatchObject({ commsGuard: 'always', commsGuardPatterns: ['Send*'] });
+    await state.updatePreferences({ commsGuardPatterns: [] } as P);
+    expect(state.preferences).not.toHaveProperty('commsGuardPatterns');
+  });
+
   it('getSessionConfig exposes tool configuration without session fields', async () => {
     const state = await createState(freshPreferences());
     expect(state.getSessionConfig()).toEqual({ toolFactory: config.toolFactory, excludedTools: ['disabled_tool'] });

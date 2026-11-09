@@ -20,6 +20,10 @@ export interface IdleAuthorityCtx {
    *  captured when the message was received (`null`: no offer existed then).
    *  Absent: `needsObservation` alone decides. */
   offerBaseline?: { at: string | null };
+  /** Whether the dispatch that started this turn is a message the user sent to
+   *  this session. Carried into every auto-continuation, so the comms guard
+   *  judges the whole turn by its root (spec-comms-guard). Absent = unattended. */
+  humanRooted?: boolean;
 }
 
 export interface IdleAuthorityDeps {

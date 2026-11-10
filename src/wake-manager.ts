@@ -220,11 +220,10 @@ export function createWakeManager(deps: WakeManagerDeps) {
       for (const [id] of due) {
         const meta = deps.getMeta(id);
         if (!meta?.wake) { index.delete(id); continue; }
-        if (meta.folder === cfg.archiveFolder) {
-          write(id, () => undefined);
-          log(`cleared ${id.slice(0, 8)} (staged for archive)`);
-          continue;
-        }
+        // Staged for archive: suspended, not cleared, so a drag out of the folder
+        // resumes it exactly as it was. nextWakeAt is left alone, so a rescued
+        // overdue wake fires on the next tick (still subject to the defers).
+        if (meta.folder === cfg.archiveFolder) continue;
         const d = decideWake({
           wake: meta.wake, nowMs: now, lastHumanAt: meta.lastUsedAt, busy: deps.isBusy(id),
           runningCount: running, window: cfg.window, expireMs: cfg.expireMs,

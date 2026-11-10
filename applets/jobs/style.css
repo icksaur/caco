@@ -190,6 +190,10 @@
   color: var(--color-error);
 }
 
+.wake-status.archived {
+  color: var(--color-text-muted);
+}
+
 .wake-card.wake-paused {
   border-style: dashed;
 }

@@ -1045,6 +1045,11 @@ main {
   border-color: var(--color-error);
 }
 
+.session-wake-badge.archived {
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-text-muted);
+}
+
 .assistant-activity {
   background: var(--color-activity-bg);
   padding: var(--space-sm);

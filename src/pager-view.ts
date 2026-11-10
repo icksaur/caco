@@ -61,20 +61,24 @@ export interface PagerSessionInput {
   lastIdleAt?: string;
   /** The session's self-wake, if it has one (spec-session-wake). */
   wake?: WakeState;
+  /** Staged in auto-archive: any wake is suspended, shown as "would wake". */
+  archived?: boolean;
 }
 
-/** Just enough of a wake for the pager's badge: cadence, paused, failing. */
+/** Just enough of a wake for the pager's badge: cadence, paused, failing, archived. */
 export interface PagerWakeBadge {
   everyHours: number;
   pausedReason?: WakeState['pausedReason'];
   failed?: true;
+  archived?: true;
 }
 
-export function pagerWakeBadge(wake: WakeState | undefined): PagerWakeBadge | undefined {
+export function pagerWakeBadge(wake: WakeState | undefined, archived = false): PagerWakeBadge | undefined {
   if (!wake) return undefined;
   const badge: PagerWakeBadge = { everyHours: wake.everyMinutes / 60 };
   if (wake.pausedReason) badge.pausedReason = wake.pausedReason;
   if (wake.lastResult === 'error') badge.failed = true;
+  if (archived) badge.archived = true;
   return badge;
 }
 
@@ -104,6 +108,8 @@ export interface PagerWakeEntry {
   lastWakeAt?: string;
   lastResult?: WakeState['lastResult'];
   pausedReason?: WakeState['pausedReason'];
+  /** Staged in auto-archive: suspended until the session is moved out. */
+  archived?: true;
   /** The session is holding an offer on the board right now. */
   waiting?: true;
   busy?: true;
@@ -212,8 +218,8 @@ function compareWaiting(a: PagerSessionInput, b: PagerSessionInput): number {
 }
 
 /** Attach a wake badge only when there is one, so wake-less entries keep their old shape. */
-function withWake<T extends object>(entry: T, wake: WakeState | undefined): T & { wake?: PagerWakeBadge } {
-  const badge = pagerWakeBadge(wake);
+function withWake<T extends object>(entry: T, input: PagerSessionInput): T & { wake?: PagerWakeBadge } {
+  const badge = pagerWakeBadge(input.wake, !!input.archived);
   return badge ? { ...entry, wake: badge } : entry;
 }
 
@@ -228,7 +234,7 @@ export function buildPagerView(
 ): PagerView {
   const busy = inputs
     .filter(i => i.isBusy)
-    .map(i => withWake({ sessionId: i.sessionId, name: titleOf(i) }, i.wake))
+    .map(i => withWake({ sessionId: i.sessionId, name: titleOf(i) }, i))
     .sort(compareBusy);
 
   const triaged = inputs.filter(i => needsTriage(i, now)).sort(compareWaiting);
@@ -245,7 +251,7 @@ export function buildPagerView(
       kind: i.kind,
       idleAt: i.responseOptionsAt ?? i.lastIdleAt ?? null,
       options: i.responseOptions ?? [],
-    }, i.wake)),
+    }, i)),
     waitingTruncated: triaged.length > PAGER_MAX_WAITING,
     wakes: inputs
       .filter((i): i is PagerSessionInput & { wake: WakeState } => !!i.wake)
@@ -261,15 +267,20 @@ function wakeEntry(i: PagerSessionInput & { wake: WakeState }, name: string, wai
   if (w.lastWakeAt) e.lastWakeAt = w.lastWakeAt;
   if (w.lastResult) e.lastResult = w.lastResult;
   if (w.pausedReason) e.pausedReason = w.pausedReason;
+  if (i.archived) e.archived = true;
   if (waiting) e.waiting = true;
   if (i.isBusy) e.busy = true;
   return e;
 }
 
-/** Soonest next wake first; paused wakes, which will not fire, go last. */
+/** Wakes that will fire, soonest first; then archived (suspended); then paused. */
+function wakeRank(e: PagerWakeEntry): number {
+  return e.pausedReason ? 2 : e.archived ? 1 : 0;
+}
+
 function compareWakes(a: PagerWakeEntry, b: PagerWakeEntry): number {
-  const ap = a.pausedReason ? 1 : 0;
-  const bp = b.pausedReason ? 1 : 0;
+  const ap = wakeRank(a);
+  const bp = wakeRank(b);
   if (ap !== bp) return ap - bp;
   const at = parseTime(a.nextWakeAt) ?? Infinity;
   const bt = parseTime(b.nextWakeAt) ?? Infinity;

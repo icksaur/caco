@@ -592,4 +592,16 @@ describe('scheduled wakes list', () => {
     await deliver(view([entry()]));
     expect(document.getElementById('wakes')!.textContent).toBe('');
   });
+
+  it('says "would wake" for a session in auto-archive', async () => {
+    const soon = new Date(Date.now() + 3600_000).toISOString();
+    await deliver({
+      ...view([entry({ wake: { everyHours: 3, archived: true } })]),
+      wakes: [{ sessionId: 'k-1', name: 'parked', everyHours: 3, nextWakeAt: soon, archived: true }],
+    });
+    expect(cards()[0].querySelector('.wake')!.textContent).toBe('would wake 3h');
+    const card = document.querySelector('.wake-card')!;
+    expect(card.querySelector('.wake')!.className).toBe('wake archived');
+    expect(card.querySelector('.wake-line')!.textContent).toMatch(/^In auto-archive\. Would wake in 1h .* if moved out\.$/);
+  });
 });

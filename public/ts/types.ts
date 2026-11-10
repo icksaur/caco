@@ -72,6 +72,8 @@ export interface SessionData {
     lastResult?: 'ok' | 'error' | 'running' | 'cancelled';
     lastError?: string;
     pausedReason?: 'failures' | 'expired' | 'imported';
+    /** Staged in auto-archive: suspended, resumes if moved out. */
+    archived?: true;
   } | null;
   /** Herd bond: this session's parent id, or absent if not a herd child. */
   orchestratedBy?: string | null;

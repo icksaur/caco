@@ -35,6 +35,7 @@ import { lookupMcpKey, learnFromMetadata, keysForServer, allLearnedKeys, servers
 import { recordObservedSizes, getToolSize } from './tool-size-store.js';
 import { estimateToolTokens } from './tool-size.js';
 import { buildPagerView, pagerTitle, type PagerSessionInput } from './pager-view.js';
+import { AUTO_ARCHIVE_FOLDER } from './config.js';
 import { planSessionRemoval, type RemovalPlan } from './session-removal.js';
 import { activityVersion } from './activity-version.js';
 import { validateEnable, resolveEnableTargets, computeColdResumeExclusions, deferredToolKeys, enableableToolKeys, advertisableToolKeys, partitionEnableNames, buildSyncSeed, shouldCommitWarmSet } from './session-tool-state.js';
@@ -1987,6 +1988,7 @@ export class SessionManager {
         pagerDismissedAt: meta?.pagerDismissedAt,
         lastIdleAt: meta?.lastIdleAt,
         wake: meta?.wake,
+        archived: meta?.folder === AUTO_ARCHIVE_FOLDER,
       });
     }
     return result;

@@ -142,8 +142,11 @@ A wake only fires while `meta.folder !== AUTO_ARCHIVE_FOLDER`
 (`src/config.ts:72`). This covers manual `/caco.session-archive`, auto-park,
 herd disown, and folder PATCH, since they all stage into that folder
 (`src/session-archive-reaper.ts:340, 570`). At the tick, a staged session's
-wake is **cleared**, not paused. Archiving means "done". If the session is
-rescued, it re-arms with `set` like any other session. Hard archive and delete
+wake is **suspended**: skipped without clearing it or advancing `nextWakeAt`.
+Staging is fully reversible by dragging the session out, and the wake comes
+back with it; an overdue wake then fires on the next tick, subject to the usual
+defers. While staged, the session list, pager and jobs applet show it as
+"would wake" (`archived: true` on the wake summary). Hard archive and delete
 remove the meta (and with it the wake). The index drops the entry when its
 meta read comes back empty, and on `sessionState.onSessionEnd`.
 
@@ -168,7 +171,7 @@ as failed. Then, for each due entry (`nextWakeAt <= now`, not paused, not
 running), oldest first:
 
 1. Read meta. If it is gone, drop the entry. If the folder is
-   `auto-archive`, clear the wake.
+   `auto-archive`, skip it (suspended, see Lifecycle and archive).
 2. **Active hours.** If `now` is outside `WAKE_WINDOW`, set `nextWakeAt` to
    the next window start and skip. This gives "due outside the window fires
    once at the window start". Missed wakes collapse into one and never stack.
@@ -386,8 +389,10 @@ and last result. Slug-scheduled sessions render as before.
   and avoids putting fake slugs (`wake-<uuid>`) into the slug namespace.
 - **Why pause rather than clear on expiry and failure.** A wake that silently
   disappears looks the same as one that never existed.
-- **Why clear rather than pause on archive.** Staging means "done". Rescue
-  stays possible, and re-arming is one call.
+- **Why suspend rather than clear on archive.** Soft-archive is reversible by
+  drag and otherwise leaves the session untouched, so the wake should be too.
+  Originally the wake was cleared; Carl changed it so a rescued session resumes
+  its wake and a staged one shows "would wake".
 - **Why settle by session.** It is the only key that survives
   continuations, and the one-wake-per-session plus busy-409 rules make it
   unambiguous.
@@ -422,7 +427,7 @@ and last result. Slug-scheduled sessions render as before.
 | A5 | Busy or human-recent session defers | no POST; `nextWakeAt` and failures unchanged; fires on a later tick when clear |
 | A6 | Steering stamps `lastUsedAt` | route harness: immediate-mode POST updates meta |
 | A7 | A due wake outside the window fires once at window start, in the configured zone | Saturday due -> `nextWakeAt` = Monday 07:00; one POST; zone and DST cases in `wake-core.test.ts` |
-| A8 | Staged session's wake is cleared, not fired | `folder:'auto-archive'` -> `wake` undefined, no POST |
+| A8 | Staged session's wake is suspended, not fired or cleared; moving out resumes it | `folder:'auto-archive'` -> no POST, `wake` kept; folder cleared -> POST |
 | A9 | Outcome recorded at real end, settled by session | `running` after fire; another session's outcome ignored; own `ok` settles; route harness: `session.error` and pre-session teardown emit `error`, a scheduler idle does not emit directly |
 | A10 | Reveal continuation reports once, at its real end | `idle-authority.test.ts`: `onRealIdle` not called on a false idle, called on the real one; route harness wires it to `ok` |
 | A11 | Three errors pause and mark unobserved | `pausedReason:'failures'`; `markUnobserved` called; next tick does not POST |

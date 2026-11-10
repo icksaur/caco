@@ -8,13 +8,16 @@ import { Router, Request, Response } from 'express';
 import { wakeManager } from '../wake-runtime.js';
 import { sessionManager } from '../session-manager.js';
 import { summarizeWake } from '../wake-core.js';
+import { AUTO_ARCHIVE_FOLDER } from '../config.js';
 
 const router = Router();
 
 router.get('/wakes', (_req: Request, res: Response) => {
-  const names = new Map(sessionManager.list().map(s => [s.sessionId, s.name || s.summary || s.autoName || null]));
+  const sessions = sessionManager.list();
+  const names = new Map(sessions.map(s => [s.sessionId, s.name || s.summary || s.autoName || null]));
+  const archived = new Set(sessions.filter(s => s.folder === AUTO_ARCHIVE_FOLDER).map(s => s.sessionId));
   const wakes = wakeManager.list()
-    .map(({ sessionId, wake }) => ({ sessionId, sessionName: names.get(sessionId) ?? null, ...summarizeWake(wake) }))
+    .map(({ sessionId, wake }) => ({ sessionId, sessionName: names.get(sessionId) ?? null, ...summarizeWake(wake, archived.has(sessionId)) }))
     .sort((a, b) => Date.parse(a.nextWakeAt) - Date.parse(b.nextWakeAt));
   res.json({ wakes });
 });

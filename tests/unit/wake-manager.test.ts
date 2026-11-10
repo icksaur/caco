@@ -215,13 +215,16 @@ describe('wake loop', () => {
     expect(t.wake('a')).toMatchObject({ lastError: 'no idle within timeout', consecutiveFailures: 1 });
   });
 
-  it('a session staged for archive has its wake cleared, not fired (A8)', async () => {
+  it('a session staged for archive keeps its wake but does not fire, and resumes when moved out (A8)', async () => {
     t.metas.get('a')!.folder = 'auto-archive';
     t.advance(H);
     await t.mgr.tick();
     expect(t.post).not.toHaveBeenCalled();
-    expect(t.wake('a')).toBeUndefined();
-    expect(t.mgr.list()).toHaveLength(0);
+    expect(t.wake('a')).toBeDefined();
+    expect(t.mgr.list()).toHaveLength(1);
+    t.metas.get('a')!.folder = undefined;
+    await t.mgr.tick();
+    expect(t.post).toHaveBeenCalledTimes(1);
   });
 
   it('does nothing while caco_wake is hard-disabled', async () => {

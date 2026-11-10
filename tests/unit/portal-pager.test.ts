@@ -43,12 +43,12 @@ describe('parsePagerView', () => {
     const v = parsePagerView({
       busy: [], waiting: [],
       wakes: [
-        { sessionId: 'k1', name: 'track', everyHours: 2, nextWakeAt: '2026-01-01T00:00:00Z', note: 'PR', lastResult: 'ok', waiting: true, extra: 1 },
+        { sessionId: 'k1', name: 'track', everyHours: 2, nextWakeAt: '2026-01-01T00:00:00Z', note: 'PR', lastResult: 'ok', waiting: true, archived: true, extra: 1 },
         { sessionId: '../bad', everyHours: 1 },
         { sessionId: 'k2', everyHours: 0 },
       ],
     })!;
-    expect(v.wakes).toEqual([{ sessionId: 'k1', name: 'track', everyHours: 2, nextWakeAt: '2026-01-01T00:00:00Z', note: 'PR', lastResult: 'ok', waiting: true }]);
+    expect(v.wakes).toEqual([{ sessionId: 'k1', name: 'track', everyHours: 2, nextWakeAt: '2026-01-01T00:00:00Z', note: 'PR', lastResult: 'ok', archived: true, waiting: true }]);
     expect(parsePagerView({ busy: [], waiting: [] })!.wakes).toEqual([]);
   });
 

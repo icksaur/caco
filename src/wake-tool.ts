@@ -27,7 +27,7 @@ export function createWakeTool(sessionRef: SessionIdRef) {
 - action "clear": stop waking this session. Call it as soon as you are no longer waiting on anything external.
 - action "status": show the current wake.
 
-Wakes skip live conversations (busy, or a user message in the last ${WAKE_HUMAN_QUIET_MS / 60000} minutes) and off-hours; a wake due off-hours fires once when the window opens. Wakes pause after ${Math.round(WAKE_EXPIRE_MS / 86400000)} days without a user message (after one final wake), after ${WAKE_MAX_FAILURES} failed wakes, and stop when the session is archived. Each wake is a short prompt with the local time and time since the last wake. End a wake quietly when nothing changed; end with a caco-actions block only when the user must decide something.`,
+Wakes skip live conversations (busy, or a user message in the last ${WAKE_HUMAN_QUIET_MS / 60000} minutes) and off-hours; a wake due off-hours fires once when the window opens. Wakes pause after ${Math.round(WAKE_EXPIRE_MS / 86400000)} days without a user message (after one final wake), after ${WAKE_MAX_FAILURES} failed wakes, and are suspended while the session sits in the auto-archive folder (moving it out resumes them). Each wake is a short prompt with the local time and time since the last wake. End a wake quietly when nothing changed; end with a caco-actions block only when the user must decide something.`,
     parameters: z.object({
       action: z.enum(['set', 'clear', 'status']),
       everyHours: z.number().optional().describe(`Required for set: whole hours ${WAKE_MIN_HOURS}-${WAKE_MAX_HOURS}.`),

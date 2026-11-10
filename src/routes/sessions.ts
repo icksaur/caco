@@ -22,7 +22,7 @@ import { getCurrentIntent } from '../intent-runtime.js';
 import { readSessionWorkspace, searchSessionEvents, getEventVersion } from '../sdk-session-store.js';
 import { rotateSessionHistory } from '../session-history-rotation.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
-import { AUTO_ARCHIVE_ENABLED, getBoundPort } from '../config.js';
+import { AUTO_ARCHIVE_ENABLED, AUTO_ARCHIVE_FOLDER, getBoundPort } from '../config.js';
 import { applyFolderChange } from '../folder-transitions.js';
 import { stageForArchive, archiveEligibleAt } from '../session-archive-reaper.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
@@ -158,7 +158,7 @@ router.get('/sessions', async (_req: Request, res: Response) => {
     session.archiveEligibleAt = AUTO_ARCHIVE_ENABLED ? archiveEligibleAt(session.sessionId) : null;
     // Self-wake summary so the sidebar can mark tracks (spec-session-wake).
     const wake = wakes.get(session.sessionId);
-    session.wake = wake ? summarizeWake(wake) : null;
+    session.wake = wake ? summarizeWake(wake, session.folder === AUTO_ARCHIVE_FOLDER) : null;
   }
 
   // Fetch peer sessions (non-blocking, best-effort)

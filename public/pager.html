@@ -77,6 +77,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 .wake { font-size: 12px; color: #4fa3e0; border: 1px solid #4fa3e0; border-radius: 4px; padding: 0 6px; white-space: nowrap; }
 .wake.paused { color: #888; border: 1px dashed #555; }
 .wake.failed { color: #e66; border-color: #e66; }
+.wake.archived { color: #888; border: 1px dashed #777; }
 .run-name.link { cursor: pointer; }
 .run-name.link:hover { text-decoration: underline; }
 /* Scheduled wakes (spec-session-wake): read-only, one compact card per session. */
@@ -199,11 +200,12 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
   function wakeBadge(wake) {
     if (!wake) return null;
     var paused = !!wake.pausedReason;
-    var node = el('span', 'wake' + (paused ? ' paused' : '') + (wake.failed ? ' failed' : ''),
-      paused ? 'wake paused' : 'wake ' + wake.everyHours + 'h');
-    node.title = paused
+    var word = wake.archived ? 'would wake' : 'wake';
+    var node = el('span', 'wake' + (paused ? ' paused' : '') + (wake.archived ? ' archived' : '') + (wake.failed ? ' failed' : ''),
+      paused ? word + ' paused' : word + ' ' + wake.everyHours + 'h');
+    node.title = (wake.archived ? 'Suspended while in auto-archive; move the session out to resume. ' : '') + (paused
       ? 'Wake paused (' + wake.pausedReason + ')'
-      : 'Wakes every ' + wake.everyHours + 'h' + (wake.failed ? '. The last wake failed' : '');
+      : 'Wakes every ' + wake.everyHours + 'h' + (wake.failed ? '. The last wake failed' : ''));
     return node;
   }
 
@@ -245,11 +247,11 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
   }
 
   function renderWakeCard(w) {
-    var card = el('div', 'wake-card' + (w.pausedReason ? ' paused' : ''));
+    var card = el('div', 'wake-card' + (w.pausedReason || w.archived ? ' paused' : ''));
     var head = el('div', 'card-head');
     if (w.instanceName) head.appendChild(el('span', 'inst', w.instanceName));
     head.appendChild(linkName(el('span', 'name', w.name || w.sessionId.slice(0, 8)), w));
-    var badge = wakeBadge({ everyHours: w.everyHours, pausedReason: w.pausedReason, failed: w.lastResult === 'error' });
+    var badge = wakeBadge({ everyHours: w.everyHours, pausedReason: w.pausedReason, failed: w.lastResult === 'error', archived: w.archived });
     if (badge) head.appendChild(badge);
     if (w.waiting) head.appendChild(el('span', 'tag', 'waiting on you'));
     else if (w.busy) head.appendChild(el('span', 'tag', 'running'));
@@ -257,7 +259,9 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
 
     card.appendChild(el('div', 'wake-line', w.pausedReason
       ? 'Paused (' + w.pausedReason + '). It will not wake again until it is set again.'
-      : 'Next wake ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + ')'));
+      : w.archived
+        ? 'In auto-archive. Would wake ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + ') if moved out.'
+        : 'Next wake ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + ')'));
     if (w.lastWakeAt) {
       card.appendChild(el('div', 'wake-line' + (w.lastResult === 'error' ? ' error' : ''),
         'Last wake ' + relTime(w.lastWakeAt) + (w.lastResult ? ': ' + w.lastResult : '')));

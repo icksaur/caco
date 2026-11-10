@@ -176,7 +176,7 @@ function renderWakes(wakes) {
 
 function createWakeCard(w) {
   const card = document.createElement('div');
-  card.className = `job-card wake-card${w.pausedReason ? ' wake-paused' : ''}`;
+  card.className = `job-card wake-card${w.pausedReason || w.archived ? ' wake-paused' : ''}`;
 
   const header = document.createElement('div');
   header.className = 'job-header';
@@ -209,10 +209,12 @@ function createWakeCard(w) {
   }
 
   const status = document.createElement('div');
-  status.className = `wake-status${w.pausedReason ? ' paused' : ''}`;
+  status.className = `wake-status${w.pausedReason ? ' paused' : w.archived ? ' archived' : ''}`;
   status.textContent = w.pausedReason
     ? (WAKE_PAUSE_LABELS[w.pausedReason] || `paused (${w.pausedReason})`)
-    : `Next wake ${formatDateTime(w.nextWakeAt)}`;
+    : w.archived
+      ? `In auto-archive: would wake ${formatDateTime(w.nextWakeAt)} if moved out`
+      : `Next wake ${formatDateTime(w.nextWakeAt)}`;
   card.appendChild(status);
 
   const details = document.createElement('div');

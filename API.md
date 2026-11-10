@@ -723,14 +723,17 @@ Returns:
       "lastWakeAt": "2026-11-09T16:00:00.000Z",
       "lastResult": "ok | error | running | cancelled",
       "lastError": "session.error",
-      "pausedReason": "failures | expired | imported"
+      "pausedReason": "failures | expired | imported",
+      "archived": true
     }
   ]
 }
 ```
 
 Optional fields are omitted when unset. `sessionName` is null when the session
-has no name, summary, or auto-name.
+has no name, summary, or auto-name. `archived: true` means the session is staged
+in `auto-archive`: the wake is suspended (not cleared) and resumes if the
+session is moved out.
 
 **DELETE /api/wakes/:id**
 
@@ -998,12 +1001,14 @@ staleness and can never leave a client's board wrong. `waiting` is capped at 50
 entries with `waitingTruncated` set rather than silently cut.
 
 A `busy` or `waiting` entry for a session with a self-wake also carries
-`"wake": { "everyHours": 1, "pausedReason"?: "failures"|"expired"|"imported", "failed"?: true }`
-for the pager's wake badge. Wake changes bump `version`.
+`"wake": { "everyHours": 1, "pausedReason"?: "failures"|"expired"|"imported", "failed"?: true, "archived"?: true }`
+for the pager's wake badge. Wake changes bump `version`. `archived` means the
+session is staged in `auto-archive`: the wake is suspended and resumes if the
+session is moved out (shown as "would wake").
 
 `wakes` lists every session with a self-wake, paused ones included, soonest
-`nextWakeAt` first and paused last. Optional fields: `note`, `lastWakeAt`,
-`lastResult`, `pausedReason`, and `waiting`/`busy` (`true` when the session is
+`nextWakeAt` first, then archived, then paused. Optional fields: `note`, `lastWakeAt`,
+`lastResult`, `pausedReason`, `archived`, and `waiting`/`busy` (`true` when the session is
 on the board or running right now). `name` in all three lists is the session
 list's title ladder: manual name, workspace summary, first intent, "No summary".
 

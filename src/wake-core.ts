@@ -196,10 +196,14 @@ export interface WakeSummary {
   lastResult?: WakeState['lastResult'];
   lastError?: string;
   pausedReason?: WakeState['pausedReason'];
+  /** The session is staged in auto-archive: the wake is suspended and would
+   *  resume if the session were moved out. */
+  archived?: true;
 }
 
-export function summarizeWake(w: WakeState): WakeSummary {
+export function summarizeWake(w: WakeState, archived = false): WakeSummary {
   const s: WakeSummary = { everyHours: w.everyMinutes / 60, nextWakeAt: w.nextWakeAt };
+  if (archived) s.archived = true;
   if (w.note) s.note = w.note;
   if (w.lastWakeAt) s.lastWakeAt = w.lastWakeAt;
   if (w.lastResult) s.lastResult = w.lastResult;

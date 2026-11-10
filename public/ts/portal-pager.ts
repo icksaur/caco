@@ -16,12 +16,12 @@ const TICK_MS = 5_000;
 
 export interface PortalPeer { id: string; url: string; name: string }
 
-export interface WakeBadge { everyHours: number; pausedReason?: string; failed?: true }
+export interface WakeBadge { everyHours: number; pausedReason?: string; failed?: true; archived?: true }
 export interface BusyEntry { sessionId: string; name: string; wake?: WakeBadge }
 export interface WaitingEntry { sessionId: string; name: string; cwd: string; idleAt: string; options: string[]; wake?: WakeBadge }
 export interface WakeEntry {
   sessionId: string; name: string; everyHours: number; nextWakeAt: string;
-  note?: string; lastWakeAt?: string; lastResult?: string; pausedReason?: string; waiting?: true; busy?: true;
+  note?: string; lastWakeAt?: string; lastResult?: string; pausedReason?: string; archived?: true; waiting?: true; busy?: true;
 }
 export interface PagerView { busy: BusyEntry[]; waiting: WaitingEntry[]; waitingTruncated: boolean; wakes: WakeEntry[] }
 
@@ -52,6 +52,7 @@ export function parseWakeBadge(raw: unknown): WakeBadge | undefined {
   const badge: WakeBadge = { everyHours: r.everyHours };
   if (typeof r.pausedReason === 'string' && r.pausedReason) badge.pausedReason = r.pausedReason.slice(0, 40);
   if (r.failed === true) badge.failed = true;
+  if (r.archived === true) badge.archived = true;
   return badge;
 }
 
@@ -66,6 +67,7 @@ export function parseWakeEntry(raw: unknown): WakeEntry | null {
   if (typeof o.lastWakeAt === 'string' && o.lastWakeAt) e.lastWakeAt = o.lastWakeAt.slice(0, 64);
   if (typeof o.lastResult === 'string' && o.lastResult) e.lastResult = o.lastResult.slice(0, 20);
   if (typeof o.pausedReason === 'string' && o.pausedReason) e.pausedReason = o.pausedReason.slice(0, 40);
+  if (o.archived === true) e.archived = true;
   if (o.waiting === true) e.waiting = true;
   if (o.busy === true) e.busy = true;
   return e;
@@ -151,8 +153,9 @@ export function mergeBoards(
   const t = (iso: string): number => { const n = Date.parse(iso); return Number.isFinite(n) ? n : 0; };
   // Array.prototype.sort is stable, so ties keep sidebar and server order.
   waiting.sort((a, b) => t(b.idleAt) - t(a.idleAt));
-  // Same order as one instance's list: soonest first, paused last.
-  wakes.sort((a, b) => (a.pausedReason ? 1 : 0) - (b.pausedReason ? 1 : 0) || t(a.nextWakeAt) - t(b.nextWakeAt));
+  // Same order as one instance's list: soonest first, then archived, then paused.
+  const rank = (e: WakeEntry): number => (e.pausedReason ? 2 : e.archived ? 1 : 0);
+  wakes.sort((a, b) => rank(a) - rank(b) || t(a.nextWakeAt) - t(b.nextWakeAt));
   return { busy, waiting, waitingTruncated, wakes, instances, portalOrigin };
 }
 

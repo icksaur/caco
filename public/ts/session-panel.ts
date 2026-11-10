@@ -765,14 +765,18 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
 
   // Self-wake badge (spec-session-wake): marks long-lived "track" sessions.
   // A paused wake reads differently so a stopped track is obvious at a glance.
+  // In auto-archive the wake is suspended, not cleared: "would wake" says a
+  // drag out of the folder resumes it.
   if (session.wake) {
     const w = session.wake;
     const wakeBadge = document.createElement('span');
-    wakeBadge.className = `session-wake-badge${w.pausedReason ? ' paused' : ''}${w.lastResult === 'error' ? ' failed' : ''}`;
-    wakeBadge.textContent = w.pausedReason ? 'wake paused' : `wake ${w.everyHours}h`;
+    wakeBadge.className = `session-wake-badge${w.pausedReason ? ' paused' : ''}${w.archived ? ' archived' : ''}${w.lastResult === 'error' ? ' failed' : ''}`;
+    const word = w.archived ? 'would wake' : 'wake';
+    wakeBadge.textContent = w.pausedReason ? `${word} paused` : `${word} ${w.everyHours}h`;
     const lines = [w.pausedReason
       ? `Wake paused (${w.pausedReason}). The session re-arms it with caco_wake.`
       : `Wakes every ${w.everyHours}h. Next: ${new Date(w.nextWakeAt).toLocaleString()}`];
+    if (w.archived) lines.unshift('Suspended while in auto-archive. Move the session out to resume this wake.');
     if (w.note) lines.push(`Note: ${w.note}`);
     if (w.lastResult) lines.push(`Last result: ${w.lastResult}${w.lastError ? ` (${w.lastError})` : ''}`);
     wakeBadge.title = lines.join('\n');

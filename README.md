@@ -230,7 +230,10 @@ pager. Sessions with a wake show a "wake Nh" badge in the session list
 ("wake paused" when paused), and the Job Scheduler applet lists every wake
 with a Stop button.
 
-- Cadence is 1-24 hours, one wake per session. Archiving a session suspends its
+- Cadence is 1-24 hours (anything else fails), one wake per session. An optional
+  first-wake time (`at`, e.g. `14:30` after a meeting) sets when the first wake
+  fires; the cadence follows from there. It must fall inside the wake window.
+- Archiving a session suspends its
   wake: it shows as "would wake" and resumes if you drag the session back out of
   `auto-archive`.
 - A wake skips a busy session, a session with a human message in the last 30

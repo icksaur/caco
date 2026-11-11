@@ -1,12 +1,54 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseWakeWindow, inWindow, nextWindowStart, decideWake, isExpired, buildWakePrompt, formatElapsed,
+  resolveWakeAt, describeWindow,
   type WakeWindow, type WakeDecisionInput,
 } from '../../src/wake-core.js';
 import type { WakeState } from '../../src/session-meta-store.js';
 
 const H = 60 * 60 * 1000;
 const D = 24 * H;
+
+describe('resolveWakeAt (first wake time)', () => {
+  // Monday 2026-11-09 16:00 UTC = 08:00 in Los Angeles.
+  const NOW = Date.parse('2026-11-09T16:00:00Z');
+  const LA = parseWakeWindow('Mon-Fri 07:00-19:00 America/Los_Angeles');
+  const ok = (at: string, win = LA) => {
+    const r = resolveWakeAt(at, NOW, win);
+    if (!r.ok) throw new Error(r.error);
+    return new Date(r.ms).toISOString();
+  };
+  const err = (at: string, win = LA) => {
+    const r = resolveWakeAt(at, NOW, win);
+    return r.ok ? '' : r.error;
+  };
+
+  it('reads HH:MM as the next occurrence in the window zone', () => {
+    expect(ok('14:30')).toBe('2026-11-09T22:30:00.000Z');
+    expect(ok('07:30')).toBe('2026-11-10T15:30:00.000Z'); // 07:30 today has passed
+  });
+
+  it('reads a wall-clock date-time in the zone, and an ISO instant as given', () => {
+    expect(ok('2026-11-10T09:00')).toBe('2026-11-10T17:00:00.000Z');
+    expect(ok('2026-11-10T09:00:00-08:00')).toBe('2026-11-10T17:00:00.000Z');
+    expect(ok('2026-11-10T17:00:00Z')).toBe('2026-11-10T17:00:00.000Z');
+  });
+
+  it('rejects past, too-far, off-window and malformed times', () => {
+    expect(err('2026-11-09T07:00')).toMatch(/in the past/);
+    expect(err('2026-11-20T09:00')).toMatch(/within 7 days/);
+    expect(err('20:00')).toMatch(/outside the active wake window \(Mon,Tue,Wed,Thu,Fri 07:00-19:00 America\/Los_Angeles\)/);
+    expect(err('2026-11-14T10:00')).toMatch(/outside the active wake window/); // Saturday
+    expect(err('25:00')).toMatch(/valid 24h time/);
+    expect(err('after lunch')).toMatch(/must be "HH:MM"/);
+    expect(err('2026-11-10T09:00:00')).toMatch(/must be "HH:MM"/); // no offset and seconds: ambiguous
+  });
+
+  it('accepts any future time when the window is always open', () => {
+    expect(ok('2026-11-14T23:00:00Z', null)).toBe('2026-11-14T23:00:00.000Z');
+    expect(describeWindow(null)).toBe('always');
+  });
+});
 
 describe('parseWakeWindow', () => {
   it('parses the default weekday window in server-local time', () => {

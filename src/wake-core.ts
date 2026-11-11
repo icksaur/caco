@@ -88,6 +88,72 @@ function zonedToUtc(y: number, mo: number, d: number, minutes: number, timeZone?
   return t;
 }
 
+/** The zone wake times are read in: the window's zone, else server-local. */
+export function wakeTimeZone(win: WakeWindowSpec): string {
+  return win?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** Human form of a window, e.g. "Mon-Fri 07:00-19:00 America/Los_Angeles". */
+export function describeWindow(win: WakeWindowSpec): string {
+  if (!win) return 'always';
+  const days = DAY_NAMES.filter((_, i) => win.days.has(i)).join(',');
+  const hm = (m: number) => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
+  return `${days} ${hm(win.startMin)}-${hm(win.endMin)} ${wakeTimeZone(win)}`;
+}
+
+/** Local wall-clock form of an instant in `timeZone`, e.g. "Wed 2026-11-11 14:30". */
+export function formatZoned(ms: number, timeZone?: string): string {
+  const z = zonedParts(ms, timeZone);
+  return `${DAY_NAMES[z.dow]} ${z.y}-${pad2(z.mo)}-${pad2(z.d)} ${pad2(z.h)}:${pad2(z.mi)}`;
+}
+
+/** How far ahead a first wake may be set. */
+export const WAKE_AT_MAX_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Resolve the optional first-wake time of `caco_wake set`.
+ *
+ * Accepts `HH:MM` (24h; the next occurrence, today or tomorrow),
+ * `YYYY-MM-DDTHH:MM` (wall clock), both in `timeZone`, or an ISO 8601 instant
+ * with `Z` or an offset. It must be in the future, within 7 days, and inside
+ * the active window: a wake outside the window would be silently deferred, so
+ * the caller is told now instead.
+ */
+export function resolveWakeAt(at: string, nowMs: number, win: WakeWindowSpec): { ok: true; ms: number } | { ok: false; error: string } {
+  const tz = wakeTimeZone(win);
+  const s = at.trim();
+  let ms: number;
+  const hm = /^(\d{1,2}):(\d{2})$/.exec(s);
+  const local = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})$/.exec(s);
+  if (hm) {
+    const h = Number(hm[1]), mi = Number(hm[2]);
+    if (h > 23 || mi > 59) return { ok: false, error: `at "${at}" is not a valid 24h time.` };
+    const z = zonedParts(nowMs, tz);
+    ms = zonedToUtc(z.y, z.mo, z.d, h * 60 + mi, tz);
+    if (ms <= nowMs) {
+      const t = new Date(Date.UTC(z.y, z.mo - 1, z.d + 1));
+      ms = zonedToUtc(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate(), h * 60 + mi, tz);
+    }
+  } else if (local) {
+    const h = Number(local[4]), mi = Number(local[5]);
+    if (h > 23 || mi > 59) return { ok: false, error: `at "${at}" is not a valid time.` };
+    ms = zonedToUtc(Number(local[1]), Number(local[2]), Number(local[3]), h * 60 + mi, tz);
+  } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(s)) {
+    ms = Date.parse(s);
+  } else {
+    return { ok: false, error: `at must be "HH:MM", "YYYY-MM-DDTHH:MM" (both ${tz}), or an ISO time with an offset.` };
+  }
+  if (!Number.isFinite(ms)) return { ok: false, error: `at "${at}" is not a valid time.` };
+  if (ms <= nowMs) return { ok: false, error: `at ${formatZoned(ms, tz)} ${tz} is in the past.` };
+  if (ms - nowMs > WAKE_AT_MAX_AHEAD_MS) return { ok: false, error: 'at must be within 7 days.' };
+  if (!inWindow(ms, win)) {
+    return { ok: false, error: `at ${formatZoned(ms, tz)} ${tz} is outside the active wake window (${describeWindow(win)}). Pick a time inside it.` };
+  }
+  return { ok: true, ms };
+}
+
 export function inWindow(nowMs: number, win: WakeWindowSpec): boolean {
   if (!win) return true;
   const z = zonedParts(nowMs, win.timeZone);

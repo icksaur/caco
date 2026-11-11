@@ -37,7 +37,7 @@ the same pattern as `createHerdTools`, `src/herd-tools.ts:74`).
 
 | action | params | effect |
 |---|---|---|
-| `set` | `everyHours` (integer 1-24), `note?` (max 200 chars) | Creates the wake, or replaces the existing one. The first wake is due `everyHours` from now. |
+| `set` | `everyHours` (integer 1-24), `at?`, `note?` (max 200 chars) | Creates the wake, or replaces the existing one. The first wake is due at `at`, or `everyHours` from now without it; later wakes follow every `everyHours` after each fire. |
 | `clear` | none | Removes the wake. Calling it with no wake set is fine. |
 | `status` | none | Returns cadence, note, next wake, last wake, last result, and paused reason. |
 
@@ -49,6 +49,18 @@ call `clear` as soon as it is no longer waiting on anything external.
 hours" right. Cron is more than a "check back later" loop needs, and it is
 where models make mistakes. A one-shot wake is just `set` followed by `clear`
 on the first wake, so it gets no separate mode.
+
+**Optional first-wake time (`at`).** Carl asks sessions to check back after a
+meeting at a known time, then keep checking during working hours. `at` sets
+only the first wake; the cadence stays a plain interval. Accepted forms are
+`HH:MM` (24h, the next occurrence), `YYYY-MM-DDTHH:MM` (wall clock), both read
+in the wake zone (the `CACO_WAKE_WINDOW` zone, else server-local; the tool
+description names it), or an ISO 8601 instant with `Z` or an offset. `set`
+fails, writing nothing, when `at` is in the past, more than 7 days out, or
+outside the active window. A silently deferred "14:00" that fires at 07:00 the
+next day would be worse than a clear error the model can fix. The usual defers
+(busy, human message in the last 30 min, concurrency) still apply at fire time.
+Parsing is pure: `resolveWakeAt` in `src/wake-core.ts`.
 
 **Limits.**
 
@@ -422,6 +434,7 @@ and last result. Slug-scheduled sessions render as before.
 |---|---|---|
 | A1 | `set` stores meta and index; `set` again replaces and keeps `registeredAt` | `wake-manager.test.ts` |
 | A2 | `everyHours` 0, 25, 1.5, or a string is rejected; note over 200 rejected | error names 1-24; meta unchanged |
+| A2b | `at` sets the first wake, then the cadence follows; past, over 7 days, off-window or malformed `at` fails | `wake-core.test.ts` resolveWakeAt; `wake-manager.test.ts` set with at |
 | A3 | `caco_wake` is never auto-deferred | `tool-registry.test.ts`: in `NEVER_DEFER_CACO_TOOLS` |
 | A4 | A due wake fires with the prompt lines and is `running` | fake `post`; prompt has local time, elapsed time, note, and "clear" |
 | A5 | Busy or human-recent session defers | no POST; `nextWakeAt` and failures unchanged; fires on a later tick when clear |

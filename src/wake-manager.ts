@@ -6,7 +6,7 @@
  */
 
 import type { SessionMeta, WakeState } from './session-meta-store.js';
-import { decideWake, buildWakePrompt, type WakeWindowSpec } from './wake-core.js';
+import { decideWake, buildWakePrompt, resolveWakeAt, type WakeWindowSpec } from './wake-core.js';
 import type { TurnOutcome } from './turn-outcome.js';
 
 export interface WakeConfig {
@@ -93,18 +93,25 @@ export function createWakeManager(deps: WakeManagerDeps) {
     return n;
   }
 
-  function set(id: string, everyHours: unknown, note?: unknown): WakeSetResult {
+  function set(id: string, everyHours: unknown, note?: unknown, at?: unknown): WakeSetResult {
     if (typeof everyHours !== 'number' || !Number.isInteger(everyHours) || everyHours < cfg.minHours || everyHours > cfg.maxHours) {
       return { ok: false, error: `everyHours must be a whole number from ${cfg.minHours} to ${cfg.maxHours}.` };
     }
     if (note !== undefined && typeof note !== 'string') return { ok: false, error: 'note must be a string.' };
     const trimmed = typeof note === 'string' ? note.trim() : '';
     if (trimmed.length > cfg.noteMax) return { ok: false, error: `note must be at most ${cfg.noteMax} characters.` };
+    if (at !== undefined && typeof at !== 'string') return { ok: false, error: 'at must be a string.' };
+    const now = deps.now();
+    let firstAt = now + everyHours * 60 * 60 * 1000;
+    if (typeof at === 'string' && at.trim()) {
+      const r = resolveWakeAt(at, now, cfg.window);
+      if (!r.ok) return { ok: false, error: r.error };
+      firstAt = r.ms;
+    }
     if (activeCount(id) >= cfg.maxActive) {
       return { ok: false, error: `Wake limit reached: at most ${cfg.maxActive} sessions may have an active wake.` };
     }
     if (!deps.getMeta(id)) return { ok: false, error: 'Session metadata not found.' };
-    const now = deps.now();
     const wake = write(id, prev => {
       // Re-arming from inside a running wake keeps that wake's bookkeeping, so
       // the turn still settles (and a final wake still pauses) when it ends.
@@ -112,7 +119,7 @@ export function createWakeManager(deps: WakeManagerDeps) {
       const next: WakeState = {
         everyMinutes: everyHours * 60,
         registeredAt: prev?.registeredAt ?? iso(now),
-        nextWakeAt: iso(now + everyHours * 60 * 60 * 1000),
+        nextWakeAt: iso(firstAt),
         consecutiveFailures: running ? prev!.consecutiveFailures : 0,
       };
       if (trimmed) next.note = trimmed;
@@ -123,7 +130,7 @@ export function createWakeManager(deps: WakeManagerDeps) {
       return next;
     });
     if (!wake) return { ok: false, error: 'Could not write session metadata.' };
-    log(`set ${id.slice(0, 8)} every ${everyHours}h`);
+    log(`set ${id.slice(0, 8)} every ${everyHours}h, first ${iso(firstAt)}`);
     return { ok: true, wake };
   }
 
@@ -255,7 +262,7 @@ export function createWakeManager(deps: WakeManagerDeps) {
     });
   }
 
-  return { set, clear, get, list, refresh, rebuild, tick, settle, applyImport, runningCount };
+  return { set, clear, get, list, refresh, rebuild, tick, settle, applyImport, runningCount, window: () => cfg.window };
 }
 
 export type WakeManager = ReturnType<typeof createWakeManager>;

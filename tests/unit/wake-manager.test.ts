@@ -66,6 +66,30 @@ describe('caco_wake set/clear (A1, A2, A13)', () => {
     expect(t.mgr.list()).toHaveLength(1);
   });
 
+  it('set with at fires first at that time, then every everyHours after it', async () => {
+    const t = setup({ window: parseWakeWindow('Mon-Fri 07:00-19:00 UTC') });
+    t.addSession('a');
+    expect(t.mgr.set('a', 2, 'after standup', '18:00')).toMatchObject({ ok: true });
+    expect(t.wake('a')!.nextWakeAt).toBe('2026-11-09T18:00:00.000Z');
+    t.advance(H);
+    await t.mgr.tick();
+    expect(t.post).not.toHaveBeenCalled();
+    t.advance(H);
+    await t.mgr.tick();
+    expect(t.post).toHaveBeenCalledTimes(1);
+    expect(t.wake('a')!.nextWakeAt).toBe('2026-11-09T20:00:00.000Z');
+  });
+
+  it('set with a bad at fails and writes nothing', () => {
+    const t = setup({ window: parseWakeWindow('Mon-Fri 07:00-19:00 UTC') });
+    t.addSession('a');
+    const r = t.mgr.set('a', 1, undefined, '21:00');
+    expect(r).toMatchObject({ ok: false });
+    expect((r as { error: string }).error).toMatch(/outside the active wake window/);
+    expect(t.mgr.set('a', 0, undefined, '17:00')).toMatchObject({ ok: false });
+    expect(t.wake('a')).toBeUndefined();
+  });
+
   it.each([0, 25, 1.5, '4'])('rejects everyHours=%s without writing', (h) => {
     const t = setup();
     t.addSession('a');

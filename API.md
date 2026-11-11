@@ -1242,7 +1242,8 @@ tool list: it is on `NEVER_DEFER_CACO_TOOLS`, so auto-defer never hides it.
 
 **caco_wake** parameters:
 - `action` (`set` | `clear` | `status`, required)
-- `everyHours` (integer 1-24, required for `set`) - Cadence; the first wake is due this long from now
+- `everyHours` (integer 1-24, required for `set`) - Cadence; anything else fails. Without `at`, the first wake is due this long from now
+- `at` (string, optional) - When the first wake fires; then every `everyHours` after it. `HH:MM` (24h, next occurrence) or `YYYY-MM-DDTHH:MM` in the wake zone (the `CACO_WAKE_WINDOW` zone, else server-local), or an ISO time with `Z`/offset. Must be in the future, within 7 days, and inside the active window, or `set` fails
 - `note` (string, max 200 chars, optional) - Why the session is waiting; echoed in every wake prompt and the jobs applet
 
 Acts only on the calling session. `set` replaces an existing wake. A wake is a

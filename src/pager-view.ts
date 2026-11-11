@@ -232,6 +232,9 @@ export function buildPagerView(
   now: number,
   titleOf: PagerTitleOf = nameOnly,
 ): PagerView {
+  // Sessions staged in auto-archive are parked by the user: off the board,
+  // the running rows and the wake list alike.
+  inputs = inputs.filter(i => !i.archived);
   const busy = inputs
     .filter(i => i.isBusy)
     .map(i => withWake({ sessionId: i.sessionId, name: titleOf(i) }, i))

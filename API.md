@@ -1007,7 +1007,8 @@ session is staged in `auto-archive`: the wake is suspended and resumes if the
 session is moved out (shown as "would wake").
 
 `wakes` lists every session with a self-wake, paused ones included, soonest
-`nextWakeAt` first, then archived, then paused. Optional fields: `note`, `lastWakeAt`,
+`nextWakeAt` first, then archived, then paused. Sessions staged in `auto-archive`
+are omitted from all three lists (`busy`, `waiting`, `wakes`). Optional fields: `note`, `lastWakeAt`,
 `lastResult`, `pausedReason`, `archived`, and `waiting`/`busy` (`true` when the session is
 on the board or running right now). `name` in all three lists is the session
 list's title ladder: manual name, workspace summary, first intent, "No summary".

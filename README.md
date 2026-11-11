@@ -179,7 +179,8 @@ To triage several machines on one board, use the merged pager in the [Portal](#p
   last wake failed.
 - **Scheduled wakes list.** Below the board, every session with a self-wake gets a
   read-only card: next wake (or why it is paused), last wake and result, its note,
-  and a `waiting on you` or `running` tag. Paused wakes sort last.
+  and a `waiting on you` or `running` tag. Paused wakes sort last. Sessions in the
+  `auto-archive` folder are left off the pager entirely.
 - **Click a title to open the session.** Works on action cards, running rows and
   wake cards. Standalone it opens `/?session=<id>`; in the portal it switches to
   the owning instance.

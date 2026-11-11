@@ -186,13 +186,15 @@ describe('buildPagerView', () => {
       input({ sessionId: 'soon', name: 'S', wake: wake('2026-08-03T13:00:00.000Z', { note: 'waiting on PR' }) }),
       input({ sessionId: 'run', name: 'R', isBusy: true, responseOptions: undefined, wake: wake('2026-08-03T15:00:00.000Z') }),
       input({ sessionId: 'nowake', name: 'N' }),
-      input({ sessionId: 'arch', name: 'A', responseOptions: undefined, archived: true, wake: wake('2026-08-03T12:30:00.000Z') }),
+      input({ sessionId: 'arch', name: 'A', archived: true, wake: wake('2026-08-03T12:30:00.000Z') }),
+      input({ sessionId: 'arch-busy', name: 'AB', isBusy: true, archived: true }),
     ], 1, 1, NOW, i => 'T-' + i.name);
+    expect(view.waiting.map(w => w.sessionId).sort()).toEqual(['nowake', 'soon']);
+    expect(view.busy.map(b => b.sessionId)).toEqual(['run']);
     expect(view.wakes).toEqual([
       { sessionId: 'soon', name: 'T-S', everyHours: 2, nextWakeAt: '2026-08-03T13:00:00.000Z', note: 'waiting on PR', waiting: true },
       { sessionId: 'run', name: 'T-R', everyHours: 2, nextWakeAt: '2026-08-03T15:00:00.000Z', busy: true },
       { sessionId: 'late', name: 'T-L', everyHours: 2, nextWakeAt: '2026-08-03T18:00:00.000Z' },
-      { sessionId: 'arch', name: 'T-A', everyHours: 2, nextWakeAt: '2026-08-03T12:30:00.000Z', archived: true },
       { sessionId: 'paused', name: 'T-P', everyHours: 2, nextWakeAt: '2026-08-03T13:00:00.000Z', lastWakeAt: ago(3600000), lastResult: 'error', pausedReason: 'failures' },
     ]);
   });

@@ -724,7 +724,9 @@ Returns:
       "lastResult": "ok | error | running | cancelled",
       "lastError": "session.error",
       "pausedReason": "failures | expired | imported",
-      "archived": true
+      "archived": true,
+      "failures": 2,
+      "maxFailures": 5
     }
   ]
 }
@@ -733,7 +735,9 @@ Returns:
 Optional fields are omitted when unset. `sessionName` is null when the session
 has no name, summary, or auto-name. `archived: true` means the session is staged
 in `auto-archive`: the wake is suspended (not cleared) and resumes if the
-session is moved out.
+session is moved out. `failures`/`maxFailures` appear after a failed wake: the
+wake is still scheduled (`nextWakeAt` is the backoff retry) and pauses when
+`failures` reaches `maxFailures`. The session list's `wake` object carries the same fields.
 
 **DELETE /api/wakes/:id**
 
@@ -1250,7 +1254,8 @@ tool list: it is on `NEVER_DEFER_CACO_TOOLS`, so auto-defer never hides it.
 Acts only on the calling session. `set` replaces an existing wake. A wake is a
 `source:"scheduler"` message, so it keeps a pending offer and only badges the
 session when it writes a new one. Wakes skip busy sessions, sessions with a
-human message in the last 30 min, and off-hours (`CACO_WAKE_WINDOW`). After 3
+human message in the last 30 min, and off-hours (`CACO_WAKE_WINDOW`). A failed
+wake retries after 10, 20, 40, 80 min (+/-20% jitter, capped at the cadence). After 5
 failed wakes in a row, or 7 days with no human message (after one final wake
 that asks to renew), the wake pauses and the session is marked unobserved. The
 session should call `clear` when it is no longer waiting on anything external.

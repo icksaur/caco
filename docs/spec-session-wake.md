@@ -303,8 +303,20 @@ wake POST, which also keeps scheduler messages out of the agent-call guard
 and the correlation chain.
 
 - `ok` resets `consecutiveFailures`.
-- `error` increments it. At `WAKE_MAX_FAILURES` (3) it sets
-  `pausedReason:'failures'` and marks the session unobserved.
+- `error` increments it. At `WAKE_MAX_FAILURES` (5; was 3 before backoff) it sets
+  `pausedReason:'failures'` and marks the session unobserved. Below that, the
+  wake retries early: `nextWakeAt` becomes now + `WAKE_RETRY_BASE_MS` (10 min)
+  x 2^(failures-1), +/-20% jitter, capped at the cadence (`wakeRetryDelayMs`).
+  Most failures are transient (network not up after sleep), so waiting a full
+  cadence made a red badge look dead. The badge reads `wake retry` and its
+  tooltip names the retry time and the failures so far.
+- A POST that throws (no status) while the session is busy is NOT a failure:
+  the message route waits for the session to resume, which can outlast the
+  HTTP timeout when the network is slow, and the dispatch carries on. The wake
+  stays `running` and the turn's real end settles it.
+- A turn that fails on the network before the model produced output is retried
+  inside the dispatch (`docs/spec-transient-retry.md`) and emits no outcome
+  until that retry chain ends, so one blip does not count as a failed wake.
 - `cancelled` is a user Stop. The cancel route
   (`POST /api/sessions/:id/cancel`, the only caller of `cancelSession`) emits
   it while the session is busy, before the abort, so the teardown that follows

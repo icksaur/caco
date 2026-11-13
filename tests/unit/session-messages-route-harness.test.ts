@@ -447,6 +447,43 @@ describe('session messages route harness', () => {
         await vi.waitFor(() => { expect(seen).toEqual([['s1', 'error']]); });
       } finally { off(); }
     });
+
+    it('a network failure before the model ran retries with a continuation, not an error outcome (spec-transient-retry)', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const { onTurnOutcome } = await import('../../src/turn-outcome.js');
+      const seen: string[] = [];
+      const off = onTurnOutcome((_id, outcome) => { seen.push(outcome); });
+      try {
+        await postJson('/sessions/s1/messages', { prompt: 'wake', source: 'scheduler', scheduleSlug: 'wake' });
+        emitters[0]({ type: 'assistant.turn_start', data: {} });
+        emitters[0]({ type: 'session.error', data: { message: 'Execution failed: Unable to discover model capabilities. {"kind":"network","message":"Model catalog request timed out"}' } });
+        await vi.waitFor(() => {
+          expect(routeMocks.broadcastEvent).toHaveBeenCalledWith('s1', expect.objectContaining({
+            type: 'session.info', data: { message: expect.stringMatching(/^Network not ready\. Retrying in \d+s \(attempt 1 of 6\)/) },
+          }));
+        });
+        expect(seen).toEqual([]);
+        await vi.advanceTimersByTimeAsync(20_000);
+        await vi.waitFor(() => { expect(emitters).toHaveLength(2); });
+        const sent = (routeMocks.sessionManager.sendStream.mock.calls.at(-1) as unknown[])[1] as string;
+        expect(sent).toMatch(/^\[system:retry\] The previous turn failed/);
+        // Output arrived, then a failure: not retried, the turn fails.
+        emitters[1]({ type: 'assistant.message', data: { content: 'partial' } });
+        emitters[1]({ type: 'session.error', data: { message: 'network down' } });
+        await vi.waitFor(() => { expect(seen).toEqual(['error']); });
+      } finally { off(); vi.useRealTimers(); }
+    });
+
+    it('a non-network error is not retried', async () => {
+      const { onTurnOutcome } = await import('../../src/turn-outcome.js');
+      const seen: string[] = [];
+      const off = onTurnOutcome((_id, outcome) => { seen.push(outcome); });
+      try {
+        await postJson('/sessions/s1/messages', { prompt: 'go' });
+        emitters[0]({ type: 'session.error', data: { message: 'Model refused the request' } });
+        await vi.waitFor(() => { expect(seen).toEqual(['error']); });
+      } finally { off(); }
+    });
   });
 
   describe('wake support (spec-session-wake)', () => {

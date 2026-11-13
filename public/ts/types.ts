@@ -74,6 +74,8 @@ export interface SessionData {
     pausedReason?: 'failures' | 'expired' | 'imported';
     /** Staged in auto-archive: suspended, resumes if moved out. */
     archived?: true;
+    failures?: number;
+    maxFailures?: number;
   } | null;
   /** Herd bond: this session's parent id, or absent if not a herd child. */
   orchestratedBy?: string | null;

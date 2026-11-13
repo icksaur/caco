@@ -21,6 +21,15 @@ export interface WakeConfig {
   turnTimeoutMs: number;
   window: WakeWindowSpec;
   archiveFolder: string;
+  /** First retry delay after a failure; doubles per failure, capped at the cadence. */
+  retryBaseMs: number;
+}
+
+/** Backoff for the Nth consecutive failure (1-based): base * 2^(n-1), capped at
+ *  the cadence, with +/-20% jitter so wakes that failed together do not retry together. */
+export function wakeRetryDelayMs(failures: number, baseMs: number, cadenceMs: number, random: () => number): number {
+  const raw = Math.min(cadenceMs, baseMs * 2 ** Math.max(0, failures - 1));
+  return Math.round(raw * (0.8 + 0.4 * random()));
 }
 
 export interface WakeManagerDeps {
@@ -35,6 +44,8 @@ export interface WakeManagerDeps {
   markUnobserved(id: string): void;
   toolDisabled(): boolean;
   log?(msg: string): void;
+  /** Jitter source; Math.random by default. */
+  random?(): number;
   config: WakeConfig;
 }
 
@@ -168,6 +179,12 @@ export function createWakeManager(deps: WakeManagerDeps) {
         next.lastError = reason ?? 'error';
         next.consecutiveFailures = (cur.consecutiveFailures ?? 0) + 1;
         if (next.consecutiveFailures >= cfg.maxFailures) next.pausedReason = 'failures';
+        else {
+          // Most failures are transient (network not up yet after sleep), so
+          // retry well before the next cadence slot rather than hours later.
+          const retryAt = deps.now() + wakeRetryDelayMs(next.consecutiveFailures, cfg.retryBaseMs, cur.everyMinutes * 60_000, deps.random ?? Math.random);
+          if (retryAt < Date.parse(cur.nextWakeAt)) next.nextWakeAt = iso(retryAt);
+        }
       }
       if (next.finalWakeAt && !next.pausedReason) next.pausedReason = 'expired';
       paused = next.pausedReason;
@@ -204,6 +221,14 @@ export function createWakeManager(deps: WakeManagerDeps) {
       // pre-fire fields so nothing advanced.
       write(id, cur => (cur && cur.lastResult === 'running' ? { ...prev } : cur));
       return false;
+    }
+    if (!status && deps.isBusy(id)) {
+      // The POST gave up (the route waits for the session to resume, which can
+      // outlast the HTTP timeout while the network comes up) but the dispatch is
+      // still going. Leave it running: the turn's real end settles it, and the
+      // turn timeout still catches a hang.
+      log(`fire ${id.slice(0, 8)}: request timed out, turn still dispatching`);
+      return true;
     }
     settle(id, 'error', status ? `HTTP ${status}` : 'network error');
     return false;

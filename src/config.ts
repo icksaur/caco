@@ -56,7 +56,10 @@ export const WAKE_MAX_HOURS = 24;
 export const WAKE_NOTE_MAX = 200;
 export const WAKE_MAX_ACTIVE = Number(process.env.CACO_WAKE_MAX) || 20;
 export const WAKE_MAX_RUNNING = Number(process.env.CACO_WAKE_MAX_RUNNING) || 2;
-export const WAKE_MAX_FAILURES = 3;
+// A failed wake retries sooner than its cadence: 10, 20, 40, 80 min (+/-20%
+// jitter, capped at the cadence), and pauses after this many failures in a row.
+export const WAKE_MAX_FAILURES = 5;
+export const WAKE_RETRY_BASE_MS = 10 * 60 * 1000;
 export const WAKE_HUMAN_QUIET_MS = 30 * 60 * 1000;
 export const WAKE_EXPIRE_MS = Number(process.env.CACO_WAKE_EXPIRE_MS) || 7 * 24 * 60 * 60 * 1000;
 export const WAKE_TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;

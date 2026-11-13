@@ -239,7 +239,15 @@ with a Stop button.
   `auto-archive`.
 - A wake skips a busy session, a session with a human message in the last 30
   minutes, and off-hours. Skipped wakes retry on the next check (every 5 min).
-- After 3 failed wakes in a row the wake pauses and the session is marked unobserved.
+- A failed wake stays scheduled and retries sooner than its cadence: about 10,
+  20, 40, then 80 minutes later (+/-20% jitter, never later than the cadence).
+  Its badge reads `wake retry` (red) and the tooltip shows when. After 5 failed
+  wakes in a row the wake pauses (`wake paused`) and the session is marked unobserved.
+- A turn that fails on the network before the model responds (common right after
+  power-on, before wifi is up) is retried automatically in any session: 15s, 30s,
+  1m, 2m, 4m, 8m (+/-20% jitter). The retry sends a short system continuation, not
+  your message again. Sending a message or pressing Stop cancels it. A failure
+  after the model has started responding is not retried.
 - After 7 days with no human message, one final wake asks you whether to keep
   waiting. If you don't renew, the wake pauses.
 - An imported copy arrives paused. A move (`export?delete=true`) stays armed.

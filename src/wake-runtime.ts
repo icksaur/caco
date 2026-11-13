@@ -6,7 +6,7 @@
 
 import {
   SERVER_URL, AUTO_ARCHIVE_FOLDER, WAKE_CHECK_INTERVAL_MS, WAKE_MIN_HOURS, WAKE_MAX_HOURS,
-  WAKE_NOTE_MAX, WAKE_MAX_ACTIVE, WAKE_MAX_RUNNING, WAKE_MAX_FAILURES, WAKE_HUMAN_QUIET_MS,
+  WAKE_NOTE_MAX, WAKE_MAX_ACTIVE, WAKE_MAX_RUNNING, WAKE_MAX_FAILURES, WAKE_RETRY_BASE_MS, WAKE_HUMAN_QUIET_MS,
   WAKE_EXPIRE_MS, WAKE_TURN_TIMEOUT_MS, WAKE_WINDOW, WAKE_WINDOW_DEFAULT,
 } from './config.js';
 import { listSessionIds } from './sdk-session-store.js';
@@ -64,6 +64,7 @@ export const wakeManager = createWakeManager({
     turnTimeoutMs: WAKE_TURN_TIMEOUT_MS,
     window: resolveWindow(),
     archiveFolder: AUTO_ARCHIVE_FOLDER,
+    retryBaseMs: WAKE_RETRY_BASE_MS,
   },
 });
 

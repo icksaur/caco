@@ -772,13 +772,20 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     const wakeBadge = document.createElement('span');
     wakeBadge.className = `session-wake-badge${w.pausedReason ? ' paused' : ''}${w.archived ? ' archived' : ''}${w.lastResult === 'error' ? ' failed' : ''}`;
     const word = w.archived ? 'would wake' : 'wake';
-    wakeBadge.textContent = w.pausedReason ? `${word} paused` : `${word} ${w.everyHours}h`;
+    const retrying = !w.pausedReason && w.lastResult === 'error';
+    wakeBadge.textContent = w.pausedReason ? `${word} paused` : retrying ? `${word} retry` : `${word} ${w.everyHours}h`;
+    const next = new Date(w.nextWakeAt).toLocaleString();
     const lines = [w.pausedReason
-      ? `Wake paused (${w.pausedReason}). The session re-arms it with caco_wake.`
-      : `Wakes every ${w.everyHours}h. Next: ${new Date(w.nextWakeAt).toLocaleString()}`];
+      ? `Wake paused (${w.pausedReason}). It will not wake again until the session re-arms it with caco_wake.`
+      : retrying
+        ? `Last wake failed${w.lastError ? ` (${w.lastError})` : ''}. Still scheduled: retrying ${next}, then every ${w.everyHours}h.`
+        : `Wakes every ${w.everyHours}h. Next: ${next}`];
+    if (retrying && w.failures && w.maxFailures) {
+      lines.push(`Pauses after ${w.maxFailures} failures in a row (${w.failures} so far).`);
+    }
     if (w.archived) lines.unshift('Suspended while in auto-archive. Move the session out to resume this wake.');
     if (w.note) lines.push(`Note: ${w.note}`);
-    if (w.lastResult) lines.push(`Last result: ${w.lastResult}${w.lastError ? ` (${w.lastError})` : ''}`);
+    if (w.lastResult && !retrying) lines.push(`Last result: ${w.lastResult}${w.lastError ? ` (${w.lastError})` : ''}`);
     wakeBadge.title = lines.join('\n');
     row1.appendChild(wakeBadge);
   }

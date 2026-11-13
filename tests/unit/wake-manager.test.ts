@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createWakeManager, type WakeConfig } from '../../src/wake-manager.js';
+import { createWakeManager, wakeRetryDelayMs, type WakeConfig } from '../../src/wake-manager.js';
 import type { SessionMeta } from '../../src/session-meta-store.js';
 import { parseWakeWindow } from '../../src/wake-core.js';
 
@@ -33,8 +33,9 @@ function setup(over: Partial<WakeConfig> = {}) {
     config: {
       minHours: 1, maxHours: 24, noteMax: 200, maxActive: 20, maxRunning: 2, maxFailures: 3,
       humanQuietMs: 30 * 60 * 1000, expireMs: 7 * D, turnTimeoutMs: 2 * H, window: null,
-      archiveFolder: 'auto-archive', ...over,
+      archiveFolder: 'auto-archive', retryBaseMs: 10 * 60 * 1000, ...over,
     },
+    random: () => 0.5,
   });
   const addSession = (id: string, meta: Partial<SessionMeta> = {}) => {
     metas.set(id, { name: id, lastUsedAt: new Date(now - 2 * H).toISOString(), ...meta });
@@ -197,6 +198,32 @@ describe('wake loop', () => {
     t.post.mockResolvedValueOnce(500);
     await t.mgr.tick();
     expect(t.wake('a')).toMatchObject({ lastResult: 'error', lastError: 'HTTP 500', consecutiveFailures: 1 });
+  });
+
+  it('a failed wake retries with backoff, capped at the cadence', async () => {
+    const s = setup();
+    s.addSession('b');
+    s.mgr.set('b', 4);
+    s.advance(4 * H);
+    await s.mgr.tick();
+    s.mgr.settle('b', 'error', 'session.error');
+    // random() = 0.5 is no jitter: 10 min after the first failure.
+    expect(Date.parse(s.wake('b')!.nextWakeAt)).toBe(s.now() + 10 * 60_000);
+    s.advance(10 * 60_000); await s.mgr.tick(); s.mgr.settle('b', 'error', 'session.error');
+    expect(Date.parse(s.wake('b')!.nextWakeAt)).toBe(s.now() + 20 * 60_000);
+    expect(wakeRetryDelayMs(6, 10 * 60_000, 4 * H, () => 0.5)).toBe(4 * H);
+    expect(wakeRetryDelayMs(1, 10 * 60_000, 4 * H, () => 0)).toBe(8 * 60_000);
+    expect(wakeRetryDelayMs(1, 10 * 60_000, 4 * H, () => 1)).toBe(12 * 60_000);
+  });
+
+  it('a POST that gives up while the turn is still dispatching stays running', async () => {
+    t.advance(H);
+    t.post.mockImplementationOnce(async () => { t.busy.add('a'); throw new Error('headers timeout'); });
+    await t.mgr.tick();
+    expect(t.wake('a')).toMatchObject({ lastResult: 'running', consecutiveFailures: 0 });
+    t.busy.delete('a');
+    t.mgr.settle('a', 'ok');
+    expect(t.wake('a')!.lastResult).toBe('ok');
   });
 
   it('three consecutive failures pause the wake and mark the session unobserved (A11)', async () => {

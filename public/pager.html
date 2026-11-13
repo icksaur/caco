@@ -201,11 +201,14 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     if (!wake) return null;
     var paused = !!wake.pausedReason;
     var word = wake.archived ? 'would wake' : 'wake';
+    var retrying = !paused && wake.failed;
     var node = el('span', 'wake' + (paused ? ' paused' : '') + (wake.archived ? ' archived' : '') + (wake.failed ? ' failed' : ''),
-      paused ? word + ' paused' : word + ' ' + wake.everyHours + 'h');
+      paused ? word + ' paused' : retrying ? word + ' retry' : word + ' ' + wake.everyHours + 'h');
     node.title = (wake.archived ? 'Suspended while in auto-archive; move the session out to resume. ' : '') + (paused
-      ? 'Wake paused (' + wake.pausedReason + ')'
-      : 'Wakes every ' + wake.everyHours + 'h' + (wake.failed ? '. The last wake failed' : ''));
+      ? 'Wake paused (' + wake.pausedReason + '). It will not wake again until it is set again.'
+      : retrying
+        ? 'The last wake failed. Still scheduled: it retries soon, then every ' + wake.everyHours + 'h.'
+        : 'Wakes every ' + wake.everyHours + 'h');
     return node;
   }
 
@@ -261,7 +264,9 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       ? 'Paused (' + w.pausedReason + '). It will not wake again until it is set again.'
       : w.archived
         ? 'In auto-archive. Would wake ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + ') if moved out.'
-        : 'Next wake ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + ')'));
+        : w.lastResult === 'error'
+          ? 'Last wake failed. Retrying ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + '), then every ' + w.everyHours + 'h.'
+          : 'Next wake ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + ')'));
     if (w.lastWakeAt) {
       card.appendChild(el('div', 'wake-line' + (w.lastResult === 'error' ? ' error' : ''),
         'Last wake ' + relTime(w.lastWakeAt) + (w.lastResult ? ': ' + w.lastResult : '')));

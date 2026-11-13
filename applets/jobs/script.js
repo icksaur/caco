@@ -149,7 +149,7 @@ function createJobCard(job) {
 
 const WAKE_RESULT_LABELS = { ok: 'ok', error: 'failed', running: 'running', cancelled: 'stopped' };
 const WAKE_PAUSE_LABELS = {
-  failures: 'paused: 3 failed wakes in a row',
+  failures: 'paused: 5 failed wakes in a row',
   expired: 'paused: expired, no human message in the session for too long',
   imported: 'paused: copied from another machine',
 };
@@ -214,7 +214,9 @@ function createWakeCard(w) {
     ? (WAKE_PAUSE_LABELS[w.pausedReason] || `paused (${w.pausedReason})`)
     : w.archived
       ? `In auto-archive: would wake ${formatDateTime(w.nextWakeAt)} if moved out`
-      : `Next wake ${formatDateTime(w.nextWakeAt)}`;
+      : w.lastResult === 'error'
+        ? `Last wake failed. Still scheduled: retrying ${formatDateTime(w.nextWakeAt)}${w.failures && w.maxFailures ? ` (pauses after ${w.maxFailures} failures in a row, ${w.failures} so far)` : ''}`
+        : `Next wake ${formatDateTime(w.nextWakeAt)}`;
   card.appendChild(status);
 
   const details = document.createElement('div');

@@ -40,6 +40,11 @@ import { getLastAssistantMessage } from '../session-history.js';
 import { idleFeed } from '../idle-feed.js';
 import { emitTurnOutcome } from '../turn-outcome.js';
 import { setTurnRoot, clearTurnRoot, setCommsGuardConfigProvider, resolveCommsGuardConfig } from '../comms-guard.js';
+import {
+  TRANSIENT_RETRY_MAX, TRANSIENT_RETRY_IDENTIFIER, TRANSIENT_RETRY_PROMPT,
+  isTransientTurnError, isModelOutputEvent, transientRetryDelayMs,
+  scheduleTransientRetry, cancelTransientRetry,
+} from '../transient-retry.js';
 
 const router = Router();
 
@@ -123,6 +128,46 @@ export function handleIdle(sessionId: string, ctx: IdleAuthorityCtx, correlation
         idleFeed.append(id, response, kind, correlationId);
       });
     },
+  });
+}
+
+/**
+ * After a turn failed on the network before the model responded, try again
+ * with backoff and jitter (spec-transient-retry). The retry keeps the failed
+ * turn's root, observation policy and depth, like an auto-continuation, so the
+ * comms guard and badging treat it as the same turn. A send in between cancels
+ * it; a session that is busy when it fires is left alone.
+ */
+function scheduleNetworkRetry(
+  sessionId: string,
+  attempt: number,
+  ctx: { needsObservation?: boolean; offerBaseline?: { at: string | null }; humanRooted: boolean; depth: number },
+): void {
+  const delay = transientRetryDelayMs(attempt);
+  console.warn(`[DISPATCH] ${sessionId.slice(0, 8)}: network failure before the model ran; retry ${attempt}/${TRANSIENT_RETRY_MAX} in ${Math.round(delay / 1000)}s`);
+  broadcastEvent(sessionId, {
+    type: 'session.info',
+    data: { message: `Network not ready. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt} of ${TRANSIENT_RETRY_MAX}). Sending a message cancels the retry.` },
+  });
+  scheduleTransientRetry(sessionId, delay, () => {
+    if (sessionManager.isBusy(sessionId)) return;
+    dispatchMessage(
+      sessionId,
+      prefixMessageSource('system', TRANSIENT_RETRY_IDENTIFIER, TRANSIENT_RETRY_PROMPT),
+      {
+        needsObservation: ctx.needsObservation,
+        ...(ctx.offerBaseline && { offerBaseline: ctx.offerBaseline }),
+        humanRooted: ctx.humanRooted,
+        depth: ctx.depth,
+        requestId: `retry-${attempt}-${Date.now().toString(36)}`,
+        transientAttempt: attempt,
+      },
+      { onEvent: evt => broadcastEvent(sessionId, evt) },
+    ).catch(() => {
+      // The dispatch reported its own error; end the original turn as failed,
+      // unless another turn took over the session (that one settles it).
+      if (!sessionManager.isBusy(sessionId)) emitTurnOutcome(sessionId, 'error', 'retry failed');
+    });
   });
 }
 
@@ -407,17 +452,19 @@ function capturePriceContext(sessionId: string): {
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; offerBaseline?: { at: string | null }; displayPrompt?: string; beforeSend?: () => Promise<void>; depth?: number; humanRooted?: boolean },
+  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; offerBaseline?: { at: string | null }; displayPrompt?: string; beforeSend?: () => Promise<void>; depth?: number; humanRooted?: boolean; transientAttempt?: number },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePaths, correlationId, requestId, needsObservation, offerBaseline, displayPrompt, beforeSend, depth, humanRooted } = options || {};
+  const { tempFilePaths, correlationId, requestId, needsObservation, offerBaseline, displayPrompt, beforeSend, depth, humanRooted, transientAttempt } = options || {};
   const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
 
   if (sessionManager.isBusy(sessionId)) {
     throw new DispatchHttpError(409, 'Session is busy processing another message', 'SESSION_BUSY');
   }
+  // Any other send supersedes a pending network retry for this session.
+  if (!transientAttempt) cancelTransientRetry(sessionId);
 
   // Register the dispatch with dispatch-state up-front. This is what
   // restart-manager watches; it must cover the full lifetime of dispatchMessage
@@ -446,6 +493,8 @@ export async function dispatchMessage(
   // Guard against double cleanup (completeDispatch vs outer catch)
   let dispatchCompleted = false;
   let sendStarted = false;
+  let sawModelOutput = false;
+  let retryScheduled = false;
   let watchdog: ReturnType<typeof createWatchdog> | null = null;
 
   // Per-turn ledger for this request. Every `assistant.usage` appends one entry
@@ -499,8 +548,9 @@ export async function dispatchMessage(
     onEvent({ type: 'caco.throughput', data: snapshot(sessionId) as unknown as Record<string, unknown> } as unknown as SessionEvent);
     console.log(`[DISPATCH:${rid}] Completed: ${reason}`);
     // Every non-idle teardown ends the turn as a failure. An idle's outcome is
-    // decided by the idle authority instead (a reveal-idle is not the end).
-    if (reason !== 'session.idle') emitTurnOutcome(sessionId, 'error', reason);
+    // decided by the idle authority instead (a reveal-idle is not the end). A
+    // scheduled network retry is not the end either: the retry's turn settles it.
+    if (reason !== 'session.idle' && !retryScheduled) emitTurnOutcome(sessionId, 'error', reason);
   };
 
   try {
@@ -616,6 +666,12 @@ export async function dispatchMessage(
       if (dispatchCompleted) return;
       watchdog?.notifyEvent(event.type);
       dispatchState.notifyActivity(sessionId, event.type);
+      if (isModelOutputEvent(event.type)) sawModelOutput = true;
+      const attempt = (transientAttempt ?? 0) + 1;
+      if (event.type === 'session.error' && !sawModelOutput && attempt <= TRANSIENT_RETRY_MAX
+        && isTransientTurnError((event.data as { message?: unknown } | undefined)?.message)) {
+        retryScheduled = true;
+      }
 
       // Forward the SDK event to the client (no transformation — caco.* events
       // are emitted directly by their tool handlers). One exception: annotate a
@@ -651,6 +707,11 @@ export async function dispatchMessage(
           // signals) vs real idle (mark unobserved + herd wake + quota). An
           // errored dispatch is never an idle, so nothing propagates.
           if (wasIdle) handleIdle(sessionId, { needsObservation: needsObservation ?? false, ...(offerBaseline && { offerBaseline }), humanRooted: humanRooted === true }, effectiveCorrelationId);
+          else if (retryScheduled) {
+            scheduleNetworkRetry(sessionId, (transientAttempt ?? 0) + 1, {
+              needsObservation, offerBaseline, humanRooted: humanRooted === true, depth: depth ?? 1,
+            });
+          }
         });
         unsubscribe();
       }
@@ -757,6 +818,11 @@ router.post('/sessions/:sessionId/cancel', async (req: Request, res: Response) =
   // A user Stop is not a failure. Emitted before the abort so it settles a
   // running wake or slug run first; the abort's idle/error then finds it settled.
   if (sessionManager.isBusy(sessionId)) emitTurnOutcome(sessionId, 'cancelled', 'stopped by user');
+  // Stop also cancels a pending network retry (spec-transient-retry).
+  else if (cancelTransientRetry(sessionId)) {
+    emitTurnOutcome(sessionId, 'cancelled', 'stopped by user');
+    broadcastEvent(sessionId, { type: 'session.info', data: { message: 'Retry cancelled.' } });
+  }
   
   const { forced } = await sessionManager.cancelSession(sessionId);
   if (forced) {

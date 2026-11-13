@@ -64,3 +64,10 @@ own backoff (`docs/spec-session-wake.md`).
 | Error after output: not retried, error outcome | same |
 | Non-network error: not retried | same |
 | Classifier, backoff with jitter, one pending retry per session, cancel | `transient-retry.test.ts` |
+
+## Plan
+
+| phase | scope | status |
+|---|---|---|
+| 1 | `src/transient-retry.ts` policy; retry chain in `dispatchMessage`; Stop cancels a pending retry; tests | done |
+| 2 | Wake backoff and `wake retry` badge (`docs/spec-session-wake.md`) | done |

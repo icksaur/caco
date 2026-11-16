@@ -4,11 +4,11 @@ import type { SessionIdRef } from './types.js';
 import type { WakeState } from './session-meta-store.js';
 import { WAKE_MIN_HOURS, WAKE_MAX_HOURS, WAKE_NOTE_MAX, WAKE_HUMAN_QUIET_MS, WAKE_EXPIRE_MS, WAKE_MAX_FAILURES } from './config.js';
 import { wakeManager, WAKE_TOOL_NAME } from './wake-runtime.js';
-import { wakeTimeZone, describeWindow, formatZoned } from './wake-core.js';
+import { wakeTimeZone, describeWindow, formatZoned, formatCadence } from './wake-core.js';
 
 function describe(w: WakeState): string {
   const tz = wakeTimeZone(wakeManager.window());
-  const parts = [`Wake every ${w.everyMinutes / 60}h.`];
+  const parts = [`Wake every ${formatCadence(w.everyMinutes / 60)}.`];
   if (w.note) parts.push(`Note: ${w.note}.`);
   if (w.pausedReason) parts.push(`PAUSED (${w.pausedReason}); call set again to resume.`);
   else parts.push(`Next wake ${formatZoned(Date.parse(w.nextWakeAt), tz)} ${tz}.`);
@@ -27,14 +27,14 @@ export function createWakeTool(sessionRef: SessionIdRef) {
   const wake = defineTool(WAKE_TOOL_NAME, {
     description: `Schedule this session to be woken periodically while it waits on external data (a PR review, a reply, a deployment), or to check back with the user at a set time (e.g. after a meeting).
 
-- action "set": wake every \`everyHours\` (whole hours, ${WAKE_MIN_HOURS}-${WAKE_MAX_HOURS}; anything else fails). Optional \`at\`: when the FIRST wake fires, then every \`everyHours\` after it; without \`at\` the first wake is \`everyHours\` from now. \`at\` is "HH:MM" (24h, next occurrence) or "YYYY-MM-DDTHH:MM", both in ${tz}, or an ISO time with an offset; it must be within 7 days and inside the active window (${describeWindow(win)}). Replaces any existing wake. Optional \`note\` (max ${WAKE_NOTE_MAX} chars) saying what you wait for; it is repeated in every wake prompt.
+- action "set": wake every \`everyHours\` (whole hours, ${WAKE_MIN_HOURS}-${WAKE_MAX_HOURS}, i.e. up to 7 days; e.g. 168 for weekly; anything else fails). Optional \`at\`: when the FIRST wake fires, then every \`everyHours\` after it; without \`at\` the first wake is \`everyHours\` from now. \`at\` is "HH:MM" (24h, next occurrence) or "YYYY-MM-DDTHH:MM", both in ${tz}, or an ISO time with an offset; it must be within 7 days and inside the active window (${describeWindow(win)}). Replaces any existing wake. Optional \`note\` (max ${WAKE_NOTE_MAX} chars) saying what you wait for; it is repeated in every wake prompt.
 - action "clear": stop waking this session. Call it as soon as you are no longer waiting on anything external.
 - action "status": show the current wake.
 
 Wakes skip live conversations (busy, or a user message in the last ${WAKE_HUMAN_QUIET_MS / 60000} minutes) and off-hours; a wake due off-hours fires once when the window opens. Wakes pause after ${Math.round(WAKE_EXPIRE_MS / 86400000)} days without a user message (after one final wake), after ${WAKE_MAX_FAILURES} failed wakes, and are suspended while the session sits in the auto-archive folder (moving it out resumes them). Each wake is a short prompt with the local time and time since the last wake. End a wake quietly when nothing changed; end with a caco-actions block only when the user must decide something.`,
     parameters: z.object({
       action: z.enum(['set', 'clear', 'status']),
-      everyHours: z.number().optional().describe(`Required for set: whole hours ${WAKE_MIN_HOURS}-${WAKE_MAX_HOURS}.`),
+      everyHours: z.number().optional().describe(`Required for set: whole hours ${WAKE_MIN_HOURS}-${WAKE_MAX_HOURS} (168 = weekly).`),
       note: z.string().optional().describe(`Optional for set: what you are waiting on (max ${WAKE_NOTE_MAX} chars).`),
       at: z.string().optional().describe(`Optional for set: first wake time, "HH:MM" or "YYYY-MM-DDTHH:MM" in ${tz}, or ISO with offset.`),
     }),

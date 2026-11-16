@@ -52,7 +52,7 @@ export const SCHEDULE_TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 // scheduler so a 1 h cadence is not late by up to 30 min.
 export const WAKE_CHECK_INTERVAL_MS = Number(process.env.CACO_WAKE_CHECK_INTERVAL_MS) || 5 * 60 * 1000;
 export const WAKE_MIN_HOURS = 1;
-export const WAKE_MAX_HOURS = 24;
+export const WAKE_MAX_HOURS = 168;
 export const WAKE_NOTE_MAX = 200;
 export const WAKE_MAX_ACTIVE = Number(process.env.CACO_WAKE_MAX) || 20;
 export const WAKE_MAX_RUNNING = Number(process.env.CACO_WAKE_MAX_RUNNING) || 2;

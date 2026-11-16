@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseWakeWindow, inWindow, nextWindowStart, decideWake, isExpired, buildWakePrompt, formatElapsed,
-  resolveWakeAt, describeWindow,
+  resolveWakeAt, describeWindow, formatCadence,
   type WakeWindow, type WakeDecisionInput,
 } from '../../src/wake-core.js';
 import type { WakeState } from '../../src/session-meta-store.js';
@@ -156,6 +156,15 @@ describe('isExpired keys on human activity only (B)', () => {
   it('falls back to registeredAt for a session no human wrote to', () => {
     expect(isExpired(wake({ registeredAt: new Date(NOW - 8 * D).toISOString() }), undefined, NOW, 7 * D)).toBe(true);
     expect(isExpired(wake(), undefined, NOW, 7 * D)).toBe(false);
+  });
+
+  it('gives a slow cadence at least two wakes before the final one', () => {
+    const weekly = wake({ everyMinutes: 168 * 60 });
+    expect(isExpired(weekly, new Date(NOW - 8 * D).toISOString(), NOW, 7 * D)).toBe(false);
+    expect(isExpired(weekly, new Date(NOW - 15 * D).toISOString(), NOW, 7 * D)).toBe(true);
+    expect(formatCadence(168)).toBe('7d');
+    expect(formatCadence(36)).toBe('36h');
+    expect(formatCadence(4)).toBe('4h');
   });
 });
 

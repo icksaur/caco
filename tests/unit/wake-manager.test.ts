@@ -31,7 +31,7 @@ function setup(over: Partial<WakeConfig> = {}) {
     markUnobserved,
     toolDisabled: () => disabled,
     config: {
-      minHours: 1, maxHours: 24, noteMax: 200, maxActive: 20, maxRunning: 2, maxFailures: 3,
+      minHours: 1, maxHours: 168, noteMax: 200, maxActive: 20, maxRunning: 2, maxFailures: 3,
       humanQuietMs: 30 * 60 * 1000, expireMs: 7 * D, turnTimeoutMs: 2 * H, window: null,
       archiveFolder: 'auto-archive', retryBaseMs: 10 * 60 * 1000, ...over,
     },
@@ -91,12 +91,19 @@ describe('caco_wake set/clear (A1, A2, A13)', () => {
     expect(t.wake('a')).toBeUndefined();
   });
 
-  it.each([0, 25, 1.5, '4'])('rejects everyHours=%s without writing', (h) => {
+  it('accepts a weekly cadence', () => {
+    const t = setup({ maxHours: 168 });
+    t.addSession('a');
+    expect(t.mgr.set('a', 168).ok).toBe(true);
+    expect(Date.parse(t.wake('a')!.nextWakeAt)).toBe(START + 7 * D);
+  });
+
+  it.each([0, 169, 1.5, '4'])('rejects everyHours=%s without writing', (h) => {
     const t = setup();
     t.addSession('a');
     const r = t.mgr.set('a', h);
     expect(r).toMatchObject({ ok: false });
-    expect((r as { error: string }).error).toContain('1 to 24');
+    expect((r as { error: string }).error).toContain('1 to 168');
     expect(t.wake('a')).toBeUndefined();
   });
 

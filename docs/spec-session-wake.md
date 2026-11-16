@@ -37,11 +37,11 @@ the same pattern as `createHerdTools`, `src/herd-tools.ts:74`).
 
 | action | params | effect |
 |---|---|---|
-| `set` | `everyHours` (integer 1-24), `at?`, `note?` (max 200 chars) | Creates the wake, or replaces the existing one. The first wake is due at `at`, or `everyHours` from now without it; later wakes follow every `everyHours` after each fire. |
+| `set` | `everyHours` (integer 1-168), `at?`, `note?` (max 200 chars) | Creates the wake, or replaces the existing one. The first wake is due at `at`, or `everyHours` from now without it; later wakes follow every `everyHours` after each fire. |
 | `clear` | none | Removes the wake. Calling it with no wake set is fine. |
 | `status` | none | Returns cadence, note, next wake, last wake, last result, and paused reason. |
 
-The tool description states the 1-24 h range, that wakes skip live
+The tool description states the 1-168 h range, that wakes skip live
 conversations and off-hours, the pause rules, and that the session should
 call `clear` as soon as it is no longer waiting on anything external.
 
@@ -68,12 +68,13 @@ Parsing is pure: `resolveWakeAt` in `src/wake-core.ts`.
   (`src/schedule-store.ts:17-18`) and Carl's "1h cadence or slower". Each
   wake is a full model turn on a long transcript, so cost goes up with
   frequency.
-- **Maximum 24 h.** A wake is for a session waiting on external data that
-  arrives in hours to days. A daily check catches anything a slower cadence
-  would. A cadence over a day also means "not really waiting", and that is
-  what the inactivity expiry is for: a 7-day wake would fire once and then
-  expire (see Guards). Capping at 24 h makes sure every wake gets several
-  checks before it can expire.
+- **Maximum 168 h (7 days).** Originally 24 h, on the theory that a slower
+  cadence means "not really waiting". Carl raised it: a production change
+  freeze (a week after a major outage) is real external waiting on a weekly
+  scale. Whole-day cadences display as days (`wake 7d`). To keep the
+  inactivity expiry meaningful, its threshold is
+  `max(CACO_WAKE_EXPIRE_MS, 2 x cadence)`, so a weekly wake fires at least
+  twice before the final renew-or-pause wake.
 
 Out-of-range values are rejected with an error that states the range. They
 are never clamped, so the model learns the rule.
@@ -445,7 +446,7 @@ and last result. Slug-scheduled sessions render as before.
 | # | behavior | oracle (unit test) |
 |---|---|---|
 | A1 | `set` stores meta and index; `set` again replaces and keeps `registeredAt` | `wake-manager.test.ts` |
-| A2 | `everyHours` 0, 25, 1.5, or a string is rejected; note over 200 rejected | error names 1-24; meta unchanged |
+| A2 | `everyHours` 0, 169, 1.5, or a string is rejected; note over 200 rejected | error names 1-168; meta unchanged |
 | A2b | `at` sets the first wake, then the cadence follows; past, over 7 days, off-window or malformed `at` fails | `wake-core.test.ts` resolveWakeAt; `wake-manager.test.ts` set with at |
 | A3 | `caco_wake` is never auto-deferred | `tool-registry.test.ts`: in `NEVER_DEFER_CACO_TOOLS` |
 | A4 | A due wake fires with the prompt lines and is `running` | fake `post`; prompt has local time, elapsed time, note, and "clear" |

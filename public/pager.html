@@ -196,6 +196,10 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     return entry.key || entry.sessionId;
   }
 
+  function cadence(h) {
+    return h >= 24 && h % 24 === 0 ? (h / 24) + 'd' : h + 'h';
+  }
+
   // Mirrors the session list's wake badge. Only ever textContent.
   function wakeBadge(wake) {
     if (!wake) return null;
@@ -203,12 +207,12 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     var word = wake.archived ? 'would wake' : 'wake';
     var retrying = !paused && wake.failed;
     var node = el('span', 'wake' + (paused ? ' paused' : '') + (wake.archived ? ' archived' : '') + (wake.failed ? ' failed' : ''),
-      paused ? word + ' paused' : retrying ? word + ' retry' : word + ' ' + wake.everyHours + 'h');
+      paused ? word + ' paused' : retrying ? word + ' retry' : word + ' ' + cadence(wake.everyHours));
     node.title = (wake.archived ? 'Suspended while in auto-archive; move the session out to resume. ' : '') + (paused
       ? 'Wake paused (' + wake.pausedReason + '). It will not wake again until it is set again.'
       : retrying
-        ? 'The last wake failed. Still scheduled: it retries soon, then every ' + wake.everyHours + 'h.'
-        : 'Wakes every ' + wake.everyHours + 'h');
+        ? 'The last wake failed. Still scheduled: it retries soon, then every ' + cadence(wake.everyHours) + '.'
+        : 'Wakes every ' + cadence(wake.everyHours));
     return node;
   }
 
@@ -265,7 +269,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       : w.archived
         ? 'In auto-archive. Would wake ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + ') if moved out.'
         : w.lastResult === 'error'
-          ? 'Last wake failed. Retrying ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + '), then every ' + w.everyHours + 'h.'
+          ? 'Last wake failed. Retrying ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + '), then every ' + cadence(w.everyHours) + '.'
           : 'Next wake ' + untilTime(w.nextWakeAt) + ' (' + clockTime(w.nextWakeAt) + ')'));
     if (w.lastWakeAt) {
       card.appendChild(el('div', 'wake-line' + (w.lastResult === 'error' ? ' error' : ''),

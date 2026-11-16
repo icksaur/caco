@@ -201,7 +201,14 @@ export type WakeDecision =
  *  extend it. `registeredAt` is the fallback for a session no human ever wrote to. */
 export function isExpired(wake: WakeState, lastHumanAt: string | undefined, nowMs: number, expireMs: number): boolean {
   const anchor = Date.parse(lastHumanAt ?? wake.registeredAt);
-  return Number.isFinite(anchor) && nowMs - anchor > expireMs;
+  // A slow cadence gets at least two wakes before the final one.
+  const limit = Math.max(expireMs, 2 * wake.everyMinutes * 60_000);
+  return Number.isFinite(anchor) && nowMs - anchor > limit;
+}
+
+/** Short cadence label: whole days as "7d", otherwise hours, "36h". */
+export function formatCadence(everyHours: number): string {
+  return everyHours >= 24 && everyHours % 24 === 0 ? `${everyHours / 24}d` : `${everyHours}h`;
 }
 
 /** What to do with one wake at a tick. Deferrals other than the window never

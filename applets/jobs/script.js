@@ -189,7 +189,7 @@ function createWakeCard(w) {
   title.appendChild(link);
   const cadence = document.createElement('span');
   cadence.className = 'status-badge status-enabled';
-  cadence.textContent = `every ${w.everyHours}h`;
+  cadence.textContent = `every ${w.everyHours >= 24 && w.everyHours % 24 === 0 ? `${w.everyHours / 24}d` : `${w.everyHours}h`}`;
   title.appendChild(cadence);
   header.appendChild(title);
 

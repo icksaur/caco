@@ -19,6 +19,7 @@ const sm = vi.hoisted(() => ({
   endDispatch: vi.fn(),
   isActive: vi.fn(() => true),
   ensureClientHealthy: vi.fn(async () => {}),
+  markClientAuthFailed: vi.fn(),
   getSession: vi.fn((): unknown => null),
   resume: vi.fn(async () => {}),
   pollQuota: vi.fn(async () => {}),

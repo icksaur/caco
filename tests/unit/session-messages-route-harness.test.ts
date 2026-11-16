@@ -25,6 +25,7 @@ const routeMocks = vi.hoisted(() => {
     pollQuota: vi.fn(async () => {}),
     getModels: vi.fn((): unknown[] => []),
     ensureClientHealthy: vi.fn(async () => {}),
+    markClientAuthFailed: vi.fn(),
     getSession: vi.fn(() => null),
     startDispatch: vi.fn(),
     endDispatch: vi.fn(),
@@ -483,6 +484,17 @@ describe('session messages route harness', () => {
         emitters[0]({ type: 'session.error', data: { message: 'Model refused the request' } });
         await vi.waitFor(() => { expect(seen).toEqual(['error']); });
       } finally { off(); }
+    });
+
+    it('an auth error before output restores the prompt and flags the client for restart', async () => {
+      await postJson('/sessions/s1/messages', { prompt: 'go' });
+      emitters[0]({ type: 'session.error', data: { message: 'Execution failed: InvalidArg, No GitHub OAuth token or Copilot HMAC key provided' } });
+      await vi.waitFor(() => {
+        expect(routeMocks.broadcastEvent).toHaveBeenCalledWith('s1', expect.objectContaining({
+          type: 'session.error', data: expect.objectContaining({ restorePrompt: true }),
+        }));
+      });
+      expect(routeMocks.sessionManager.markClientAuthFailed).toHaveBeenCalled();
     });
   });
 

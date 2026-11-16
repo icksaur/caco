@@ -42,7 +42,7 @@ import { emitTurnOutcome } from '../turn-outcome.js';
 import { setTurnRoot, clearTurnRoot, setCommsGuardConfigProvider, resolveCommsGuardConfig } from '../comms-guard.js';
 import {
   TRANSIENT_RETRY_MAX, TRANSIENT_RETRY_IDENTIFIER, TRANSIENT_RETRY_PROMPT,
-  isTransientTurnError, isModelOutputEvent, transientRetryDelayMs,
+  isTransientTurnError, isClientAuthError, isModelOutputEvent, transientRetryDelayMs,
   scheduleTransientRetry, cancelTransientRetry,
 } from '../transient-retry.js';
 
@@ -672,6 +672,9 @@ export async function dispatchMessage(
         && isTransientTurnError((event.data as { message?: unknown } | undefined)?.message)) {
         retryScheduled = true;
       }
+      if (event.type === 'session.error' && isClientAuthError((event.data as { message?: unknown } | undefined)?.message)) {
+        sessionManager.markClientAuthFailed();
+      }
 
       // Forward the SDK event to the client (no transformation — caco.* events
       // are emitted directly by their tool handlers). One exception: annotate a
@@ -683,11 +686,13 @@ export async function dispatchMessage(
           ...event,
           data: { ...(event.data ?? {}), willAutoContinue: true },
         } as SessionEvent);
+      } else if (event.type === 'session.error' && !sawModelOutput && !retryScheduled && humanRooted === true) {
+        // An SDK error before any output (e.g. lost credentials): the client
+        // cleared the well on send, so tell it to put the user's text back.
+        onEvent({ ...event, data: { ...(event.data ?? {}), restorePrompt: true } } as SessionEvent);
       } else {
         onEvent(event);
       }
-
-      // Server-side side-effects: intent capture, auto-context, usage,
       // reload signal. Extracted so each event hook stays inspectable.
       applyDispatchEventEffects(sessionId, event, {
         autoAddFileContext,

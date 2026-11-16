@@ -23,6 +23,13 @@ export function isTransientTurnError(message: unknown): boolean {
   return /\b(network|timed? ?out|timeout|connectivity|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|socket hang up|fetch failed|getaddrinfo|502|503|504)\b/i.test(message);
 }
 
+/** Whether an error says the SDK client has no usable credentials. Only a
+ *  fresh client re-reads them, so these trigger a client restart. */
+export function isClientAuthError(message: unknown): boolean {
+  if (typeof message !== 'string') return false;
+  return /No GitHub OAuth token|Copilot HMAC key|\b401\b|Unauthorized|not authenticated/i.test(message);
+}
+
 /** Delay before retry `attempt` (1-based): base * 2^(attempt-1), +/-20% jitter.
  *  15s, 30s, 60s, 2m, 4m, 8m: about 16 minutes in all. */
 export function transientRetryDelayMs(attempt: number, random: () => number = Math.random): number {

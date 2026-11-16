@@ -51,6 +51,14 @@ hit it recorded a failure. Caco should retry these on its own.
 
 ## Not covered
 
+Lost credentials ("No GitHub OAuth token or Copilot HMAC key provided") are not
+transient: the shared client keeps failing until it is replaced, while its ping
+health check still passes. Such an error flags the client
+(`markClientAuthFailed`), and the next `ensureClientHealthy` restarts it. Any
+`session.error` before model output in a human-rooted turn is also forwarded
+with `restorePrompt`, so the client puts the user's text back in the well
+instead of losing it.
+
 Failures before the SDK accepted the send (session resume or client health
 check throwing) still surface as an error. They are rarer, and the prompt was
 never recorded, so the user can just resend. Wakes cover themselves with their

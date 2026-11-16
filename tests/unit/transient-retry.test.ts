@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  isTransientTurnError, transientRetryDelayMs, isModelOutputEvent,
+  isTransientTurnError, isClientAuthError, transientRetryDelayMs, isModelOutputEvent,
   scheduleTransientRetry, cancelTransientRetry, hasPendingTransientRetry,
 } from '../../src/transient-retry.js';
 
@@ -13,6 +13,13 @@ describe('transient retry policy (spec-transient-retry)', () => {
     for (const m of ['Model refused the request', 'Session expired', '', undefined, 42]) {
       expect(isTransientTurnError(m)).toBe(false);
     }
+  });
+
+  it('classifies lost SDK credentials as an auth error', () => {
+    expect(isClientAuthError('Execution failed: InvalidArg, No GitHub OAuth token or Copilot HMAC key provided')).toBe(true);
+    expect(isClientAuthError('HTTP 401 Unauthorized')).toBe(true);
+    expect(isClientAuthError('Model catalog request timed out')).toBe(false);
+    expect(isClientAuthError(undefined)).toBe(false);
   });
 
   it('backs off progressively with +/-20% jitter', () => {

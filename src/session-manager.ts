@@ -721,8 +721,25 @@ export class SessionManager {
     return { healthy: false, probed: client };
   }
 
+  /** Set when a turn failed on missing SDK credentials; the next
+   *  ensureClientHealthy replaces the client. */
+  private clientAuthFailed = false;
+
+  markClientAuthFailed(): void {
+    this.clientAuthFailed = true;
+  }
+
   async ensureClientHealthy(): Promise<void> {
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+    if (this.clientAuthFailed) {
+      // The client answers pings but has lost its token: only a fresh client
+      // re-reads the credentials. Other in-flight turns on it fail the same way.
+      this.clientAuthFailed = false;
+      console.warn('[SDK] Restarting client after an authentication failure');
+      await this.restartSharedClient({ notify: false });
+      await this.ensureClient();
+      return;
+    }
     const client = await this.ensureClient();
     const { healthy, probed } = await this.probeClientHealth(client, 'health');
     if (healthy) return;

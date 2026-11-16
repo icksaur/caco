@@ -263,12 +263,13 @@ describe('wake badge', () => {
   const wake = (over: Record<string, unknown> = {}) => ({
     everyMinutes: 60, registeredAt: ago(DAY), nextWakeAt: ago(-3600000), consecutiveFailures: 0, ...over,
   }) as NonNullable<PagerSessionInput['wake']>;
+  const NEXT = ago(-3600000);
 
   it('summarizes cadence, paused and failed', () => {
     expect(pagerWakeBadge(undefined)).toBeUndefined();
-    expect(pagerWakeBadge(wake())).toEqual({ everyHours: 1 });
-    expect(pagerWakeBadge(wake({ everyMinutes: 180, lastResult: 'error' }))).toEqual({ everyHours: 3, failed: true });
-    expect(pagerWakeBadge(wake({ pausedReason: 'expired' }))).toEqual({ everyHours: 1, pausedReason: 'expired' });
+    expect(pagerWakeBadge(wake())).toEqual({ everyHours: 1, nextWakeAt: NEXT });
+    expect(pagerWakeBadge(wake({ everyMinutes: 180, lastResult: 'error' }))).toEqual({ everyHours: 3, nextWakeAt: NEXT, failed: true });
+    expect(pagerWakeBadge(wake({ pausedReason: 'expired' }))).toEqual({ everyHours: 1, nextWakeAt: NEXT, pausedReason: 'expired' });
   });
 
   it('rides on busy and waiting entries only when the session has a wake', () => {
@@ -277,8 +278,8 @@ describe('wake badge', () => {
       input({ sessionId: 'b' }),
       input({ sessionId: 'c', isBusy: true, wake: wake({ pausedReason: 'failures' }) }),
     ], 1, 1, NOW);
-    expect(view.waiting.find(w => w.sessionId === 'a')!.wake).toEqual({ everyHours: 1 });
+    expect(view.waiting.find(w => w.sessionId === 'a')!.wake).toEqual({ everyHours: 1, nextWakeAt: NEXT });
     expect(view.waiting.find(w => w.sessionId === 'b')).not.toHaveProperty('wake');
-    expect(view.busy).toEqual([{ sessionId: 'c', name: 'a session', wake: { everyHours: 1, pausedReason: 'failures' } }]);
+    expect(view.busy).toEqual([{ sessionId: 'c', name: 'a session', wake: { everyHours: 1, nextWakeAt: NEXT, pausedReason: 'failures' } }]);
   });
 });

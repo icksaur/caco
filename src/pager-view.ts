@@ -68,6 +68,7 @@ export interface PagerSessionInput {
 /** Just enough of a wake for the pager's badge: cadence, paused, failing, archived. */
 export interface PagerWakeBadge {
   everyHours: number;
+  nextWakeAt: string;
   pausedReason?: WakeState['pausedReason'];
   failed?: true;
   archived?: true;
@@ -75,7 +76,7 @@ export interface PagerWakeBadge {
 
 export function pagerWakeBadge(wake: WakeState | undefined, archived = false): PagerWakeBadge | undefined {
   if (!wake) return undefined;
-  const badge: PagerWakeBadge = { everyHours: wake.everyMinutes / 60 };
+  const badge: PagerWakeBadge = { everyHours: wake.everyMinutes / 60, nextWakeAt: wake.nextWakeAt };
   if (wake.pausedReason) badge.pausedReason = wake.pausedReason;
   if (wake.lastResult === 'error') badge.failed = true;
   if (archived) badge.archived = true;

@@ -176,7 +176,8 @@ To triage several machines on one board, use the merged pager in the [Portal](#p
   Repeating the same options word for word is not a new offer.
 - **Wake badges.** A session with a self-wake shows the same `wake 1h` badge as the
   session list on its card and running row: dashed for `wake paused`, red when the
-  last wake failed.
+  last wake failed. A first wake set further out than the cadence reads
+  `wake in 7d` until it fires.
 - **Scheduled wakes list.** Below the board, every session with a self-wake gets a
   read-only card: next wake (or why it is paused), last wake and result, its note,
   and a `waiting on you` or `running` tag. Paused wakes sort last. Sessions in the

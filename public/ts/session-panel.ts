@@ -774,13 +774,18 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     const word = w.archived ? 'would wake' : 'wake';
     const retrying = !w.pausedReason && w.lastResult === 'error';
     const cadence = w.everyHours >= 24 && w.everyHours % 24 === 0 ? `${w.everyHours / 24}d` : `${w.everyHours}h`;
-    wakeBadge.textContent = w.pausedReason ? `${word} paused` : retrying ? `${word} retry` : `${word} ${cadence}`;
+    // A first wake set further out than the cadence (e.g. "after the freeze")
+    // shows how far away it is; after it fires the badge shows the cadence.
+    const untilMs = Date.parse(w.nextWakeAt) - Date.now();
+    const farOff = untilMs > w.everyHours * 3_600_000;
+    const until = untilMs >= 86_400_000 ? `${Math.round(untilMs / 86_400_000)}d` : `${Math.max(1, Math.round(untilMs / 3_600_000))}h`;
+    wakeBadge.textContent = w.pausedReason ? `${word} paused` : retrying ? `${word} retry` : farOff ? `${word} in ${until}` : `${word} ${cadence}`;
     const next = new Date(w.nextWakeAt).toLocaleString();
     const lines = [w.pausedReason
       ? `Wake paused (${w.pausedReason}). It will not wake again until the session re-arms it with caco_wake.`
       : retrying
         ? `Last wake failed${w.lastError ? ` (${w.lastError})` : ''}. Still scheduled: retrying ${next}, then every ${cadence}.`
-        : `Wakes every ${cadence}. Next: ${next}`];
+        : `${farOff ? `First wake in ${until}, then every` : 'Wakes every'} ${cadence}. Next: ${next}`];
     if (retrying && w.failures && w.maxFailures) {
       lines.push(`Pauses after ${w.maxFailures} failures in a row (${w.failures} so far).`);
     }

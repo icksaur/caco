@@ -200,14 +200,23 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     return h >= 24 && h % 24 === 0 ? (h / 24) + 'd' : h + 'h';
   }
 
+  // Time until the next wake when it is further out than one cadence (a first
+  // wake set days ahead), else null.
+  function farUntil(wake) {
+    var ms = new Date(wake.nextWakeAt).getTime() - Date.now();
+    if (!isFinite(ms) || ms <= wake.everyHours * 3600000) return null;
+    return ms >= 86400000 ? Math.round(ms / 86400000) + 'd' : Math.max(1, Math.round(ms / 3600000)) + 'h';
+  }
+
   // Mirrors the session list's wake badge. Only ever textContent.
   function wakeBadge(wake) {
     if (!wake) return null;
     var paused = !!wake.pausedReason;
     var word = wake.archived ? 'would wake' : 'wake';
     var retrying = !paused && wake.failed;
+    var far = paused || retrying ? null : farUntil(wake);
     var node = el('span', 'wake' + (paused ? ' paused' : '') + (wake.archived ? ' archived' : '') + (wake.failed ? ' failed' : ''),
-      paused ? word + ' paused' : retrying ? word + ' retry' : word + ' ' + cadence(wake.everyHours));
+      paused ? word + ' paused' : retrying ? word + ' retry' : far ? word + ' in ' + far : word + ' ' + cadence(wake.everyHours));
     node.title = (wake.archived ? 'Suspended while in auto-archive; move the session out to resume. ' : '') + (paused
       ? 'Wake paused (' + wake.pausedReason + '). It will not wake again until it is set again.'
       : retrying
@@ -258,7 +267,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
     var head = el('div', 'card-head');
     if (w.instanceName) head.appendChild(el('span', 'inst', w.instanceName));
     head.appendChild(linkName(el('span', 'name', w.name || w.sessionId.slice(0, 8)), w));
-    var badge = wakeBadge({ everyHours: w.everyHours, pausedReason: w.pausedReason, failed: w.lastResult === 'error', archived: w.archived });
+    var badge = wakeBadge({ everyHours: w.everyHours, nextWakeAt: w.nextWakeAt, pausedReason: w.pausedReason, failed: w.lastResult === 'error', archived: w.archived });
     if (badge) head.appendChild(badge);
     if (w.waiting) head.appendChild(el('span', 'tag', 'waiting on you'));
     else if (w.busy) head.appendChild(el('span', 'tag', 'running'));

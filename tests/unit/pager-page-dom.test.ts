@@ -593,6 +593,17 @@ describe('scheduled wakes list', () => {
     expect(document.getElementById('wakes')!.textContent).toBe('');
   });
 
+  it('shows how far off a first wake is when it is beyond one cadence', async () => {
+    const week = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    const hour = new Date(Date.now() + 3_600_000).toISOString();
+    await deliver(view([
+      entry({ wake: { everyHours: 24, nextWakeAt: week } }),
+      entry({ sessionId: 's-2', wake: { everyHours: 24, nextWakeAt: hour } }),
+    ]));
+    const badges = cards().map(c => c.querySelector('.wake')!.textContent);
+    expect(badges).toEqual(['wake in 7d', 'wake 1d']);
+  });
+
   it('says "would wake" for a session in auto-archive', async () => {
     const soon = new Date(Date.now() + 3600_000).toISOString();
     await deliver({

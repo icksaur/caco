@@ -16,7 +16,7 @@ const TICK_MS = 5_000;
 
 export interface PortalPeer { id: string; url: string; name: string }
 
-export interface WakeBadge { everyHours: number; pausedReason?: string; failed?: true; archived?: true }
+export interface WakeBadge { everyHours: number; nextWakeAt?: string; pausedReason?: string; failed?: true; archived?: true }
 export interface BusyEntry { sessionId: string; name: string; wake?: WakeBadge }
 export interface WaitingEntry { sessionId: string; name: string; cwd: string; idleAt: string; options: string[]; wake?: WakeBadge }
 export interface WakeEntry {
@@ -50,6 +50,7 @@ export function parseWakeBadge(raw: unknown): WakeBadge | undefined {
   const r = raw as Record<string, unknown>;
   if (typeof r.everyHours !== 'number' || !Number.isFinite(r.everyHours) || r.everyHours <= 0) return undefined;
   const badge: WakeBadge = { everyHours: r.everyHours };
+  if (typeof r.nextWakeAt === 'string' && r.nextWakeAt) badge.nextWakeAt = r.nextWakeAt.slice(0, 64);
   if (typeof r.pausedReason === 'string' && r.pausedReason) badge.pausedReason = r.pausedReason.slice(0, 40);
   if (r.failed === true) badge.failed = true;
   if (r.archived === true) badge.archived = true;

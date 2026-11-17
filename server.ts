@@ -54,6 +54,7 @@ import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { startWakeManager, stopWakeManager, wakeManager } from './src/wake-runtime.js';
 import { createWakeTool } from './src/wake-tool.js';
+import { getInstanceIdentity } from './src/instance-identity.js';
 import { registerUsageSink } from './src/usage-metrics.js';
 import { appendUsageRecord } from './src/usage-store.js';
 import { loadServerExtensions } from './src/extension-runtime.js';
@@ -415,6 +416,9 @@ async function start(): Promise<void> {
   // orphaned children, and re-wake any parent with a non-active child. Must
   // run after listen() because the wake POSTs the message route.
   void scanHerdsOnBoot();
+  // Stable instance identity (spec-session-overview): create ~/.caco/instance.json once.
+  const instance = getInstanceIdentity();
+  console.log(`[INSTANCE] ${instance.name} (${instance.id.slice(0, 8)})`);
   // Session self-wakes (spec-session-wake): post-listen for the same reason.
   startWakeManager();
   // Start the soft-archive reaper: periodically archive sessions parked in the

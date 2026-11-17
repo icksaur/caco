@@ -14,7 +14,7 @@ import { getSessionMeta, updateSessionMeta } from './storage.js';
 import { sessionManager } from './session-manager.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { disabledToolNames } from './tool-registry.js';
-import { onTurnOutcome } from './turn-outcome.js';
+import { onTurnOutcome, onTurnRetry } from './turn-outcome.js';
 import { parseWakeWindow, type WakeWindowSpec } from './wake-core.js';
 import { createWakeManager } from './wake-manager.js';
 import { activityVersion } from './activity-version.js';
@@ -70,12 +70,14 @@ export const wakeManager = createWakeManager({
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let unsubscribe: (() => void) | null = null;
+let unsubscribeRetry: (() => void) | null = null;
 
 /** Post-listen: the first tick POSTs the message route, so the server must be up. */
 export function startWakeManager(): void {
   if (timer) return;
   wakeManager.rebuild();
   unsubscribe = onTurnOutcome((id, outcome, reason) => wakeManager.settle(id, outcome, reason));
+  unsubscribeRetry = onTurnRetry((id, attempt) => wakeManager.noteRetry(id, attempt));
   void wakeManager.tick();
   timer = setInterval(() => { void wakeManager.tick(); }, WAKE_CHECK_INTERVAL_MS);
   timer.unref?.();
@@ -85,4 +87,6 @@ export function stopWakeManager(): void {
   if (timer) { clearInterval(timer); timer = null; }
   unsubscribe?.();
   unsubscribe = null;
+  unsubscribeRetry?.();
+  unsubscribeRetry = null;
 }

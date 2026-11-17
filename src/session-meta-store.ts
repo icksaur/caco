@@ -146,6 +146,72 @@ export interface WakeState {
   /** ISO, set when the expiry wake fired; the wake pauses when that turn ends. */
   finalWakeAt?: string;
   pausedReason?: 'failures' | 'expired' | 'imported';
+  // ---- History (spec-session-overview, Wake history). Written only through
+  // wake-history.ts helpers; travels with export/import and is validated there.
+  /** Increments per fire attempt; the slot identity of a run. */
+  slotSeq?: number;
+  counters?: WakeCounters;
+  lastOkAt?: string;
+  /** settledAt of the newest run whose turn wrote a new offer. */
+  lastOfferedAt?: string;
+  /** Newest last; at most 20 runs and 8 KiB serialized. */
+  history?: WakeRun[];
+  /** Oldest time still covered by `history`. */
+  historySince?: string;
+  /** Deferrals, one record per `dueAt`; at most 5. */
+  defers?: WakeDefer[];
+  /** The fire attempt whose turn has not settled yet. */
+  pendingRun?: WakePendingRun;
+}
+
+export interface WakeCounters {
+  fires: number;
+  ok: number;
+  /** `error` and `rejected` runs. */
+  errors: number;
+  cancelled: number;
+  interrupted: number;
+  /** Runs whose turn wrote a new offer. */
+  offered: number;
+  /** Reset when meta.lastUsedAt moves past `humanAnchor`. */
+  firesSinceHuman: number;
+  humanAnchor?: string;
+}
+
+export type WakeRunOutcome = 'ok' | 'error' | 'cancelled' | 'interrupted' | 'rejected';
+
+export interface WakeRun {
+  slot: number;
+  dueAt: string;
+  firedAt?: string;
+  settledAt?: string;
+  outcome: WakeRunOutcome;
+  /** Fixed strings only, same rule as lastError. */
+  reason?: string;
+  offered?: true;
+  final?: true;
+  retries?: number;
+}
+
+export type WakeDeferKind = 'busy' | 'human' | 'window' | 'concurrency' | 'archived';
+
+export interface WakeDefer {
+  dueAt: string;
+  kind: WakeDeferKind;
+  first: string;
+  last: string;
+  count: number;
+}
+
+export interface WakePendingRun {
+  slot: number;
+  dueAt: string;
+  firedAt: string;
+  /** meta.responseOptionsAt when the wake fired. */
+  offerBaseline: string | null;
+  final?: true;
+  /** Transient retries of this run's turn so far. */
+  retries?: number;
 }
 
 // ============================================================================

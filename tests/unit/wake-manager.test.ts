@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createWakeManager, wakeRetryDelayMs, type WakeConfig } from '../../src/wake-manager.js';
 import type { SessionMeta } from '../../src/session-meta-store.js';
 import { parseWakeWindow } from '../../src/wake-core.js';
+import { appendRun, recordDefer, WAKE_HISTORY_MAX_BYTES } from '../../src/wake-history.js';
 
 const H = 60 * 60 * 1000;
 const D = 24 * H;
@@ -409,5 +410,334 @@ describe('boot and import (A14, F)', () => {
     expect(t.wake('moved')!.pausedReason).toBeUndefined();
     expect(t.wake('moved')!.lastResult).toBe('error');
     expect(t.mgr.list()).toHaveLength(2);
+  });
+});
+
+describe('wake history lifecycle (spec-session-overview O6)', () => {
+  let t: ReturnType<typeof setup>;
+  const fireOnce = async () => { t.advance(H); await t.mgr.tick(); };
+  beforeEach(() => {
+    t = setup();
+    t.addSession('a');
+    t.mgr.set('a', 1);
+  });
+
+  it('a fresh set starts empty counters and coverage', () => {
+    expect(t.wake('a')).toMatchObject({ slotSeq: 0, counters: { fires: 0, ok: 0, errors: 0, firesSinceHuman: 0 }, historySince: new Date(START).toISOString() });
+    expect(t.wake('a')!.history).toBeUndefined();
+  });
+
+  it('fire accepted opens a slot with the offer baseline and counts the fire', async () => {
+    t.metas.get('a')!.responseOptionsAt = '2026-11-09T10:00:00.000Z';
+    const due = t.wake('a')!.nextWakeAt;
+    await fireOnce();
+    const w = t.wake('a')!;
+    expect(w.pendingRun).toEqual({ slot: 1, dueAt: due, firedAt: new Date(t.now()).toISOString(), offerBaseline: '2026-11-09T10:00:00.000Z' });
+    expect(w.counters).toMatchObject({ fires: 1, firesSinceHuman: 1 });
+    expect(w.history).toBeUndefined();
+  });
+
+  it('settle ok records exactly one run; a late second outcome adds nothing', async () => {
+    await fireOnce();
+    t.advance(60_000);
+    t.mgr.settle('a', 'ok');
+    t.mgr.settle('a', 'error', 'session.error');
+    const w = t.wake('a')!;
+    expect(w.history).toHaveLength(1);
+    expect(w.history![0]).toMatchObject({ slot: 1, outcome: 'ok', settledAt: new Date(t.now()).toISOString() });
+    expect(w.history![0].offered).toBeUndefined();
+    expect(w.pendingRun).toBeUndefined();
+    expect(w.counters).toMatchObject({ fires: 1, ok: 1, errors: 0, offered: 0 });
+    expect(w.lastOkAt).toBe(new Date(t.now()).toISOString());
+  });
+
+  it('offered iff responseOptionsAt is newer than the baseline', async () => {
+    t.metas.get('a')!.responseOptionsAt = '2026-11-09T10:00:00.000Z';
+    await fireOnce();
+    t.mgr.settle('a', 'ok'); // offer unchanged
+    expect(t.wake('a')!.history![0].offered).toBeUndefined();
+    await fireOnce();
+    t.metas.get('a')!.responseOptionsAt = new Date(t.now() + 1000).toISOString();
+    t.advance(2000);
+    t.mgr.settle('a', 'ok');
+    const w = t.wake('a')!;
+    expect(w.history![1]).toMatchObject({ slot: 2, offered: true });
+    expect(w.counters!.offered).toBe(1);
+    expect(w.lastOfferedAt).toBe(new Date(t.now()).toISOString());
+  });
+
+  it('settle error and cancelled record their outcome and fixed reason', async () => {
+    await fireOnce();
+    t.mgr.settle('a', 'error', 'session.error');
+    await fireOnce();
+    t.mgr.settle('a', 'cancelled', 'stopped by user');
+    t.mgr.settle('a', 'error', 'session.error'); // the abort's teardown: already settled
+    const h = t.wake('a')!.history!;
+    expect(h.map(r => [r.slot, r.outcome, r.reason])).toEqual([[1, 'error', 'session.error'], [2, 'cancelled', 'stopped by user']]);
+    expect(t.wake('a')!.counters).toMatchObject({ fires: 2, errors: 1, cancelled: 1 });
+  });
+
+  it('a transient retry chain is recorded once, with the attempt count', async () => {
+    await fireOnce();
+    t.mgr.noteRetry('a', 1);
+    t.mgr.noteRetry('a', 2);
+    expect(t.wake('a')!.history).toBeUndefined();
+    t.mgr.settle('a', 'error', 'retry failed');
+    const h = t.wake('a')!.history!;
+    expect(h).toHaveLength(1);
+    expect(h[0]).toMatchObject({ outcome: 'error', reason: 'retry failed', retries: 2 });
+    t.mgr.noteRetry('a', 3); // not running: ignored
+    expect(t.wake('a')!.pendingRun).toBeUndefined();
+  });
+
+  it('a non-2xx POST records one rejected run', async () => {
+    t.post.mockResolvedValueOnce(500);
+    await fireOnce();
+    const w = t.wake('a')!;
+    expect(w.history).toEqual([expect.objectContaining({ slot: 1, outcome: 'rejected', reason: 'HTTP 500' })]);
+    expect(w).toMatchObject({ lastResult: 'error', lastError: 'HTTP 500', consecutiveFailures: 1, counters: { fires: 1, errors: 1 } });
+    expect(w.pendingRun).toBeUndefined();
+  });
+
+  it('a POST that throws while not busy records one rejected network error', async () => {
+    t.post.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    await fireOnce();
+    expect(t.wake('a')!.history).toEqual([expect.objectContaining({ outcome: 'rejected', reason: 'network error' })]);
+  });
+
+  it('a 409 restores only scheduling fields, undoes the slot and keeps history', async () => {
+    await fireOnce();
+    t.mgr.settle('a', 'ok');
+    t.advance(H);
+    const before = t.wake('a')!;
+    t.post.mockResolvedValueOnce(409);
+    await t.mgr.tick();
+    const w = t.wake('a')!;
+    expect(w).toEqual(before);
+    expect(w.history).toHaveLength(1);
+    expect(w).toMatchObject({ slotSeq: 1, counters: { fires: 1, ok: 1 } });
+    await t.mgr.tick();
+    expect(t.wake('a')!.pendingRun!.slot).toBe(2);
+  });
+
+  it('a 409 keeps history added while the POST was in flight', async () => {
+    await fireOnce();
+    t.mgr.settle('a', 'ok');
+    t.advance(H);
+    t.post.mockImplementationOnce(async () => {
+      // Something else (e.g. an import validation or defer) touched history meanwhile.
+      t.metas.get('a')!.wake!.lastOfferedAt = '2026-11-09T19:00:00.000Z';
+      return 409;
+    });
+    await t.mgr.tick();
+    expect(t.wake('a')!.lastOfferedAt).toBe('2026-11-09T19:00:00.000Z');
+    expect(t.wake('a')!.lastResult).toBe('ok');
+  });
+
+  it('a POST that times out while the turn dispatches stays pending, then settles once', async () => {
+    t.post.mockImplementationOnce(async () => { t.busy.add('a'); throw new Error('headers timeout'); });
+    await fireOnce();
+    expect(t.wake('a')!.pendingRun).toBeDefined();
+    expect(t.wake('a')!.history).toBeUndefined();
+    t.busy.delete('a');
+    t.mgr.settle('a', 'ok');
+    expect(t.wake('a')!.history).toEqual([expect.objectContaining({ slot: 1, outcome: 'ok' })]);
+  });
+
+  it('a turn timeout records one error run', async () => {
+    await fireOnce();
+    t.advance(2 * H + 1);
+    t.busy.add('a');
+    await t.mgr.tick();
+    t.mgr.settle('a', 'ok'); // late real end: ignored
+    expect(t.wake('a')!.history).toEqual([expect.objectContaining({ outcome: 'error', reason: 'no idle within timeout' })]);
+  });
+
+  it('boot with a pending run records one interrupted run', async () => {
+    await fireOnce();
+    t.mgr.rebuild();
+    t.mgr.rebuild();
+    const w = t.wake('a')!;
+    expect(w.history).toEqual([expect.objectContaining({ slot: 1, outcome: 'interrupted', reason: 'restart' })]);
+    expect(w).toMatchObject({ lastResult: 'error', lastError: 'interrupted by restart', consecutiveFailures: 0, counters: { interrupted: 1 } });
+    expect(w.pendingRun).toBeUndefined();
+  });
+
+  it.each([false, true])('import (migrated=%s) with a pending run records one interrupted run', async (migrated) => {
+    await fireOnce();
+    t.mgr.applyImport('a', migrated);
+    t.mgr.applyImport('a', migrated);
+    const w = t.wake('a')!;
+    expect(w.history).toEqual([expect.objectContaining({ outcome: 'interrupted', reason: 'import' })]);
+    expect(w.lastError).toBe('interrupted by transfer');
+    expect(w.pendingRun).toBeUndefined();
+  });
+
+  it('set during a pending run keeps the pending run, history and counters', async () => {
+    await fireOnce();
+    t.mgr.settle('a', 'ok');
+    await fireOnce();
+    const pending = t.wake('a')!.pendingRun;
+    t.mgr.set('a', 2, 'new note');
+    const w = t.wake('a')!;
+    expect(w.pendingRun).toEqual(pending);
+    expect(w.history).toHaveLength(1);
+    expect(w.counters).toMatchObject({ fires: 2, ok: 1 });
+    t.mgr.settle('a', 'ok');
+    expect(t.wake('a')!.history!.map(r => r.slot)).toEqual([1, 2]);
+  });
+
+  it('set while idle keeps history; clear drops it with the wake', async () => {
+    await fireOnce();
+    t.mgr.settle('a', 'ok');
+    t.mgr.set('a', 3);
+    expect(t.wake('a')!.history).toHaveLength(1);
+    t.mgr.clear('a');
+    expect(t.wake('a')).toBeUndefined();
+    t.mgr.set('a', 1);
+    expect(t.wake('a')).toMatchObject({ slotSeq: 0, counters: { fires: 0 } });
+    expect(t.wake('a')!.history).toBeUndefined();
+  });
+
+  it('firesSinceHuman counts fires and resets when lastUsedAt moves past the anchor', async () => {
+    for (let i = 0; i < 3; i++) { await fireOnce(); t.mgr.settle('a', 'ok'); }
+    expect(t.wake('a')!.counters!.firesSinceHuman).toBe(3);
+    t.metas.get('a')!.lastUsedAt = new Date(t.now() - 31 * 60_000).toISOString();
+    await fireOnce();
+    expect(t.wake('a')!.counters).toMatchObject({ fires: 4, firesSinceHuman: 1, humanAnchor: t.metas.get('a')!.lastUsedAt });
+  });
+
+  it('a final fire marks its run final', async () => {
+    const s = setup();
+    s.addSession('b');
+    s.mgr.set('b', 24);
+    s.advance(7 * D);
+    await s.mgr.tick();
+    s.mgr.settle('b', 'ok');
+    expect(s.wake('b')!.history![0]).toMatchObject({ final: true, outcome: 'ok' });
+  });
+});
+
+describe('wake history caps, defers and import validation (spec-session-overview O7)', () => {
+  it('keeps at most 20 runs; historySince follows the oldest kept run', async () => {
+    const t = setup();
+    t.addSession('a');
+    t.mgr.set('a', 1);
+    for (let i = 0; i < 25; i++) { t.advance(H); await t.mgr.tick(); t.mgr.settle('a', 'ok'); }
+    const w = t.wake('a')!;
+    expect(w.history).toHaveLength(20);
+    expect(w.history![0].slot).toBe(6);
+    expect(w.historySince).toBe(w.history![0].dueAt);
+    expect(w.counters).toMatchObject({ fires: 25, ok: 25 });
+  });
+
+  it('caps the serialized history at 8 KiB', () => {
+    let w = { everyMinutes: 60, registeredAt: 'x', nextWakeAt: 'y', consecutiveFailures: 0 } as Parameters<typeof appendRun>[0];
+    for (let i = 1; i <= 20; i++) {
+      w = appendRun(w, { slot: i, dueAt: new Date(START + i * H).toISOString(), outcome: 'error', reason: 'r'.repeat(600) });
+    }
+    expect(Buffer.byteLength(JSON.stringify(w.history))).toBeLessThanOrEqual(WAKE_HISTORY_MAX_BYTES);
+    expect(w.history!.length).toBeLessThan(20);
+    expect(w.history!.at(-1)!.slot).toBe(20);
+    expect(w.historySince).toBe(w.history![0].dueAt);
+  });
+
+  it('dedupes defers by dueAt, persists repeats at most hourly, and keeps 5', async () => {
+    const t = setup();
+    t.addSession('a');
+    t.mgr.set('a', 1);
+    t.advance(H);
+    const due = t.wake('a')!.nextWakeAt;
+    t.busy.add('a');
+    await t.mgr.tick();
+    expect(t.wake('a')!.defers).toEqual([{ dueAt: due, kind: 'busy', first: new Date(t.now()).toISOString(), last: new Date(t.now()).toISOString(), count: 1 }]);
+    for (let i = 0; i < 11; i++) { t.advance(5 * 60_000); await t.mgr.tick(); }
+    expect(t.wake('a')!.defers![0].count).toBe(1); // buffered
+    t.advance(5 * 60_000);
+    await t.mgr.tick();
+    expect(t.wake('a')!.defers).toHaveLength(1);
+    expect(t.wake('a')!.defers![0]).toMatchObject({ count: 13, last: new Date(t.now()).toISOString() });
+    t.busy.delete('a');
+    t.metas.get('a')!.lastUsedAt = new Date(t.now()).toISOString();
+    await t.mgr.tick(); // kind change persists at once
+    expect(t.wake('a')!.defers![0]).toMatchObject({ kind: 'human', count: 14 });
+    expect(t.wake('a')!.nextWakeAt).toBe(due);
+
+    let w = t.wake('a')!;
+    for (let i = 0; i < 7; i++) w = recordDefer(w, { dueAt: new Date(START + i * D).toISOString(), kind: 'window', nowMs: t.now(), count: 1 });
+    expect(w.defers).toHaveLength(5);
+  });
+
+  it('an archived due wake records an archived defer', async () => {
+    const t = setup();
+    t.addSession('a', { folder: 'auto-archive' });
+    t.mgr.set('a', 1);
+    t.advance(H);
+    await t.mgr.tick();
+    expect(t.wake('a')!.defers).toEqual([expect.objectContaining({ kind: 'archived', count: 1 })]);
+    expect(t.post).not.toHaveBeenCalled();
+  });
+
+  it('a window defer records a window defer and moves nextWakeAt', async () => {
+    const t = setup({ window: parseWakeWindow('Mon-Fri 07:00-19:00 UTC') });
+    t.advance(-2 * D - 4 * H);
+    t.addSession('a');
+    t.mgr.set('a', 1);
+    const due = t.wake('a')!.nextWakeAt;
+    t.advance(H);
+    await t.mgr.tick();
+    expect(t.wake('a')!.defers).toEqual([expect.objectContaining({ dueAt: due, kind: 'window', count: 1 })]);
+  });
+
+  describe('import validation', () => {
+    const base = { everyMinutes: 60, registeredAt: '2026-11-01T00:00:00.000Z', nextWakeAt: new Date(START).toISOString(), consecutiveFailures: 0 };
+    const run = (slot: number) => ({ slot, dueAt: '2026-11-08T00:00:00.000Z', outcome: 'ok' });
+    const importWith = (extra: Record<string, unknown>) => {
+      const t = setup();
+      t.addSession('a', { wake: { ...base, ...extra } as SessionMeta['wake'] });
+      t.mgr.applyImport('a', true);
+      return t.wake('a')!;
+    };
+
+    it('keeps valid history and strips unknown keys', () => {
+      const w = importWith({ slotSeq: 2, history: [{ ...run(1), junk: 'x' }, run(2)], historySince: '2026-11-08T00:00:00.000Z' });
+      expect(w.history).toEqual([run(1), run(2)]);
+      expect(w.historySince).toBe('2026-11-08T00:00:00.000Z');
+      expect(w.slotSeq).toBe(2);
+    });
+
+    it.each([
+      ['bad outcome', [{ ...run(1), outcome: 'weird' }]],
+      ['bad slot', [{ ...run(1), slot: -1 }]],
+      ['bad date', [{ ...run(1), dueAt: 'nope' }]],
+      ['long reason', [{ ...run(1), reason: 'x'.repeat(500) }]],
+      ['too many runs', Array.from({ length: 21 }, (_, i) => run(i + 1))],
+      ['not an array', 'x'],
+    ])('drops malformed history (%s)', (_label, history) => {
+      const w = importWith({ history, historySince: '2026-11-08T00:00:00.000Z' });
+      expect(w.history).toBeUndefined();
+      expect(w.historySince).toBeUndefined();
+      expect(w.everyMinutes).toBe(60);
+    });
+
+    it('drops malformed counters, defers and timestamps; raises slotSeq to the max slot', () => {
+      const w = importWith({
+        slotSeq: 1, history: [run(4)],
+        counters: { fires: 'many' },
+        defers: Array.from({ length: 6 }, () => ({ dueAt: base.nextWakeAt, kind: 'busy', first: base.nextWakeAt, last: base.nextWakeAt, count: 1 })),
+        lastOkAt: 42,
+      });
+      expect(w.counters).toBeUndefined();
+      expect(w.defers).toBeUndefined();
+      expect(w.lastOkAt).toBeUndefined();
+      expect(w.slotSeq).toBe(4);
+    });
+
+    it('a malformed pending run is dropped; a running wake still becomes an error', () => {
+      const w = importWith({ lastResult: 'running', pendingRun: { slot: 'x' } });
+      expect(w.pendingRun).toBeUndefined();
+      expect(w.history).toBeUndefined();
+      expect(w.lastError).toBe('interrupted by transfer');
+    });
   });
 });

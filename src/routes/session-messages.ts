@@ -38,7 +38,7 @@ import { onSessionIdle } from '../herd-runtime.js';
 import { handleSessionIdle, type IdleAuthorityCtx } from '../idle-authority.js';
 import { getLastAssistantMessage } from '../session-history.js';
 import { idleFeed } from '../idle-feed.js';
-import { emitTurnOutcome } from '../turn-outcome.js';
+import { emitTurnOutcome, emitTurnRetry } from '../turn-outcome.js';
 import { setTurnRoot, clearTurnRoot, setCommsGuardConfigProvider, resolveCommsGuardConfig } from '../comms-guard.js';
 import {
   TRANSIENT_RETRY_MAX, TRANSIENT_RETRY_IDENTIFIER, TRANSIENT_RETRY_PROMPT,
@@ -144,6 +144,7 @@ function scheduleNetworkRetry(
   ctx: { needsObservation?: boolean; offerBaseline?: { at: string | null }; humanRooted: boolean; depth: number },
 ): void {
   const delay = transientRetryDelayMs(attempt);
+  emitTurnRetry(sessionId, attempt);
   console.warn(`[DISPATCH] ${sessionId.slice(0, 8)}: network failure before the model ran; retry ${attempt}/${TRANSIENT_RETRY_MAX} in ${Math.round(delay / 1000)}s`);
   broadcastEvent(sessionId, {
     type: 'session.info',

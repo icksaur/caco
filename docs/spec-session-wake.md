@@ -118,8 +118,16 @@ meta.wake?: {
   consecutiveFailures: number;
   finalWakeAt?: string;      // ISO, set when the expiry wake fired
   pausedReason?: 'failures' | 'expired' | 'imported';
+  // History and counters (slotSeq, counters, lastOkAt, lastOfferedAt, history,
+  // historySince, defers, pendingRun): see docs/spec-session-overview.md,
+  // "Wake history". Kept across `set`, dropped by `clear`, validated on import.
 }
 ```
+
+Every fire attempt opens a slot (`pendingRun`) and every path closes it with
+exactly one history run (`src/wake-history.ts`). A boot or import that finds a
+pending slot records it `interrupted`. A 409 undoes the slot and restores only
+the scheduling fields.
 
 Because it is meta, the wake goes away when the session is deleted or
 hard-archived. On boot an in-memory index (`Map<sessionId, WakeState>`) is

@@ -215,6 +215,34 @@ Lifecycle contract (each path records **exactly one** terminal run per slot):
 
 Imported history is validated (types, lengths, caps) and dropped if malformed.
 
+Implementation notes (phase 1, `src/wake-history.ts`, `src/wake-manager.ts`):
+
+- `pendingRun` also carries `dueAt`, `final` and `retries`, so the run can be
+  written at settle without re-reading the wake.
+- `counters.errors` counts both `error` and `rejected` runs. A non-2xx POST
+  and a POST that throws while the session is not busy (`network error`) are
+  both `rejected`, and both count toward `consecutiveFailures` as before.
+- The 409 undo also puts `firesSinceHuman` and `humanAnchor` back to their
+  pre-fire values; only the fire itself is undone.
+- Transient retries reach the wake through a `turn retry` signal
+  (`emitTurnRetry` in `src/turn-outcome.ts`, emitted where the retry is
+  scheduled). It only updates `pendingRun.retries`; the run is still written
+  once, by the final outcome.
+- Defers are stored as `wake.defers`. A defer that repeats with the same kind
+  for the same `dueAt` is persisted at most once an hour; ticks in between are
+  counted in memory and merged into the next write, so a long busy or archived
+  defer does not rewrite meta every tick. Unflushed counts are lost on restart.
+- Validation rebuilds each group with known keys only and drops a malformed
+  group (history with `historySince`, defers, counters, pending run, or a bad
+  timestamp) on its own. `slotSeq` is raised to the highest slot seen.
+- A wake created by `set` starts with `slotSeq: 0`, zero counters and
+  `historySince = registeredAt`. A wake from before this change gets
+  `historySince` from its first recorded run.
+- Instance identity: `src/instance-identity.ts`. A missing file is created
+  (atomic write); an invalid one is moved to `instance.json.corrupt` and
+  replaced; any other read error gives an in-memory id for that process only,
+  so a transient error never replaces a good id.
+
 ### Last-event context
 
 `readSessionTailAsync(sessionId, maxBytes = 256 KiB)` in

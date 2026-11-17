@@ -19,6 +19,24 @@ export function onTurnOutcome(cb: Listener): () => void {
   return () => { listeners.delete(cb); };
 }
 
+type RetryListener = (sessionId: string, attempt: number) => void;
+const retryListeners = new Set<RetryListener>();
+
+/** A transient retry was scheduled for the session's current turn (no outcome
+ *  is emitted for the failed attempt; the chain's final outcome comes once). */
+export function onTurnRetry(cb: RetryListener): () => void {
+  retryListeners.add(cb);
+  return () => { retryListeners.delete(cb); };
+}
+
+export function emitTurnRetry(sessionId: string, attempt: number): void {
+  for (const cb of retryListeners) {
+    try { cb(sessionId, attempt); } catch (e) {
+      console.error(`[TURN-OUTCOME] retry listener threw: ${e instanceof Error ? e.name : typeof e}`);
+    }
+  }
+}
+
 export function emitTurnOutcome(sessionId: string, outcome: TurnOutcome, reason?: string): void {
   for (const cb of listeners) {
     try { cb(sessionId, outcome, reason); } catch (e) {

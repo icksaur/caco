@@ -66,6 +66,9 @@ export const WAKE_TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 export const WAKE_WINDOW_DEFAULT = 'Mon-Fri 07:00-19:00';
 export const WAKE_WINDOW = process.env.CACO_WAKE_WINDOW || WAKE_WINDOW_DEFAULT;
 
+// Instance identity (spec-session-overview): display-name override for ~/.caco/instance.json.
+export const INSTANCE_NAME_OVERRIDE = process.env.CACO_INSTANCE_NAME?.trim() || undefined;
+
 // Cache TTLs (milliseconds)
 export const OUTPUT_CACHE_TTL_MS = 30 * 60 * 1000;
 export const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;

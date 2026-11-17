@@ -5,9 +5,12 @@
  * the real wiring) so the loop is unit-testable with fakes.
  */
 
-import type { SessionMeta, WakeState } from './session-meta-store.js';
+import type { SessionMeta, WakeState, WakeDeferKind } from './session-meta-store.js';
 import { decideWake, buildWakePrompt, resolveWakeAt, type WakeWindowSpec } from './wake-core.js';
 import type { TurnOutcome } from './turn-outcome.js';
+import {
+  carryHistory, emptyCounters, finishRun, noteRetry as withRetry, recordDefer, sanitizeWakeHistory, startRun, undoStart,
+} from './wake-history.js';
 
 export interface WakeConfig {
   minHours: number;
@@ -53,18 +56,33 @@ export type WakeSetResult = { ok: true; wake: WakeState } | { ok: false; error: 
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** A repeated defer of the same kind for the same dueAt is persisted at most this often;
+ *  the ticks in between are counted in memory and merged into the next write. */
+const DEFER_PERSIST_MS = 60 * 60 * 1000;
+/** The scheduling fields a 409 restore puts back (history and counters are kept). */
+const SCHEDULING_KEYS = ['nextWakeAt', 'lastWakeAt', 'lastResult', 'lastError', 'finalWakeAt'] as const;
+
+function restoreScheduling(next: WakeState, prev: WakeState): void {
+  const n = next as unknown as Record<string, unknown>;
+  const p = prev as unknown as Record<string, unknown>;
+  for (const k of SCHEDULING_KEYS) {
+    if (p[k] === undefined) delete n[k]; else n[k] = p[k];
+  }
+}
 
 export function createWakeManager(deps: WakeManagerDeps) {
   const cfg = deps.config;
   const index = new Map<string, WakeState>();
   let executing = false;
+  /** Unpersisted defer ticks per session, keyed by the dueAt they deferred. */
+  const deferBuf = new Map<string, { dueAt: string; count: number }>();
   const log = (msg: string) => deps.log?.(`[WAKE] ${msg}`);
 
   /** The single write path for `meta.wake`; keeps the index in step. */
-  function write(id: string, mutate: (cur: WakeState | undefined) => WakeState | undefined): WakeState | undefined {
+  function write(id: string, mutate: (cur: WakeState | undefined, meta: SessionMeta) => WakeState | undefined): WakeState | undefined {
     let out: WakeState | undefined;
     const ok = deps.updateMeta(id, m => {
-      out = mutate(m.wake ? { ...m.wake } : undefined);
+      out = mutate(m.wake ? { ...m.wake } : undefined, m);
       if (out) m.wake = out; else delete m.wake;
     });
     if (!ok) { index.delete(id); return undefined; }
@@ -77,15 +95,24 @@ export function createWakeManager(deps: WakeManagerDeps) {
     if (w) index.set(id, { ...w }); else index.delete(id);
   }
 
+  /** Close a slot that cannot settle (restart, transfer): an `interrupted` run,
+   *  not counted as a failure. */
+  function interrupt(cur: WakeState, meta: SessionMeta, reason: string, lastError: string): WakeState {
+    const next: WakeState = { ...cur };
+    if (next.lastResult === 'running') { next.lastResult = 'error'; next.lastError = lastError; }
+    return finishRun(next, { nowMs: deps.now(), outcome: 'interrupted', reason, offerAt: meta.responseOptionsAt });
+  }
+
   /** Boot: rebuild the index from meta. A `running` wake cannot survive a
    *  restart, so it is recorded as interrupted (not counted as a failure). */
   function rebuild(): void {
     index.clear();
+    deferBuf.clear();
     for (const id of deps.listSessionIds()) {
       const w = deps.getMeta(id)?.wake;
       if (!w) continue;
-      if (w.lastResult === 'running') {
-        write(id, cur => cur && { ...cur, lastResult: 'error', lastError: 'interrupted by restart' });
+      if (w.lastResult === 'running' || w.pendingRun) {
+        write(id, (cur, m) => cur && interrupt(cur, m, 'restart', 'interrupted by restart'));
       } else {
         index.set(id, { ...w });
       }
@@ -138,6 +165,9 @@ export function createWakeManager(deps: WakeManagerDeps) {
       if (prev?.lastResult) next.lastResult = prev.lastResult;
       if (prev?.lastError) next.lastError = prev.lastError;
       if (running && prev?.finalWakeAt) next.finalWakeAt = prev.finalWakeAt;
+      // History and counters survive a re-arm; only `clear` drops them.
+      if (prev) carryHistory(prev, next, running);
+      else { next.slotSeq = 0; next.counters = emptyCounters(); next.historySince = next.registeredAt; }
       return next;
     });
     if (!wake) return { ok: false, error: 'Could not write session metadata.' };
@@ -147,6 +177,7 @@ export function createWakeManager(deps: WakeManagerDeps) {
 
   function clear(id: string): boolean {
     const had = !!(index.get(id) ?? deps.getMeta(id)?.wake);
+    deferBuf.delete(id);
     if (had) { write(id, () => undefined); log(`cleared ${id.slice(0, 8)}`); }
     return had;
   }
@@ -161,9 +192,20 @@ export function createWakeManager(deps: WakeManagerDeps) {
 
   /** Record a running wake's outcome at the REAL end of its turn. */
   function settle(id: string, outcome: TurnOutcome, reason?: string): void {
+    finish(id, outcome, reason);
+  }
+
+  /** A transient retry of a running wake's turn: counted once, at settle. */
+  function noteRetry(id: string, attempt: number): void {
+    if (index.get(id)?.lastResult !== 'running') return;
+    write(id, cur => (cur && cur.lastResult === 'running' && cur.pendingRun ? withRetry(cur, attempt) : cur));
+  }
+
+  /** Settle a running wake; `rejected` is a fire whose POST failed (a failure, like `error`). */
+  function finish(id: string, outcome: TurnOutcome | 'rejected', reason?: string): void {
     if (index.get(id)?.lastResult !== 'running') return;
     let paused: WakeState['pausedReason'];
-    write(id, cur => {
+    write(id, (cur, meta) => {
       if (!cur || cur.lastResult !== 'running') return cur;
       const next: WakeState = { ...cur };
       if (outcome === 'ok') {
@@ -188,7 +230,8 @@ export function createWakeManager(deps: WakeManagerDeps) {
       }
       if (next.finalWakeAt && !next.pausedReason) next.pausedReason = 'expired';
       paused = next.pausedReason;
-      return next;
+      const runReason = outcome === 'ok' ? undefined : outcome === 'cancelled' ? reason : next.lastError;
+      return finishRun(next, { nowMs: deps.now(), outcome, reason: runReason, offerAt: meta.responseOptionsAt });
     });
     if (paused) {
       log(`paused ${id.slice(0, 8)} (${paused})`);
@@ -203,13 +246,20 @@ export function createWakeManager(deps: WakeManagerDeps) {
       expireDays: Math.round(cfg.expireMs / DAY_MS),
     });
     const prev = { ...wake };
-    write(id, cur => {
+    let slot = 0;
+    write(id, (cur, meta) => {
       if (!cur) return cur;
-      const next: WakeState = { ...cur, lastWakeAt: iso(now), lastResult: 'running', nextWakeAt: iso(now + cur.everyMinutes * 60 * 1000) };
+      let next: WakeState = { ...cur, lastWakeAt: iso(now), lastResult: 'running', nextWakeAt: iso(now + cur.everyMinutes * 60 * 1000) };
       delete next.lastError;
       if (final) next.finalWakeAt = iso(now);
+      next = startRun(next, {
+        nowMs: now, dueAt: cur.nextWakeAt, final,
+        offerBaseline: meta.responseOptionsAt ?? null, lastHumanAt: meta.lastUsedAt,
+      });
+      slot = next.pendingRun?.slot ?? 0;
       return next;
     });
+    deferBuf.delete(id);
     let status = 0;
     try { status = await deps.post(id, prompt); } catch { status = 0; }
     if (status >= 200 && status < 300) {
@@ -218,8 +268,14 @@ export function createWakeManager(deps: WakeManagerDeps) {
     }
     if (status === 409) {
       // Lost a race with a human send: the same as a busy defer. Restore the
-      // pre-fire fields so nothing advanced.
-      write(id, cur => (cur && cur.lastResult === 'running' ? { ...prev } : cur));
+      // pre-fire scheduling fields so nothing advanced, and undo the slot. No
+      // run is recorded; history and counters added since are kept.
+      write(id, cur => {
+        if (!cur || cur.lastResult !== 'running') return cur;
+        const next = undoStart(cur, slot, prev);
+        restoreScheduling(next, prev);
+        return next;
+      });
       return false;
     }
     if (!status && deps.isBusy(id)) {
@@ -230,8 +286,28 @@ export function createWakeManager(deps: WakeManagerDeps) {
       log(`fire ${id.slice(0, 8)}: request timed out, turn still dispatching`);
       return true;
     }
-    settle(id, 'error', status ? `HTTP ${status}` : 'network error');
+    finish(id, 'rejected', status ? `HTTP ${status}` : 'network error');
     return false;
+  }
+
+  function takeBuffered(id: string, dueAt: string): number {
+    const b = deferBuf.get(id);
+    deferBuf.delete(id);
+    return b && b.dueAt === dueAt ? b.count : 0;
+  }
+
+  /** A deferring tick for a due wake (`nextWakeAt` unchanged). One record per
+   *  dueAt; repeats of the same kind persist at most once per DEFER_PERSIST_MS. */
+  function noteDefer(id: string, w: WakeState, kind: WakeDeferKind, now: number): void {
+    const dueAt = w.nextWakeAt;
+    const rec = w.defers?.find(x => x.dueAt === dueAt);
+    if (rec && rec.kind === kind && now - Date.parse(rec.last) < DEFER_PERSIST_MS) {
+      const b = deferBuf.get(id);
+      deferBuf.set(id, { dueAt, count: (b?.dueAt === dueAt ? b.count : 0) + 1 });
+      return;
+    }
+    const count = takeBuffered(id, dueAt) + 1;
+    write(id, cur => (cur && cur.nextWakeAt === dueAt ? recordDefer(cur, { dueAt, kind, nowMs: now, count }) : cur));
   }
 
   async function tick(): Promise<void> {
@@ -255,14 +331,24 @@ export function createWakeManager(deps: WakeManagerDeps) {
         // Staged for archive: suspended, not cleared, so a drag out of the folder
         // resumes it exactly as it was. nextWakeAt is left alone, so a rescued
         // overdue wake fires on the next tick (still subject to the defers).
-        if (meta.folder === cfg.archiveFolder) continue;
+        if (meta.folder === cfg.archiveFolder) { noteDefer(id, meta.wake, 'archived', now); continue; }
         const d = decideWake({
           wake: meta.wake, nowMs: now, lastHumanAt: meta.lastUsedAt, busy: deps.isBusy(id),
           runningCount: running, window: cfg.window, expireMs: cfg.expireMs,
           humanQuietMs: cfg.humanQuietMs, maxRunning: cfg.maxRunning,
         });
         if (d.kind === 'defer-window') {
-          write(id, cur => cur && { ...cur, nextWakeAt: iso(d.nextAtMs) });
+          const count = takeBuffered(id, meta.wake.nextWakeAt) + 1;
+          write(id, cur => cur && {
+            ...recordDefer(cur, { dueAt: cur.nextWakeAt, kind: 'window', nowMs: now, count }),
+            nextWakeAt: iso(d.nextAtMs),
+          });
+        } else if (d.kind === 'defer-busy') {
+          noteDefer(id, meta.wake, 'busy', now);
+        } else if (d.kind === 'defer-human') {
+          noteDefer(id, meta.wake, 'human', now);
+        } else if (d.kind === 'defer-concurrency') {
+          noteDefer(id, meta.wake, 'concurrency', now);
         } else if (d.kind === 'fire') {
           running++;
           if (!(await fire(id, meta.wake, d.final, now))) running--;
@@ -274,20 +360,21 @@ export function createWakeManager(deps: WakeManagerDeps) {
   }
 
   /** Imported session (spec-session-wake, Import). A migration export keeps the
-   *  wake armed; a plain copy arrives paused so two machines never wake one session. */
+   *  wake armed; a plain copy arrives paused so two machines never wake one session.
+   *  Imported history is validated first; a pending run becomes `interrupted`. */
   function applyImport(id: string, migrated: boolean): void {
     const w = deps.getMeta(id)?.wake;
+    deferBuf.delete(id);
     if (!w) { index.delete(id); return; }
-    write(id, cur => {
+    write(id, (cur, meta) => {
       if (!cur) return cur;
-      const next: WakeState = { ...cur };
-      if (next.lastResult === 'running') { next.lastResult = 'error'; next.lastError = 'interrupted by transfer'; }
+      const next = interrupt(sanitizeWakeHistory(cur), meta, 'import', 'interrupted by transfer');
       if (!migrated && !next.pausedReason) next.pausedReason = 'imported';
       return next;
     });
   }
 
-  return { set, clear, get, list, refresh, rebuild, tick, settle, applyImport, runningCount, window: () => cfg.window };
+  return { set, clear, get, list, refresh, rebuild, tick, settle, noteRetry, applyImport, runningCount, window: () => cfg.window };
 }
 
 export type WakeManager = ReturnType<typeof createWakeManager>;

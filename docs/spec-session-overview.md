@@ -289,6 +289,38 @@ the cut), because a question or request to Carl is usually the last thing said.
 anything matching a token/key/bearer pattern replaced with `[redacted]`.
 Excerpts are never logged.
 
+Implementation notes (phase 2, `src/sdk-session-tail.ts`):
+
+- `readSessionTailAsync(sessionId, maxBytes, {busy})` returns
+  `{context, ask}`; `readSessionTails(items, {concurrency: 4, deadlineMs: 3000})`
+  runs many with the concurrency cap and the whole-call deadline. A read still
+  running at the deadline reports `skipped-deadline` and finishes in the
+  background (it only closes its handle).
+- `LastContext` adds `errorCode` (the fs code) when `status` is `unavailable`.
+  Any fs error is `unavailable`, not just the four listed codes.
+- Window decoding splits on `\n` bytes, so only whole lines are decoded. A
+  window that starts mid-file and holds no complete line is `no-events` with
+  `ask: {unavailable: 'oversized'}`.
+- `truncated-start` = the window starts mid-file, holds no `user.message`, and
+  no substantive assistant message was found after the last one in the
+  window: the message that would be judged may lie before the window. When a
+  substantive message is found in the window it is the latest one, so it is
+  judged even if the turn started earlier.
+- Event names are the persisted SDK ones: `user.message` (`data.content`,
+  source parsed from the `[source:id]` prefix), `assistant.message`
+  (`data.content`; empty content with `toolRequests` is not substantive),
+  `session.error` (`data.message`). Everything else (`assistant.turn_end`,
+  `tool.execution_complete`, `session.usage_record`, `hook.*`, a persisted
+  `session.idle` if any) is skipped by the ask walk.
+- Fences: a line starting with up to 3 spaces and 3+ backticks or tildes opens
+  a fence; it closes only on a bare fence line of the same character and at
+  least the same length. A trailing `?` may be followed by closing quotes,
+  brackets or emphasis. `can you (check|confirm|run|send|approve)` reports the
+  matched words.
+- Redaction also covers JWTs and any 32+ character opaque token.
+- The cache is per process, at most 512 entries, keyed by session and
+  `maxBytes`, valid while `dev:ino:size:mtimeMs` from the same `fstat` match.
+
 ### Flags (derived, pure)
 
 Each flag is `{ code, detail, confidence: 'high' | 'low' }`. `detail` cites the

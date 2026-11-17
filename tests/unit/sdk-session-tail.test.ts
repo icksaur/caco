@@ -270,6 +270,24 @@ describe('excerpts and redaction', () => {
     expect(redactErrorText('api_key: abcd1234 and password=hunter2')).toBe('[redacted] and [redacted]');
     expect(redactErrorText('authorization: Bearer xyz')).not.toContain('xyz');
   });
+
+  it.each([
+    ['Bearer "se cret"'],
+    ["Bearer 'se cret'"],
+    ['Authorization: Bearer "se cret"'],
+    ["Authorization: Bearer 'se cret'"],
+    ['{"token": "se cret", "ok": 1}'],
+    ["{'token': 'se cret'}"],
+    ['password="se cret"'],
+    ["api_key='se cret'"],
+    ['"Authorization":"Bearer se-cret"'],
+    ['Bearer "unterminated se cret'],
+  ])('redacts the whole quoted value: %s', (input) => {
+    const out = redactErrorText(`failed: ${input} end`);
+    expect(out).not.toMatch(/se.?cret/);
+    expect(out).toContain('[redacted]');
+    expect(out.startsWith('failed: ')).toBe(true);
+  });
 });
 
 describe('ask heuristic, reader side (O11)', () => {

@@ -112,8 +112,9 @@ export function redactErrorText(s: string): string {
       const host = auth.includes('@') ? auth.slice(auth.lastIndexOf('@') + 1) : auth;
       return `${scheme}://${host}`;
     })
-    .replace(/\bbearer\s+[^\s"',;]+/gi, '[redacted]')
-    .replace(/\b(?:access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|token|key|secret|password|passwd|pwd|sig|signature|auth|authorization|client[_-]?secret)\b\s*[:=]\s*["']?[^\s"'&,;]+/gi, '[redacted]')
+    // A value may be bare, or quoted with ' or " (the whole quoted value goes).
+    .replace(/\bbearer\s+(?:"[^"]*"?|'[^']*'?|[^\s"',;]+)/gi, '[redacted]')
+    .replace(/\b(?:access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|token|key|secret|password|passwd|pwd|sig|signature|auth|authorization|client[_-]?secret)\b["']?\s*[:=]\s*(?:bearer\s+)?(?:"[^"]*"?|'[^']*'?|[^\s"'&,;]+)/gi, '[redacted]')
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]')
     .replace(/[A-Za-z0-9+/_-]{32,}={0,2}/g, '[redacted]');
 }

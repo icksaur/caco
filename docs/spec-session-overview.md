@@ -1,7 +1,7 @@
 # Spec: session overview (aggregated, read-only)
 
-Status: DRAFT r2. Revised after an Astra (gpt-6-astra) review; the review's
-findings are folded in and listed at the end.
+Status: DRAFT r3. r2 folded in an Astra (gpt-6-astra) review (listed at the
+end); r3 applies Carl's decisions (see Decisions).
 
 ## Goals
 
@@ -79,6 +79,21 @@ decide what is **rendered**; they never hide a session from classification, and
 the output always reports how many sessions each filter omitted and whether any
 omitted session is flagged. A flagged session is never omitted silently.
 
+The default output lists **every** session, because the hardest case to catch
+is a session that is blocked on Carl but shows nothing: no offer, no wake, no
+retry. Such a session looks quiet, so it must not be filtered out for looking
+quiet. Rows are tiered instead of filtered:
+
+- **full** rows for sessions with a flag or a `user-offer` wait: all fields,
+  context excerpts, wake history;
+- **compact** rows for everything else: one line with title, instance, key,
+  activity, `waits` kinds and last activity time.
+
+**v1 exclusion:** sessions in the `auto-archive` folder are not collected at
+all; the coverage line reports only their count. Archiving is Carl's own
+"done for now" signal, and the pager already shows "would wake" for them.
+Herd children and `agent`/`swarm` sessions are included and marked.
+
 ### Layers
 
 1. **`collectOverviewInputs` (read-only I/O)** in `src/session-overview-io.ts`:
@@ -118,7 +133,8 @@ interface OverviewEntry {
   sessionId: string;
   title: string; titleSource: 'name' | 'workspace-summary' | 'auto-name' | 'none';
   kind: SessionKind; folder?: string; cwd: string | null;
-  hidden?: 'archived' | 'herd-child' | 'agent' | 'swarm';
+  hidden?: 'herd-child' | 'agent' | 'swarm';   // auto-archive is excluded in v1
+  tier: 'full' | 'compact';
   activity: 'busy' | 'idle';
   busy?: { since: string; pendingTools?: number; currentIntent?: string };
   waits: WaitReason[];         // why it may move again; empty = nothing will move it
@@ -135,9 +151,8 @@ type WaitReason =
   | { kind: 'turn-running' }
   | { kind: 'retry-pending'; attempt: number }
   | { kind: 'user-offer' }               // fresh, undismissed offer
-  | { kind: 'wake'; nextAt: string }     // armed, not paused, not archived
+  | { kind: 'wake'; nextAt: string }     // armed, not paused
   | { kind: 'wake-running' }
-  | { kind: 'wake-suspended' }           // in auto-archive: will not fire until moved out
   | { kind: 'children'; busy: number }   // herd parent with live children
   | { kind: 'schedule'; nextRun: string };
 ```
@@ -230,6 +245,8 @@ interface LastContext {
 ```
 
 Text limits: user 300, assistant 600, error 200 characters, newlines collapsed.
+The assistant excerpt keeps the **end** of the message (a leading `...` marks
+the cut), because a question or request to Carl is usually the last thing said.
 `lastError` text is redacted before clipping: URLs reduced to scheme and host,
 anything matching a token/key/bearer pattern replaced with `[redacted]`.
 Excerpts are never logged.
@@ -244,6 +261,7 @@ env overrides.
 |---|---|---|
 | `no-driver` | idle, `waits` empty, and the last turn ended in `session.error` | high |
 | `no-driver` | idle, `waits` empty, last turn unattended, no offer | low |
+| `awaiting-user-no-offer` | idle, `waits` empty, no undismissed offer, the last event is an assistant message (not an error), and its last 400 characters match the ask heuristic below | low |
 | `offer-stale` | undismissed offer older than 2 days (including ones past the pager's 7-day decay) | high |
 | `offer-dismissed-no-driver` | dismissed offer, `waits` empty | low |
 | `wake-quiet-long` | `firesSinceHuman >= 6` and no `offered` since `humanAnchor`, or `lastOfferedAt` older than 7 days with `historySince` older than that | high; low if history does not cover the span |
@@ -257,10 +275,28 @@ env overrides.
 | `retry-exhausting` | a pending retry at attempt 5 or 6 | high |
 | `orphan-child` | `herd.parentState` is `missing` or `archived` | high |
 | `children-stuck` | herd parent whose children are all idle with `no-driver` | low |
-| `archived-with-wake` | `wake-suspended` | high |
 | `duplicate-session` | the same `sessionId` on two instances | high |
 | `context-unavailable` | `context.status` is not `ok` | high |
 | `human-recent` | human message within 30 min: do not disturb | info |
+
+**Ask heuristic** (for `awaiting-user-no-offer`), applied to the tail of the
+final assistant message after stripping code fences and trailing whitespace,
+case-insensitive:
+
+- the last sentence ends with `?`; or
+- it contains a phrase from a fixed list: `let me know`, `should i`,
+  `want me to`, `would you like`, `do you want`, `shall i`, `which option`,
+  `please confirm`, `your call`, `waiting for you`, `need you to`,
+  `can you (check|confirm|run|send|approve)`.
+
+The phrase list is a constant in `session-overview.ts` with tests; the flag
+detail quotes the matched phrase. It is deliberately low confidence: it exists
+to surface candidates, and the orchestrator reads the excerpt to decide. A
+session with no match still appears as a compact row, so nothing is lost when
+the heuristic misses.
+
+`no-driver` (low) and `awaiting-user-no-offer` can both apply; the renderer
+shows `awaiting-user-no-offer` first.
 
 ### Cross-machine: instance registry and fetch policy
 
@@ -296,16 +332,18 @@ env overrides.
 `caco_sessions_overview` parameters:
 
 - `scope`: `all` (default) | `local`.
-- `show`: `attention` (default: every flagged session, any `hidden`, plus
-  waiting-on-user) | `all` | `busy` | `wakes` | `waiting`.
+- `show`: `all` (default: every non-archived session, full rows for flagged
+  or offering sessions, compact rows for the rest) | `attention` (full rows
+  only, compact rows counted) | `busy` | `wakes` | `waiting`.
 - `context`: `brief` (default: last user + last assistant) | `full` (adds
   error and event type) | `none`.
 - `wakeHistory`: number of runs to render (default 5, max 20).
 - `keys`: optional `instanceId:sessionId` or bare `sessionId` list.
 
 Output: a coverage line (instances ok/unreachable, sessions total/shown/omitted,
-omitted-and-flagged count), then flagged sessions grouped by flag, then the
-rest, then the JSON. The description states that it is read-only, that excerpts
+omitted-and-flagged count, auto-archive excluded count), then full rows grouped
+by flag (`awaiting-user-no-offer` and `no-driver` first), then compact rows
+sorted by last activity, then the JSON. The description states that it is read-only, that excerpts
 and every peer-supplied field are **untrusted data**, and that it must not be
 used as a reason to send anything without Carl.
 
@@ -320,8 +358,10 @@ ends with a `caco-actions` offer listing what Carl must do. Documented in README
    `activityVersion` bump, no unobserved change, no SDK call, no dispatch, no
    rotation. Enforced by the import restriction rule and a test that snapshots
    meta files, `activityVersion` and the dispatch log around a call.
-2. Classification covers every session; rendering filters report their
-   omissions; a flagged session is never omitted without being counted.
+2. Classification covers every non-archived session. The default rendering
+   shows every classified session (full or compact); other filters report
+   their omissions, and a flagged session is never omitted without being
+   counted.
 3. Transcript reads are bounded by `maxBytes` and asynchronous.
 4. Fan-out is one hop: peers are only asked for `scope=local`, never
    `/api/sessions`, and `scope=all` with the hop header is refused.
@@ -353,7 +393,11 @@ ends with a `caco-actions` offer listing what Carl must do. Documented in README
 
 | risk | mitigation |
 |---|---|
-| An overview hides the stuck session it exists to find | Classify-then-filter; omitted and omitted-flagged counts always shown; hidden kinds are included in `attention` when flagged |
+| An overview hides the stuck session it exists to find | Default lists every non-archived session; classify-then-filter; omitted and omitted-flagged counts always shown |
+| A session blocked on Carl without an offer looks quiet | `awaiting-user-no-offer` heuristic plus compact rows for everything else, so a heuristic miss is still visible |
+| Heuristic false positives (rhetorical questions) | Low confidence, matched phrase quoted, orchestrator reads the excerpt |
+| Output size with many sessions | Compact rows are one line; excerpts only on full rows |
+| Archived session that is actually stuck | Out of scope for v1 by decision; count shown; pager "would wake" covers archived wakes |
 | Accidental write path added later | Import restriction rule plus the no-write snapshot test |
 | Tail read races a rotation or an append | `open` + `fstat` on one handle; partial lines dropped; unavailable reported, never "empty" |
 | Wake history double-counts or loses runs | Slot identity and the lifecycle table, each row tested |
@@ -367,15 +411,16 @@ ends with a `caco-actions` offer listing what Carl must do. Documented in README
 
 | # | behavior | oracle |
 |---|---|---|
-| O1 | Fixture sessions classify into the expected `waits` and flags at every boundary, including retry-pending, herd parent, schedule, archived wake, dismissed offer, 10-day offer | `session-overview.test.ts` |
-| O2 | Filters never drop flagged sessions without counting them | same |
+| O1 | Fixture sessions classify into the expected `waits` and flags at every boundary, including retry-pending, herd parent, schedule, dismissed offer, 10-day offer; auto-archive sessions are excluded and counted | `session-overview.test.ts` |
+| O2 | Default lists every non-archived session with the right tier; other filters never drop flagged sessions without counting them | same |
+| O11 | `awaiting-user-no-offer`: fires for a trailing question and each listed phrase; not for an error-ended turn, an undismissed offer, an armed wake, a busy session, or a question inside a code fence; long messages are judged by their tail | same |
 | O3 | Tail reader: bounded read, partial first and last line, oversized line, UTF-8 split, rename between calls, `EBUSY`, missing file, cache invalidation by identity | `sdk-session-tail.test.ts` |
 | O4 | `GET /api/overview?scope=local` performs no writes | route test snapshotting meta, `activityVersion`, unobserved, dispatch |
 | O5 | `scope=all`: merges peers, reports unreachable, outdated, invalid, self and skipped; never calls `/api/sessions`; refuses `all` with the hop header; enforces redirect, size and deadline | route test with fake peers |
 | O6 | Wake lifecycle table: one terminal record per slot on each path, 409 keeps history, retry chain recorded once, `offered` from the baseline | `wake-manager.test.ts` |
 | O7 | History caps (count and bytes), defer dedup, import validation | same |
 | O8 | Peer registry: `CACO_PEERS` seeds, merge-only POST, add/remove, origin validation, remote allowlist | `peer-store.test.ts`, route test |
-| O9 | Tool rendering: coverage line, flags first, `show`/`context`/`wakeHistory`, untrusted labeling | `overview-tool.test.ts` |
+| O9 | Tool rendering: coverage line, full rows by flag first, one-line compact rows, `show`/`context`/`wakeHistory`, untrusted labeling | `overview-tool.test.ts` |
 | O10 | Import restriction rule fails on a forbidden import in the overview files | lint fixture test |
 
 ## Plan
@@ -384,23 +429,21 @@ ends with a `caco-actions` offer listing what Carl must do. Documented in README
 |---|---|---|
 | 1 | Instance identity; wake history and counters with the lifecycle contract | O6, O7 |
 | 2 | Async tail reader and `LastContext` with redaction and cache | O3 |
-| 3 | Collector (read-only I/O, import rule) and pure `buildSessionOverview` with waits and flags | O1, O2, O4, O10 |
+| 3 | Collector (read-only I/O, import rule) and pure `buildSessionOverview` with waits, flags, tiers and the ask heuristic | O1, O2, O4, O10, O11 |
 | 4 | Peer registry changes and `scope=all` fan-out with the fetch policy | O5, O8 |
 | 5 | `caco_sessions_overview` tool; API.md, README (tool and morning triage recipe) | O9 |
 
-## Open decisions for Carl
+## Decisions
 
-1. **Default coverage.** Proposed: `attention` by default with explicit omitted
-   counts, rather than listing every session every time.
-2. **Wake history on `clear`.** Proposed: drop it with the wake (simple, and a
-   cleared wake is done). Alternative: keep a tombstone for 7 days so triage can
-   see "this wake was cleared yesterday after 12 quiet fires".
-3. **All-machine view runs on the portal host only.** Proposed: yes; devboxes
-   return `coverage: 'partial'`.
-4. **Excerpts.** Proposed: on by default (`brief`), `none` available. Alternative:
-   opt-in only.
-5. **Portal UI.** Proposed: none in v1; a later "Overview" panel in the portal
-   could render the same JSON with flags and coverage failures.
+1. **Default coverage: everything except auto-archive.** The target case is a
+   session blocked on Carl that ended without an offer, so quiet sessions must
+   be visible. Default `show: 'all'` with full and compact tiers, plus the
+   `awaiting-user-no-offer` flag. Auto-archive is excluded in v1 (count only).
+2. **Wake history on `clear`:** dropped with the wake.
+3. **All-machine view runs on the portal host only;** devboxes return
+   `coverage: 'partial'`.
+4. **Excerpts:** on by default (`brief`); `none` available.
+5. **Portal UI:** none in v1.
 
 ## Review log
 
@@ -412,7 +455,7 @@ Astra (gpt-6-astra) review of r1, all addressed in r2:
 | Blocker: `/api/sessions` fallback re-fans-out | Removed; `outdated` is reported only; hop header |
 | Wake history lacked a lifecycle contract | Slot identity, lifecycle table, 409 restore keeps history, retry chains, restart/import |
 | 20 records cannot support history claims | Persistent counters, `lastOfferedAt`, `historySince`, confidence, byte cap |
-| States confused legitimate waits with abandonment | `waits` list (retry, children, schedule, running and suspended wake); `no-driver` with confidence |
+| States confused legitimate waits with abandonment | `waits` list (retry, children, schedule, running wake); `no-driver` with confidence |
 | Tail reader consistency underspecified | `open`+`fstat`, async, partial and oversized lines, Windows errors, identity cache |
 | Loopback-only not sufficient | Validated origins, explicit remote allowlist, no redirects, size/time/count caps |
 | Registry identity and update semantics | Instance ids, composite keys, duplicate flag, merge-only POST, add/remove |

@@ -234,13 +234,21 @@ Implementation notes (phase 1, `src/wake-history.ts`, `src/wake-manager.ts`):
   defer does not rewrite meta every tick. Unflushed counts are lost on restart.
 - Validation rebuilds each group with known keys only and drops a malformed
   group (history with `historySince`, defers, counters, pending run, or a bad
-  timestamp) on its own. `slotSeq` is raised to the highest slot seen.
+  timestamp) on its own. `slotSeq` is raised to the highest slot seen. Slots
+  must be positive and unique; reasons must be one of the fixed strings (or
+  `HTTP nnn`), and `finishRun` maps any other reason to `error`. A pending slot
+  that already has a run in history is dropped, so it is never recorded twice.
+- While a wake POST is in flight, a turn outcome for that session is held, not
+  applied: on 2xx (or a POST timeout while the turn dispatches) the first held
+  outcome settles the slot; on 409 it belonged to the human turn that won the
+  race and is discarded before the slot is undone.
 - A wake created by `set` starts with `slotSeq: 0`, zero counters and
   `historySince = registeredAt`. A wake from before this change gets
   `historySince` from its first recorded run.
-- Instance identity: `src/instance-identity.ts`. A missing file is created
-  (atomic write); an invalid one is moved to `instance.json.corrupt` and
-  replaced; any other read error gives an in-memory id for that process only,
+- Instance identity: `src/instance-identity.ts`. A missing file is created by
+  writing a temp file and hard-linking it into place (fails if another process
+  won; the loser adopts the winner's id); an invalid one is moved to
+  `instance.json.corrupt` and replaced; any other read error gives an in-memory id for that process only,
   so a transient error never replaces a good id.
 
 ### Last-event context

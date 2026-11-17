@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'crypto';
 import { hostname } from 'os';
-import { closeSync, fsyncSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'fs';
+import { closeSync, fsyncSync, linkSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'fs';
 import { dirname, join } from 'path';
 import { STORAGE_ROOT, ensureDir } from './storage-paths.js';
 import { INSTANCE_NAME_OVERRIDE } from './config.js';
@@ -21,26 +21,43 @@ export const INSTANCE_FILE = join(STORAGE_ROOT, 'instance.json');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NAME_MAX = 100;
 
-function writeAtomic(file: string, value: unknown): void {
+const cleanName = (v: unknown): string | undefined =>
+  typeof v === 'string' && v.trim() ? v.trim().slice(0, NAME_MAX) : undefined;
+
+function parseIdentity(text: string, host: string): InstanceIdentity | null {
+  const r = JSON.parse(text) as { id?: unknown; name?: unknown } | null;
+  if (r && typeof r === 'object' && typeof r.id === 'string' && UUID_RE.test(r.id)) {
+    return { id: r.id.toLowerCase(), name: cleanName(r.name) ?? host };
+  }
+  return null;
+}
+
+/**
+ * Publish `candidate` only if no identity file exists yet: the complete content
+ * is written to a temp file, then hard-linked into place, which fails with
+ * EEXIST if another process got there first. The loser re-reads and adopts the
+ * winner, so two concurrent first starts end up with one id.
+ */
+export function createOrAdoptIdentity(file: string, candidate: InstanceIdentity, host: string): InstanceIdentity {
   ensureDir(dirname(file));
   const tmp = `${file}.tmp.${process.pid}`;
   const fd = openSync(tmp, 'w');
   try {
-    writeSync(fd, JSON.stringify(value, null, 2));
+    writeSync(fd, JSON.stringify(candidate, null, 2));
     fsyncSync(fd);
   } finally {
     closeSync(fd);
   }
   try {
-    renameSync(tmp, file);
+    linkSync(tmp, file);
+    return candidate;
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    return parseIdentity(readFileSync(file, 'utf-8'), host) ?? candidate;
+  } finally {
     try { unlinkSync(tmp); } catch { /* ignore */ }
-    throw err;
   }
 }
-
-const cleanName = (v: unknown): string | undefined =>
-  typeof v === 'string' && v.trim() ? v.trim().slice(0, NAME_MAX) : undefined;
 
 /**
  * Read the identity file, creating it if missing. A file that exists but is
@@ -57,10 +74,8 @@ export function loadInstanceIdentity(
   let stored: InstanceIdentity | null = null;
   let persist = true;
   try {
-    const raw: unknown = JSON.parse(readFileSync(file, 'utf-8'));
-    const r = raw as { id?: unknown; name?: unknown } | null;
-    if (r && typeof r === 'object' && typeof r.id === 'string' && UUID_RE.test(r.id)) {
-      stored = { id: r.id.toLowerCase(), name: cleanName(r.name) ?? host };
+    stored = parseIdentity(readFileSync(file, 'utf-8'), host);
+    if (stored) {
       persist = false;
     } else {
       log('[INSTANCE] instance.json is not a valid identity; replacing it');
@@ -79,7 +94,7 @@ export function loadInstanceIdentity(
   if (!stored) {
     stored = { id: randomUUID(), name: host };
     if (persist) {
-      try { writeAtomic(file, stored); } catch (e) {
+      try { stored = createOrAdoptIdentity(file, stored, host); } catch (e) {
         log(`[INSTANCE] cannot write instance.json (${(e as NodeJS.ErrnoException).code ?? 'error'})`);
       }
     }

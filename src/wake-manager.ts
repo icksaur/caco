@@ -74,6 +74,11 @@ export function createWakeManager(deps: WakeManagerDeps) {
   const cfg = deps.config;
   const index = new Map<string, WakeState>();
   let executing = false;
+  /** Sessions whose wake POST is in flight. An outcome that arrives meanwhile is
+   *  held here: it may belong to a human turn that won the race (then the POST
+   *  gets 409 and the outcome is dropped), or to the wake's own fast turn (then
+   *  it is applied once the POST is accepted). Only the first outcome is kept. */
+  const inFlight = new Map<string, { outcome: TurnOutcome; reason?: string } | null>();
   /** Unpersisted defer ticks per session, keyed by the dueAt they deferred. */
   const deferBuf = new Map<string, { dueAt: string; count: number }>();
   const log = (msg: string) => deps.log?.(`[WAKE] ${msg}`);
@@ -192,6 +197,10 @@ export function createWakeManager(deps: WakeManagerDeps) {
 
   /** Record a running wake's outcome at the REAL end of its turn. */
   function settle(id: string, outcome: TurnOutcome, reason?: string): void {
+    if (inFlight.has(id)) {
+      if (!inFlight.get(id)) inFlight.set(id, { outcome, reason });
+      return;
+    }
     finish(id, outcome, reason);
   }
 
@@ -261,9 +270,13 @@ export function createWakeManager(deps: WakeManagerDeps) {
     });
     deferBuf.delete(id);
     let status = 0;
+    inFlight.set(id, null);
     try { status = await deps.post(id, prompt); } catch { status = 0; }
+    const held = inFlight.get(id);
+    inFlight.delete(id);
     if (status >= 200 && status < 300) {
       log(`fired ${id.slice(0, 8)}${final ? ' (final)' : ''}`);
+      if (held) finish(id, held.outcome, held.reason);
       return true;
     }
     if (status === 409) {
@@ -284,6 +297,7 @@ export function createWakeManager(deps: WakeManagerDeps) {
       // still going. Leave it running: the turn's real end settles it, and the
       // turn timeout still catches a hang.
       log(`fire ${id.slice(0, 8)}: request timed out, turn still dispatching`);
+      if (held) finish(id, held.outcome, held.reason);
       return true;
     }
     finish(id, 'rejected', status ? `HTTP ${status}` : 'network error');

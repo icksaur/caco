@@ -534,6 +534,40 @@ describe('wake history lifecycle (spec-session-overview O6)', () => {
     expect(t.wake('a')!.lastResult).toBe('ok');
   });
 
+  it('a human turn outcome during a POST that then gets 409 does not settle the wake slot', async () => {
+    await fireOnce();
+    t.mgr.settle('a', 'ok');
+    t.advance(H);
+    const before = t.wake('a')!;
+    t.post.mockImplementationOnce(async () => {
+      t.mgr.settle('a', 'ok'); // the human turn that won the race ends first
+      return 409;
+    });
+    await t.mgr.tick();
+    expect(t.wake('a')).toEqual(before);
+    expect(t.wake('a')!.history).toHaveLength(1);
+  });
+
+  it("the wake's own fast turn ending before the POST returns settles once after acceptance", async () => {
+    t.post.mockImplementationOnce(async () => {
+      t.mgr.settle('a', 'error', 'session.error');
+      t.mgr.settle('a', 'ok'); // later outcomes ignored: first wins
+      return 200;
+    });
+    await fireOnce();
+    const w = t.wake('a')!;
+    expect(w.history).toEqual([expect.objectContaining({ slot: 1, outcome: 'error', reason: 'session.error' })]);
+    expect(w.pendingRun).toBeUndefined();
+    t.mgr.settle('a', 'ok');
+    expect(t.wake('a')!.history).toHaveLength(1);
+  });
+
+  it('a non-fixed reason is recorded as "error"', async () => {
+    await fireOnce();
+    t.mgr.settle('a', 'error', 'some exception text with a@b.com');
+    expect(t.wake('a')!.history![0].reason).toBe('error');
+  });
+
   it('a POST that times out while the turn dispatches stays pending, then settles once', async () => {
     t.post.mockImplementationOnce(async () => { t.busy.add('a'); throw new Error('headers timeout'); });
     await fireOnce();
@@ -711,6 +745,9 @@ describe('wake history caps, defers and import validation (spec-session-overview
       ['bad slot', [{ ...run(1), slot: -1 }]],
       ['bad date', [{ ...run(1), dueAt: 'nope' }]],
       ['long reason', [{ ...run(1), reason: 'x'.repeat(500) }]],
+      ['free-text reason', [{ ...run(1), reason: 'Error: token abc123 at C:\\x' }]],
+      ['zero slot', [{ ...run(1), slot: 0 }]],
+      ['duplicate slots', [run(1), run(1)]],
       ['too many runs', Array.from({ length: 21 }, (_, i) => run(i + 1))],
       ['not an array', 'x'],
     ])('drops malformed history (%s)', (_label, history) => {
@@ -731,6 +768,20 @@ describe('wake history caps, defers and import validation (spec-session-overview
       expect(w.defers).toBeUndefined();
       expect(w.lastOkAt).toBeUndefined();
       expect(w.slotSeq).toBe(4);
+    });
+
+    it('keeps fixed and HTTP reasons', () => {
+      const w = importWith({ history: [{ ...run(1), outcome: 'rejected', reason: 'HTTP 503' }, { ...run(2), outcome: 'error', reason: 'session.error' }] });
+      expect(w.history!.map(r => r.reason)).toEqual(['HTTP 503', 'session.error']);
+    });
+
+    it('a pending slot already in history is dropped and never recorded twice', () => {
+      const w = importWith({
+        lastResult: 'running', slotSeq: 3, history: [run(3)],
+        pendingRun: { slot: 3, dueAt: base.nextWakeAt, firedAt: base.nextWakeAt, offerBaseline: null },
+      });
+      expect(w.pendingRun).toBeUndefined();
+      expect(w.history).toEqual([run(3)]);
     });
 
     it('a malformed pending run is dropped; a running wake still becomes an error', () => {

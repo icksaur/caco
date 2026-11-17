@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { loadInstanceIdentity } from '../../src/instance-identity.js';
+import { loadInstanceIdentity, createOrAdoptIdentity } from '../../src/instance-identity.js';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'caco-instance-'));
 const quiet = { log: () => {} };
@@ -42,6 +42,19 @@ describe('instance identity', () => {
       expect(a.id).toMatch(/^[0-9a-f-]{36}$/);
       expect(readFileSync(`${file}.corrupt`, 'utf-8')).toBe(content);
       expect(loadInstanceIdentity(file, { host: 'h', ...quiet }).id).toBe(a.id);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a concurrent first start adopts the identity another process published', () => {
+    const dir = tmp();
+    try {
+      const file = join(dir, 'instance.json');
+      const winner = { id: 'aaaaaaaa-0000-4000-8000-000000000001', name: 'winner' };
+      writeFileSync(file, JSON.stringify(winner));
+      const got = createOrAdoptIdentity(file, { id: 'bbbbbbbb-0000-4000-8000-000000000002', name: 'loser' }, 'h');
+      expect(got).toEqual(winner);
+      expect(JSON.parse(readFileSync(file, 'utf-8'))).toEqual(winner);
+      expect(existsSync(`${file}.tmp.${process.pid}`)).toBe(false);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 

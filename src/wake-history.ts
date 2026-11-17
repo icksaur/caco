@@ -12,7 +12,19 @@ import type {
 export const WAKE_HISTORY_MAX_RUNS = 20;
 export const WAKE_HISTORY_MAX_BYTES = 8 * 1024;
 export const WAKE_DEFER_MAX = 5;
-const REASON_MAX = 100;
+
+/** The only reason strings a run may carry (invariant 6): the wake manager's own
+ *  reasons plus the dispatch teardown reasons of `emitTurnOutcome`. */
+const RUN_REASONS = new Set<string>([
+  'restart', 'import', 'no idle within timeout', 'network error', 'error',
+  'session.error', 'timeout', 'no-session', 'retry-failed', 'retry failed',
+  'send error', 'outer-error', 'stopped by user',
+]);
+const HTTP_REASON = /^HTTP \d{3}$/;
+
+export function isWakeRunReason(v: unknown): v is string {
+  return typeof v === 'string' && (RUN_REASONS.has(v) || HTTP_REASON.test(v));
+}
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
@@ -92,7 +104,7 @@ export function finishRun(w: WakeState, o: {
   if (!p) return w;
   const settledAt = iso(o.nowMs);
   const run: WakeRun = { slot: p.slot, dueAt: p.dueAt, firedAt: p.firedAt, settledAt, outcome: o.outcome };
-  if (o.reason) run.reason = o.reason.slice(0, REASON_MAX);
+  if (o.reason) run.reason = isWakeRunReason(o.reason) ? o.reason : 'error';
   if (p.final) run.final = true;
   if (p.retries) run.retries = p.retries;
   const c = countersOf(w);
@@ -148,6 +160,7 @@ const DEFER_KINDS = new Set<string>(['busy', 'human', 'window', 'concurrency', '
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const isCount = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
+const isSlot = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 1;
 const isIso = (v: unknown): v is string => typeof v === 'string' && v.length <= 40 && Number.isFinite(Date.parse(v));
 const optIso = (v: unknown) => v === undefined || isIso(v);
 const optTrue = (v: unknown) => v === undefined || v === true;
@@ -155,9 +168,9 @@ const optCount = (v: unknown) => v === undefined || isCount(v);
 
 function cleanRun(v: unknown): WakeRun | null {
   if (!isObj(v)) return null;
-  if (!isCount(v.slot) || !isIso(v.dueAt) || !optIso(v.firedAt) || !optIso(v.settledAt)) return null;
+  if (!isSlot(v.slot) || !isIso(v.dueAt) || !optIso(v.firedAt) || !optIso(v.settledAt)) return null;
   if (typeof v.outcome !== 'string' || !OUTCOMES.has(v.outcome)) return null;
-  if (v.reason !== undefined && (typeof v.reason !== 'string' || v.reason.length > REASON_MAX)) return null;
+  if (v.reason !== undefined && !isWakeRunReason(v.reason)) return null;
   if (!optTrue(v.offered) || !optTrue(v.final) || !optCount(v.retries)) return null;
   const r: WakeRun = { slot: v.slot, dueAt: v.dueAt, outcome: v.outcome as WakeRunOutcome };
   if (v.firedAt) r.firedAt = v.firedAt as string;
@@ -190,7 +203,7 @@ function cleanCounters(v: unknown): WakeCounters | null {
 
 function cleanPending(v: unknown): WakePendingRun | null {
   if (!isObj(v)) return null;
-  if (!isCount(v.slot) || !isIso(v.dueAt) || !isIso(v.firedAt)) return null;
+  if (!isSlot(v.slot) || !isIso(v.dueAt) || !isIso(v.firedAt)) return null;
   if (v.offerBaseline !== null && !isIso(v.offerBaseline)) return null;
   if (!optTrue(v.final) || !optCount(v.retries)) return null;
   const p: WakePendingRun = { slot: v.slot, dueAt: v.dueAt, firedAt: v.firedAt, offerBaseline: v.offerBaseline as string | null };
@@ -210,7 +223,9 @@ export function sanitizeWakeHistory(w: WakeState): WakeState {
 
   if (raw.history !== undefined) {
     const h = Array.isArray(raw.history) && raw.history.length <= WAKE_HISTORY_MAX_RUNS ? raw.history.map(cleanRun) : null;
-    if (h && h.every((r): r is WakeRun => r !== null) && historyBytes(h) <= WAKE_HISTORY_MAX_BYTES) next.history = h;
+    const valid = h !== null && h.every((r): r is WakeRun => r !== null)
+      && new Set(h.map(r => r?.slot)).size === h.length && historyBytes(h as WakeRun[]) <= WAKE_HISTORY_MAX_BYTES;
+    if (valid) next.history = h as WakeRun[];
     else { delete next.history; delete next.historySince; }
   }
   if (raw.defers !== undefined) {
@@ -225,6 +240,8 @@ export function sanitizeWakeHistory(w: WakeState): WakeState {
     const p = cleanPending(raw.pendingRun);
     if (p) next.pendingRun = p; else delete next.pendingRun;
   }
+  // A pending slot that already has a terminal run was settled: never record it twice.
+  if (next.pendingRun && (next.history ?? []).some(r => r.slot === next.pendingRun!.slot)) delete next.pendingRun;
   for (const k of ['lastOkAt', 'lastOfferedAt', 'historySince'] as const) {
     if (next[k] !== undefined && !isIso(next[k])) delete next[k];
   }

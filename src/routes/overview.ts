@@ -74,9 +74,23 @@ router.get('/overview', async (req: Request, res: Response) => {
       context, onIdentity: recordPeerIdentity, ...fanoutOverrides,
     });
     const ok = results.filter(r => r.status === 'ok' && r.overview);
-    const merged = mergeSessionOverviews([local, ...ok.map(r => r.overview!)], { show, keys });
+    // A peer's data passed validation, but merging must still never fail the
+    // call (Invariant 7): add peers one at a time and drop any whose data makes
+    // the merge throw, reporting it invalid.
+    const accepted = [local];
+    for (const r of ok) {
+      try {
+        mergeSessionOverviews([...accepted, r.overview!]);
+        accepted.push(r.overview!);
+      } catch {
+        r.status = 'invalid';
+        r.reason = 'merge failed';
+        delete r.overview;
+      }
+    }
+    const merged = mergeSessionOverviews(accepted, { show, keys });
     applyContextMode(merged.entries, context);
-    const partial = ok.length === 0 || results.some(r => r.status !== 'ok' && r.status !== 'self');
+    const partial = accepted.length === 1 || results.some(r => r.status !== 'ok' && r.status !== 'self');
     res.json({
       schemaVersion: local.schemaVersion,
       scope,

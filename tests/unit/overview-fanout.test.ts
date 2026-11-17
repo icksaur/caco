@@ -157,6 +157,14 @@ describe('fetchPeerOverviews (O5)', () => {
     expect(rs.every(r => r.status === 'outdated')).toBe(true);
   });
 
+  it('a peer with malformed nested data is invalid, never a thrown error', async () => {
+    const o = overview('66666666-0000-4000-8000-00000000000b', 'm', [{ sid: 's' }]) as unknown as { entries: Array<Record<string, unknown>> };
+    o.entries[0].waits = [null];
+    const a = await peer(json(o));
+    const [r] = await run([p(a.origin)]);
+    expect(r).toMatchObject({ status: 'invalid', reason: 'bad wait' });
+  });
+
   it('never calls /api/sessions', async () => {
     const a = await peer(json(overview('44444444-0000-4000-8000-000000000009', 'a', [])));
     await run([p(a.origin)], { context: 'full' });
@@ -166,6 +174,51 @@ describe('fetchPeerOverviews (O5)', () => {
 });
 
 describe('validateOverviewPayload', () => {
+  const base = () => overview('55555555-0000-4000-8000-00000000000a', 'v', [{ sid: 's' }]);
+  type Mut = (e: Record<string, unknown>) => void;
+  it.each<[string, Mut]>([
+    ['null wait', e => { e.waits = [null]; }],
+    ['wait without kind', e => { e.waits = [{}]; }],
+    ['unknown wait kind', e => { e.waits = [{ kind: 'bogus' }]; }],
+    ['wake wait without nextAt', e => { e.waits = [{ kind: 'wake' }]; }],
+    ['null flag', e => { e.flags = [null]; }],
+    ['flags not an array', e => { e.flags = 'x'; }],
+    ['numeric title', e => { e.title = 42; }],
+    ['bad tier', e => { e.tier = 'huge'; }],
+    ['bad activity', e => { e.activity = null; }],
+    ['context null', e => { e.context = null; }],
+    ['context lastUser without text', e => { e.context = { status: 'ok', lastUser: { at: 'x', source: 'user' } }; }],
+    ['wake without counters', e => { e.wake = { everyHours: 1, nextWakeAt: 'x', registeredAt: 'x', consecutiveFailures: 0, slotSeq: 0, history: [], defers: [] }; }],
+    ['wake history item null', e => { e.wake = { ...(base().entries[0] as unknown as Record<string, unknown>), everyHours: 1, nextWakeAt: 'x', registeredAt: 'x', consecutiveFailures: 0, slotSeq: 0, counters: { fires: 0, ok: 0, errors: 0, cancelled: 0, interrupted: 0, offered: 0, firesSinceHuman: 0 }, history: [null], defers: [] }; }],
+    ['offer options not strings', e => { e.offer = { options: [1], at: null, dismissed: false, ageMs: null, onPager: false }; }],
+    ['offer missing onPager', e => { e.offer = { options: [], at: null, dismissed: false, ageMs: null }; }],
+    ['herd parentState bogus', e => { e.herd = { parentState: 'gone' }; }],
+    ['busy since number', e => { e.busy = { since: 5 }; }],
+    ['lastActivityAt object', e => { e.lastActivityAt = {}; }],
+    ['ask matched number', e => { e.ask = { matched: 3 }; }],
+    ['cwd number', e => { e.cwd = 3; }],
+  ])('rejects an entry with %s', (_label, mut) => {
+    const v = structuredClone(base()) as unknown as { entries: Array<Record<string, unknown>> };
+    mut(v.entries[0]);
+    expect(validateOverviewPayload(v).ok).toBe(false);
+  });
+
+  it('rejects null entries and a null instance', () => {
+    expect(validateOverviewPayload({ ...base(), entries: [null] }).ok).toBe(false);
+    expect(validateOverviewPayload({ ...base(), instance: null }).ok).toBe(false);
+  });
+
+  it('rebuilds entries from known fields only', () => {
+    const v = structuredClone(base()) as unknown as { entries: Array<Record<string, unknown>> };
+    v.entries[0].evil = { __proto__: 'x' };
+    const r = validateOverviewPayload(v);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect('evil' in r.value.entries[0]).toBe(false);
+      expect(r.value.entries[0]).toEqual(base().entries[0]);
+    }
+  });
+
   it('accepts a real overview and rejects malformed ones', () => {
     const ok = overview('55555555-0000-4000-8000-00000000000a', 'v', [{ sid: 's' }]);
     expect(validateOverviewPayload(ok).ok).toBe(true);

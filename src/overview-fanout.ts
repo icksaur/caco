@@ -8,7 +8,11 @@
 
 import type { CacoPeer } from './peer-store.js';
 import { normalizeOrigin, isLoopbackOrigin } from './peer-store.js';
-import { OVERVIEW_SCHEMA_VERSION, type SessionOverview } from './session-overview.js';
+import {
+  OVERVIEW_SCHEMA_VERSION, type SessionOverview, type OverviewEntry, type OverviewFlag, type WaitReason, type WakeOverview,
+} from './session-overview.js';
+import type { LastContext, AskVerdict } from './sdk-session-tail.js';
+import type { WakeRun, WakeDefer, WakePendingRun } from './session-meta-store.js';
 
 export const OVERVIEW_HOP_HEADER = 'X-Caco-Overview-Hop';
 export const PEER_TIMEOUT_MS = 5000;
@@ -48,32 +52,236 @@ class FanoutError extends Error {
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const isStr = (v: unknown, max = 10_000): v is string => typeof v === 'string' && v.length <= max;
 const CONFIDENCE = new Set(['high', 'low', 'info']);
+const WAIT_KINDS = new Set(['turn-running', 'retry-pending', 'user-offer', 'wake', 'wake-running', 'children', 'schedule']);
+const TIERS = new Set(['full', 'compact']);
+const ACTIVITY = new Set(['busy', 'idle']);
+const HIDDEN = new Set(['herd-child', 'agent', 'swarm']);
+const TITLE_SOURCES = new Set(['name', 'workspace-summary', 'auto-name', 'none']);
+const PARENT_STATES = new Set(['ok', 'missing', 'archived']);
+const RUN_OUTCOMES = new Set(['ok', 'error', 'cancelled', 'interrupted', 'rejected']);
+const MAX_ENTRIES = 20_000;
 
-/** Shape check of a peer's overview. Every entry must belong to the reporting
- *  instance (`key` and `instance.id`), so a peer cannot speak for another. */
+class Invalid extends Error {}
+const bad = (reason: string): never => { throw new Invalid(reason); };
+
+// Typed readers: each returns a clean value or throws Invalid. Optional readers
+// return undefined for an absent (undefined) field.
+const str = (v: unknown, what: string, max = 10_000): string => (typeof v === 'string' && v.length <= max ? v : bad(what));
+const optStr = (v: unknown, what: string, max = 10_000): string | undefined => (v === undefined ? undefined : str(v, what, max));
+const num = (v: unknown, what: string): number => (typeof v === 'number' && Number.isFinite(v) ? v : bad(what));
+const optNum = (v: unknown, what: string): number | undefined => (v === undefined ? undefined : num(v, what));
+const bool = (v: unknown, what: string): boolean => (typeof v === 'boolean' ? v : bad(what));
+const obj = (v: unknown, what: string): Record<string, unknown> => (isObj(v) ? v : bad(what));
+const arr = (v: unknown, what: string, max = 10_000): unknown[] => (Array.isArray(v) && v.length <= max ? v : bad(what));
+const oneOf = <T extends string>(v: unknown, set: Set<string>, what: string): T => (typeof v === 'string' && set.has(v) ? v as T : bad(what));
+/** Copy only defined values, so the clean object has no `undefined` keys. */
+function defined<T extends Record<string, unknown>>(o: T): T {
+  for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
+  return o;
+}
+
+function cleanWait(v: unknown): WaitReason {
+  const w = obj(v, 'bad wait');
+  const kind = oneOf<WaitReason['kind']>(w.kind, WAIT_KINDS, 'bad wait');
+  switch (kind) {
+    case 'retry-pending': return { kind, attempt: num(w.attempt, 'bad wait') };
+    case 'wake': return { kind, nextAt: str(w.nextAt, 'bad wait', 40) };
+    case 'children': return { kind, busy: num(w.busy, 'bad wait') };
+    case 'schedule': return { kind, nextRun: str(w.nextRun, 'bad wait', 40) };
+    default: return { kind } as WaitReason;
+  }
+}
+
+function cleanFlag(v: unknown): OverviewFlag {
+  const f = obj(v, 'bad flag');
+  return {
+    code: str(f.code, 'bad flag', 100) as OverviewFlag['code'],
+    detail: str(f.detail, 'bad flag', 2000),
+    confidence: oneOf<OverviewFlag['confidence']>(f.confidence, CONFIDENCE, 'bad flag'),
+  };
+}
+
+function cleanAt(v: unknown, what: string, textMax: number, withSource = false) {
+  if (v === undefined) return undefined;
+  const o = obj(v, what);
+  const out: Record<string, unknown> = { at: str(o.at, what, 40), text: str(o.text, what, textMax) };
+  if (withSource) out.source = str(o.source, what, 20);
+  return out;
+}
+
+function cleanContext(v: unknown): LastContext {
+  const c = obj(v, 'bad context');
+  return defined({
+    status: str(c.status, 'bad context', 40) as LastContext['status'],
+    errorCode: optStr(c.errorCode, 'bad context', 40),
+    windowCoversTurn: c.windowCoversTurn === undefined ? undefined : bool(c.windowCoversTurn, 'bad context'),
+    lastUser: cleanAt(c.lastUser, 'bad context', 2000, true) as LastContext['lastUser'],
+    lastAssistant: cleanAt(c.lastAssistant, 'bad context', 2000) as LastContext['lastAssistant'],
+    lastError: cleanAt(c.lastError, 'bad context', 2000) as LastContext['lastError'],
+    lastEventType: optStr(c.lastEventType, 'bad context', 100),
+    lastEventAt: optStr(c.lastEventAt, 'bad context', 40),
+  });
+}
+
+function cleanAsk(v: unknown): AskVerdict | undefined {
+  if (v === undefined) return undefined;
+  const a = obj(v, 'bad ask');
+  if ('unavailable' in a) {
+    const u = str(a.unavailable, 'bad ask', 40);
+    if (u !== 'oversized' && u !== 'truncated-start') bad('bad ask');
+    return { unavailable: u as 'oversized' | 'truncated-start' };
+  }
+  return { matched: a.matched === null ? null : str(a.matched, 'bad ask', 200) };
+}
+
+function cleanWake(v: unknown): WakeOverview | undefined {
+  if (v === undefined) return undefined;
+  const w = obj(v, 'bad wake');
+  const c = obj(w.counters, 'bad wake');
+  const counters = defined({
+    fires: num(c.fires, 'bad wake'), ok: num(c.ok, 'bad wake'), errors: num(c.errors, 'bad wake'),
+    cancelled: num(c.cancelled, 'bad wake'), interrupted: num(c.interrupted, 'bad wake'), offered: num(c.offered, 'bad wake'),
+    firesSinceHuman: num(c.firesSinceHuman, 'bad wake'), humanAnchor: optStr(c.humanAnchor, 'bad wake', 40),
+  });
+  const history = arr(w.history, 'bad wake', 50).map(x => {
+    const r = obj(x, 'bad wake');
+    return defined({
+      slot: num(r.slot, 'bad wake'), dueAt: str(r.dueAt, 'bad wake', 40),
+      firedAt: optStr(r.firedAt, 'bad wake', 40), settledAt: optStr(r.settledAt, 'bad wake', 40),
+      outcome: oneOf<WakeRun['outcome']>(r.outcome, RUN_OUTCOMES, 'bad wake'),
+      reason: optStr(r.reason, 'bad wake', 100),
+      offered: r.offered === undefined ? undefined : (r.offered === true ? true as const : bad('bad wake')),
+      final: r.final === undefined ? undefined : (r.final === true ? true as const : bad('bad wake')),
+      retries: optNum(r.retries, 'bad wake'),
+    }) as WakeRun;
+  });
+  const defers = arr(w.defers, 'bad wake', 20).map(x => {
+    const d = obj(x, 'bad wake');
+    return {
+      dueAt: str(d.dueAt, 'bad wake', 40), kind: str(d.kind, 'bad wake', 20) as WakeDefer['kind'],
+      first: str(d.first, 'bad wake', 40), last: str(d.last, 'bad wake', 40), count: num(d.count, 'bad wake'),
+    };
+  });
+  let pendingRun: WakePendingRun | undefined;
+  if (w.pendingRun !== undefined) {
+    const p = obj(w.pendingRun, 'bad wake');
+    pendingRun = defined({
+      slot: num(p.slot, 'bad wake'), dueAt: str(p.dueAt, 'bad wake', 40), firedAt: str(p.firedAt, 'bad wake', 40),
+      offerBaseline: p.offerBaseline === null ? null : str(p.offerBaseline, 'bad wake', 40),
+      final: p.final === undefined ? undefined : (p.final === true ? true as const : bad('bad wake')),
+      retries: optNum(p.retries, 'bad wake'),
+    }) as WakePendingRun;
+  }
+  return defined({
+    everyHours: num(w.everyHours, 'bad wake'), registeredAt: str(w.registeredAt, 'bad wake', 40), nextWakeAt: str(w.nextWakeAt, 'bad wake', 40),
+    note: optStr(w.note, 'bad wake', 500), lastWakeAt: optStr(w.lastWakeAt, 'bad wake', 40),
+    lastResult: optStr(w.lastResult, 'bad wake', 20) as WakeOverview['lastResult'], lastError: optStr(w.lastError, 'bad wake', 200),
+    pausedReason: optStr(w.pausedReason, 'bad wake', 20) as WakeOverview['pausedReason'], finalWakeAt: optStr(w.finalWakeAt, 'bad wake', 40),
+    consecutiveFailures: num(w.consecutiveFailures, 'bad wake'), slotSeq: num(w.slotSeq, 'bad wake'), counters,
+    lastOkAt: optStr(w.lastOkAt, 'bad wake', 40), lastOfferedAt: optStr(w.lastOfferedAt, 'bad wake', 40),
+    historySince: optStr(w.historySince, 'bad wake', 40), history, defers, pendingRun,
+  }) as WakeOverview;
+}
+
+function cleanEntry(v: unknown, inst: { id: string; name: string }): OverviewEntry {
+  const e = obj(v, 'bad entry');
+  const sessionId = str(e.sessionId, 'bad entry', 200);
+  const ei = obj(e.instance, 'bad entry');
+  if (ei.id !== inst.id || e.key !== `${inst.id}:${sessionId}`) bad('entry from another instance');
+  let offer: OverviewEntry['offer'];
+  if (e.offer !== undefined) {
+    const o = obj(e.offer, 'bad offer');
+    offer = {
+      options: arr(o.options, 'bad offer', 50).map(x => str(x, 'bad offer', 500)),
+      at: o.at === null ? null : str(o.at, 'bad offer', 40),
+      dismissed: bool(o.dismissed, 'bad offer'),
+      ageMs: o.ageMs === null ? null : num(o.ageMs, 'bad offer'),
+      onPager: bool(o.onPager, 'bad offer'),
+    };
+  }
+  let busy: OverviewEntry['busy'];
+  if (e.busy !== undefined) {
+    const b = obj(e.busy, 'bad busy');
+    busy = defined({ since: str(b.since, 'bad busy', 40), pendingTools: optNum(b.pendingTools, 'bad busy'), currentIntent: optStr(b.currentIntent, 'bad busy', 500) });
+  }
+  let schedule: OverviewEntry['schedule'];
+  if (e.schedule !== undefined) {
+    const sc = obj(e.schedule, 'bad schedule');
+    schedule = defined({
+      slug: str(sc.slug, 'bad schedule', 200), enabled: bool(sc.enabled, 'bad schedule'),
+      nextRun: sc.nextRun === null ? null : str(sc.nextRun, 'bad schedule', 40), lastResult: optStr(sc.lastResult, 'bad schedule', 40),
+    });
+  }
+  let herd: OverviewEntry['herd'];
+  if (e.herd !== undefined) {
+    const h = obj(e.herd, 'bad herd');
+    herd = defined({
+      parent: optStr(h.parent, 'bad herd', 200),
+      parentState: h.parentState === undefined ? undefined : oneOf<NonNullable<NonNullable<OverviewEntry['herd']>['parentState']>>(h.parentState, PARENT_STATES, 'bad herd'),
+      children: optNum(h.children, 'bad herd'), busyChildren: optNum(h.busyChildren, 'bad herd'),
+    });
+  }
+  return defined({
+    key: e.key as string,
+    instance: { id: inst.id, name: inst.name },
+    sessionId,
+    title: str(e.title, 'bad entry', 1000),
+    titleSource: oneOf<OverviewEntry['titleSource']>(e.titleSource, TITLE_SOURCES, 'bad entry'),
+    kind: str(e.kind, 'bad entry', 40) as OverviewEntry['kind'],
+    folder: optStr(e.folder, 'bad entry', 200),
+    cwd: e.cwd === null ? null : str(e.cwd, 'bad entry', 2000),
+    hidden: e.hidden === undefined ? undefined : oneOf<NonNullable<OverviewEntry['hidden']>>(e.hidden, HIDDEN, 'bad entry'),
+    tier: oneOf<OverviewEntry['tier']>(e.tier, TIERS, 'bad entry'),
+    activity: oneOf<OverviewEntry['activity']>(e.activity, ACTIVITY, 'bad entry'),
+    busy,
+    waits: arr(e.waits, 'bad entry', 20).map(cleanWait),
+    offer,
+    wake: cleanWake(e.wake),
+    schedule,
+    herd,
+    lastHumanAt: optStr(e.lastHumanAt, 'bad entry', 40),
+    lastActivityAt: optStr(e.lastActivityAt, 'bad entry', 40),
+    context: cleanContext(e.context),
+    ask: cleanAsk(e.ask),
+    flags: arr(e.flags, 'bad entry', 50).map(cleanFlag),
+    primaryFlag: optStr(e.primaryFlag, 'bad entry', 100) as OverviewEntry['primaryFlag'],
+  }) as OverviewEntry;
+}
+
+/**
+ * Validate a peer's overview and rebuild it from known fields only, so every
+ * field the merge, classifier or a renderer dereferences has the right type.
+ * Every entry must belong to the reporting instance (`key` and
+ * `instance.id`), so a peer cannot speak for another.
+ */
 export function validateOverviewPayload(v: unknown): { ok: true; value: SessionOverview } | { ok: false; reason: string } {
-  if (!isObj(v)) return { ok: false, reason: 'not an object' };
-  if (v.schemaVersion !== OVERVIEW_SCHEMA_VERSION) return { ok: false, reason: 'schemaVersion mismatch' };
-  const inst = v.instance;
-  if (!isObj(inst) || !isStr(inst.id, 100) || !inst.id || !isStr(inst.name, 200)) return { ok: false, reason: 'bad instance' };
-  if (!isStr(v.generatedAt, 40) || !isObj(v.counts) || !Array.isArray(v.entries)) return { ok: false, reason: 'bad envelope' };
-  for (const k of ['total', 'shown', 'omitted', 'omittedFlagged', 'full', 'compact', 'archivedExcluded']) {
-    if (typeof v.counts[k] !== 'number') return { ok: false, reason: 'bad counts' };
+  try {
+    const o = obj(v, 'not an object');
+    if (o.schemaVersion !== OVERVIEW_SCHEMA_VERSION) bad('schemaVersion mismatch');
+    const ri = obj(o.instance, 'bad instance');
+    const inst = { id: str(ri.id, 'bad instance', 100), name: str(ri.name, 'bad instance', 200) };
+    if (!inst.id) bad('bad instance');
+    const c = obj(o.counts, 'bad counts');
+    const counts = {
+      total: num(c.total, 'bad counts'), shown: num(c.shown, 'bad counts'), omitted: num(c.omitted, 'bad counts'),
+      omittedFlagged: num(c.omittedFlagged, 'bad counts'), full: num(c.full, 'bad counts'), compact: num(c.compact, 'bad counts'),
+      archivedExcluded: num(c.archivedExcluded, 'bad counts'),
+    };
+    const value: SessionOverview = {
+      schemaVersion: OVERVIEW_SCHEMA_VERSION,
+      instance: inst,
+      generatedAt: str(o.generatedAt, 'bad envelope', 40),
+      show: (typeof o.show === 'string' ? o.show : 'all') as SessionOverview['show'],
+      wakeLoopEnabled: o.wakeLoopEnabled === undefined ? true : bool(o.wakeLoopEnabled, 'bad envelope'),
+      counts,
+      entries: arr(o.entries, 'bad envelope', MAX_ENTRIES).map(e => cleanEntry(e, inst)),
+    };
+    return { ok: true, value };
+  } catch (e) {
+    if (e instanceof Invalid) return { ok: false, reason: e.message };
+    return { ok: false, reason: 'bad payload' };
   }
-  for (const e of v.entries as unknown[]) {
-    if (!isObj(e) || !isStr(e.sessionId, 200) || !isStr(e.title) || !isObj(e.instance) || !isObj(e.context)) return { ok: false, reason: 'bad entry' };
-    if (e.instance.id !== inst.id || e.key !== `${inst.id}:${e.sessionId}`) return { ok: false, reason: 'entry from another instance' };
-    if (e.tier !== 'full' && e.tier !== 'compact') return { ok: false, reason: 'bad entry' };
-    if (e.activity !== 'busy' && e.activity !== 'idle') return { ok: false, reason: 'bad entry' };
-    if (!Array.isArray(e.waits) || !Array.isArray(e.flags)) return { ok: false, reason: 'bad entry' };
-    for (const f of e.flags as unknown[]) {
-      if (!isObj(f) || !isStr(f.code, 100) || !isStr(f.detail, 2000) || !CONFIDENCE.has(f.confidence as string)) return { ok: false, reason: 'bad flag' };
-    }
-    if (!isStr(e.context.status, 40)) return { ok: false, reason: 'bad entry' };
-  }
-  return { ok: true, value: v as unknown as SessionOverview };
 }
 
 /** Read a body with a hard byte cap, streaming (never buffers past the cap). */

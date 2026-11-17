@@ -459,6 +459,32 @@ Implementation notes (phase 3: `src/session-overview.ts`,
   returns local data plus `coverage: 'partial'` and a note that all-machine
   views run on the portal host.
 
+Implementation notes (phase 4: `src/peer-store.ts`, `src/overview-fanout.ts`,
+`src/routes/overview.ts`, `src/routes/sessions.ts`, `public/portal.html`):
+
+- Legacy `{url, hostname}` entries are read as `addedBy: 'portal'` with
+  `origin` derived from `url` when valid; `url`/`hostname` stay on every
+  entry so the existing `/api/sessions` fan-out keeps working unchanged.
+  Writes are atomic (temp + rename).
+- `CACO_PEERS` peers are merged in at read time and never deleted; a learned
+  id for one is stored as a separate entry that the config entry shadows.
+- The portal no longer posts its whole list on every change. On load it posts
+  once (merge only, so it can only add) and then adopts server peers it lacks;
+  `+` and remove call `/api/peers/add` and `/api/peers/remove`. Removing a
+  config peer is refused in the portal and by the server (403).
+- The hub classifies locally with `show: 'all'`, asks peers for
+  `show=all` with the caller's `context`, merges with
+  `mergeSessionOverviews` (duplicate flags, re-tier, `compareEntries`), then
+  applies `show`/`keys`. Per-instance `counts` are reported in `instances`.
+- Status details: an invalid origin is `invalid`; a redirect is `invalid`
+  (`redirect refused`); a second peer reporting an instance id already seen
+  is `skipped` (`duplicate instance id`); a peer whose stored `id` equals
+  ours is `self` without a request. Entries whose `key` or `instance.id` do
+  not match the reporting instance make the whole response `invalid`.
+- The learned peer id is the one write `scope=all` makes (only to
+  `peers.json`, only when it changes). `overview-fanout.ts` is under the
+  read-only lint rule too.
+
 ### Tool
 
 `caco_sessions_overview` parameters:

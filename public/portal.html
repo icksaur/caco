@@ -197,9 +197,47 @@ function loadPeers() {
 
 function savePeers() {
   localStorage.setItem(PEERS_KEY, JSON.stringify(peers));
-  // Persist to server so agents can discover peers
+}
+
+function originOf(u) {
+  try { return new URL(u).origin; } catch (e) { return u; }
+}
+
+function postJson(path, body) {
+  return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
+// The server's peer list (~/.caco/peers.json plus CACO_PEERS) is shared by every
+// tab and by the session overview. On start this tab merges its own list in
+// (the legacy POST only adds, never deletes, so a stale tab cannot drop a
+// peer), then adopts any server peer it does not have yet. Changes after that
+// go through /api/peers/add and /api/peers/remove, one peer at a time.
+function syncPeersWithServer() {
   var remote = peers.filter(function(p) { return p.id !== 'local'; }).map(function(p) { return { url: p.url, hostname: p.name }; });
-  fetch('/api/peers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(remote) }).catch(function() {});
+  return postJson('/api/peers', remote).catch(function() {})
+    .then(function() { return fetch('/api/peers'); })
+    .then(function(r) { return r && r.ok ? r.json() : []; })
+    .then(function(list) {
+      if (!Array.isArray(list)) return;
+      var have = {};
+      peers.forEach(function(p) { have[originOf(p.url)] = true; });
+      var self = originOf(window.location.origin);
+      var added = [];
+      list.forEach(function(sp) {
+        var url = sp.origin || sp.url;
+        if (!url || originOf(url) === self || have[originOf(url)]) return;
+        var peer = { id: Math.random().toString(36).slice(2, 8), url: originOf(url), name: sp.name || sp.hostname || originOf(url) };
+        if (sp.addedBy === 'config') peer.config = true;
+        peers.push(peer);
+        have[originOf(url)] = true;
+        added.push(peer);
+      });
+      if (!added.length) return;
+      savePeers();
+      renderSidebar();
+      added.forEach(function(p) { ensureIframe(p); });
+    })
+    .catch(function() {});
 }
 
 function saveActive() {
@@ -355,12 +393,19 @@ function addPeer() {
   try { fallbackName = new URL(url).hostname; } catch { fallbackName = url; }
   peers.push({ id: id, url: url, name: fallbackName });
   savePeers();
+  postJson('/api/peers/add', { url: url, name: fallbackName }).catch(function() {});
   switchTo(id);
 }
 
 function removePeer(peerId) {
+  var target = peers.find(function(p) { return p.id === peerId; });
+  if (target && target.config) {
+    alert(target.name + ' is set by CACO_PEERS on the server and cannot be removed here.');
+    return;
+  }
   peers = peers.filter(function(p) { return p.id !== peerId; });
   savePeers();
+  if (target) postJson('/api/peers/remove', { url: target.url }).catch(function() {});
   
   var frame = document.getElementById('frame-' + peerId);
   if (frame) frame.remove();
@@ -550,6 +595,8 @@ if (activePeerId === PAGER_ID) {
   var activePeer = peers.find(function(p) { return p.id === activePeerId; });
   if (activePeer) switchTo(activePeerId);
 }
+
+syncPeersWithServer();
 </script>
 <script type="module" src="/portal-pager.js"></script>
 </body>

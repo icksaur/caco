@@ -9,6 +9,7 @@ import express from 'express';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
 import { mkdirSync, writeFileSync, readdirSync, readFileSync, statSync, rmSync } from 'fs';
+import { createServer } from 'http';
 import { join } from 'path';
 
 const env = await vi.hoisted(async () => {
@@ -136,6 +137,52 @@ describe('GET /api/overview', () => {
     const all = await (await fetch(`${base}/overview?scope=all`)).json();
     expect(all).toMatchObject({ scope: 'all', coverage: 'partial' });
     expect(all.note).toBeTruthy();
+  });
+
+  it('scope=all merges a peer, flags a duplicated session on both copies, and records the peer id (O5)', async () => {
+    const peerId = 'bbbbbbbb-0000-4000-8000-0000000000bb';
+    const { buildSessionOverview } = await import('../../src/session-overview.js');
+    const peerOverview = buildSessionOverview({
+      instance: { id: peerId, name: 'devbox' },
+      sessions: [
+        { sessionId: env.ids[0], cwd: null, meta: { name: 'copy' }, tail: { context: { status: 'ok' }, ask: { matched: null } } },
+        { sessionId: 'peer-only', cwd: null, meta: { name: 'p' }, tail: { context: { status: 'ok' }, ask: { matched: null } } },
+      ],
+      archiveFolder: 'auto-archive', wakeLoopEnabled: true, contextRead: true,
+    }, Date.now());
+    const hits: Array<{ url: string; hop: unknown }> = [];
+    const peer = createServer((req, res) => {
+      hits.push({ url: req.url ?? '', hop: req.headers['x-caco-overview-hop'] });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(peerOverview));
+    });
+    await new Promise<void>(r => peer.listen(0, '127.0.0.1', () => r()));
+    const origin = `http://127.0.0.1:${(peer.address() as AddressInfo).port}`;
+    const peersFile = join(env.home, 'peers.json');
+    writeFileSync(peersFile, JSON.stringify([{ url: origin, hostname: 'devbox' }, { url: 'http://10.9.9.9:53000', hostname: 'remote' }]));
+    try {
+      const body = await (await fetch(`${base}/overview?scope=all`)).json();
+      expect(body.scope).toBe('all');
+      expect(body.coverage).toBe('partial'); // the non-loopback peer is skipped
+      expect(body.instances.map((i: { status: string }) => i.status)).toEqual(['ok', 'ok', 'skipped']);
+      expect(body.instances[1]).toMatchObject({ instance: { id: peerId, name: 'devbox' } });
+      const dup = body.entries.filter((e: { sessionId: string }) => e.sessionId === env.ids[0]);
+      expect(dup).toHaveLength(2);
+      for (const e of dup) expect(e.flags.map((f: { code: string }) => f.code)).toContain('duplicate-session');
+      expect(body.entries.some((e: { key: string }) => e.key === `${peerId}:peer-only`)).toBe(true);
+      expect(body.counts.total).toBe(4);
+      expect(hits).toEqual([{ url: '/api/overview?scope=local&show=all&context=brief', hop: '1' }]);
+      expect(JSON.parse(readFileSync(peersFile, 'utf8'))[0].id).toBe(peerId);
+      // Only the skipped peer keeps coverage partial.
+      writeFileSync(peersFile, JSON.stringify([{ url: origin, hostname: 'devbox' }]));
+      const complete = await (await fetch(`${base}/overview?scope=all&show=attention`)).json();
+      expect(complete.coverage).toBe('complete');
+      expect(complete.entries.every((e: { tier: string }) => e.tier === 'full')).toBe(true);
+    } finally {
+      rmSync(peersFile, { force: true });
+      peer.closeAllConnections?.();
+      await new Promise(r => peer.close(() => r(undefined)));
+    }
   });
 
   it('rejects bad parameters and filters by show and keys', async () => {

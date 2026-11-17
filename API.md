@@ -29,8 +29,10 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `POST /api/sessions/:id/cancel` - Cancel current streaming
 - `GET /api/sessions/:id/export` - Export session as .tar.gz archive
 - `POST /api/sessions/import` - Import session from .tar.gz archive
-- `GET /api/peers` - List known Caco peers
-- `POST /api/peers` - Update peer list (from portal)
+- `GET /api/peers` - List known Caco peers: stored portal peers plus `CACO_PEERS` config peers. Each entry has `url`, `hostname` (legacy), `name`, `origin` (`scheme://host:port`), `addedBy` (`portal` | `config`), `rev`, and `id` once the peer's instance id is known
+- `POST /api/peers` - Legacy whole-list write from older portals. **Merge only**: adds new peers and renames, never deletes. Returns `{ok, count, added, updated}`
+- `POST /api/peers/add` - `{url, name?}`: add or rename one peer. `url` must be an http(s) origin with no credentials, path, query or fragment; this instance itself is refused (400)
+- `POST /api/peers/remove` - `{url}`: remove one peer (404 if unknown). A `CACO_PEERS` config peer cannot be removed (403)
 
 **GET /api/session** query params:
 - `sessionId` - Optional session ID (defaults to active session)
@@ -1078,8 +1080,25 @@ Query parameters:
 | `context` | `brief` (last user + last assistant), `full` (adds error, event type), `none` (no transcript read) | `brief` |
 | `keys` | comma list of `instanceId:sessionId` or bare session ids | all |
 
-- `scope=all` is the hub view across peers. Until fan-out ships it returns local
-  data with `coverage: "partial"` and a `note`.
+- `scope=all` is the hub view: local data plus every registered peer's
+  `/api/overview?scope=local` (never `/api/sessions`), merged into one ordered
+  list. A session id present on two instances gets `duplicate-session` on both
+  copies. The response adds `instances`, one per instance (this one first):
+  `{instance, status, fetchedAt, reason?, counts?}` with `status` one of
+  `ok`, `unreachable` (network error, timeout, deadline, non-2xx),
+  `skipped` (non-loopback peer not in `CACO_PEERS_ALLOW_REMOTE`, or a second
+  peer with the same instance id), `outdated` (404: the peer has no
+  `/api/overview`), `invalid` (bad origin, redirect, over 4 MB, not JSON,
+  schema mismatch, or entries for another instance) or `self`.
+  `coverage` is `complete` only when at least one peer is `ok` and every
+  peer is `ok` or `self`. With no peers registered it is `partial` with a
+  `note` (all-machine views run on the portal host).
+- Fetch policy: registered peers only; loopback origins by default (devtunnel
+  port forwards), others only when listed in `CACO_PEERS_ALLOW_REMOTE`
+  (comma list of origins); `redirect: error`; 4 MB body cap; 5 s per peer, 8 s
+  for the whole call, at most 8 peers at a time; the request carries
+  `X-Caco-Overview-Hop: 1`. A failing peer never fails the call. The only write
+  is the peer's instance id, stored in `peers.json` on first contact.
 - A request with header `X-Caco-Overview-Hop: 1` (a peer hop) may only use
   `scope=local`; `scope=all` is 400.
 - Responses set `Cache-Control: no-store`.

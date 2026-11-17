@@ -54,7 +54,7 @@ export default [
   {
     // Session overview is read only (spec-session-overview, Invariant 1, O10):
     // the collector and the route may not import or call any write path.
-    files: ['src/session-overview-io.ts', 'src/session-overview.ts', 'src/routes/overview.ts'],
+    files: ['src/session-overview-io.ts', 'src/session-overview.ts', 'src/routes/overview.ts', 'src/overview-fanout.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [

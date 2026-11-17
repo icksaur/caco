@@ -42,4 +42,4 @@ export {
 } from './mcp-auth-store.js';
 
 export type { CacoPeer } from './peer-store.js';
-export { getPeers, setPeers } from './peer-store.js';
+export { getPeers, setPeers, mergePeers, addPeer, removePeer } from './peer-store.js';

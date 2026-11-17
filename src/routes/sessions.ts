@@ -17,7 +17,7 @@ import { homedir } from 'os';
 import { sessionManager, ForkRefusedError } from '../session-manager.js';
 import { sessionState } from '../session-state.js';
 import { getScheduleForSession } from '../schedule-store.js';
-import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getPeers, setPeers, getSessionOrder, type CacoPeer, type SessionKind } from '../storage.js';
+import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, getSessionData, setSessionData, listSessionData, isValidDataName, getPeers, mergePeers, addPeer, removePeer, getSessionOrder, type CacoPeer, type SessionKind } from '../storage.js';
 import { getCurrentIntent } from '../intent-runtime.js';
 import { readSessionWorkspace, searchSessionEvents, getEventVersion } from '../sdk-session-store.js';
 import { rotateSessionHistory } from '../session-history-rotation.js';
@@ -90,6 +90,8 @@ router.get('/peers', (_req: Request, res: Response) => {
   res.json(getPeers());
 });
 
+// Legacy whole-list POST: MERGE only (adds and renames, never deletes), so a
+// stale portal tab cannot drop a peer. Deletion is POST /peers/remove.
 router.post('/peers', (req: Request, res: Response) => {
   const peers = req.body as CacoPeer[];
   if (!Array.isArray(peers)) {
@@ -97,9 +99,32 @@ router.post('/peers', (req: Request, res: Response) => {
     return;
   }
   // Only store remote peers (skip self)
-  const remote = peers.filter(p => p.url && p.hostname && !isSelfPeerUrl(p.url));
-  setPeers(remote);
-  res.json({ ok: true, count: remote.length });
+  const remote = peers.filter(p => p && typeof p.url === 'string' && p.url && p.hostname && !isSelfPeerUrl(p.url));
+  const { added, updated } = mergePeers(remote);
+  res.json({ ok: true, count: remote.length, added, updated });
+});
+
+router.post('/peers/add', (req: Request, res: Response) => {
+  const { url, name } = (req.body ?? {}) as { url?: unknown; name?: unknown };
+  if (typeof url !== 'string' || (name !== undefined && typeof name !== 'string')) {
+    res.status(400).json({ error: 'Expected {url, name?}' });
+    return;
+  }
+  if (isSelfPeerUrl(url)) {
+    res.status(400).json({ error: 'url is this instance' });
+    return;
+  }
+  const r = addPeer(url, name);
+  if (!r.ok) { res.status(400).json({ error: r.error }); return; }
+  res.json({ ok: true, added: r.added, peer: r.peer });
+});
+
+router.post('/peers/remove', (req: Request, res: Response) => {
+  const { url } = (req.body ?? {}) as { url?: unknown };
+  if (typeof url !== 'string' || !url) { res.status(400).json({ error: 'Expected {url}' }); return; }
+  const r = removePeer(url);
+  if (!r.ok) { res.status(r.status).json({ error: r.error }); return; }
+  res.json({ ok: true });
 });
 
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);

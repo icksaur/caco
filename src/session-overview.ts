@@ -550,6 +550,54 @@ function matchesKeys(e: OverviewEntry, keys: string[] | undefined): boolean {
   return keys.some(k => k === e.key || k === e.sessionId);
 }
 
+function filterAndCount(all: OverviewEntry[], show: OverviewShow, keys: string[] | undefined) {
+  const shown = all.filter(e => matchesShow(e, show) && matchesKeys(e, keys));
+  const shownSet = new Set(shown);
+  const omitted = all.filter(e => !shownSet.has(e));
+  return {
+    shown,
+    counts: {
+      total: all.length,
+      shown: shown.length,
+      omitted: omitted.length,
+      omittedFlagged: omitted.filter(e => e.flags.some(f => f.confidence !== 'info')).length,
+      full: all.filter(e => e.tier === 'full').length,
+      compact: all.filter(e => e.tier === 'compact').length,
+    },
+  };
+}
+
+/**
+ * Hub merge (scope=all): combine unfiltered (`show: 'all'`) overviews from
+ * several instances, add `duplicate-session` to every copy of a session id
+ * seen on more than one instance, re-tier, order with `compareEntries` (so peer
+ * arrival order never matters), then filter and count.
+ */
+export function mergeSessionOverviews(
+  parts: SessionOverview[],
+  opts: { show?: OverviewShow; keys?: string[] } = {},
+): { entries: OverviewEntry[]; counts: SessionOverview['counts'] } {
+  const show = opts.show ?? 'all';
+  const all: OverviewEntry[] = parts.flatMap(p => p.entries.map(e => ({ ...e, flags: e.flags.filter(f => f.code !== 'duplicate-session') })));
+  const bySession = new Map<string, OverviewEntry[]>();
+  for (const e of all) bySession.set(e.sessionId, [...(bySession.get(e.sessionId) ?? []), e]);
+  for (const copies of bySession.values()) {
+    const instances = new Set(copies.map(e => e.instance.id));
+    if (instances.size < 2) continue;
+    for (const e of copies) {
+      const others = copies.filter(o => o.instance.id !== e.instance.id).map(o => o.instance.name || o.instance.id.slice(0, 8));
+      e.flags.push({ code: 'duplicate-session', detail: `same session id also on ${[...new Set(others)].sort().join(', ')}; one copy is stale`, confidence: 'high' });
+    }
+  }
+  for (const e of all) finish(e);
+  all.sort(compareEntries);
+  const { shown, counts } = filterAndCount(all, show, opts.keys);
+  return {
+    entries: shown,
+    counts: { ...counts, archivedExcluded: parts.reduce((n, p) => n + (p.counts.archivedExcluded ?? 0), 0) },
+  };
+}
+
 /** Classify every non-archived session, then filter what is returned. */
 export function buildSessionOverview(inputs: OverviewInputs, now: number, opts: OverviewOptions = {}): SessionOverview {
   const th = opts.thresholds ?? DEFAULT_OVERVIEW_THRESHOLDS;
@@ -574,24 +622,14 @@ export function buildSessionOverview(inputs: OverviewInputs, now: number, opts: 
   for (const d of drafts) finish(d.entry);
 
   const all = drafts.map(d => d.entry).sort(compareEntries);
-  const shown = all.filter(e => matchesShow(e, show) && matchesKeys(e, opts.keys));
-  const shownSet = new Set(shown);
-  const omitted = all.filter(e => !shownSet.has(e));
+  const { shown, counts } = filterAndCount(all, show, opts.keys);
   return {
     schemaVersion: OVERVIEW_SCHEMA_VERSION,
     instance: { ...inputs.instance },
     generatedAt: iso(now),
     show,
     wakeLoopEnabled: inputs.wakeLoopEnabled,
-    counts: {
-      total: all.length,
-      shown: shown.length,
-      omitted: omitted.length,
-      omittedFlagged: omitted.filter(e => e.flags.some(f => f.confidence !== 'info')).length,
-      full: all.filter(e => e.tier === 'full').length,
-      compact: all.filter(e => e.tier === 'compact').length,
-      archivedExcluded: inputs.sessions.length - live.length,
-    },
+    counts: { ...counts, archivedExcluded: inputs.sessions.length - live.length },
     entries: shown,
   };
 }

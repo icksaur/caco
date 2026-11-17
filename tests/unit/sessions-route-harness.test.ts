@@ -103,6 +103,20 @@ resetState();
 
 const getPeers = vi.fn(() => state.peers);
 const setPeers = vi.fn((peers: Array<{ url: string; hostname: string }>) => { state.peers = peers; });
+const mergePeers = vi.fn((peers: Array<{ url: string; hostname: string }>) => {
+  const before = state.peers.length;
+  for (const p of peers) if (!state.peers.some(q => q.url === p.url)) state.peers.push(p);
+  return { added: state.peers.length - before, updated: 0 };
+});
+const addPeer = vi.fn((url: string, name?: string) => (url.startsWith('http')
+  ? { ok: true, added: true, peer: { url, hostname: name ?? 'h' } }
+  : { ok: false, error: 'bad origin' }));
+const removePeer = vi.fn((url: string) => {
+  if (url.includes('config')) return { ok: false, status: 403, error: 'config' };
+  if (!state.peers.some(p => p.url === url)) return { ok: false, status: 404, error: 'not found' };
+  state.peers = state.peers.filter(p => p.url !== url);
+  return { ok: true };
+});
 const getSessionOrder = vi.fn(() => [knownId, inactiveId]);
 const getSessionMeta = vi.fn((id: string) => state.metaById.get(id) ?? null);
 const setSessionMeta = vi.fn((id: string, meta: SessionMeta) => { state.metaById.set(id, meta); });
@@ -256,6 +270,9 @@ vi.mock('../../src/storage.js', () => ({
   isValidDataName,
   getPeers,
   setPeers,
+  mergePeers,
+  addPeer,
+  removePeer,
   getSessionOrder,
 }));
 vi.mock('../../src/sdk-session-store.js', () => ({ readSessionWorkspace, searchSessionEvents, getEventVersion }));
@@ -310,7 +327,7 @@ const patchJson = (path: string, body: unknown) => jsonRequest('PATCH', path, bo
 const deleteRequest = (path: string, headers: Record<string, string> = {}) => request(path, { method: 'DELETE', headers });
 
 describe('sessions route harness', () => {
-  it('gets peers and stores only remote peers', async () => {
+  it('gets peers and merges only remote peers (the legacy POST never deletes)', async () => {
     state.peers = [{ url: 'http://remote:53000', hostname: 'remote' }];
     expect(await (await request('/peers')).json()).toEqual([{ url: 'http://remote:53000', hostname: 'remote' }]);
     expect((await postJson('/peers', { url: 'nope' })).status).toBe(400);
@@ -320,8 +337,26 @@ describe('sessions route harness', () => {
       { url: '', hostname: 'bad' },
     ]);
     expect(saved.status).toBe(200);
-    expect(await saved.json()).toEqual({ ok: true, count: 1 });
-    expect(setPeers).toHaveBeenCalledWith([{ url: 'http://other:53000', hostname: 'other' }]);
+    expect(await saved.json()).toEqual({ ok: true, count: 1, added: 1, updated: 0 });
+    expect(mergePeers).toHaveBeenCalledWith([{ url: 'http://other:53000', hostname: 'other' }]);
+    expect(setPeers).not.toHaveBeenCalled();
+    // A stale tab posting a shorter list keeps the existing peers.
+    await postJson('/peers', []);
+    expect(state.peers.map(p => p.url)).toEqual(['http://remote:53000', 'http://other:53000']);
+  });
+
+  it('adds and removes one peer at a time', async () => {
+    state.peers = [{ url: 'http://remote:53000', hostname: 'remote' }];
+    expect((await postJson('/peers/add', { url: 'http://new:53000', name: 'new' })).status).toBe(200);
+    expect(addPeer).toHaveBeenCalledWith('http://new:53000', 'new');
+    expect((await postJson('/peers/add', { url: 'ftp://x' })).status).toBe(400);
+    expect((await postJson('/peers/add', { url: `http://localhost:${(await import('../../src/config.js')).getBoundPort()}` })).status).toBe(400);
+    expect((await postJson('/peers/add', {})).status).toBe(400);
+    expect((await postJson('/peers/remove', { url: 'http://remote:53000' })).status).toBe(200);
+    expect(state.peers).toEqual([]);
+    expect((await postJson('/peers/remove', { url: 'http://remote:53000' })).status).toBe(404);
+    expect((await postJson('/peers/remove', { url: 'http://config:1' })).status).toBe(403);
+    expect((await postJson('/peers/remove', {})).status).toBe(400);
   });
 
   it('recognizes self by loopback host and the bound port, not by text', async () => {
@@ -338,8 +373,8 @@ describe('sessions route harness', () => {
         { url: 'http://remote:53001/localhost:53001', hostname: 'remote' },
       ]);
 
-      expect(await saved.json()).toEqual({ ok: true, count: 2 });
-      expect(setPeers).toHaveBeenLastCalledWith([
+      expect(await saved.json()).toMatchObject({ ok: true, count: 2 });
+      expect(mergePeers).toHaveBeenLastCalledWith([
         { url: 'http://localhost:53000', hostname: 'old-default' },
         { url: 'http://remote:53001/localhost:53001', hostname: 'remote' },
       ]);

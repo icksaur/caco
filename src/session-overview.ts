@@ -90,7 +90,7 @@ export type OverviewFlagCode =
   | 'awaiting-user-no-offer' | 'no-driver' | 'wake-failing' | 'busy-long' | 'retry-exhausting'
   | 'orphan-child' | 'offer-stale' | 'wake-overdue' | 'wake-paused' | 'wake-expiring'
   | 'wake-quiet-long' | 'wake-deferred-long' | 'duplicate-session' | 'context-unavailable'
-  | 'children-stuck' | 'offer-dismissed-no-driver' | 'wake-note-dated' | 'human-recent';
+  | 'children-stuck' | 'offer-dismissed-no-driver' | 'wake-note-dated' | 'human-recent' | 'wake-loop-disabled';
 
 export interface OverviewFlag {
   code: OverviewFlagCode;
@@ -223,6 +223,8 @@ export interface SessionOverview {
   instance: { id: string; name: string };
   generatedAt: string;
   show: OverviewShow;
+  /** False while caco_wake is hard-disabled: armed wakes will not fire. */
+  wakeLoopEnabled: boolean;
   counts: {
     /** Non-archived sessions classified. */
     total: number;
@@ -401,15 +403,22 @@ function classifyOne(
   if (w) {
     entry.wake = wakeOverview(w);
     const c = entry.wake.counters;
+    // An armed wake only moves the session while the wake loop runs: with
+    // caco_wake hard-disabled the manager never fires, so it is not a wait (and
+    // the driver flags below can see the session is stuck). A turn already
+    // running still settles on its own.
     if (w.lastResult === 'running') entry.waits.push({ kind: 'wake-running' });
-    else if (!w.pausedReason) entry.waits.push({ kind: 'wake', nextAt: w.nextWakeAt });
+    else if (!w.pausedReason && inputs.wakeLoopEnabled) entry.waits.push({ kind: 'wake', nextAt: w.nextWakeAt });
+    else if (!w.pausedReason) {
+      flag('wake-loop-disabled', 'caco_wake is disabled on this instance, so this wake will not fire', 'info');
+    }
 
     if (w.consecutiveFailures >= th.wakeFailing || w.pausedReason === 'failures') {
       flag('wake-failing', `${w.consecutiveFailures} failures in a row${w.lastError ? `, last: ${w.lastError}` : ''}${w.pausedReason === 'failures' ? ', paused' : ''}`);
     }
     if (w.pausedReason === 'expired' || w.pausedReason === 'imported') flag('wake-paused', `paused: ${w.pausedReason}`);
     if (w.finalWakeAt) flag('wake-expiring', `final wake fired at ${w.finalWakeAt}`);
-    else if (!w.pausedReason && isExpired(w, meta.lastUsedAt, ms(w.nextWakeAt) ?? now, th.wakeExpireMs)) {
+    else if (!w.pausedReason && inputs.wakeLoopEnabled && isExpired(w, meta.lastUsedAt, ms(w.nextWakeAt) ?? now, th.wakeExpireMs)) {
       flag('wake-expiring', `next wake at ${w.nextWakeAt} will be the final one`);
     }
     const next = ms(w.nextWakeAt);
@@ -573,6 +582,7 @@ export function buildSessionOverview(inputs: OverviewInputs, now: number, opts: 
     instance: { ...inputs.instance },
     generatedAt: iso(now),
     show,
+    wakeLoopEnabled: inputs.wakeLoopEnabled,
     counts: {
       total: all.length,
       shown: shown.length,

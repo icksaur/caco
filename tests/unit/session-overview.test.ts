@@ -166,6 +166,30 @@ describe('wakes (O1)', () => {
     expect(has(one(s('a', { wake: wake({ pausedReason: 'imported' }) })), 'wake-paused')).toBe(true);
   });
 
+  it('with the wake loop disabled an armed wake is not a wait, so driver flags apply', () => {
+    const off = { wakeLoopEnabled: false };
+    const asking = one(s('a', { wake: wake() }, { tail: tail({}, { matched: 'should i' }) }), off);
+    expect(asking.waits).toEqual([]);
+    expect(codes(asking).sort()).toEqual(['awaiting-user-no-offer:low', 'wake-loop-disabled:info']);
+    expect(asking.tier).toBe('full');
+    const unattended = one(s('a', { wake: wake() }, { tail: tail({ lastUser: { at: ago(3 * H), source: 'scheduler', text: 'x' } }) }), off);
+    expect(codes(unattended)).toContain('no-driver:low');
+    const errored = one(s('a', { wake: wake() }, { tail: tail({ lastError: { at: ago(MIN), text: 'x' } }) }), off);
+    expect(codes(errored)).toContain('no-driver:high');
+    // A running wake turn still settles on its own.
+    expect(one(s('a', { wake: wake({ lastResult: 'running' }) }), off).waits).toEqual([{ kind: 'wake-running' }]);
+    // A wake that cannot fire cannot be overdue or about to be final.
+    const stale = one(s('a', { lastUsedAt: ago(8 * D), wake: wake({ nextWakeAt: ago(3 * H) }) }), off);
+    expect(has(stale, 'wake-overdue')).toBe(false);
+    expect(has(stale, 'wake-expiring')).toBe(false);
+    // A disabled flag alone never makes a row full.
+    const quiet = one(s('a', { wake: wake() }), off);
+    expect(codes(quiet)).toEqual(['wake-loop-disabled:info']);
+    expect(quiet.tier).toBe('compact');
+    expect(build([s('a')], {}, off).wakeLoopEnabled).toBe(false);
+    expect(build([s('a')]).wakeLoopEnabled).toBe(true);
+  });
+
   it('wake-failing from 2 consecutive failures or a failures pause', () => {
     expect(has(one(s('a', { wake: wake({ consecutiveFailures: 1 }) })), 'wake-failing')).toBe(false);
     expect(has(one(s('a', { wake: wake({ consecutiveFailures: 2, lastError: 'HTTP 500' }) })), 'wake-failing')).toBe(true);

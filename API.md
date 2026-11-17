@@ -1085,6 +1085,9 @@ Query parameters:
 - Responses set `Cache-Control: no-store`.
 - Sessions in the `auto-archive` folder are not collected; `counts.archivedExcluded`
   reports how many.
+- `wakeLoopEnabled: false` means `caco_wake` is hard-disabled on this instance:
+  armed wakes will not fire, are not counted as a wait, and carry an info flag
+  `wake-loop-disabled`.
 
 ```json
 {

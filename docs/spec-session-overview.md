@@ -421,6 +421,11 @@ Implementation notes (phase 3: `src/session-overview.ts`,
 - `context: 'none'` sets `context.status = 'not-read'` (new status) and
   suppresses `context-unavailable`. `brief` removes `lastError` and
   `lastEventType` from the response after classification.
+- While `caco_wake` is hard-disabled the wake loop never fires, so an armed
+  wake is not a `wake` wait (a `wake-running` turn still is). The entry gets
+  an info flag `wake-loop-disabled`, `wake-overdue` and the "next will be
+  final" `wake-expiring` are suppressed, and the response carries
+  `wakeLoopEnabled: false`. With no other wait, the driver flags apply.
 - `duplicate-session` is hub-only and arrives with phase 4.
 - `scope=all` returns local data with `coverage: 'partial'` and a `note` until
   phase 4.

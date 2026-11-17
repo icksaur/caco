@@ -1,7 +1,8 @@
 # Spec: session overview (aggregated, read-only)
 
 Status: DRAFT r3. r2 folded in an Astra (gpt-6-astra) review (listed at the
-end); r3 applies Carl's decisions (see Decisions).
+end); r3 applies Carl's decisions (see Decisions); r4 adds the tool output
+budget; r5 folds in Astra's review of r4.
 
 ## Goals
 
@@ -113,7 +114,8 @@ Herd children and `agent`/`swarm` sessions are included and marked.
    peers, and **never** `/api/sessions`. Responses set `Cache-Control: no-store`.
 4. **`caco_sessions_overview` tool**: deferred by default, calls the collector
    in-process for local and the fan-out for all, and returns a compact text
-   rendering plus JSON.
+   rendering only, within an output budget (see Tool). The JSON stays on
+   `GET /api/overview` for scripts and a future portal panel.
 
 ### Instance identity
 
@@ -261,7 +263,7 @@ env overrides.
 |---|---|---|
 | `no-driver` | idle, `waits` empty, and the last turn ended in `session.error` | high |
 | `no-driver` | idle, `waits` empty, last turn unattended, no offer | low |
-| `awaiting-user-no-offer` | idle, `waits` empty, no undismissed offer, the last event is an assistant message (not an error), and its last 400 characters match the ask heuristic below | low |
+| `awaiting-user-no-offer` | idle, `waits` empty, no undismissed offer, the latest turn completed without error, no user input after it, and its last substantive assistant message matches the ask heuristic below | low |
 | `offer-stale` | undismissed offer older than 2 days (including ones past the pager's 7-day decay) | high |
 | `offer-dismissed-no-driver` | dismissed offer, `waits` empty | low |
 | `wake-quiet-long` | `firesSinceHuman >= 6` and no `offered` since `humanAnchor`, or `lastOfferedAt` older than 7 days with `historySince` older than that | high; low if history does not cover the span |
@@ -279,8 +281,17 @@ env overrides.
 | `context-unavailable` | `context.status` is not `ok` | high |
 | `human-recent` | human message within 30 min: do not disturb | info |
 
-**Ask heuristic** (for `awaiting-user-no-offer`), applied to the tail of the
-final assistant message after stripping code fences and trailing whitespace,
+**Ask heuristic** (for `awaiting-user-no-offer`). "Last substantive assistant
+message" means the last `assistant.message` with non-empty content in the
+latest turn, skipping lifecycle events that follow it (`assistant.turn_end`,
+`session.idle`, tool completion events); see `session-auto-repair.ts` for the
+persisted turn boundaries. The turn is rejected if a `user.message` or a
+`session.error` comes after that message.
+
+The heuristic runs in the tail reader on the **complete** message text from
+the bounded read, before clipping or newline collapse. It removes fenced code
+blocks including their contents (an unclosed fence removes everything to the
+end), trims trailing whitespace, takes the last 400 characters, and then,
 case-insensitive:
 
 - the last sentence ends with `?`; or
@@ -289,14 +300,20 @@ case-insensitive:
   `please confirm`, `your call`, `waiting for you`, `need you to`,
   `can you (check|confirm|run|send|approve)`.
 
+The reader returns `ask: { matched: string } | { matched: null } |
+{ unavailable: 'oversized' | 'truncated-start' }` alongside `LastContext`, so
+the classifier never re-runs the heuristic on the clipped excerpt. A message
+whose start lies outside the read window is `truncated-start` (no flag, fence
+state unknown).
+
 The phrase list is a constant in `session-overview.ts` with tests; the flag
 detail quotes the matched phrase. It is deliberately low confidence: it exists
 to surface candidates, and the orchestrator reads the excerpt to decide. A
 session with no match still appears as a compact row, so nothing is lost when
 the heuristic misses.
 
-`no-driver` (low) and `awaiting-user-no-offer` can both apply; the renderer
-shows `awaiting-user-no-offer` first.
+`no-driver` (low) and `awaiting-user-no-offer` can both apply; the primary
+flag rank (see Tool) puts `awaiting-user-no-offer` first.
 
 ### Cross-machine: instance registry and fetch policy
 
@@ -337,13 +354,56 @@ shows `awaiting-user-no-offer` first.
   only, compact rows counted) | `busy` | `wakes` | `waiting`.
 - `context`: `brief` (default: last user + last assistant) | `full` (adds
   error and event type) | `none`.
-- `wakeHistory`: number of runs to render (default 5, max 20).
+- `wakeHistory`: number of runs to render (default 3, max 20).
 - `keys`: optional `instanceId:sessionId` or bare `sessionId` list.
+- `page`: 1-based page number (default 1); see Output budget.
+
+**Ordering (deterministic).** Each row has one primary flag: the
+highest-ranked of its flags by this fixed rank: `awaiting-user-no-offer`,
+`no-driver` (high), `wake-failing`, `busy-long`, `retry-exhausting`,
+`orphan-child`, `offer-stale`, `wake-overdue`, `wake-paused`, `wake-expiring`,
+`wake-quiet-long`, `wake-deferred-long`, `duplicate-session`,
+`context-unavailable`, `children-stuck`, `offer-dismissed-no-driver`,
+`no-driver` (low), `wake-note-dated`; `human-recent` (info) never makes a row
+full on its own. "Last activity" is the max of `context.lastEventAt`,
+`lastHumanAt` and meta `updatedAt`; missing values sort as oldest. The global
+order is: full rows by primary-flag rank, then compact rows; within each
+group by last activity descending, then by `key` ascending. Peer arrival order
+never affects the result.
 
 Output: a coverage line (instances ok/unreachable, sessions total/shown/omitted,
-omitted-and-flagged count, auto-archive excluded count), then full rows grouped
-by flag (`awaiting-user-no-offer` and `no-driver` first), then compact rows
-sorted by last activity, then the JSON. The description states that it is read-only, that excerpts
+omitted-and-flagged count, auto-archive excluded count, page n of m), then the
+rows in the order above. Full rows show their other flags inline. No JSON in
+the tool result.
+
+**Output budget.** Each page is capped at 64 KB of UTF-8 (about 16k tokens;
+`CACO_OVERVIEW_TOOL_MAX_BYTES` overrides, clamped to 8 KB..256 KB), counting
+everything: coverage line, rows and the continuation line. Measured scale on
+2026-11-17: 94 non-archived sessions across three instances. Estimates:
+compact row about 150 bytes, full row about 1.8 KB, so a typical run (about 20
+full rows) is about 50 KB and all-full is about 170 KB.
+
+Rendering is two steps:
+
+1. **Degrade.** While the whole ordered list exceeds one page, the lowest-ranked
+   full row (ties: least recent activity) drops to compact. Rows whose primary
+   flag is `awaiting-user-no-offer`, `no-driver` (high), `wake-failing` or
+   `busy-long` are degraded last. Degradation stops when everything fits on
+   one page or every row is compact.
+2. **Paginate.** If the list still does not fit, it is split into pages in
+   order. Rows are never merged into counts, so every session keeps its own
+   row on some page. Each page ends with `continued: call again with page: N`
+   (reserved bytes). A single row is clipped to fit a page if needed, and its
+   excerpt is cut first.
+
+Pages are computed from one collection pass: the tool caches the ordered
+result for 60 s keyed by its parameters, so `page: 2` is consistent with
+`page: 1`; after expiry it recollects and the coverage line says so. The
+coverage line reports how many rows were degraded. With the measured 94
+sessions, all-compact is about 14 KB, so pagination only happens at several
+hundred sessions or with a small budget override.
+
+The description states that it is read-only, that excerpts
 and every peer-supplied field are **untrusted data**, and that it must not be
 used as a reason to send anything without Carl.
 
@@ -396,7 +456,7 @@ ends with a `caco-actions` offer listing what Carl must do. Documented in README
 | An overview hides the stuck session it exists to find | Default lists every non-archived session; classify-then-filter; omitted and omitted-flagged counts always shown |
 | A session blocked on Carl without an offer looks quiet | `awaiting-user-no-offer` heuristic plus compact rows for everything else, so a heuristic miss is still visible |
 | Heuristic false positives (rhetorical questions) | Low confidence, matched phrase quoted, orchestrator reads the excerpt |
-| Output size with many sessions | Compact rows are one line; excerpts only on full rows |
+| Output size floods the orchestrator's context | Text only (no JSON), 64 KB pages with degrade-then-paginate (rows never merged), 3 wake runs by default, excerpts only on full rows |
 | Archived session that is actually stuck | Out of scope for v1 by decision; count shown; pager "would wake" covers archived wakes |
 | Accidental write path added later | Import restriction rule plus the no-write snapshot test |
 | Tail read races a rotation or an append | `open` + `fstat` on one handle; partial lines dropped; unavailable reported, never "empty" |
@@ -413,14 +473,14 @@ ends with a `caco-actions` offer listing what Carl must do. Documented in README
 |---|---|---|
 | O1 | Fixture sessions classify into the expected `waits` and flags at every boundary, including retry-pending, herd parent, schedule, dismissed offer, 10-day offer; auto-archive sessions are excluded and counted | `session-overview.test.ts` |
 | O2 | Default lists every non-archived session with the right tier; other filters never drop flagged sessions without counting them | same |
-| O11 | `awaiting-user-no-offer`: fires for a trailing question and each listed phrase; not for an error-ended turn, an undismissed offer, an armed wake, a busy session, or a question inside a code fence; long messages are judged by their tail | same |
+| O11 | `awaiting-user-no-offer`: fires for a trailing question and each listed phrase, on realistic event sequences (`assistant.message` followed by `assistant.turn_end`, tool completions, `session.idle`); not for an error-ended turn, later user input, an undismissed offer, an armed wake, a busy session, a question inside a fence (including a fence opened before the excerpt window and an unclosed fence), or a `truncated-start` message; long messages are judged by their tail | `session-overview.test.ts`, `sdk-session-tail.test.ts` |
 | O3 | Tail reader: bounded read, partial first and last line, oversized line, UTF-8 split, rename between calls, `EBUSY`, missing file, cache invalidation by identity | `sdk-session-tail.test.ts` |
 | O4 | `GET /api/overview?scope=local` performs no writes | route test snapshotting meta, `activityVersion`, unobserved, dispatch |
 | O5 | `scope=all`: merges peers, reports unreachable, outdated, invalid, self and skipped; never calls `/api/sessions`; refuses `all` with the hop header; enforces redirect, size and deadline | route test with fake peers |
 | O6 | Wake lifecycle table: one terminal record per slot on each path, 409 keeps history, retry chain recorded once, `offered` from the baseline | `wake-manager.test.ts` |
 | O7 | History caps (count and bytes), defer dedup, import validation | same |
 | O8 | Peer registry: `CACO_PEERS` seeds, merge-only POST, add/remove, origin validation, remote allowlist | `peer-store.test.ts`, route test |
-| O9 | Tool rendering: coverage line, full rows by flag first, one-line compact rows, `show`/`context`/`wakeHistory`, untrusted labeling | `overview-tool.test.ts` |
+| O9 | Tool rendering: coverage line, deterministic order (primary flag rank, last activity, key) stable under shuffled peer input with equal timestamps and multi-flag rows, one-line compact rows, `show`/`context`/`wakeHistory`, untrusted labeling, no JSON in the result. Budget: every page is within the UTF-8 byte cap including coverage and continuation lines; degradation follows the stated order; 1,000 synthetic sessions and an 8 KB budget paginate with every key on exactly one page; a heuristic-negative quiet session is still listed; `page: 2` within 60 s matches the same pass | `overview-tool.test.ts` |
 | O10 | Import restriction rule fails on a forbidden import in the overview files | lint fixture test |
 
 ## Plan
@@ -461,3 +521,13 @@ Astra (gpt-6-astra) review of r1, all addressed in r2:
 | Registry identity and update semantics | Instance ids, composite keys, duplicate flag, merge-only POST, add/remove |
 | Overstated injection and privacy claims | Claims removed, redaction, `no-store`, `context: 'none'`, privacy noted |
 | Grounding errors | Corrected (`getHistory`, existing tail helper, `skill` source) |
+
+Astra review of r4 (one round, all addressed in r5):
+
+| finding | resolution |
+|---|---|
+| Blocker: reserved flagged-key line could itself exceed the budget | Merging removed; degrade then paginate with `page`; byte cap counts everything; budget clamp 8-256 KB |
+| Merged counts contradicted "every session listed" | Rows are never merged; every session has a row on some page |
+| "Last event is an assistant message" misses completed turns | Last substantive assistant message in the latest turn, skipping lifecycle events |
+| Fence handling on a clipped excerpt is unreliable | Heuristic runs in the tail reader on the full message; `truncated-start` yields no flag |
+| No deterministic ordering contract | Primary flag rank, last-activity definition, key tie-break; shuffled-input test |

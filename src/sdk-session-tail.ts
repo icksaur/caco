@@ -24,7 +24,8 @@ export const ERROR_TEXT_MAX = 200;
 export const ASK_TAIL_CHARS = 400;
 
 export interface LastContext {
-  status: 'ok' | 'unavailable' | 'skipped-deadline' | 'no-events';
+  /** `not-read`: the caller asked for no context (overview `context: 'none'`). */
+  status: 'ok' | 'unavailable' | 'skipped-deadline' | 'no-events' | 'not-read';
   /** The fs error code when `status` is `unavailable` (e.g. EBUSY, ENOENT). */
   errorCode?: string;
   /** false = the window held no user.message. */

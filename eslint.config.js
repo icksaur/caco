@@ -52,6 +52,38 @@ export default [
     }
   },
   {
+    // Session overview is read only (spec-session-overview, Invariant 1, O10):
+    // the collector and the route may not import or call any write path.
+    files: ['src/session-overview-io.ts', 'src/session-overview.ts', 'src/routes/overview.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['**/session-history-rotation*', './session-history-rotation*', '../session-history-rotation*'], message: 'Overview is read only: no history rotation.' },
+          { group: ['**/activity-version*', './activity-version*', '../activity-version*'], message: 'Overview is read only: no activityVersion.' },
+          { group: ['**/unobserved-tracker*', './unobserved-tracker*', '../unobserved-tracker*'], message: 'Overview is read only: no unobserved tracker.' },
+          { group: ['**/wake-runtime*', './wake-runtime*', '../wake-runtime*', '**/wake-manager*', './wake-manager*', '../wake-manager*'], message: 'Overview is read only: read wakes from meta.' },
+          { group: ['**/session-messages*', './session-messages*', '../session-messages*', './routes/session-messages*'], message: 'Overview is read only: no dispatch.' },
+          { group: ['**/session-auto-repair*', './session-auto-repair*', '../session-auto-repair*'], message: 'Overview is read only: no repair.' },
+          {
+            group: ['**/storage*', './storage*', '../storage*', '**/session-meta-store*', './session-meta-store*', '../session-meta-store*'],
+            importNames: ['updateSessionMeta', 'ensureSessionMeta', 'setSessionMeta', 'markSessionObserved', 'markSessionIdle', 'setSessionIntent', 'setSessionOrder'],
+            message: 'Overview is read only: use readSessionMeta/getSessionMeta.',
+          },
+        ],
+      }],
+      'no-restricted-syntax': ['error',
+        {
+          selector: 'MemberExpression[property.name=/^(resume|getHistory|getEvents|dispatchMessage|updateSessionMeta|ensureSessionMeta|setSessionMeta|markIdle|markObserved|bump|send|sendAndWait)$/]',
+          message: 'Overview is read only: no resume, history, SDK, dispatch or write calls.',
+        },
+        {
+          selector: 'CallExpression[callee.name=/^(dispatchMessage|updateSessionMeta|ensureSessionMeta|setSessionMeta|repairSessionEvents)$/]',
+          message: 'Overview is read only: no dispatch or meta writes.',
+        },
+      ],
+    },
+  },
+  {
     // TypeScript files - tests
     files: ['tests/**/*.ts'],
     languageOptions: {

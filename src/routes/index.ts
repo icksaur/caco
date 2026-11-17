@@ -20,3 +20,4 @@ export { router as memoryRoutes } from './memory.js';
 export { router as usageRoutes } from './usage.js';
 export { router as idleRoutes } from './idle.js';
 export { router as pagerRoutes } from './pager.js';
+export { router as overviewRoutes } from './overview.js';

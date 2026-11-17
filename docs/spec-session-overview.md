@@ -383,6 +383,48 @@ the heuristic misses.
 `no-driver` (low) and `awaiting-user-no-offer` can both apply; the primary
 flag rank (see Tool) puts `awaiting-user-no-offer` first.
 
+Implementation notes (phase 3: `src/session-overview.ts`,
+`src/session-overview-io.ts`, `src/routes/overview.ts`):
+
+- The collector takes an injectable `OverviewSources` (every member a read).
+  Sessions come from the session cache (`listForPager` ids and cwd), meta from
+  `readSessionMeta`, busy from `dispatchState`, the pending retry attempt from
+  `transient-retry` (now recorded when the retry is scheduled), schedules from
+  `last-run.json` (`sessionId`), herd links from children's `orchestratedBy`
+  (not the in-memory herd index), tails from `readSessionTails`. Archived
+  sessions are listed for counts and herd parent state, but their tails are
+  not read.
+- The lint rule covers `session-overview.ts` as well. It forbids imports of
+  rotation, `activity-version`, `unobserved-tracker`, `wake-runtime` /
+  `wake-manager`, `session-messages`, `session-auto-repair`, and the meta write
+  functions, plus calls named `resume`, `getHistory`, `getEvents`,
+  `dispatchMessage`, `updateSessionMeta`, `ensureSessionMeta`,
+  `setSessionMeta`, `markIdle`, `markObserved`, `bump`, `send`, `sendAndWait`.
+- Definitions the table leaves open:
+  - `user-offer` wait: an undismissed offer with a known time no older than
+    the pager's 7-day decay, on an idle session.
+  - `children` wait: a herd parent with at least one busy (non-archived)
+    child; all-idle children are `children-stuck` material instead.
+  - "last turn ended in `session.error`": the context's `lastError` is at or
+    after both `lastUser` and `lastAssistant`.
+  - "last turn unattended": `lastUser.source` is not `user`.
+  - `no-driver` (low) also requires no offer at all, dismissed or not (a
+    dismissed one is `offer-dismissed-no-driver`).
+  - `wake-quiet-long` branch 1 is high when `historySince <= humanAnchor`;
+    branch 2 needs at least one fire and is high when `historySince` is older
+    than 7 days.
+  - `wake-note-dated` reads "today" in the wake window's zone. `M/D` ignores
+    fractions inside version-like tokens (`1.2/3`).
+  - `show: 'waiting'`: idle rows with any wait or a waiting flag
+    (`awaiting-user-no-offer`, `no-driver`, `offer-stale`,
+    `offer-dismissed-no-driver`).
+- `context: 'none'` sets `context.status = 'not-read'` (new status) and
+  suppresses `context-unavailable`. `brief` removes `lastError` and
+  `lastEventType` from the response after classification.
+- `duplicate-session` is hub-only and arrives with phase 4.
+- `scope=all` returns local data with `coverage: 'partial'` and a `note` until
+  phase 4.
+
 ### Cross-machine: instance registry and fetch policy
 
 - `~/.caco/peers.json` entries gain `id` (a peer's instance id, learned on the

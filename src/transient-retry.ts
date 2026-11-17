@@ -47,13 +47,16 @@ export function isModelOutputEvent(type: string): boolean {
 
 type Timer = ReturnType<typeof setTimeout>;
 const pending = new Map<string, Timer>();
+/** The attempt number of each pending retry (read by the session overview). */
+const pendingAttempt = new Map<string, number>();
 
 /** Schedule one retry for a session, replacing any already pending. */
-export function scheduleTransientRetry(sessionId: string, delayMs: number, run: () => void): void {
+export function scheduleTransientRetry(sessionId: string, delayMs: number, run: () => void, attempt?: number): void {
   cancelTransientRetry(sessionId);
-  const t = setTimeout(() => { pending.delete(sessionId); run(); }, delayMs);
+  const t = setTimeout(() => { pending.delete(sessionId); pendingAttempt.delete(sessionId); run(); }, delayMs);
   t.unref?.();
   pending.set(sessionId, t);
+  if (attempt !== undefined) pendingAttempt.set(sessionId, attempt);
 }
 
 /** Drop a pending retry. True if one was pending. */
@@ -62,9 +65,16 @@ export function cancelTransientRetry(sessionId: string): boolean {
   if (!t) return false;
   clearTimeout(t);
   pending.delete(sessionId);
+  pendingAttempt.delete(sessionId);
   return true;
 }
 
 export function hasPendingTransientRetry(sessionId: string): boolean {
   return pending.has(sessionId);
+}
+
+/** The attempt number of a pending retry, or undefined when none is pending
+ *  (0 when one is pending but was scheduled without an attempt number). */
+export function pendingTransientRetryAttempt(sessionId: string): number | undefined {
+  return pending.has(sessionId) ? (pendingAttempt.get(sessionId) ?? 0) : undefined;
 }

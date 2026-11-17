@@ -169,7 +169,7 @@ function scheduleNetworkRetry(
       // unless another turn took over the session (that one settles it).
       if (!sessionManager.isBusy(sessionId)) emitTurnOutcome(sessionId, 'error', 'retry failed');
     });
-  });
+  }, attempt);
 }
 
 /**

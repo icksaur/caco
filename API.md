@@ -1059,6 +1059,56 @@ done
 echo "Exhausted $MAX attempts." >&2; exit 1
 ```
 
+## Session Overview
+
+**GET /api/overview** — Read-only, classified view of every non-archived
+session on this instance: why each one may move again (`waits`), what looks
+wrong (`flags` with confidence and evidence), wake history and counters, offer
+facts (separate from pager visibility), and a short last-event context from the
+transcript tail. Gathering it never writes anything (no meta, no
+`activityVersion`, no unobserved change, no dispatch, no resume, no SDK call).
+See [spec-session-overview](docs/spec-session-overview.md).
+
+Query parameters:
+
+| param | values | default |
+|---|---|---|
+| `scope` | `local`, `all` | `local` |
+| `show` | `all`, `attention` (full rows only), `busy`, `wakes`, `waiting` | `all` |
+| `context` | `brief` (last user + last assistant), `full` (adds error, event type), `none` (no transcript read) | `brief` |
+| `keys` | comma list of `instanceId:sessionId` or bare session ids | all |
+
+- `scope=all` is the hub view across peers. Until fan-out ships it returns local
+  data with `coverage: "partial"` and a `note`.
+- A request with header `X-Caco-Overview-Hop: 1` (a peer hop) may only use
+  `scope=local`; `scope=all` is 400.
+- Responses set `Cache-Control: no-store`.
+- Sessions in the `auto-archive` folder are not collected; `counts.archivedExcluded`
+  reports how many.
+
+```json
+{
+  "schemaVersion": 1, "scope": "local", "coverage": "complete", "show": "all",
+  "instance": { "id": "uuid", "name": "laptop" },
+  "generatedAt": "2026-11-17T18:00:00.000Z",
+  "counts": { "total": 94, "shown": 94, "omitted": 0, "omittedFlagged": 0, "full": 20, "compact": 74, "archivedExcluded": 31 },
+  "entries": [{
+    "key": "uuid:sessionId", "sessionId": "...", "title": "PR track", "titleSource": "name",
+    "kind": "interactive", "cwd": "C:/work", "tier": "full", "activity": "idle",
+    "waits": [{ "kind": "wake", "nextAt": "..." }],
+    "offer": { "options": ["Ship it"], "at": "...", "dismissed": false, "ageMs": 259200000, "onPager": true },
+    "wake": { "everyHours": 4, "nextWakeAt": "...", "counters": { "fires": 7, "firesSinceHuman": 6, "offered": 0 }, "history": [] },
+    "context": { "status": "ok", "lastUser": { "at": "...", "source": "scheduler", "text": "..." }, "lastAssistant": { "at": "...", "text": "...end of message" } },
+    "ask": { "matched": null },
+    "flags": [{ "code": "offer-stale", "detail": "offer from ... is 3d old", "confidence": "high" }],
+    "primaryFlag": "offer-stale"
+  }]
+}
+```
+
+Entries are ordered: full rows by primary flag rank, then compact rows; within
+each by last activity (newest first), then `key`. Excerpts are untrusted text.
+
 ## Session Migration
 
 Export and import sessions between Caco instances (e.g., work → home).

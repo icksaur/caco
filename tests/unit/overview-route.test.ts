@@ -160,6 +160,8 @@ describe('GET /api/overview', () => {
     const origin = `http://127.0.0.1:${(peer.address() as AddressInfo).port}`;
     const peersFile = join(env.home, 'peers.json');
     writeFileSync(peersFile, JSON.stringify([{ url: origin, hostname: 'devbox' }, { url: 'http://10.9.9.9:53000', hostname: 'remote' }]));
+    const before = snapshotFiles();
+    const version = activityVersion.version;
     try {
       const body = await (await fetch(`${base}/overview?scope=all`)).json();
       expect(body.scope).toBe('all');
@@ -172,7 +174,10 @@ describe('GET /api/overview', () => {
       expect(body.entries.some((e: { key: string }) => e.key === `${peerId}:peer-only`)).toBe(true);
       expect(body.counts.total).toBe(4);
       expect(hits).toEqual([{ url: '/api/overview?scope=local&show=all&context=brief', hop: '1' }]);
-      expect(JSON.parse(readFileSync(peersFile, 'utf8'))[0].id).toBe(peerId);
+      // scope=all writes nothing either: not peers.json, not meta, not the activity version.
+      expect(snapshotFiles()).toEqual(before);
+      expect(activityVersion.version).toBe(version);
+      expect(JSON.parse(readFileSync(peersFile, 'utf8'))[0].id).toBeUndefined();
       // Only the skipped peer keeps coverage partial.
       writeFileSync(peersFile, JSON.stringify([{ url: origin, hostname: 'devbox' }]));
       const complete = await (await fetch(`${base}/overview?scope=all&show=attention`)).json();

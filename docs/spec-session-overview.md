@@ -470,8 +470,8 @@ Implementation notes (phase 4: `src/peer-store.ts`, `src/overview-fanout.ts`,
   `origin` derived from `url` when valid; `url`/`hostname` stay on every
   entry so the existing `/api/sessions` fan-out keeps working unchanged.
   Writes are atomic (temp + rename).
-- `CACO_PEERS` peers are merged in at read time and never deleted; a learned
-  id for one is stored as a separate entry that the config entry shadows.
+- `CACO_PEERS` peers are merged in at read time and never deleted; a stored
+  id for one (if any) carries over to the config entry.
 - The portal no longer posts its whole list on every change. On load it posts
   once (merge only, so it can only add) and then adopts server peers it lacks;
   `+` and remove call `/api/peers/add` and `/api/peers/remove`. Removing a
@@ -485,9 +485,18 @@ Implementation notes (phase 4: `src/peer-store.ts`, `src/overview-fanout.ts`,
   is `skipped` (`duplicate instance id`); a peer whose stored `id` equals
   ours is `self` without a request. Entries whose `key` or `instance.id` do
   not match the reporting instance make the whole response `invalid`.
-- The learned peer id is the one write `scope=all` makes (only to
-  `peers.json`, only when it changes). `overview-fanout.ts` is under the
-  read-only lint rule too.
+- Peer ids are NOT persisted (review fix after phase 5): collection,
+  including `scope=all` and the tool, writes nothing, `peers.json`
+  included (Invariant 1). Self and duplicate-instance detection use the id
+  each peer reports, in memory. A stored `id` is still honored for the
+  no-request `self` check. The lint rule forbids the peer-registry writers
+  (`setPeers`, `mergePeers`, `addPeer`, `removePeer`) in overview files, and
+  the route test snapshots every file, `peers.json` included, around
+  `scope=all` with a fake peer.
+- Peer payloads accept only known flag codes (`OVERVIEW_FLAG_CODES`) for
+  `flags[].code` and `primaryFlag`, and plain-token instance and session ids
+  (`[A-Za-z0-9._-]{1,100}`). `overview-fanout.ts` is under the read-only
+  lint rule too.
 
 ### Tool
 
@@ -570,6 +579,14 @@ Implementation notes (phase 5: `src/overview-tool.ts`, `src/overview-service.ts`
   keeps its primary flag on its compact line.
 - Degradation tie-break: lowest primary rank first (an offer-only row has no
   flag and goes first), then least recent activity, then key.
+- Every string in the result passes through one sanitizer (`oneLine`:
+  control characters, NEL, U+2028/2029 and newlines become spaces) before
+  rendering, so no field can start a line or forge a heading.
+- The header is capped at a quarter of the page budget: fixed facts first,
+  then the instance list as `instances: N (counts by status): first 10 names`
+  (names 40 chars, reasons 60, note 200), clipped on a UTF-8 boundary.
+- The page cache holds at most 8 parameter sets (least recently used goes);
+  `keys` are trimmed, deduplicated, at most 200 of at most 200 chars.
 
 ### Morning triage recipe
 

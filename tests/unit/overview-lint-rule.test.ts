@@ -33,6 +33,8 @@ describe('overview read-only lint rule (O10)', () => {
     ['src/overview-tool.ts', "import { dispatchMessage } from './routes/session-messages.js';\nexport const x = dispatchMessage;\n"],
     ['src/overview-service.ts', "import { activityVersion } from './activity-version.js';\nexport const x = activityVersion;\n"],
     ['src/overview-fanout.ts', "import { unobservedTracker } from './unobserved-tracker.js';\nexport const x = unobservedTracker;\n"],
+    ['src/overview-service.ts', "import { recordPeerIdentity } from './peer-store.js';\nexport const x = recordPeerIdentity;\n"],
+    ['src/routes/overview.ts', "import { mergePeers } from '../peer-store.js';\nexport const x = mergePeers;\n"],
   ])('%s: forbidden import is reported', async (file, code) => {
     expect(await lint(file, code)).toContain('no-restricted-imports');
   });

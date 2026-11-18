@@ -86,11 +86,13 @@ export type WaitReason =
   | { kind: 'children'; busy: number }
   | { kind: 'schedule'; nextRun: string };
 
-export type OverviewFlagCode =
-  | 'awaiting-user-no-offer' | 'no-driver' | 'wake-failing' | 'busy-long' | 'retry-exhausting'
-  | 'orphan-child' | 'offer-stale' | 'wake-overdue' | 'wake-paused' | 'wake-expiring'
-  | 'wake-quiet-long' | 'wake-deferred-long' | 'duplicate-session' | 'context-unavailable'
-  | 'children-stuck' | 'offer-dismissed-no-driver' | 'wake-note-dated' | 'human-recent' | 'wake-loop-disabled';
+export const OVERVIEW_FLAG_CODES = [
+  'awaiting-user-no-offer', 'no-driver', 'wake-failing', 'busy-long', 'retry-exhausting',
+  'orphan-child', 'offer-stale', 'wake-overdue', 'wake-paused', 'wake-expiring',
+  'wake-quiet-long', 'wake-deferred-long', 'duplicate-session', 'context-unavailable',
+  'children-stuck', 'offer-dismissed-no-driver', 'wake-note-dated', 'human-recent', 'wake-loop-disabled',
+] as const;
+export type OverviewFlagCode = typeof OVERVIEW_FLAG_CODES[number];
 
 export interface OverviewFlag {
   code: OverviewFlagCode;

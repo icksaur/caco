@@ -197,9 +197,21 @@ describe('validateOverviewPayload', () => {
     ['lastActivityAt object', e => { e.lastActivityAt = {}; }],
     ['ask matched number', e => { e.ask = { matched: 3 }; }],
     ['cwd number', e => { e.cwd = 3; }],
+    ['unknown flag code', e => { e.flags = [{ code: 'bogus', detail: 'x', confidence: 'high' }]; }],
+    ['flag code with a newline', e => { e.flags = [{ code: 'no-driver\n### FORGED', detail: 'x', confidence: 'high' }]; }],
+    ['unknown primaryFlag', e => { e.primaryFlag = 'x\ny'; }],
   ])('rejects an entry with %s', (_label, mut) => {
     const v = structuredClone(base()) as unknown as { entries: Array<Record<string, unknown>> };
     mut(v.entries[0]);
+    expect(validateOverviewPayload(v).ok).toBe(false);
+  });
+
+  it('rejects ids that are not plain tokens', () => {
+    const b = base();
+    expect(validateOverviewPayload({ ...b, instance: { id: 'a\n### X', name: 'n' } }).ok).toBe(false);
+    const v = structuredClone(b) as unknown as { entries: Array<Record<string, unknown>> };
+    v.entries[0].sessionId = 's\nx';
+    v.entries[0].key = `${b.instance.id}:s\nx`;
     expect(validateOverviewPayload(v).ok).toBe(false);
   });
 

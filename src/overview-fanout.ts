@@ -9,7 +9,7 @@
 import type { CacoPeer } from './peer-store.js';
 import { normalizeOrigin, isLoopbackOrigin } from './peer-store.js';
 import {
-  OVERVIEW_SCHEMA_VERSION, type SessionOverview, type OverviewEntry, type OverviewFlag, type WaitReason, type WakeOverview,
+  OVERVIEW_SCHEMA_VERSION, OVERVIEW_FLAG_CODES, type SessionOverview, type OverviewEntry, type OverviewFlag, type WaitReason, type WakeOverview,
 } from './session-overview.js';
 import type { LastContext, AskVerdict } from './sdk-session-tail.js';
 import type { WakeRun, WakeDefer, WakePendingRun } from './session-meta-store.js';
@@ -61,6 +61,10 @@ const TITLE_SOURCES = new Set(['name', 'workspace-summary', 'auto-name', 'none']
 const PARENT_STATES = new Set(['ok', 'missing', 'archived']);
 const RUN_OUTCOMES = new Set(['ok', 'error', 'cancelled', 'interrupted', 'rejected']);
 const MAX_ENTRIES = 20_000;
+const FLAG_CODES = new Set<string>(OVERVIEW_FLAG_CODES);
+/** Instance and session ids: uuid-like tokens only (they become keys and render verbatim). */
+const ID_RE = /^[A-Za-z0-9._-]{1,100}$/;
+const id = (v: unknown, what: string): string => (typeof v === 'string' && ID_RE.test(v) ? v : bad(what));
 
 class Invalid extends Error {}
 const bad = (reason: string): never => { throw new Invalid(reason); };
@@ -96,7 +100,7 @@ function cleanWait(v: unknown): WaitReason {
 function cleanFlag(v: unknown): OverviewFlag {
   const f = obj(v, 'bad flag');
   return {
-    code: str(f.code, 'bad flag', 100) as OverviewFlag['code'],
+    code: oneOf<OverviewFlag['code']>(f.code, FLAG_CODES, 'bad flag'),
     detail: str(f.detail, 'bad flag', 2000),
     confidence: oneOf<OverviewFlag['confidence']>(f.confidence, CONFIDENCE, 'bad flag'),
   };
@@ -186,7 +190,7 @@ function cleanWake(v: unknown): WakeOverview | undefined {
 
 function cleanEntry(v: unknown, inst: { id: string; name: string }): OverviewEntry {
   const e = obj(v, 'bad entry');
-  const sessionId = str(e.sessionId, 'bad entry', 200);
+  const sessionId = id(e.sessionId, 'bad entry');
   const ei = obj(e.instance, 'bad entry');
   if (ei.id !== inst.id || e.key !== `${inst.id}:${sessionId}`) bad('entry from another instance');
   let offer: OverviewEntry['offer'];
@@ -245,7 +249,7 @@ function cleanEntry(v: unknown, inst: { id: string; name: string }): OverviewEnt
     context: cleanContext(e.context),
     ask: cleanAsk(e.ask),
     flags: arr(e.flags, 'bad entry', 50).map(cleanFlag),
-    primaryFlag: optStr(e.primaryFlag, 'bad entry', 100) as OverviewEntry['primaryFlag'],
+    primaryFlag: e.primaryFlag === undefined ? undefined : oneOf<NonNullable<OverviewEntry['primaryFlag']>>(e.primaryFlag, FLAG_CODES, 'bad entry'),
   }) as OverviewEntry;
 }
 
@@ -260,7 +264,7 @@ export function validateOverviewPayload(v: unknown): { ok: true; value: SessionO
     const o = obj(v, 'not an object');
     if (o.schemaVersion !== OVERVIEW_SCHEMA_VERSION) bad('schemaVersion mismatch');
     const ri = obj(o.instance, 'bad instance');
-    const inst = { id: str(ri.id, 'bad instance', 100), name: str(ri.name, 'bad instance', 200) };
+    const inst = { id: id(ri.id, 'bad instance'), name: str(ri.name, 'bad instance', 200) };
     if (!inst.id) bad('bad instance');
     const c = obj(o.counts, 'bad counts');
     const counts = {

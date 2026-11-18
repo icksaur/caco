@@ -191,19 +191,3 @@ export function removePeer(url: string, env: Record<string, string | undefined> 
   writeStored(keep);
   return { ok: true };
 }
-
-/** Record the instance id a peer reported (first successful fetch, or a change).
- *  The only write the overview fan-out makes, and only to peers.json. */
-export function recordPeerIdentity(origin: string, id: string, env: Record<string, string | undefined> = process.env): void {
-  const stored = readStored();
-  const cur = stored.find(p => p.origin === origin);
-  if (cur) {
-    if (cur.id === id) return;
-    cur.id = id; cur.rev = (cur.rev ?? 0) + 1;
-  } else {
-    const config = parsePeersEnv(env.CACO_PEERS).find(p => p.origin === origin);
-    if (!config) return;
-    stored.push({ ...config, addedBy: 'portal', id, rev: 1 });
-  }
-  writeStored(stored);
-}

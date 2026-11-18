@@ -11,7 +11,7 @@ import {
   type OverviewShow, type OverviewEntry, type SessionOverview,
 } from './session-overview.js';
 import { fetchPeerOverviews, type FanoutOptions, type PeerFetchResult, type PeerStatus } from './overview-fanout.js';
-import { getPeers, parseAllowRemote, recordPeerIdentity } from './peer-store.js';
+import { getPeers, parseAllowRemote } from './peer-store.js';
 
 export interface OverviewQuery {
   scope: 'local' | 'all';
@@ -75,7 +75,7 @@ export async function computeOverview(q: OverviewQuery, deps: OverviewServiceDep
   const peers = getPeers(env);
   const results: PeerFetchResult[] = peers.length === 0 ? [] : await fetchPeerOverviews({
     peers, selfId: local.instance.id, allowRemote: parseAllowRemote(env.CACO_PEERS_ALLOW_REMOTE),
-    context: q.context, onIdentity: (origin, id) => recordPeerIdentity(origin, id, env), ...deps.fanout,
+    context: q.context, ...deps.fanout,
   });
   // A peer's data passed validation, but merging must still never fail the
   // call (Invariant 7): add peers one at a time and drop any whose data makes

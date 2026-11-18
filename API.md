@@ -29,7 +29,7 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `POST /api/sessions/:id/cancel` - Cancel current streaming
 - `GET /api/sessions/:id/export` - Export session as .tar.gz archive
 - `POST /api/sessions/import` - Import session from .tar.gz archive
-- `GET /api/peers` - List known Caco peers: stored portal peers plus `CACO_PEERS` config peers. Each entry has `url`, `hostname` (legacy), `name`, `origin` (`scheme://host:port`), `addedBy` (`portal` | `config`), `rev`, and `id` once the peer's instance id is known
+- `GET /api/peers` - List known Caco peers: stored portal peers plus `CACO_PEERS` config peers. Each entry has `url`, `hostname` (legacy), `name`, `origin` (`scheme://host:port`), `addedBy` (`portal` | `config`), `rev`, and `id` if one was stored (the overview never writes it)
 - `POST /api/peers` - Legacy whole-list write from older portals. **Merge only**: adds new peers and renames, never deletes. Returns `{ok, count, added, updated}`
 - `POST /api/peers/add` - `{url, name?}`: add or rename one peer. `url` must be an http(s) origin with no credentials, path, query or fragment; this instance itself is refused (400)
 - `POST /api/peers/remove` - `{url}`: remove one peer (404 if unknown). A `CACO_PEERS` config peer cannot be removed (403)
@@ -1097,8 +1097,9 @@ Query parameters:
   port forwards), others only when listed in `CACO_PEERS_ALLOW_REMOTE`
   (comma list of origins); `redirect: error`; 4 MB body cap; 5 s per peer, 8 s
   for the whole call, at most 8 peers at a time; the request carries
-  `X-Caco-Overview-Hop: 1`. A failing peer never fails the call. The only write
-  is the peer's instance id, stored in `peers.json` on first contact.
+  `X-Caco-Overview-Hop: 1`. A failing peer never fails the call. Nothing is
+  written, including `peers.json`: self-detection uses the instance id each peer
+  reports in its response.
 - A request with header `X-Caco-Overview-Hop: 1` (a peer hop) may only use
   `scope=local`; `scope=all` is 400.
 - Responses set `Cache-Control: no-store`.

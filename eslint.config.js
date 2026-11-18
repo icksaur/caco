@@ -65,6 +65,11 @@ export default [
           { group: ['**/session-messages*', './session-messages*', '../session-messages*', './routes/session-messages*'], message: 'Overview is read only: no dispatch.' },
           { group: ['**/session-auto-repair*', './session-auto-repair*', '../session-auto-repair*'], message: 'Overview is read only: no repair.' },
           {
+            group: ['**/peer-store*', './peer-store*', '../peer-store*', '**/storage', './storage.js', '../storage.js'],
+            importNames: ['recordPeerIdentity', 'writeStored', 'setPeers', 'mergePeers', 'addPeer', 'removePeer'],
+            message: 'Overview is read only: no peer registry writes.',
+          },
+          {
             group: ['**/storage*', './storage*', '../storage*', '**/session-meta-store*', './session-meta-store*', '../session-meta-store*'],
             importNames: ['updateSessionMeta', 'ensureSessionMeta', 'setSessionMeta', 'markSessionObserved', 'markSessionIdle', 'setSessionIntent', 'setSessionOrder'],
             message: 'Overview is read only: use readSessionMeta/getSessionMeta.',

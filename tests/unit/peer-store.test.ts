@@ -113,18 +113,6 @@ describe('mutations', () => {
     expect(read()).toEqual([]);
     expect(store.removePeer('http://localhost:53001', {})).toMatchObject({ ok: false, status: 404 });
   });
-
-  it('records a learned instance id once; a config peer gets a stored entry for it', () => {
-    store.addPeer('http://localhost:53001', 'a');
-    store.recordPeerIdentity('http://localhost:53001', 'id-1', {});
-    store.recordPeerIdentity('http://localhost:53001', 'id-1', {});
-    expect(read()[0]).toMatchObject({ id: 'id-1', rev: 2 });
-    const cfg = { CACO_PEERS: 'cfg=http://localhost:53009' };
-    store.recordPeerIdentity('http://localhost:53009', 'id-9', cfg);
-    expect(store.getPeers(cfg).find(p => p.origin === 'http://localhost:53009')).toMatchObject({ id: 'id-9', addedBy: 'config' });
-    store.recordPeerIdentity('http://localhost:59999', 'nobody', {});
-    expect(read()).toHaveLength(2);
-  });
 });
 
 describe('CACO_PEERS_ALLOW_REMOTE', () => {

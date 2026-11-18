@@ -9,10 +9,10 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { collectOverviewInputs, realOverviewSources, type OverviewContextMode, type OverviewSources } from '../session-overview-io.js';
-import { buildSessionOverview, mergeSessionOverviews, overviewThresholdsFromEnv, type OverviewShow, type OverviewEntry } from '../session-overview.js';
-import { fetchPeerOverviews, OVERVIEW_HOP_HEADER, type FanoutOptions, type PeerFetchResult } from '../overview-fanout.js';
-import { getPeers, parseAllowRemote, recordPeerIdentity } from '../peer-store.js';
+import { realOverviewSources, type OverviewContextMode, type OverviewSources } from '../session-overview-io.js';
+import type { OverviewShow } from '../session-overview.js';
+import { OVERVIEW_HOP_HEADER, type FanoutOptions } from '../overview-fanout.js';
+import { computeOverview } from '../overview-service.js';
 
 const router = Router();
 
@@ -34,15 +34,6 @@ export function _setFanoutOptionsForTests(o: Partial<FanoutOptions> | null): voi
 
 const one = (v: unknown): string | undefined => (typeof v === 'string' ? v : Array.isArray(v) && typeof v[0] === 'string' ? v[0] : undefined);
 
-/** `brief` keeps the last user and assistant excerpts; `full` adds error and event type. */
-function applyContextMode(entries: OverviewEntry[], mode: OverviewContextMode): void {
-  if (mode !== 'brief') return;
-  for (const e of entries) {
-    delete e.context.lastError;
-    delete e.context.lastEventType;
-  }
-}
-
 router.get('/overview', async (req: Request, res: Response) => {
   res.set('Cache-Control', 'no-store');
   const scope = one(req.query.scope) ?? 'local';
@@ -58,59 +49,7 @@ router.get('/overview', async (req: Request, res: Response) => {
   if (!CONTEXTS.has(context)) { res.status(400).json({ error: 'context must be brief, full or none' }); return; }
   const keys = keysRaw ? keysRaw.split(',').map(k => k.trim()).filter(Boolean) : undefined;
   try {
-    const inputs = await collectOverviewInputs(sourcesFactory(), { context });
-    const thresholds = overviewThresholdsFromEnv(process.env);
-    if (scope === 'local') {
-      const ov = buildSessionOverview(inputs, Date.now(), { show, keys, thresholds });
-      applyContextMode(ov.entries, context);
-      res.json({ ...ov, scope, coverage: 'complete' });
-      return;
-    }
-    // Hub: classify locally unfiltered, fetch peers, merge, then filter.
-    const local = buildSessionOverview(inputs, Date.now(), { show: 'all', thresholds });
-    const peers = getPeers();
-    const results: PeerFetchResult[] = peers.length === 0 ? [] : await fetchPeerOverviews({
-      peers, selfId: local.instance.id, allowRemote: parseAllowRemote(process.env.CACO_PEERS_ALLOW_REMOTE),
-      context, onIdentity: recordPeerIdentity, ...fanoutOverrides,
-    });
-    const ok = results.filter(r => r.status === 'ok' && r.overview);
-    // A peer's data passed validation, but merging must still never fail the
-    // call (Invariant 7): add peers one at a time and drop any whose data makes
-    // the merge throw, reporting it invalid.
-    const accepted = [local];
-    for (const r of ok) {
-      try {
-        mergeSessionOverviews([...accepted, r.overview!]);
-        accepted.push(r.overview!);
-      } catch {
-        r.status = 'invalid';
-        r.reason = 'merge failed';
-        delete r.overview;
-      }
-    }
-    const merged = mergeSessionOverviews(accepted, { show, keys });
-    applyContextMode(merged.entries, context);
-    const partial = accepted.length === 1 || results.some(r => r.status !== 'ok' && r.status !== 'self');
-    res.json({
-      schemaVersion: local.schemaVersion,
-      scope,
-      coverage: partial ? 'partial' : 'complete',
-      ...(peers.length === 0 && { note: 'No peers are registered here; all-machine views run on the portal host.' }),
-      instance: local.instance,
-      generatedAt: local.generatedAt,
-      show,
-      wakeLoopEnabled: local.wakeLoopEnabled,
-      instances: [
-        { instance: { ...local.instance, self: true }, status: 'ok', fetchedAt: local.generatedAt, counts: local.counts },
-        ...results.map(r => ({
-          instance: r.instance, status: r.status, fetchedAt: r.fetchedAt,
-          ...(r.reason && { reason: r.reason }),
-          ...(r.overview && { counts: r.overview.counts, wakeLoopEnabled: r.overview.wakeLoopEnabled }),
-        })),
-      ],
-      counts: merged.counts,
-      entries: merged.entries,
-    });
+    res.json(await computeOverview({ scope: scope as 'local' | 'all', show, context, keys }, { sources: sourcesFactory, fanout: fanoutOverrides }));
   } catch (e) {
     console.error(`[OVERVIEW] collection failed: ${e instanceof Error ? e.name : typeof e}`);
     res.status(500).json({ error: 'overview collection failed' });

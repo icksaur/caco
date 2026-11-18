@@ -1,8 +1,9 @@
 # Spec: session overview (aggregated, read-only)
 
-Status: DRAFT r3. r2 folded in an Astra (gpt-6-astra) review (listed at the
-end); r3 applies Carl's decisions (see Decisions); r4 adds the tool output
-budget; r5 folds in Astra's review of r4.
+Status: IMPLEMENTED (r5; phases 1-5 on master, 2026-11-17). r2 folded in an
+Astra (gpt-6-astra) review (listed at the end); r3 applies Carl's decisions
+(see Decisions); r4 adds the tool output budget; r5 folds in Astra's review of
+r4. Implementation notes follow each design section.
 
 ## Goals
 
@@ -426,6 +427,9 @@ Implementation notes (phase 3: `src/session-overview.ts`,
   an info flag `wake-loop-disabled`, `wake-overdue` and the "next will be
   final" `wake-expiring` are suppressed, and the response carries
   `wakeLoopEnabled: false`. With no other wait, the driver flags apply.
+- `context-unavailable` is not raised for `ENOENT`: a session that was never
+  messaged has no `events.jsonl`. The context still reports
+  `unavailable (ENOENT)`. (Found in the phase 5 smoke: 18 such sessions.)
 - `duplicate-session` is hub-only and arrives with phase 4.
 - `scope=all` returns local data with `coverage: 'partial'` and a `note` until
   phase 4.
@@ -547,6 +551,25 @@ hundred sessions or with a small budget override.
 The description states that it is read-only, that excerpts
 and every peer-supplied field are **untrusted data**, and that it must not be
 used as a reason to send anything without Carl.
+
+Implementation notes (phase 5: `src/overview-tool.ts`, `src/overview-service.ts`):
+
+- `computeOverview` holds the route's code path (local collection, fan-out,
+  guarded merge); the route and the tool both call it, so the tool never makes
+  an HTTP request to its own instance. Both modules are under the read-only
+  lint rule.
+- The tool is registered with the other Caco tools and is not on
+  `NEVER_DEFER_CACO_TOOLS`, so the existing staleness rule defers it (a tool
+  never used is maximally stale).
+- Page 1 always collects fresh and refreshes the cache entry; pages 2+ reuse
+  it within 60 s, else recollect and say so. The cache key is
+  `{scope, show, context, keys}`; `wakeHistory` and `page` only affect
+  rendering.
+- The header budget is reserved with worst-case numbers; the continuation line
+  reserves 64 bytes on every page once pagination is needed. A degraded row
+  keeps its primary flag on its compact line.
+- Degradation tie-break: lowest primary rank first (an offer-only row has no
+  flag and goes first), then least recent activity, then key.
 
 ### Morning triage recipe
 

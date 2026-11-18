@@ -301,6 +301,10 @@ describe('drivers and context (O1)', () => {
     expect(codes(u)).toEqual(['context-unavailable:high']);
     expect(u.flags[0].detail).toContain('EBUSY');
     expect(has(one(s('a', {}, { tail: { context: { status: 'skipped-deadline' }, ask: { matched: null } } })), 'context-unavailable')).toBe(true);
+    // A session never messaged has no transcript: reported, not flagged.
+    const fresh = one(s('a', {}, { tail: { context: { status: 'unavailable', errorCode: 'ENOENT' }, ask: { matched: null } } }));
+    expect(fresh.context).toEqual({ status: 'unavailable', errorCode: 'ENOENT' });
+    expect(has(fresh, 'context-unavailable')).toBe(false);
     const none = one(s('a', {}, { tail: undefined }), { contextRead: false });
     expect(none.context).toEqual({ status: 'not-read' });
     expect(none.flags).toEqual([]);

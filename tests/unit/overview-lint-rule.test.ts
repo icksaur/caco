@@ -30,6 +30,9 @@ describe('overview read-only lint rule (O10)', () => {
     ['src/routes/overview.ts', "import { dispatchMessage } from './session-messages.js';\nexport const x = dispatchMessage;\n"],
     ['src/routes/overview.ts', "import { wakeManager } from '../wake-runtime.js';\nexport const x = wakeManager;\n"],
     ['src/session-overview.ts', "import { setSessionMeta } from './storage.js';\nexport const x = setSessionMeta;\n"],
+    ['src/overview-tool.ts', "import { dispatchMessage } from './routes/session-messages.js';\nexport const x = dispatchMessage;\n"],
+    ['src/overview-service.ts', "import { activityVersion } from './activity-version.js';\nexport const x = activityVersion;\n"],
+    ['src/overview-fanout.ts', "import { unobservedTracker } from './unobserved-tracker.js';\nexport const x = unobservedTracker;\n"],
   ])('%s: forbidden import is reported', async (file, code) => {
     expect(await lint(file, code)).toContain('no-restricted-imports');
   });

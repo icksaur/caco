@@ -152,7 +152,18 @@ Open `/portal.html` to aggregate multiple Caco instances in a single view. Each 
 - **Merged pager.** The `PG` button at the top of the sidebar (or `/portal.html#pager`) opens one pager board for every instance. Each card and busy row is labeled with its instance. Send and Dismiss go to the instance that owns the session, and clicking a session name opens it in that instance. An instance that is down shows as `unreachable` without breaking the board. Its count badge shows how many cards are waiting.
 - **Remote instances and the merged pager.** Each remote instance only answers a portal on an origin it trusts, because the board can send prompts. By default that is `http://localhost:53000` (and `http://127.0.0.1:53000`), so no setup is needed when you open the portal there. If your portal is at a different address, set `CACO_PORTAL_ORIGINS` on each remote instance to that origin and restart it (comma-separate several; the list replaces the default). Set `CACO_PORTAL_ORIGINS=none` to turn the bridge off for other origins. When an instance refuses, the board lists it as not connected and shows the value to use. See [docs/spec-portal-pager.md](docs/spec-portal-pager.md).
 
+### Session overview and morning triage
+
+`caco_sessions_overview` is a read-only tool that lists every session on every instance in the portal (auto-archived ones are only counted) with why each one may move again (an offer to you, an armed wake, a pending retry, busy children, a schedule) and what looks stuck: no driver at all, a question with no offer, stale offers, failing or quiet wakes, long busy turns, duplicate copies across machines. Each flagged session gets a full row with evidence and a short, labeled excerpt; the rest get one line each. It is deferred by default; ask for it or enable it with `caco_enable_tools`. The same data is at `GET /api/overview` (see [API.md](API.md#session-overview)).
+
+**Morning triage recipe.** Keep one track session for it and arm a daily wake at 07:30:
+
+> Every weekday morning, call `caco_sessions_overview` (scope all, show attention), then tell me in five lines or less what needs me, and end with a caco-actions block listing the two to four things I should do first. Do not message anyone or act on other sessions yourself. Set a caco_wake every 24 hours at 07:30 for this.
+
+The wake fires inside the active window, the session reads the overview, and you get an offer on the pager. Excerpts and peer data are untrusted, and the tool tells the model never to act on them without you.
+
 ### Pager
+
 
 Open `/pager.html` to triage finished work in one place, away from the main UI.
 To triage several machines on one board, use the merged pager in the [Portal](#portal).

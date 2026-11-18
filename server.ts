@@ -54,6 +54,7 @@ import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { startWakeManager, stopWakeManager, wakeManager } from './src/wake-runtime.js';
 import { createWakeTool } from './src/wake-tool.js';
+import { createOverviewTool } from './src/overview-tool.js';
 import { getInstanceIdentity } from './src/instance-identity.js';
 import { registerUsageSink } from './src/usage-metrics.js';
 import { appendUsageRecord } from './src/usage-store.js';
@@ -298,8 +299,11 @@ async function start(): Promise<void> {
     const browserTools = createBrowserTools(sessionRef);
     const toolRevealTools = createToolRevealTool(sessionRef);
     const wakeTools = createWakeTool(sessionRef);
+    // Read-only session overview (spec-session-overview). Not in
+    // NEVER_DEFER_CACO_TOOLS, so a session that never used it gets it deferred.
+    const overviewTools = createOverviewTool();
     
-    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...herdTools, ...sessionHistoryTools, ...memoryTools, ...reportIntentTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools, ...toolRevealTools, ...wakeTools];
+    const allTools = [...appletTools, ...agentTools, ...mcpAuthTools, ...docs, ...extensionTools, ...delegateTools, ...herdTools, ...sessionHistoryTools, ...memoryTools, ...reportIntentTools, ...indexTools, ...retrieveTools, ...workflowTools, ...surfaceTools, ...browserTools, ...toolRevealTools, ...wakeTools, ...overviewTools];
     // Capture the full Caco tool catalog (pre-filter, incl. hard-disabled) once, for
     // the mcp-servers applet. See docs/spec-tool-reveal.md Phase A.
     if (sessionManager.getCacoToolCatalog().length === 0) {

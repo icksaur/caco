@@ -1332,6 +1332,36 @@ failed wakes in a row, or 7 days with no human message (after one final wake
 that asks to renew), the wake pauses and the session is marked unobserved. The
 session should call `clear` when it is no longer waiting on anything external.
 
+### Session Overview Tool
+
+`caco_sessions_overview`, defined in `src/overview-tool.ts` (data from
+`src/overview-service.ts`, the same code path as `GET /api/overview`, called in
+process). Read only. Deferred by default like other rarely used Caco tools
+(not on `NEVER_DEFER_CACO_TOOLS`); enable it with `caco_enable_tools`.
+
+| param | values |
+|---|---|
+| `scope` | `all` (default: this instance plus peers) or `local` |
+| `show` | `all` (default), `attention`, `busy`, `wakes`, `waiting` |
+| `context` | `brief` (default), `full`, `none` |
+| `wakeHistory` | wake runs per full row, default 3, max 20 |
+| `keys` | `instanceId:sessionId` or bare session ids |
+| `page` | 1-based page, default 1 |
+
+The result is text only: a coverage line (instances and their status,
+sessions total, shown, omitted and omitted-and-flagged, auto-archive excluded,
+rows full, compact and degraded, page n of m, wake-loop and recollect notes),
+an untrusted-data line, then full rows (primary flag first, other flags inline,
+waits, offer, wake with recent runs, herd, schedule, labeled excerpts) and
+one-line compact rows. Each page is at most 64 KB of UTF-8
+(`CACO_OVERVIEW_TOOL_MAX_BYTES`, clamped 8 KB to 256 KB). When the list does not
+fit one page, the lowest-ranked full rows become compact first
+(`awaiting-user-no-offer`, `no-driver` high, `wake-failing` and `busy-long`
+last); if it still does not fit it is split into pages, and every page but the
+last ends with `continued: call again with page: N`. Page 1 always collects
+fresh; later pages reuse that pass for 60 s, after which the coverage line says
+the pass was recollected.
+
 ### Comms Guard
 
 Not a tool: an `onPreToolUse` hook on every session (`src/comms-guard.ts`).

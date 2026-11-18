@@ -491,7 +491,9 @@ function classifyOne(
     if (dismissedOffer) flag('offer-dismissed-no-driver', `offer from ${entry.offer!.at} was dismissed; nothing will move it`, 'low');
   }
 
-  if (inputs.contextRead && entry.context.status !== 'ok' && entry.context.status !== 'not-read') {
+  // ENOENT is a session that has never had a message (no transcript yet), not a read failure.
+  const neverMessaged = entry.context.status === 'unavailable' && entry.context.errorCode === 'ENOENT';
+  if (inputs.contextRead && entry.context.status !== 'ok' && entry.context.status !== 'not-read' && !neverMessaged) {
     flag('context-unavailable', `context ${entry.context.status}${entry.context.errorCode ? ` (${entry.context.errorCode})` : ''}`);
   }
 

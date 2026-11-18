@@ -39,8 +39,12 @@ export const PAGER_MAX_OFFER_AGE_MS =
  *
  * `scheduled` is deliberately NOT excluded: a run that finished overnight with
  * nobody watching is exactly what a pager is for. The old coupling hid those too.
+ *
+ * `agent` is NOT excluded either: it only records that another session created
+ * this one. Such sessions are often long-lived work tracks that ask the user
+ * directly, and a herd child is caught by its `orchestratedBy` bond instead.
  */
-const EXCLUDED_KINDS: ReadonlySet<SessionKind> = new Set(['agent', 'swarm'] as SessionKind[]);
+const EXCLUDED_KINDS: ReadonlySet<SessionKind> = new Set(['swarm'] as SessionKind[]);
 
 export interface PagerSessionInput {
   sessionId: string;

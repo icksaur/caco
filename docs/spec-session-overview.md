@@ -39,7 +39,10 @@ model; a portal UI in v1 (see Open decisions).
 
 - **Pager read model** `src/pager-view.ts`: `needsTriage` (`:155-166`) hides an
   offer older than `PAGER_MAX_OFFER_AGE_MS` (7 days, `:27-28`), dismissed offers,
-  `agent`/`swarm` kinds, herd children, and (since `50cf5d9`) `auto-archive`.
+  `swarm` sessions, herd children, and (since `50cf5d9`) `auto-archive`. Until
+  the overview shipped it also hid `agent`-kind sessions; it no longer does,
+  since an agent-created session without a herd bond is often a work track that
+  asks the user directly.
   That is right for a human board and wrong for an audit: the oldest unresolved
   offers are exactly what an orchestrator must see. The overview therefore does
   **not** reuse `needsTriage` as a filter; it reuses its parts as facts.
@@ -162,7 +165,9 @@ type WaitReason =
 
 Offer facts are separate from pager visibility: `dismissed`, `ageMs` and
 `onPager` (the `needsTriage` verdict) are all reported, so a 10-day-old offer is
-visible and flagged even though the pager stopped showing it.
+visible and flagged even though the pager stopped showing it. The tool names the
+reason an offer is off the pager: herd child, swarm session, dismissed, turn
+running, offer time unknown, or older than the pager window.
 
 ### Wake history
 

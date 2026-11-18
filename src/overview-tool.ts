@@ -107,6 +107,17 @@ function isProtected(e: OverviewEntry): boolean {
     || (f.code === 'no-driver' && f.confidence === 'high'));
 }
 
+/** Why an offer is off the pager, from the row's facts (works for peer rows too). */
+export function offPagerReason(e: OverviewEntry): string {
+  if (e.hidden === 'herd-child') return 'herd child';
+  if (e.hidden === 'swarm') return 'swarm session';
+  if (e.hidden === 'agent') return 'agent session'; // a peer still on the old pager rule
+  if (e.offer?.dismissed) return 'dismissed';
+  if (e.activity === 'busy') return 'turn running';
+  if (e.offer?.ageMs === null || e.offer?.ageMs === undefined) return 'offer time unknown';
+  return 'older than the pager window';
+}
+
 export function renderCompactRow(e: OverviewEntry, degraded = false): string {
   const parts = [
     `- ${clipChars(one(e.title), 80)}`,
@@ -139,7 +150,7 @@ export function renderFullRow(e: OverviewEntry, wakeHistory: number): { core: st
   if (e.lastHumanAt) L.push(`last human message ${t(e.lastHumanAt)}`);
   if (e.offer) {
     const o = e.offer;
-    L.push(`offer: ${o.options.length} option(s) at ${t(o.at)}, age ${age(o.ageMs)}, ${o.dismissed ? 'dismissed' : 'not dismissed'}, ${o.onPager ? 'on the pager' : 'not on the pager'}; options (untrusted): ${o.options.map(x => q(x, 80)).join(' / ')}`);
+    L.push(`offer: ${o.options.length} option(s) at ${t(o.at)}, age ${age(o.ageMs)}, ${o.dismissed ? 'dismissed' : 'not dismissed'}, ${o.onPager ? 'on the pager' : `not on the pager (${offPagerReason(e)})`}; options (untrusted): ${o.options.map(x => q(x, 80)).join(' / ')}`);
   }
   if (e.wake) {
     const w = e.wake;

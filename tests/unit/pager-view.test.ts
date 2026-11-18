@@ -85,10 +85,11 @@ describe('needsTriage', () => {
     { label: 'offer one ms past the edge', over: { responseOptionsAt: new Date(NOW - PAGER_MAX_OFFER_AGE_MS - 1).toISOString() }, expected: false },
     { label: 'no timestamps at all', over: { responseOptionsAt: undefined, lastIdleAt: undefined }, expected: false },
     { label: 'stale offer AND dismissed', over: { responseOptionsAt: ago(30 * DAY), pagerDismissedAt: ago(29 * DAY) }, expected: false },
-    // Agent-driven sessions are drained by whoever drives them, so their offers
-    // are not the user's to action. This exclusion used to be an accident of
-    // gating on isUnobserved; dropping that gate would have admitted them.
-    { label: 'herd child by kind', over: { kind: 'agent' }, expected: false },
+    // Swarm sessions and herd children are drained by whoever drives them, so
+    // their offers are not the user's to action. An agent-created session with
+    // no herd bond is often a work track that asks the user directly.
+    { label: 'agent-created session', over: { kind: 'agent' }, expected: true },
+    { label: 'agent-created herd child', over: { kind: 'agent', orchestratedBy: 'parent-1' }, expected: false },
     { label: 'swarm session', over: { kind: 'swarm' }, expected: false },
     { label: 'herd child by bond', over: { orchestratedBy: 'parent-1' }, expected: false },
     // A scheduled run that finished overnight with nobody watching is exactly

@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  renderOverviewPage, createOverviewHandler, toolMaxBytes, clipBytes, renderCompactRow, oneLine, TOOL_CACHE_TTL_MS, TOOL_CACHE_MAX_ENTRIES,
+  renderOverviewPage, createOverviewHandler, toolMaxBytes, clipBytes, renderCompactRow, oneLine, offPagerReason, TOOL_CACHE_TTL_MS, TOOL_CACHE_MAX_ENTRIES,
 } from '../../src/overview-tool.js';
 import { buildSessionOverview, mergeSessionOverviews, type OverviewSessionInput, type SessionOverview } from '../../src/session-overview.js';
 import type { OverviewResult } from '../../src/overview-service.js';
@@ -350,5 +350,30 @@ describe('handler cache (O9)', () => {
     await s.handler({ scope: 'local', show: 'all' });
     await s.handler({ scope: 'local', show: 'busy', page: 2 });
     expect(s.passes()).toBe(2);
+  });
+});
+
+
+describe('off-pager reason', () => {
+  const offer = (at: string, extra: NonNullable<OverviewSessionInput['meta']> = {}) => ({ responseOptions: ['Go'], responseOptionsAt: at, ...extra });
+  const entryOf = (id: string, ov: SessionOverview) => ov.entries.find(e => e.sessionId === id)!;
+
+  it('names why an offer is not on the pager', () => {
+    const ov = overview([
+      sess('p'),
+      sess('child', {}, offer(ago(H), { orchestratedBy: 'p' })),
+      sess('swarm', {}, offer(ago(H), { kind: 'swarm' })),
+      sess('dismissed', {}, offer(ago(H), { pagerDismissedAt: ago(MIN) })),
+      sess('old', {}, offer(ago(10 * D))),
+      sess('agent', {}, offer(ago(H), { kind: 'agent' })),
+    ]);
+    expect(offPagerReason(entryOf('child', ov))).toBe('herd child');
+    expect(offPagerReason(entryOf('swarm', ov))).toBe('swarm session');
+    expect(offPagerReason(entryOf('dismissed', ov))).toBe('dismissed');
+    expect(offPagerReason(entryOf('old', ov))).toBe('older than the pager window');
+    expect(entryOf('agent', ov).offer!.onPager).toBe(true);
+    const text = render(local(ov)).text;
+    expect(text).toContain('not on the pager (herd child)');
+    expect(text).toContain('not on the pager (swarm session)');
   });
 });

@@ -143,6 +143,11 @@ describe('offers (O1)', () => {
     const ov = build([s('p'), s('c', { orchestratedBy: 'p', ...offer(ago(H)) })]);
     expect(ov.entries.find(e => e.sessionId === 'c')!.offer!.onPager).toBe(false);
   });
+
+  it('an agent-created session offer is on the pager; a swarm session offer is not', () => {
+    expect(one(s('a', { kind: 'agent', ...offer(ago(H)) })).offer!.onPager).toBe(true);
+    expect(one(s('w', { kind: 'swarm', ...offer(ago(H)) })).offer!.onPager).toBe(false);
+  });
 });
 
 describe('wakes (O1)', () => {

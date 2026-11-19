@@ -1,9 +1,112 @@
 # Spec: session overview (aggregated, read-only)
 
-Status: IMPLEMENTED (r5; phases 1-5 on master, 2026-11-17). r2 folded in an
-Astra (gpt-6-astra) review (listed at the end); r3 applies Carl's decisions
-(see Decisions); r4 adds the tool output budget; r5 folds in Astra's review of
-r4. Implementation notes follow each design section.
+Status: IMPLEMENTED (r5; phases 1-5 on master, 2026-11-17). r6 (facts only,
+phase 6) is APPROVED and supersedes the flags, tiers, ask heuristic and
+flag-based ordering; see "r6: facts only" below. r2 folded in an Astra
+(gpt-6-astra) review (listed at the end); r3 applies Carl's decisions (see
+Decisions); r4 adds the tool output budget; r5 folds in Astra's review of r4.
+Implementation notes follow each design section.
+
+## r6: facts only
+
+**Why.** The consumer of the overview is an LLM (GPT or Claude) in an
+orchestrator or triage session. It classifies better than fixed rules. The r5
+classifier added judgments (flags with confidence, a primary flag, full and
+compact tiers, an ask heuristic) that anchored the reader and decided which
+rows got excerpts. A heuristic miss became a one-line row the model could not
+judge, which is the exact case the feature exists to catch. Observed on
+2026-11-18: a finished release was flagged `no-driver`, and a healthy wake was
+flagged `wake-note-dated`.
+
+**Rule.** Caco reports facts it can compute exactly and the model cannot
+derive. The model makes every judgment. The tool description says so.
+
+**Removed.**
+
+- `flags`, `OverviewFlag`, `OVERVIEW_FLAG_CODES`, `FLAG_RANK`, `flagRank`,
+  `primaryFlag`, `tier`, `children-stuck`, `datedNote`.
+- `OverviewThresholds`, `DEFAULT_OVERVIEW_THRESHOLDS`,
+  `overviewThresholdsFromEnv` and every `CACO_OVERVIEW_*` threshold env var.
+  (`CACO_OVERVIEW_TOOL_MAX_BYTES` stays; `CACO_WAKE_EXPIRE_MS` stays where the
+  wake code uses it.)
+- The ask heuristic: `AskVerdict`, `ask` on the entry and on `TailResult`, the
+  fence and phrase logic, and `oversized` / `truncated-start` verdicts in
+  `sdk-session-tail.ts`. The tail reader still selects the last substantive
+  assistant message for the excerpt.
+- `show: 'attention'` (route 400s it like any unknown value);
+  `counts.omittedFlagged`, `counts.full`, `counts.compact`; the degrade step
+  of the tool budget.
+
+**Kept (facts).** Everything else on the entry: `waits` (empty still means
+nothing will move it), offer facts including `onPager`, busy since, pending
+tools and intent, retry attempt, the full `WakeOverview` (counters, history,
+defers, `consecutiveFailures`, `pausedReason`, `finalWakeAt`, `lastError`),
+schedule, herd parent and parent state, children and busy children, folder,
+`hidden`, `lastHumanAt`, `lastActivityAt`, `context` including `status`,
+`errorCode` and `lastError`, `wakeLoopEnabled` on the response.
+
+**Added (facts that used to live only inside a flag).**
+
+- `duplicateOn?: string[]` on an entry: names (or short ids) of the other
+  instances that report the same session id. Set by the hub merge.
+- `wake.nextIsFinal?: true` when the next fire will be the final one under
+  the wake expiry rule (`isExpired`), only while the wake loop is enabled and
+  the wake is not paused.
+
+**Ordering.** One rule for every row: `lastActivityAt` descending (missing
+sorts oldest), then `key` ascending. Busy rows are not special-cased; their
+`lastActivityAt` is recent.
+
+**`show` values.** `all` (default) | `busy` (busy rows) | `wakes` (rows with a
+wake) | `waiting` (idle rows with any wait or any offer, dismissed or not).
+Counts are `total`, `shown`, `omitted`, `archivedExcluded`.
+
+**Tool rendering.** Every row has the same shape:
+
+```
+### <title>
+key <instance:session> | instance <name> | <kind>[ (hidden)] | <busy since ... | idle>[ | folder f][ | cwd c]
+waits: <list> | none (nothing will move it)
+[offer: n option(s) at T, age A, dismissed?, on the pager | not on the pager (reason); options (untrusted): ...]
+[wake: every Nh, next T[, next is final], last <result> at T, failures in a row N[, paused <reason>][, last error "..."], counters ...]
+[wake note (untrusted): "..."]
+[wake runs (last N): ...]
+[schedule ..., herd ..., also on <instances>]
+last human message T | context <status>[ (code)][, window starts after the turn began]
+excerpts (untrusted ...):
+  user [source] T: "..." (at most 200 chars)
+  assistant T: "..." (at most 400 chars, keeps the end)
+  [error T: "..." in context: full]
+```
+
+`context: 'none'` drops the excerpt lines. The excerpt cap is per row, so a row
+is about 1-1.5 KB. 37 sessions measured on 2026-11-18 fit one 64 KB page;
+larger sets paginate in order (rows never merged, each key on exactly one
+page, an oversize row clipped with its excerpts cut first). The coverage line
+drops the full/compact/degraded and omitted-flagged counts.
+
+**Wire format.** `OVERVIEW_SCHEMA_VERSION` becomes 2. The fan-out validator
+drops the flag, tier, primary-flag and ask fields and accepts `duplicateOn`
+and `wake.nextIsFinal`. A peer answering with another `schemaVersion` is
+reported `outdated` with the version in the reason, never merged.
+
+**Unchanged.** Read-only invariants and the lint rule, wake history recording,
+the tail reader's bounds, redaction and cache, peers and fetch policy, paging
+and its 60 s cache, `oneLine` sanitizing, `offPagerReason`.
+
+**Acceptance (r6).**
+
+| # | behavior | oracle |
+|---|---|---|
+| R1 | Entries carry no `flags`, `tier`, `primaryFlag` or `ask`; the facts above are present for fixture sessions (busy, retry, offer fresh/old/dismissed, wake armed/paused/final-next/loop-disabled, schedule, herd parent missing/archived, children) | `session-overview.test.ts` |
+| R2 | Order is last activity descending then key, stable under shuffled multi-instance input | `session-overview.test.ts`, `overview-tool.test.ts` |
+| R3 | `duplicateOn` is set on every copy of a session id seen on two instances | `session-overview.test.ts` |
+| R4 | Every rendered row has excerpts when context was read; `none` has none; pages stay within the byte cap; 1,000 sessions at 8 KB paginate with each key on exactly one page | `overview-tool.test.ts` |
+| R5 | `show=attention` is a 400; a peer with `schemaVersion` 1 is `outdated` | route and fan-out tests |
+| R6 | The tail reader returns no ask verdict and still picks the last substantive assistant message | `sdk-session-tail.test.ts` |
+
+Sections below that describe flags, tiers, the ask heuristic, primary-flag
+ordering or the degrade step are r5 history and are superseded by this one.
 
 ## Goals
 
@@ -678,6 +781,7 @@ ends with a `caco-actions` offer listing what Carl must do. Documented in README
 | 3 | Collector (read-only I/O, import rule) and pure `buildSessionOverview` with waits, flags, tiers and the ask heuristic | O1, O2, O4, O10, O11 |
 | 4 | Peer registry changes and `scope=all` fan-out with the fetch policy | O5, O8 |
 | 5 | `caco_sessions_overview` tool; API.md, README (tool and morning triage recipe) | O9 |
+| 6 | r6 facts only: remove flags, tiers, thresholds and the ask heuristic; add `duplicateOn`, `wake.nextIsFinal`; uniform rows; schema 2 | R1-R6 |
 
 ## Decisions
 
@@ -690,6 +794,9 @@ ends with a `caco-actions` offer listing what Carl must do. Documented in README
    `coverage: 'partial'`.
 4. **Excerpts:** on by default (`brief`); `none` available.
 5. **Portal UI:** none in v1.
+6. **Facts only (r6, 2026-11-19).** The overview is consumed by an LLM, which
+   classifies. Caco drops every judgment (flags, tiers, ask heuristic,
+   thresholds) and reports facts with excerpts on every row.
 
 ## Review log
 

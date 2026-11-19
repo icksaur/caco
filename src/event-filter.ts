@@ -10,7 +10,11 @@
 export interface FilterableEvent {
   type: string;
   data?: Record<string, unknown>;
+  agentId?: unknown;
 }
+
+/** Model events a sub-agent writes into the parent log: not the session's model. */
+const SESSION_MODEL_TYPES = new Set(['session.model_change', 'session.auto_mode_resolved']);
 
 /**
  * Event types that always pass through regardless of content.
@@ -64,6 +68,10 @@ function isNonEmpty(value: unknown): boolean {
  * @remarks Unit test all changes - see tests/unit/event-filter.test.ts
  */
 export function shouldFilter(event: FilterableEvent): boolean {
+  if (SESSION_MODEL_TYPES.has(event.type) && event.agentId) {
+    return true;
+  }
+
   // Passthrough types always allowed
   if (PASSTHROUGH_TYPES.has(event.type)) {
     return false;

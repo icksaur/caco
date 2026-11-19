@@ -31,6 +31,12 @@ describe('shouldFilter', () => {
         data: { content: '', deltaContent: '', intent: '' } 
       })).toBe(true);
     });
+
+    it('when a sub-agent writes a model event into the parent log', () => {
+      expect(shouldFilter({ type: 'session.model_change', agentId: 'a1', data: { newModel: 'gpt-5.6-luna' } })).toBe(true);
+      expect(shouldFilter({ type: 'session.auto_mode_resolved', agentId: 'a1', data: { chosenModel: 'x' } })).toBe(true);
+      expect(shouldFilter({ type: 'session.model_change', data: { newModel: 'claude-opus-5.5' } })).toBe(false);
+    });
   });
 
   describe('returns false (keep event) - content properties', () => {

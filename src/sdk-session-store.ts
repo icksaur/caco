@@ -402,7 +402,8 @@ function forEachFileLine(path: string, onLine: (line: string) => boolean | void)
  * The session's current model, or null when the events log records none.
  *
  * The model is only ever set by a `session.start` (selectedModel) or a
- * `session.model_change` (newModel); last write wins. A cheap substring guard
+ * `session.model_change` (newModel); last write wins. A sub-agent's
+ * model_change (it carries `agentId`) is ignored. A cheap substring guard
  * skips `JSON.parse` on the (potentially hundreds of thousands of) other event
  * lines. Every line is still visited, because the last model_change can be
  * anywhere in the file — but the file is streamed rather than materialized, so
@@ -427,7 +428,7 @@ export function parseSessionModel(sessionId: string): string | null {
       try { event = JSON.parse(line); } catch { return; }
       if (event.type === 'session.start' && event.data?.selectedModel) {
         model = String(event.data.selectedModel);
-      } else if (event.type === 'session.model_change') {
+      } else if (event.type === 'session.model_change' && !(event as { agentId?: unknown }).agentId) {
         // SDK emits { previousModel, newModel }
         const newModel = (event.data as { newModel?: unknown })?.newModel ?? (event.data as { model?: unknown })?.model;
         if (newModel) model = String(newModel);

@@ -228,6 +228,14 @@ describe('sdk-session-store', () => {
       expect(parseSessionModel('sess-21b')).toBe('claude-opus-4');
     });
 
+    it('ignores a sub-agent model_change (agentId set)', () => {
+      writeEvents('sess-21e', [
+        { type: 'session.start', data: { selectedModel: 'claude-opus-5.5' } },
+        { type: 'session.model_change', agentId: 'a1', data: { source: 'agent', newModel: 'gpt-5.6-luna' } },
+      ]);
+      expect(parseSessionModel('sess-21e')).toBe('claude-opus-5.5');
+    });
+
     it('ignores model strings appearing in message content (substring guard)', () => {
       writeEvents('sess-21c', [
         { type: 'session.start', data: { selectedModel: 'gpt-4' } },

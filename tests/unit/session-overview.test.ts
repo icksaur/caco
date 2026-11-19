@@ -26,7 +26,7 @@ function tail(over: Partial<LastContext> = {}): TailResult {
 
 type Meta = NonNullable<OverviewSessionInput['meta']>;
 function s(id: string, meta: Partial<Meta> = {}, over: Partial<OverviewSessionInput> = {}): OverviewSessionInput {
-  return { sessionId: id, cwd: null, meta: { name: id, lastUsedAt: ago(3 * H), ...meta }, tail: tail(), ...over };
+  return { sessionId: id, cwd: 'C:/work', meta: { name: id, lastUsedAt: ago(3 * H), ...meta }, tail: tail(), ...over };
 }
 
 function build(sessions: OverviewSessionInput[], opts: OverviewOptions = {}, extra: Partial<OverviewInputs> = {}): SessionOverview {
@@ -79,6 +79,12 @@ describe('facts only (R1)', () => {
     expect(by('sw').hidden).toBe('swarm');
     expect(by('ch').hidden).toBe('herd-child');
     expect(ov.entries.some(e => e.sessionId === 'arch')).toBe(false);
+  });
+
+  it('sessions without a cwd are excluded, matching the session list', () => {
+    const ov = build([s('ok'), s('nocwd', {}, { cwd: null }), s('unknown', {}, { cwd: '(unknown)' })]);
+    expect(ov.entries.map(e => e.sessionId)).toEqual(['ok']);
+    expect(ov.counts).toMatchObject({ total: 1, archivedExcluded: 0 });
   });
 
   it('busy: turn-running wait and busy facts', () => {

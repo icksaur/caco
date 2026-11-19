@@ -145,8 +145,8 @@ describe('GET /api/overview', () => {
     const peerOverview = buildSessionOverview({
       instance: { id: peerId, name: 'devbox' },
       sessions: [
-        { sessionId: env.ids[0], cwd: null, meta: { name: 'copy' }, tail: { context: { status: 'ok' } } },
-        { sessionId: 'peer-only', cwd: null, meta: { name: 'p' }, tail: { context: { status: 'ok' } } },
+        { sessionId: env.ids[0], cwd: 'C:/work', meta: { name: 'copy' }, tail: { context: { status: 'ok' } } },
+        { sessionId: 'peer-only', cwd: 'C:/work', meta: { name: 'p' }, tail: { context: { status: 'ok' } } },
       ],
       archiveFolder: 'auto-archive', wakeLoopEnabled: true, contextRead: true,
     }, Date.now());

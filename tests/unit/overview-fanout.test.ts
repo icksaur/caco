@@ -19,7 +19,7 @@ function overview(id: string, name: string, sessions: Array<{ sid: string; meta?
   return buildSessionOverview({
     instance: { id, name },
     sessions: sessions.map(s => ({
-      sessionId: s.sid, cwd: null, meta: s.meta ?? { name: s.sid, lastUsedAt: new Date(NOW - 3_600_000 * 3).toISOString() },
+      sessionId: s.sid, cwd: 'C:/work', meta: s.meta ?? { name: s.sid, lastUsedAt: new Date(NOW - 3_600_000 * 3).toISOString() },
       tail: { context: { status: 'ok', lastEventAt: new Date(NOW - 3_600_000).toISOString() } },
     })),
     archiveFolder: 'auto-archive', wakeLoopEnabled: true, contextRead: true,

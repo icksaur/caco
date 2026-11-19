@@ -61,6 +61,9 @@ sorts oldest), then `key` ascending. Busy rows are not special-cased; their
 wake) | `waiting` (idle rows with any wait or any offer, dismissed or not).
 Counts are `total`, `shown`, `omitted`, `archivedExcluded`.
 
+**Collection.** Same set as the session list: non-archived sessions with a
+cwd. Sessions with no cwd (or `(unknown)`) are not listed in the UI, so they
+are not collected or counted.
 **Tool rendering.** Every row has the same shape:
 
 ```

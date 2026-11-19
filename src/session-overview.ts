@@ -327,7 +327,7 @@ export function mergeSessionOverviews(
   };
 }
 
-/** Describe every non-archived session, then filter what is returned. */
+/** Describe every non-archived session the session list shows, then filter what is returned. */
 export function buildSessionOverview(inputs: OverviewInputs, now: number, opts: OverviewOptions = {}): SessionOverview {
   const show = opts.show ?? 'all';
   const byId = new Map(inputs.sessions.map(s => [s.sessionId, s]));
@@ -336,7 +336,9 @@ export function buildSessionOverview(inputs: OverviewInputs, now: number, opts: 
     const p = s.meta?.orchestratedBy;
     if (p) children.set(p, [...(children.get(p) ?? []), s]);
   }
-  const live = inputs.sessions.filter(s => s.meta?.folder !== inputs.archiveFolder);
+  const unarchived = inputs.sessions.filter(s => s.meta?.folder !== inputs.archiveFolder);
+  // Same rule as the session list: a session with no cwd is not listed in the UI.
+  const live = unarchived.filter(s => s.cwd && s.cwd !== '(unknown)');
   const all = live.map(s => describeOne(s, inputs, now, byId, children)).sort(compareEntries);
   const { shown, counts } = filterAndCount(all, show, opts.keys);
   return {
@@ -345,7 +347,7 @@ export function buildSessionOverview(inputs: OverviewInputs, now: number, opts: 
     generatedAt: iso(now),
     show,
     wakeLoopEnabled: inputs.wakeLoopEnabled,
-    counts: { ...counts, archivedExcluded: inputs.sessions.length - live.length },
+    counts: { ...counts, archivedExcluded: inputs.sessions.length - unarchived.length },
     entries: shown,
   };
 }

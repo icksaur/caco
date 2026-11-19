@@ -17,11 +17,9 @@ import { parseMessageSource, type MessageSource } from './message-source.js';
 export const TAIL_DEFAULT_MAX_BYTES = 256 * 1024;
 export const TAIL_DEFAULT_CONCURRENCY = 4;
 export const TAIL_DEFAULT_DEADLINE_MS = 3000;
-export const USER_TEXT_MAX = 300;
-export const ASSISTANT_TEXT_MAX = 600;
+export const USER_TEXT_MAX = 200;
+export const ASSISTANT_TEXT_MAX = 400;
 export const ERROR_TEXT_MAX = 200;
-/** The ask heuristic looks at this many trailing characters (after fences are removed). */
-export const ASK_TAIL_CHARS = 400;
 
 export interface LastContext {
   /** `not-read`: the caller asked for no context (overview `context: 'none'`). */
@@ -37,57 +35,13 @@ export interface LastContext {
   lastEventAt?: string;
 }
 
-export type AskVerdict =
-  | { matched: string }
-  | { matched: null }
-  | { unavailable: 'oversized' | 'truncated-start' };
-
 export interface TailResult {
   context: LastContext;
-  ask: AskVerdict;
 }
 
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
-
-/** Fixed phrase list for the ask heuristic (case-insensitive). */
-export const ASK_PHRASES: readonly string[] = [
-  'let me know', 'should i', 'want me to', 'would you like', 'do you want', 'shall i',
-  'which option', 'please confirm', 'your call', 'waiting for you', 'need you to',
-];
-const CAN_YOU_RE = /can you (check|confirm|run|send|approve)/i;
-/** A trailing `?`, allowing closing quotes, brackets or markdown emphasis after it. */
-const TRAILING_QUESTION_RE = /\?["')\]*_`]*$/;
-
-/** Remove fenced code blocks with their contents. An unclosed fence removes
- *  everything to the end. A fence closes only with the same character and at
- *  least the opening length (CommonMark). */
-export function stripFences(text: string): string {
-  const out: string[] = [];
-  let fence: { ch: string; len: number } | null = null;
-  for (const line of text.split('\n')) {
-    const m = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (fence) {
-      if (m && m[1][0] === fence.ch && m[1].length >= fence.len && /^ {0,3}[`~]+\s*$/.test(line)) fence = null;
-      continue;
-    }
-    if (m) { fence = { ch: m[1][0], len: m[1].length }; continue; }
-    out.push(line);
-  }
-  return out.join('\n');
-}
-
-/** The ask heuristic on a COMPLETE assistant message (before clipping). */
-export function detectAsk(text: string): { matched: string } | { matched: null } {
-  const tail = stripFences(text).trimEnd().slice(-ASK_TAIL_CHARS);
-  if (!tail) return { matched: null };
-  if (TRAILING_QUESTION_RE.test(tail)) return { matched: '?' };
-  const lower = tail.toLowerCase();
-  for (const p of ASK_PHRASES) if (lower.includes(p)) return { matched: p };
-  const m = CAN_YOU_RE.exec(tail);
-  return m ? { matched: m[0].toLowerCase() } : { matched: null };
-}
 
 const collapse = (s: string) => s.replace(/\s+/g, ' ').trim();
 
@@ -158,7 +112,9 @@ interface PersistedEvent {
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
 
-/** Build the context and ask verdict from the decoded window. Pure. */
+/** Build the context from the decoded window. Pure. The assistant excerpt is
+ *  the last substantive (non-empty) assistant message; tool-request-only
+ *  messages and lifecycle events are skipped. */
 export function summarizeTail(w: DecodedWindow): TailResult {
   const events: PersistedEvent[] = [];
   for (const line of w.lines) {
@@ -168,10 +124,7 @@ export function summarizeTail(w: DecodedWindow): TailResult {
     } catch { /* skip an unparseable line */ }
   }
   if (events.length === 0) {
-    return {
-      context: { status: 'no-events', windowCoversTurn: false },
-      ask: w.oversized ? { unavailable: 'oversized' } : w.truncatedStart ? { unavailable: 'truncated-start' } : { matched: null },
-    };
+    return { context: { status: 'no-events', windowCoversTurn: false } };
   }
   const ctx: LastContext = { status: 'ok', windowCoversTurn: false };
   const last = events[events.length - 1];
@@ -194,30 +147,7 @@ export function summarizeTail(w: DecodedWindow): TailResult {
     }
   }
 
-  // Ask: the last substantive assistant message of the latest turn. Walking
-  // back, a user.message ends the turn; a session.error after the message
-  // rejects it; lifecycle events (turn_end, usage, tool completions, idle)
-  // are skipped.
-  let ask: AskVerdict = { matched: null };
-  let errorAfter = false;
-  let found: string | undefined;
-  let sawUser = false;
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (e.type === 'session.error') { errorAfter = true; continue; }
-    if (e.type === 'user.message') { sawUser = true; break; }
-    if (e.type === 'assistant.message') {
-      const content = str(e.data?.content);
-      if (content?.trim()) { found = content; break; }
-    }
-  }
-  if (found !== undefined) {
-    if (!errorAfter) ask = detectAsk(found);
-  } else if (!sawUser && w.truncatedStart) {
-    // The turn (and possibly its message) starts before the window.
-    ask = { unavailable: 'truncated-start' };
-  }
-  return { context: ctx, ask };
+  return { context: ctx };
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +178,7 @@ export function clearTailCache(): void {
 }
 
 function unavailable(code: string): TailResult {
-  return { context: { status: 'unavailable', errorCode: code }, ask: { matched: null } };
+  return { context: { status: 'unavailable', errorCode: code } };
 }
 
 /**
@@ -320,7 +250,7 @@ export async function readSessionTails(
   const now = opts.now ?? Date.now;
   const deadline = now() + (opts.deadlineMs ?? TAIL_DEFAULT_DEADLINE_MS);
   const read = opts.read ?? ((id, mb, busy) => readSessionTailAsync(id, mb, { busy }));
-  const skipped: TailResult = { context: { status: 'skipped-deadline' }, ask: { matched: null } };
+  const skipped: TailResult = { context: { status: 'skipped-deadline' } };
   const out = new Map<string, TailResult>();
   let next = 0;
 

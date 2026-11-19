@@ -20,8 +20,7 @@ import { pendingTransientRetryAttempt } from './transient-retry.js';
 import { listSchedules, loadDefinition, loadLastRun } from './schedule-store.js';
 import { disabledToolNames } from './tool-registry.js';
 import { getInstanceIdentity } from './instance-identity.js';
-import { AUTO_ARCHIVE_FOLDER, WAKE_WINDOW, WAKE_WINDOW_DEFAULT } from './config.js';
-import { parseWakeWindow, wakeTimeZone } from './wake-core.js';
+import { AUTO_ARCHIVE_FOLDER, WAKE_EXPIRE_MS } from './config.js';
 import type { OverviewInputs, OverviewSessionInput } from './session-overview.js';
 
 export type OverviewContextMode = 'brief' | 'full' | 'none';
@@ -30,7 +29,8 @@ export type OverviewContextMode = 'brief' | 'full' | 'none';
 export interface OverviewSources {
   instance(): { id: string; name: string };
   archiveFolder: string;
-  timeZone?: string;
+  /** The wake expiry window, for `wake.nextIsFinal`. */
+  wakeExpireMs?: number;
   listSessions(): Array<{ sessionId: string; cwd: string | null }>;
   readMeta(sessionId: string): SessionMeta | null;
   readWorkspace(sessionId: string): { summary?: string; updatedAt?: string } | null;
@@ -42,12 +42,6 @@ export interface OverviewSources {
   schedulesBySession(): Promise<Map<string, NonNullable<OverviewSessionInput['schedule']>>>;
   readTails(items: Array<{ sessionId: string; busy: boolean }>): Promise<Map<string, TailResult>>;
   wakeLoopEnabled(): boolean;
-}
-
-function windowZone(): string | undefined {
-  try { return wakeTimeZone(parseWakeWindow(WAKE_WINDOW)); } catch {
-    try { return wakeTimeZone(parseWakeWindow(WAKE_WINDOW_DEFAULT)); } catch { return undefined; }
-  }
 }
 
 async function schedulesBySession(): Promise<Map<string, NonNullable<OverviewSessionInput['schedule']>>> {
@@ -67,7 +61,7 @@ export function realOverviewSources(): OverviewSources {
   return {
     instance: () => getInstanceIdentity(),
     archiveFolder: AUTO_ARCHIVE_FOLDER,
-    timeZone: windowZone(),
+    wakeExpireMs: WAKE_EXPIRE_MS,
     listSessions: () => sessionManager.listForPager().map(p => ({ sessionId: p.sessionId, cwd: p.cwd })),
     readMeta: id => {
       const r = readSessionMeta(id);
@@ -122,6 +116,6 @@ export async function collectOverviewInputs(src: OverviewSources, opts: { contex
     wakeLoopEnabled: src.wakeLoopEnabled(),
     contextRead: context !== 'none',
   };
-  if (src.timeZone) inputs.timeZone = src.timeZone;
+  if (src.wakeExpireMs !== undefined) inputs.wakeExpireMs = src.wakeExpireMs;
   return inputs;
 }

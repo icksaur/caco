@@ -20,7 +20,7 @@ function overview(id: string, name: string, sessions: Array<{ sid: string; meta?
     instance: { id, name },
     sessions: sessions.map(s => ({
       sessionId: s.sid, cwd: null, meta: s.meta ?? { name: s.sid, lastUsedAt: new Date(NOW - 3_600_000 * 3).toISOString() },
-      tail: { context: { status: 'ok', lastEventAt: new Date(NOW - 3_600_000).toISOString() }, ask: { matched: null } },
+      tail: { context: { status: 'ok', lastEventAt: new Date(NOW - 3_600_000).toISOString() } },
     })),
     archiveFolder: 'auto-archive', wakeLoopEnabled: true, contextRead: true,
   }, NOW);
@@ -63,24 +63,30 @@ describe('fetchPeerOverviews (O5)', () => {
     expect(seen).toEqual([`${r.instance.origin}=${id}`]);
   });
 
-  it('reports unreachable, outdated, invalid JSON, schema mismatch and an impostor without failing', async () => {
+  it('reports unreachable, outdated (404 or another schemaVersion), invalid JSON and an impostor without failing (R5)', async () => {
     const closed = await peer(json({}));
     const closedOrigin = closed.origin;
     await new Promise(r => closed.server.close(() => r(undefined)));
     servers.splice(servers.indexOf(closed.server), 1);
     const outdated = await peer(json({ error: 'nope' }, 404));
     const notJson = await peer((_q, res) => { res.writeHead(200); res.end('<html>'); });
-    const v2 = await peer(json({ ...overview('cccccccc-0000-4000-8000-000000000002', 'x', []), schemaVersion: 2 }));
+    // A v1 peer (r5 payload: flags, tier) is outdated, never merged.
+    const v1Body = { ...overview('cccccccc-0000-4000-8000-000000000002', 'x', [{ sid: 's' }]), schemaVersion: 1 } as unknown as { entries: Array<Record<string, unknown>> };
+    v1Body.entries[0].flags = [{ code: 'no-driver', detail: 'x', confidence: 'high' }];
+    v1Body.entries[0].tier = 'full';
+    const v1 = await peer(json(v1Body));
+    const noVersion = await peer(json({ instance: { id: 'x', name: 'x' } }));
     const imp = overview('dddddddd-0000-4000-8000-000000000003', 'imp', [{ sid: 's' }]);
     imp.entries[0] = { ...imp.entries[0], key: 'someone-else:s' };
     const impostor = await peer(json(imp));
     const err500 = await peer(json({}, 500));
-    const rs = await run([p(closedOrigin), p(outdated.origin), p(notJson.origin), p(v2.origin), p(impostor.origin), p(err500.origin)]);
+    const rs = await run([p(closedOrigin), p(outdated.origin), p(notJson.origin), p(v1.origin), p(noVersion.origin), p(impostor.origin), p(err500.origin)]);
     expect(rs.map(r => [r.status, r.reason])).toEqual([
       ['unreachable', 'network error'],
       ['outdated', 'no /api/overview'],
       ['invalid', 'not JSON'],
-      ['invalid', 'schemaVersion mismatch'],
+      ['outdated', 'schemaVersion 1'],
+      ['outdated', 'no schemaVersion'],
       ['invalid', 'entry from another instance'],
       ['unreachable', 'HTTP 500'],
     ]);
@@ -181,10 +187,7 @@ describe('validateOverviewPayload', () => {
     ['wait without kind', e => { e.waits = [{}]; }],
     ['unknown wait kind', e => { e.waits = [{ kind: 'bogus' }]; }],
     ['wake wait without nextAt', e => { e.waits = [{ kind: 'wake' }]; }],
-    ['null flag', e => { e.flags = [null]; }],
-    ['flags not an array', e => { e.flags = 'x'; }],
     ['numeric title', e => { e.title = 42; }],
-    ['bad tier', e => { e.tier = 'huge'; }],
     ['bad activity', e => { e.activity = null; }],
     ['context null', e => { e.context = null; }],
     ['context lastUser without text', e => { e.context = { status: 'ok', lastUser: { at: 'x', source: 'user' } }; }],
@@ -195,11 +198,10 @@ describe('validateOverviewPayload', () => {
     ['herd parentState bogus', e => { e.herd = { parentState: 'gone' }; }],
     ['busy since number', e => { e.busy = { since: 5 }; }],
     ['lastActivityAt object', e => { e.lastActivityAt = {}; }],
-    ['ask matched number', e => { e.ask = { matched: 3 }; }],
+    ['duplicateOn not an array', e => { e.duplicateOn = 'devbox'; }],
+    ['duplicateOn with a number', e => { e.duplicateOn = [3]; }],
+    ['wake.nextIsFinal false', e => { e.wake = { everyHours: 1, nextWakeAt: 'x', registeredAt: 'x', consecutiveFailures: 0, slotSeq: 0, counters: { fires: 0, ok: 0, errors: 0, cancelled: 0, interrupted: 0, offered: 0, firesSinceHuman: 0 }, history: [], defers: [], nextIsFinal: false }; }],
     ['cwd number', e => { e.cwd = 3; }],
-    ['unknown flag code', e => { e.flags = [{ code: 'bogus', detail: 'x', confidence: 'high' }]; }],
-    ['flag code with a newline', e => { e.flags = [{ code: 'no-driver\n### FORGED', detail: 'x', confidence: 'high' }]; }],
-    ['unknown primaryFlag', e => { e.primaryFlag = 'x\ny'; }],
   ])('rejects an entry with %s', (_label, mut) => {
     const v = structuredClone(base()) as unknown as { entries: Array<Record<string, unknown>> };
     mut(v.entries[0]);
@@ -236,9 +238,17 @@ describe('validateOverviewPayload', () => {
     expect(validateOverviewPayload(ok).ok).toBe(true);
     expect(validateOverviewPayload(null)).toMatchObject({ ok: false });
     expect(validateOverviewPayload({ ...ok, counts: {} })).toMatchObject({ ok: false, reason: 'bad counts' });
-    const badFlag = structuredClone(ok);
-    badFlag.entries[0].flags.push({ code: 'wake-paused', detail: 'y', confidence: 'certain' as 'high' });
-    expect(validateOverviewPayload(badFlag)).toMatchObject({ ok: false, reason: 'bad flag' });
+    // Removed r5 fields are dropped, not echoed; new r6 fields are kept.
+    const withOld = structuredClone(ok) as unknown as { entries: Array<Record<string, unknown>>; counts: Record<string, unknown> };
+    Object.assign(withOld.entries[0], { flags: [{ code: 'no-driver' }], tier: 'full', primaryFlag: 'no-driver', ask: { matched: '?' }, duplicateOn: ['devbox'] });
+    Object.assign(withOld.counts, { omittedFlagged: 1, full: 1, compact: 0 });
+    const r = validateOverviewPayload(withOld);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      for (const k of ['flags', 'tier', 'primaryFlag', 'ask']) expect(k in r.value.entries[0]).toBe(false);
+      expect(r.value.entries[0].duplicateOn).toEqual(['devbox']);
+      expect(r.value.counts).toEqual({ total: 1, shown: 1, omitted: 0, archivedExcluded: 0 });
+    }
     const otherInstance = structuredClone(ok);
     otherInstance.entries[0].instance = { id: 'zzz', name: 'z' };
     expect(validateOverviewPayload(otherInstance)).toMatchObject({ ok: false, reason: 'entry from another instance' });
@@ -249,28 +259,24 @@ describe('mergeSessionOverviews', () => {
   const a = () => overview('aaaa0000-0000-4000-8000-000000000001', 'laptop', [{ sid: 'shared' }, { sid: 'only-a' }]);
   const b = () => overview('bbbb0000-0000-4000-8000-000000000002', 'devbox', [{ sid: 'shared' }, { sid: 'only-b' }]);
 
-  it('flags a session id present on two instances on both copies and makes them full', () => {
+  it('sets duplicateOn on both copies of a session id present on two instances (R3)', () => {
     const m = mergeSessionOverviews([a(), b()]);
     const shared = m.entries.filter(e => e.sessionId === 'shared');
     expect(shared).toHaveLength(2);
-    for (const e of shared) {
-      expect(e.flags.map(f => f.code)).toEqual(['duplicate-session']);
-      expect(e.tier).toBe('full');
-      expect(e.primaryFlag).toBe('duplicate-session');
-    }
-    expect(shared.find(e => e.instance.name === 'laptop')!.flags[0].detail).toContain('devbox');
-    expect(m.entries.filter(e => e.sessionId !== 'shared').every(e => e.flags.length === 0)).toBe(true);
-    expect(m.counts).toMatchObject({ total: 4, full: 2, compact: 2 });
+    expect(shared.find(e => e.instance.name === 'laptop')!.duplicateOn).toEqual(['devbox']);
+    expect(shared.find(e => e.instance.name === 'devbox')!.duplicateOn).toEqual(['laptop']);
+    expect(m.entries.filter(e => e.sessionId !== 'shared').every(e => e.duplicateOn === undefined)).toBe(true);
+    expect(m.counts).toEqual({ total: 4, shown: 4, omitted: 0, archivedExcluded: 0 });
   });
 
   it('is independent of instance arrival order and filters after merging', () => {
     const order = (parts: SessionOverview[]) => mergeSessionOverviews(parts).entries.map(e => e.key);
     expect(order([b(), a()])).toEqual(order([a(), b()]));
-    const att = mergeSessionOverviews([a(), b()], { show: 'attention' });
-    expect(att.entries.map(e => e.sessionId)).toEqual(['shared', 'shared']);
-    expect(att.counts).toMatchObject({ shown: 2, omitted: 2, omittedFlagged: 0 });
-    // Re-merging does not stack duplicate flags.
+    const keyed = mergeSessionOverviews([a(), b()], { keys: ['shared'] });
+    expect(keyed.entries.map(e => e.sessionId)).toEqual(['shared', 'shared']);
+    expect(keyed.counts).toMatchObject({ shown: 2, omitted: 2 });
+    // Re-merging recomputes duplicateOn; it does not stack.
     const again = mergeSessionOverviews([{ ...a(), entries: mergeSessionOverviews([a(), b()]).entries.filter(e => e.instance.name === 'laptop') }, b()]);
-    expect(again.entries.find(e => e.sessionId === 'shared')!.flags).toHaveLength(1);
+    expect(again.entries.find(e => e.instance.name === 'laptop' && e.sessionId === 'shared')!.duplicateOn).toEqual(['devbox']);
   });
 });

@@ -4,13 +4,13 @@
  * `scope=local` returns this instance's classified sessions. `scope=all` is the
  * hub view: local plus every registered peer's `/api/overview?scope=local`
  * under the fetch policy (`overview-fanout.ts`), merged with
- * `duplicate-session` flags and one deterministic order. A request carrying
+ * `duplicateOn` on every shared session id, and one order. A request carrying
  * `X-Caco-Overview-Hop: 1` (a peer hop) may only ask for `local`.
  */
 
 import { Router, Request, Response } from 'express';
 import { realOverviewSources, type OverviewContextMode, type OverviewSources } from '../session-overview-io.js';
-import type { OverviewShow } from '../session-overview.js';
+import { OVERVIEW_SHOWS, type OverviewShow } from '../session-overview.js';
 import { OVERVIEW_HOP_HEADER, type FanoutOptions } from '../overview-fanout.js';
 import { computeOverview } from '../overview-service.js';
 
@@ -18,7 +18,7 @@ const router = Router();
 
 export { OVERVIEW_HOP_HEADER };
 const SCOPES = new Set(['local', 'all']);
-const SHOWS = new Set<OverviewShow>(['all', 'attention', 'busy', 'wakes', 'waiting']);
+const SHOWS = new Set<OverviewShow>(OVERVIEW_SHOWS);
 const CONTEXTS = new Set<OverviewContextMode>(['brief', 'full', 'none']);
 
 let sourcesFactory: () => OverviewSources = realOverviewSources;
@@ -45,7 +45,7 @@ router.get('/overview', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'scope=all is not allowed on a peer hop' });
     return;
   }
-  if (!SHOWS.has(show)) { res.status(400).json({ error: 'show must be all, attention, busy, wakes or waiting' }); return; }
+  if (!SHOWS.has(show)) { res.status(400).json({ error: 'show must be all, busy, wakes or waiting' }); return; }
   if (!CONTEXTS.has(context)) { res.status(400).json({ error: 'context must be brief, full or none' }); return; }
   const keys = keysRaw ? keysRaw.split(',').map(k => k.trim()).filter(Boolean) : undefined;
   try {

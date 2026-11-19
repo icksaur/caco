@@ -3,8 +3,8 @@ import { mkdtempSync, writeFileSync, appendFileSync, renameSync, rmSync, statSyn
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
-  readSessionTailAsync, readSessionTails, clearTailCache, decodeWindow, detectAsk, stripFences,
-  redactErrorText, clipTail, ASK_PHRASES, type TailFileHandle, type TailResult,
+  readSessionTailAsync, readSessionTails, clearTailCache, decodeWindow,
+  redactErrorText, clipTail, type TailFileHandle, type TailResult,
 } from '../../src/sdk-session-tail.js';
 
 let dir: string;
@@ -67,11 +67,10 @@ describe('tail reader window (O3)', () => {
     expect(r.context.lastEventType).toBe('session.usage_record');
   });
 
-  it('a line longer than the window yields no events and ask oversized', async () => {
+  it('a line longer than the window yields no events', async () => {
     write([user('q'), assistant('y'.repeat(4000))]);
     const r = await read(1000);
-    expect(r.context.status).toBe('no-events');
-    expect(r.ask).toEqual({ unavailable: 'oversized' });
+    expect(r).toEqual({ context: { status: 'no-events', windowCoversTurn: false } });
   });
 
   it('decodes whole lines only: a UTF-8 sequence cut at the window edge is dropped with its line', () => {
@@ -98,7 +97,7 @@ describe('tail reader window (O3)', () => {
       };
     };
     const r = await readSessionTailAsync('s', undefined, { path: file, open });
-    expect(r.ask).toEqual({ matched: '?' });
+    expect(r.context.lastAssistant!.text).toBe('done?');
   });
 
   it('a file that shrinks during the read uses what was read', async () => {
@@ -216,7 +215,7 @@ describe('concurrency and deadline (O3)', () => {
       inFlight++; max = Math.max(max, inFlight);
       await new Promise(r => setTimeout(r, 5));
       inFlight--;
-      return { context: { status: 'ok' }, ask: { matched: null } };
+      return { context: { status: 'ok' } };
     };
     const items = Array.from({ length: 12 }, (_, i) => ({ sessionId: `s${i}` }));
     const out = await readSessionTails(items, { read: readFn });
@@ -227,7 +226,7 @@ describe('concurrency and deadline (O3)', () => {
   it('sessions not reached or not finished by the deadline are skipped-deadline', async () => {
     const readFn = async (id: string): Promise<TailResult> => {
       await new Promise(r => setTimeout(r, id === 'slow' ? 200 : 1));
-      return { context: { status: 'ok' }, ask: { matched: null } };
+      return { context: { status: 'ok' } };
     };
     const items = [{ sessionId: 'fast' }, { sessionId: 'slow' }, { sessionId: 'later' }];
     const out = await readSessionTails(items, { read: readFn, concurrency: 1, deadlineMs: 50 });
@@ -239,7 +238,7 @@ describe('concurrency and deadline (O3)', () => {
   it('passes busy through so busy sessions bypass the cache', async () => {
     const seen: boolean[] = [];
     await readSessionTails([{ sessionId: 'a', busy: true }, { sessionId: 'b' }], {
-      read: async (_id, _mb, busy) => { seen.push(busy); return { context: { status: 'ok' }, ask: { matched: null } }; },
+      read: async (_id, _mb, busy) => { seen.push(busy); return { context: { status: 'ok' } }; },
     });
     expect(seen.sort()).toEqual([false, true]);
   });
@@ -252,15 +251,15 @@ describe('excerpts and redaction', () => {
     const t = (await read()).context.lastAssistant!.text;
     expect(t.startsWith('...')).toBe(true);
     expect(t.endsWith('Should I merge it?')).toBe(true);
-    expect(t.length).toBe(600);
+    expect(t.length).toBe(400);
     expect(t).not.toContain('\n');
-    expect(clipTail('short', 600)).toBe('short');
+    expect(clipTail('short', 400)).toBe('short');
   });
 
-  it('user excerpt is 300 chars; error excerpt is redacted then 200 chars', async () => {
+  it('user excerpt is 200 chars; error excerpt is redacted then 200 chars', async () => {
     write([user('u'.repeat(1000)), error(`Bearer abc.def token=s3cr3t ${'k'.repeat(40)} eyJa.eyJb.sig ${'e'.repeat(400)}`)]);
     const c = (await read()).context;
-    expect(c.lastUser!.text).toHaveLength(300);
+    expect(c.lastUser!.text).toHaveLength(200);
     expect(c.lastError!.text.length).toBeLessThanOrEqual(200);
     expect(c.lastError!.text).not.toMatch(/abc\.def|s3cr3t|kkkk|eyJ/);
   });
@@ -290,78 +289,40 @@ describe('excerpts and redaction', () => {
   });
 });
 
-describe('ask heuristic, reader side (O11)', () => {
-  it('a trailing question on a realistic completed turn matches', async () => {
-    write(turn('I opened the PR.\n\nShould we ship it today?'));
-    expect((await read()).ask).toEqual({ matched: '?' });
+describe('no ask verdict; last substantive assistant message (R6)', () => {
+  it('returns only the context: no ask field, for every outcome', async () => {
+    write(turn('Should we ship it today?'));
+    const ok = await read();
+    expect(Object.keys(ok)).toEqual(['context']);
+    write([user('q'), assistant('y'.repeat(4000))]);
+    clearTailCache();
+    expect(Object.keys(await read(1000))).toEqual(['context']);
+    const open = async (): Promise<TailFileHandle> => { throw Object.assign(new Error('x'), { code: 'EBUSY' }); };
+    expect(Object.keys(await readSessionTailAsync('s', undefined, { path: file, open }))).toEqual(['context']);
   });
 
-  it('skips lifecycle events after the message (turn_end, usage, tool completions, idle)', async () => {
-    write(turn('Want me to file the bug?', [toolDone(), idle(), usage()]));
-    expect((await read()).ask).toEqual({ matched: '?' });
-  });
-
-  it.each(ASK_PHRASES.map(p => [p]))('phrase "%s" matches', async (p) => {
-    write(turn(`I finished the draft. ${p.toUpperCase()} before I send.`));
-    expect((await read()).ask).toEqual({ matched: p });
-  });
-
-  it.each(['check', 'confirm', 'run', 'send', 'approve'])('"can you %s" matches', (verb) => {
-    expect(detectAsk(`Ready. Can you ${verb} the draft.`)).toEqual({ matched: `can you ${verb}` });
-  });
-
-  it('an error-ended turn does not match', async () => {
-    write(turn('Should I continue?', [error('network')]));
-    expect((await read()).ask).toEqual({ matched: null });
-  });
-
-  it('later user input does not match', async () => {
-    write([...turn('Should I continue?'), user('yes'), turnStart()]);
-    expect((await read()).ask).toEqual({ matched: null });
-  });
-
-  it('a question inside a fence does not match', async () => {
-    write(turn('Here is the script:\n```bash\necho "should I?"\n```\nDone.'));
-    expect((await read()).ask).toEqual({ matched: null });
-  });
-
-  it('a fence opened before the 400-char window still removes its question', async () => {
-    const code = `\`\`\`ts\n${'const x = 1;\n'.repeat(60)}// should i keep this?\n\`\`\`\nAll done.`;
-    expect(code.length).toBeGreaterThan(800);
-    write(turn(code));
-    expect((await read()).ask).toEqual({ matched: null });
-  });
-
-  it('an unclosed fence removes everything to the end', () => {
-    expect(stripFences('Result:\n```\nwant me to?\nmore')).toBe('Result:');
-    expect(detectAsk('Result:\n```\nwant me to?\nmore')).toEqual({ matched: null });
-    expect(detectAsk('Text\n~~~\nx\n~~~\nWhich option do you prefer?')).toEqual({ matched: '?' });
-  });
-
-  it('a caco-actions block after the question does not hide it', () => {
-    expect(detectAsk('Should I push?\n\n```caco-actions\nPush it\n```')).toEqual({ matched: '?' });
-  });
-
-  it('only the last 400 characters are judged', () => {
-    expect(detectAsk(`Should I? ${'x'.repeat(500)}.`)).toEqual({ matched: null });
-  });
-
-  it('a message whose start lies before the window is truncated-start', async () => {
-    write([user('go'), turnStart(), assistant(`${'z'.repeat(3000)} should I proceed?`), turnEnd(), usage()]);
-    const r = await read(1500);
-    expect(r.context.windowCoversTurn).toBe(false);
-    expect(r.ask).toEqual({ unavailable: 'truncated-start' });
-  });
-
-  it('long messages are judged on their full text before clipping', async () => {
-    write(turn(`${'word '.repeat(400)}let me know if that works.`));
+  it('skips tool-request-only assistant messages and lifecycle events after the message', async () => {
+    write([user('go'), turnStart(), assistant('The answer is 42.'), assistant('', [{ name: 'view' }]), toolStart(), toolDone(), turnEnd(), usage(), idle()]);
     const r = await read();
-    expect(r.ask).toEqual({ matched: 'let me know' });
-    expect(r.context.lastAssistant!.text.length).toBe(600);
+    expect(r.context.lastAssistant!.text).toBe('The answer is 42.');
+    expect(r.context.lastEventType).toBe('session.idle');
   });
 
-  it('no assistant text in the latest turn is no match', async () => {
+  it('picks the message even when an error or later user input follows it', async () => {
+    write([...turn('Earlier answer.'), error('network down'), user('again?'), turnStart()]);
+    const r = await read();
+    expect(r.context.lastAssistant!.text).toBe('Earlier answer.');
+    expect(r.context.lastUser!.text).toBe('again?');
+    expect(r.context.lastError!.text).toBe('network down');
+  });
+
+  it('keeps fenced text in the excerpt (no fence logic)', async () => {
+    write(turn('Run this:\n```bash\necho hi\n```\nThen tell me.'));
+    expect((await read()).context.lastAssistant!.text).toBe('Run this: ```bash echo hi ``` Then tell me.');
+  });
+
+  it('a turn with no assistant text has no assistant excerpt', async () => {
     write([user('hi'), turnStart(), assistant('', [{ name: 'x' }]), toolStart()]);
-    expect((await read()).ask).toEqual({ matched: null });
+    expect((await read()).context.lastAssistant).toBeUndefined();
   });
 });

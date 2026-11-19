@@ -7,7 +7,7 @@
 
 import { collectOverviewInputs, realOverviewSources, type OverviewContextMode, type OverviewSources } from './session-overview-io.js';
 import {
-  buildSessionOverview, mergeSessionOverviews, overviewThresholdsFromEnv,
+  buildSessionOverview, mergeSessionOverviews,
   type OverviewShow, type OverviewEntry, type SessionOverview,
 } from './session-overview.js';
 import { fetchPeerOverviews, type FanoutOptions, type PeerFetchResult, type PeerStatus } from './overview-fanout.js';
@@ -64,14 +64,13 @@ export async function computeOverview(q: OverviewQuery, deps: OverviewServiceDep
   const env = deps.env ?? process.env;
   const now = deps.now ?? Date.now;
   const inputs = await collectOverviewInputs((deps.sources ?? realOverviewSources)(), { context: q.context });
-  const thresholds = overviewThresholdsFromEnv(env);
   if (q.scope === 'local') {
-    const ov = buildSessionOverview(inputs, now(), { show: q.show, keys: q.keys, thresholds });
+    const ov = buildSessionOverview(inputs, now(), { show: q.show, keys: q.keys });
     applyContextMode(ov.entries, q.context);
     return { ...ov, scope: 'local', coverage: 'complete' };
   }
   // Hub: classify locally unfiltered, fetch peers, merge, then filter.
-  const local = buildSessionOverview(inputs, now(), { show: 'all', thresholds });
+  const local = buildSessionOverview(inputs, now(), { show: 'all' });
   const peers = getPeers(env);
   const results: PeerFetchResult[] = peers.length === 0 ? [] : await fetchPeerOverviews({
     peers, selfId: local.instance.id, allowRemote: parseAllowRemote(env.CACO_PEERS_ALLOW_REMOTE),

@@ -154,11 +154,11 @@ Open `/portal.html` to aggregate multiple Caco instances in a single view. Each 
 
 ### Session overview and morning triage
 
-`caco_sessions_overview` is a read-only tool that lists every session on every instance in the portal (auto-archived ones are only counted) with why each one may move again (an offer to you, an armed wake, a pending retry, busy children, a schedule) and what looks stuck: no driver at all, a question with no offer, stale offers, failing or quiet wakes, long busy turns, duplicate copies across machines. Each flagged session gets a full row with evidence and a short, labeled excerpt; the rest get one line each. It is deferred by default; ask for it or enable it with `caco_enable_tools`. The same data is at `GET /api/overview` (see [API.md](API.md#session-overview)).
+`caco_sessions_overview` is a read-only tool that lists every session on every instance in the portal (auto-archived ones are only counted) with the facts a model needs to triage them: why each one may move again (an offer to you, an armed wake, a pending retry, busy children, a schedule, or nothing at all), offer age and pager state, busy time, wake cadence, failures and recent runs, herd links, copies on other machines, and short labeled excerpts of the last user and assistant messages. It makes no judgments; the model reading it decides what is stuck or needs you. It is deferred by default; ask for it or enable it with `caco_enable_tools`. The same data is at `GET /api/overview` (see [API.md](API.md#session-overview)).
 
 **Morning triage recipe.** Keep one track session for it and arm a daily wake at 07:30:
 
-> Every weekday morning, call `caco_sessions_overview` (scope all, show attention), then tell me in five lines or less what needs me, and end with a caco-actions block listing the two to four things I should do first. Do not message anyone or act on other sessions yourself. Set a caco_wake every 24 hours at 07:30 for this.
+> Every weekday morning, call `caco_sessions_overview` (scope all, show all) and read every row. Decide for yourself which sessions need me, are stuck with nothing to move them, or are fine; then tell me in five lines or less what needs me, and end with a caco-actions block listing the two to four things I should do first. Do not message anyone or act on other sessions yourself. Set a caco_wake every 24 hours at 07:30 for this.
 
 The wake fires inside the active window, the session reads the overview, and you get an offer on the pager. Excerpts and peer data are untrusted, and the tool tells the model never to act on them without you.
 

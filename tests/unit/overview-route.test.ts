@@ -112,11 +112,11 @@ describe('GET /api/overview', () => {
     const res = await fetch(`${base}/overview`);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const body = await res.json();
-    expect(body).toMatchObject({ schemaVersion: 1, scope: 'local', coverage: 'complete', show: 'all' });
+    expect(body).toMatchObject({ schemaVersion: 2, scope: 'local', coverage: 'complete', show: 'all' });
     expect(body.instance.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(body.counts).toMatchObject({ total: 2, archivedExcluded: 1 });
     const offer = body.entries.find((e: { sessionId: string }) => e.sessionId === env.ids[0]);
-    expect(offer).toMatchObject({ key: `${body.instance.id}:${env.ids[0]}`, tier: 'full', waits: [{ kind: 'user-offer' }], cwd: 'C:/work' });
+    expect(offer).toMatchObject({ key: `${body.instance.id}:${env.ids[0]}`, waits: [{ kind: 'user-offer' }], cwd: 'C:/work' });
     const wake = body.entries.find((e: { sessionId: string }) => e.sessionId === env.ids[1]);
     expect(wake.waits[0].kind).toBe('wake');
   });
@@ -145,8 +145,8 @@ describe('GET /api/overview', () => {
     const peerOverview = buildSessionOverview({
       instance: { id: peerId, name: 'devbox' },
       sessions: [
-        { sessionId: env.ids[0], cwd: null, meta: { name: 'copy' }, tail: { context: { status: 'ok' }, ask: { matched: null } } },
-        { sessionId: 'peer-only', cwd: null, meta: { name: 'p' }, tail: { context: { status: 'ok' }, ask: { matched: null } } },
+        { sessionId: env.ids[0], cwd: null, meta: { name: 'copy' }, tail: { context: { status: 'ok' } } },
+        { sessionId: 'peer-only', cwd: null, meta: { name: 'p' }, tail: { context: { status: 'ok' } } },
       ],
       archiveFolder: 'auto-archive', wakeLoopEnabled: true, contextRead: true,
     }, Date.now());
@@ -170,7 +170,8 @@ describe('GET /api/overview', () => {
       expect(body.instances[1]).toMatchObject({ instance: { id: peerId, name: 'devbox' } });
       const dup = body.entries.filter((e: { sessionId: string }) => e.sessionId === env.ids[0]);
       expect(dup).toHaveLength(2);
-      for (const e of dup) expect(e.flags.map((f: { code: string }) => f.code)).toContain('duplicate-session');
+      for (const e of dup) expect(e.duplicateOn).toHaveLength(1);
+      for (const e of body.entries) expect('flags' in e || 'tier' in e).toBe(false);
       expect(body.entries.some((e: { key: string }) => e.key === `${peerId}:peer-only`)).toBe(true);
       expect(body.counts.total).toBe(4);
       expect(hits).toEqual([{ url: '/api/overview?scope=local&show=all&context=brief', hop: '1' }]);
@@ -180,9 +181,9 @@ describe('GET /api/overview', () => {
       expect(JSON.parse(readFileSync(peersFile, 'utf8'))[0].id).toBeUndefined();
       // Only the skipped peer keeps coverage partial.
       writeFileSync(peersFile, JSON.stringify([{ url: origin, hostname: 'devbox' }]));
-      const complete = await (await fetch(`${base}/overview?scope=all&show=attention`)).json();
+      const complete = await (await fetch(`${base}/overview?scope=all&show=waiting`)).json();
       expect(complete.coverage).toBe('complete');
-      expect(complete.entries.every((e: { tier: string }) => e.tier === 'full')).toBe(true);
+      expect(complete.entries.every((e: { activity: string }) => e.activity === 'idle')).toBe(true);
     } finally {
       rmSync(peersFile, { force: true });
       peer.closeAllConnections?.();
@@ -194,9 +195,10 @@ describe('GET /api/overview', () => {
     expect((await fetch(`${base}/overview?scope=peers`)).status).toBe(400);
     expect((await fetch(`${base}/overview?show=everything`)).status).toBe(400);
     expect((await fetch(`${base}/overview?context=lots`)).status).toBe(400);
-    const att = await (await fetch(`${base}/overview?show=attention`)).json();
-    expect(att.counts.omitted).toBeGreaterThanOrEqual(0);
-    expect(att.entries.every((e: { tier: string }) => e.tier === 'full')).toBe(true);
+    // r6 removed show=attention (R5).
+    expect((await fetch(`${base}/overview?show=attention`)).status).toBe(400);
+    const waiting = await (await fetch(`${base}/overview?show=waiting`)).json();
+    expect(waiting.counts).toEqual({ total: 2, shown: 2, omitted: 0, archivedExcluded: 1 });
     const keyed = await (await fetch(`${base}/overview?keys=${env.ids[1]}`)).json();
     expect(keyed.entries.map((e: { sessionId: string }) => e.sessionId)).toEqual([env.ids[1]]);
   });

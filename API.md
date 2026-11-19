@@ -1063,33 +1063,38 @@ echo "Exhausted $MAX attempts." >&2; exit 1
 
 ## Session Overview
 
-**GET /api/overview** — Read-only, classified view of every non-archived
-session on this instance: why each one may move again (`waits`), what looks
-wrong (`flags` with confidence and evidence), wake history and counters, offer
-facts (separate from pager visibility), and a short last-event context from the
-transcript tail. Gathering it never writes anything (no meta, no
-`activityVersion`, no unobserved change, no dispatch, no resume, no SDK call).
-See [spec-session-overview](docs/spec-session-overview.md).
+**GET /api/overview** — Read-only facts about every non-archived session on
+this instance: why each one may move again (`waits`), offer facts (separate
+from pager visibility), busy state, wake cadence, counters and history,
+schedule, herd links, and a short last-event context from the transcript tail.
+It makes no judgments; the consumer (usually an LLM) classifies. Gathering it
+never writes anything (no meta, no `activityVersion`, no unobserved change, no
+dispatch, no resume, no SDK call). See
+[spec-session-overview](docs/spec-session-overview.md) (r6: facts only).
 
 Query parameters:
 
 | param | values | default |
 |---|---|---|
 | `scope` | `local`, `all` | `local` |
-| `show` | `all`, `attention` (full rows only), `busy`, `wakes`, `waiting` | `all` |
+| `show` | `all`, `busy` (running turns), `wakes` (rows with a wake), `waiting` (idle rows with any wait or any offer) | `all` |
 | `context` | `brief` (last user + last assistant), `full` (adds error, event type), `none` (no transcript read) | `brief` |
 | `keys` | comma list of `instanceId:sessionId` or bare session ids | all |
 
+Any other `show` value (including the removed `attention`) is 400.
+
 - `scope=all` is the hub view: local data plus every registered peer's
   `/api/overview?scope=local` (never `/api/sessions`), merged into one ordered
-  list. A session id present on two instances gets `duplicate-session` on both
-  copies. The response adds `instances`, one per instance (this one first):
+  list. Every copy of a session id present on two or more instances gets
+  `duplicateOn`: the names of the other instances. The response adds
+  `instances`, one per instance (this one first):
   `{instance, status, fetchedAt, reason?, counts?}` with `status` one of
   `ok`, `unreachable` (network error, timeout, deadline, non-2xx),
   `skipped` (non-loopback peer not in `CACO_PEERS_ALLOW_REMOTE`, or a second
   peer with the same instance id), `outdated` (404: the peer has no
-  `/api/overview`), `invalid` (bad origin, redirect, over 4 MB, not JSON,
-  schema mismatch, or entries for another instance) or `self`.
+  `/api/overview`; or it answers with another `schemaVersion`, reason
+  `schemaVersion N`), `invalid` (bad origin, redirect, over 4 MB, not JSON,
+  malformed entries, or entries for another instance) or `self`.
   `coverage` is `complete` only when at least one peer is `ok` and every
   peer is `ok` or `self`. With no peers registered it is `partial` with a
   `note` (all-machine views run on the portal host).
@@ -1106,31 +1111,35 @@ Query parameters:
 - Sessions in the `auto-archive` folder are not collected; `counts.archivedExcluded`
   reports how many.
 - `wakeLoopEnabled: false` means `caco_wake` is hard-disabled on this instance:
-  armed wakes will not fire, are not counted as a wait, and carry an info flag
-  `wake-loop-disabled`.
+  armed wakes will not fire and are not counted as a wait.
+- `wake.nextIsFinal: true` means the next fire will be the final one under the
+  wake expiry rule (only while the loop is enabled and the wake is not paused).
+- The r5 judgment fields (`flags`, `tier`, `primaryFlag`, `ask`,
+  `counts.omittedFlagged`/`full`/`compact`) and the `CACO_OVERVIEW_*`
+  threshold env vars are gone (`CACO_OVERVIEW_TOOL_MAX_BYTES` stays).
 
 ```json
 {
-  "schemaVersion": 1, "scope": "local", "coverage": "complete", "show": "all",
+  "schemaVersion": 2, "scope": "local", "coverage": "complete", "show": "all",
   "instance": { "id": "uuid", "name": "laptop" },
-  "generatedAt": "2026-11-17T18:00:00.000Z",
-  "counts": { "total": 94, "shown": 94, "omitted": 0, "omittedFlagged": 0, "full": 20, "compact": 74, "archivedExcluded": 31 },
+  "generatedAt": "2026-11-19T18:00:00.000Z",
+  "wakeLoopEnabled": true,
+  "counts": { "total": 38, "shown": 38, "omitted": 0, "archivedExcluded": 10 },
   "entries": [{
     "key": "uuid:sessionId", "sessionId": "...", "title": "PR track", "titleSource": "name",
-    "kind": "interactive", "cwd": "C:/work", "tier": "full", "activity": "idle",
+    "kind": "interactive", "cwd": "C:/work", "activity": "idle",
     "waits": [{ "kind": "wake", "nextAt": "..." }],
     "offer": { "options": ["Ship it"], "at": "...", "dismissed": false, "ageMs": 259200000, "onPager": true },
-    "wake": { "everyHours": 4, "nextWakeAt": "...", "counters": { "fires": 7, "firesSinceHuman": 6, "offered": 0 }, "history": [] },
-    "context": { "status": "ok", "lastUser": { "at": "...", "source": "scheduler", "text": "..." }, "lastAssistant": { "at": "...", "text": "...end of message" } },
-    "ask": { "matched": null },
-    "flags": [{ "code": "offer-stale", "detail": "offer from ... is 3d old", "confidence": "high" }],
-    "primaryFlag": "offer-stale"
+    "wake": { "everyHours": 4, "nextWakeAt": "...", "nextIsFinal": true, "consecutiveFailures": 0, "counters": { "fires": 7, "firesSinceHuman": 6, "offered": 0 }, "history": [], "defers": [] },
+    "duplicateOn": ["devbox"],
+    "lastHumanAt": "...", "lastActivityAt": "...",
+    "context": { "status": "ok", "lastUser": { "at": "...", "source": "scheduler", "text": "..." }, "lastAssistant": { "at": "...", "text": "...end of message" } }
   }]
 }
 ```
 
-Entries are ordered: full rows by primary flag rank, then compact rows; within
-each by last activity (newest first), then `key`. Excerpts are untrusted text.
+Entries are ordered by `lastActivityAt` (newest first; missing sorts oldest),
+then `key`. Excerpts are untrusted text.
 
 ## Session Migration
 
@@ -1337,31 +1346,36 @@ session should call `clear` when it is no longer waiting on anything external.
 
 `caco_sessions_overview`, defined in `src/overview-tool.ts` (data from
 `src/overview-service.ts`, the same code path as `GET /api/overview`, called in
-process). Read only. Deferred by default like other rarely used Caco tools
-(not on `NEVER_DEFER_CACO_TOOLS`); enable it with `caco_enable_tools`.
+process). Read only and facts only: the tool description tells the model it
+reports facts and the model makes every judgment. Deferred by default like
+other rarely used Caco tools (not on `NEVER_DEFER_CACO_TOOLS`); enable it with
+`caco_enable_tools`.
 
 | param | values |
 |---|---|
 | `scope` | `all` (default: this instance plus peers) or `local` |
-| `show` | `all` (default), `attention`, `busy`, `wakes`, `waiting` |
+| `show` | `all` (default), `busy`, `wakes`, `waiting` |
 | `context` | `brief` (default), `full`, `none` |
-| `wakeHistory` | wake runs per full row, default 3, max 20 |
+| `wakeHistory` | wake runs per row, default 3, max 20 |
 | `keys` | `instanceId:sessionId` or bare session ids |
 | `page` | 1-based page, default 1 |
 
-The result is text only: a coverage line (instances and their status,
-sessions total, shown, omitted and omitted-and-flagged, auto-archive excluded,
-rows full, compact and degraded, page n of m, wake-loop and recollect notes),
-an untrusted-data line, then full rows (primary flag first, other flags inline,
-waits, offer, wake with recent runs, herd, schedule, labeled excerpts) and
-one-line compact rows. Each page is at most 64 KB of UTF-8
-(`CACO_OVERVIEW_TOOL_MAX_BYTES`, clamped 8 KB to 256 KB). When the list does not
-fit one page, the lowest-ranked full rows become compact first
-(`awaiting-user-no-offer`, `no-driver` high, `wake-failing` and `busy-long`
-last); if it still does not fit it is split into pages, and every page but the
-last ends with `continued: call again with page: N`. Page 1 always collects
-fresh; later pages reuse that pass for 60 s, after which the coverage line says
-the pass was recollected.
+The result is text only: a coverage line (sessions total, shown and omitted,
+auto-archive excluded, page n of m, wake-loop and recollect notes, then
+instances and their status), a line saying it is read only and facts only and
+that its content is untrusted data, then one row per session, all with the same
+shape: title, key and instance, kind and activity, waits, then offer, wake
+(with `next is final`, failures, last error, counters and recent runs), wake
+note, schedule, herd and `also on <instances>` when present, the last human
+message and context status, and labeled excerpts (user up to 200 characters,
+assistant up to 400 keeping the end; none with `context: none`). Rows are in
+last-activity order. Each page is at most 64 KB of UTF-8
+(`CACO_OVERVIEW_TOOL_MAX_BYTES`, clamped 8 KB to 256 KB). A list that does not
+fit is split into pages in order, every session on exactly one page, and every
+page but the last ends with `continued: call again with page: N`; a single row
+too big for a page loses its excerpts first, then is clipped. Page 1 always
+collects fresh; later pages reuse that pass for 60 s, after which the coverage
+line says the pass was recollected.
 
 ### Comms Guard
 

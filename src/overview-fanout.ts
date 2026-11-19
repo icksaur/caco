@@ -9,9 +9,9 @@
 import type { CacoPeer } from './peer-store.js';
 import { normalizeOrigin, isLoopbackOrigin } from './peer-store.js';
 import {
-  OVERVIEW_SCHEMA_VERSION, OVERVIEW_FLAG_CODES, type SessionOverview, type OverviewEntry, type OverviewFlag, type WaitReason, type WakeOverview,
+  OVERVIEW_SCHEMA_VERSION, OVERVIEW_SHOWS, type SessionOverview, type OverviewEntry, type WaitReason, type WakeOverview,
 } from './session-overview.js';
-import type { LastContext, AskVerdict } from './sdk-session-tail.js';
+import type { LastContext } from './sdk-session-tail.js';
 import type { WakeRun, WakeDefer, WakePendingRun } from './session-meta-store.js';
 
 export const OVERVIEW_HOP_HEADER = 'X-Caco-Overview-Hop';
@@ -52,16 +52,14 @@ class FanoutError extends Error {
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const CONFIDENCE = new Set(['high', 'low', 'info']);
 const WAIT_KINDS = new Set(['turn-running', 'retry-pending', 'user-offer', 'wake', 'wake-running', 'children', 'schedule']);
-const TIERS = new Set(['full', 'compact']);
 const ACTIVITY = new Set(['busy', 'idle']);
 const HIDDEN = new Set(['herd-child', 'agent', 'swarm']);
 const TITLE_SOURCES = new Set(['name', 'workspace-summary', 'auto-name', 'none']);
 const PARENT_STATES = new Set(['ok', 'missing', 'archived']);
 const RUN_OUTCOMES = new Set(['ok', 'error', 'cancelled', 'interrupted', 'rejected']);
 const MAX_ENTRIES = 20_000;
-const FLAG_CODES = new Set<string>(OVERVIEW_FLAG_CODES);
+const OVERVIEW_SHOW_SET = new Set<string>(OVERVIEW_SHOWS);
 /** Instance and session ids: uuid-like tokens only (they become keys and render verbatim). */
 const ID_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const id = (v: unknown, what: string): string => (typeof v === 'string' && ID_RE.test(v) ? v : bad(what));
@@ -97,15 +95,6 @@ function cleanWait(v: unknown): WaitReason {
   }
 }
 
-function cleanFlag(v: unknown): OverviewFlag {
-  const f = obj(v, 'bad flag');
-  return {
-    code: oneOf<OverviewFlag['code']>(f.code, FLAG_CODES, 'bad flag'),
-    detail: str(f.detail, 'bad flag', 2000),
-    confidence: oneOf<OverviewFlag['confidence']>(f.confidence, CONFIDENCE, 'bad flag'),
-  };
-}
-
 function cleanAt(v: unknown, what: string, textMax: number, withSource = false) {
   if (v === undefined) return undefined;
   const o = obj(v, what);
@@ -128,16 +117,6 @@ function cleanContext(v: unknown): LastContext {
   });
 }
 
-function cleanAsk(v: unknown): AskVerdict | undefined {
-  if (v === undefined) return undefined;
-  const a = obj(v, 'bad ask');
-  if ('unavailable' in a) {
-    const u = str(a.unavailable, 'bad ask', 40);
-    if (u !== 'oversized' && u !== 'truncated-start') bad('bad ask');
-    return { unavailable: u as 'oversized' | 'truncated-start' };
-  }
-  return { matched: a.matched === null ? null : str(a.matched, 'bad ask', 200) };
-}
 
 function cleanWake(v: unknown): WakeOverview | undefined {
   if (v === undefined) return undefined;
@@ -179,6 +158,7 @@ function cleanWake(v: unknown): WakeOverview | undefined {
   }
   return defined({
     everyHours: num(w.everyHours, 'bad wake'), registeredAt: str(w.registeredAt, 'bad wake', 40), nextWakeAt: str(w.nextWakeAt, 'bad wake', 40),
+    nextIsFinal: w.nextIsFinal === undefined ? undefined : (w.nextIsFinal === true ? true as const : bad('bad wake')),
     note: optStr(w.note, 'bad wake', 500), lastWakeAt: optStr(w.lastWakeAt, 'bad wake', 40),
     lastResult: optStr(w.lastResult, 'bad wake', 20) as WakeOverview['lastResult'], lastError: optStr(w.lastError, 'bad wake', 200),
     pausedReason: optStr(w.pausedReason, 'bad wake', 20) as WakeOverview['pausedReason'], finalWakeAt: optStr(w.finalWakeAt, 'bad wake', 40),
@@ -236,7 +216,6 @@ function cleanEntry(v: unknown, inst: { id: string; name: string }): OverviewEnt
     folder: optStr(e.folder, 'bad entry', 200),
     cwd: e.cwd === null ? null : str(e.cwd, 'bad entry', 2000),
     hidden: e.hidden === undefined ? undefined : oneOf<NonNullable<OverviewEntry['hidden']>>(e.hidden, HIDDEN, 'bad entry'),
-    tier: oneOf<OverviewEntry['tier']>(e.tier, TIERS, 'bad entry'),
     activity: oneOf<OverviewEntry['activity']>(e.activity, ACTIVITY, 'bad entry'),
     busy,
     waits: arr(e.waits, 'bad entry', 20).map(cleanWait),
@@ -244,12 +223,10 @@ function cleanEntry(v: unknown, inst: { id: string; name: string }): OverviewEnt
     wake: cleanWake(e.wake),
     schedule,
     herd,
+    duplicateOn: e.duplicateOn === undefined ? undefined : arr(e.duplicateOn, 'bad entry', 50).map(x => str(x, 'bad entry', 200)),
     lastHumanAt: optStr(e.lastHumanAt, 'bad entry', 40),
     lastActivityAt: optStr(e.lastActivityAt, 'bad entry', 40),
     context: cleanContext(e.context),
-    ask: cleanAsk(e.ask),
-    flags: arr(e.flags, 'bad entry', 50).map(cleanFlag),
-    primaryFlag: e.primaryFlag === undefined ? undefined : oneOf<NonNullable<OverviewEntry['primaryFlag']>>(e.primaryFlag, FLAG_CODES, 'bad entry'),
   }) as OverviewEntry;
 }
 
@@ -269,14 +246,13 @@ export function validateOverviewPayload(v: unknown): { ok: true; value: SessionO
     const c = obj(o.counts, 'bad counts');
     const counts = {
       total: num(c.total, 'bad counts'), shown: num(c.shown, 'bad counts'), omitted: num(c.omitted, 'bad counts'),
-      omittedFlagged: num(c.omittedFlagged, 'bad counts'), full: num(c.full, 'bad counts'), compact: num(c.compact, 'bad counts'),
       archivedExcluded: num(c.archivedExcluded, 'bad counts'),
     };
     const value: SessionOverview = {
       schemaVersion: OVERVIEW_SCHEMA_VERSION,
       instance: inst,
       generatedAt: str(o.generatedAt, 'bad envelope', 40),
-      show: (typeof o.show === 'string' ? o.show : 'all') as SessionOverview['show'],
+      show: (typeof o.show === 'string' && OVERVIEW_SHOW_SET.has(o.show) ? o.show : 'all') as SessionOverview['show'],
       wakeLoopEnabled: o.wakeLoopEnabled === undefined ? true : bool(o.wakeLoopEnabled, 'bad envelope'),
       counts,
       entries: arr(o.entries, 'bad envelope', MAX_ENTRIES).map(e => cleanEntry(e, inst)),
@@ -351,6 +327,11 @@ export async function fetchPeerOverviews(o: FanoutOptions): Promise<PeerFetchRes
       const text = await readCapped(res, maxBytes);
       let json: unknown;
       try { json = JSON.parse(text); } catch { return done('invalid', 'not JSON'); }
+      // A peer on another wire version is outdated (never merged), not malformed.
+      const version = isObj(json) ? json.schemaVersion : undefined;
+      if (isObj(json) && version !== OVERVIEW_SCHEMA_VERSION) {
+        return done('outdated', typeof version === 'number' && Number.isInteger(version) ? `schemaVersion ${version}` : 'no schemaVersion');
+      }
       const v = validateOverviewPayload(json);
       if (!v.ok) return done('invalid', v.reason);
       const id = v.value.instance.id;

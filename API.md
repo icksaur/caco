@@ -121,7 +121,7 @@ Body:
 {
   "name": "string (custom session name, empty to clear)",
   "envHint": "string (environment setup hint shown on resume)",
-  "folder": "string (virtual folder name, '/' or 'root' to move to root, empty to clear)",
+  "folder": "string (virtual folder name, '/' or 'root' to move to root, empty to clear; a single emoji pins the session, see docs/spec-session-pin.md)",
   "setContext": {
     "setName": "files | applet | endpoints | ports",
     "items": ["path/to/file.ts", "other/file.ts"],

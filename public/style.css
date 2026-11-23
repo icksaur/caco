@@ -1420,6 +1420,20 @@ main {
   white-space: nowrap;
 }
 
+/* Pin glyph (spec-session-pin): top-right of the card; click to unpin */
+.session-pin {
+  flex-shrink: 0;
+  margin-left: var(--space-xs);
+  font-size: var(--text-sm);
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.session-pin:hover {
+  opacity: 0.6;
+}
+
 /* Action buttons (edit, delete) */
 /* Busy state styling */
 .session-item.busy {

@@ -112,7 +112,8 @@ To remove: `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Star
 | `/caco.agent <name> <prompt>` | Dispatch prompt with an SDK custom agent |
 | `/caco.session-rename <name>` | Rename current session |
 | `/caco.session-cwd <path>` | Change session working directory |
-| `/caco.session-folder <name>` | Move session to a folder (or "/" for root) |
+| `/caco.session-folder <name>` | Move session to a folder (or "/" for root; an emoji pins it) |
+| `/caco.session-pin [emoji]` | Pin session to the top of the list (default 📌). Long-press a card also pins; click the glyph to unpin |
 | `/caco.session-archive` | Archive current session |
 | `/caco.session-model` | Change session model |
 | `/caco.session-export` | Export current session as .tar.gz |

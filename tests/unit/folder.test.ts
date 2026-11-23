@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeFolder, isValidFolder } from '../../src/folder.js';
+import { normalizeFolder, isValidFolder, isGlyphFolder } from '../../src/folder.js';
+import { isGlyphFolder as clientIsGlyphFolder } from '../../public/ts/glyph-folder.js';
 
 describe('normalizeFolder', () => {
   it('empty string → root', () => expect(normalizeFolder('')).toBe(''));
@@ -31,4 +32,31 @@ describe('isValidFolder', () => {
   it('"/work" is valid (leading slash ok)', () => expect(isValidFolder('/work')).toBe(true));
   it('"my folder" is valid', () => expect(isValidFolder('my folder')).toBe(true));
   it('"work/" trailing slash is valid', () => expect(isValidFolder('work/')).toBe(true));
+});
+
+describe('glyph folders (spec-session-pin)', () => {
+  const glyphs = ['📌', '⭐', '⭐\uFE0F', '🔥', '✅', ' 📌 '];
+  const notGlyphs = ['A', '1', '-', '📌📌', '📌a', 'a📌', '', '  ', '/', 'pin', undefined, null];
+  it.each(glyphs)('%s is a glyph', g => {
+    expect(isGlyphFolder(g)).toBe(true);
+    expect(clientIsGlyphFolder(g)).toBe(true);
+  });
+  it.each(notGlyphs)('%s is not a glyph', g => {
+    expect(isGlyphFolder(g)).toBe(false);
+    expect(clientIsGlyphFolder(g)).toBe(false);
+  });
+  it('normalizeFolder keeps a glyph, trimmed', () => {
+    expect(normalizeFolder('📌')).toBe('📌');
+    expect(normalizeFolder(' ⭐ ')).toBe('⭐');
+  });
+  it('normalizeFolder still strips a non-glyph emoji mix', () => {
+    expect(normalizeFolder('📌📌')).toBe('');
+    expect(normalizeFolder('A')).toBe('A');
+  });
+  it('isValidFolder accepts one glyph, rejects two', () => {
+    expect(isValidFolder('📌')).toBe(true);
+    expect(isValidFolder('⭐')).toBe(true);
+    expect(isValidFolder('📌📌')).toBe(false);
+    expect(isValidFolder('A')).toBe(true);
+  });
 });

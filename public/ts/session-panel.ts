@@ -16,6 +16,10 @@ import { buildSessionListModel } from './session-list-model.js';
 import { refreshUsageDisplays, repaintUsageDisplays } from './usage-display.js';
 import type { SessionListModel, FolderGroup } from './session-list-model.js';
 import { displayTitleFor, truncateForTitle, shouldSuppressIntentSubline } from './session-title.js';
+import { isGlyphFolder, PIN_GLYPH } from './glyph-folder.js';
+
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_MOVE_PX = 8;
 
 // Module state
 let allSessions: SessionData[] = [];
@@ -26,6 +30,9 @@ const collapsedFolders = new Set<string>(
 
 // Track active session drags (iframe may restrict dataTransfer.types during dragover)
 let sessionDragActive = false;
+// The dragged session id: getData() is unreadable during dragover, and the
+// root zone must refuse a pinned card (spec-session-pin).
+let draggingSessionId: string | null = null;
 
 // Fuzzy-find query for the session-list filter input (session-title-fuzzyfind).
 // Empty or whitespace-only means no filter. The input element itself lives in
@@ -467,22 +474,55 @@ function toggleFolder(name: string): void {
 
 const movingSessionIds = new Set<string>();
 
+function isPinnedSession(sessionId: string | null): boolean {
+  if (!sessionId) return false;
+  return isGlyphFolder(allSessions.find(s => s.sessionId === sessionId)?.folder);
+}
+
+/** PATCH a session's folder for pin/unpin; one request per session at a time. */
+function setSessionFolder(sessionId: string, folder: string, successMessage: string): void {
+  if (movingSessionIds.has(sessionId)) return;
+  movingSessionIds.add(sessionId);
+  void (async () => {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder })
+      });
+      if (res.ok) {
+        showToast(successMessage, { type: 'success', autoHideMs: 3000 });
+        void loadSessions();
+      } else {
+        const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+        showToast(data.error || 'Failed to move session');
+      }
+    } catch {
+      showToast('Failed to move session');
+    } finally {
+      movingSessionIds.delete(sessionId);
+    }
+  })();
+}
+
 function setupZoneDragHandlers(zone: HTMLElement, folderName: string): void {
   let dragDepth = 0;
   const isSessionDrag = (e: DragEvent) => sessionDragActive || (e.dataTransfer?.types.includes('text/x-caco-session') ?? false);
+  // A pinned card already renders in root: dropping it there is a move to nowhere.
+  const refuses = () => folderName === '' && isPinnedSession(draggingSessionId);
 
   zone.addEventListener('dragover', (e) => {
-    if (!isSessionDrag(e)) return;
+    if (!isSessionDrag(e) || refuses()) return;
     e.preventDefault();
     e.dataTransfer!.dropEffect = 'move';
   });
   zone.addEventListener('dragenter', (e) => {
-    if (!isSessionDrag(e)) return;
+    if (!isSessionDrag(e) || refuses()) return;
     dragDepth++;
     if (dragDepth === 1) zone.classList.add('drop-highlight');
   });
   zone.addEventListener('dragleave', (e) => {
-    if (!isSessionDrag(e)) return;
+    if (!isSessionDrag(e) || refuses()) return;
     dragDepth--;
     if (dragDepth === 0) zone.classList.remove('drop-highlight');
   });
@@ -494,6 +534,7 @@ function setupZoneDragHandlers(zone: HTMLElement, folderName: string): void {
     zone.classList.remove('drop-highlight');
     const sessionId = e.dataTransfer!.getData('text/x-caco-session');
     if (!sessionId || movingSessionIds.has(sessionId)) return;
+    if (folderName === '' && isPinnedSession(sessionId)) return;
     const current = allSessions.find(s => s.sessionId === sessionId)?.folder ?? '';
     if (current === folderName) return;
     const session = allSessions.find(s => s.sessionId === sessionId);
@@ -558,7 +599,7 @@ function renderFromModel(model: SessionListModel): void {
   wireHeaderControls();
   repaintUsageDisplays();
 
-  if (model.root.length === 0 && model.folders.length === 0) {
+  if (model.pinned.length === 0 && model.root.length === 0 && model.folders.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'schedules-empty';
     empty.textContent = sessionFilterQuery.trim().length > 0 ? 'no matching sessions' : 'no sessions';
@@ -569,12 +610,13 @@ function renderFromModel(model: SessionListModel): void {
   const rootZone = document.createElement('div');
   rootZone.className = 'folder-zone';
   rootZone.dataset.folder = '';
-  if (model.root.length === 0 && model.folders.length > 0) {
+  if (model.pinned.length === 0 && model.root.length === 0 && model.folders.length > 0) {
     const indicator = document.createElement('div');
     indicator.className = 'root-drop-indicator';
     rootZone.appendChild(indicator);
   }
-  for (const session of model.root) {
+  // Pinned (glyph folder) sessions go first in root, no divider (spec-session-pin).
+  for (const session of [...model.pinned, ...model.root]) {
     rootZone.appendChild(createSessionItem(session, activeSessionId ?? undefined));
   }
   setupZoneDragHandlers(rootZone, '');
@@ -633,8 +675,79 @@ function createFolderHeader(folder: FolderGroup): HTMLElement {
 }
 
 /**
+ * Glyph badge at the top-right of a pinned card; one click unpins (folder '/').
+ * Pressing it must not start the card's drag or long-press.
+ */
+function createPinGlyph(item: HTMLElement, sessionId: string, glyph: string): HTMLElement {
+  const pin = document.createElement('span');
+  pin.className = 'session-pin';
+  pin.textContent = glyph;
+  pin.title = glyph === PIN_GLYPH ? 'Pinned. Click to unpin.' : `In folder ${glyph}. Click to remove.`;
+  pin.draggable = false;
+  const restoreDrag = () => { item.draggable = true; };
+  pin.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    item.draggable = false;
+    // Restore on release anywhere, not on leave: moving off the glyph while
+    // held must not start a card drag.
+    window.addEventListener('pointerup', restoreDrag, { once: true });
+    window.addEventListener('pointercancel', restoreDrag, { once: true });
+  });
+  pin.addEventListener('click', (e) => {
+    e.stopPropagation();
+    restoreDrag();
+    setSessionFolder(sessionId, '/', 'Unpinned');
+  });
+  return pin;
+}
+
+/**
+ * Long-press on a card pins it with 📌 (spec-session-pin). A move past the
+ * threshold, a drag, or lifting early cancels. Returns a function the card's
+ * click handler calls: true means a long-press just fired, so skip the open.
+ */
+function attachLongPressPin(item: HTMLElement, sessionId: string): () => boolean {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let fired = false;
+  let startX = 0;
+  let startY = 0;
+  const cancel = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+  };
+  item.addEventListener('pointerdown', (e) => {
+    fired = false;
+    cancel();
+    if (e.button !== 0) return;
+    if ((e.target as Element | null)?.closest?.('.session-pin')) return;
+    startX = e.clientX;
+    startY = e.clientY;
+    timer = setTimeout(() => {
+      timer = null;
+      fired = true;
+      const folder = allSessions.find(s => s.sessionId === sessionId)?.folder;
+      if (folder?.trim() === PIN_GLYPH) return;
+      setSessionFolder(sessionId, PIN_GLYPH, 'Pinned');
+    }, LONG_PRESS_MS);
+  });
+  item.addEventListener('pointermove', (e) => {
+    if (timer && Math.hypot(e.clientX - startX, e.clientY - startY) > LONG_PRESS_MOVE_PX) cancel();
+  });
+  for (const type of ['pointerup', 'pointercancel', 'pointerleave', 'dragstart']) {
+    item.addEventListener(type, cancel);
+  }
+  item.addEventListener('contextmenu', (e) => {
+    if (fired) e.preventDefault();
+  });
+  return () => {
+    const wasFired = fired;
+    fired = false;
+    return wasFired;
+  };
+}
+
+/**
  * Create a session item element
- * Layout: [ indicator | title... | cwd | age | actions ]
+ * Layout: [ indicator | title... | cwd | age | wake | pin ]
  */
 function createSessionItem(session: SessionData, activeSessionId?: string): HTMLElement {
   const item = document.createElement('div');
@@ -653,7 +766,11 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     item.classList.add('unobserved');
   }
   item.dataset.sessionId = session.sessionId;
-  item.onclick = () => sessionClick(session.sessionId);
+  const consumeLongPress = attachLongPressPin(item, session.sessionId);
+  item.onclick = () => {
+    if (consumeLongPress()) return;
+    void sessionClick(session.sessionId);
+  };
   
   item.draggable = true;
   item.addEventListener('dragstart', (e) => {
@@ -662,6 +779,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     e.dataTransfer!.setDragImage(item, 0, 0);
     item.classList.add('dragging');
     sessionDragActive = true;
+    draggingSessionId = session.sessionId;
     if (window.parent !== window) {
       // Drag payload uses the SAME truncated title the row displays, so a
       // drop receiver sees exactly what the user was dragging — a runaway
@@ -679,6 +797,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   item.addEventListener('dragend', () => {
     item.classList.remove('dragging');
     sessionDragActive = false;
+    draggingSessionId = null;
     document.querySelectorAll('.folder-zone.drop-highlight').forEach(z => z.classList.remove('drop-highlight'));
     if (window.parent !== window) {
       window.parent.postMessage({ type: 'caco:transfer:dragend' }, '*');
@@ -801,6 +920,10 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
     ageSpan.className = 'session-age';
     ageSpan.textContent = formatAge(session.updatedAt);
     row1.appendChild(ageSpan);
+  }
+
+  if (isGlyphFolder(session.folder)) {
+    row1.appendChild(createPinGlyph(item, session.sessionId, session.folder!.trim()));
   }
   
   item.appendChild(row1);

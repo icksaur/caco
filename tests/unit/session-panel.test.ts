@@ -632,3 +632,155 @@ describe('session-panel API actions', () => {
     expect(container?.textContent).toBe('existing');
   });
 });
+
+describe('session-panel pins', () => {
+  function pinnedSessions(): SessionData[] {
+    return [
+      ...cannedSessions(),
+      { sessionId: 'pin-old', cwd: '/repo/p1', summary: 'Pinned old', folder: '📌', updatedAt: '2026-07-11T10:00:00.000Z' },
+      { sessionId: 'star-new', cwd: '/repo/p2', summary: 'Starred new', folder: '⭐', updatedAt: '2026-07-11T16:00:00.000Z' }
+    ];
+  }
+  const ORDER = ['active-root', 'root-new', 'work-busy', 'alpha-child', 'pin-old', 'star-new'];
+
+  function pointer(type: string, init: MouseEventInit = {}): Event {
+    return new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init });
+  }
+
+  function patchFetch(sessionId: string): void {
+    mockFetch((input: FetchInput, init?: FetchInit) => {
+      if (String(input) === `/api/sessions/${sessionId}` && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      if (String(input) === '/api/sessions') {
+        return Promise.resolve(jsonResponse({ sessions: [], sessionOrder: [] }));
+      }
+      return Promise.reject(new Error('unexpected fetch call'));
+    });
+  }
+
+  const item = (id: string) => document.querySelector<HTMLElement>(`.session-item[data-session-id="${id}"]`)!;
+
+  it('renders glyph-folder sessions first in root with their glyph and no folder header', async () => {
+    await loadRenderedPanel(pinnedSessions(), ORDER);
+    const items = [...document.querySelectorAll<HTMLElement>('.session-item')].map(el => el.dataset.sessionId);
+    expect(items.slice(0, 4)).toEqual(['pin-old', 'star-new', 'active-root', 'root-new']);
+    const folders = [...document.querySelectorAll<HTMLElement>('.folder-header')].map(f => f.dataset.folder);
+    expect(folders).toEqual(['alpha', 'work']);
+    expect(document.querySelectorAll('.root-divider, .pinned-divider')).toHaveLength(0);
+    expect(item('pin-old').querySelector('.session-pin')?.textContent).toBe('📌');
+    expect(item('pin-old').querySelector('.session-pin')?.getAttribute('title')).toBe('Pinned. Click to unpin.');
+    expect(item('star-new').querySelector('.session-pin')?.getAttribute('title')).toBe('In folder ⭐. Click to remove.');
+    expect(item('root-new').querySelector('.session-pin')).toBeNull();
+  });
+
+  it('a pinned-only list is not empty and has no root drop indicator', async () => {
+    await loadRenderedPanel([
+      { sessionId: 'pin-only', cwd: '/repo/p', summary: 'Only pinned', folder: '📌' },
+      { sessionId: 'in-folder', cwd: '/repo/f', summary: 'Foldered', folder: 'work' }
+    ], ['pin-only', 'in-folder']);
+    expect(item('pin-only')).not.toBeNull();
+    expect(document.querySelector('#sessionList .schedules-empty')).toBeNull();
+    expect(document.querySelector('.root-drop-indicator')).toBeNull();
+  });
+
+  it('clicking the glyph unpins without opening the session', async () => {
+    await loadRenderedPanel(pinnedSessions(), ORDER);
+    patchFetch('pin-old');
+    item('pin-old').querySelector<HTMLElement>('.session-pin')!.click();
+    await flushPromises();
+    expect(fetchCall('/api/sessions/pin-old', 'PATCH')?.[1]?.body).toBe(JSON.stringify({ folder: '/' }));
+    expect(showToastMock).toHaveBeenCalledWith('Unpinned', { type: 'success', autoHideMs: 3000 });
+    expect(sessionClickMock).not.toHaveBeenCalled();
+  });
+
+  it('pressing the glyph blocks card drag and does not start a long-press', async () => {
+    await loadRenderedPanel(pinnedSessions(), ORDER);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const card = item('pin-old');
+    const glyph = card.querySelector<HTMLElement>('.session-pin')!;
+    glyph.dispatchEvent(pointer('pointerdown'));
+    expect(card.draggable).toBe(false);
+    vi.advanceTimersByTime(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    glyph.dispatchEvent(pointer('pointerleave', { bubbles: false }));
+    expect(card.draggable).toBe(false);
+    glyph.dispatchEvent(pointer('pointerup'));
+    expect(card.draggable).toBe(true);
+  });
+
+  it('long-press pins with 📌 and suppresses the click that follows', async () => {
+    await loadRenderedPanel(pinnedSessions(), ORDER);
+    patchFetch('root-new');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const card = item('root-new');
+    card.dispatchEvent(pointer('pointerdown'));
+    vi.advanceTimersByTime(500);
+    vi.useRealTimers();
+    await flushPromises();
+    expect(fetchCall('/api/sessions/root-new', 'PATCH')?.[1]?.body).toBe(JSON.stringify({ folder: '📌' }));
+    expect(showToastMock).toHaveBeenCalledWith('Pinned', { type: 'success', autoHideMs: 3000 });
+    card.click();
+    expect(sessionClickMock).not.toHaveBeenCalled();
+    card.click();
+    expect(sessionClickMock).toHaveBeenCalledWith('root-new');
+  });
+
+  it('a short press or a moved press does not pin', async () => {
+    await loadRenderedPanel(pinnedSessions(), ORDER);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const card = item('root-new');
+    card.dispatchEvent(pointer('pointerdown'));
+    vi.advanceTimersByTime(200);
+    card.dispatchEvent(pointer('pointerup'));
+    card.dispatchEvent(pointer('pointerdown', { clientX: 0, clientY: 0 }));
+    card.dispatchEvent(pointer('pointermove', { clientX: 20, clientY: 0 }));
+    vi.advanceTimersByTime(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    card.click();
+    expect(sessionClickMock).toHaveBeenCalledWith('root-new');
+  });
+
+  it('long-press on a 📌 session does nothing', async () => {
+    await loadRenderedPanel(pinnedSessions(), ORDER);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    item('pin-old').dispatchEvent(pointer('pointerdown'));
+    vi.advanceTimersByTime(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(showToastMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses dropping a pinned card on root and keeps it pinned', async () => {
+    await loadRenderedPanel(pinnedSessions(), ORDER);
+    const card = item('pin-old');
+    card.dispatchEvent(dragEvent('dragstart', { setData: vi.fn(), setDragImage: vi.fn(), effectAllowed: 'none' }));
+    const dataTransfer = {
+      types: ['text/x-caco-session'],
+      getData: vi.fn(() => 'pin-old'),
+      dropEffect: 'none'
+    } as Partial<DataTransfer>;
+    const rootZone = document.querySelector<HTMLElement>('.folder-zone[data-folder=""]')!;
+    rootZone.dispatchEvent(dragEvent('dragenter', dataTransfer));
+    const over = dragEvent('dragover', dataTransfer);
+    rootZone.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(false);
+    expect(rootZone.classList.contains('drop-highlight')).toBe(false);
+    rootZone.dispatchEvent(dragEvent('drop', dataTransfer));
+    await flushPromises();
+    expect(fetchCall('/api/sessions/pin-old', 'PATCH')).toBeUndefined();
+    card.dispatchEvent(new Event('dragend'));
+  });
+
+  it('still allows dropping a pinned card into a named folder', async () => {
+    await loadRenderedPanel(pinnedSessions(), ORDER);
+    patchFetch('pin-old');
+    const card = item('pin-old');
+    card.dispatchEvent(dragEvent('dragstart', { setData: vi.fn(), setDragImage: vi.fn(), effectAllowed: 'none' }));
+    const dataTransfer = { types: ['text/x-caco-session'], getData: vi.fn(() => 'pin-old'), dropEffect: 'none' } as Partial<DataTransfer>;
+    const workZone = document.querySelector<HTMLElement>('.folder-zone[data-folder="work"]')!;
+    workZone.dispatchEvent(dragEvent('drop', dataTransfer));
+    await flushPromises();
+    expect(fetchCall('/api/sessions/pin-old', 'PATCH')?.[1]?.body).toBe(JSON.stringify({ folder: 'work' }));
+    card.dispatchEvent(new Event('dragend'));
+  });
+});

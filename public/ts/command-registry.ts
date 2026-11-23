@@ -4,7 +4,8 @@ import { chatView } from './chat-view-controller.js';
 import { selectModel } from './model-selector.js';
 import { showToast } from './toast.js';
 import { setActiveContextBudget, setActiveReasoningEffort } from './context-footer.js';
-import { archiveSession, stageSessionForArchive, renameSession } from './session-panel.js';
+import { archiveSession, stageSessionForArchive, renameSession, getCachedSessions } from './session-panel.js';
+import { isGlyphFolder, PIN_GLYPH } from './glyph-folder.js';
 import type { PopupItem } from './input-popup.js';
 
 export interface Command {
@@ -20,7 +21,8 @@ export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string
   { name: 'caco.agent', description: 'Select an SDK custom agent (applies to your next message)' },
   { name: 'caco.session-rename', description: 'Rename current session' },
   { name: 'caco.session-cwd', description: 'Change session working directory' },
-  { name: 'caco.session-folder', description: 'Move session to a folder (or "/" for root)' },
+  { name: 'caco.session-folder', description: 'Move session to a folder (or "/" for root; an emoji pins it)' },
+  { name: 'caco.session-pin', description: 'Pin session to the top of the list (optionally with an emoji)' },
   { name: 'caco.session-archive', description: 'Stage session for archival (or "now" to archive immediately)' },
   { name: 'caco.session-model', description: 'Change session model' },
   { name: 'caco.restart', description: 'Restart the Caco server' },
@@ -172,6 +174,30 @@ registerBuiltin('caco.session-folder', async (arg) => {
     }
   } catch {
     showToast('Failed to move session');
+  }
+});
+
+registerBuiltin('caco.session-pin', async (arg) => {
+  const sessionId = getActiveSessionId();
+  if (!sessionId) { showToast('No active session'); return; }
+  const glyph = arg.trim() || PIN_GLYPH;
+  if (!isGlyphFolder(glyph)) { showToast('Usage: /session-pin [emoji]'); return; }
+  const current = getCachedSessions().find(s => s.sessionId === sessionId)?.folder?.trim();
+  if (current === glyph) { showToast('Already pinned'); return; }
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder: glyph })
+    });
+    if (res.ok) {
+      showToast('Pinned', { type: 'success', autoHideMs: 3000 });
+    } else {
+      const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+      showToast(data.error || 'Failed to pin session');
+    }
+  } catch {
+    showToast('Failed to pin session');
   }
 });
 

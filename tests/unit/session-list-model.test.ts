@@ -93,4 +93,18 @@ describe('buildSessionListModel', () => {
     const work = model.folders[0];
     expect(work.sessions.map(s => s.sessionId)).toEqual(['c', 'b', 'a']);
   });
+
+  it('glyph-folder sessions go to pinned, MRU-sorted, never a folder group', () => {
+    const sessions = [
+      session('r1'),
+      session('p1', { folder: '📌' }),
+      session('p2', { folder: '⭐' }),
+      session('f1', { folder: 'work' }),
+      session('a1', { folder: 'A' }),
+    ];
+    const model = buildSessionListModel(sessions, ['p2', 'r1', 'p1'], new Set());
+    expect(model.pinned.map(s => s.sessionId)).toEqual(['p2', 'p1']);
+    expect(model.root.map(s => s.sessionId)).toEqual(['r1']);
+    expect(model.folders.map(f => f.name)).toEqual(['A', 'work']);
+  });
 });

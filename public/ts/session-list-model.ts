@@ -1,5 +1,6 @@
 import type { SessionData } from './types.js';
 import { sessionTracker } from './session-state-tracker.js';
+import { isGlyphFolder } from './glyph-folder.js';
 
 export interface FolderGroup {
   name: string;
@@ -10,6 +11,8 @@ export interface FolderGroup {
 }
 
 export interface SessionListModel {
+  /** Sessions in a glyph folder: rendered first in root (spec-session-pin). */
+  pinned: SessionData[];
   root: SessionData[];
   folders: FolderGroup[];
 }
@@ -32,12 +35,15 @@ export function buildSessionListModel(
   sessionOrder: string[],
   collapsedFolders: Set<string>
 ): SessionListModel {
+  const pinned: SessionData[] = [];
   const rootSessions: SessionData[] = [];
   const folderMap = new Map<string, SessionData[]>();
 
   for (const s of sessions) {
     const folder = s.folder;
-    if (folder) {
+    if (isGlyphFolder(folder)) {
+      pinned.push(s);
+    } else if (folder) {
       let list = folderMap.get(folder);
       if (!list) { list = []; folderMap.set(folder, list); }
       list.push(s);
@@ -49,6 +55,7 @@ export function buildSessionListModel(
   const orderMap = new Map(sessionOrder.map((id, i) => [id, i]));
   const cmp = mruComparator(orderMap);
 
+  pinned.sort(cmp);
   rootSessions.sort(cmp);
 
   const folders: FolderGroup[] = [];
@@ -72,5 +79,5 @@ export function buildSessionListModel(
     });
   }
 
-  return { root: rootSessions, folders };
+  return { pinned, root: rootSessions, folders };
 }

@@ -804,7 +804,7 @@ router.patch('/sessions/:sessionId', async (req: Request, res: Response) => {
   
   if (folder !== undefined) {
     if (folder !== '' && folder !== '/' && folder.toLowerCase() !== 'root' && !isValidFolder(folder)) {
-      res.status(400).json({ error: 'Invalid folder name: only letters, numbers, space, dash, underscore. Nested paths not supported.' });
+      res.status(400).json({ error: 'Invalid folder name: a single emoji, or only letters, numbers, space, dash, underscore. Nested paths not supported.' });
       return;
     }
     // A folder change alters auto-archive eligibility; refuse it while the reaper

@@ -140,6 +140,11 @@ export function createPeerProxy(deps: PeerProxyDeps = {}) {
       }
       if (typeof out.location === 'string') out.location = rewriteLocation(out.location, r.target.origin, r.base);
       res.writeHead(upRes.statusCode ?? 502, out);
+      // A peer that goes away mid-response (restart, dropped forward) must not
+      // leave the browser's response hanging open.
+      upRes.on('aborted', () => res.destroy());
+      upRes.on('error', () => res.destroy());
+      upRes.on('close', () => { if (!upRes.complete) res.destroy(); });
       upRes.pipe(res);
     });
     up.on('error', () => {
@@ -168,12 +173,27 @@ export function createPeerProxy(deps: PeerProxyDeps = {}) {
     if (r.kind === 'redirect') return refuse(404, 'Not Found');
     const mod = r.target.protocol === 'https:' ? https : http;
     const up = mod.request(requestOptions(r.target, 'GET', r.path, forwardHeaders(req.headers, r.target, r.base, true)));
+    // A browser that leaves before the peer answers cancels the upstream handshake.
+    // An upgrade socket starts paused and would never notice the close, so it
+    // flows until the handshake completes; any early bytes are held and replayed.
+    // HTTP server sockets are half-open, so a browser's FIN is 'end', not 'close'.
+    const cancel = () => { up.destroy(); socket.destroy(); };
+    const early: Buffer[] = [];
+    const hold = (chunk: Buffer) => { early.push(chunk); };
+    socket.once('close', cancel);
+    socket.once('end', cancel);
+    socket.on('data', hold);
     up.on('upgrade', (upRes, upSocket, upHead) => {
       const lines = [`HTTP/1.1 ${upRes.statusCode ?? 101} ${upRes.statusMessage ?? 'Switching Protocols'}`];
       for (let i = 0; i < upRes.rawHeaders.length; i += 2) lines.push(`${upRes.rawHeaders[i]}: ${upRes.rawHeaders[i + 1]}`);
       socket.write(lines.join('\r\n') + '\r\n\r\n');
+      socket.off('close', cancel);
+      socket.off('end', cancel);
+      socket.off('data', hold);
+      socket.pause();
       if (upHead.length) socket.write(upHead);
       if (head.length) upSocket.write(head);
+      for (const chunk of early) upSocket.write(chunk);
       upSocket.on('error', () => socket.destroy());
       upSocket.on('close', () => socket.destroy());
       socket.on('close', () => upSocket.destroy());

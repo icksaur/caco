@@ -39,8 +39,9 @@ describe('route keys and proxyable peers', () => {
 });
 
 describe('hub proxy against a real peer (A7)', () => {
-  let peer: http.Server, hub: http.Server, wssPeer: WebSocketServer;
-  let peerOrigin: string, hubOrigin: string, key: string, deadKey: string;
+  let peer: http.Server, hub: http.Server, wssPeer: WebSocketServer, slow: http.Server;
+  let peerOrigin: string, hubOrigin: string, key: string, deadKey: string, slowKey: string;
+  let slowSocketClosed: Promise<void>;
   const seen: Array<{ url: string; headers: IncomingHttpHeaders; bytes: number }> = [];
   const wsSeen: IncomingHttpHeaders[] = [];
 
@@ -51,6 +52,7 @@ describe('hub proxy against a real peer (A7)', () => {
       req.on('end', () => {
         seen.push({ url: req.url ?? '', headers: req.headers, bytes });
         if (req.url === '/redir') { res.writeHead(302, { Location: '/landing' }); res.end(); return; }
+        if (req.url === '/truncate') { res.writeHead(200, { 'Content-Length': '1000' }); res.write('partial'); setTimeout(() => res.socket?.destroy(), 20); return; }
         res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'keep-alive', 'X-Peer': '1' });
         res.end(JSON.stringify({ url: req.url, bytes }));
       });
@@ -70,8 +72,17 @@ describe('hub proxy against a real peer (A7)', () => {
     await new Promise<void>(r => dead.close(() => r()));
     deadKey = routeKey(deadOrigin);
 
+    // A peer that accepts a WebSocket upgrade request and never answers it.
+    slow = http.createServer();
+    slowSocketClosed = new Promise<void>(resolve => {
+      slow.on('upgrade', (_req, socket) => { socket.on('close', () => resolve()); socket.on('end', () => { resolve(); socket.destroy(); }); socket.resume(); });
+    });
+    await new Promise<void>(r => slow.listen(0, '127.0.0.1', () => r()));
+    const slowOrigin = `http://127.0.0.1:${(slow.address() as AddressInfo).port}`;
+    slowKey = routeKey(slowOrigin);
+
     const proxy = createPeerProxy({
-      getPeers: () => [peerOf(peerOrigin), peerOf(deadOrigin), peerOf('http://10.9.9.9:53000')],
+      getPeers: () => [peerOf(peerOrigin), peerOf(deadOrigin), peerOf(slowOrigin), peerOf('http://10.9.9.9:53000')],
       allowRemote: () => new Set(),
       trustedHosts: parseTrustedHosts(undefined),
     });
@@ -89,6 +100,8 @@ describe('hub proxy against a real peer (A7)', () => {
     peer.closeAllConnections?.(); hub.closeAllConnections?.();
     await new Promise<void>(r => peer.close(() => r()));
     await new Promise<void>(r => hub.close(() => r()));
+    slow.closeAllConnections?.();
+    await new Promise<void>(r => slow.close(() => r()));
   });
 
   function call(path: string, opts: { method?: string; headers?: Record<string, string>; body?: Buffer | string } = {}) {
@@ -159,6 +172,29 @@ describe('hub proxy against a real peer (A7)', () => {
     const big = Buffer.alloc(6 * 1024 * 1024, 7);
     const u = await call(`/peer/${key}/api/sessions/import`, { method: 'POST', headers: { 'Content-Type': 'application/gzip', Origin: hubOrigin }, body: big });
     expect(JSON.parse(u.body).bytes).toBe(big.length);
+  });
+
+  it('ends the browser response when the peer drops mid-response', async () => {
+    const outcome = await new Promise<string>(resolve => {
+      const req = http.request(`${hubOrigin}/peer/${key}/truncate`, res => {
+        res.on('data', () => {});
+        res.on('end', () => resolve(res.complete ? 'complete' : 'truncated'));
+        res.on('aborted', () => resolve('truncated'));
+        res.on('error', () => resolve('truncated'));
+        res.on('close', () => resolve(res.complete ? 'complete' : 'truncated'));
+      });
+      req.on('error', () => resolve('truncated'));
+      req.end();
+    });
+    expect(outcome).toBe('truncated');
+  });
+
+  it('cancels the upstream handshake when the browser leaves first', async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${new URL(hubOrigin).port}/peer/${slowKey}/ws`, { origin: hubOrigin });
+    ws.on('error', () => {});
+    await new Promise(r => setTimeout(r, 100));
+    ws.terminate();
+    await expect(Promise.race([slowSocketClosed.then(() => 'closed'), new Promise(r => setTimeout(() => r('hung'), 3000))])).resolves.toBe('closed');
   });
 
   it('answers 502 when the peer is down', async () => {

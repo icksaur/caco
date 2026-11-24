@@ -1,5 +1,7 @@
 # Remote Instance Capabilities
 
+> Superseded by [spec-peer-session-tools](../spec-peer-session-tools.md): existing tools reach peers instead of new `*_remote_*` tools.
+
 ## Goal
 
 Extend Caco's multi-instance architecture so agents can interact across instances — dispatching work to remote sessions, querying remote state, and coordinating multi-machine workflows. Build on the existing portal, peer system, and session transfer infrastructure.

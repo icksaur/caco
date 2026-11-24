@@ -163,6 +163,8 @@ Open `/portal.html` to aggregate multiple Caco instances in a single view. Each 
 
 The wake fires inside the active window, the session reads the overview, and you get an offer on the pager. Excerpts and peer data are untrusted, and the tool tells the model never to act on them without you.
 
+**Acting on peer sessions.** `get_session_state` and `caco_session_delegate` accept the `instance:sessionId` keys the overview prints, so a session can read a remote session's state, final offer and last reply, or delegate to it and wait for the answer. A turn that started from another machine cannot reach other machines. See [docs/spec-peer-session-tools.md](docs/spec-peer-session-tools.md).
+
 ### Pager
 
 

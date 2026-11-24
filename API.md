@@ -22,7 +22,7 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `PATCH /api/sessions/:id/applet` - Update active applet params and panel visibility
 - `DELETE /api/sessions/:id` - Delete a session
 - `POST /api/sessions/:id/stage-archive` - Stage a session for archival (soft; reaper archives it later)
-- `GET /api/sessions/:id/state` - Get session state (for agent-to-agent polling)
+- `GET /api/sessions/:id/state` - Get session state (for agent-to-agent polling, local and from peers)
 - `GET /api/sessions/:id/throughput` - Get session token throughput (input/output tokens + 429 count)
 - `GET /api/sessions/:id/icon` - Serve session icon (icon.gif preferred, falls back to icon.png). Returns 404 if no icon exists.
 - `POST /api/sessions/:id/messages` - Send message to session
@@ -207,18 +207,32 @@ Returns 204.
 
 Returns `["surface", ...]`. Excludes meta.json.
 
-**GET /api/sessions/:id/state** - Get session state (agent-to-agent)
+**GET /api/sessions/:id/state** - Get session state (agent-to-agent, local and from peers)
+
+Query: `reply=1` adds `lastResponse`, the last assistant message bounded to 4 KB.
 
 Returns:
 ```json
 {
   "sessionId": "uuid",
-  "status": "idle | inactive",
+  "status": "busy | idle | inactive",
   "cwd": "/path/to/workspace",
   "model": "claude-sonnet-4.5",
-  "isActive": true
+  "name": "string | null",
+  "kind": "interactive | agent | scheduled",
+  "currentIntent": "string | null",
+  "responseOptions": ["final offer options"],
+  "isActive": true,
+  "isBusy": false,
+  "turn": { "active": "turn id | null", "lastCompleted": "turn id | null" },
+  "lastResponse": "string (only with reply=1)"
 }
 ```
+
+`turn` holds the running turn's id and the id of the last turn that finished,
+in memory only. A turn id is the root message's correlation id and survives
+auto-continue and network retries. A peer delegate waits for its turn id to
+appear as `lastCompleted` (docs/spec-peer-session-tools.md).
 
 **GET /api/sessions/:id/agents** - List SDK custom agents visible to `/agent`
 
@@ -292,14 +306,22 @@ Returns: `{ "ok": true, "sessionId": "uuid" }`
   "imageData": "data:image/...;base64,... (optional)",
   "appletState": "object (optional, batched state from applet)",
   "appletNavigation": "object (optional, navigation context)",
-  "source": "'user' | 'applet' | 'agent' | 'scheduler' (optional, defaults to 'user')",
+  "source": "'user' | 'applet' | 'agent' | 'scheduler' | 'peer' (optional, defaults to 'user')",
   "appletSlug": "string (optional, applet context for agent)",
   "fromSession": "string (optional, for agent-to-agent calls)",
+  "fromPeer": "{ instanceId, instanceName, sessionId } (required for source 'peer')",
   "scheduleSlug": "string (optional, for scheduler-originated messages)",
   "correlationId": "string (required for agent calls)"
 }
 ```
-Returns: `{ ok: true, sessionId: "uuid" }`
+Returns: `{ ok: true, sessionId: "uuid", correlationId: "turn id" }`
+
+`source: 'peer'` is a message from a session on another Caco instance, sent by
+`caco_session_delegate`. It needs the `X-Caco-Peer-Hop: 1` header and a valid
+`fromPeer`, must not carry `fromSession` or `correlationId`, and is refused
+with 409 for a herd child. It runs as a new root turn, persisted with a
+`[peer:<instanceName>/<session8>]` prefix. `fromPeer` is an unauthenticated
+label and authorizes nothing (docs/spec-peer-session-tools.md).
 
 Response streams via WebSocket (not SSE).
 
@@ -1276,34 +1298,38 @@ Returns stored context for the session.
 
 ### Agent-to-Agent Tools
 
-Defined in `src/agent-tools.ts`:
+Defined in `src/agent-tools.ts` and `src/delegate-tool.ts` (herd tools are in
+`src/herd-tools.ts`):
 
-- `send_agent_message` - Send a message to another agent session
-- `get_session_state` - Check current state of an agent session
-- `list_models` - List available models for creating sessions
-- `create_agent_session` - Create a new agent session
+- `get_session_state` - State, final offer and last reply of a session
+- `create_caco_session` - Create a new session, optionally with a first message
+- `caco_session_delegate` - Send 1-2 sessions a message and wait for their replies
 
-**send_agent_message** parameters:
-- `sessionId` (string, required) - Target session ID
-- `message` (string, required) - Message/prompt to send
-
-Sends message with `source: 'agent'` and includes originating session ID for callbacks. Requires correlationId from dispatch context.
+`get_session_state` and `caco_session_delegate` accept a local session id or an
+`instance:sessionId` key from `caco_sessions_overview` (the instance part may be
+the peer's id or name). Peer calls go to `GET /api/sessions/:id/state` and
+`POST /api/sessions/:id/messages` on the peer, under the overview's origin rule
+(loopback, or `CACO_PEERS_ALLOW_REMOTE`). A turn that started from another
+machine cannot reach other machines (docs/spec-peer-session-tools.md).
 
 **get_session_state** parameters:
-- `sessionId` (string, required) - Target session ID to check
+- `sessionId` (string, required) - Session id or `instance:sessionId` key
 
-Returns session status (`idle`/`inactive`), cwd, model, isActive.
+Returns the `/state` JSON with `lastResponse`; a peer result adds `instance`.
 
-**list_models** - no parameters
-
-Returns available models from SDK.
-
-**create_agent_session** parameters:
+**create_caco_session** parameters:
 - `cwd` (string, required) - Working directory for the new session
-- `model` (string, required) - Model ID (e.g., `claude-sonnet-4.5`)
+- `model` (string, required) - Model ID
 - `initialMessage` (string, optional) - First message to send immediately
+- `description` (string, optional) - Label for the session list
+- `pluginDirectories` (string[], optional) - Open Plugins directories for the new session
 
-Creates a new session and optionally sends an initial message. Returns the new session ID.
+**caco_session_delegate** parameters:
+- `prompts` (1-2 of `{ sessionId, message, pluginDirectories? }`) - `pluginDirectories` is local only
+
+Blocks until each target replies and returns `[{ sessionId, response }]`. A peer
+target is checked first (exists, idle, current build), sent a `source: 'peer'`
+message, then polled every 5 s until its turn finishes.
 
 ### Session History Tool
 

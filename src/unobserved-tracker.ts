@@ -52,7 +52,7 @@ export class UnobservedTracker {
     // hydrate reads it back rather than re-deriving it from timestamps that
     // cannot express who requested the work (spec-observation-authority).
     //
-    // No kind test: `kind === 'swarm'` used to stand in for "an agent is watching
+    // No kind test: a session kind used to stand in for "an agent is watching
     // this", which is equally true of delegate targets — ordinary interactive
     // sessions no kind could ever catch. The request source answers it for every
     // kind, upstream at the authority.

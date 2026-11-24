@@ -54,13 +54,13 @@ describe('activity version wiring', () => {
     expect(delta(() => { tracker.markObserved('never-idle'); })).toBe(0);
   });
 
-  it('does not bump for a swarm session going idle (it never becomes unobserved)', () => {
-    storage.getSessionMeta.mockReturnValue({ name: 'x', kind: 'swarm' });
+  it('does not bump for an agent session going idle (it never becomes unobserved)', () => {
+    storage.getSessionMeta.mockReturnValue({ name: 'x', kind: 'agent' });
     storage.updateSessionMeta.mockImplementation((_id: string, mutate: (m: Record<string, unknown>) => void) => {
-      mutate({ kind: 'swarm' }); return true;
+      mutate({ kind: 'agent' }); return true;
     });
     const tracker = new UnobservedTracker(bus.broadcastGlobalEvent);
-    expect(delta(() => { tracker.markIdle('wire-swarm'); })).toBe(0);
+    expect(delta(() => { tracker.markIdle('wire-agent'); })).toBe(0);
   });
 });
 

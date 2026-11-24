@@ -92,7 +92,7 @@ describe('sortSessions', () => {
       { id: 'old-interactive', kind: 'interactive', updatedAt: '2026-01-01T00:00:00Z' },
       { id: 'new-interactive', kind: 'interactive', updatedAt: '2026-01-02T00:00:00Z' },
       { id: 'scheduled', kind: 'scheduled', updatedAt: '2026-01-03T00:00:00Z' },
-      { id: 'unobserved', kind: 'swarm', isUnobserved: true, updatedAt: '2025-01-01T00:00:00Z' },
+      { id: 'unobserved', kind: 'agent', isUnobserved: true, updatedAt: '2025-01-01T00:00:00Z' },
       { id: 'agent', kind: 'agent', updatedAt: '2026-01-04T00:00:00Z' },
     ];
 

@@ -5,7 +5,7 @@
  * A session is "dispatching" when actively processing a message from the SDK.
  * 
  * Extends EventEmitter: emits 'idle' when a dispatch ends, enabling
- * event-driven completion detection in swarm/delegate tools.
+ * event-driven completion detection in the delegate tool.
  */
 
 import { EventEmitter } from 'events';

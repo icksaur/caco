@@ -125,8 +125,8 @@ describe('the live set and a re-hydrated set agree', () => {
     // The property that actually failed: each representation is individually
     // defensible, and they diverge only in combination.
     const live = liveTracker();
-    for (const id of ['user-chat', 'reviewer', 'herd-child', 'swarm-child']) {
-      setSessionMeta(id, { name: id, kind: id === 'swarm-child' ? 'swarm' : 'interactive', unobserved: false } as never);
+    for (const id of ['user-chat', 'reviewer', 'herd-child', 'agent-child']) {
+      setSessionMeta(id, { name: id, kind: id === 'agent-child' ? 'agent' : 'interactive', unobserved: false } as never);
     }
 
     await idle(live, 'user-chat', false);
@@ -134,25 +134,25 @@ describe('the live set and a re-hydrated set agree', () => {
     markSessionObserved('reviewer');
     await idle(live, 'reviewer', true);     // delegated to again after being read
     await idle(live, 'herd-child', true);
-    await idle(live, 'swarm-child', true);
+    await idle(live, 'agent-child', true);
 
-    const ids = ['user-chat', 'reviewer', 'herd-child', 'swarm-child'];
+    const ids = ['user-chat', 'reviewer', 'herd-child', 'agent-child'];
     const after = rehydrated(ids);
     expect(ids.filter(id => after.isUnobserved(id)))
       .toEqual(ids.filter(id => live.isUnobserved(id)));
   });
 
-  it('classifies a swarm session by its stamps, not its kind', async () => {
+  it('classifies an agent session by its stamps, not its kind', async () => {
     // Kind cannot decide this: a delegate target is kind 'interactive'. Once
-    // attendance follows the request source, an unattended swarm idle SHOULD arm
+    // attendance follows the request source, an unattended agent idle SHOULD arm
     // — proving no kind test survives on either path.
     const live = liveTracker();
-    setSessionMeta('swarm-child', { name: 'swarm', kind: 'swarm', unobserved: false } as never);
+    setSessionMeta('agent-child', { name: 'agent', kind: 'agent', unobserved: false } as never);
 
-    await idle(live, 'swarm-child', false);
+    await idle(live, 'agent-child', false);
 
-    expect(live.isUnobserved('swarm-child')).toBe(true);
-    expect(rehydrated(['swarm-child']).isUnobserved('swarm-child')).toBe(true);
+    expect(live.isUnobserved('agent-child')).toBe(true);
+    expect(rehydrated(['agent-child']).isUnobserved('agent-child')).toBe(true);
   });
 });
 

@@ -217,6 +217,18 @@ describe('validateOverviewPayload', () => {
     expect(validateOverviewPayload(v).ok).toBe(false);
   });
 
+  it('reads an older peer\'s swarm kind and hidden marker as agent', () => {
+    const v = structuredClone(base()) as unknown as { entries: Array<Record<string, unknown>> };
+    v.entries[0].kind = 'swarm';
+    v.entries[0].hidden = 'swarm';
+    const r = validateOverviewPayload(v);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.entries[0].kind).toBe('agent');
+      expect(r.value.entries[0].hidden).toBe('agent');
+    }
+  });
+
   it('rejects null entries and a null instance', () => {
     expect(validateOverviewPayload({ ...base(), entries: [null] }).ok).toBe(false);
     expect(validateOverviewPayload({ ...base(), instance: null }).ok).toBe(false);

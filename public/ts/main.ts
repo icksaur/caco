@@ -145,7 +145,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     registerPoundProvider(() => {
       return getCachedSessions()
-        .filter(s => s.kind !== 'swarm')
         .map(s => {
           // Use the same title ladder the session list itself displays
           // (spec-auto-name-sessions): name → summary → autoName → sessionId

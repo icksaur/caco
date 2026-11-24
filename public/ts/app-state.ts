@@ -103,7 +103,7 @@ function notifyActiveSessionChange(prev: string | null, next: string | null): vo
 //
 // Canonical hooks for session-scoped state. Any module holding
 // state that is logically scoped to a session (drafts, applet
-// state, staged images, swarm progress, etc.) should subscribe to
+// state, staged images, etc.) should subscribe to
 // the relevant hook here to clear/prune at the right boundary.
 //
 // See `docs/research/global-leak-audit.md` for the audit that motivated
@@ -134,8 +134,8 @@ export function notifyMessageSent(sessionId: string): void {
 
 /** Fires when a session is archived/deleted and will not return.
  *  Subscribers: Map<sessionId,…> caches that should prune on
- *  removal (sessionDrafts, sessionPrompts, usageCache, swarm
- *  progress, hydrated set). */
+ *  removal (sessionDrafts, sessionPrompts, usageCache,
+ *  hydrated set). */
 export function onSessionArchived(fn: (sessionId: string) => void): () => void {
   sessionArchivedListeners.push(fn);
   return () => {

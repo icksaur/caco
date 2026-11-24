@@ -58,7 +58,7 @@ export interface OverviewEntry {
   kind: SessionKind;
   folder?: string;
   cwd: string | null;
-  hidden?: 'herd-child' | 'agent' | 'swarm';
+  hidden?: 'herd-child' | 'agent';
   activity: 'busy' | 'idle';
   busy?: { since: string; pendingTools?: number; currentIntent?: string };
   waits: WaitReason[];
@@ -206,7 +206,7 @@ function describeOne(
   };
   if (meta.folder) entry.folder = meta.folder;
   if (meta.orchestratedBy) entry.hidden = 'herd-child';
-  else if (kind === 'agent' || kind === 'swarm') entry.hidden = kind;
+  else if (kind === 'agent') entry.hidden = kind;
   if (meta.lastUsedAt) entry.lastHumanAt = meta.lastUsedAt;
   const lastActivityAt = maxIso(entry.context.lastEventAt, meta.lastUsedAt, i.workspace?.updatedAt);
   if (lastActivityAt) entry.lastActivityAt = lastActivityAt;

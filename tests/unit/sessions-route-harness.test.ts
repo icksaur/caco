@@ -75,7 +75,7 @@ const resetState = () => {
     { sessionId: knownId, name: 'Known Session', cwd: process.cwd(), kind: 'interactive' },
     { sessionId: inactiveId, name: 'Inactive Session', cwd: process.cwd(), kind: 'interactive' },
     { sessionId: busyId, name: 'Busy Session', cwd: process.cwd(), kind: 'interactive' },
-    { sessionId: 'swarm', name: 'Swarm Session', cwd: process.cwd(), kind: 'swarm' },
+    { sessionId: 'swarm', name: 'Swarm Session', cwd: process.cwd(), kind: 'agent' },
   ];
   state.cwdById = new Map([
     [knownId, process.cwd()],
@@ -410,12 +410,11 @@ describe('sessions route harness', () => {
     expect(sessionState.deleteSession).not.toHaveBeenCalled();
   });
 
-  it('searches session events and ignores empty queries and swarm sessions', async () => {
+  it('searches session events and ignores empty queries', async () => {
     expect(await (await request('/sessions/search?q=')).json()).toEqual({ results: [] });
     const body = await (await request('/sessions/search?q=needle')).json();
     expect(body.query).toBe('needle');
     expect(body.results[0]).toMatchObject({ sessionId: knownId, name: 'Known Session', matchCount: 1 });
-    expect(searchSessionEvents).not.toHaveBeenCalledWith('swarm', 'needle');
   });
 
   it('creates a session after validating cwd and stores metadata', async () => {

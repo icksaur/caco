@@ -235,7 +235,7 @@ router.get('/sessions/search', (req: Request, res: Response) => {
   }> = [];
 
   for (const s of sessions) {
-    if (s.kind === 'swarm' || !s.cwd) continue;
+    if (!s.cwd) continue;
     const events = searchSessionEvents(s.sessionId, query);
     const totalMatches = events.totalMatches;
     if (totalMatches > 0) {
@@ -262,7 +262,7 @@ router.get('/sessions/search', (req: Request, res: Response) => {
 });
 
 router.post('/sessions', async (req: Request, res: Response) => {
-  const { cwd, model, description, parentSessionId, isSwarmSession, kind, pluginDirectories } = req.body as { cwd?: string; model?: string; description?: string; parentSessionId?: string; isSwarmSession?: boolean; kind?: SessionKind; pluginDirectories?: string[] };
+  const { cwd, model, description, parentSessionId, kind, pluginDirectories } = req.body as { cwd?: string; model?: string; description?: string; parentSessionId?: string; kind?: SessionKind; pluginDirectories?: string[] };
   const clientId = req.headers['x-client-id'] as string | undefined;
   
   const sessionCwd = cwd || process.cwd();
@@ -300,12 +300,11 @@ router.post('/sessions', async (req: Request, res: Response) => {
     const actualCwd = sessionManager.getSessionCwd(sessionId);
     
     // Set metadata
-    const resolvedKind: SessionKind = kind ?? (isSwarmSession ? 'swarm' : parentSessionId ? 'agent' : 'interactive');
+    const resolvedKind: SessionKind = kind ?? (parentSessionId ? 'agent' : 'interactive');
     updateSessionMeta(sessionId, meta => {
       meta.kind = resolvedKind;
       if (description) meta.name = description;
       if (parentSessionId) meta.parentSessionId = parentSessionId;
-      if (isSwarmSession) meta.isSwarmSession = true;
       if (normalizedPluginDirs?.length) meta.pluginDirectories = normalizedPluginDirs;
     });
     

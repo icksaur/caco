@@ -54,7 +54,9 @@ class FanoutError extends Error {
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const WAIT_KINDS = new Set(['turn-running', 'retry-pending', 'user-offer', 'wake', 'wake-running', 'children', 'schedule']);
 const ACTIVITY = new Set(['busy', 'idle']);
-const HIDDEN = new Set(['herd-child', 'agent', 'swarm']);
+const HIDDEN = new Set(['herd-child', 'agent']);
+/** An older peer may still report the removed swarm kind; read it as agent. */
+const legacySwarm = (v: unknown): unknown => (v === 'swarm' ? 'agent' : v);
 const TITLE_SOURCES = new Set(['name', 'workspace-summary', 'auto-name', 'none']);
 const PARENT_STATES = new Set(['ok', 'missing', 'archived']);
 const RUN_OUTCOMES = new Set(['ok', 'error', 'cancelled', 'interrupted', 'rejected']);
@@ -212,10 +214,10 @@ function cleanEntry(v: unknown, inst: { id: string; name: string }): OverviewEnt
     sessionId,
     title: str(e.title, 'bad entry', 1000),
     titleSource: oneOf<OverviewEntry['titleSource']>(e.titleSource, TITLE_SOURCES, 'bad entry'),
-    kind: str(e.kind, 'bad entry', 40) as OverviewEntry['kind'],
+    kind: str(legacySwarm(e.kind), 'bad entry', 40) as OverviewEntry['kind'],
     folder: optStr(e.folder, 'bad entry', 200),
     cwd: e.cwd === null ? null : str(e.cwd, 'bad entry', 2000),
-    hidden: e.hidden === undefined ? undefined : oneOf<NonNullable<OverviewEntry['hidden']>>(e.hidden, HIDDEN, 'bad entry'),
+    hidden: e.hidden === undefined ? undefined : oneOf<NonNullable<OverviewEntry['hidden']>>(legacySwarm(e.hidden), HIDDEN, 'bad entry'),
     activity: oneOf<OverviewEntry['activity']>(e.activity, ACTIVITY, 'bad entry'),
     busy,
     waits: arr(e.waits, 'bad entry', 20).map(cleanWait),

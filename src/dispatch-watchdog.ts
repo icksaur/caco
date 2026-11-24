@@ -7,7 +7,7 @@
  *     anything, the SDK connection is probably stale and the caller will try
  *     a fresh resume.
  *   - After the first event: betweenEventTimeout (DISPATCH_TIMEOUT_MS for
- *     interactive sessions, 15 minutes for swarm/agent). Tool execution
+ *     interactive sessions, 15 minutes for agent sessions). Tool execution
  *     pauses the watchdog entirely — tools can run as long as they need.
  *
  * Bumps the between-event timeout to 15 minutes after the first

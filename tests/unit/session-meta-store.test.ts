@@ -47,6 +47,16 @@ describe('readSessionMeta', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.kind).toBe('corrupt');
   });
+
+  it('reads the removed swarm kind as agent (spec-peer-session-tools)', () => {
+    writeFileSync(metaPath(), JSON.stringify({ name: 'a', kind: 'swarm' }));
+    let r = readSessionMeta(SID);
+    expect(r.ok && r.value.kind).toBe('agent');
+    writeFileSync(metaPath(), JSON.stringify({ name: 'b', isSwarmSession: true }));
+    r = readSessionMeta(SID);
+    expect(r.ok && r.value.kind).toBe('agent');
+    expect(r.ok && 'isSwarmSession' in r.value).toBe(false);
+  });
 });
 
 describe('updateSessionMeta', () => {

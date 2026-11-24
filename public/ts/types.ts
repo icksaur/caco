@@ -29,7 +29,7 @@ export interface ModelInfo {
   defaultReasoningEffort?: string;
 }
 
-export type SessionKind = 'interactive' | 'agent' | 'swarm' | 'scheduled';
+export type SessionKind = 'interactive' | 'agent' | 'scheduled';
 
 export interface SessionData {
   sessionId: string;

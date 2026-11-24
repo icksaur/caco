@@ -15,7 +15,7 @@ import { STORAGE_ROOT, getSessionDir, ensureDir } from './storage-paths.js';
 import { readJsonFileSync, type DiskRead } from './disk-read.js';
 import { recordIntent, needsAutoNameCheck, markAutoNameChecked } from './intent-runtime.js';
 
-export type SessionKind = 'interactive' | 'agent' | 'swarm' | 'scheduled';
+export type SessionKind = 'interactive' | 'agent' | 'scheduled';
 
 export interface SessionMeta {
   name: string;
@@ -116,8 +116,6 @@ export interface SessionMeta {
   activeApplet?: string;
   appletParams?: Record<string, string>;
   appletPanelVisible?: boolean;
-  /** @deprecated Use kind === 'swarm' instead */
-  isSwarmSession?: boolean;
   /** Epoch ms of the last history rotation (front-truncation of events.jsonl).
    *  Used as a cooldown so we don't re-rotate a session repeatedly. */
   lastRotatedAt?: number;
@@ -272,9 +270,12 @@ export function readSessionMeta(sessionId: string): DiskRead<SessionMeta> {
   }
 
   const meta = parsed as SessionMeta;
+  // The swarm kind is gone (spec-peer-session-tools): old swarm sessions read as agent.
+  const legacy = meta as unknown as Record<string, unknown>;
+  if (legacy.kind === 'swarm' || legacy.isSwarmSession) meta.kind = 'agent';
+  delete legacy.isSwarmSession;
   if (!meta.kind) {
-    if (meta.isSwarmSession) meta.kind = 'swarm';
-    else if (meta.parentSessionId) meta.kind = 'agent';
+    if (meta.parentSessionId) meta.kind = 'agent';
     else meta.kind = 'interactive';
   }
   return { ok: true, value: meta };

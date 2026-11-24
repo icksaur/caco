@@ -367,18 +367,15 @@ describe('off-pager reason', () => {
     const ov = overview([
       sess('p'),
       sess('child', {}, offer(ago(H), { orchestratedBy: 'p' })),
-      sess('swarm', {}, offer(ago(H), { kind: 'swarm' })),
       sess('dismissed', {}, offer(ago(H), { pagerDismissedAt: ago(MIN) })),
       sess('old', {}, offer(ago(10 * D))),
       sess('agent', {}, offer(ago(H), { kind: 'agent' })),
     ]);
     expect(offPagerReason(entryOf('child', ov))).toBe('herd child');
-    expect(offPagerReason(entryOf('swarm', ov))).toBe('swarm session');
     expect(offPagerReason(entryOf('dismissed', ov))).toBe('dismissed');
     expect(offPagerReason(entryOf('old', ov))).toBe('older than the pager window');
     expect(entryOf('agent', ov).offer!.onPager).toBe(true);
     const text = render(local(ov)).text;
     expect(text).toContain('not on the pager (herd child)');
-    expect(text).toContain('not on the pager (swarm session)');
   });
 });

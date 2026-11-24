@@ -109,7 +109,7 @@ interface Sortable {
 }
 
 export function sortSessions<T extends Sortable>(sessions: T[]): T[] {
-  const kindOrder: Record<string, number> = { interactive: 0, scheduled: 1, agent: 2, swarm: 3 };
+  const kindOrder: Record<string, number> = { interactive: 0, scheduled: 1, agent: 2 };
   return sessions.sort((a, b) => {
     if (a.isUnobserved !== b.isUnobserved) return a.isUnobserved ? -1 : 1;
     const aKind = kindOrder[a.kind ?? 'interactive'] ?? 0;

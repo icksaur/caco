@@ -106,7 +106,6 @@ function waitText(w: WaitReason): string {
 /** Why an offer is off the pager, from the row's facts (works for peer rows too). */
 export function offPagerReason(e: OverviewEntry): string {
   if (e.hidden === 'herd-child') return 'herd child';
-  if (e.hidden === 'swarm') return 'swarm session';
   if (e.hidden === 'agent') return 'agent session'; // a peer still on the old pager rule
   if (e.offer?.dismissed) return 'dismissed';
   if (e.activity === 'busy') return 'turn running';

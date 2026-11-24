@@ -27,25 +27,6 @@ export const PAGER_MAX_WAITING = 50;
 export const PAGER_MAX_OFFER_AGE_MS =
   Number(process.env.CACO_PAGER_MAX_OFFER_AGE_MS) || 7 * 24 * 60 * 60 * 1000;
 
-/**
- * Session kinds whose offers never reach the board.
- *
- * A herd child is driven and drained by its parent, and a swarm session by the
- * agent that spawned it — neither is waiting on a human, so a card for one is
- * noise the user cannot meaningfully act on. This exclusion used to be an
- * accident of gating on `isUnobserved` (only a source-less user turn marks a
- * session unobserved); dropping that gate would have silently admitted them, so
- * it is now stated outright.
- *
- * `scheduled` is deliberately NOT excluded: a run that finished overnight with
- * nobody watching is exactly what a pager is for. The old coupling hid those too.
- *
- * `agent` is NOT excluded either: it only records that another session created
- * this one. Such sessions are often long-lived work tracks that ask the user
- * directly, and a herd child is caught by its `orchestratedBy` bond instead.
- */
-const EXCLUDED_KINDS: ReadonlySet<SessionKind> = new Set(['swarm'] as SessionKind[]);
-
 export interface PagerSessionInput {
   sessionId: string;
   name: string;
@@ -158,7 +139,6 @@ export function offerAtOf(input: PagerSessionInput): number | null {
  */
 export function needsTriage(input: PagerSessionInput, now: number): boolean {
   if (input.isBusy) return false;
-  if (EXCLUDED_KINDS.has(input.kind)) return false;
   if (input.orchestratedBy) return false; // a herd child, whatever its kind
   if ((input.responseOptions?.length ?? 0) === 0) return false;
 

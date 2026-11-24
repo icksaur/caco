@@ -100,13 +100,6 @@ function cannedSessions(): SessionData[] {
       sessionId: 'unknown-cwd',
       cwd: '(unknown)',
       summary: 'Filtered unknown'
-    },
-    {
-      sessionId: 'idle-swarm',
-      cwd: '/repo/swarm',
-      kind: 'swarm',
-      summary: 'Idle swarm',
-      isBusy: false
     }
   ];
 }

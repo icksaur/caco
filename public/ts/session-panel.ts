@@ -446,7 +446,7 @@ export async function loadSessions(): Promise<void> {
     
     container.innerHTML = '';
     
-    allSessions = flatSessions.filter(s => s.kind !== 'swarm' || s.isBusy);
+    allSessions = flatSessions;
     currentSessionOrder = sessionOrder || [];
     
     renderList();

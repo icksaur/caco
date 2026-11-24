@@ -598,11 +598,9 @@ export async function dispatchMessage(
     
     type SDKEventCallback = (event: SessionEvent) => void;
 
-    const SWARM_TIMEOUT_MS = 15 * 60 * 1000;
+    const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
     const meta = getSessionMeta(sessionId);
-    const baseTimeout = meta?.kind === 'swarm' || meta?.kind === 'agent'
-      ? SWARM_TIMEOUT_MS
-      : DISPATCH_TIMEOUT_MS;
+    const baseTimeout = meta?.kind === 'agent' ? AGENT_TIMEOUT_MS : DISPATCH_TIMEOUT_MS;
 
     let retried = false;
     let unsubscribe: () => void = () => {};
@@ -610,7 +608,7 @@ export async function dispatchMessage(
     watchdog = createWatchdog({
       initialTimeoutMs: 45_000,
       betweenEventTimeoutMs: baseTimeout,
-      longRunningTimeoutMs: SWARM_TIMEOUT_MS,
+      longRunningTimeoutMs: AGENT_TIMEOUT_MS,
       onTimeout: (reason) => {
         if (dispatchCompleted) return;
 

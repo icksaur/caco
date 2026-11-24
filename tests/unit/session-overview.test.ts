@@ -71,12 +71,11 @@ describe('facts only (R1)', () => {
     expect(one(s('a', { name: '' }))).toMatchObject({ title: 'No summary', titleSource: 'none' });
   });
 
-  it('auto-archive sessions are excluded and counted; agent, swarm and herd children are marked', () => {
-    const ov = build([s('p'), s('arch', { folder: 'auto-archive' }), s('ag', { kind: 'agent' }), s('sw', { kind: 'swarm' }), s('ch', { orchestratedBy: 'p' })]);
-    expect(ov.counts).toEqual({ total: 4, shown: 4, omitted: 0, archivedExcluded: 1 });
+  it('auto-archive sessions are excluded and counted; agent and herd children are marked', () => {
+    const ov = build([s('p'), s('arch', { folder: 'auto-archive' }), s('ag', { kind: 'agent' }), s('ch', { orchestratedBy: 'p' })]);
+    expect(ov.counts).toEqual({ total: 3, shown: 3, omitted: 0, archivedExcluded: 1 });
     const by = (id: string) => ov.entries.find(e => e.sessionId === id)!;
     expect(by('ag').hidden).toBe('agent');
-    expect(by('sw').hidden).toBe('swarm');
     expect(by('ch').hidden).toBe('herd-child');
     expect(ov.entries.some(e => e.sessionId === 'arch')).toBe(false);
   });

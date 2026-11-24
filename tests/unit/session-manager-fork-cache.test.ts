@@ -12,9 +12,8 @@ describe('shouldUseForkReplaceSystemMessage — fork cache gate', () => {
     expect(shouldUseForkReplaceSystemMessage(fork, firstActivation)).toBe(true);
   });
 
-  it('is FALSE for a swarm/agent child even with a parentSessionId (wants its own agent prompt)', () => {
+  it('is FALSE for an agent child even with a parentSessionId (wants its own agent prompt)', () => {
     expect(shouldUseForkReplaceSystemMessage({ parentSessionId: 'p1', kind: 'agent' }, firstActivation)).toBe(false);
-    expect(shouldUseForkReplaceSystemMessage({ parentSessionId: 'p1', kind: 'swarm' }, firstActivation)).toBe(false);
   });
 
   it('is FALSE for a normal (non-forked) session with no parentSessionId', () => {

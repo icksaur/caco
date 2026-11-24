@@ -240,14 +240,14 @@ describe('UnobservedTracker', () => {
   });
 
   describe('sub-sessions are suppressed by attendance, not by kind', () => {
-    // The kind test was a stand-in for "an agent is watching this", true of swarm
+    // The kind test was a stand-in for "an agent is watching this", true of agent
     // children but ALSO of delegate targets — which are ordinary interactive
     // sessions, so no kind could ever classify them. The request source now
     // answers it for every kind, recorded as lastAttendedAt on the authority's
     // unconditional path (spec-observation-authority).
 
-    it('marks a swarm session whose idle was NOT attended', () => {
-      mockMeta.set('child1', { name: '', kind: 'swarm' });
+    it('marks an agent session whose idle was NOT attended', () => {
+      mockMeta.set('child1', { name: '', kind: 'agent' });
 
       const result = unobservedTracker.markIdle('child1');
 
@@ -256,7 +256,7 @@ describe('UnobservedTracker', () => {
     });
 
     it('markIdle still persists lastIdleAt', () => {
-      mockMeta.set('child1', { name: '', kind: 'swarm' });
+      mockMeta.set('child1', { name: '', kind: 'agent' });
 
       unobservedTracker.markIdle('child1');
 
@@ -264,9 +264,9 @@ describe('UnobservedTracker', () => {
     });
 
     it('hydrate reads the persisted verdict regardless of kind', () => {
-      // A swarm child and an interactive delegate target, both attended: neither
+      // An agent child and an interactive delegate target, both attended: neither
       // may arm. The interactive one is the case the old kind check missed.
-      mockMeta.set('child1', { name: '', kind: 'swarm', lastIdleAt: '2026-02-06T12:00:00Z', unobserved: false });
+      mockMeta.set('child1', { name: '', kind: 'agent', lastIdleAt: '2026-02-06T12:00:00Z', unobserved: false });
       mockMeta.set('reviewer', { name: '', kind: 'interactive', lastIdleAt: '2026-02-06T12:00:00Z', unobserved: false });
       mockMeta.set('normal1', { name: '', lastIdleAt: '2026-02-06T12:00:00Z', unobserved: true });
 

@@ -198,7 +198,7 @@ interface ResumeSessionConfig {
  * Whether a session's resume should reuse the parent's exact `mode:'replace'` system
  * message for fork cache preservation (spec-session-fork). True only for a forked
  * INTERACTIVE child's FIRST genuine activation:
- *   - `parentSessionId` set AND `kind === 'interactive'` — a fork, not a swarm/agent
+ *   - `parentSessionId` set AND `kind === 'interactive'` — a fork, not an agent
  *     child (those also set parentSessionId but want their own agent prompt).
  *   - NOT already active — first activation only.
  *   - NOT a warm recreate / model switch — those delete `activeSessions` then resume,
@@ -1319,7 +1319,7 @@ export class SessionManager {
     // cache). For a forked INTERACTIVE child's first (cold) resume, pass the SAME
     // mode:'replace' content the parent was created with, so the runtime's system block
     // matches the parent's cached [replace-sys] prefix (fresh-billed tokens drop, cache
-    // prefix restored). Gate on kind==='interactive': swarm/agent children ALSO set
+    // prefix restored). Gate on kind==='interactive': agent children ALSO set
     // parentSessionId but want their own agent prompt, so they must NOT be caught here.
     const forkMeta = getSessionMeta(sessionId);
     const useForkReplace = shouldUseForkReplaceSystemMessage(forkMeta, {

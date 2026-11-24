@@ -19,7 +19,7 @@ export const PAGER_WAITER_CAP = 256;
 /**
  * Bumps inside this window settle parked readers once. The counter is global, so
  * without this every dispatch start/end in any session wakes every poller and
- * rebuilds a snapshot — worst exactly when a swarm is running, which is the case
+ * rebuilds a snapshot — worst exactly when many sessions are running, which is the case
  * the pager exists to watch. Bounds wake frequency; the wait cap bounds staleness.
  */
 export const PAGER_COALESCE_MS = 250;

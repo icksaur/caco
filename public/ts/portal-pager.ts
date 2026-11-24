@@ -14,7 +14,11 @@ export const PENDING_GRACE_MS = 20_000;
 export const ACTION_TIMEOUT_MS = 20_000;
 const TICK_MS = 5_000;
 
-export interface PortalPeer { id: string; url: string; name: string }
+/** `frameOrigin`: where the portal loads this peer, when that differs from `url`
+ *  (proxied through the hub, spec-portal-single-port). */
+export interface PortalPeer { id: string; url: string; name: string; frameOrigin?: string | null }
+
+const frameOriginOf = (p: PortalPeer): string | null => p.frameOrigin ?? originOf(p.url);
 
 export interface WakeBadge { everyHours: number; nextWakeAt?: string; pausedReason?: string; failed?: true; archived?: true }
 export interface BusyEntry { sessionId: string; name: string; wake?: WakeBadge }
@@ -199,7 +203,7 @@ export function createPortalPager(deps: PortalPagerDeps): PortalPager {
 
   function peerFor(e: { origin: string; source: unknown }): PortalPeer | null {
     for (const p of deps.getPeers()) {
-      if (originOf(p.url) !== e.origin) continue;
+      if (frameOriginOf(p) !== e.origin) continue;
       const w = deps.getFrameWindow(p.id);
       if (w && w === e.source) return p;
     }
@@ -228,7 +232,7 @@ export function createPortalPager(deps: PortalPagerDeps): PortalPager {
   function kick(): void {
     lastWatchAt = now();
     for (const p of deps.getPeers()) {
-      const origin = originOf(p.url);
+      const origin = frameOriginOf(p);
       const w = deps.getFrameWindow(p.id);
       if (origin && w) w.postMessage({ type: BRIDGE.WATCH }, origin);
     }
@@ -276,7 +280,7 @@ export function createPortalPager(deps: PortalPagerDeps): PortalPager {
   function act(key: string, action: 'send' | 'dismiss', text?: string): Promise<void> {
     const parsed = parseCardKey(key);
     const peer = parsed ? deps.getPeers().find(p => p.id === parsed.peerId) : undefined;
-    const origin = peer ? originOf(peer.url) : null;
+    const origin = peer ? frameOriginOf(peer) : null;
     const w = peer ? deps.getFrameWindow(peer.id) : null;
     if (!parsed || !peer || !origin || !w) return Promise.reject(Object.assign(new Error('Instance not available'), { status: 0 }));
     const reqId = 'r' + (++seq) + '_' + Math.random().toString(36).slice(2, 10);

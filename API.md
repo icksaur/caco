@@ -29,10 +29,11 @@ All session endpoints accept `X-Client-ID` header for multi-client isolation.
 - `POST /api/sessions/:id/cancel` - Cancel current streaming
 - `GET /api/sessions/:id/export` - Export session as .tar.gz archive
 - `POST /api/sessions/import` - Import session from .tar.gz archive
-- `GET /api/peers` - List known Caco peers: stored portal peers plus `CACO_PEERS` config peers. Each entry has `url`, `hostname` (legacy), `name`, `origin` (`scheme://host:port`), `addedBy` (`portal` | `config`), `rev`, and `id` if one was stored (the overview never writes it)
+- `GET /api/peers` - List known Caco peers: stored portal peers plus `CACO_PEERS` config peers. Each entry has `url`, `hostname` (legacy), `name`, `origin` (`scheme://host:port`), `addedBy` (`portal` | `config`), `rev`, `id` if known, and `proxyPath` (`/peer/<key>/`) when this instance can proxy the peer (spec-portal-single-port)
 - `POST /api/peers` - Legacy whole-list write from older portals. **Merge only**: adds new peers and renames, never deletes. Returns `{ok, count, added, updated}`
 - `POST /api/peers/add` - `{url, name?}`: add or rename one peer. `url` must be an http(s) origin with no credentials, path, query or fragment; this instance itself is refused (400)
 - `POST /api/peers/remove` - `{url}`: remove one peer (404 if unknown). A `CACO_PEERS` config peer cannot be removed (403)
+- `ANY /peer/<key>/...` - Hub proxy: serves a peer (loopback, or listed in `CACO_PEERS_ALLOW_REMOTE`) under this instance's origin, including its WebSocket. Only this instance's own browser tab may use it (same-origin check, else 403); unknown or unproxyable peers get 404, a request already carrying `X-Caco-Base-Path` 400, and a peer that is down 502. Host and Origin are rewritten to the peer, and cookies, `Authorization` and `X-Forwarded-*` are dropped (docs/spec-portal-single-port.md)
 
 **GET /api/session** query params:
 - `sessionId` - Optional session ID (defaults to active session)

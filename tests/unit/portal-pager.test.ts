@@ -148,6 +148,29 @@ function setup() {
   return { pager, frames, openSession, advance, view };
 }
 
+describe('createPortalPager with proxied frames (spec-portal-single-port A8)', () => {
+  it('uses frameOrigin to watch, act and accept, telling frames apart by window', async () => {
+    const hub = 'https://laptop.devtunnels.ms';
+    const proxied: PortalPeer[] = [
+      { id: 'p1', url: 'http://localhost:53001', name: 'one', frameOrigin: hub },
+      { id: 'p2', url: 'http://localhost:53002', name: 'two', frameOrigin: hub },
+    ];
+    const mk = () => ({ postMessage: vi.fn<(msg: unknown, targetOrigin: string) => void>() });
+    const frames: Record<string, ReturnType<typeof mk>> = { p1: mk(), p2: mk() };
+    const pager = createPortalPager({ getPeers: () => proxied, getFrameWindow: id => frames[id] ?? null, openSession: vi.fn(), portalOrigin: hub, setTimer: () => 0, clearTimer: () => {} });
+    pager.kick();
+    expect(frames.p1.postMessage).toHaveBeenCalledWith({ type: BRIDGE.WATCH }, hub);
+    const v = { busy: [], waiting: [waiting('s1', '2026-01-01T00:00:00Z')] };
+    pager.handleMessage({ origin: hub, source: frames.p2, data: { type: BRIDGE.VIEW, view: v } });
+    expect(pager.current().waiting.map(w => w.key)).toEqual(['p2:s1']);
+    pager.handleMessage({ origin: 'http://localhost:53001', source: frames.p1, data: { type: BRIDGE.VIEW, view: v } });
+    expect(pager.current().waiting.map(w => w.key)).toEqual(['p2:s1']);
+    void pager.send('p2:s1', 'go').catch(() => {});
+    expect(frames.p2.postMessage.mock.calls.at(-1)?.[1]).toBe(hub);
+    expect(frames.p1.postMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('createPortalPager (P5, P6)', () => {
   it('kick sends a watch to every frame with its exact origin', () => {
     const { pager, frames } = setup();

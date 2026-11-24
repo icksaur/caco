@@ -203,6 +203,38 @@ function originOf(u) {
   try { return new URL(u).origin; } catch (e) { return u; }
 }
 
+// Where the browser loads a peer (spec-portal-single-port): through this hub's
+// proxy at proxyPath when the server offers one, so every instance works over
+// one tunnel; otherwise the peer's own URL.
+function frameUrl(peer) {
+  return peer.id !== 'local' && peer.proxyPath ? peer.proxyPath : peer.url;
+}
+
+/** Base for a peer's API paths, ending in '/'. */
+function apiBase(peer) {
+  var u = frameUrl(peer);
+  return u.endsWith('/') ? u : u + '/';
+}
+
+function frameOrigin(peer) {
+  try { return new URL(frameUrl(peer), window.location.href).origin; } catch (e) { return null; }
+}
+
+// Proxied frames all share this page's origin, so a message's sender is
+// identified by its window, never by its origin.
+function peerForSource(source) {
+  if (!source) return null;
+  return peers.find(function(p) {
+    var f = document.getElementById('frame-' + p.id);
+    return f && f.contentWindow === source;
+  }) || null;
+}
+
+function repointFrame(peer) {
+  var f = document.getElementById('frame-' + peer.id);
+  if (f && f.getAttribute('src') !== frameUrl(peer)) f.src = frameUrl(peer);
+}
+
 function postJson(path, body) {
   return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
@@ -233,6 +265,11 @@ function syncPeersWithServer() {
           // Same origin already in this tab: adopt the server's metadata, so a
           // CACO_PEERS peer is marked as config even if the tab added it first.
           if (!!existing.config !== isConfig) { existing.config = isConfig || undefined; changed = true; }
+          if ((existing.proxyPath || undefined) !== (sp.proxyPath || undefined)) {
+            if (sp.proxyPath) existing.proxyPath = sp.proxyPath; else delete existing.proxyPath;
+            repointFrame(existing);
+            changed = true;
+          }
           if (sp.id && existing.instanceId !== sp.id) { existing.instanceId = sp.id; changed = true; }
           if (isConfig && sp.name && existing.name !== sp.name) { existing.name = sp.name; changed = true; }
           return;
@@ -240,6 +277,7 @@ function syncPeersWithServer() {
         var peer = { id: Math.random().toString(36).slice(2, 8), url: originOf(url), name: sp.name || sp.hostname || originOf(url) };
         if (isConfig) peer.config = true;
         if (sp.id) peer.instanceId = sp.id;
+        if (sp.proxyPath) peer.proxyPath = sp.proxyPath;
         peers.push(peer);
         have[originOf(url)] = peer;
         added.push(peer);
@@ -270,7 +308,7 @@ function renderSidebar() {
     
     var icon = document.createElement('img');
     icon.className = 'peer-icon';
-    icon.src = peer.url + '/api/favicon';
+    icon.src = apiBase(peer) + 'api/favicon';
     icon.alt = peer.name;
     icon.onerror = function() {
       var fb = document.createElement('div');
@@ -342,9 +380,6 @@ function renderSidebar() {
   updateBadges();
 }
 
-function peerOrigin(peer) {
-  try { return new URL(peer.url).origin; } catch { return null; }
-}
 
 function ensurePagerFrame() {
   var existing = document.getElementById('frame-' + PAGER_ID);
@@ -363,7 +398,7 @@ function ensureIframe(peer) {
   
   var iframe = document.createElement('iframe');
   iframe.id = 'frame-' + peer.id;
-  iframe.src = peer.url;
+  iframe.src = frameUrl(peer);
   iframe.allow = 'clipboard-write';
   // A reloaded instance page has lost its pager feed; renew it at once.
   iframe.addEventListener('load', function() {
@@ -405,7 +440,8 @@ function addPeer() {
   try { fallbackName = new URL(url).hostname; } catch { fallbackName = url; }
   peers.push({ id: id, url: url, name: fallbackName });
   savePeers();
-  postJson('/api/peers/add', { url: url, name: fallbackName }).catch(function() {});
+  // The server's answer carries the new peer's proxyPath; the sync re-points its frame.
+  postJson('/api/peers/add', { url: url, name: fallbackName }).then(syncPeersWithServer).catch(function() {});
   switchTo(id);
 }
 
@@ -473,26 +509,26 @@ function updateBadges() {
 }
 
 function isSourcePeer(peer) {
-  if (!pendingDrag) return false;
-  var o = pendingDrag.origin;
-  return peer.url === o || peer.url + '/' === o || o.startsWith(peer.url);
+  return !!pendingDrag && pendingDrag.peerId === peer.id;
 }
 
 function transferSession(targetPeer) {
   if (!pendingDrag || transferring) return;
   var drag = pendingDrag;
+  var sourcePeer = peers.find(function(p) { return p.id === drag.peerId; });
   pendingDrag = null;
+  if (!sourcePeer) return;
   transferring = true;
   var badge = document.getElementById('badge-' + targetPeer.id);
   if (badge) { badge.className = 'peer-badge transferring'; badge.style.display = 'block'; }
   
-  fetch(drag.origin + '/api/sessions/' + drag.sessionId + '/export')
+  fetch(apiBase(sourcePeer) + 'api/sessions/' + encodeURIComponent(drag.sessionId) + '/export')
     .then(function(res) {
       if (!res.ok) throw new Error('Export failed: ' + res.status);
       return res.blob();
     })
     .then(function(blob) {
-      return fetch(targetPeer.url + '/api/sessions/import?force=true', {
+      return fetch(apiBase(targetPeer) + 'api/sessions/import?force=true', {
         method: 'POST',
         headers: { 'Content-Type': 'application/gzip' },
         body: blob
@@ -530,13 +566,11 @@ function showStatus(msg) {
 window.addEventListener('message', function(e) {
   if (!e.data?.type) return;
   
-  var isKnownPeer = peers.some(function(p) {
-    return p.url === e.origin || p.url + '/' === e.origin || e.origin.startsWith(p.url);
-  });
+  var sender = peerForSource(e.source);
   
   if (e.data.type === 'caco:transfer:dragstart') {
-    if (!isKnownPeer) return;
-    pendingDrag = { sessionId: e.data.sessionId, sessionName: e.data.sessionName, origin: e.data.origin };
+    if (!sender) return;
+    pendingDrag = { sessionId: e.data.sessionId, sessionName: e.data.sessionName, peerId: sender.id };
     return;
   }
   if (e.data.type === 'caco:transfer:dragend') {
@@ -567,11 +601,9 @@ window.addEventListener('message', function(e) {
   }
   
   if (e.data.type !== 'caco:status') return;
-  var origin = e.data.origin;
-  peerStatus[origin] = { busyCount: e.data.busyCount, unobservedCount: e.data.unobservedCount };
-  
-  var peer = peers.find(function(p) { return p.url === origin || p.url + '/' === origin || origin.startsWith(p.url); });
+  var peer = sender;
   if (peer) {
+    peerStatus[peer.url] = { busyCount: e.data.busyCount, unobservedCount: e.data.unobservedCount };
     if (peerTimers[peer.id]) clearTimeout(peerTimers[peer.id]);
     var el = document.querySelector('.peer[data-id="' + peer.id + '"]');
     if (el) el.classList.remove('offline');
@@ -592,14 +624,16 @@ document.getElementById('pagerBtn').addEventListener('click', function() { switc
 
 // Host API for the merged pager (portal-pager.js, spec-portal-pager).
 window.cacoPortal = {
-  getPeers: function() { return peers.slice(); },
+  getPeers: function() {
+    return peers.map(function(p) { return Object.assign({}, p, { frameOrigin: frameOrigin(p) }); });
+  },
   getFrameWindow: function(peerId) {
     var f = document.getElementById('frame-' + peerId);
     return f && f.contentWindow ? f.contentWindow : null;
   },
   openSession: function(peerId, sessionId) {
     var peer = peers.find(function(p) { return p.id === peerId; });
-    var origin = peer && peerOrigin(peer);
+    var origin = peer && frameOrigin(peer);
     if (!peer || !origin) return;
     var frame = ensureIframe(peer);
     switchTo(peer.id);

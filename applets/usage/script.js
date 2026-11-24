@@ -153,7 +153,7 @@ function renderLegend(seenModels, anyPartial) {
 async function loadUsage() {
   show('loading');
   try {
-    const res = await fetch(`/api/usage/hourly?days=${USAGE_DAYS}`);
+    const res = await fetch(`api/usage/hourly?days=${USAGE_DAYS}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const payload = await res.json();
     renderChart(payload);

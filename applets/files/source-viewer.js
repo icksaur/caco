@@ -126,7 +126,7 @@
       if (this._abort) this._abort.abort();
       this._abort = new AbortController();
       var res = await fetch(
-        '/api/file?path=' + encodeURIComponent(this.absPath),
+        'api/file?path=' + encodeURIComponent(this.absPath),
         { signal: this._abort.signal }
       );
       if (this.destroyed) return;

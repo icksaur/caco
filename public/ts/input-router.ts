@@ -6,6 +6,7 @@
  * The router dispatches only to the currently active applet.
  */
 
+import { withBase } from './base-path.js';
 import { getViewState, isAppletPanelVisible, toggleAppletExpanded } from './view-controller.js';
 import { toggleSessions, toggleApplet } from './router.js';
 import { getCurrentCwd, getNewChatCwd } from './app-state.js';
@@ -76,7 +77,7 @@ export function initInputRouter(): void {
       e.preventDefault();
       if (getViewState() === 'newChat') {
         const cwd = getNewChatCwd() || getCurrentCwd() || '~';
-        window.location.href = '/?applet=files&openFinder=1&openFinderRoot=' + encodeURIComponent(cwd);
+        window.location.href = withBase('/?applet=files&openFinder=1&openFinderRoot=' + encodeURIComponent(cwd));
         return;
       }
       // SPA navigate so panel + applet state survive.
@@ -93,7 +94,7 @@ export function initInputRouter(): void {
         }
       }
       if (!navigated) {
-        window.location.href = '/?applet=files&openFinder=1';
+        window.location.href = withBase('/?applet=files&openFinder=1');
       }
       return;
     }
@@ -101,7 +102,7 @@ export function initInputRouter(): void {
     // Global Ctrl+Shift+F: open session search
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
       e.preventDefault();
-      window.location.href = '/?applet=session-search';
+      window.location.href = withBase('/?applet=session-search');
       return;
     }
     

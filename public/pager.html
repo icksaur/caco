@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Caco Pager</title>
-<link rel="icon" href="/caco.png">
+<link rel="icon" href="caco.png">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { min-height: 100%; background: #1a1a1a; color: #d4d4d4; font-family: -apple-system, sans-serif; -webkit-text-size-adjust: 100%; }
@@ -233,7 +233,7 @@ header { display: flex; justify-content: center; padding: 4px 0 14px; }
       if (!entry.key) return node;
       open = function () { bridge.open(entry.key); };
     } else {
-      open = function () { window.location.href = '/?session=' + encodeURIComponent(entry.sessionId); };
+      open = function () { window.location.href = (window.CACO_BASE || '/') + '?session=' + encodeURIComponent(entry.sessionId); };
     }
     node.classList.add('link');
     node.setAttribute('role', 'link');

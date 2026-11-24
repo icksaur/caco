@@ -224,7 +224,7 @@
       body.diffMode = opts.diffMode;
     }
     var res = await fetch(
-      '/api/sessions/' + encodeURIComponent(sid) + '/file-edits/open',
+      'api/sessions/' + encodeURIComponent(sid) + '/file-edits/open',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

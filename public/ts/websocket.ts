@@ -12,6 +12,7 @@
  * Client filters by active session.
  */
 
+import { withBase } from './base-path.js';
 import { debug } from './debug.js';
 import { showToast } from './toast.js';
 import { getActiveSessionId } from './app-state.js';
@@ -158,7 +159,7 @@ function doConnect(myConnectionId: number): void {
   }
   
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${protocol}//${window.location.host}/ws`;
+  const url = `${protocol}//${window.location.host}${withBase('/ws')}`;
   
   debug('WS', `Connecting: ${url} (connectionId: ${myConnectionId})`);
   const ws = new WebSocket(url);

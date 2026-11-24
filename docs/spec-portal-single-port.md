@@ -133,8 +133,8 @@ The fetch wrapper covers core code, applets (user JS runs in the page and calls
 | `<img src>`, `<iframe src>` | `session-panel.ts` and `context-footer.ts` (session icon), `command-registry.ts` (export) |
 | `<a href>` and `location.href` | `context-footer.ts` (applet links), `input-router.ts` (3) |
 | History URLs | `router.ts`, `applet-runtime.ts`, `chat-view-controller.ts`. They build from `window.location.href`, which already carries the prefix; verify each keeps the path rather than resetting to `/` |
-| Pager page | `public/pager.html` inline script: links and fetches (lines ~236, 302, 307, 691) |
-| Built-in applets | `applets/session-search/script.js`, `applets/text-editor/script.js` (navigation to `/`), and any other absolute URL under `applets/` |
+| Pager page | `public/pager.html`: the icon link becomes relative and the session link uses `CACO_BASE`. Its fetches stay absolute; the injected wrapper covers them |
+| Built-in applets | Every root-absolute `'/api/...'`, `'/themes/...'` and `'/?...'` literal under `applets/` becomes relative (`'api/...'`, `'?...'`). Applets run in the main page, whose document path is always the base, so a relative URL resolves the same at `/` and, through `<base href>`, under a prefix |
 | Server output | `res.redirect('/...')` in `server.ts` (OAuth callback, legacy applet redirect) and any route that redirects: they redirect relative to the request's base path |
 
 A unit test scans `public/ts/**/*.ts`, `public/*.html` and
@@ -147,9 +147,9 @@ from regressing the prefix.
 **Browser storage.** Proxied instances share the hub's origin, so storage
 collides. A helper `storageKey(key)` returns `key` when `BASE` is `/`
 (unchanged) and `key@<BASE>` otherwise. Every key is classified:
-- per instance (namespaced): `caco:collapsed-folders`, `ext:<slug>:<key>`,
-  terminal height (`terminal-panel.ts`), debug state (`debug.ts`);
-- shared on purpose: `caco:theme`, panel widths (`panel-resizer.ts`);
+- per instance (namespaced): `caco:collapsed-folders`, `ext:<slug>:<key>`;
+- shared on purpose: `caco:theme`, panel widths (`panel-resizer.ts`), terminal
+  height (`terminal-panel.ts`), debug state (`debug.ts`);
 - the portal's own keys are unaffected.
 
 The A6 test enumerates every `localStorage`/`sessionStorage` key in

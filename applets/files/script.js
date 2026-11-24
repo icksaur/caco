@@ -1560,7 +1560,7 @@
     var openSessionId = sessionId;
     pendingOpenIds.add(targetRelPath);
     try {
-      var res = await fetch('/api/sessions/' + encodeURIComponent(openSessionId) + '/file-edits/open', {
+      var res = await fetch('api/sessions/' + encodeURIComponent(openSessionId) + '/file-edits/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ relativePath: targetRelPath }),
@@ -2240,7 +2240,7 @@
 
   async function doPersistPut(sid, body) {
     try {
-      await fetch('/api/sessions/' + encodeURIComponent(sid) + '/file-edits/cards', {
+      await fetch('api/sessions/' + encodeURIComponent(sid) + '/file-edits/cards', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -2255,7 +2255,7 @@
     try {
       var body = buildPersistBody();
       var blob = new Blob([JSON.stringify(body)], { type: 'application/json' });
-      navigator.sendBeacon('/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/cards', blob);
+      navigator.sendBeacon('api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/cards', blob);
     } catch (_) { /* best effort */ }
   }
   window.addEventListener('beforeunload', flushPersistBeacon);
@@ -2278,7 +2278,7 @@
 
   async function loadPersistedCards(sid) {
     try {
-      var res = await fetch('/api/sessions/' + encodeURIComponent(sid) + '/file-edits/cards');
+      var res = await fetch('api/sessions/' + encodeURIComponent(sid) + '/file-edits/cards');
       if (!res.ok) return null;
       return await res.json();
     } catch (_) { return null; }
@@ -2547,7 +2547,7 @@
     var token = ++pickerFetchToken;
 
     if (!q) {
-      var browseUrl = '/api/files?path=' + encodeURIComponent(_browseRoot);
+      var browseUrl = 'api/files?path=' + encodeURIComponent(_browseRoot);
       try {
         var browseRes = await fetch(browseUrl);
         if (token !== pickerFetchToken) return;
@@ -2575,7 +2575,7 @@
       return;
     }
 
-    var url = '/api/project-files?cwd=' + encodeURIComponent(_browseRoot);
+    var url = 'api/project-files?cwd=' + encodeURIComponent(_browseRoot);
     if (fetchQ) url += '&q=' + encodeURIComponent(fetchQ);
     try {
       var res = await fetch(url);
@@ -3747,7 +3747,7 @@
   async function fetchSnapshot(updateOnly) {
     if (!sessionId) return;
     try {
-      var res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/snapshot');
+      var res = await fetch('api/sessions/' + encodeURIComponent(sessionId) + '/file-edits/snapshot');
       if (!res.ok) {
         if (res.status === 404) markCwdNonGit();
         return;

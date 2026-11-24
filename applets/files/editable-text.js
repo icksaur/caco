@@ -18,7 +18,7 @@
    */
   window.__filesApplet.writeFileText = async function(absPath, text) {
     var encodedAbs = absPath.split('/').map(encodeURIComponent).join('/');
-    var url = '/api/files' + (absPath.charAt(0) === '/' ? '/' : '') + encodedAbs;
+    var url = 'api/files' + (absPath.charAt(0) === '/' ? '/' : '') + encodedAbs;
     var res = await fetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'text/plain' },

@@ -77,7 +77,7 @@
     this.loaded = false;
     this._clearError();
     // Reused <audio> requires native load() to re-fetch after a src change.
-    this.audio.src = '/api/file?path=' + encodeURIComponent(this.absPath) + '&t=' + Date.now();
+    this.audio.src = 'api/file?path=' + encodeURIComponent(this.absPath) + '&t=' + Date.now();
     this.audio.load();
   };
 

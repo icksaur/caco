@@ -15,7 +15,7 @@ function applyTheme(themeId) {
     existing.rel = 'stylesheet';
     document.head.appendChild(existing);
   }
-  existing.href = '/themes/' + themeId + '.css';
+  existing.href = 'themes/' + themeId + '.css';
   localStorage.setItem(STORAGE_KEY, themeId);
   render();
   window.appletAPI.setAppletState({ theme: themeId });
@@ -41,7 +41,7 @@ function render() {
   });
 }
 
-fetch('/api/themes').then(function(r) { return r.json(); }).then(function(data) {
+fetch('api/themes').then(function(r) { return r.json(); }).then(function(data) {
   themes = data.themes || [];
   render();
 }).catch(function() { render(); });

@@ -56,7 +56,7 @@
 
   (async function () {
     try {
-      var res = await window.appletAPI.fetch('/api/models/raw');
+      var res = await window.appletAPI.fetch('api/models/raw');
       var data = await res.json();
       var models = (data && data.models) ? data.models : [];
       render(models);

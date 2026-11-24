@@ -1,3 +1,4 @@
+import { withBase } from './base-path.js';
 import { newSessionClick } from './router.js';
 import { getActiveSessionId, getAvailableModels, onSessionActivate, onActiveSessionChange } from './app-state.js';
 import { chatView } from './chat-view-controller.js';
@@ -268,7 +269,7 @@ registerBuiltin('caco.session-export', async () => {
     // cause the download to re-trigger on hard refresh.
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';
-    iframe.src = `/api/sessions/${sessionId}/export`;
+    iframe.src = withBase(`/api/sessions/${sessionId}/export`);
     document.body.appendChild(iframe);
     setTimeout(() => iframe.remove(), 60_000);
   } catch (e) {

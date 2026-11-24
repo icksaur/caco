@@ -50,6 +50,7 @@ import { initTerminalManager } from './src/terminal-manager.js';
 import { startRotationSweeper, startQuietMaintenance } from './src/session-history-rotation.js';
 import { requireSameOrigin } from './src/security/same-origin.js';
 import { portalOrigins } from './src/security/portal-origins.js';
+import { injectPageBase, pageBasePath, BASE_PATH_HEADER } from './src/page-base.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { startWakeManager, stopWakeManager, wakeManager } from './src/wake-runtime.js';
@@ -121,7 +122,7 @@ app.get('/', (req, res) => {
   // OAuth callback: redirect to /api/mcp/auth/callback with same query params
   if (req.query.code && req.query.state) {
     const qs = new URLSearchParams(req.query as Record<string, string>).toString();
-    res.redirect(`/api/mcp/auth/callback?${qs}`);
+    res.redirect(`api/mcp/auth/callback?${qs}`);
     return;
   }
   const slug = typeof req.query.applet === 'string' ? req.query.applet : null;
@@ -132,11 +133,20 @@ app.get('/', (req, res) => {
     }
     const target = legacyAppletRedirectTarget(slug, cleanQuery);
     if (target) {
-      res.redirect(302, '/?' + target.toString());
+      res.redirect(302, '?' + target.toString());
       return;
     }
   }
-  res.type('html').send(cachedIndexHtml);
+  // Served per request: a hub proxy may serve this page under a prefix
+  // (spec-portal-single-port).
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('html').send(injectPageBase(cachedIndexHtml, pageBasePath(req.headers[BASE_PATH_HEADER.toLowerCase()])));
+});
+
+const cachedPagerHtml = readFileSync(join(__dirname, 'public', 'pager.html'), 'utf-8');
+app.get('/pager.html', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('html').send(injectPageBase(cachedPagerHtml, pageBasePath(req.headers[BASE_PATH_HEADER.toLowerCase()])));
 });
 
 app.get('/api/info', (req, res) => {

@@ -30,7 +30,7 @@ function loadGallery(dirPath) {
   emptyEl.style.display = 'none';
   errorEl.style.display = 'none';
 
-  fetch('/api/files?path=' + encodeURIComponent(dirPath))
+  fetch('api/files?path=' + encodeURIComponent(dirPath))
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (myLoad !== galleryEpoch) return;
@@ -54,7 +54,7 @@ function loadGallery(dirPath) {
           var img = document.createElement('img');
           img.alt = cell.dataset.name || '';
           img.draggable = false;
-          img.src = '/api/file?path=' + encodeURIComponent(imgPath);
+          img.src = 'api/file?path=' + encodeURIComponent(imgPath);
           img.onerror = function() {
             cell.classList.add('ig-cell-error');
             cell.querySelector('.ig-thumb')?.remove();

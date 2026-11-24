@@ -46,7 +46,7 @@ async function putItem(itemId, item) {
   var sid = sessionId();
   if (!sid || !doc) return { ok: false, reason: 'no-session' };
   try {
-    var res = await fetch('/api/sessions/' + encodeURIComponent(sid) + '/surface/changes/' + encodeURIComponent(itemId), {
+    var res = await fetch('api/sessions/' + encodeURIComponent(sid) + '/surface/changes/' + encodeURIComponent(itemId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dataToken: doc.dataToken, item: item }),
@@ -169,7 +169,7 @@ async function fetchSurface() {
   var epoch = ++fetchEpoch;
   if (!sid) { doc = null; agentRender = null; callRender(); return; }
   try {
-    var res = await fetch('/api/sessions/' + encodeURIComponent(sid) + '/surface');
+    var res = await fetch('api/sessions/' + encodeURIComponent(sid) + '/surface');
     if (epoch !== fetchEpoch) return; // session changed while fetch was in-flight
     if (res.status === 404) { doc = null; agentRender = null; callRender(); return; }
     if (!res.ok) throw new Error('HTTP ' + res.status);

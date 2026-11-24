@@ -2,6 +2,7 @@
  * Session panel management
  */
 
+import { withBase, storageKey } from './base-path.js';
 import { debug } from './debug.js';
 import type { SessionsResponse, SessionData } from './types.js';
 import { formatAge, formatStatusParts, fuzzyScore } from './ui-utils.js';
@@ -25,7 +26,7 @@ const LONG_PRESS_MOVE_PX = 8;
 let allSessions: SessionData[] = [];
 let currentSessionOrder: string[] = [];
 const collapsedFolders = new Set<string>(
-  (() => { try { return JSON.parse(localStorage.getItem('caco:collapsed-folders') || '[]'); } catch { return []; } })()
+  (() => { try { return JSON.parse(localStorage.getItem(storageKey('caco:collapsed-folders')) || '[]'); } catch { return []; } })()
 );
 
 // Track active session drags (iframe may restrict dataTransfer.types during dragover)
@@ -459,7 +460,7 @@ export async function loadSessions(): Promise<void> {
  * Render sessions filtered by current search query
  */
 function saveCollapsedFolders(): void {
-  localStorage.setItem('caco:collapsed-folders', JSON.stringify([...collapsedFolders]));
+  localStorage.setItem(storageKey('caco:collapsed-folders'), JSON.stringify([...collapsedFolders]));
 }
 
 function toggleFolder(name: string): void {
@@ -820,7 +821,7 @@ function createSessionItem(session: SessionData, activeSessionId?: string): HTML
   if (session.hasIcon) {
     const icon = document.createElement('img');
     icon.className = 'session-icon';
-    icon.src = `/api/sessions/${session.sessionId}/icon`;
+    icon.src = withBase(`/api/sessions/${session.sessionId}/icon`);
     icon.alt = '';
     row1.appendChild(icon);
   }

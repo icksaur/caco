@@ -56,7 +56,7 @@ async function loadMemories() {
   show('loading');
   el('mem-list').innerHTML = '';
   try {
-    const res = await fetch('/api/memory');
+    const res = await fetch('api/memory');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const payload = await res.json();
     renderEntries(payload);
@@ -69,7 +69,7 @@ async function loadMemories() {
 async function deleteEntry(key) {
   if (!window.confirm(`Delete memory "${key}"? This cannot be undone.`)) return;
   try {
-    const res = await fetch(`/api/memory/${encodeURIComponent(key)}`, { method: 'DELETE' });
+    const res = await fetch(`api/memory/${encodeURIComponent(key)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const payload = await res.json();
     renderEntries(payload);

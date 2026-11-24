@@ -26,7 +26,7 @@ async function loadJobs() {
 
   try {
     console.log('[Jobs Applet] Fetching /api/schedule and /api/wakes...');
-    const [response, wakes] = await Promise.all([fetch('/api/schedule'), loadWakes()]);
+    const [response, wakes] = await Promise.all([fetch('api/schedule'), loadWakes()]);
     console.log('[Jobs Applet] Response:', response.status, response.statusText);
     
     if (!response.ok) {
@@ -156,7 +156,7 @@ const WAKE_PAUSE_LABELS = {
 
 async function loadWakes() {
   try {
-    const res = await fetch('/api/wakes');
+    const res = await fetch('api/wakes');
     if (!res.ok) return [];
     const data = await res.json();
     return data.wakes || [];
@@ -184,7 +184,7 @@ function createWakeCard(w) {
   title.className = 'job-title';
   const link = document.createElement('a');
   link.className = 'wake-session';
-  link.href = '/?session=' + encodeURIComponent(w.sessionId);
+  link.href = '?session=' + encodeURIComponent(w.sessionId);
   link.textContent = w.sessionName || w.sessionId.slice(0, 8);
   title.appendChild(link);
   const cadence = document.createElement('span');
@@ -235,7 +235,7 @@ async function stopWake(w, button) {
   if (!confirm(`Stop waking "${w.sessionName || w.sessionId.slice(0, 8)}"?`)) return;
   button.disabled = true;
   try {
-    const res = await fetch('/api/wakes/' + encodeURIComponent(w.sessionId), { method: 'DELETE' });
+    const res = await fetch('api/wakes/' + encodeURIComponent(w.sessionId), { method: 'DELETE' });
     if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
   } catch (err) {
     console.error('[Jobs Applet] Failed to stop wake:', err);

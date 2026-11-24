@@ -54,7 +54,7 @@ const aheadBehind = document.getElementById('aheadBehind');
  * Run a git command via /api/shell in the repo directory
  */
 async function runGit(args, cwd = repoPath) {
-  const response = await fetch('/api/shell', {
+  const response = await fetch('api/shell', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command: 'git', args, cwd: cwd })

@@ -4,7 +4,7 @@
  * V2.b port of applets/html-viewer/script.js into the V1.1
  * ViewerInstance contract (docs/spec-files-applet-viewers.md).
  *
- * The iframe loads `/api/file?path=` directly; the server sets
+ * The iframe loads `api/file?path=` directly; the server sets
  * CSP for HTML responses (src/routes/api.ts:414-417). The
  * iframe sandbox attribute is `allow-scripts allow-popups
  * allow-popups-to-escape-sandbox` — same as the standalone
@@ -45,7 +45,7 @@
   HtmlViewer.prototype.load = function() {
     if (this.destroyed) return;
     this._iframe.src =
-      '/api/file?path=' + encodeURIComponent(this.absPath) + '&t=' + Date.now();
+      'api/file?path=' + encodeURIComponent(this.absPath) + '&t=' + Date.now();
   };
 
   HtmlViewer.prototype.activate = function() {

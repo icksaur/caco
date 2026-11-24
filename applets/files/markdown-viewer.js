@@ -177,7 +177,7 @@
     this._abort = new AbortController();
     var signal = this._abort.signal;
     var res = await fetch(
-      '/api/file?path=' + encodeURIComponent(this.absPath),
+      'api/file?path=' + encodeURIComponent(this.absPath),
       { signal: signal }
     );
     if (!res.ok) throw new Error('HTTP ' + res.status);

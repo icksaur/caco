@@ -8,6 +8,7 @@
  * Updated via WebSocket events or on session load.
  */
 
+import { withBase } from './base-path.js';
 import { regions } from './dom-regions.js';
 import { formatContextFiles, formatStatusParts, escapeHtml } from './ui-utils.js';
 import { getActiveSessionId, getAvailableModels } from './app-state.js';
@@ -127,7 +128,7 @@ export function renderContextFooter(context: SessionContext): void {
   const sessionPart = sid ? `session=${encodeURIComponent(sid)}&` : '';
   const links = files.map(({ name, path }) => {
     const encodedPath = encodeURIComponent(path);
-    return `<a href="/?${sessionPart}applet=files&openPath=${encodedPath}" title="${path}">${name}</a>`;
+    return `<a href="${withBase('/')}?${sessionPart}applet=files&openPath=${encodedPath}" title="${path}">${name}</a>`;
   });
   
   linksContainer.innerHTML = links.length
@@ -188,7 +189,7 @@ export function renderSessionStatus(params: SessionStatusParams): void {
   if (sessionEl) {
     const sParts: string[] = [];
     if (hasIcon && sessionId) {
-      sParts.push(`<img class="context-icon" src="/api/sessions/${encodeURIComponent(sessionId)}/icon" alt="">`);
+      sParts.push(`<img class="context-icon" src="${withBase(`/api/sessions/${encodeURIComponent(sessionId)}/icon`)}" alt="">`);
     }
     if (sessionName) sParts.push(`<span class="context-session-name">${escapeHtml(sessionName)}</span>`);
     sessionEl.innerHTML = sParts.join(' ');
@@ -216,12 +217,12 @@ function renderDescription(sessionId: string, hasGit = false, gitBranch?: string
   const appletLinks: string[] = [];
   if (hasGit && encodedCwd) {
     const gitLabel = gitBranch ? `⎇ ${escapeHtml(gitBranch)}` : 'git';
-    appletLinks.push(`<a href="/?session=${encodedSession}&applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);
+    appletLinks.push(`<a href="${withBase('/')}?session=${encodedSession}&applet=git-status&path=${encodedCwd}" class="footer-applet-link">${gitLabel}</a>`);
   }
   if (encodedCwd) {
     // Files link labeled with the cwd basename (per layout: "cwd string as files link").
     const label = dirName ? escapeHtml(dirName) : 'files';
-    appletLinks.push(`<a href="/?session=${encodedSession}&applet=files&openFinder=1&openFinderRoot=${encodedCwd}" class="footer-applet-link" title="${escapeHtml(fullCwd || '')}">${label}</a>`);
+    appletLinks.push(`<a href="${withBase('/')}?session=${encodedSession}&applet=files&openFinder=1&openFinderRoot=${encodedCwd}" class="footer-applet-link" title="${escapeHtml(fullCwd || '')}">${label}</a>`);
   }
 
   descEl.innerHTML = appletLinks.join(' ');

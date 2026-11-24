@@ -20,7 +20,7 @@ async function doSearch() {
   resultsEl.innerHTML = '<div class="searching">Searching sessions...</div>';
 
   try {
-    var res = await fetch('/api/sessions/search?q=' + encodeURIComponent(query));
+    var res = await fetch('api/sessions/search?q=' + encodeURIComponent(query));
     var data = await res.json();
     renderResults(data.results || [], query);
   } catch (err) {
@@ -43,7 +43,7 @@ function renderResults(results, query) {
     var r = results[i];
     html += '<div class="result-card">';
     html += '<div class="result-header">';
-    html += '<a class="result-name" href="/?session=' + r.sessionId + '">' + esc(r.name) + '</a>';
+    html += '<a class="result-name" href="?session=' + r.sessionId + '">' + esc(r.name) + '</a>';
     html += '<span class="result-count-badge">' + r.matchCount + ' match' + (r.matchCount !== 1 ? 'es' : '') + '</span>';
     html += '</div>';
     html += '<div class="result-id">caco-session:' + r.sessionId + '</div>';

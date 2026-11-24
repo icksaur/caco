@@ -4,6 +4,7 @@
  * Factory that creates a sandboxed API surface for each client extension.
  */
 
+import { storageKey } from './base-path.js';
 import { regions } from './dom-regions.js';
 import { onGlobalEvent, wsSendRaw } from './websocket.js';
 import { sessionClick } from './router.js';
@@ -140,13 +141,13 @@ export function createExtensionAPI(slug: string): { api: ClientExtensionAPI; aut
       wsSendRaw({ type, data });
     },
     getState<T>(key: string): T | undefined {
-      const raw = localStorage.getItem(`ext:${slug}:${key}`);
+      const raw = localStorage.getItem(storageKey(`ext:${slug}:${key}`));
       if (raw === null) return undefined;
       try { return JSON.parse(raw) as T; }
       catch { return undefined; }
     },
     setState<T>(key: string, value: T): void {
-      localStorage.setItem(`ext:${slug}:${key}`, JSON.stringify(value));
+      localStorage.setItem(storageKey(`ext:${slug}:${key}`), JSON.stringify(value));
     },
     toast(message) {
       showToast(message);

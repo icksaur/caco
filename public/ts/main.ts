@@ -2,6 +2,7 @@
  * Main entry point - ties all modules together
  */
 
+import { withBase } from './base-path.js';
 import { setupImagePaste, removeImage } from './image-paste.js';
 import { initChatScroll } from './chat-scroll.js';
 import { loadPreferences } from './history.js';
@@ -100,7 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const link = document.createElement('link');
     link.id = 'cacoThemeLink';
     link.rel = 'stylesheet';
-    link.href = `/themes/${savedTheme}.css`;
+    link.href = withBase(`/themes/${savedTheme}.css`);
     document.head.appendChild(link);
   }
 
@@ -228,7 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ext.provides.includes('css')) {
           const link = document.createElement('link');
           link.rel = 'stylesheet';
-          link.href = `/api/extensions/${ext.slug}/style.css`;
+          link.href = withBase(`/api/extensions/${ext.slug}/style.css`);
           link.dataset.extensionSlug = ext.slug;
           document.head.appendChild(link);
         }
@@ -244,7 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (event.type === 'extension.cssChanged') {
       const slug = (event.data as { slug: string })?.slug;
       const link = document.querySelector(`link[data-extension-slug="${slug}"]`) as HTMLLinkElement;
-      if (link) link.href = `/api/extensions/${slug}/style.css?t=${Date.now()}`;
+      if (link) link.href = withBase(`/api/extensions/${slug}/style.css?t=${Date.now()}`);
     } else if (event.type === 'extension.reload') {
       const slug = (event.data as { slug: string })?.slug;
       if (slug) void reloadExtension(slug);

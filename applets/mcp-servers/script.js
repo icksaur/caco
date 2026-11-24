@@ -31,7 +31,7 @@ async function fetchServers() {
   errorEl.style.display = 'none';
   
   try {
-    var res = await fetch('/api/mcp/auth/servers');
+    var res = await fetch('api/mcp/auth/servers');
     var data = await res.json();
     
     servers = data.servers;
@@ -96,7 +96,7 @@ function renderServer(server) {
  */
 function authenticate(serverId) {
   var popup = window.open(
-    '/api/mcp/auth/start?server=' + encodeURIComponent(serverId) + '&origin=' + encodeURIComponent(location.origin),
+    'api/mcp/auth/start?server=' + encodeURIComponent(serverId) + '&origin=' + encodeURIComponent(location.origin),
     'mcp-auth-' + serverId,
     'width=500,height=700,popup=yes'
   );
@@ -118,7 +118,7 @@ async function saveClientId(serverId, inputElement) {
   }
   
   try {
-    var res = await fetch('/api/mcp/auth/config', {
+    var res = await fetch('api/mcp/auth/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ serverId: serverId, clientId: clientId })
@@ -183,12 +183,12 @@ async function fetchMcpServers() {
     // (deferred/enabled), not the most-recently-active session's. getSessionId may be
     // null (no active session) — then the server falls back to its default target.
     var sid = window.appletAPI && window.appletAPI.getSessionId ? window.appletAPI.getSessionId() : null;
-    var url = sid ? '/api/mcp/servers?sessionId=' + encodeURIComponent(sid) : '/api/mcp/servers';
+    var url = sid ? 'api/mcp/servers?sessionId=' + encodeURIComponent(sid) : 'api/mcp/servers';
     var res = await fetch(url);
     var data = await res.json();
 
     if (data.configExists && editConfigLink) {
-      editConfigLink.href = '/?applet=text-editor&path=' + encodeURIComponent(data.configPath);
+      editConfigLink.href = '?applet=text-editor&path=' + encodeURIComponent(data.configPath);
       editConfigLink.style.display = 'inline';
     }
 
@@ -466,7 +466,7 @@ mcpServerContent.addEventListener('click', function(event) {
 async function setServerDeferred(server, deferred, btn) {
   if (btn) { btn.disabled = true; btn.textContent = deferred ? 'deferring…' : 'enabling…'; }
   try {
-    var res = await fetch('/api/mcp/servers/' + encodeURIComponent(server) + '/defer', {
+    var res = await fetch('api/mcp/servers/' + encodeURIComponent(server) + '/defer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ deferred: deferred })

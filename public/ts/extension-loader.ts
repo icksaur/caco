@@ -5,6 +5,7 @@
  * and initializes them with a ClientExtensionAPI instance.
  */
 
+import { withBase } from './base-path.js';
 import { createExtensionAPI } from './extension-api.js';
 import { showToast } from './toast.js';
 
@@ -36,8 +37,8 @@ export async function loadClientExtensions(): Promise<void> {
 async function loadOne(slug: string, cacheBust?: string): Promise<void> {
   try {
     const url = cacheBust
-      ? `/api/extensions/${slug}/client.js?t=${cacheBust}`
-      : `/api/extensions/${slug}/client.js`;
+      ? withBase(`/api/extensions/${slug}/client.js?t=${cacheBust}`)
+      : withBase(`/api/extensions/${slug}/client.js`);
     const mod = await import(url);
     if (typeof mod.default !== 'function') {
       console.warn(`[EXT:${slug}] client.js has no default export`);

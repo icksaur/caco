@@ -149,7 +149,7 @@
       self._applyTransform();
       self.shell.echoState();
     };
-    img.src = '/api/file?path=' + encodeURIComponent(this.absPath) + '&t=' + Date.now();
+    img.src = 'api/file?path=' + encodeURIComponent(this.absPath) + '&t=' + Date.now();
     this._img = null;
     this._imgWrap.appendChild(img);
   };

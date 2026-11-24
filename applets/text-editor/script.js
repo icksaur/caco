@@ -17,7 +17,7 @@ function loadCMBundle() {
   return new Promise(function(resolve, reject) {
     if (window.CM) { resolve(); return; }
     var s = document.createElement('script');
-    s.src = '/api/applets/text-editor/assets/codemirror-bundle.js?v=2';
+    s.src = 'api/applets/text-editor/assets/codemirror-bundle.js?v=2';
     s.onload = function() { resolve(); };
     s.onerror = function() { reject(new Error('Failed to load CodeMirror')); };
     document.head.appendChild(s);
@@ -157,7 +157,7 @@ function createEditor(content, langKey) {
 function openFinder() {
   if (!currentFilePath) return;
   var dir = currentFilePath.split('/').slice(0, -1).join('/');
-  window.location.href = '/?applet=files&openFinder=1&openFinderRoot=' + encodeURIComponent(dir);
+  window.location.href = '?applet=files&openFinder=1&openFinderRoot=' + encodeURIComponent(dir);
 }
 
 function updateHeader(path) {
@@ -175,7 +175,7 @@ function updateHeader(path) {
   filePathEl.title = path;
   folderBtn.style.display = '';
 
-  var viewerUrl = '/?applet=files&openPath=' + encodeURIComponent(path);
+  var viewerUrl = '?applet=files&openPath=' + encodeURIComponent(path);
   filePathEl.style.cursor = 'pointer';
   filePathEl.onclick = function() { window.location.href = viewerUrl; };
   viewLink.href = viewerUrl;
@@ -210,7 +210,7 @@ async function loadFile(path) {
   var langKey = getLanguageExt(path);
 
   try {
-    var response = await fetch('/api/file?path=' + encodeURIComponent(path));
+    var response = await fetch('api/file?path=' + encodeURIComponent(path));
     if (myLoad !== loadEpoch) return;
     if (!response.ok) throw new Error('HTTP ' + response.status);
     var text = await response.text();
@@ -246,7 +246,7 @@ saveBtn.addEventListener('click', async function() {
 
   try {
     var text = editorView.state.doc.toString();
-    var response = await fetch('/api/files/' + encodeURIComponent(currentFilePath), {
+    var response = await fetch('api/files/' + encodeURIComponent(currentFilePath), {
       method: 'PUT',
       headers: { 'Content-Type': 'text/plain' },
       body: text,

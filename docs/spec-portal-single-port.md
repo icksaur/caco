@@ -239,7 +239,7 @@ on `localhost:5300x`, so its same-origin guard passes with no change.
 | The proxy becomes a way for a foreign page to drive peers | Same-origin check on the hub before proxying (Invariant 3); peers only from the vetted list |
 | Header spoofing (`X-Caco-Base-Path`) | Display-only, pattern-validated, and chaining refused |
 | localStorage bleed between instances | Namespaced keys under a prefix |
-| Proxied pages share the hub's origin, so a peer page's script (including an applet on that peer) can read the portal and the hub's own frame and call the hub's API, shell included | **Open decision for Carl.** Inherent to one origin over one tunnel; separate origins need separate hostnames. Peers are the user's own instances. Option: use `proxyPath` only when the portal itself is not on loopback (remote access), and raw peer URLs on the laptop |
+| Proxied pages share the hub's origin, so a peer page's script (including an applet on that peer) can read the portal and the hub's own frame and call the hub's API, shell included | **Accepted (Carl, 2026-11-24):** he owns every instance and wants more automation, not less. Inherent to one origin over one tunnel; separate origins would need separate hostnames. |
 | A sibling frame posts messages to the portal or another frame | The portal attributes every message by source window, a drag only by the frame that started it, navigation only from a known frame to the target frame's origin; a page accepts `caco:navigateSession` only from its parent |
 
 ## Acceptance

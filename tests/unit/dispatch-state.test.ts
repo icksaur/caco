@@ -187,7 +187,7 @@ describe('DispatchState', () => {
       state.setIdleSuppressor(() => continuing);
       state.start('session-1', 'corr-1');
       state.end('session-1', { completed: true });
-      expect(state.getTurn('session-1').lastCompleted).toBeNull();
+      expect(state.getTurn('session-1')).toEqual({ active: 'corr-1', lastCompleted: null });
       continuing = false;
       state.start('session-1', 'corr-2', { turnId: 'corr-1' });
       state.end('session-1', { completed: true });

@@ -168,10 +168,11 @@ export class DispatchState extends EventEmitter {
     return d ? { depth: d.depth, peerOrigin: d.peerOrigin, turnId: d.turnId } : undefined;
   }
 
-  /** The running turn and the last finished turn (in memory only). */
+  /** The running turn and the last finished turn (in memory only). A turn whose
+   *  idle was suppressed for an imminent continuation is still running. */
   getTurn(sessionId: string): TurnState {
     return {
-      active: this.dispatches.get(sessionId)?.turnId ?? null,
+      active: this.dispatches.get(sessionId)?.turnId ?? this.suppressedTurn.get(sessionId) ?? null,
       lastCompleted: this.lastCompleted.get(sessionId) ?? null,
     };
   }

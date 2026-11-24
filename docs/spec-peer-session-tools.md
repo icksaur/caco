@@ -49,12 +49,14 @@ origins, or origins listed in `CACO_PEERS_ALLOW_REMOTE`. Errors:
 - `Instance "<x>" is not reachable from this server (not loopback and not in CACO_PEERS_ALLOW_REMOTE).`
 
 **Learning peer ids.** The overview fan-out already reports each peer's
-instance id through `FanoutOptions.onIdentity`, but nothing consumes it today.
-Add `setPeerId(origin, id)` to `peer-store.ts` (updates the matching entry's
-`id` and bumps `rev`; no-op when unchanged; config peers keep the id in memory
-only) and pass it as `onIdentity` from `computeOverview`. After one overview
-run, every key the overview printed resolves. A peer that has never answered
-an overview has no id yet; its name still works.
+instance id through `FanoutOptions.onIdentity`, but nothing consumed it.
+`rememberPeerId(origin, id)` in `peer-store.ts` keeps learned ids in memory
+(the overview never writes, spec-session-overview), and `getPeers()` applies
+them. `computeOverview` passes it as `onIdentity`, so after one overview run
+every key the overview printed resolves. When an id is still unknown,
+`resolvePeerTargetFresh` fetches the overview (`context=none`) of each
+reachable peer without an id once, then resolves again. A peer's name always
+works.
 
 ### Peer HTTP client
 
@@ -69,14 +71,17 @@ so the peer's same-origin guard treats it like any server self-call.
 Local behaviour is unchanged, except that `GET /api/sessions/:id/state` gains
 two fields, for local and peer reads alike:
 
-- `turn: { active: string | null, lastCompleted: string | null }`: the
-  correlation id of the running dispatch, and of the last dispatch that ended
-  with a real idle (the same idle that resolves the local delegate's
-  `waitForActive`). Both live in `dispatchState`, in memory only.
+- `turn: { active: string | null, lastCompleted: string | null }`: the turn id
+  of the running dispatch, and of the last turn that ended with a real
+  `session.idle`. An error, timeout, cancel, or a turn waiting for a network
+  retry is not finished. Both live in `dispatchState`, in memory only. A turn
+  id is the root message's correlation id; auto-continue and retry carry it.
 - `lastResponse`: the session's last assistant message
   (`getLastAssistantMessage`), bounded with `boundDelegateResponse(text, id8,
   4096)`. It is included only when the query has `?reply=1`, so the UI and
-  other pollers do not pay for a history read.
+  other pollers do not pay for a history read. It is left out when a turn
+  started or ended while history was being read, so it always belongs to
+  `turn.lastCompleted`.
 
 The `turn` field doubles as the capability check: a peer whose `/state` has
 no `turn` runs an older build.
@@ -265,7 +270,7 @@ tools and are out of scope.
 | # | Criterion |
 |---|---|
 | A1 | `resolvePeerTarget`: bare id and `caco-session:` id are local; self id and self name are local; `peer-id:x` and `peer-name:x` resolve; an instance part containing `:` splits at the last colon; unknown instance, duplicate name and disallowed origin return the fixed errors |
-| A2 | `setPeerId` stores a learned id once (no rev bump when unchanged); after `computeOverview` with a fake peer, a key the overview printed resolves |
+| A2 | `rememberPeerId` applies a learned id without writing `peers.json`; after an overview with a fake peer, a key the overview printed resolves |
 | A3 | `GET /state` returns `turn.active` while busy and `turn.lastCompleted` after a real idle (not after a tool-reveal idle); with `?reply=1` it returns `lastResponse` bounded to 4096 bytes, without it no history read happens |
 | A4 | `get_session_state` on a peer key calls only the peer's `/state?reply=1` with the hop header and returns its JSON plus `instance` |
 | A5 | Delegate preflight: 404, busy, missing `turn` (older peer) and `pluginDirectories` give the fixed texts and send nothing; the send body has `source:'peer'` and `fromPeer` and no `fromSession` |
@@ -283,7 +288,7 @@ tools and are out of scope.
 |---|---|---|
 | 1 | Remove the swarm kind, keep the meta migration and fan-out mapping; fix comments; tests (A10) | `src/session-meta-store.ts`, `src/routes/sessions.ts`, `src/routes/session-messages.ts`, `src/session-overview.ts`, `src/overview-fanout.ts`, `src/overview-tool.ts`, `src/pager-view.ts`, `public/ts/*`, tests |
 | 2 | `dispatchState`: `{ depth, peerOrigin }` record carried by auto-continue and retry; `lastCompleted` correlation id on real idle; `/state` adds `turn` and `?reply=1` `lastResponse` (A3, A9 carry half) | `src/dispatch-state.ts`, `src/session-manager.ts`, `src/auto-continue-runtime.ts`, `src/routes/session-messages.ts`, `src/routes/sessions.ts`, tests |
-| 3 | `peer-target.ts`: resolve plus `peerFetch`; export `readCapped`; `setPeerId` wired as `onIdentity` (A1, A2) | `src/peer-target.ts`, `src/peer-store.ts`, `src/overview-fanout.ts`, `src/overview-service.ts`, tests |
+| 3 | `peer-target.ts`: resolve plus `peerFetch`; export `readCapped`; `rememberPeerId` wired as `onIdentity` (A1, A2) | `src/peer-target.ts`, `src/peer-store.ts`, `src/overview-fanout.ts`, `src/overview-service.ts`, tests |
 | 4 | Receive side: `source:'peer'`, `fromPeer`, hop check, herd-child refusal, returned `correlationId`, `peerOrigin` set and inherited; `peer` source in `message-source.ts`, WebSocket enrichment and the client (A8) | `src/routes/session-messages.ts`, `src/message-source.ts`, `src/routes/websocket.ts`, `public/ts/*`, tests |
 | 5 | `get_session_state` peer path and loop guard (A4, A9) | `src/agent-tools.ts`, tests |
 | 6 | Delegate peer path: preflight, send, token wait, mixed batches, loop guard (A5-A7, A9) | `src/delegate-tool.ts`, tests |

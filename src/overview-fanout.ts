@@ -267,7 +267,7 @@ export function validateOverviewPayload(v: unknown): { ok: true; value: SessionO
 }
 
 /** Read a body with a hard byte cap, streaming (never buffers past the cap). */
-async function readCapped(res: Response, maxBytes: number): Promise<string> {
+export async function readCapped(res: Response, maxBytes: number): Promise<string> {
   const declared = Number(res.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) throw new FanoutError('invalid', 'response too large');
   if (!res.body) return '';

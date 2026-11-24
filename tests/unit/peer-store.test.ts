@@ -113,6 +113,16 @@ describe('mutations', () => {
     expect(read()).toEqual([]);
     expect(store.removePeer('http://localhost:53001', {})).toMatchObject({ ok: false, status: 404 });
   });
+
+  it('rememberPeerId applies a learned id in memory without writing (spec-peer-session-tools)', () => {
+    store.addPeer('http://localhost:53001', 'devbox');
+    const before = readFileSync(file, 'utf8');
+    store.rememberPeerId('http://localhost:53001/', 'peer-a');
+    store.rememberPeerId('http://localhost:53009', 'peer-c');
+    expect(readFileSync(file, 'utf8')).toBe(before);
+    expect(store.getPeers({})[0].id).toBe('peer-a');
+    expect(store.getPeers({ CACO_PEERS: 'cfg=http://localhost:53009' })[0].id).toBe('peer-c');
+  });
 });
 
 describe('CACO_PEERS_ALLOW_REMOTE', () => {

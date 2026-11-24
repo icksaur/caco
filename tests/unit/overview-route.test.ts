@@ -179,6 +179,9 @@ describe('GET /api/overview', () => {
       expect(snapshotFiles()).toEqual(before);
       expect(activityVersion.version).toBe(version);
       expect(JSON.parse(readFileSync(peersFile, 'utf8'))[0].id).toBeUndefined();
+      // The overview remembers peer ids in memory, so its keys resolve (spec-peer-session-tools).
+      const { resolvePeerTarget } = await import('../../src/peer-target.js');
+      expect(resolvePeerTarget(`${peerId}:peer-only`)).toMatchObject({ kind: 'peer', sessionId: 'peer-only', peer: { origin } });
       // Only the skipped peer keeps coverage partial.
       writeFileSync(peersFile, JSON.stringify([{ url: origin, hostname: 'devbox' }]));
       const complete = await (await fetch(`${base}/overview?scope=all&show=waiting`)).json();

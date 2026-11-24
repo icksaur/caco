@@ -124,7 +124,22 @@ export function getPeers(env: Record<string, string | undefined> = process.env):
     const s = stored.find(p => p.origin === c.origin);
     if (s?.id) c.id = s.id;
   }
-  return [...config, ...stored.filter(p => !p.origin || !configOrigins.has(p.origin))];
+  const all = [...config, ...stored.filter(p => !p.origin || !configOrigins.has(p.origin))];
+  for (const p of all) {
+    const learned = p.origin ? learnedIds.get(p.origin) : undefined;
+    if (learned) p.id = learned;
+  }
+  return all;
+}
+
+/** Instance ids learned from peer overviews, by origin. In memory only: the
+ *  overview never writes (spec-session-overview), and a restart relearns them. */
+const learnedIds = new Map<string, string>();
+
+/** Remember a peer's instance id, learned from its overview (spec-peer-session-tools). */
+export function rememberPeerId(origin: string, id: string): void {
+  const o = normalizeOrigin(origin);
+  if (o && id) learnedIds.set(o, id);
 }
 
 /** @deprecated Whole-list replace. The API uses add/remove/merge. */

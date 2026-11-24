@@ -11,7 +11,7 @@ import { cancelCardPersist } from './file-edits-store.js';
 import { readSessionWorkspace, readSessionEvents, readSessionHeadResult, parseSessionModel, listSessionIds, STATE_DIR } from './sdk-session-store.js';
 import { unobservedTracker } from './unobserved-tracker.js';
 import { CorrelationMetrics, DEFAULT_RULES, type CorrelationRules } from './correlation-metrics.js';
-import { dispatchState } from './dispatch-state.js';
+import { dispatchState, type DispatchLineage } from './dispatch-state.js';
 import { setAnyPendingProvider } from './restart-manager.js';import { pollQuota } from './quota-poller.js';
 import type { QuotaSnapshot } from './usage-state.js';
 import { loadMcpServers, loadMcpServersStrict } from './mcp-config-loader.js';
@@ -492,11 +492,12 @@ export class SessionManager {
   //  - autoContinueAttempts: consecutive auto-continuations fired, reset only by a
   //    non-autocontinue (human/agent/applet/scheduler) dispatch start.
   private pendingTools = new Map<string, Set<string>>();
-  // sessionId → the hop-count depth of the dispatch that revealed the pending tools,
-  // captured while that dispatch is live (spec-herd-depth-breadth). The auto-continue
-  // dispatch — a same-session continuation, NOT a root — carries this so nested work
-  // cannot regain delegation budget by revealing a tool.
-  private pendingToolsDepth = new Map<string, number>();
+  // sessionId → the lineage (depth, peerOrigin, turnId) of the dispatch that revealed
+  // the pending tools, captured while that dispatch is live (spec-herd-depth-breadth,
+  // spec-peer-session-tools). The auto-continue dispatch — a same-session continuation,
+  // NOT a root — carries it so nested work cannot regain delegation budget or shed its
+  // peer origin by revealing a tool, and so the turn keeps its id.
+  private pendingToolsLineage = new Map<string, DispatchLineage>();
   private autoContinueAttempts = new Map<string, number>();
   // Sessions whose continuation is being SET UP (spec-idle-suppression-central):
   // held by the auto-continue runtime from before the pending set is cleared until
@@ -2539,8 +2540,8 @@ export class SessionManager {
    * Start a dispatch - marks session busy with correlation context
    * Called before dispatching to SDK. Tools can inherit correlationId.
    */
-  startDispatch(sessionId: string, correlationId: string, depth = 1): void {
-    dispatchState.start(sessionId, correlationId, depth);
+  startDispatch(sessionId: string, correlationId: string, lineage: Partial<DispatchLineage> = {}): void {
+    dispatchState.start(sessionId, correlationId, lineage);
   }
 
   /**
@@ -2614,6 +2615,11 @@ export class SessionManager {
    *  (spec-herd-depth-breadth). */
   getDispatchDepth(sessionId: string): number | undefined {
     return dispatchState.getDepth(sessionId);
+  }
+
+  /** The lineage of a session's active dispatch, or undefined if idle. */
+  getDispatchLineage(sessionId: string): DispatchLineage | undefined {
+    return dispatchState.getLineage(sessionId);
   }
 
   /**
@@ -3387,19 +3393,20 @@ export class SessionManager {
   }
 
   /** Union revealed tool names into this session's pending-continuation set. Captures
-   *  the revealing dispatch's depth (live now) so the continuation preserves it. */
+   *  the revealing dispatch's lineage (live now) so the continuation preserves it. */
   addPendingTools(sessionId: string, names: string[]): void {
     if (names.length === 0) return;
     const set = this.pendingTools.get(sessionId) ?? new Set<string>();
     for (const n of names) set.add(n);
     this.pendingTools.set(sessionId, set);
-    this.pendingToolsDepth.set(sessionId, dispatchState.getDepth(sessionId) ?? 1);
+    const lineage = dispatchState.getLineage(sessionId);
+    if (lineage) this.pendingToolsLineage.set(sessionId, lineage);
   }
 
-  /** The depth the auto-continue dispatch should carry (the revealing dispatch's
-   *  depth), or 1 if none captured. Read by runAutoContinue's direct dispatch. */
-  getRevealDepth(sessionId: string): number {
-    return this.pendingToolsDepth.get(sessionId) ?? 1;
+  /** The lineage the auto-continue dispatch should carry (the revealing dispatch's),
+   *  or undefined if none was captured. Read by runAutoContinue's direct dispatch. */
+  getRevealLineage(sessionId: string): DispatchLineage | undefined {
+    return this.pendingToolsLineage.get(sessionId);
   }
 
   /** The tools awaiting an auto-continuation for this session (empty if none). */
@@ -3429,7 +3436,7 @@ export class SessionManager {
    *  re-arms the budget. */
   resetAutoContinue(sessionId: string): void {
     this.pendingTools.delete(sessionId);
-    this.pendingToolsDepth.delete(sessionId);
+    this.pendingToolsLineage.delete(sessionId);
     this.autoContinueAttempts.delete(sessionId);
     this.continuationInFlight.delete(sessionId);
   }

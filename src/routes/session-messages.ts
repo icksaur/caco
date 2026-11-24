@@ -24,7 +24,7 @@ import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS, AGENT_MAX_DEPTH } from '../config.js';
 import { prefixMessageSource, type MessageSource } from '../message-source.js';
 import { createWatchdog } from '../dispatch-watchdog.js';
-import { dispatchState } from '../dispatch-state.js';
+import { dispatchState, type DispatchLineage } from '../dispatch-state.js';
 import { retryWithFreshClient } from '../dispatch-retry.js';
 import { applyDispatchEventEffects } from '../dispatch-events.js';
 import { resetRequest, snapshot, markRequestComplete } from '../session-throughput.js';
@@ -75,8 +75,9 @@ function runAutoContinue(sessionId: string, ctx: IdleAuthorityCtx): Promise<bool
       const prompt = prefixMessageSource('system', AUTOCONTINUE_IDENTIFIER, text);
       // Broadcast the continuation's events to WS viewers (same as the HTTP route),
       // otherwise the operator sees nothing live until a page refresh replays history.
-      // A continuation is NOT a root: carry the revealing dispatch's captured depth so
-      // nested work cannot regain delegation budget (spec-herd-depth-breadth). It also
+      // A continuation is NOT a root: carry the revealing dispatch's captured lineage so
+      // nested work cannot regain delegation budget (spec-herd-depth-breadth) or shed a
+      // peer origin, and the turn keeps its id (spec-peer-session-tools). It also
       // inherits the originating dispatch's observation policy, so a human turn that
       // revealed tools still badges at the continuation's real idle, and chained
       // continuations pass it on again (spec-observation-verdict-completeness).
@@ -88,7 +89,7 @@ function runAutoContinue(sessionId: string, ctx: IdleAuthorityCtx): Promise<bool
           ...(ctx.offerBaseline && { offerBaseline: ctx.offerBaseline }),
           humanRooted: ctx.humanRooted === true,
           requestId: `autocontinue-${Date.now().toString(36)}`,
-          depth: sessionManager.getRevealDepth(id),
+          lineage: sessionManager.getRevealLineage(id),
         },
         { onEvent: (evt) => broadcastEvent(id, evt) }
       );
@@ -134,14 +135,14 @@ export function handleIdle(sessionId: string, ctx: IdleAuthorityCtx, correlation
 /**
  * After a turn failed on the network before the model responded, try again
  * with backoff and jitter (spec-transient-retry). The retry keeps the failed
- * turn's root, observation policy and depth, like an auto-continuation, so the
+ * turn's root, observation policy and lineage, like an auto-continuation, so the
  * comms guard and badging treat it as the same turn. A send in between cancels
  * it; a session that is busy when it fires is left alone.
  */
 function scheduleNetworkRetry(
   sessionId: string,
   attempt: number,
-  ctx: { needsObservation?: boolean; offerBaseline?: { at: string | null }; humanRooted: boolean; depth: number },
+  ctx: { needsObservation?: boolean; offerBaseline?: { at: string | null }; humanRooted: boolean; lineage?: DispatchLineage },
 ): void {
   const delay = transientRetryDelayMs(attempt);
   emitTurnRetry(sessionId, attempt);
@@ -159,7 +160,7 @@ function scheduleNetworkRetry(
         needsObservation: ctx.needsObservation,
         ...(ctx.offerBaseline && { offerBaseline: ctx.offerBaseline }),
         humanRooted: ctx.humanRooted,
-        depth: ctx.depth,
+        lineage: ctx.lineage,
         requestId: `retry-${attempt}-${Date.now().toString(36)}`,
         transientAttempt: attempt,
       },
@@ -280,13 +281,17 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // is not depth). The child→parent completion wake is source:'system' (a root), which
   // is the pop. Rejected if the caller has no live dispatch or the push exceeds the max.
   let dispatchDepth = 1;
+  let peerOrigin = false;
   if (source === 'agent' && fromSession) {
-    const callerDepth = sessionManager.getDispatchDepth(fromSession);
+    const caller = sessionManager.getDispatchLineage(fromSession);
+    const callerDepth = caller?.depth;
     if (callerDepth === undefined) {
       res.status(400).json({ error: 'Agent call rejected: caller has no active dispatch' });
       return;
     }
     dispatchDepth = callerDepth + 1;
+    // A peer-rooted turn stays peer-rooted down its agent calls (spec-peer-session-tools).
+    peerOrigin = caller?.peerOrigin === true;
     if (dispatchDepth > AGENT_MAX_DEPTH) {
       res.status(400).json({ error: `Agent call rejected: Effective call depth ${dispatchDepth} exceeds limit (max ${AGENT_MAX_DEPTH})` });
       return;
@@ -383,7 +388,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     await dispatchMessage(
       sessionId, 
       promptToSend, 
-      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId, needsObservation: !source || source === 'scheduler', ...(offerBaseline && { offerBaseline }), depth: dispatchDepth, humanRooted: !source },
+      { tempFilePaths, clientId, correlationId: effectiveCorrelationId, requestId, needsObservation: !source || source === 'scheduler', ...(offerBaseline && { offerBaseline }), lineage: { depth: dispatchDepth, peerOrigin }, humanRooted: !source },
       {
         onEvent: (evt) => broadcastEvent(sessionId, evt)
       }
@@ -453,11 +458,11 @@ function capturePriceContext(sessionId: string): {
 export async function dispatchMessage(
   sessionId: string,
   prompt: string,
-  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; offerBaseline?: { at: string | null }; displayPrompt?: string; beforeSend?: () => Promise<void>; depth?: number; humanRooted?: boolean; transientAttempt?: number },
+  options?: { tempFilePaths?: string[]; clientId?: string; correlationId?: string; requestId?: string; needsObservation?: boolean; offerBaseline?: { at: string | null }; displayPrompt?: string; beforeSend?: () => Promise<void>; lineage?: Partial<DispatchLineage>; humanRooted?: boolean; transientAttempt?: number },
   callbacks?: DispatchCallbacks
 ): Promise<void> {
   
-  const { tempFilePaths, correlationId, requestId, needsObservation, offerBaseline, displayPrompt, beforeSend, depth, humanRooted, transientAttempt } = options || {};
+  const { tempFilePaths, correlationId, requestId, needsObservation, offerBaseline, displayPrompt, beforeSend, lineage, humanRooted, transientAttempt } = options || {};
   const rid = requestId || `dispatch-${Date.now().toString(36)}`;
   const onEvent = callbacks?.onEvent || (() => {});
 
@@ -472,7 +477,8 @@ export async function dispatchMessage(
   // so a restart requested during session-resume waits for us. The actual
   // send-to-SDK happens later but the busy state is already true here.
   const effectiveCorrelationId = correlationId || randomUUID();
-  sessionManager.startDispatch(sessionId, effectiveCorrelationId, depth ?? 1);
+  sessionManager.startDispatch(sessionId, effectiveCorrelationId, lineage ?? {});
+  const startedLineage = sessionManager.getDispatchLineage(sessionId);
   // Comms guard: only a user-sent root may use guarded tools (spec-comms-guard).
   setTurnRoot(sessionId, humanRooted === true);
 
@@ -713,7 +719,7 @@ export async function dispatchMessage(
           if (wasIdle) handleIdle(sessionId, { needsObservation: needsObservation ?? false, ...(offerBaseline && { offerBaseline }), humanRooted: humanRooted === true }, effectiveCorrelationId);
           else if (retryScheduled) {
             scheduleNetworkRetry(sessionId, (transientAttempt ?? 0) + 1, {
-              needsObservation, offerBaseline, humanRooted: humanRooted === true, depth: depth ?? 1,
+              needsObservation, offerBaseline, humanRooted: humanRooted === true, lineage: startedLineage,
             });
           }
         });

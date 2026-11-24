@@ -277,6 +277,8 @@ vi.mock('../../src/storage.js', () => ({
 }));
 vi.mock('../../src/sdk-session-store.js', () => ({ readSessionWorkspace, searchSessionEvents, getEventVersion }));
 vi.mock('../../src/session-history-rotation.js', () => ({ rotateSessionHistory }));
+const getLastAssistantMessageMock = vi.hoisted(() => vi.fn(async (_id: string) => ''));
+vi.mock('../../src/session-history.js', () => ({ getLastAssistantMessage: getLastAssistantMessageMock }));
 vi.mock('../../src/folder.js', () => ({ normalizeFolder, isValidFolder }));
 vi.mock('../../src/unobserved-tracker.js', () => ({ unobservedTracker }));
 vi.mock('../../src/routes/websocket.js', () => ({ broadcastGlobalEvent, broadcastEvent }));
@@ -456,6 +458,18 @@ describe('sessions route harness', () => {
     expect(await (await request('/sessions/known/state')).json()).toMatchObject({ sessionId: knownId, status: 'idle', cwd: process.cwd(), model: 'model-a', isActive: true, isBusy: false });
     expect((await (await request('/sessions/busy/state')).json()).status).toBe('busy');
     expect((await (await request('/sessions/inactive/state')).json()).status).toBe('inactive');
+  });
+
+  it('reports turn ids and reads the last reply only with ?reply=1 (spec-peer-session-tools)', async () => {
+    getLastAssistantMessageMock.mockResolvedValue('x'.repeat(10_000));
+    const plain = await (await request('/sessions/known/state')).json();
+    expect(plain.turn).toEqual({ active: null, lastCompleted: null });
+    expect('lastResponse' in plain).toBe(false);
+    expect(getLastAssistantMessageMock).not.toHaveBeenCalled();
+    const withReply = await (await request('/sessions/known/state?reply=1')).json();
+    expect(getLastAssistantMessageMock).toHaveBeenCalledWith(knownId);
+    expect(Buffer.byteLength(JSON.stringify(withReply.lastResponse))).toBeLessThanOrEqual(4096);
+    expect(withReply.lastResponse).toContain('response truncated');
   });
 
   it('returns throughput snapshots', async () => {

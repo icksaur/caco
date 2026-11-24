@@ -25,6 +25,7 @@ const fakeSession = {
 const sm = vi.hoisted(() => ({
   isBusy: vi.fn(() => false),
   startDispatch: vi.fn(),
+  getDispatchLineage: vi.fn((): undefined => undefined),
   endDispatch: vi.fn(),
   isActive: vi.fn(() => true),
   ensureClientHealthy: vi.fn(async () => {}),

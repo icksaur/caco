@@ -12,13 +12,31 @@ import { EventEmitter } from 'events';
 import { createWatchdog } from './dispatch-watchdog.js';
 import { activityVersion } from './activity-version.js';
 
-export interface ActiveDispatch {
+export interface ActiveDispatch extends DispatchLineage {
   correlationId: string;
   startedAt: number;
-  /** Server-derived hop-count depth of this dispatch (spec-herd-depth-breadth):
-   *  a root entry (user/applet/scheduler/herd-wake) is 1, an agent call is the
-   *  caller's depth + 1. Read by the route to derive a child dispatch's depth. */
+}
+
+/**
+ * What a dispatch carries forward to a continuation of the same turn (auto-continue,
+ * transient retry) and, for depth and peerOrigin, to the agent calls it makes.
+ * Carried as one record so no carrier can copy one field without the others.
+ *  - depth: server-derived hop count (spec-herd-depth-breadth). A root entry is 1,
+ *    an agent call is the caller's depth + 1.
+ *  - peerOrigin: the turn's root came from another Caco instance; such a turn may
+ *    not reach other instances (spec-peer-session-tools).
+ *  - turnId: the root's correlation id, kept across continuations, so a peer
+ *    delegate can tell when the turn it started has finished.
+ */
+export interface DispatchLineage {
   depth: number;
+  peerOrigin: boolean;
+  turnId: string;
+}
+
+export interface TurnState {
+  active: string | null;
+  lastCompleted: string | null;
 }
 
 /** Options for an activity-aware wait. */
@@ -35,6 +53,11 @@ export interface WaitForActiveOptions {
 
 export class DispatchState extends EventEmitter {
   private dispatches = new Map<string, ActiveDispatch>();
+  /** turnId of the last dispatch that ended in a real idle, per session. */
+  private lastCompleted = new Map<string, string>();
+  /** turnId of a dispatch whose idle was suppressed for an imminent continuation;
+   *  promoted to lastCompleted if the continuation never starts (signalIdle). */
+  private suppressedTurn = new Map<string, string>();
 
   // Injected idle suppressor (spec-idle-suppression-central): returns true when a
   // session is about to auto-continue (a caco_enable_tools reveal-idle), so this
@@ -64,14 +87,17 @@ export class DispatchState extends EventEmitter {
     return !this.isBusy(sessionId) && !this.idleSuppressor?.(sessionId);
   }
 
-  start(sessionId: string, correlationId: string, depth = 1): void {
+  start(sessionId: string, correlationId: string, lineage: Partial<DispatchLineage> = {}): void {
     if (this.dispatches.has(sessionId)) {
       throw new Error(`Session ${sessionId} is already dispatching`);
     }
+    this.suppressedTurn.delete(sessionId);
     this.dispatches.set(sessionId, {
       correlationId,
       startedAt: Date.now(),
-      depth
+      depth: lineage.depth ?? 1,
+      peerOrigin: lineage.peerOrigin ?? false,
+      turnId: lineage.turnId ?? correlationId,
     });
     // Busy/idle transitions change the pager board. Bumped directly rather than
     // via a new event, which would be inert until someone wired a listener
@@ -81,13 +107,19 @@ export class DispatchState extends EventEmitter {
   }
 
   end(sessionId: string): void {
+    const ended = this.dispatches.get(sessionId);
     const wasDispatching = this.dispatches.delete(sessionId);
     if (wasDispatching) activityVersion.bump();
     // Suppress the idle signal when a continuation is imminent: the edge-triggered
     // consumers (waitForActive.onIdle, restart-manager) must not see this idle. A
     // real idle arrives later — from the continuation's own end(), or from
     // signalIdle() if the continuation fails to start (spec-idle-suppression-central).
-    if (!this.idleSuppressor?.(sessionId)) this.emit('idle', sessionId);
+    if (this.idleSuppressor?.(sessionId)) {
+      if (ended) this.suppressedTurn.set(sessionId, ended.turnId);
+      return;
+    }
+    if (ended) this.lastCompleted.set(sessionId, ended.turnId);
+    this.emit('idle', sessionId);
   }
 
   /** Force-emit a real idle for a session (spec-idle-suppression-central): the
@@ -95,6 +127,11 @@ export class DispatchState extends EventEmitter {
    *  failed to start, so no continuation end() will ever fire. Only the idle
    *  authority calls this, on the willFire-but-not-started fallthrough. */
   signalIdle(sessionId: string): void {
+    const turn = this.suppressedTurn.get(sessionId);
+    if (turn !== undefined) {
+      this.suppressedTurn.delete(sessionId);
+      this.lastCompleted.set(sessionId, turn);
+    }
     this.emit('idle', sessionId);
   }
 
@@ -120,6 +157,20 @@ export class DispatchState extends EventEmitter {
    *  the route relies on to derive an agent call's depth (spec-herd-depth-breadth). */
   getDepth(sessionId: string): number | undefined {
     return this.dispatches.get(sessionId)?.depth;
+  }
+
+  /** The active dispatch's lineage, or undefined when idle. */
+  getLineage(sessionId: string): DispatchLineage | undefined {
+    const d = this.dispatches.get(sessionId);
+    return d ? { depth: d.depth, peerOrigin: d.peerOrigin, turnId: d.turnId } : undefined;
+  }
+
+  /** The running turn and the last finished turn (in memory only). */
+  getTurn(sessionId: string): TurnState {
+    return {
+      active: this.dispatches.get(sessionId)?.turnId ?? null,
+      lastCompleted: this.lastCompleted.get(sessionId) ?? null,
+    };
   }
 
   getDispatch(sessionId: string): ActiveDispatch | undefined {

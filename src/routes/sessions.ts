@@ -21,6 +21,9 @@ import { getSessionMeta, setSessionMeta, updateSessionMeta, getSessionIconPath, 
 import { getCurrentIntent } from '../intent-runtime.js';
 import { readSessionWorkspace, searchSessionEvents, getEventVersion } from '../sdk-session-store.js';
 import { rotateSessionHistory } from '../session-history-rotation.js';
+import { dispatchState } from '../dispatch-state.js';
+import { getLastAssistantMessage } from '../session-history.js';
+import { boundDelegateResponse } from '../delegate-tool.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
 import { AUTO_ARCHIVE_ENABLED, AUTO_ARCHIVE_FOLDER, WAKE_MAX_FAILURES, getBoundPort } from '../config.js';
 import { applyFolderChange } from '../folder-transitions.js';
@@ -55,6 +58,8 @@ export { buildSkillPrompt };
 
 const router = Router();
 
+/** Byte budget for `lastResponse` on GET /state (spec-peer-session-tools). */
+const STATE_REPLY_BYTES = 4096;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function readGitBranch(cwd: string): string | null {
@@ -997,10 +1002,12 @@ router.post('/sessions/:sessionId/compact', async (req: Request, res: Response) 
 
 /**
  * GET /api/sessions/:sessionId/state
- * Get session state (for agent-to-agent polling)
- * Returns: status (idle/inactive), cwd, model
+ * Get session state (for agent-to-agent polling, local and from peers).
+ * Returns: status (busy/idle/inactive), cwd, model, the final offer, and `turn`
+ * (running and last finished turn ids, spec-peer-session-tools). `?reply=1` adds
+ * `lastResponse`, the bounded last assistant message.
  */
-router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
+router.get('/sessions/:sessionId/state', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   
   const cwd = sessionManager.getSessionCwd(sessionId);
@@ -1027,7 +1034,11 @@ router.get('/sessions/:sessionId/state', (req: Request, res: Response) => {
     pluginDirectories: meta?.pluginDirectories ?? [],
     reasoningEffort: meta?.reasoningEffort ?? null,
     isActive,
-    isBusy
+    isBusy,
+    turn: dispatchState.getTurn(sessionId),
+    ...(req.query.reply === '1' && {
+      lastResponse: boundDelegateResponse(await getLastAssistantMessage(sessionId), sessionId.slice(0, 8), STATE_REPLY_BYTES),
+    }),
   });
 });
 

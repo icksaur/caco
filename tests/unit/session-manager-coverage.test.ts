@@ -92,28 +92,29 @@ const sdkStore = vi.hoisted(() => {
 const dispatch = vi.hoisted(() => {
   const busy = new Set<string>();
   const correlations = new Map<string, string>();
-  const depths = new Map<string, number>();
+  const lineages = new Map<string, { depth: number; peerOrigin: boolean; turnId: string }>();
   return {
     busy,
     correlations,
-    depths,
+    lineages,
     waitForIdleResult: 'idle',
     dispatchState: {
-      start: vi.fn((sessionId: string, correlationId: string, depth = 1) => {
+      start: vi.fn((sessionId: string, correlationId: string, l: { depth?: number; peerOrigin?: boolean; turnId?: string } = {}) => {
         busy.add(sessionId);
         correlations.set(sessionId, correlationId);
-        depths.set(sessionId, depth);
+        lineages.set(sessionId, { depth: l.depth ?? 1, peerOrigin: l.peerOrigin ?? false, turnId: l.turnId ?? correlationId });
       }),
       end: vi.fn((sessionId: string) => {
         busy.delete(sessionId);
         correlations.delete(sessionId);
-        depths.delete(sessionId);
+        lineages.delete(sessionId);
       }),
       isBusy: vi.fn((sessionId: string) => busy.has(sessionId)),
       getAllActive: vi.fn(() => new Set(busy)),
       waitForIdle: vi.fn(async () => dispatch.waitForIdleResult),
       getCorrelationId: vi.fn((sessionId: string) => correlations.get(sessionId)),
-      getDepth: vi.fn((sessionId: string) => depths.get(sessionId)),
+      getDepth: vi.fn((sessionId: string) => lineages.get(sessionId)?.depth),
+      getLineage: vi.fn((sessionId: string) => lineages.get(sessionId)),
       setIdleSuppressor: vi.fn(),
     },
   };
@@ -726,20 +727,20 @@ describe('SessionManager coverage seams', () => {
 
     // A session dispatching at depth 3 reveals a tool: addPendingTools captures the
     // live depth so the continuation preserves it (not reset to root 1).
-    manager.startDispatch('deep-session', 'corr-1', 3);
+    manager.startDispatch('deep-session', 'corr-1', { depth: 3, peerOrigin: true });
     expect(manager.getDispatchDepth('deep-session')).toBe(3);
     manager.addPendingTools('deep-session', ['some_tool']);
-    expect(manager.getRevealDepth('deep-session')).toBe(3);
+    expect(manager.getRevealLineage('deep-session')).toEqual({ depth: 3, peerOrigin: true, turnId: 'corr-1' });
 
     // The captured depth survives the dispatch ending (idle) — the continuation
     // fires after idle and still carries depth 3.
     manager.endDispatch('deep-session');
     expect(manager.getDispatchDepth('deep-session')).toBeUndefined();
-    expect(manager.getRevealDepth('deep-session')).toBe(3);
+    expect(manager.getRevealLineage('deep-session')?.depth).toBe(3);
 
     // A fresh non-autocontinue dispatch re-arms: resetAutoContinue clears the capture.
     manager.resetAutoContinue('deep-session');
-    expect(manager.getRevealDepth('deep-session')).toBe(1);
+    expect(manager.getRevealLineage('deep-session')).toBeUndefined();
   });
 
   it('stops, changes cwd, forks, deletes, and shuts down sessions through public lifecycle APIs', async () => {

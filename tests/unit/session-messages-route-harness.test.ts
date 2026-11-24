@@ -30,7 +30,11 @@ const routeMocks = vi.hoisted(() => {
     startDispatch: vi.fn(),
     endDispatch: vi.fn(),
     getDispatchDepth: vi.fn((_sessionId: string): number | undefined => 1),
-    getRevealDepth: vi.fn((_sessionId: string): number => 1),
+    getRevealLineage: vi.fn((_sessionId: string) => undefined),
+    getDispatchLineage: vi.fn((id: string) => {
+      const depth = sessionManager.getDispatchDepth(id);
+      return depth === undefined ? undefined : { depth, peerOrigin: false, turnId: 'turn' };
+    }),
     nextDeferredToolsReminder: vi.fn(() => ({ text: '', commit: vi.fn() })),
   };
   return {
@@ -201,21 +205,21 @@ describe('session messages route harness', () => {
       const res = await postJson('/sessions/child-a/messages', { prompt: 'work', source: 'agent', fromSession: 'parent', correlationId: 'corr-1' });
       expect(res.status).toBe(200);
       expect(routeMocks.sessionManager.getDispatchDepth).toHaveBeenCalledWith('parent');
-      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('child-a', expect.any(String), 2);
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('child-a', expect.any(String), { depth: 2, peerOrigin: false });
     });
 
     it('fan-out is flat: a second child from the same depth-1 caller is also depth 2', async () => {
       routeMocks.sessionManager.getDispatchDepth.mockReturnValue(1);
       await postJson('/sessions/child-a/messages', { prompt: 'work', source: 'agent', fromSession: 'parent', correlationId: 'corr-1' });
       await postJson('/sessions/child-b/messages', { prompt: 'work', source: 'agent', fromSession: 'parent', correlationId: 'corr-1' });
-      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('child-b', expect.any(String), 2);
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('child-b', expect.any(String), { depth: 2, peerOrigin: false });
     });
 
     it('nesting: a depth-2 caller pushes its child to depth 3 (allowed at max 3)', async () => {
       routeMocks.sessionManager.getDispatchDepth.mockReturnValue(2);
       const res = await postJson('/sessions/grandchild/messages', { prompt: 'work', source: 'agent', fromSession: 'child', correlationId: 'corr-1' });
       expect(res.status).toBe(200);
-      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('grandchild', expect.any(String), 3);
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('grandchild', expect.any(String), { depth: 3, peerOrigin: false });
     });
 
     it('nesting: a depth-3 caller pushes past the limit and is rejected', async () => {
@@ -237,14 +241,13 @@ describe('session messages route harness', () => {
     it('wake-pop: a source:system wake is a root at depth 1 regardless of any child depth', async () => {
       const res = await postJson('/sessions/parent/messages', { prompt: 'your herd needs attention', source: 'system' });
       expect(res.status).toBe(200);
-      expect(routeMocks.sessionManager.getDispatchDepth).not.toHaveBeenCalled();
-      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('parent', expect.any(String), 1);
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('parent', expect.any(String), { depth: 1, peerOrigin: false });
     });
 
     it('root: a plain user message dispatches at depth 1', async () => {
       const res = await postJson('/sessions/s1/messages', { prompt: 'hello' });
       expect(res.status).toBe(200);
-      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('s1', expect.any(String), 1);
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('s1', expect.any(String), { depth: 1, peerOrigin: false });
     });
   });
 
@@ -253,7 +256,7 @@ describe('session messages route harness', () => {
     const res = await postJson('/sessions/s1/messages', { prompt: 'dispatch then stop' }, { 'x-request-id': 'req-1' });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, sessionId: 's1' });
-    expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('s1', expect.any(String), 1);
+    expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('s1', expect.any(String), { depth: 1, peerOrigin: false });
     expect(routeMocks.sessionManager.endDispatch).toHaveBeenCalledWith('s1');
     expect(routeMocks.broadcastEvent).toHaveBeenCalledWith('s1', { type: 'session.error', data: { message: 'No active session' } });
     expect(routeMocks.broadcastGlobalEvent).toHaveBeenCalledWith({ type: 'session.busy', data: { sessionId: 's1', isBusy: false } });

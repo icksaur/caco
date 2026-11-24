@@ -146,7 +146,7 @@ describe('DispatchState', () => {
     });
 
     it('stores an explicit depth', () => {
-      state.start('session-1', 'corr-1', 3);
+      state.start('session-1', 'corr-1', { depth: 3 });
       expect(state.getDepth('session-1')).toBe(3);
     });
 
@@ -155,9 +155,49 @@ describe('DispatchState', () => {
     });
 
     it('clears depth after the dispatch ends', () => {
-      state.start('session-1', 'corr-1', 2);
+      state.start('session-1', 'corr-1', { depth: 2 });
       state.end('session-1');
       expect(state.getDepth('session-1')).toBeUndefined();
+    });
+  });
+
+  describe('lineage and turns (spec-peer-session-tools)', () => {
+    it('defaults the lineage of a root dispatch', () => {
+      state.start('session-1', 'corr-1');
+      expect(state.getLineage('session-1')).toEqual({ depth: 1, peerOrigin: false, turnId: 'corr-1' });
+      expect(state.getTurn('session-1')).toEqual({ active: 'corr-1', lastCompleted: null });
+    });
+
+    it('keeps a carried turn id and peer origin', () => {
+      state.start('session-1', 'corr-2', { depth: 2, peerOrigin: true, turnId: 'turn-a' });
+      expect(state.getLineage('session-1')).toEqual({ depth: 2, peerOrigin: true, turnId: 'turn-a' });
+    });
+
+    it('records the finished turn on a real idle', () => {
+      state.start('session-1', 'corr-1');
+      state.end('session-1');
+      expect(state.getTurn('session-1')).toEqual({ active: null, lastCompleted: 'corr-1' });
+    });
+
+    it('does not finish a turn on a suppressed idle; the continuation keeps the id', () => {
+      let continuing = true;
+      state.setIdleSuppressor(() => continuing);
+      state.start('session-1', 'corr-1');
+      state.end('session-1');
+      expect(state.getTurn('session-1').lastCompleted).toBeNull();
+      continuing = false;
+      state.start('session-1', 'corr-2', { turnId: 'corr-1' });
+      state.end('session-1');
+      expect(state.getTurn('session-1').lastCompleted).toBe('corr-1');
+    });
+
+    it('finishes a suppressed turn when the continuation never starts', () => {
+      state.setIdleSuppressor(() => true);
+      state.start('session-1', 'corr-1');
+      state.end('session-1');
+      state.setIdleSuppressor(() => false);
+      state.signalIdle('session-1');
+      expect(state.getTurn('session-1').lastCompleted).toBe('corr-1');
     });
   });
 

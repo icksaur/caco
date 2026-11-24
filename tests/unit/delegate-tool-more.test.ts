@@ -3,6 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const sessionManagerFake = vi.hoisted(() => ({
   getSessionCwd: vi.fn<(sessionId: string) => string | undefined>(),
   isBusy: vi.fn<(sessionId: string) => boolean>(),
+  getDispatchLineage: vi.fn<(sessionId: string) => { depth: number; peerOrigin: boolean; turnId: string } | undefined>(),
+}));
+
+const peerFake = vi.hoisted(() => ({
+  resolve: vi.fn(),
+  preflight: vi.fn(),
+  send: vi.fn(),
+  wait: vi.fn(),
 }));
 
 const dispatchStateFake = vi.hoisted(() => ({
@@ -22,6 +30,11 @@ vi.mock('../../src/session-manager.js', () => ({ sessionManager: sessionManagerF
 vi.mock('../../src/dispatch-state.js', () => ({ dispatchState: dispatchStateFake }));
 vi.mock('../../src/storage.js', () => storageFake);
 vi.mock('../../src/session-history.js', () => historyFake);
+vi.mock('../../src/peer-target.js', async (orig) => ({
+  ...(await orig<typeof import('../../src/peer-target.js')>()),
+  resolvePeerTargetFresh: peerFake.resolve,
+}));
+vi.mock('../../src/peer-delegate.js', () => ({ peerPreflight: peerFake.preflight, peerSend: peerFake.send, peerWaitReply: peerFake.wait }));
 
 import { createDelegateTool } from '../../src/delegate-tool.js';
 import type { SessionIdRef } from '../../src/types.js';
@@ -33,6 +46,7 @@ interface WaitOptions {
 }
 
 interface DelegatePrompt {
+  pluginDirectories?: string[];
   // Optional so a dropped-key call is expressible here — the whole point of the
   // fix is that the SCHEMA no longer rejects it before the handler can report it
   // (spec-delegate-arg-integrity). Re-tightening the schema breaks these tests.
@@ -68,6 +82,72 @@ beforeEach(() => {
   dispatchStateFake.waitForActive.mockResolvedValue('idle');
   storageFake.getSessionMeta.mockReturnValue({ name: 'delegate' });
   historyFake.getLastAssistantMessage.mockResolvedValue('delegate finished');
+  sessionManagerFake.getDispatchLineage.mockReturnValue(undefined);
+  peerFake.resolve.mockImplementation(async (raw: string) => {
+    const cut = raw.lastIndexOf(':');
+    return cut < 0
+      ? { kind: 'local', sessionId: raw }
+      : { kind: 'peer', sessionId: raw.slice(cut + 1), peer: { origin: 'http://localhost:53001', name: 'devbox', id: raw.slice(0, cut) } };
+  });
+  peerFake.preflight.mockResolvedValue(null);
+  peerFake.send.mockResolvedValue({ token: 'turn-1' });
+  peerFake.wait.mockResolvedValue('peer finished');
+});
+
+describe('caco_session_delegate to a peer (spec-peer-session-tools)', () => {
+  it('mixes a local and a peer target and returns both replies in order', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    const out = await tool().handler({ prompts: [
+      { sessionId: 'target-session-0003', message: 'local work' },
+      { sessionId: 'dev-id:remote-session-9', message: 'remote work' },
+    ] });
+    expect(JSON.parse(out.textResultForLlm)).toEqual([
+      { sessionId: 'target-session-0003', response: 'delegate finished' },
+      { sessionId: 'dev-id:remote-session-9', response: 'peer finished' },
+    ]);
+    const devbox = { origin: 'http://localhost:53001', name: 'devbox', id: 'dev-id' };
+    expect(peerFake.preflight).toHaveBeenCalledWith(devbox, 'remote-session-9');
+    expect(peerFake.send).toHaveBeenCalledWith(devbox, 'remote-session-9', 'remote work', 'caller-session-0001');
+    expect(peerFake.wait).toHaveBeenCalledWith(devbox, 'remote-session-9', 'turn-1', { maxTotalMs: 3600000 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops before sending anything when a peer preflight fails', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    peerFake.preflight.mockResolvedValue('devbox runs an older Caco; update it first.');
+    const out = await tool().handler({ prompts: [{ sessionId: 'target-session-0003', message: 'a' }, { sessionId: 'dev-id:r', message: 'b' }] });
+    expect(out).toEqual({ resultType: 'error', textResultForLlm: 'devbox runs an older Caco; update it first.' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(peerFake.send).not.toHaveBeenCalled();
+  });
+
+  it('returns a failed peer send as that target\'s result without waiting', async () => {
+    peerFake.send.mockResolvedValue({ error: '(send failed: HTTP 409 - herd child)' });
+    const out = await tool().handler({ prompts: [{ sessionId: 'dev-id:r', message: 'b' }] });
+    expect(JSON.parse(out.textResultForLlm)).toEqual([{ sessionId: 'dev-id:r', response: '(send failed: HTTP 409 - herd child)' }]);
+    expect(peerFake.wait).not.toHaveBeenCalled();
+  });
+
+  it('refuses peer targets from a peer-rooted turn, pluginDirectories, and resolver errors', async () => {
+    sessionManagerFake.getDispatchLineage.mockReturnValue({ depth: 1, peerOrigin: true, turnId: 't' });
+    expect((await tool().handler({ prompts: [{ sessionId: 'dev-id:r', message: 'b' }] })).textResultForLlm)
+      .toBe('This turn started from another machine, so it cannot reach other machines.');
+    sessionManagerFake.getDispatchLineage.mockReturnValue(undefined);
+    expect((await tool().handler({ prompts: [{ sessionId: 'dev-id:r', message: 'b', pluginDirectories: ['/x'] } as DelegatePrompt] })).textResultForLlm)
+      .toBe('pluginDirectories is local only.');
+    peerFake.resolve.mockResolvedValueOnce({ kind: 'error', error: 'Unknown instance "zz". Run caco_sessions_overview to list instances.' });
+    expect((await tool().handler({ prompts: [{ sessionId: 'zz:r', message: 'b' }] })).textResultForLlm).toContain('Unknown instance');
+    expect(peerFake.send).not.toHaveBeenCalled();
+  });
+
+  it('a peer-rooted turn may still delegate locally', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ok: true })));
+    sessionManagerFake.getDispatchLineage.mockReturnValue({ depth: 1, peerOrigin: true, turnId: 't' });
+    const out = await tool().handler({ prompts: [{ sessionId: 'target-session-0003', message: 'a' }] });
+    expect(out.resultType).toBe('text');
+  });
 });
 
 afterEach(() => {

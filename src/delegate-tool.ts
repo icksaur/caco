@@ -8,6 +8,8 @@ import { dispatchState } from './dispatch-state.js';
 import { getSessionMeta } from './storage.js';
 import { getLastAssistantMessage } from './session-history.js';
 import { applyPluginDirectories } from './plugin-directories-apply.js';
+import { resolvePeerTargetFresh, peerKey, PEER_LOOP_ERROR, type PeerRef } from './peer-target.js';
+import { peerPreflight, peerSend, peerWaitReply } from './peer-delegate.js';
 
 const DELEGATE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const DELEGATE_MAX_TOTAL_MS = 60 * 60 * 1000;
@@ -130,11 +132,13 @@ export function createDelegateTool(sessionRef: SessionIdRef) {
   const cacoSessionDelegate = defineTool('caco_session_delegate', {
     description: `Delegate work to 1-2 existing Caco sessions and wait for their responses, returned to you. This blocks until they reply — the preferred tool for cross-session collaboration. Sessions must already exist (caco-session:UUID); verify with get_session_state if unsure. Delegates persist after replying and see the message as coming from your session.
 
-Use to have a reviewer/research session check work or look something up. Don't delegate to yourself, create new sessions (use create_caco_session), or use for quick sub-tasks (use the task tool).`,
+Use to have a reviewer/research session check work or look something up. Don't delegate to yourself, create new sessions (use create_caco_session), or use for quick sub-tasks (use the task tool).
+
+Targets may be local session IDs or \`instance:sessionId\` keys from caco_sessions_overview.`,
 
     parameters: z.object({
       prompts: z.array(z.object({
-        sessionId: z.string().optional().describe('Target session ID (UUID, with or without the caco-session: prefix). REQUIRED — optional in the schema only so a dropped key is reported as an actionable error instead of an opaque tool failure.'),
+        sessionId: z.string().optional().describe('Target session ID (UUID, with or without the caco-session: prefix) or an instance:sessionId key. REQUIRED — optional in the schema only so a dropped key is reported as an actionable error instead of an opaque tool failure.'),
         message: z.string().describe('Message to send to the delegate'),
         pluginDirectories: z.array(z.string()).optional().describe('Absolute paths to Open Plugins directories to configure on THIS target before sending (never installed into ~/.copilot). STICKY: this permanently changes the target\'s configuration, not just this request, and costs a reconnect if it is loaded. Omit to leave its existing dirs untouched; pass [] to clear them.'),
       })).min(1).max(2).describe('Sessions to delegate to (1-2)'),
@@ -149,18 +153,48 @@ Use to have a reviewer/research session check work or look something up. Don't d
       const argError = delegateArgError(prompts);
       if (argError) return { textResultForLlm: argError, resultType: 'error' as const };
 
-      if (prompts.some(p => p.sessionId === sessionRef.id)) {
+      // Resolve every target before anything with a side effect: a bare id is local,
+      // an instance:sessionId key names a peer (spec-peer-session-tools).
+      const peers: Array<PeerRef | undefined> = [];
+      for (const p of prompts) {
+        const target = await resolvePeerTargetFresh(p.sessionId);
+        if (target.kind === 'error') return { textResultForLlm: target.error, resultType: 'error' as const };
+        p.sessionId = target.sessionId;
+        peers.push(target.kind === 'peer' ? target.peer : undefined);
+      }
+      if (peers.some(Boolean)) {
+        if (sessionManager.getDispatchLineage(sessionRef.id)?.peerOrigin) {
+          return { textResultForLlm: PEER_LOOP_ERROR, resultType: 'error' as const };
+        }
+        if (prompts.some((p, i) => peers[i] && p.pluginDirectories !== undefined)) {
+          return { textResultForLlm: 'pluginDirectories is local only.', resultType: 'error' as const };
+        }
+      }
+
+      if (prompts.some((p, i) => !peers[i] && p.sessionId === sessionRef.id)) {
         return { textResultForLlm: 'Cannot delegate to yourself.', resultType: 'error' as const };
       }
 
       const delegates: Array<{
         sessionId: string;
+        /** The id reported back: the local id, or the peer key. */
+        key: string;
+        peer?: PeerRef;
+        /** The peer turn this delegate waits for. */
+        token?: string;
         startedAt: number;
         done: boolean;
         result: string | null;
       }> = [];
 
-      for (const p of prompts) {
+      for (const [i, p] of prompts.entries()) {
+        const peer = peers[i];
+        if (peer) {
+          const error = await peerPreflight(peer, p.sessionId);
+          if (error) return { textResultForLlm: error, resultType: 'error' as const };
+          delegates.push({ sessionId: p.sessionId, key: peerKey(peer, p.sessionId), peer, startedAt: Date.now(), done: false, result: null });
+          continue;
+        }
         const id8 = p.sessionId.slice(0, 8);
         const meta = getSessionMeta(p.sessionId);
         const error = delegateTargetError({
@@ -175,7 +209,7 @@ Use to have a reviewer/research session check work or look something up. Don't d
           return { textResultForLlm: error, resultType: 'error' as const };
         }
 
-        delegates.push({ sessionId: p.sessionId, startedAt: Date.now(), done: false, result: null });
+        delegates.push({ sessionId: p.sessionId, key: p.sessionId, startedAt: Date.now(), done: false, result: null });
       }
 
       // Configure plugin directories BEFORE any dispatch (and before the blocking wait), so
@@ -185,7 +219,7 @@ Use to have a reviewer/research session check work or look something up. Don't d
       const pluginNotes: string[] = [];
       for (let i = delegates.length - 1; i >= 0; i--) {
         const dirs = prompts[i].pluginDirectories;
-        if (dirs === undefined) continue;
+        if (dirs === undefined || delegates[i].peer) continue;
         const applied = await applyPluginDirectories(SERVER_URL, delegates[i].sessionId, dirs);
         const id8 = delegates[i].sessionId.slice(0, 8);
         if (!applied.ok) {
@@ -202,6 +236,11 @@ Use to have a reviewer/research session check work or look something up. Don't d
 
       for (let i = 0; i < delegates.length; i++) {
         const d = delegates[i];
+        if (d.peer) {
+          const sent = await peerSend(d.peer, d.sessionId, prompts[i].message, sessionRef.id);
+          if ('error' in sent) { d.done = true; d.result = sent.error; } else { d.token = sent.token; }
+          continue;
+        }
         try {
           console.log(`[DELEGATE] Sending to ${d.sessionId.slice(0, 8)}`);
           const res = await fetch(`${SERVER_URL}/api/sessions/${d.sessionId}/messages`, {
@@ -233,6 +272,11 @@ Use to have a reviewer/research session check work or look something up. Don't d
       const waitPromises = delegates
         .filter(d => !d.done)
         .map(async (d) => {
+          if (d.peer && d.token) {
+            d.result = await peerWaitReply(d.peer, d.sessionId, d.token, { maxTotalMs: DELEGATE_MAX_TOTAL_MS });
+            d.done = true;
+            return;
+          }
           const result = await dispatchState.waitForActive(d.sessionId, {
             idleTimeoutMs: DELEGATE_IDLE_TIMEOUT_MS,
             maxTotalMs: DELEGATE_MAX_TOTAL_MS,
@@ -263,7 +307,7 @@ Use to have a reviewer/research session check work or look something up. Don't d
 
       const perResponseBudget = Math.floor(DELEGATE_TOTAL_BYTE_BUDGET / Math.max(1, delegates.length));
       const results = delegates.map(d => ({
-        sessionId: d.sessionId,
+        sessionId: d.key,
         response: boundDelegateResponse(d.result || '(no response)', d.sessionId.slice(0, 8), perResponseBudget),
       }));
 

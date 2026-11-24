@@ -90,6 +90,31 @@ describe('portal frames through the hub proxy', () => {
     ]));
   });
 
+  it('only the dragging frame can end its drag', async () => {
+    const { w, calls, frame, post } = await loadPortal();
+    post(frame('one').el.contentWindow, { type: 'caco:transfer:dragstart', sessionId: 's1', sessionName: 'S' });
+    post(frame('far').el.contentWindow, { type: 'caco:transfer:dragend' });
+    w.document.querySelector<HTMLElement>(`.peer[data-id="${frame('two').id}"]`)!.dispatchEvent(new w.Event('drop', { bubbles: true, cancelable: true }));
+    await new Promise(r => setTimeout(r, 30));
+    expect(calls.some(c => c.url === '/peer/AAA/api/sessions/s1/export')).toBe(true);
+  });
+
+  it('keeps a stored peer at its own URL when the server offers no proxyPath', async () => {
+    const stored = [{ id: 'local', url: HUB, name: 'local' }, { id: 'x1', url: 'http://localhost:53001', name: 'one' }];
+    const { w } = await loadPortal([], stored);
+    expect(w.document.getElementById('frame-x1')!.getAttribute('src')).toBe('http://localhost:53001');
+  });
+
+  it('ignores a navigation request from an unknown window', async () => {
+    const { frame, post } = await loadPortal();
+    const target = frame('two').el.contentWindow!;
+    const spy = vi.spyOn(target, 'postMessage');
+    post({}, { type: 'caco:navigate', targetUrl: 'http://localhost:53002', sessionId: 's9' });
+    expect(spy).not.toHaveBeenCalled();
+    post(frame('one').el.contentWindow, { type: 'caco:navigate', targetUrl: 'http://localhost:53002', sessionId: 's9' });
+    expect(spy).toHaveBeenCalledWith({ type: 'caco:navigateSession', sessionId: 's9' }, HUB);
+  });
+
   it('ignores a drag from an unknown window', async () => {
     const { w, calls, frame, post } = await loadPortal();
     post({}, { type: 'caco:transfer:dragstart', sessionId: 's1', sessionName: 'S' });

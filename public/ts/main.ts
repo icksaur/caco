@@ -254,6 +254,8 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Cross-iframe navigation: portal sends caco:navigateSession to switch sessions
   window.addEventListener('message', (e) => {
+    // Only the embedding portal may navigate this page; sibling frames can share its origin.
+    if (e.source !== window.parent || window.parent === window) return;
     if (e.data?.type === 'caco:navigateSession' && e.data.sessionId) {
       void sessionClick(e.data.sessionId);
     }

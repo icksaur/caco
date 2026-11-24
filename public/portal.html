@@ -232,7 +232,11 @@ function peerForSource(source) {
 
 function repointFrame(peer) {
   var f = document.getElementById('frame-' + peer.id);
-  if (f && f.getAttribute('src') !== frameUrl(peer)) f.src = frameUrl(peer);
+  if (!f || f.getAttribute('src') === frameUrl(peer)) return;
+  // The old document's status no longer applies; the new one must report in.
+  delete peerStatus[peer.url];
+  f.src = frameUrl(peer);
+  startOfflineTimer(peer);
 }
 
 function postJson(path, body) {
@@ -574,6 +578,7 @@ window.addEventListener('message', function(e) {
     return;
   }
   if (e.data.type === 'caco:transfer:dragend') {
+    if (!sender || !pendingDrag || pendingDrag.peerId !== sender.id) return;
     pendingDrag = null;
     document.querySelectorAll('.peer.drop-target, .peer.drop-self').forEach(function(el) {
       el.classList.remove('drop-target', 'drop-self');
@@ -585,15 +590,16 @@ window.addEventListener('message', function(e) {
   if (e.data.type === 'caco:navigate') {
     var targetUrl = e.data.targetUrl;
     var sessionId = e.data.sessionId;
-    if (!targetUrl || !sessionId) return;
+    if (!sender || !targetUrl || !sessionId) return;
 
     // Find the peer and its iframe
     var targetPeer = peers.find(function(p) { return p.url === targetUrl || targetUrl.startsWith(p.url); });
     if (!targetPeer) return;
 
     var targetFrame = document.getElementById('frame-' + targetPeer.id);
-    if (targetFrame) {
-      targetFrame.contentWindow.postMessage({ type: 'caco:navigateSession', sessionId: sessionId }, '*');
+    var targetOrigin = frameOrigin(targetPeer);
+    if (targetFrame && targetOrigin) {
+      targetFrame.contentWindow.postMessage({ type: 'caco:navigateSession', sessionId: sessionId }, targetOrigin);
       // Switch portal to show that peer
       switchTo(targetPeer.id);
     }

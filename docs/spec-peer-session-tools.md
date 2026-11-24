@@ -108,7 +108,10 @@ current path unchanged. A peer entry:
    That id is the **token** for this delegate.
 3. **Wait**: poll `GET <peer>/api/sessions/<id>/state?reply=1` every 5 s.
    - `turn.active === token`: still working.
-   - `turn.lastCompleted === token`: done; the result is `lastResponse`.
+   - `turn.lastCompleted === token` and nothing running: done; the result is
+     `lastResponse` (poll again if the snapshot has none).
+   - `turn.lastCompleted === token` but another turn is running: the reply is no
+     longer the last one, so the result is the not-available text below.
    - Neither, on two polls in a row: the turn was lost (the peer restarted, or
      another message ran after the reply and before the poll). Result:
      `(reply not available; read it with get_session_state)`.
@@ -140,6 +143,7 @@ to the first 8 characters of `instanceId` when empty. The request must carry
 It is handled like an agent message for display and observation, with these
 differences:
 
+- Steering (`mode: 'immediate'`) is refused with 403, as for agent messages.
 - The persisted prefix is `[peer:<instanceName>/<session8>]`.
   `message-source.ts` parses it as a new `peer` source, WebSocket event
   enrichment passes it through, and the client renders it like an agent
@@ -302,7 +306,12 @@ not matter for turns that take minutes. The wait keys on a token the peer
 issues (its correlation id) rather than timestamps, which avoids clock skew
 and cannot pick up another turn's reply.
 
-Review (gpt-5.6-sol-fast, 2026-11-24) changes folded in: peer ids are now
+Implementation review (gpt-5.6-sol-fast, 2026-11-24): only a real idle finishes
+a turn; the reply is tied to its turn (consistent `/state` snapshot, and no
+reply once another turn starts); peer messages cannot steer. Learned peer ids
+stay in memory, because the overview must not write.
+
+Spec review (gpt-5.6-sol-fast, 2026-11-24) changes folded in: peer ids are now
 persisted from the overview; the loop guard carries through auto-continue and
 retry and states which roots start clean; the wait uses a turn token instead of
 `lastIdleAt`; preflight detects older peers; the `peer` source is wired through

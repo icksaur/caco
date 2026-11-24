@@ -247,7 +247,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   }
   
   if (mode === 'immediate') {
-    if (fromSession || source === 'agent') {
+    if (fromSession || source === 'agent' || source === 'peer') {
       res.status(403).json({ error: 'Steering is only available for user input' });
       return;
     }
@@ -544,7 +544,7 @@ export async function dispatchMessage(
     if (dispatchCompleted) return;
     dispatchCompleted = true;
     watchdog?.cancel();
-    sessionManager.endDispatch(sessionId);
+    sessionManager.endDispatch(sessionId, reason === 'session.idle');
     clearTurnRoot(sessionId);
     broadcastGlobalEvent({ type: 'session.busy', data: { sessionId, isBusy: false } });
     if (tempFilePaths) await Promise.all(tempFilePaths.map(p => unlink(p).catch(() => {})));

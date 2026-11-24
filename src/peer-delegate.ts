@@ -80,8 +80,14 @@ export async function peerWaitReply(peer: PeerRef, sessionId: string, token: str
       continue;
     }
     failed = 0;
-    if (turn.lastCompleted === token) return typeof state.lastResponse === 'string' && state.lastResponse ? state.lastResponse : '(no response)';
     if (turn.active === token) { lost = 0; continue; }
+    if (turn.lastCompleted === token) {
+      // Another turn already started: the last reply is no longer ours.
+      if (turn.active !== null) return '(reply not available; read it with get_session_state)';
+      // No reply in this snapshot means a turn moved while it was read; poll again.
+      if (typeof state.lastResponse !== 'string') continue;
+      return state.lastResponse || '(no response)';
+    }
     if (++lost >= PEER_LOST_TURN_POLLS) return '(reply not available; read it with get_session_state)';
   }
 }

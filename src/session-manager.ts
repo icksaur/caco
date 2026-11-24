@@ -2546,10 +2546,11 @@ export class SessionManager {
 
   /**
    * End a dispatch - clears busy state and correlation context
-   * Called when dispatch completes (idle, error, or timeout).
+   * Called when dispatch completes (idle, error, or timeout). `completed` is true
+   * only for a real session.idle: just that marks the turn finished for peers.
    */
-  endDispatch(sessionId: string): void {
-    dispatchState.end(sessionId);
+  endDispatch(sessionId: string, completed = false): void {
+    dispatchState.end(sessionId, { completed });
     this.resetIdleTimer();
   }
 

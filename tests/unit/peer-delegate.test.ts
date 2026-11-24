@@ -77,6 +77,15 @@ describe('peerWaitReply', () => {
     expect(await wait()).toBe('(reply not available; read it with get_session_state)');
   });
 
+  it('gives up when another turn started after ours, and re-polls a snapshot without a reply', async () => {
+    peerFetch.mockResolvedValueOnce(state({ active: 'turn-2', lastCompleted: 'turn-1' }, { lastResponse: 'turn-2 text' }));
+    expect(await wait()).toBe('(reply not available; read it with get_session_state)');
+    peerFetch.mockReset()
+      .mockResolvedValueOnce(state({ active: null, lastCompleted: 'turn-1' }))
+      .mockResolvedValueOnce(state({ active: null, lastCompleted: 'turn-1' }, { lastResponse: 'ours' }));
+    expect(await wait()).toBe('ours');
+  });
+
   it('tolerates two failed polls and gives up on the third', async () => {
     peerFetch
       .mockRejectedValueOnce(new Error('x'))

@@ -173,28 +173,31 @@ describe('DispatchState', () => {
       expect(state.getLineage('session-1')).toEqual({ depth: 2, peerOrigin: true, turnId: 'turn-a' });
     });
 
-    it('records the finished turn on a real idle', () => {
+    it('records the finished turn only on a real idle', () => {
       state.start('session-1', 'corr-1');
       state.end('session-1');
-      expect(state.getTurn('session-1')).toEqual({ active: null, lastCompleted: 'corr-1' });
+      expect(state.getTurn('session-1')).toEqual({ active: null, lastCompleted: null });
+      state.start('session-1', 'corr-2');
+      state.end('session-1', { completed: true });
+      expect(state.getTurn('session-1')).toEqual({ active: null, lastCompleted: 'corr-2' });
     });
 
     it('does not finish a turn on a suppressed idle; the continuation keeps the id', () => {
       let continuing = true;
       state.setIdleSuppressor(() => continuing);
       state.start('session-1', 'corr-1');
-      state.end('session-1');
+      state.end('session-1', { completed: true });
       expect(state.getTurn('session-1').lastCompleted).toBeNull();
       continuing = false;
       state.start('session-1', 'corr-2', { turnId: 'corr-1' });
-      state.end('session-1');
+      state.end('session-1', { completed: true });
       expect(state.getTurn('session-1').lastCompleted).toBe('corr-1');
     });
 
     it('finishes a suppressed turn when the continuation never starts', () => {
       state.setIdleSuppressor(() => true);
       state.start('session-1', 'corr-1');
-      state.end('session-1');
+      state.end('session-1', { completed: true });
       state.setIdleSuppressor(() => false);
       state.signalIdle('session-1');
       expect(state.getTurn('session-1').lastCompleted).toBe('corr-1');

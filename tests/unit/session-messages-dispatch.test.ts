@@ -93,7 +93,7 @@ describe('dispatchMessage !session teardown owner', () => {
     expect(busyEvents.some(e => e.data?.isBusy === true)).toBe(false);
 
     expect(sm.endDispatch).toHaveBeenCalledTimes(1);
-    expect(sm.endDispatch).toHaveBeenCalledWith(SID);
+    expect(sm.endDispatch).toHaveBeenCalledWith(SID, false);
 
     const errorEvents = onEvent.mock.calls
       .map(c => c[0] as { type: string; data?: { message?: string } })

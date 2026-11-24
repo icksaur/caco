@@ -106,19 +106,22 @@ export class DispatchState extends EventEmitter {
     activityVersion.bump();
   }
 
-  end(sessionId: string): void {
+  end(sessionId: string, opts: { completed?: boolean } = {}): void {
     const ended = this.dispatches.get(sessionId);
     const wasDispatching = this.dispatches.delete(sessionId);
     if (wasDispatching) activityVersion.bump();
+    // Only a turn that reached a real session.idle is finished for peers; an
+    // error, timeout, cancel or a turn waiting for a network retry is not.
+    const finished = opts.completed === true ? ended?.turnId : undefined;
     // Suppress the idle signal when a continuation is imminent: the edge-triggered
     // consumers (waitForActive.onIdle, restart-manager) must not see this idle. A
     // real idle arrives later — from the continuation's own end(), or from
     // signalIdle() if the continuation fails to start (spec-idle-suppression-central).
     if (this.idleSuppressor?.(sessionId)) {
-      if (ended) this.suppressedTurn.set(sessionId, ended.turnId);
+      if (finished) this.suppressedTurn.set(sessionId, finished);
       return;
     }
-    if (ended) this.lastCompleted.set(sessionId, ended.turnId);
+    if (finished) this.lastCompleted.set(sessionId, finished);
     this.emit('idle', sessionId);
   }
 

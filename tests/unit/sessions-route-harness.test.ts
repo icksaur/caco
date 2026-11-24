@@ -472,6 +472,18 @@ describe('sessions route harness', () => {
     expect(withReply.lastResponse).toContain('response truncated');
   });
 
+  it('leaves out the reply when a turn moves while history is read', async () => {
+    const { dispatchState } = await import('../../src/dispatch-state.js');
+    getLastAssistantMessageMock.mockImplementationOnce(async (id: string) => {
+      dispatchState.start(id, 'racing-turn');
+      return 'not yours';
+    });
+    const body = await (await request('/sessions/known/state?reply=1')).json();
+    dispatchState.end(knownId);
+    expect(body.turn.active).toBe('racing-turn');
+    expect('lastResponse' in body).toBe(false);
+  });
+
   it('returns throughput snapshots', async () => {
     expect(await (await request('/sessions/known/throughput')).json()).toEqual({ sessionId: knownId, inputTokensPerSecond: 1, outputTokensPerSecond: 2 });
     expect(throughputSnapshot).toHaveBeenCalledWith(knownId);

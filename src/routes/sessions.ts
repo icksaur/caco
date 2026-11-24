@@ -1020,6 +1020,19 @@ router.get('/sessions/:sessionId/state', async (req: Request, res: Response) => 
   const isBusy = sessionManager.isBusy(sessionId);
   const meta = getSessionMeta(sessionId);
   const model = meta?.model || null;
+
+  // The reply belongs to `turn.lastCompleted` only if no turn started or ended while
+  // history was read; otherwise it is left out and the caller polls again.
+  let turn = dispatchState.getTurn(sessionId);
+  let lastResponse: string | undefined;
+  if (req.query.reply === '1') {
+    const text = await getLastAssistantMessage(sessionId);
+    const after = dispatchState.getTurn(sessionId);
+    if (after.active === turn.active && after.lastCompleted === turn.lastCompleted) {
+      lastResponse = boundDelegateResponse(text, sessionId.slice(0, 8), STATE_REPLY_BYTES);
+    }
+    turn = after;
+  }
   
   res.json({
     sessionId,
@@ -1035,10 +1048,8 @@ router.get('/sessions/:sessionId/state', async (req: Request, res: Response) => 
     reasoningEffort: meta?.reasoningEffort ?? null,
     isActive,
     isBusy,
-    turn: dispatchState.getTurn(sessionId),
-    ...(req.query.reply === '1' && {
-      lastResponse: boundDelegateResponse(await getLastAssistantMessage(sessionId), sessionId.slice(0, 8), STATE_REPLY_BYTES),
-    }),
+    turn,
+    ...(lastResponse !== undefined && { lastResponse }),
   });
 });
 

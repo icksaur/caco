@@ -231,6 +231,13 @@ describe('session messages route harness', () => {
       expect(routeMocks.sessionManager.startDispatch).not.toHaveBeenCalled();
     });
 
+    it('403s a peer message that tries to steer', async () => {
+      routeMocks.sessionManager.isBusy.mockReturnValue(true);
+      const res = await postJson('/sessions/s1/messages', peerBody({ mode: 'immediate' }), hop);
+      expect(res.status).toBe(403);
+      expect(routeMocks.sessionManager.sendStream).not.toHaveBeenCalled();
+    });
+
     it('409s a herd child', async () => {
       routeMocks.getSessionMeta.mockImplementation(() => ({ orchestratedBy: 'parent-1' }));
       const res = await postJson('/sessions/s1/messages', peerBody(), hop);
@@ -305,7 +312,7 @@ describe('session messages route harness', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, sessionId: 's1', correlationId: expect.any(String) });
     expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('s1', expect.any(String), { depth: 1, peerOrigin: false });
-    expect(routeMocks.sessionManager.endDispatch).toHaveBeenCalledWith('s1');
+    expect(routeMocks.sessionManager.endDispatch).toHaveBeenCalledWith('s1', false);
     expect(routeMocks.broadcastEvent).toHaveBeenCalledWith('s1', { type: 'session.error', data: { message: 'No active session' } });
     expect(routeMocks.broadcastGlobalEvent).toHaveBeenCalledWith({ type: 'session.busy', data: { sessionId: 's1', isBusy: false } });
   });

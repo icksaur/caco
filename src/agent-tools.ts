@@ -14,6 +14,22 @@ import { z } from 'zod';
 import { SERVER_URL } from './config.js';
 import { sessionManager } from './session-manager.js';
 import type { SessionIdRef } from './types.js';
+import { resolvePeerTargetFresh, peerFetch, PEER_LOOP_ERROR, type PeerRef } from './peer-target.js';
+
+/** `get_session_state` for a session on another Caco instance (spec-peer-session-tools). */
+async function getPeerSessionState(peer: PeerRef, sessionId: string) {
+  try {
+    const r = await peerFetch(peer.origin, `/api/sessions/${encodeURIComponent(sessionId)}/state?reply=1`);
+    if (r.status === 404) return { textResultForLlm: `Session ${sessionId.slice(0, 8)} not found on ${peer.name}.`, resultType: 'error' as const };
+    if (r.status !== 200 || !r.json || typeof r.json !== 'object') {
+      return { textResultForLlm: `Failed to get session state from ${peer.name}: HTTP ${r.status}`, resultType: 'error' as const };
+    }
+    const state = { ...(r.json as Record<string, unknown>), instance: { id: peer.id ?? null, name: peer.name } };
+    return { textResultForLlm: JSON.stringify(state, null, 2), resultType: 'text' as const };
+  } catch {
+    return { textResultForLlm: `Could not reach ${peer.name}.`, resultType: 'error' as const };
+  }
+}
 
 export type GetCorrelationId = (sessionId: string) => string | undefined;
 
@@ -21,16 +37,24 @@ export function createAgentTools(sessionRef: SessionIdRef, getCorrelationId: Get
   const modelIds = sessionManager.getModels().map(m => m.id);
 
   const getSessionState = defineTool('get_session_state', {
-    description: 'Check the current state of a Caco session (idle, busy, or inactive). Use to verify a session exists before sending messages.',
+    description: 'Check the current state of a Caco session (idle, busy, or inactive), its final offer (responseOptions) and its last reply. Use to verify a session exists before sending messages. Accepts a local session ID or an `instance:sessionId` key from caco_sessions_overview.',
 
     parameters: z.object({
-      sessionId: z.string().describe('Target session ID to check')
+      sessionId: z.string().describe('Target session ID to check, or an instance:sessionId key')
     }),
 
     handler: async ({ sessionId: rawSessionId }) => {
-      const sessionId = rawSessionId.replace(/^caco-session:/, '');
+      const target = await resolvePeerTargetFresh(rawSessionId);
+      if (target.kind === 'error') return { textResultForLlm: target.error, resultType: 'error' as const };
+      if (target.kind === 'peer') {
+        if (sessionManager.getDispatchLineage(sessionRef.id)?.peerOrigin) {
+          return { textResultForLlm: PEER_LOOP_ERROR, resultType: 'error' as const };
+        }
+        return getPeerSessionState(target.peer, target.sessionId);
+      }
+      const sessionId = target.sessionId;
       try {
-        const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/state`);
+        const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/state?reply=1`);
         
         if (!response.ok) {
           if (response.status === 404) {

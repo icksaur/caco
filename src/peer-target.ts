@@ -14,6 +14,8 @@ import { readCapped, fetchPeerOverviews } from './overview-fanout.js';
 export const PEER_HOP_HEADER = 'X-Caco-Peer-Hop';
 export const PEER_FETCH_TIMEOUT_MS = 10_000;
 export const PEER_FETCH_MAX_BYTES = 1024 * 1024;
+/** Loop guard (spec-peer-session-tools): a turn rooted on another machine. */
+export const PEER_LOOP_ERROR = 'This turn started from another machine, so it cannot reach other machines.';
 
 export interface PeerRef { origin: string; name: string; id?: string }
 

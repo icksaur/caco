@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const manager = vi.hoisted(() => ({ getModels: vi.fn() }));
+const manager = vi.hoisted(() => ({ getModels: vi.fn(), getDispatchLineage: vi.fn() }));
+const peer = vi.hoisted(() => ({ resolve: vi.fn(), fetch: vi.fn() }));
 
 vi.mock('../../src/session-manager.js', () => ({ sessionManager: manager }));
+vi.mock('../../src/peer-target.js', async (orig) => ({
+  ...(await orig<typeof import('../../src/peer-target.js')>()),
+  resolvePeerTargetFresh: peer.resolve,
+  peerFetch: peer.fetch,
+}));
 
 import { SERVER_URL } from '../../src/config.js';
 import { createAgentTools, type GetCorrelationId } from '../../src/agent-tools.js';
@@ -49,10 +55,47 @@ beforeEach(() => {
   manager.getModels.mockReturnValue([{ id: 'auto' }, { id: 'claude-sonnet-4.6' }]);
   getCorrelationIdMock = vi.fn(() => 'corr-1');
   getCorrelationId = getCorrelationIdMock as unknown as GetCorrelationId;
+  manager.getDispatchLineage.mockReset();
+  peer.fetch.mockReset();
+  peer.resolve.mockReset();
+  peer.resolve.mockImplementation(async (raw: string) => ({ kind: 'local', sessionId: raw.replace(/^caco-session:/, '') }));
 });
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+describe('get_session_state on a peer (spec-peer-session-tools)', () => {
+  const devbox = { origin: 'http://localhost:53001', name: 'devbox', id: 'dev-id' };
+
+  it('reads the peer state with the reply and adds the instance', async () => {
+    peer.resolve.mockResolvedValue({ kind: 'peer', peer: devbox, sessionId: 's1' });
+    peer.fetch.mockResolvedValue({ status: 200, json: { status: 'idle', responseOptions: ['a'], lastResponse: 'done' } });
+    const out = await getTool(createTools(), 'get_session_state').handler({ sessionId: 'dev-id:s1' });
+    expect(peer.fetch).toHaveBeenCalledWith('http://localhost:53001', '/api/sessions/s1/state?reply=1');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.parse(out.textResultForLlm as string)).toEqual({ status: 'idle', responseOptions: ['a'], lastResponse: 'done', instance: { id: 'dev-id', name: 'devbox' } });
+  });
+
+  it('maps 404, other statuses and network failures', async () => {
+    peer.resolve.mockResolvedValue({ kind: 'peer', peer: devbox, sessionId: 's1234567890' });
+    peer.fetch.mockResolvedValueOnce({ status: 404, json: null });
+    expect(await getTool(createTools(), 'get_session_state').handler({ sessionId: 'x' })).toEqual({ textResultForLlm: 'Session s1234567 not found on devbox.', resultType: 'error' });
+    peer.fetch.mockResolvedValueOnce({ status: 500, json: null });
+    expect((await getTool(createTools(), 'get_session_state').handler({ sessionId: 'x' })).textResultForLlm).toBe('Failed to get session state from devbox: HTTP 500');
+    peer.fetch.mockRejectedValueOnce(new Error('down'));
+    expect((await getTool(createTools(), 'get_session_state').handler({ sessionId: 'x' })).textResultForLlm).toBe('Could not reach devbox.');
+  });
+
+  it('returns resolver errors and refuses peers from a peer-rooted turn', async () => {
+    peer.resolve.mockResolvedValueOnce({ kind: 'error', error: 'Unknown instance "x".' });
+    expect(await getTool(createTools(), 'get_session_state').handler({ sessionId: 'x:s' })).toEqual({ textResultForLlm: 'Unknown instance "x".', resultType: 'error' });
+    peer.resolve.mockResolvedValue({ kind: 'peer', peer: devbox, sessionId: 's1' });
+    manager.getDispatchLineage.mockReturnValue({ depth: 1, peerOrigin: true, turnId: 't' });
+    const out = await getTool(createTools(), 'get_session_state').handler({ sessionId: 'dev-id:s1' });
+    expect(out).toEqual({ textResultForLlm: 'This turn started from another machine, so it cannot reach other machines.', resultType: 'error' });
+    expect(peer.fetch).not.toHaveBeenCalled();
+  });
 });
 
 describe('agent tool handlers', () => {
@@ -63,7 +106,7 @@ describe('agent tool handlers', () => {
       sessionId: 'caco-session:child-1',
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(`${SERVER_URL}/api/sessions/child-1/state`);
+    expect(fetchMock).toHaveBeenCalledWith(`${SERVER_URL}/api/sessions/child-1/state?reply=1`);
     expect(out).toEqual({
       textResultForLlm: JSON.stringify({ state: 'idle', sessionId: 'child-1' }, null, 2),
       resultType: 'text',

@@ -23,6 +23,8 @@ import { getSessionMeta, updateSessionMeta } from '../storage.js';
 import { unobservedTracker } from '../unobserved-tracker.js';
 import { DISPATCH_TIMEOUT_MS, AGENT_MAX_DEPTH } from '../config.js';
 import { prefixMessageSource, type MessageSource } from '../message-source.js';
+import { parsePeerSender } from '../peer-message.js';
+import { PEER_HOP_HEADER } from '../peer-target.js';
 import { createWatchdog } from '../dispatch-watchdog.js';
 import { dispatchState, type DispatchLineage } from '../dispatch-state.js';
 import { retryWithFreshClient } from '../dispatch-retry.js';
@@ -182,7 +184,7 @@ function scheduleNetworkRetry(
 router.post('/sessions/:sessionId/messages', async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId as string;
   const requestId = (req.headers['x-request-id'] as string) || `srv-${Date.now().toString(36)}`;
-  const { prompt, imageData, appletState, appletNavigation, source, appletSlug, fromSession, scheduleSlug, correlationId, mode } = req.body as {
+  const { prompt, imageData, appletState, appletNavigation, source, appletSlug, fromSession, fromPeer, scheduleSlug, correlationId, mode } = req.body as {
     prompt?: string;
     imageData?: string;
     appletState?: Record<string, unknown>;
@@ -190,6 +192,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     source?: MessageSource;
     appletSlug?: string;
     fromSession?: string;
+    fromPeer?: unknown;
     scheduleSlug?: string;
     correlationId?: string;
     mode?: 'immediate' | 'enqueue';
@@ -202,6 +205,19 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     return;
   }
   
+  // A message from another Caco instance (spec-peer-session-tools): always a root
+  // dispatch on this machine, labelled by its unauthenticated sender claim.
+  let peerLabel: string | undefined;
+  if (source === 'peer') {
+    const sender = parsePeerSender(fromPeer, req.get(PEER_HOP_HEADER));
+    if (!sender.ok) { res.status(400).json({ error: sender.error }); return; }
+    if (fromSession || correlationId) {
+      res.status(400).json({ error: "source:'peer' cannot carry fromSession or correlationId" });
+      return;
+    }
+    peerLabel = sender.label;
+  }
+
   // Agent calls must include correlationId (passed by tool, invisible to agent)
   if (fromSession && !correlationId) {
     res.status(400).json({ error: 'correlationId required for agent-initiated calls' });
@@ -221,6 +237,12 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // Verify session exists (getSessionCwd returns null if not found)
   if (!sessionManager.getSessionCwd(sessionId)) {
     res.status(404).json({ error: `Session not found: ${sessionId}` });
+    return;
+  }
+
+  // A herd child is supervised by its parent; a remote delegate must not fight it.
+  if (source === 'peer' && getSessionMeta(sessionId)?.orchestratedBy) {
+    res.status(409).json({ error: `Session ${sessionId.slice(0, 8)} is a herd child, so it cannot be delegated to. Its parent supervises it.` });
     return;
   }
   
@@ -281,7 +303,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
   // is not depth). The child→parent completion wake is source:'system' (a root), which
   // is the pop. Rejected if the caller has no live dispatch or the push exceeds the max.
   let dispatchDepth = 1;
-  let peerOrigin = false;
+  let peerOrigin = source === 'peer';
   if (source === 'agent' && fromSession) {
     const caller = sessionManager.getDispatchLineage(fromSession);
     const callerDepth = caller?.depth;
@@ -378,6 +400,8 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     promptToSend = prefixMessageSource('scheduler', scheduleSlug, prompt);
   } else if (source === 'system') {
     promptToSend = prefixMessageSource('system', 'herd', prompt);
+  } else if (source === 'peer' && peerLabel) {
+    promptToSend = prefixMessageSource('peer', peerLabel, prompt);
   }
   
   try {
@@ -395,7 +419,7 @@ router.post('/sessions/:sessionId/messages', async (req: Request, res: Response)
     );
     
     console.log(`[DISPATCH:${requestId}] Accepted for session ${sessionId}`);
-    res.json({ ok: true, sessionId });
+    res.json({ ok: true, sessionId, correlationId: effectiveCorrelationId });
   } catch (err) {
     if (err instanceof DispatchHttpError) {
       res.status(err.status).json({ error: err.message, ...(err.code && { code: err.code }) });

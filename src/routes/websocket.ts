@@ -352,6 +352,7 @@ function enrichUserMessageWithSource(event: SessionEvent): SessionEvent {
       // Add identifier to appropriate field based on source
       ...(parsed.source === 'applet' && { appletSlug: parsed.identifier }),
       ...(parsed.source === 'agent' && { fromSession: parsed.identifier }),
+      ...(parsed.source === 'peer' && { fromPeer: parsed.identifier }),
       ...(parsed.source === 'scheduler' && { scheduleSlug: parsed.identifier }),
       ...(parsed.source === 'skill' && { skillName: parsed.identifier }),
       // System messages carry the raw identifier so the client can scope styling

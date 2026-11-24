@@ -7,11 +7,12 @@
  * - [scheduler:slug] - from scheduled jobs
  * - [skill:name] - from a skill slash-command invocation (shown purple)
  * - [system:id] - server-injected (e.g. autocontinue); id drives rendering
+ * - [peer:name/session8] - from a session on another Caco instance
  * 
  * Pure functions - no I/O, no side effects.
  */
 
-export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler' | 'skill' | 'system';
+export type MessageSource = 'user' | 'applet' | 'agent' | 'scheduler' | 'skill' | 'system' | 'peer';
 
 export interface ParsedMessage {
   source: MessageSource;
@@ -46,6 +47,16 @@ export function parseMessageSource(content: string): ParsedMessage {
     };
   }
   
+  // Parse peer marker: [peer:name/session8]
+  const peerMatch = content.match(/^\[peer:([^\]]+)\]\s*/);
+  if (peerMatch) {
+    return {
+      source: 'peer',
+      identifier: peerMatch[1],
+      cleanContent: content.slice(peerMatch[0].length)
+    };
+  }
+
   // Parse scheduler marker: [scheduler:slug]
   const schedulerMatch = content.match(/^\[scheduler:([^\]]+)\]\s*/);
   if (schedulerMatch) {

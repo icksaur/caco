@@ -117,6 +117,7 @@ export const EVENT_TO_OUTER: Record<string, string> = {
 
   // Caco synthetic types
   'caco.agent': 'agent-message',
+  'caco.peer': 'agent-message',
   'caco.applet': 'applet-message',
   'caco.scheduler': 'scheduler-message',
   'caco.skill': 'agent-message',
@@ -157,6 +158,7 @@ export const EVENT_TO_INNER: Record<string, string | null> = {
 
   // Caco synthetic types
   'caco.agent': 'agent-text',
+  'caco.peer': 'agent-text',
   'caco.applet': 'applet-text',
   'caco.scheduler': 'scheduler-text',
   'caco.skill': 'agent-text',
@@ -778,6 +780,7 @@ export const EVENT_INSERTERS: Record<string, EventInserterFn> = {
 
   // Caco synthetic types
   'caco.agent': setPath('content'),
+  'caco.peer': setPath('content'),
   'caco.applet': setPath('content'),
   'caco.scheduler': setPath('content'),
   'caco.skill': setPath('content'),

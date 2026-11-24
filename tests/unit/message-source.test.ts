@@ -40,6 +40,14 @@ describe('parseMessageSource', () => {
     });
   });
 
+  describe('peer messages (spec-peer-session-tools)', () => {
+    it('parses [peer:name/session8] and round-trips with prefixMessageSource', () => {
+      const raw = prefixMessageSource('peer', 'Laptop/abcdef12', 'Check the build');
+      expect(raw).toBe('[peer:Laptop/abcdef12] Check the build');
+      expect(parseMessageSource(raw)).toEqual({ source: 'peer', identifier: 'Laptop/abcdef12', cleanContent: 'Check the build' });
+    });
+  });
+
   describe('agent messages', () => {
     it('parses [agent:sessionId] prefix', () => {
       const result = parseMessageSource('[agent:abc-123-def] Analyze the codebase');

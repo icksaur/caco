@@ -199,6 +199,54 @@ describe('session messages route harness', () => {
     expect(routeMocks.sessionManager.checkAgentCall).toHaveBeenCalledWith('corr-1', 's2');
   });
 
+  describe('peer messages (spec-peer-session-tools)', () => {
+    const peerBody = (extra: Record<string, unknown> = {}) => ({
+      prompt: 'from afar', source: 'peer',
+      fromPeer: { instanceId: 'inst-1234567890', instanceName: 'Lap<top>', sessionId: 'abcdef1234567890' },
+      ...extra,
+    });
+    const hop = { 'X-Caco-Peer-Hop': '1' };
+
+    it('dispatches a root at depth 1 with peer origin, prefixes the sender, and returns the turn id', async () => {
+      routeMocks.sessionManager.getDispatchDepth.mockReturnValue(3);
+      const res = await postJson('/sessions/s1/messages', peerBody(), hop);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.correlationId).toEqual(expect.any(String));
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('s1', body.correlationId, { depth: 1, peerOrigin: true });
+      const { prefixMessageSource } = await import('../../src/message-source.js');
+      expect(prefixMessageSource).toHaveBeenCalledWith('peer', 'Lap_top_/abcdef12', 'from afar');
+    });
+
+    it.each<[string, Record<string, unknown>, Record<string, string>]>([
+      ['no hop header', {}, {}],
+      ['a hop of 2', {}, { 'X-Caco-Peer-Hop': '2' }],
+      ['a bad instance id', { fromPeer: { instanceId: 'a b', sessionId: 's' } }, hop],
+      ['no fromPeer', { fromPeer: undefined }, hop],
+      ['fromSession', { fromSession: 'x' }, hop],
+      ['a correlationId', { correlationId: 'c' }, hop],
+    ])('400s %s', async (_label, extra, headers) => {
+      const res = await postJson('/sessions/s1/messages', peerBody(extra), headers);
+      expect(res.status).toBe(400);
+      expect(routeMocks.sessionManager.startDispatch).not.toHaveBeenCalled();
+    });
+
+    it('409s a herd child', async () => {
+      routeMocks.getSessionMeta.mockImplementation(() => ({ orchestratedBy: 'parent-1' }));
+      const res = await postJson('/sessions/s1/messages', peerBody(), hop);
+      routeMocks.getSessionMeta.mockImplementation(() => null);
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toContain('herd child');
+    });
+
+    it('an agent call from a peer-rooted caller inherits peer origin', async () => {
+      routeMocks.sessionManager.getDispatchLineage.mockImplementationOnce(() => ({ depth: 1, peerOrigin: true, turnId: 't' }));
+      const res = await postJson('/sessions/child-a/messages', { prompt: 'work', source: 'agent', fromSession: 'parent', correlationId: 'corr-1' });
+      expect(res.status).toBe(200);
+      expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('child-a', expect.any(String), { depth: 2, peerOrigin: true });
+    });
+  });
+
   describe('hop-count depth (spec-herd-depth-breadth)', () => {
     it('fan-out: an agent call from a depth-1 caller dispatches the child at depth 2', async () => {
       routeMocks.sessionManager.getDispatchDepth.mockReturnValue(1);
@@ -255,7 +303,7 @@ describe('session messages route harness', () => {
     routeMocks.sessionManager.getSession.mockReturnValueOnce(null);
     const res = await postJson('/sessions/s1/messages', { prompt: 'dispatch then stop' }, { 'x-request-id': 'req-1' });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, sessionId: 's1' });
+    expect(await res.json()).toEqual({ ok: true, sessionId: 's1', correlationId: expect.any(String) });
     expect(routeMocks.sessionManager.startDispatch).toHaveBeenCalledWith('s1', expect.any(String), { depth: 1, peerOrigin: false });
     expect(routeMocks.sessionManager.endDispatch).toHaveBeenCalledWith('s1');
     expect(routeMocks.broadcastEvent).toHaveBeenCalledWith('s1', { type: 'session.error', data: { message: 'No active session' } });

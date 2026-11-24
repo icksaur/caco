@@ -13,6 +13,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server, IncomingMessage } from 'http';
+import type { Duplex } from 'stream';
 import { setAppletUserState, getAppletUserState } from '../applet-state.js';
 import { sessionManager } from '../session-manager.js';
 import { readLastTurnsResult } from '../sdk-session-store.js';
@@ -73,19 +74,34 @@ interface ServerMessage {
 /**
  * Setup WebSocket server on existing HTTP server
  * Single persistent connection - no session in URL
+ *
+ * Upgrades are routed here rather than by `ws` itself: attached to the server,
+ * `ws` answers 400 to any path it does not own, which would break the hub peer
+ * proxy's `/peer/<key>/ws` (spec-portal-single-port). `otherUpgrade` gets every
+ * non-`/ws` upgrade and returns true when it took the socket.
  */
-export function setupWebSocket(server: Server) {
+export function setupWebSocket(
+  server: Server,
+  opts: { otherUpgrade?: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean } = {},
+) {
   const wss = new WebSocketServer({
-    server,
+    noServer: true,
     path: '/ws',
     verifyClient: (info: { origin: string; req: IncomingMessage }) => verifyWsUpgrade(info.origin, info.req.headers.host),
   });
 
-  // CONTRACT: keep this listener. `ws` re-emits the HTTP server's 'error'
-  // event on the WebSocketServer, and an 'error' with no listener throws. A
-  // failed bind (EACCES, EADDRINUSE) would become an uncaught exception that
-  // kills startup before listenWithFallback (server-listen.ts) can handle it.
-  // The HTTP server's own error listeners own those errors; nothing to do here.
+  server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    if (wss.shouldHandle(req)) {
+      wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+      return;
+    }
+    if (opts.otherUpgrade?.(req, socket, head)) return;
+    socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+  });
+
+  // CONTRACT: keep this listener. An 'error' with no listener throws, and a
+  // failed bind (EACCES, EADDRINUSE) must never become an uncaught exception
+  // that kills startup before listenWithFallback (server-listen.ts) handles it.
   wss.on('error', () => {});
 
   wss.on('connection', (ws, _req) => {

@@ -22,6 +22,7 @@ import { getCurrentIntent } from '../intent-runtime.js';
 import { readSessionWorkspace, searchSessionEvents, getEventVersion } from '../sdk-session-store.js';
 import { rotateSessionHistory } from '../session-history-rotation.js';
 import { dispatchState } from '../dispatch-state.js';
+import { proxyPathFor } from '../peer-proxy.js';
 import { getLastAssistantMessage } from '../session-history.js';
 import { boundDelegateResponse } from '../delegate-tool.js';
 import { normalizeFolder, isValidFolder } from '../folder.js';
@@ -92,7 +93,11 @@ router.options('/sessions/import', (req, res) => { allowLocalhostCors(req, res);
 
 // Peer management
 router.get('/peers', (_req: Request, res: Response) => {
-  res.json(getPeers());
+  // proxyPath: where the hub serves this peer (spec-portal-single-port).
+  res.json(getPeers().map(p => {
+    const proxyPath = proxyPathFor(p);
+    return proxyPath ? { ...p, proxyPath } : p;
+  }));
 });
 
 // Legacy whole-list POST: MERGE only (adds and renames, never deletes), so a

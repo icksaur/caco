@@ -162,10 +162,12 @@ The A6 test enumerates every `localStorage`/`sessionStorage` key in
 Route `app.use('/peer/:key', ...)`, mounted **before the body parsers**
 (`express.json()` and `express.urlencoded()`), static files and
 `requireSameOrigin`, so request bodies stream to the peer untouched. It runs its
-own checks. A WebSocket `upgrade` handler on the HTTP server handles
-`/peer/:key/ws` before Caco's own `/ws` server; it runs
-`verifyWsUpgrade(origin, hubHost)` and destroys the socket when that fails. Uses `http-proxy` (the library under `http-proxy-middleware`;
-mature, handles WebSocket upgrades). Per request:
+own checks. Caco's own WebSocket server moves to `noServer` mode, because `ws` attached to
+the HTTP server answers 400 to every upgrade path it does not own. One `upgrade`
+listener sends `/ws` to Caco and everything else to the proxy; it runs
+`verifyWsUpgrade(origin, hubHost)` and destroys the socket when that fails. Built on Node's `http`/`https` (about 150 lines in `src/peer-proxy.ts`) rather
+than `http-proxy`, which is unmaintained; the behaviour below is small enough
+to own and test directly. Per request:
 
 1. Refuse (400) a request that already carries `X-Caco-Base-Path`: no chaining.
 2. Run the same-origin check against the hub (the browser must be the hub's own
@@ -260,7 +262,7 @@ on `localhost:5300x`, so its same-origin guard passes with no change.
 | A2 | Server injection (base, `<base href>`, wrapper script) for `/` and `/pager.html`; relative asset URLs in HTML; base-aware redirects (A3) | `server.ts`, `public/index.html`, `public/pager.html`, tests |
 | A3 | Convert the non-fetch sites in `public/ts`, `pager.html` and built-in applets; raw-URL test; storage classification (A4, A6) | `websocket.ts`, `extension-loader.ts`, `main.ts`, `session-panel.ts`, `context-footer.ts`, `command-registry.ts`, `input-router.ts`, router files, `terminal-panel.ts`, `debug.ts`, `public/pager.html`, `applets/**`, tests |
 | A4 | Prefixed end-to-end test; deploy to all three instances; manual smoke at `/` (A5) | tests |
-| B | Hub proxy with WebSocket upgrade, mounted before body parsers; `isProxyablePeer`; `proxyPath` on `GET /api/peers` (A7) | `src/peer-proxy.ts`, `server.ts`, `src/routes/api.ts`, `package.json`, tests |
+| B | Hub proxy with WebSocket upgrade, mounted before body parsers; `noServer` upgrade routing; proxyable-peer predicate; `proxyPath` on `GET /api/peers` (A7) | `src/peer-proxy.ts`, `src/routes/websocket.ts`, `server.ts`, `src/routes/sessions.ts`, tests |
 | C | Portal iframes, favicons, every message handler, transfers and the merged pager use proxied paths and source-window matching (A8); docs; manual phone test (A9) | `public/portal.html`, `public/ts/portal-pager.ts`, `public/ts/pager-bridge.ts`, `README.md`, `API.md` |
 
 Phase A is complete and shippable on its own; B and C start only after A4's

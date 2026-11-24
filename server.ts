@@ -51,6 +51,7 @@ import { startRotationSweeper, startQuietMaintenance } from './src/session-histo
 import { requireSameOrigin } from './src/security/same-origin.js';
 import { portalOrigins } from './src/security/portal-origins.js';
 import { injectPageBase, pageBasePath, BASE_PATH_HEADER } from './src/page-base.js';
+import { createPeerProxy } from './src/peer-proxy.js';
 import { loadUsageCache } from './src/usage-state.js';
 import { startScheduleManager, stopScheduleManager } from './src/schedule-manager.js';
 import { startWakeManager, stopWakeManager, wakeManager } from './src/wake-runtime.js';
@@ -79,6 +80,11 @@ process.env.CACO_SESSION = '1';
 const programCwd = process.cwd();
 
 // Middleware
+
+// Hub peer proxy (spec-portal-single-port): before the body parsers so request
+// bodies stream to the peer untouched. It runs its own same-origin check.
+const peerProxy = createPeerProxy();
+app.use(peerProxy.middleware);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -258,7 +264,7 @@ async function start(): Promise<void> {
   
   const server = createServer(app);
   
-  const { wss, pushStateToApplet } = setupWebSocket(server);
+  const { wss, pushStateToApplet } = setupWebSocket(server, { otherUpgrade: peerProxy.upgrade });
 
   bootLog('checking the workflow runner');
   const workflowAvailable = WORKFLOW_ENABLED && await isWorkflowRunnerAvailable();
